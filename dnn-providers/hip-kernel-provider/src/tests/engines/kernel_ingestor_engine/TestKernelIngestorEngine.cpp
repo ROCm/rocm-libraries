@@ -17,14 +17,12 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "core/Container.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
@@ -49,6 +47,22 @@ using hipdnn_test_sdk::utilities::MockEngineConfig;
 GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 {
     return GraphWrapper(builder.GetBufferPointer(), builder.GetSize());
+}
+
+// Stand-ins for the SymbolScope tests below. Those assert the scope's all-or-nothing
+// behaviour, which is indifferent to what a symbol points at, so they use trivial
+// functions rather than reaching for a pack's -- which are internal to their native
+// file and correctly unreachable from here.
+bool acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                    hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/)
+{
+    return true;
+}
+
+double scoreNothing(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/,
+                    const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/)
+{
+    return 0.0;
 }
 
 /// Stubs a config naming this pack's engine, keyed the way getMaxWorkspaceSize() and
@@ -82,21 +96,21 @@ TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOther
     // A neighbour pack's symbol, registered and committed before the failing pack runs.
     const std::string neighbourSymbol = "test.neighbour.graph_match";
     SymbolScope<Handle> neighbour;
-    neighbour.add(neighbourSymbol, &pointwiseAddGraphMatches);
+    neighbour.add(neighbourSymbol, &acceptAnyGraph);
     neighbour.commit();
 
     // Occupies the symbol the failing pack will try second, so its registration fails
     // partway -- the shape rollback exists for.
     const std::string contendedSymbol = "test.contended.score";
     SymbolScope<Handle> squatter;
-    squatter.add(contendedSymbol, &pointwiseAddScore);
+    squatter.add(contendedSymbol, &scoreNothing);
     squatter.commit();
 
     const std::string firstSymbol = "test.failing.graph_match";
     {
         SymbolScope<Handle> failing;
-        failing.add(firstSymbol, &pointwiseAddGraphMatches);
-        EXPECT_THROW(failing.add(contendedSymbol, &pointwiseAddScore), std::runtime_error);
+        failing.add(firstSymbol, &acceptAnyGraph);
+        EXPECT_THROW(failing.add(contendedSymbol, &scoreNothing), std::runtime_error);
         // Never committed: the destructor rolls this pack back.
     }
 
@@ -120,7 +134,7 @@ TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
     const std::string symbol = "test.committed.graph_match";
     {
         SymbolScope<Handle> scope;
-        scope.add(symbol, &pointwiseAddGraphMatches);
+        scope.add(symbol, &acceptAnyGraph);
         scope.commit();
     }
 

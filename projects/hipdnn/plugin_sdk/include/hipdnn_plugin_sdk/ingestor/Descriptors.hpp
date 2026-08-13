@@ -9,6 +9,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -50,6 +51,19 @@ using DescriptorId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 inline std::string toString(const DescriptorId& id)
 {
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
+}
+
+/**
+ * @brief How a descriptor is named in a diagnostic: its kind, its name, and its id.
+ *
+ * An id alone is a UUID an operator cannot grep the source for, and a name alone is
+ * not unique. Every message about a descriptor should be built from this so they read
+ * the same wherever they come from.
+ */
+inline std::string
+    describeDescriptor(std::string_view kind, const std::string& name, const DescriptorId& id)
+{
+    return std::string(kind) + " '" + name + "' (" + toString(id) + ")";
 }
 
 /// Hash for keying maps on a descriptor id (std::array has no std::hash).

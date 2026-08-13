@@ -14,8 +14,6 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
@@ -24,6 +22,11 @@
  *
  * An under-specified refusal accepts a graph the kernel cannot serve, which is silently
  * wrong rather than merely a missed optimization.
+ *
+ * The matchers are reached through the registry rather than called directly: they are
+ * internal to PointwiseAddNative.cpp, and the registry is the only door the descriptors
+ * reach them by, so testing through it also proves the pack registered what its
+ * descriptors name.
  */
 namespace
 {
@@ -38,7 +41,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 bool matches(const MatchContext& context)
 {
     BoundTokens bound;
-    return pointwiseAddGraphMatches(context, bound);
+    return matchesGraph(context, bound);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,7 +216,7 @@ TEST(TestPointwiseAddKernelMatcher, AcceptsAKernelWhoseDtypeMatchesTheGraph)
 {
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_TRUE(pointwiseAddKernelMatches(fixture.context(), makeKernel(64, "FLOAT")));
+    EXPECT_TRUE(matchesKernel(fixture.context(), makeKernel(64, "FLOAT")));
 }
 
 TEST(TestPointwiseAddKernelMatcher, RefusesAKernelBakedForAnotherDtype)
@@ -221,7 +224,7 @@ TEST(TestPointwiseAddKernelMatcher, RefusesAKernelBakedForAnotherDtype)
     // An f16 kernel handed f32 operands does not fail; it returns wrong numbers.
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_FALSE(pointwiseAddKernelMatches(fixture.context(), makeKernel(64, "HALF")));
+    EXPECT_FALSE(matchesKernel(fixture.context(), makeKernel(64, "HALF")));
 }
 
 TEST(TestPointwiseAddKernelMatcher, AcceptsAHalfKernelForAHalfGraph)
@@ -229,7 +232,7 @@ TEST(TestPointwiseAddKernelMatcher, AcceptsAHalfKernelForAHalfGraph)
     const GraphFixture fixture(
         buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::HALF));
 
-    EXPECT_TRUE(pointwiseAddKernelMatches(fixture.context(), makeKernel(64, "HALF")));
+    EXPECT_TRUE(matchesKernel(fixture.context(), makeKernel(64, "HALF")));
 }
 
 TEST(TestPointwiseAddKernelMatcher, IgnoresBlockSizeWhichTheGraphDoesNotConstrain)
@@ -237,8 +240,8 @@ TEST(TestPointwiseAddKernelMatcher, IgnoresBlockSizeWhichTheGraphDoesNotConstrai
     // block_size ranks kernels but never gates applicability.
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_TRUE(pointwiseAddKernelMatches(fixture.context(), makeKernel(64, "FLOAT")));
-    EXPECT_TRUE(pointwiseAddKernelMatches(fixture.context(), makeKernel(256, "FLOAT")));
+    EXPECT_TRUE(matchesKernel(fixture.context(), makeKernel(64, "FLOAT")));
+    EXPECT_TRUE(matchesKernel(fixture.context(), makeKernel(256, "FLOAT")));
 }
 
 // ---------------------------------------------------------------------------
@@ -249,8 +252,8 @@ TEST(TestPointwiseAddScore, PrefersTheLargerBlockSize)
 {
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_GT(pointwiseAddScore(makeKernel(256, "FLOAT"), fixture.context()),
-              pointwiseAddScore(makeKernel(64, "FLOAT"), fixture.context()));
+    EXPECT_GT(scoreKernel(makeKernel(256, "FLOAT"), fixture.context()),
+              scoreKernel(makeKernel(64, "FLOAT"), fixture.context()));
 }
 
 TEST(TestPointwiseAddBinding, TheMatcherBindsTheOperandUidsItResolved)
@@ -258,12 +261,14 @@ TEST(TestPointwiseAddBinding, TheMatcherBindsTheOperandUidsItResolved)
     const GraphFixture fixture(buildPointwiseGraph());
 
     BoundTokens bound;
-    ASSERT_TRUE(pointwiseAddGraphMatches(fixture.context(), bound));
+    ASSERT_TRUE(matchesGraph(fixture.context(), bound));
 
-    const auto binding = pointwiseAddBinding(bound);
-    EXPECT_EQ(binding.inputA, INPUT_A_UID);
-    EXPECT_EQ(binding.inputB, INPUT_B_UID);
-    EXPECT_EQ(binding.output, OUTPUT_UID);
+    // Asserted by token name rather than through a binding struct: the names are the
+    // contract a descriptor's dispatch formulas will reference (RFC 0017 §5), and they
+    // are what survives this pack's C++ becoming data.
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, INPUT_A_TOKEN), INPUT_A_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, INPUT_B_TOKEN), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, OUTPUT_TOKEN), OUTPUT_UID);
 }
 
 TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
@@ -271,10 +276,11 @@ TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
     const GraphFixture fixture(buildTwoNodePointwiseGraph());
 
     BoundTokens bound;
-    ASSERT_FALSE(pointwiseAddGraphMatches(fixture.context(), bound));
+    ASSERT_FALSE(matchesGraph(fixture.context(), bound));
 
+    // Dispatch reads these tokens back; a refused graph must leave nothing for it to
+    // read, or a later pack's dispatch could prepare against another pack's operands.
     EXPECT_TRUE(bound.empty());
-    EXPECT_THROW(pointwiseAddBinding(bound), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

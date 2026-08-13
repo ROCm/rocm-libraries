@@ -40,6 +40,15 @@ struct KernelDispatcher
     const IKernelDispatchHandler<THandle>* handler = nullptr;
 };
 
+/// A UMD paired with the native function its matchSymbol resolved to at construction.
+/// Exactly one of the two function pointers is set, per the descriptor's scope.
+struct ResolvedMatcher
+{
+    MatchDescriptor descriptor;
+    GraphMatcherFn graphFn = nullptr;
+    KernelMatcherFn kernelFn = nullptr;
+};
+
 /**
  * @brief The engine's view of its own kernels: which apply to a graph, in what order,
  *        and how to launch one.
@@ -79,10 +88,14 @@ public:
      * @throws std::invalid_argument if a pack names an unknown matcher or dispatch
      *         descriptor, or if two kernels share a metadata tuple (the catalog key
      *         must be unique).
+     * @throws std::runtime_error if a UMD names a match symbol this build does not
+     *         ship.
      *
-     * Eagerly validates every pack and kernel at plugin load (validateAndIndexPacks());
-     * kernel source compilation and heuristic model loading stay lazy until a graph
-     * needs them.
+     * Eagerly validates every pack and kernel at plugin load (validateAndIndexPacks())
+     * and resolves every matcher symbol here, so a descriptor naming a behaviour that
+     * does not exist excludes this engine at load rather than throwing from inside a
+     * later isApplicable() -- which RFC 0017 §8.6 has already turned into a promise by
+     * that point. Kernel source compilation stays lazy until a graph needs it.
      */
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
@@ -103,12 +116,31 @@ public:
         for(auto& matcher : matchers)
         {
             const auto id = matcher.id;
-            if(const auto [it, inserted] = _matchers.emplace(id, std::move(matcher)); !inserted)
+            const auto description = describeDescriptor("matcher", matcher.name, matcher.id);
+            // Resolved here rather than per matching call: a descriptor naming a
+            // symbol this build does not ship must exclude the engine at load, not
+            // throw from inside isApplicable() after the catalog was already promised
+            // (RFC 0017 §8.6). Also lifts a mutexed registry lookup out of the
+            // per-pack, per-kernel matching loops.
+            ResolvedMatcher resolved{std::move(matcher), nullptr, nullptr};
+            if(resolved.descriptor.scope == MatchScope::GRAPH)
+            {
+                resolved.graphFn
+                    = GraphMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+            else
+            {
+                resolved.kernelFn
+                    = KernelMatcherRegistry::resolve(resolved.descriptor.matchSymbol, description);
+            }
+
+            if(const auto [it, inserted] = _matchers.emplace(id, std::move(resolved)); !inserted)
             {
                 // A pack naming this id would otherwise silently run whichever
                 // matcher loaded first.
                 throw std::invalid_argument("duplicate match descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.name + "'");
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
             }
         }
         for(auto& dispatch : dispatches)
@@ -394,7 +426,7 @@ private:
                 continue;
             }
 
-            mergeBound(catalog.bound, packBound, pack.id);
+            mergeBound(catalog.bound, packBound, pack);
 
             size_t admitted = 0;
             for(const auto& kernel : pack.kernels)
@@ -428,8 +460,13 @@ private:
 
     /// Folds @p packBound into @p bound. Throws if two packs bind the same token to
     /// different values.
-    static void
-        mergeBound(BoundTokens& bound, const BoundTokens& packBound, const DescriptorId& packId)
+    ///
+    /// Names the pack the way every other descriptor diagnostic does: an operator
+    /// reading this has to find the pack in a descriptor set, and a bare UUID is not
+    /// something they can grep for.
+    static void mergeBound(BoundTokens& bound,
+                           const BoundTokens& packBound,
+                           const KernelDescriptorPack& pack)
     {
         for(const auto& [token, value] : packBound)
         {
@@ -437,7 +474,7 @@ private:
             if(!inserted && !(it->second == value))
             {
                 throw std::runtime_error(
-                    "pack '" + toString(packId) + "' binds token '" + token
+                    describeDescriptor("pack", pack.name, pack.id) + " binds token '" + token
                     + "' to a value that disagrees with another pack's binding of the "
                       "same token; one token name must mean one thing across an engine");
             }
@@ -456,7 +493,7 @@ private:
         for(const auto& matcherId : pack.matcherIds)
         {
             const auto& matcher = _matchers.at(matcherId);
-            if(matcher.scope != MatchScope::GRAPH)
+            if(matcher.descriptor.scope != MatchScope::GRAPH)
             {
                 continue;
             }
@@ -466,8 +503,7 @@ private:
             {
                 // Evaluated once per matcher; later packs reuse the memoized verdict.
                 GraphMatcherVerdict verdict;
-                verdict.passed
-                    = GraphMatcherRegistry::resolve(matcher.matchSymbol)(context, verdict.bound);
+                verdict.passed = matcher.graphFn(context, verdict.bound);
                 memo = graphVerdicts.emplace(matcherId, std::move(verdict)).first;
             }
 
@@ -489,11 +525,11 @@ private:
         for(const auto& matcherId : pack.matcherIds)
         {
             const auto& matcher = _matchers.at(matcherId);
-            if(matcher.scope != MatchScope::KERNEL)
+            if(matcher.descriptor.scope != MatchScope::KERNEL)
             {
                 continue;
             }
-            if(!KernelMatcherRegistry::resolve(matcher.matchSymbol)(context, kernel))
+            if(!matcher.kernelFn(context, kernel))
             {
                 return false;
             }
@@ -502,7 +538,7 @@ private:
     }
 
     MetadataSchema _schema;
-    std::unordered_map<DescriptorId, MatchDescriptor, DescriptorIdHash> _matchers;
+    std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, DispatchDescriptor, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
     std::shared_ptr<IKernelHeuristic> _heuristic;

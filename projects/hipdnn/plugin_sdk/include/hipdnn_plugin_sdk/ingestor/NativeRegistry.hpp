@@ -71,9 +71,14 @@ public:
 
     /**
      * @brief Resolves @p symbol.
+     *
+     * @param describedBy What names @p symbol, for the failure message: a symbol name
+     *        alone tells an operator nothing about which descriptor to go and fix.
+     *        Callers holding a descriptor should pass describeDescriptor().
+     *
      * @throws std::runtime_error if no implementation is registered under it.
      */
-    static T resolve(const std::string& symbol)
+    static T resolve(const std::string& symbol, const std::string& describedBy = {})
     {
         auto& self = instance();
         const std::lock_guard<std::mutex> lock(self._mutex);
@@ -81,7 +86,10 @@ public:
         auto it = self._symbols.find(symbol);
         if(it == self._symbols.end())
         {
-            throw std::runtime_error("unresolved native ingestor symbol: " + symbol);
+            throw std::runtime_error("unresolved native ingestor symbol '" + symbol + "'"
+                                     + (describedBy.empty() ? "" : ", named by " + describedBy)
+                                     + "; the descriptor names a behaviour this build does "
+                                       "not ship, which is usually a misspelled symbol");
         }
         return it->second;
     }

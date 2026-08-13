@@ -27,18 +27,39 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
-TEST(TestIngestorKernelHeuristic, ResolvesItsSymbolOnFirstUseRatherThanAtConstruction)
+TEST(TestIngestorKernelHeuristic, RefusesToConstructAgainstAnUnregisteredSymbol)
 {
-    // RFC 0017 §8.1/§3: constructing against an unregistered symbol must be legal;
-    // only scoring may fail. An engine whose matchers reject a graph never pays for it.
-    const NativeKernelHeuristic heuristic("hipdnn.kernel_ingestor.test.not_yet_registered");
+    // The inverse of what this asserted before eager resolution. Resolving on first
+    // score() means a UHD naming a scorer this build does not ship survives load and
+    // survives isApplicable(), then throws at plan build -- past the point RFC 0017
+    // §8.6 makes applicability a promise the engine must keep. Failing here instead
+    // turns that into a load-time exclusion.
+    EXPECT_THROW(NativeKernelHeuristic("hipdnn.kernel_ingestor.test.not_yet_registered"),
+                 std::runtime_error);
+}
 
-    const TestGraph graph;
-    const auto properties = testDeviceProperties();
-    const MatchContext context{graph, 0, properties};
-    const auto kernel = makeDefinition(testId(0x01), 64);
+TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
+{
+    // The whole diagnostic for a typo'd symbol, so it must name the descriptor to fix
+    // rather than only the symbol that was missing.
+    HeuristicDescriptor descriptor;
+    descriptor.id = HEURISTIC_ID;
+    descriptor.name = "misspelled selector";
+    descriptor.kind = HeuristicKind::NATIVE;
+    descriptor.payload = "hipdnn.kernel_ingestor.test.misspelled";
 
-    EXPECT_THROW(heuristic.score(kernel, context), std::runtime_error);
+    try
+    {
+        makeKernelHeuristic(descriptor);
+        FAIL() << "expected an unresolved-symbol failure";
+    }
+    catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("hipdnn.kernel_ingestor.test.misspelled"), std::string::npos);
+        EXPECT_NE(message.find("misspelled selector"), std::string::npos);
+        EXPECT_NE(message.find(toString(HEURISTIC_ID)), std::string::npos);
+    }
 }
 
 TEST(TestIngestorKernelHeuristic, RanksHigherScoringKernelsFirst)

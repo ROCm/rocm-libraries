@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <hip/hip_runtime_api.h>
@@ -15,13 +16,92 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
+#include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
+#include "core/Handle.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
+
+// The pack's contract, restated for the test side exactly as PointwiseAddNative.cpp and
+// PointwiseAddDescriptors.cpp each restate it. There is deliberately no shared header:
+// after ALMIOPEN-2401 the descriptors are a data file, so a test asserting the pack's
+// behaviour has to name these strings itself, the same way an operator authoring a
+// descriptor would. A mismatch here fails at resolve() with the descriptor named.
+constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise_add.graph_match";
+constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise_add.kernel_match";
+constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise_add.score";
+constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dispatch";
+constexpr std::string_view ENGINE_NAME = "hipkernel:PointwiseAdd";
+constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
+constexpr std::string_view DTYPE_FIELD = "dtype";
+
+/// Tokens the graph matcher binds for dispatch to read back.
+constexpr std::string_view INPUT_A_TOKEN = "pointwise_add.input_a.uid";
+constexpr std::string_view INPUT_B_TOKEN = "pointwise_add.input_b.uid";
+constexpr std::string_view OUTPUT_TOKEN = "pointwise_add.output.uid";
+
+/// This pack's native functions, reached the only way anything reaches them now: by
+/// the symbol name its descriptors carry. Each registers the provider's packs first,
+/// which is idempotent and is exactly what Container's constructor does, so a test
+/// needs no fixture and no ordering discipline to reach a matcher.
+///
+/// Resolving here rather than calling a declared function is also what keeps these
+/// tests honest after ALMIOPEN-2401: a descriptor naming a symbol nothing implements
+/// is the failure mode the string-valued contract introduces, and it surfaces here.
+inline hipdnn_plugin_sdk::ingestor::GraphMatcherFn graphMatcher()
+{
+    registerNativeIngestorSymbols();
+    return hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry::resolve(
+        std::string(GRAPH_MATCHER_SYMBOL));
+}
+
+inline hipdnn_plugin_sdk::ingestor::KernelMatcherFn kernelMatcher()
+{
+    registerNativeIngestorSymbols();
+    return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+        std::string(KERNEL_MATCHER_SYMBOL));
+}
+
+inline hipdnn_plugin_sdk::ingestor::ScoreFn scorer()
+{
+    registerNativeIngestorSymbols();
+    return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(SCORE_SYMBOL));
+}
+
+/// This pack's dispatch handler, from the registry that owns its process lifetime.
+inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>& dispatchHandler()
+{
+    registerNativeIngestorSymbols();
+    const auto* handler = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
+        std::string(DISPATCH_SYMBOL));
+    return *handler;
+}
+
+/// Runs this pack's graph matcher, binding into @p bound.
+inline bool matchesGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                         hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
+{
+    return graphMatcher()(context, bound);
+}
+
+/// Runs this pack's kernel-scoped matcher against one candidate.
+inline bool matchesKernel(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+{
+    return kernelMatcher()(context, kernel);
+}
+
+/// Scores one candidate with this pack's scorer.
+inline double scoreKernel(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                          const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+{
+    return scorer()(kernel, context);
+}
 
 /// Tensor uids the builders below use, in argument order.
 constexpr int64_t INPUT_A_UID = 1;

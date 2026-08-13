@@ -362,8 +362,8 @@ inline double scoreConstant(const KernelDefinition& /*kernel*/, const MatchConte
     return 1.0;
 }
 
-/// RAII: registers the constant scorer. Must outlive the ranking call since the
-/// heuristic resolves its symbol lazily.
+/// RAII: registers the constant scorer. Must outlive the heuristic naming it, which
+/// resolves at construction.
 class ScopedConstantScore
 {
 public:
@@ -379,6 +379,25 @@ public:
 
     ScopedConstantScore(const ScopedConstantScore&) = delete;
     ScopedConstantScore& operator=(const ScopedConstantScore&) = delete;
+};
+
+/// RAII: registers only the block-size scorer, for tests that wire their own matchers
+/// by hand but still need a heuristic to be constructible.
+class ScopedBlockSizeScore
+{
+public:
+    ScopedBlockSizeScore()
+    {
+        ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
+    }
+
+    ~ScopedBlockSizeScore()
+    {
+        ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
+    }
+
+    ScopedBlockSizeScore(const ScopedBlockSizeScore&) = delete;
+    ScopedBlockSizeScore& operator=(const ScopedBlockSizeScore&) = delete;
 };
 
 inline MetadataSchema makeSchema()
@@ -440,6 +459,9 @@ inline KernelDefinition
 
 /// RAII: registers matchers under caller-supplied symbol names without disturbing the
 /// shared fixture's registrations.
+///
+/// Must be constructed *before* any state manager or heuristic naming these symbols:
+/// both resolve eagerly, so a manager built while this is out of scope throws.
 class ScopedSymbols
 {
 public:
@@ -452,8 +474,8 @@ public:
     {
         GraphMatcherRegistry::registerSymbol(_graphSymbol, graphFn);
         KernelMatcherRegistry::registerSymbol(_kernelSymbol, kernelFn);
-        // Heuristic resolves its symbol lazily, not at construction; ranking tests need
-        // it registered for the duration too.
+        // The heuristic resolves at construction, so a manager built under this scope
+        // needs the scorer registered before it, not merely before ranking.
         ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
         counters().reset();
     }

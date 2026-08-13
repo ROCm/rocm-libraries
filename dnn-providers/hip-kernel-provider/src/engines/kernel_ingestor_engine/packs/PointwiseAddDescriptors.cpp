@@ -1,19 +1,39 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
-
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
-#include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
-#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
+/**
+ * @file PointwiseAddDescriptors.cpp
+ * @brief The pointwise-add descriptor set, built in memory.
+ *
+ * The temporary side of the seam. Stands in for what a loader will produce from
+ * installed files: one engine (UED), its metadata schema (KMD) and heuristic (UHD),
+ * two matchers (UMDs), one dispatch descriptor (UDD), and one pack (KDP) binding them
+ * over three kernels (UKDs).
+ *
+ * ALMIOPEN-2401 deletes this file: a descriptor set becomes parsed data rather than
+ * code. Nothing outside it depends on that distinction, since it returns the same
+ * generic DescriptorSet a loader will.
+ *
+ * The symbol names below are the ones PointwiseAddNative.cpp implements, restated
+ * rather than shared through a header. That is deliberate and is what this file's
+ * deletion is going to look like: a descriptor file is data, and data cannot export a
+ * constant to C++. A name that does not match an implemented symbol excludes this
+ * engine when its state manager is constructed, naming the descriptor at fault.
+ */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -22,6 +42,21 @@ using hipdnn_flatbuffers_sdk::utilities::parseUuid;
 
 namespace
 {
+
+/// The engine name, hashed into hipDNN's engine-id space. Prefixed per RFC 0017's
+/// global-uniqueness rule; absent from EngineNames.hpp's registry because it is
+/// registered at construction, not at build time.
+constexpr std::string_view ENGINE_NAME = "hipkernel:PointwiseAdd";
+
+// The behaviours this set names, implemented by PointwiseAddNative.cpp.
+constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise_add.graph_match";
+constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise_add.kernel_match";
+constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise_add.score";
+constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dispatch";
+
+/// The KMD fields this engine's kernels vary along.
+constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
+constexpr std::string_view DTYPE_FIELD = "dtype";
 
 // Descriptor ids are stable GUIDs, minted once for this pack and never regenerated.
 // Authored descriptors will carry the same values as text, parsed with parseUuid().

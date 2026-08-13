@@ -23,19 +23,16 @@
 
 #include "core/Container.hpp"
 #include "core/Handle.hpp"
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
-#include "mocks/MockCompiledProgram.hpp"
-#include "mocks/MockKernelCompiler.hpp"
-#include "mocks/MockRunnableKernel.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
  * @file TestPointwiseAddDispatchHandler.cpp
- * @brief The pack's dispatch: workspace sizing, prepare's compile options, and a real
+ * @brief The pack's dispatch: workspace sizing, prepare's unhappy paths, and a real
  *        compile-and-launch.
+ *
+ * The handler is reached through DispatchRegistry, the way a plan build reaches it:
+ * it is internal to PointwiseAddNative.cpp, and its process-lifetime instance is the
+ * one a plan actually runs.
  *
  * The launch tests run on device to exercise the runtime compile and uid-to-pointer
  * resolution. Everything that fails before those is asserted CPU-only.
@@ -54,7 +51,7 @@ using hipdnn_plugin_sdk::ingestor::MatchContext;
 BoundTokens bindingsFor(const MatchContext& context)
 {
     BoundTokens bound;
-    if(!pointwiseAddGraphMatches(context, bound))
+    if(!matchesGraph(context, bound))
     {
         throw std::logic_error("test graph does not match the pack it is dispatched against");
     }
@@ -123,8 +120,7 @@ class TestPointwiseAddDispatchWorkspace : public ::testing::TestWithParam<Worksp
 TEST_P(TestPointwiseAddDispatchWorkspace, ReportsWorkspaceFromKernelMetadata)
 {
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     EXPECT_EQ(handler.workspaceBytes(fixture.context(),
                                      bindingsFor(fixture.context()),
@@ -142,8 +138,7 @@ INSTANTIATE_TEST_SUITE_P(,
 TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
 {
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     // The query is answered per kernel, before selection and before any plan exists, so
     // the answer must not depend on which other kernels are in the catalog.
@@ -158,43 +153,15 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
 }
 
 // ---------------------------------------------------------------------------
-// Prepare: compile options and unhappy paths -- all CPU-only, since nothing here
-// reaches a real compiler.
+// Prepare: unhappy paths -- CPU-only, since each fails before reaching a compiler.
 // ---------------------------------------------------------------------------
-
-TEST(TestPointwiseAddDispatch, PreparePassesTheKernelsTypeAndBlockSizeToTheCompiler)
-{
-    // A mock compiler proves exactly what prepare() sends it, without hiprtc or a device.
-    const GraphFixture fixture(buildPointwiseGraph());
-    const MockKernelCompiler compiler;
-    std::vector<std::string> capturedOptions;
-
-    EXPECT_CALL(compiler, compile("PointwiseAdd.cpp", ::testing::_))
-        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
-            capturedOptions = options;
-
-            auto kernel = std::make_unique<MockRunnableKernel>();
-            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
-
-            auto program = std::make_unique<MockCompiledProgram>();
-            EXPECT_CALL(*program, getKernel("PointwiseAdd"))
-                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
-            return program;
-        });
-
-    const PointwiseAddDispatchHandler handler(compiler);
-    const auto prepared = handler.prepare(
-        fixture.context(), bindingsFor(fixture.context()), makeKernel(256, "FLOAT"));
-    ASSERT_NE(prepared, nullptr);
-
-    const auto hasOption = [&capturedOptions](const std::string& option) {
-        return std::find(capturedOptions.begin(), capturedOptions.end(), option)
-               != capturedOptions.end();
-    };
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_POINTWISE_ADD_TYPE=float"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE=256"));
-}
+//
+// prepare()'s compile options are no longer asserted against a mock compiler. The
+// handler is internal to PointwiseAddNative.cpp and reachable only as the
+// process-lifetime instance the registry holds, so there is no seam to inject one
+// through. What those options produce is covered where it is observable: the HALF
+// launch below fails if the dtype option is wrong, and the E2E suite fails if the
+// kernel does not compile at all. Both need a device.
 
 TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 {
@@ -202,8 +169,7 @@ TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
     // dtypes this pack declares (FLOAT, HALF). Never reaches the compiler --
     // elementTypeFor throws before prepare() calls it.
     const GraphFixture fixture(buildPointwiseGraph());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     EXPECT_THROW(handler.prepare(
                      fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "BFLOAT16")),
@@ -212,10 +178,9 @@ TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 
 TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
-    // pointwiseAddBinding() throws on a missing token before prepare() touches HIP.
+    // Binding lookup throws on a missing token before prepare() touches HIP.
     const GraphFixture fixture(buildPointwiseGraph());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     // Preparation reads the operand uids the matcher bound rather than re-deriving them;
     // bindings not produced by this pack's matcher are a wiring error.
@@ -248,8 +213,7 @@ TEST_P(TestPointwiseAddDispatchRealLaunch, LaunchesARealAddOnDevice)
         buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
                             param.dataType),
         currentDeviceProperties());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     const auto prepared = handler.prepare(
         fixture.context(), bindingsFor(fixture.context()), makeKernel(64, param.kernelDtype));
@@ -290,8 +254,7 @@ TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
     SKIP_IF_NO_DEVICES();
 
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     // block_size reaches the compiler and the launch geometry; a one-element add must
     // still agree across both kernels.
@@ -315,8 +278,7 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
     SKIP_IF_NO_DEVICES();
 
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
-    const HipMlopsKernelCompiler compiler;
-    const PointwiseAddDispatchHandler handler(compiler);
+    const auto& handler = dispatchHandler();
 
     // A plan is built once and executes many times, so preparation must hold nothing
     // tied to one execution.

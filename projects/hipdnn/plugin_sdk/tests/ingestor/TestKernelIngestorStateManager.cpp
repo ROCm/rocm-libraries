@@ -175,7 +175,9 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     constexpr const char* ALWAYS_FAILS_SYMBOL = "test.pruned_bound_isolation.fail";
 
     // acceptAnyGraph passes and binds nothing; acceptGraph passes and binds
-    // "test.bound_token"; rejectGraph always fails.
+    // "test.bound_token"; rejectGraph always fails. Registered before the manager,
+    // which resolves every matcher symbol at construction.
+    const ScopedBlockSizeScore scorer;
     GraphMatcherRegistry::registerSymbol(PASS_NO_BIND_SYMBOL, &acceptAnyGraph);
     GraphMatcherRegistry::registerSymbol(LEAK_THEN_PRUNE_SYMBOL, &acceptGraph);
     GraphMatcherRegistry::registerSymbol(ALWAYS_FAILS_SYMBOL, &rejectGraph);
@@ -234,12 +236,15 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThr
     // Conflicting values under one token name is an authoring error; a silent merge
     // would hide it.
     constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.conflicting";
+    // Ahead of the manager: matcher symbols resolve at construction.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
 
     const auto conflictingMatcherId = testId(0xB0);
     const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID});
     KernelDescriptorPack second = makePack({conflictingMatcherId});
     second.id = testId(0xB1);
+    second.name = "the conflicting pack";
     second.kernels = {makeKernel(testId(0xB2), "second_pack_kernel", 512, "FLOAT")};
 
     const StateManager manager(makeSchema(),
@@ -252,11 +257,23 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThr
                                {first, second},
                                std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const TestGraph graph(makeGraphId(51));
     const auto properties = testDeviceProperties();
 
-    EXPECT_THROW(manager.unsortedCatalog(MatchContext{graph, 0, properties}), std::runtime_error);
+    try
+    {
+        manager.unsortedCatalog(MatchContext{graph, 0, properties});
+        ADD_FAILURE() << "expected a cross-pack token conflict to be reported";
+    }
+    catch(const std::runtime_error& error)
+    {
+        // The message has to identify which pack to go and fix, not only that some
+        // pack disagreed.
+        const std::string message = error.what();
+        EXPECT_NE(message.find("the conflicting pack"), std::string::npos);
+        EXPECT_NE(message.find(toString(second.id)), std::string::npos);
+        EXPECT_NE(message.find("test.bound_token"), std::string::npos);
+    }
 
     GraphMatcherRegistry::unregisterSymbol(CONFLICTING_SYMBOL);
 }
@@ -265,6 +282,7 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeC
 {
     // Packs agreeing on a token's value must still merge cleanly.
     constexpr const char* AGREEING_SYMBOL = "test.bound_conflict.agreeing";
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     GraphMatcherRegistry::registerSymbol(AGREEING_SYMBOL, &bindAgreeingTokenValue);
 
     const auto agreeingMatcherId = testId(0xB3);
@@ -281,7 +299,6 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeC
         {first, second},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
-    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const TestGraph graph(makeGraphId(52));
     const auto properties = testDeviceProperties();
 
@@ -472,6 +489,7 @@ TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatch
     // A missing dispatch after a graph was accepted is a hard error, not a silent
     // decline. Built directly, bypassing pack validation, since validateAndIndexPacks()
     // cannot see a definition that never went through a pack.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto kernel = makeDefinition(testId(0x01), 64);
 
@@ -527,6 +545,11 @@ class TestKernelIngestorStateManagerConstructionThrows
 
 TEST_P(TestKernelIngestorStateManagerConstructionThrows, RejectsAtConstruction)
 {
+    // Every case below names the fixture's symbols, and the constructor resolves them
+    // eagerly, so without these registered each case would throw runtime_error for an
+    // unresolved symbol before reaching the invalid_argument it exists to assert.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
     EXPECT_THROW(GetParam().construct(), std::invalid_argument);
 }
 

@@ -10,9 +10,9 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 
 /**
  * @file TestPointwiseAddPack.cpp
@@ -22,6 +22,7 @@ namespace
 {
 
 using namespace hip_kernel_provider::kernel_ingestor_engine;
+using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 
 TEST(TestPointwiseAddPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
 {

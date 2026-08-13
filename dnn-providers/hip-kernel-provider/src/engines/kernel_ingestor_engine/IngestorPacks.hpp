@@ -57,6 +57,31 @@ struct IngestorPack
  */
 const std::vector<IngestorPack>& ingestorPacks();
 
+/**
+ * @name Pack entry points
+ *
+ * Each pack contributes exactly these two functions, one per file, and nothing else:
+ * the native seam from `<Op>Native.cpp` and the descriptor set from
+ * `<Op>Descriptors.cpp`. A pack's matchers, scorer, and dispatch handler are internal
+ * to its native file -- the registry the descriptors name is the only way to them --
+ * so there is deliberately no per-pack header.
+ *
+ * Declared here rather than locally in IngestorPacks.cpp because a definition with no
+ * visible declaration reads as one that should have been internal, and the table is
+ * the only caller either has.
+ *
+ * Post-ALMIOPEN-2401 an installed descriptor file replaces the second column, and its
+ * declaration goes with it; the native one is unaffected.
+ * @{
+ */
+
+/// @see packs/PointwiseAddNative.cpp
+void registerPointwiseAddSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+/// @see packs/PointwiseAddDescriptors.cpp
+hipdnn_plugin_sdk::ingestor::DescriptorSet buildPointwiseAddDescriptorSet();
+
+/** @} */
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

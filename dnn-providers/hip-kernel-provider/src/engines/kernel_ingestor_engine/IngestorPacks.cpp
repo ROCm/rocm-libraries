@@ -5,9 +5,6 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
-
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 

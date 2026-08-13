@@ -16,29 +16,40 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseAddTestGraphs.hpp"
 #endif
 
 using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::core;
 
-constexpr uint32_t EXPECTED_ENGINES = 0
-
+/// Engines the provider exposes: one per compiled-in native engine, plus one per
+/// discovered descriptor set.
+///
+/// The ingestor's contribution is read from the inventory rather than written as a
+/// literal `+ 1`. A hardcoded count silently becomes wrong the moment a second pack
+/// ships, and the count is the only thing standing between "the pack table was
+/// dead-stripped out of this binary" and a green run -- so it has to track the table.
+static uint32_t expectedEngines()
+{
+    uint32_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-                                      + 1
+    ++expected;
 #endif
-
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
-                                      + 1
+    ++expected;
 #endif
-
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-                                      + 1
+    expected += static_cast<uint32_t>(
+        hip_kernel_provider::kernel_ingestor_engine::discoverDescriptorSets().size());
 #endif
+    return expected;
+}
 
-    // Add more blocks like this as more engines are implemented
-    ;
+/// Upper bound for the fixed-size buffers below; only needs to be at least
+/// expectedEngines().
+constexpr uint32_t MAX_EXPECTED_ENGINES = 8;
 
 TEST(TestContainer, ConstructsSuccessfully)
 {
@@ -50,8 +61,8 @@ TEST(TestContainer, CopyEngineIdsReturnsExpectedEngineCount)
     uint32_t numEngines = 0;
     auto totalEngines = Container::copyEngineIds(nullptr, 0, numEngines);
 
-    EXPECT_EQ(totalEngines, EXPECTED_ENGINES);
-    EXPECT_EQ(numEngines, EXPECTED_ENGINES);
+    EXPECT_EQ(totalEngines, expectedEngines());
+    EXPECT_EQ(numEngines, expectedEngines());
 }
 
 TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
@@ -59,12 +70,13 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
 #ifndef HIPDNN_ENGINE_HIP_MLOPS
     GTEST_SKIP();
 #else
-    std::array<int64_t, EXPECTED_ENGINES> engineIds = {};
+    std::array<int64_t, MAX_EXPECTED_ENGINES> engineIds = {};
     uint32_t numEngines = 0;
-    auto totalEngines = Container::copyEngineIds(engineIds.data(), EXPECTED_ENGINES, numEngines);
+    auto totalEngines
+        = Container::copyEngineIds(engineIds.data(), MAX_EXPECTED_ENGINES, numEngines);
 
-    EXPECT_EQ(totalEngines, EXPECTED_ENGINES);
-    EXPECT_EQ(numEngines, EXPECTED_ENGINES);
+    EXPECT_EQ(totalEngines, expectedEngines());
+    EXPECT_EQ(numEngines, expectedEngines());
 
     bool containsHipMlopsEngine = false;
     for(const int64_t engine : engineIds)
@@ -74,6 +86,27 @@ TEST(TestContainer, CopyEngineIdsWithBufferContainsHipMlopsEngineId)
     EXPECT_EQ(containsHipMlopsEngine, true);
 #endif
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
+{
+    using namespace hip_kernel_provider::kernel_ingestor_engine;
+
+    // Names the ids rather than counting them. A count cannot tell a missing ingestor
+    // engine from an extra native one, and it cannot see the failure this is really
+    // guarding: the pack table being dropped from a binary that links the provider as a
+    // static archive, which leaves the engine absent and every other assertion happy.
+    Container container;
+    const auto allEngineIds = container.getEngineManager().getAllEngineIds();
+
+    for(const auto& set : discoverDescriptorSets())
+    {
+        const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
+        EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())
+            << "no engine for descriptor set '" << set.engine.name << "'";
+    }
+}
+#endif
 
 TEST(TestContainer, GetEngineManagerReturnsValidReference)
 {
@@ -157,5 +190,5 @@ TEST(TestContainer, GetAllEngineIds)
 
     auto allEngines = engineManager.getAllEngineIds();
 
-    ASSERT_EQ(allEngines.size(), EXPECTED_ENGINES);
+    ASSERT_EQ(allEngines.size(), expectedEngines());
 }
