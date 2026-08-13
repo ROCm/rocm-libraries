@@ -38,6 +38,7 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
@@ -207,6 +208,13 @@ def _setup():
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
+
+    archs = args.Architecture.split(";")
+    if "all" not in archs:
+        files = [f for f in files if archMatch(load_logic_gfx_arch(f), archs)]
+        if len(files) == 0:
+            print1(f"No files found in {logicPath} for architectures: {', '.join(archs)}")
+            exit(1)
     print2(f"Found {len(files)} files")
 
     isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, str(cxxCompiler))
