@@ -387,7 +387,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
-        return cfg < INT_MAX ? cfg : config_.dsReadPerWmma;
+        return cfg > 0 ? (cfg < INT_MAX ? cfg : config_.dsReadPerWmma) : config_.dsReadPerWmma;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
