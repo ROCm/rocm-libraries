@@ -292,6 +292,7 @@ if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
        AND EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
             set(HOST_VALIDATION_BUILD_TESTING OFF)
+            set(HOST_VALIDATION_BUILD_BLAS_BACKEND ON)
             set(HOST_VALIDATION_BUILD_MX_BACKEND ON)
             add_subdirectory(
                 "${_rocroller_host_validation_source}"

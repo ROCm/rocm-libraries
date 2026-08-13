@@ -77,6 +77,16 @@ class TheRockMatrixTest(unittest.TestCase):
             hipthreads_entry["projects_to_test"].split(","),
         )
 
+    def test_host_validation_runs_rocroller_consumers(self):
+        project_to_run = therock_matrix.collect_projects_to_run(
+            ["shared/host-validation"]
+        )
+        self.assertEqual(len(project_to_run), 1)
+        projects_to_test = project_to_run[0]["projects_to_test"].split(",")
+        self.assertIn("hipblaslt", projects_to_test)
+        self.assertIn("tensilelite", projects_to_test)
+        self.assertIn("rocroller", projects_to_test)
+
     def test_collect_projects_to_run(self):
         subtrees = ["projects/rocsparse", "projects/hipblaslt"]
 

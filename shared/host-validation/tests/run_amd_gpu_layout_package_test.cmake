@@ -16,6 +16,18 @@ set(install_dir "${PACKAGE_WORK_DIR}/install")
 set(build_dir "${PACKAGE_WORK_DIR}/build")
 file(REMOVE_RECURSE "${PACKAGE_WORK_DIR}")
 
+set(component_build_command "${CMAKE_COMMAND}" --build "${COMPONENT_BINARY_DIR}")
+if(TEST_CONFIG)
+    list(APPEND component_build_command --config "${TEST_CONFIG}")
+endif()
+execute_process(
+    COMMAND ${component_build_command}
+    RESULT_VARIABLE component_build_result
+)
+if(NOT component_build_result EQUAL 0)
+    message(FATAL_ERROR "ROCHostValidation package artifacts failed to build.")
+endif()
+
 execute_process(
     COMMAND
         "${CMAKE_COMMAND}" --install "${COMPONENT_BINARY_DIR}" --prefix "${install_dir}"
