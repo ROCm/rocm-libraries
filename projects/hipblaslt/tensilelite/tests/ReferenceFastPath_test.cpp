@@ -6,11 +6,14 @@
 #include <Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <roc/host_validation/adapters/tensilelite/GemmProblemAdapter.hpp>
 #include <roc/host_validation/validation.hpp>
 
 #include <array>
 #include <cmath>
+#include <optional>
 #include <span>
+#include <variant>
 #include <vector>
 
 using namespace TensileLite;
@@ -776,8 +779,58 @@ TEST(ReferenceTiledBackend, RejectsInvalidPointerBatchBeforeWriting)
     inputs.batchC = batchC;
     inputs.batchD = batchD;
 
+    const auto translation
+        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/-1);
+    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
+              reference_adapter::TranslationFailureCode::InvalidBatchPointer);
+
     EXPECT_FALSE(tryRuntimeTiledGemm(problem, inputs, /*elementsToValidate=*/-1));
     EXPECT_EQ(d0[0], -99);
+}
+
+TEST(ReferenceProblemAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
+{
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 2, 2, 1);
+    problem.setUseE(true);
+    problem.setE(rocisa::DataType::Float, problem.d().sizes(), problem.d().strides(), true);
+
+    std::vector<float> a{1, 2};
+    std::vector<float> b{3, 4};
+    std::vector<float> c(4, 0);
+    std::vector<float> d(4, -99);
+    std::vector<float> e(4, -99);
+    ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.e = e.data();
+
+    std::optional<reference_adapter::TranslatedGemmBatch> translated;
+    {
+        auto problemTranslation
+            = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/-1);
+        ASSERT_TRUE(
+            std::holds_alternative<reference_adapter::GemmProblemAdapter>(problemTranslation));
+        auto adapter
+            = std::move(std::get<reference_adapter::GemmProblemAdapter>(problemTranslation));
+
+        auto batchTranslation = adapter.translateBatch(0, adapter.operationAccumulatorType());
+        ASSERT_TRUE(
+            std::holds_alternative<reference_adapter::TranslatedGemmBatch>(batchTranslation));
+        translated.emplace(
+            std::move(std::get<reference_adapter::TranslatedGemmBatch>(batchTranslation)));
+    }
+
+    ASSERT_TRUE(translated->intermediate);
+    ASSERT_TRUE(translated->epilogue);
+    roc::host_validation::referenceGemm(translated->gemm(),
+                                        {
+                                            .backend = roc::host_validation::GemmBackend::Canonical,
+                                            .requireRequestedBackend = true,
+                                        });
+    roc::host_validation::referenceEpilogue(*translated->epilogue);
+
+    EXPECT_EQ(d, (std::vector<float>{3, 6, 4, 8}));
+    EXPECT_EQ(e, d);
 }
 
 TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)
