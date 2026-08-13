@@ -16012,7 +16012,7 @@ class KernelWriterAssembly(KernelWriter):
     True: PostLoopStoreInNll is active and the compute type is fp32 (the scalar-scale
     fold the epilogue applies asserts a single-register alpha). Everything else keeps
     the always-correct applyAlpha=True path."""
-    return bool(kernel["PostLoopStoreInNll"]) and kernel["ProblemType"]["ComputeDataType"].isSingle()
+    return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
   def _plsinCanBypassEndSummation(self, kernel):
     """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit

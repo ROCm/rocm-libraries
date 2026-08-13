@@ -50,6 +50,7 @@ from .Components.Signature import UserArgumentsInfo
 from .Components.CustomSchedule import customMainLoopSchedule
 from .Components.StreamK import streamKVariantClass
 from .Components.Subtile.Kernel import *
+from .Components.Subtile.Plsin import computeSubtilePlsin
 from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
@@ -401,6 +402,7 @@ class StateValues:
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
   postLoopStoreInNll: bool               = False
+  plsinStoreMode: str                    = "Weave"
   postLoopStoreInjected: bool            = False
   postLoopSrdDHoisted: bool              = False
   # PostLoopStoreInNll (PLSIN) store/init-weave state (B2). Declared here so the
@@ -5513,7 +5515,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # persistent tile loop, read back via v_readfirstlane at use sites -- frees
     # those SGPRs for the fused store. Scoped to PLSIN so non-fused gfx950 StreamK
     # kernels are unaffected.
-    if kernel["ISA"] == IsaVersion(9,5,0) and kernel["StreamK"] and kernel.get("PostLoopStoreInNll"):
+    if kernel["ISA"] == IsaVersion(9,5,0) and kernel["StreamK"] and self.states.postLoopStoreInNll:
       return True
     return False
 
@@ -5537,7 +5539,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     """
     if not self.isStreamKConstantsToVgprEnabled(kernel):
       return []
-    if kernel["ISA"] == IsaVersion(9,5,0) and kernel.get("PostLoopStoreInNll"):
+    if kernel["ISA"] == IsaVersion(9,5,0) and self.states.postLoopStoreInNll:
       # Kernarg order, which is what makes the default a contiguous run:
       allNames = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
                   "SKItersPerWG", "skGrid", "skTiles", "StreamKIdx"]
@@ -7254,10 +7256,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #exit(1)
 
     self.states.tailloopInNll = kernel["TailloopInNll"]
-    # PostLoopStoreInNll: fuse the fp4+UseSubtileImpl paired dwordx4 store into the
-    # NLL. Solution-level gating already narrowed this to eligible configs; here we
-    # just snapshot it and reset the per-kernel "already injected" flag.
-    self.states.postLoopStoreInNll = kernel["PostLoopStoreInNll"]
+    # PostLoopStoreInNll (PLSIN): fuse the fp4+UseSubtileImpl paired dwordx4 store
+    # into the NLL. This is an internal, subtile-owned decision derived here from
+    # the already-present solution/problem parameters (no public solution knob, not
+    # part of the kernel name). computeSubtilePlsin runs before every consumer in
+    # this init pass (StreamK-constants-to-VGPR at 9354+/9909, defineSgpr at 9648)
+    # and before the schedule-time consumers in LogicalScheduler / KernelWriterAssembly.
+    self.states.postLoopStoreInNll, self.states.plsinStoreMode = computeSubtilePlsin(kernel)
     self.states.postLoopStoreInjected = False
     # Step 4b-2: set True once SrdD's value is computed before the main loop, so
     # the post-loop store-init emits only the C channel (D already done) instead
@@ -9645,7 +9650,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Defined here (before the nonPostLoopSgpr snapshot below) so it survives
     # endSummation and is live at all guard sites. Only defined when the optimization is
     # eligible so non-PLSIN / non-fp32-compute kernels are unaffected.
-    if kernel["PostLoopStoreInNll"] and kernel["ProblemType"]["ComputeDataType"].isSingle():
+    if self.states.postLoopStoreInNll and kernel["ProblemType"]["ComputeDataType"].isSingle():
       self.defineSgpr("PostLoopFusedStore", 1)
 
 

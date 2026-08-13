@@ -3689,7 +3689,7 @@ class LogicalScheduler:
         # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
         # the loop (natural large distance); pairs >= LA are woven.
         # Must stay in step with the eligibility gate's default in
-        # SolutionStructs/Solution.py (assignPostLoopStoreInNll), which admits a
+        # Components/Subtile/Plsin.py (computeSubtilePlsin), which admits a
         # tile only when numStorePairs > weaveLA so at least one pair is left in
         # the loop to hide the woven ones under.
         weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "2"))  # test-only override
@@ -3714,12 +3714,11 @@ class LogicalScheduler:
         # before the store) and lend the now-dead input-tile VGPRs to the store pool
         # so its temps reuse the freed holes instead of shuffling. Env-gated (default
         # off) so compute-bound tiles, where the weave overlap is a net win, are
-        # unaffected. In production this is selected by the PLSINStoreMode solution
-        # parameter (Lend vs Weave), so the host can pick the lend-general kernel for
-        # store-bound shapes and the fused-general (weave) kernel for compute-bound
-        # shapes without a single-binary compromise. TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_SMALLTILE_LEND=1"
-        # remains a test-only override that forces Lend regardless of the parameter.
-        paramLend = kernel.get("PLSINStoreMode", "Weave") == "Lend"
+        # unaffected. In production this is selected by the internal plsinStoreMode
+        # decision (Lend vs Weave), carried on writer.states from
+        # Components/Subtile/Plsin.py. TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_SMALLTILE_LEND=1"
+        # remains a test-only override that forces Lend regardless of the decision.
+        paramLend = getattr(writer.states, "plsinStoreMode", "Weave") == "Lend"
         envLend = plsinDebugEnv("TENSILE_PLSIN_SMALLTILE_LEND", "0") != "0"
         smallTileLend = (not largeTile) and (paramLend or envLend)
         if largeTile or smallTileLend:
