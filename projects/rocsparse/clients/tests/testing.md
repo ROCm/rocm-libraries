@@ -240,8 +240,8 @@ either one builds and tests both. Broader tiers run in the TheRock nightly workf
 (`therock-multi-arch-ci-asan*.yml`). Repo-wide quality workflows (`pre-commit`, `clang-tidy`,
 `codeql`) apply to all components.
 
-Internal AMD **Jenkins** pipelines (`.jenkins/`) also exist but are legacy: they run on older GPUs
-(gfx900 / gfx906 / gfx908) on cron/nightly triggers and mirror the same GTest filters —
+Internal AMD **Jenkins** pipelines (`.jenkins/`) also exist but are legacy: they run across a range
+of GPUs (gfx908 / gfx90a / gfx942 / gfx950 / gfx1201) on cron/nightly triggers and mirror the same GTest filters —
 `precheckin.groovy` runs `*quick*:*pre_checkin*`, `extended.groovy` runs `*nightly*`, `asan.groovy`
 runs `*quick*:*pre_checkin*` under AddressSanitizer, and `codecov.groovy` uploads coverage. All
 Jenkins test commands exclude `*known_bug*`.
@@ -254,7 +254,7 @@ Jenkins test commands exclude `*known_bug*`.
 | Unit / bad-arg tests | Yes | Component team | In the CTest `standard` category (`quick`+`pre_checkin`) |
 | Integration tests | Yes | Component team | `standard` category, excluding `*known_bug*` |
 | Formatting | Yes | CI / DevOps | Repo-wide `pre-commit` |
-| Static analysis | No (informational) | CI / DevOps | `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy`; not a confirmed blocking gate |
+| Static analysis | Yes | CI / DevOps | `clang-format`, `clang-tidy`, `codeql`, Jenkins `staticanalysis.groovy` |
 | ASAN | Separate lane | CI / DevOps | Dedicated TheRock ASAN workflows (multi-arch / nightly) + Jenkins `asan.groovy`; not a confirmed per-PR blocking gate |
 | Code coverage | No | Component team / CI | `codecov.groovy`, informational (Codecov flag `rocSPARSE`) |
 | Shared validation infra | N/A | TheRock team | Shared build/validation infrastructure |
@@ -310,6 +310,12 @@ flag `rocSPARSE`.
   platforms). Because host-side instrumentation does not capture device kernels, rocSPARSE's measured
   code coverage understates work done on-device; device-path coverage is the largest gap.
 
+**Wavefront-size gap:** the reported coverage percentage is currently computed on either 32-wavefront
+hardware or 64-wavefront hardware, but not both — a report is not generated for each and then combined
+into a single report. This is a major gap because many rocSPARSE routines dispatch to different kernels
+at runtime based on the wavefront size (32 vs. 64), so in any given coverage run the alternate branch
+(the `if` or the `else`) is never hit. This is part of why measured coverage sits below the 80% target.
+
 **Scope:** measured on Linux; Windows coverage is not tracked separately.
 
 ---
@@ -333,18 +339,20 @@ this. Nightly adds:
 
 Default GPU targets come from `DEFAULT_GPU_TARGETS` in the root `CMakeLists.txt`.
 
-| Configuration | Validation Level | Frequency | Notes |
+| Configuration | Linux | Windows | Notes |
 |---|---|---|---|
-| Linux (ROCm) | Full | PR / Nightly / Release | Primary platform |
-| gfx908 / gfx90a / gfx942 / gfx950 | Full | PR / Nightly / Release | Core CDNA targets |
-| gfx900 / gfx906 | Partial | PR / Nightly | Older CDNA/GCN |
-| gfx1030 / gfx110x / gfx1200 / gfx1201 | Partial | Nightly | RDNA |
-| gfx1151 (Strix Halo) | Partial | Nightly | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
-| ASAN (gfx908/gfx90a/gfx942 `xnack+`) | Partial | Dedicated lane / Nightly | AddressSanitizer build, xnack+ only |
+| gfx908 / gfx90a / gfx942 / gfx950 | Full — PR / Nightly / Release | Not tested | Core CDNA targets |
+| gfx1201 | Full — PR / Nightly / Release | Not tested | RDNA |
+| gfx1151 (Strix Halo) | Not tested | Full — PR / Nightly / Release | `f64_r` / `f64_c` cases excluded (`exclude_gpu_gfx1151`) |
+| ASAN (gfx908 / gfx90a / gfx942 `xnack+`) | Partial — Dedicated lane / Nightly | Not tested | AddressSanitizer build, xnack+ only |
+| gfx900 / gfx906 | Not tested | Not tested | Older CDNA/GCN |
+| gfx1030 / gfx110x / gfx1200 | Not tested | Not tested | RDNA |
 
-**Explicitly not tested / guaranteed:** multi-GPU validation; non-listed gfx targets; Windows
-coverage is thinner than Linux. Configurations are guarded at runtime by the "Insufficient memory"
-skip on small cards.
+**Explicitly not tested / guaranteed:** non-listed gfx targets; any
+configuration marked "Not tested" above (including gfx900 / gfx906 and most RDNA parts). Note that
+Linux and Windows validation cover disjoint sets of targets — the CDNA parts and gfx1201 are validated
+on Linux only, while gfx1151 is validated on Windows only. Configurations are guarded at runtime by the
+"Insufficient memory" skip on small cards.
 
 ---
 
