@@ -148,9 +148,6 @@ references, and optional annotations.
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags. No duplicates. Absent => none. |
 
 All three optional fields may be omitted; a valid engine can expose no knobs and carry no notes.
-Unlike the UMD (RFC 0018), the UED carries no `sdk_version`: only the matcher reads graph fields
-and must declare the graph-schema version it was authored against (RFC 0017 § 4), so the UED needs
-only its own `version`.
 
 Each `major.minor` is a standalone JSON Schema **file** in the repository (§ 11.3); the inline copy
 below mirrors the authoritative `ued/1.0.json`, and a CI check verifies the match.
