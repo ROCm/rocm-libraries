@@ -44,7 +44,7 @@ namespace
 using namespace aot_catalog_engine;
 namespace fs = std::filesystem;
 
-constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
+const std::string CATALOG_DIR = aotResolveTestCatalogDir();
 constexpr const char* ARCH = "gfx1151";
 
 bool gpuIsArch(const std::string& arch)

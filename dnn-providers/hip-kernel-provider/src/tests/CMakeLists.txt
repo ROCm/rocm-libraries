@@ -99,12 +99,23 @@ if(ENABLE_AOT_CATALOG_ENGINE)
     target_include_directories(hip_kernel_provider_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../engines/aot_catalog_engine
     )
-    # Point the test at the build-tree copy of the catalog (family.json + .co).
-    # HIPDNN_AOT_CATALOG_BUILD_DIR is the shared path set by the top-level CMakeLists
-    # (the same root the rocke producer emits into and the runtime self-locates), so
-    # the tests load exactly what was built.
+    # Point the test at the catalog (family.json + .co). The test resolves the
+    # directory at RUNTIME via aotResolveTestCatalogDir() (AotCatalogTestSupport.hpp),
+    # mirroring the engine's own self-location so it works both in the build tree and
+    # from a packaged install tree on a SEPARATE runner (TheRock's split build/test
+    # CI). Three pieces are baked:
+    #   * AOT_CATALOG_TEST_DIR    -- the build-machine absolute path; last-resort
+    #                                local-dev fallback only (invalid on the CI test
+    #                                runner, which is exactly why it can't be the
+    #                                sole source -- see the Windows empty-catalog bug).
+    #   * AOT_CATALOG_RELDIR      -- catalog offset beneath the plugin-engine dir.
+    #   * AOT_CATALOG_ENGINE_SUBDIR -- plugin-engine dir offset beneath the install
+    #                                "bin"/"lib" root (the test exe installs to that
+    #                                root, one level above the engine dir).
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         AOT_CATALOG_TEST_DIR="${HIPDNN_AOT_CATALOG_BUILD_DIR}"
+        AOT_CATALOG_RELDIR="${HIPDNN_AOT_CATALOG_RELDIR}"
+        AOT_CATALOG_ENGINE_SUBDIR="${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
     )
     # Build the rocKE-AOT kernel families before the tests so an isolated
     # `ninja hip_kernel_provider_tests` populates the build-tree catalog rather than

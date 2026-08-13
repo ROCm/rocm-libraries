@@ -39,7 +39,7 @@ namespace
 using namespace aot_catalog_engine;
 
 // Baked in by CMake: the build-tree copy of the catalog (<arch>/<family>/...).
-constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
+const std::string CATALOG_DIR = aotResolveTestCatalogDir();
 constexpr const char* ARCH = "gfx1151";
 
 // The four facts the conv2d_fprop constraints reference. Spatial geometry is

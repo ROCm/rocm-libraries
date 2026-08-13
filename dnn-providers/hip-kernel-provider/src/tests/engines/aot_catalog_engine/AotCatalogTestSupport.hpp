@@ -10,6 +10,11 @@
 
 #include <gtest/gtest.h>
 
+#include "catalog/ModulePath.hpp"
+
+#include <filesystem>
+#include <string>
+
 // Set by src/tests/CMakeLists.txt: 1 when this build configured rocKE-AOT kernel
 // families for its target arch(es) -- i.e. the AOT_CATALOG_FAMILY_TARGETS global
 // property is non-empty (rocKE available + arch requested) -- and 0 otherwise.
@@ -50,3 +55,62 @@
                  << " (rocKE-AOT families not built for this arch; build " \
                     "with -DROCKE_PYTHON_DIR to populate it)"
 #endif
+
+// Catalog-path pieces baked by src/tests/CMakeLists.txt. RELDIR is the catalog's
+// offset beneath the plugin-engine dir; ENGINE_SUBDIR is the plugin-engine dir's
+// offset beneath the install "bin"/"lib" root. Defaulted here so the header still
+// compiles if included outside that build.
+#ifndef AOT_CATALOG_RELDIR
+#define AOT_CATALOG_RELDIR "arch_content/aot_catalog"
+#endif
+#ifndef AOT_CATALOG_ENGINE_SUBDIR
+#define AOT_CATALOG_ENGINE_SUBDIR "hipdnn_plugins/engines"
+#endif
+#ifndef AOT_CATALOG_TEST_DIR
+#define AOT_CATALOG_TEST_DIR ""
+#endif
+
+// Resolve the AOT catalog directory for a test at RUNTIME, mirroring the engine's
+// own self-location (catalog/ModulePath.cpp + Catalog.cpp::resolveCatalogDir), so a
+// test finds the catalog whether it runs from the build tree or from a packaged
+// install tree on a *separate* runner (TheRock's split build/test CI). The baked
+// absolute AOT_CATALOG_TEST_DIR points at the BUILD machine's tree and is invalid
+// on the test runner, so it is only a last-resort local-dev fallback.
+//
+// thisModuleDir() is anchored on engine code that is statically linked INTO the
+// test executable, so here it returns the *test exe's* own directory. That dir sits
+// at a different depth than the plugin between the two trees, so two offsets are
+// tried in order:
+//   * build tree   -- the test exe's RUNTIME_OUTPUT_DIRECTORY *is* the engine dir,
+//                     so the catalog is at  <exe>/AOT_CATALOG_RELDIR.
+//   * install tree -- the test exe installs to bin/, but the catalog installs to
+//                     bin/AOT_CATALOG_ENGINE_SUBDIR/AOT_CATALOG_RELDIR.
+// The first candidate that exists wins; emptiness of a located catalog is left for
+// AOT_SKIP_OR_FAIL_ON_EMPTY_CATALOG to report against the real path.
+inline std::string aotResolveTestCatalogDir()
+{
+    namespace fs = std::filesystem;
+
+    const auto exists = [](const fs::path& dir) {
+        std::error_code ec;
+        return fs::is_directory(dir, ec);
+    };
+
+    const std::string moduleDir = aot_catalog_engine::catalog::thisModuleDir();
+    if(!moduleDir.empty())
+    {
+        const fs::path buildTree = fs::path(moduleDir) / AOT_CATALOG_RELDIR;
+        if(exists(buildTree))
+        {
+            return buildTree.string();
+        }
+        const fs::path installTree
+            = fs::path(moduleDir) / AOT_CATALOG_ENGINE_SUBDIR / AOT_CATALOG_RELDIR;
+        if(exists(installTree))
+        {
+            return installTree.string();
+        }
+    }
+
+    return AOT_CATALOG_TEST_DIR;
+}

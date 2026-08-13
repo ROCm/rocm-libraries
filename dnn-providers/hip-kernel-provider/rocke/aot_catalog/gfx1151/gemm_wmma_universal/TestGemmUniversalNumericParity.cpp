@@ -40,7 +40,7 @@ namespace
 using namespace aot_catalog_engine;
 
 // Baked in by CMake: the build-tree copy of the catalog (<arch>/<family>/...).
-constexpr const char* CATALOG_DIR = AOT_CATALOG_TEST_DIR;
+const std::string CATALOG_DIR = aotResolveTestCatalogDir();
 
 // The shipped .co is gfx1151-only; the test is meaningful only on that arch.
 constexpr const char* ARCH = "gfx1151";
