@@ -97,7 +97,8 @@
     X(DsReadPerWmma, int)                         \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
-    X(DsReadOrder, int)
+    X(DsReadOrder, int)                           \
+    X(ArchName, std::string)
 
 namespace stinkytofu {
 /**
