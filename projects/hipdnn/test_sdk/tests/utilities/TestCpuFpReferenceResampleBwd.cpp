@@ -497,7 +497,7 @@ TEST(TestCpuFpReferenceResampleBwdDouble, AverageExcludePadding4DNchw)
         PaddingMode::ZERO_PAD);
 }
 
-TEST(TestCpuFpReferenceResampleBwdFp32Half, AverageExcludePadding4DNchw)
+TEST(TestCpuFpReferenceResampleBwdFloatHalf, AverageExcludePadding4DNchw)
 {
     Tensor<float> dy({2, 3, 4, 4});
     Tensor<half> dx({2, 3, 5, 5});
