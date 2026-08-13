@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,23 +20,23 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-// Sanity-checks for CDNA5 (Gfx1250) scheduler tunable defaults.
-// DAG scheduling behaviour is covered by DAGSchedulerPassTest.cpp and the
-// filecheck suite under tests/filecheck/dag_*.stir.
-#include <gtest/gtest.h>
+#pragma once
 
-// Mirror of the kCdna5* constants in CDNA5.hpp (anonymous namespace).
-// If these values change intentionally, update both places.
-static constexpr int kCdna5DsReadQueueDepth = 16;
-static constexpr int kCdna5DsReadDrainLatency = 72;
-static constexpr int kCdna5DsReadThrottleLatency = 72;
-static constexpr int kCdna5DsReadPerWmma = 3;
-static constexpr int kCdna5GlobalReadPerWmma = 1;
+#include <cstdint>
 
-TEST(CDNA5Constants, KnownDefaults) {
-    EXPECT_EQ(kCdna5DsReadQueueDepth, 16);
-    EXPECT_EQ(kCdna5DsReadDrainLatency, 72);
-    EXPECT_EQ(kCdna5DsReadThrottleLatency, 72);
-    EXPECT_EQ(kCdna5DsReadPerWmma, 3);
-    EXPECT_EQ(kCdna5GlobalReadPerWmma, 1);
+namespace {
+using namespace stinkytofu;
+
+const std::unordered_map<std::type_index, uint16_t>* Gfx1250v0RocisaToHwInstMap() {
+#define GET_ROCISA_HW_MAPPING_TABLE
+#include "stinkytofu/ir/rocisa/RocisaGfx1250v0Mappings.inc"
+    return &rocisaToHwInstMap;
 }
+
+const std::unordered_map<std::type_index, stinkytofu::ConvertRocisaToHwInstFunc>*
+Gfx1250v0RocisaToHwInstLoweringMap() {
+#define GET_ROCISA_TO_HW_CONVERSION_TABLE
+#include "stinkytofu/ir/rocisa/RocisaGfx1250v0Mappings.inc"
+    return &convertRocisaToHwInstFunc;
+}
+};  // namespace
