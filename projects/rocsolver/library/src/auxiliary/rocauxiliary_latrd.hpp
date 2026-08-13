@@ -35,8 +35,8 @@
 #include <cstdlib>
 #include <sstream>
 
-#include <hip/hip_cooperative_groups.h>
 #include "../../../grid.sync/softwareGridSync.hpp"
+#include <hip/hip_cooperative_groups.h>
 
 #include "../auxiliary/rocauxiliary_lacgv.hpp"
 #include "../auxiliary/rocauxiliary_larfg.hpp"
@@ -54,7 +54,7 @@ static bool latrd_forsytrd_multi_kernel = std::getenv("LATRD_MULTI_KERNEL") != n
 static bool force_coop_launch = std::getenv("COOP_LAUNCH") != nullptr ? true : false;
 
 static bool latrd_sw_grid_sync = std::getenv("LATRD_SW_GRID_SYNC") != nullptr ? true : false;
-static bool latrd_sw_raw_sync  = std::getenv("LATRD_SW_RAW_SYNC")  != nullptr ? true : false;
+static bool latrd_sw_raw_sync = std::getenv("LATRD_SW_RAW_SYNC") != nullptr ? true : false;
 
 #define HIP_TRACE(call)                                                                      \
     do                                                                                       \
@@ -2381,7 +2381,14 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 template <std::int32_t WDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val)
 {
-#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
+#if defined(__gfx1250__)
+    // gfx1250: defer to the portable __shfl-based reduction. The DPP intrinsic
+    // semantics might differ on this target, so avoiding the mov_dpp/ds_swizzle path
+    // for now.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val += shift_left(val, r);
+#elif defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
     && !defined(__GFX7__)
     // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
     // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
@@ -3125,22 +3132,23 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused(const I n,
 // coherency.  The software grid sync therefore only needs barrier() (no L2 fences)
 // instead of sync().  Enabled via LATRD_SW_RAW_SYNC=1.
 template <int MAX_THDS, typename T, typename I, typename S, typename U>
-__global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I n,
-                                                                         const rocblas_int nb,
-                                                                         U AA,
-                                                                         const rocblas_stride shiftA,
-                                                                         const I lda,
-                                                                         const rocblas_stride strideA,
-                                                                         S* EE,
-                                                                         const rocblas_stride strideE,
-                                                                         T* tauA,
-                                                                         const rocblas_stride strideP,
-                                                                         T* WW,
-                                                                         const rocblas_int shiftW,
-                                                                         const rocblas_int ldw,
-                                                                         const rocblas_stride strideW,
-                                                                         T* work,
-                                                                         uint8_t* syncBuf)
+__global__ void __launch_bounds__(MAX_THDS)
+    latrd_lower_kernel_fused_alt(const I n,
+                                 const rocblas_int nb,
+                                 U AA,
+                                 const rocblas_stride shiftA,
+                                 const I lda,
+                                 const rocblas_stride strideA,
+                                 S* EE,
+                                 const rocblas_stride strideE,
+                                 T* tauA,
+                                 const rocblas_stride strideP,
+                                 T* WW,
+                                 const rocblas_int shiftW,
+                                 const rocblas_int ldw,
+                                 const rocblas_stride strideW,
+                                 T* work,
+                                 uint8_t* syncBuf)
 {
     SoftwareGridSync swGrid(syncBuf);
 
@@ -3172,11 +3180,11 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I
     // Build raw buffer descriptors for all global arrays written before a barrier.
     // The 0xffffffff num_records covers the full allocation; 0x10 sc1 flag on each
     // store bypasses the L2 write-back so other blocks see the value immediately.
-    auto A_buf   = __builtin_amdgcn_make_buffer_rsrc(pA,  0, 0xffffffff, 0);
-    auto W_buf   = __builtin_amdgcn_make_buffer_rsrc(pW,  0, 0xffffffff, 0);
+    auto A_buf = __builtin_amdgcn_make_buffer_rsrc(pA, 0, 0xffffffff, 0);
+    auto W_buf = __builtin_amdgcn_make_buffer_rsrc(pW, 0, 0xffffffff, 0);
     auto tau_buf = __builtin_amdgcn_make_buffer_rsrc(tau, 0, 0xffffffff, 0);
-    auto z1_buf  = __builtin_amdgcn_make_buffer_rsrc(z1,  0, 0xffffffff, 0);
-    auto z2_buf  = __builtin_amdgcn_make_buffer_rsrc(z2,  0, 0xffffffff, 0);
+    auto z1_buf = __builtin_amdgcn_make_buffer_rsrc(z1, 0, 0xffffffff, 0);
+    auto z2_buf = __builtin_amdgcn_make_buffer_rsrc(z2, 0, 0xffffffff, 0);
 
     // Raw buffer store/load helpers for T (float=b32, double=b64) with 0x10 sc1 flag.
     // sc1 stores bypass the L2 write-back; sc1 loads bypass the L2 read cache.
@@ -3187,35 +3195,46 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I
     // Pairing sc1 stores on writers with sc1 loads on readers avoids the need for
     // L2 flush/invalidate fences, so barrier() suffices instead of sync().
     using u64_t = uint32_t __attribute__((ext_vector_type(2)));
-    auto raw_store = [](T val, __amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline)) {
-        if constexpr(sizeof(T) == 4) {
-            uint32_t bits; memcpy(&bits, &val, 4);
+    auto raw_store =
+        [](T val, __amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline))
+    {
+        if constexpr(sizeof(T) == 4)
+        {
+            uint32_t bits;
+            memcpy(&bits, &val, 4);
             __builtin_amdgcn_raw_buffer_store_b32(bits, buf, byte_off, 0, 0x10);
-        } else {
-            u64_t tmp; memcpy(&tmp, &val, 8);
+        }
+        else
+        {
+            u64_t tmp;
+            memcpy(&tmp, &val, 8);
             __builtin_amdgcn_raw_buffer_store_b64(tmp, buf, byte_off, 0, 0x10);
         }
     };
-    auto raw_load = [](__amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline)) -> T {
+    auto raw_load = [](__amdgpu_buffer_rsrc_t buf, int byte_off) __attribute__((always_inline))->T
+    {
         T val;
-        if constexpr(sizeof(T) == 4) {
+        if constexpr(sizeof(T) == 4)
+        {
             uint32_t bits = __builtin_amdgcn_raw_buffer_load_b32(buf, byte_off, 0, 0x10);
             memcpy(&val, &bits, 4);
-        } else {
+        }
+        else
+        {
             u64_t tmp = __builtin_amdgcn_raw_buffer_load_b64(buf, byte_off, 0, 0x10);
             memcpy(&val, &tmp, 8);
         }
         return val;
     };
-    auto raw_store_A   = [&](T val, int off) { raw_store(val, A_buf,   off); };
-    auto raw_store_W   = [&](T val, int off) { raw_store(val, W_buf,   off); };
-    auto raw_store_z1  = [&](T val, int off) { raw_store(val, z1_buf,  off); };
-    auto raw_store_z2  = [&](T val, int off) { raw_store(val, z2_buf,  off); };
-    auto raw_load_A    = [&](int off)        { return raw_load(A_buf,   off); };
-    auto raw_load_W    = [&](int off)        { return raw_load(W_buf,   off); };
-    auto raw_load_z1   = [&](int off)        { return raw_load(z1_buf,  off); };
-    auto raw_load_z2   = [&](int off)        { return raw_load(z2_buf,  off); };
-    auto raw_load_tau  = [&](int off)        { return raw_load(tau_buf, off); };
+    auto raw_store_A = [&](T val, int off) { raw_store(val, A_buf, off); };
+    auto raw_store_W = [&](T val, int off) { raw_store(val, W_buf, off); };
+    auto raw_store_z1 = [&](T val, int off) { raw_store(val, z1_buf, off); };
+    auto raw_store_z2 = [&](T val, int off) { raw_store(val, z2_buf, off); };
+    auto raw_load_A = [&](int off) { return raw_load(A_buf, off); };
+    auto raw_load_W = [&](int off) { return raw_load(W_buf, off); };
+    auto raw_load_z1 = [&](int off) { return raw_load(z1_buf, off); };
+    auto raw_load_z2 = [&](int off) { return raw_load(z2_buf, off); };
+    auto raw_load_tau = [&](int off) { return raw_load(tau_buf, off); };
 
     I ldSA = lda;
     I ldSW = ldw;
@@ -3250,7 +3269,7 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I
                 {
                     for(I jj = lane_id; jj < j; jj += warpSize)
                         temp += raw_load_A((int)((j + ii + (I)jj * ldSA) * sizeof(T))) * pSz1[jj]
-                              + raw_load_W((int)((j + ii + (I)jj * ldSW) * sizeof(T))) * pSz2[jj];
+                            + raw_load_W((int)((j + ii + (I)jj * ldSW) * sizeof(T))) * pSz2[jj];
                 }
                 reduce_wave_sum(temp);
 
@@ -3325,7 +3344,8 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I
                 temp = T(0);
                 for(I jj = tid; jj < nj; jj += MAX_THDS)
                 {
-                    T aval = raw_load_A((int)(Atmp_base + (jj + (rocblas_stride)ii * ldSA) * sizeof(T)));
+                    T aval
+                        = raw_load_A((int)(Atmp_base + (jj + (rocblas_stride)ii * ldSA) * sizeof(T)));
                     T vval = raw_load_A((int)(vbase + jj * sizeof(T)));
                     temp += aval * vval;
                 }
@@ -3408,8 +3428,10 @@ __global__ void __launch_bounds__(MAX_THDS) latrd_lower_kernel_fused_alt(const I
                 {
                     for(I jj = lane_id; jj < j; jj += warpSize)
                     {
-                        temp -= raw_load_A((int)(Atmp_base + (ii + (I)jj * ldSA) * sizeof(T))) * pSz1[jj];
-                        temp -= raw_load_W((int)(Wtmp_base + (ii + (I)jj * ldSW) * sizeof(T))) * pSz2[jj];
+                        temp -= raw_load_A((int)(Atmp_base + (ii + (I)jj * ldSA) * sizeof(T)))
+                            * pSz1[jj];
+                        temp -= raw_load_W((int)(Wtmp_base + (ii + (I)jj * ldSW) * sizeof(T)))
+                            * pSz2[jj];
                     }
                 }
                 reduce_wave_sum(temp);
@@ -3599,12 +3621,12 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             void* kernel_fn = latrd_sw_raw_sync
                 ? (void*)(latrd_lower_kernel_fused_alt<FUSED_THDS, T, rocblas_int, S, U>)
                 : (latrd_sw_grid_sync
-                    ? (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, true>)
-                    : (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, false>));
+                       ? (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, true>)
+                       : (void*)(latrd_lower_kernel_fused<FUSED_THDS, T, rocblas_int, S, U, false>));
             int max_blocks_per_sm = 0;
             HIP_TRACE(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm, kernel_fn,
                                                                    FUSED_THDS, lmemsize_fused));
-            rocblas_int max_total_blocks = (max_blocks_per_sm) * props->multiProcessorCount;
+            rocblas_int max_total_blocks = (max_blocks_per_sm)*props->multiProcessorCount;
             rocblas_int max_grid_x = std::max(1, max_total_blocks / batch_count);
             // LATRD_COOP_GRID_X allows GPU-specific tuning of grid width.
             static const rocblas_int env_grid_x = []() {
@@ -3625,22 +3647,23 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             if(latrd_sw_grid_sync || latrd_sw_raw_sync)
             {
                 size_t num_blocks = (size_t)grid_x * batch_count;
-                size_t num_syncs  = (size_t)5 * k; // 5 grid syncs per outer loop iteration
+                size_t num_syncs = (size_t)5 * k; // 5 grid syncs per outer loop iteration
                 size_t sync_buf_size = softwareGridSync_buf_bytes(num_blocks, num_syncs);
                 HIP_TRACE(hipMalloc(&d_sync_buf, sync_buf_size));
                 HIP_TRACE(hipMemset(d_sync_buf, 0, sync_buf_size));
             }
 
-            void* kernelArgs[] = {(void*)&n,      (void*)&k,          (void*)&A,    (void*)&shiftA_,
-                                  (void*)&lda,    (void*)&strideA,    (void*)&E_j_, (void*)&strideE,
-                                  (void*)&tau_j_, (void*)&strideP,    (void*)&W,    (void*)&shiftW,
-                                  (void*)&ldw,    (void*)&strideW,    (void*)&work, (void*)&d_sync_buf};
+            void* kernelArgs[]
+                = {(void*)&n,      (void*)&k,       (void*)&A,    (void*)&shiftA_,
+                   (void*)&lda,    (void*)&strideA, (void*)&E_j_, (void*)&strideE,
+                   (void*)&tau_j_, (void*)&strideP, (void*)&W,    (void*)&shiftW,
+                   (void*)&ldw,    (void*)&strideW, (void*)&work, (void*)&d_sync_buf};
 
             if(print_debug_messages_latrd_forsytrd)
-                std::fprintf(stderr,
-                             "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d sw_raw_sync=%d\n",
-                             n, max_blocks_per_sm, max_total_blocks, grid_x,
-                             (int)latrd_sw_grid_sync, (int)latrd_sw_raw_sync);
+                std::fprintf(
+                    stderr, "[latrd_fused] n=%d max_blocks_per_sm=%d max_total=%d grid_x=%d sw_grid_sync=%d sw_raw_sync=%d\n",
+                    n, max_blocks_per_sm, max_total_blocks, grid_x, (int)latrd_sw_grid_sync,
+                    (int)latrd_sw_raw_sync);
 
             HIP_TRACE(hipLaunchCooperativeKernel(kernel_fn, dim3(grid_x, 1, batch_count),
                                                  dim3(FUSED_THDS), kernelArgs, lmemsize_fused,
