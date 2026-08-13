@@ -79,7 +79,8 @@ std::string hipfftw_token_for_functional_test;
 hipfft_params manual_params;
 
 // (Maximum) number of hip devices to use in tests (per process).
-size_t gpus_per_rank = 0;
+size_t           gpus_per_rank             = 0;
+constexpr size_t upper_bound_gpus_per_rank = 16;
 
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
@@ -350,13 +351,15 @@ int main(int argc, char* argv[])
     app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
         ->default_val(DivRoundingUp(
             device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
-    const auto opt_ngpus = app.add_option("--ngpus",
-                                          gpus_per_rank,
-                                          "Maximum number of GPUs per process to be considered "
-                                          "(cannot exceed 1 if mp_lib == mpi)")
-                               ->option_text("Default value is 1 if mp_lib == mpi; all visible "
-                                             "devices are considered if mp_lib == none")
-                               ->check(CLI::PositiveNumber);
+    const auto opt_ngpus
+        = app.add_option("--ngpus",
+                         gpus_per_rank,
+                         "Maximum number of GPUs per process to be considered (cannot exceed 1 if "
+                         "mp_lib == mpi). An upper bound of "
+                             + std::to_string(upper_bound_gpus_per_rank) + " is enforced.")
+              ->option_text("Default value is 1 if mp_lib == mpi; all visible "
+                            "devices are considered if mp_lib == none")
+              ->check(CLI::PositiveNumber);
     app.add_option("--emulation_prob,--simulation_prob",
                    emulation_prob,
                    "Probability of running individual emulation/simulation tests (disabled by "
@@ -508,6 +511,7 @@ int main(int argc, char* argv[])
             assert(mp_lib == fft_params::fft_mp_lib_none);
             if(!*opt_ngpus)
                 gpus_per_rank = rocfft_scoped_device::device_count();
+            gpus_per_rank = std::min(gpus_per_rank, upper_bound_gpus_per_rank);
             if(mp_ranks > 1)
                 throw std::invalid_argument("--mp_ranks must be 1 if mp_lib == none (see --help)");
             if(!mp_launch.empty())
