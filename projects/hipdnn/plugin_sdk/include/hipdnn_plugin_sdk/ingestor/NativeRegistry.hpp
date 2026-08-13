@@ -90,6 +90,15 @@ public:
         return previous;
     }
 
+    /// The descriptor loader's pre-flight check: a descriptor naming an unregistered
+    /// symbol is dropped with a diagnostic, rather than paying an exception via resolve().
+    static bool isRegistered(const std::string& symbol)
+    {
+        auto& self = instance();
+        const std::lock_guard<std::mutex> lock(self._mutex);
+        return self._symbols.find(symbol) != self._symbols.end();
+    }
+
     static void unregisterSymbol(const std::string& symbol)
     {
         auto& self = instance();

@@ -155,6 +155,10 @@ struct EngineDescriptor
     /// Graph schema version this engine understands; a graph below this floor is
     /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+    /// RFC 0020 §4.2 numerical notes, held as authored. Unlike `behaviorNotes` these map
+    /// to no hipDNN enum -- there is no numerical-note vocabulary yet -- so the loader
+    /// carries the strings and nothing consumes them.
+    std::vector<std::string> numericalNotes;
 };
 
 /// Which inputs a matcher reads, and so what its failure prunes.

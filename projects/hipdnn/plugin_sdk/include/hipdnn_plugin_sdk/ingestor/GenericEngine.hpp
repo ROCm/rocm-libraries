@@ -26,6 +26,28 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
+/// The first knob @p engine exposes that @p fields does not declare, or nullptr. RFC 0017
+/// §4 makes a knob naming no field a load error: the field supplies its type, default and
+/// legal values, so a knob matching none can never be honoured. Shared with the descriptor
+/// loader, which rejects such an engine while reading it rather than letting this
+/// constructor throw after the id has been advertised.
+inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
+                                             const std::vector<MetadataField>& fields)
+{
+    for(const auto& knob : engine.knobs)
+    {
+        const auto declared
+            = std::any_of(fields.begin(), fields.end(), [&knob](const MetadataField& field) {
+                  return field.name == knob;
+              });
+        if(!declared)
+        {
+            return &knob;
+        }
+    }
+    return nullptr;
+}
+
 /// One hipDNN engine, defined entirely by a UED and the packs naming it. The
 /// engine's id is its UED name hashed into hipDNN's engine-id space.
 template <typename THandle, typename TSettings, typename TContext>
@@ -44,18 +66,12 @@ public:
         , _id(hipdnn_data_sdk::utilities::engineNameToId(_engine.name))
         , _planBuilder(_engine, *_stateManager, deviceResolver)
     {
-        const auto& fields = _stateManager->metadataSchema().fields;
-        for(const auto& knob : _engine.knobs)
+        if(const auto* undeclared
+           = findUndeclaredKnob(_engine, _stateManager->metadataSchema().fields))
         {
-            const auto declared
-                = std::any_of(fields.begin(), fields.end(), [&knob](const MetadataField& field) {
-                      return field.name == knob;
-                  });
-            if(!declared)
-            {
-                throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '" + knob
-                                            + "', which its metadata schema does not declare");
-            }
+            throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '"
+                                        + *undeclared
+                                        + "', which its metadata schema does not declare");
         }
     }
 
