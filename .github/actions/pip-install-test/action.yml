@@ -8,13 +8,6 @@ inputs:
   test_path:
     description: "Pytest target directory relative to package_path (e.g. test/ or python_module/tests/)"
     required: true
-  cmake_defines:
-    description: >-
-      Optional whitespace-separated NAME=VALUE CMake cache entries for the build,
-      forwarded as --config-settings=cmake.define.NAME=VALUE (which adds to, rather
-      than replaces, the package's own cmake.args).
-    required: false
-    default: ""
 
 runs:
   using: "composite"
@@ -38,19 +31,14 @@ runs:
         CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
         CMAKE_GENERATOR: Ninja
         LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-        CMAKE_DEFINES: ${{ inputs.cmake_defines }}
       run: |
         if [ -f "$VENV_DIR/bin/activate" ]; then
           source "$VENV_DIR/bin/activate"
         else
           source "$VENV_DIR/Scripts/activate"
         fi
-        CONFIG_SETTINGS=()
-        for define in $CMAKE_DEFINES; do
-          CONFIG_SETTINGS+=("--config-settings=cmake.define.$define")
-        done
         pip install pytest
-        pip install "${CONFIG_SETTINGS[@]}" ${{ inputs.package_path }}
+        pip install ${{ inputs.package_path }}
 
     - name: pytest
       shell: bash
