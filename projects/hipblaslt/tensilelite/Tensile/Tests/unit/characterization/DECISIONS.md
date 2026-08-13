@@ -164,7 +164,9 @@ fixture would finish it.
 
 ## D12 — TensileBenchmarkCluster: pin the `--results-only` constraint crash rather than asserting clean workflow steps
 
-**ADR:** [`adr/0001-pin-results-only-boolop-crash.md`](adr/0001-pin-results-only-boolop-crash.md) — the per-decision record (with defect link) for this pinned bug.
+**ADR:** [`adr/0001-pin-results-only-boolop-crash.md`](adr/0001-pin-results-only-boolop-crash.md) — the per-decision record for this pinned bug.
+
+**Defect:** [`AIHPBLAS-4298`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4298).
 
 **Context:** While characterizing `TensileBenchmarkCluster`, the `--results-only`
 flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep
@@ -369,13 +371,32 @@ selected steps.
 
 **M4 — widened mutation slice.** The `only_mutate` set in `[tool.mutmut]` was
 extended past the original five files to add `Common/DataType.py`,
-`Common/Types.py`, and `Common/ValidParameters.py`, with the matching
-characterization directories (`DataType`, `CommonTypes`, `ValidParameters`)
-added to `pytest_add_cli_args_test_selection`. Source-path mapping for the
-widened slice (recorded here because the shorthand names differ from the file
-paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
-`Tensile/Common/Types.py`; ValidParameters → `Tensile/Common/ValidParameters.py`
-(there is no `Tensile/SolutionStructs/ValidParameters.py`).
+`Common/Types.py`, `Common/ValidParameters.py`, `SolutionStructs/Naming.py`, and
+`SolutionStructs/Utilities.py`, with matching characterization directories added
+to `pytest_add_cli_args_test_selection`. Source-path mapping for the widened slice:
+DataType → `Tensile/Common/DataType.py`; CommonTypes → `Tensile/Common/Types.py`;
+ValidParameters → `Tensile/Common/ValidParameters.py`; Naming →
+`Tensile/SolutionStructs/Naming.py`; SolutionStructsUtils →
+`Tensile/SolutionStructs/Utilities.py`.
+
+**M5 — SolutionStructs Naming/Utilities mutation outcome.** `Naming.py`: 455
+generated, 453 killed, 2 accepted equivalents, 0 no-test mutants → 100% covered
+non-equivalent score (99.56% raw). `Utilities.py`: 131 generated, 131 killed, 0
+survivors, 0 no-test mutants → 100% covered score. The full run had 30 no-test
+mutants outside these two modules. Because `mutate_only_covered_lines = false`,
+mutmut enumerates every source-line mutation; these scores exclude only the
+explicit no-test entries and accepted equivalents.
+
+**Pinned equivalent (Naming).**
+`Tensile.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
+`state["GlobalSplitU"] = "M"` expression at `Naming.py:172`; every string form
+reaches the same pinned string-versus-integer `TypeError` before it can affect a
+name. [`AIHPBLAS-4297`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4297)
+tracks this pinned defect.
+
+The former WGMXCC and unreachable-abbreviation equivalents were removed as
+redundant/dead source instead of being fenced, unlike M2's documented pragmas.
+No new `# pragma: no mutate` fences are accepted in this round.
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
@@ -388,3 +409,65 @@ ValidParameters goldens.
 same kernel identity name/hash.
 **Verification:** only `basename` hashes + the `SKWS0` name token + the roster/valid-values entry
 change (`num_keys` 334→335); no `err`, instruction-count, or emitted-assembly changes.
+
+## D18 — LibraryIO dict-format raw logic snapshot addition
+**Context:** `rawLibraryLogic` historically unpacked only list-format logic. A
+dict-format input path was added to preserve the legacy tuple contract used by
+older call sites (`versionString`, `scheduleName`, `architectureName`,
+`deviceNames`, `problemTypeState`, `solutionStates`, `indexOrder`,
+`exactLogic`, `rangeLogic`, `otherFields`). Characterization gained a new test
+(`test_raw_library_logic_dict_format`) to pin this behavior.
+
+**Decision:** Add a new syrupy golden node for the new test in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr`.
+
+**Why:** This is a **new characterization case**, not a rewrite of an existing
+golden's meaning. The snapshot records the expected dict-format-to-legacy-tuple
+mapping (including optional-field ordering in `otherFields`) so future refactors
+cannot silently break backward compatibility.
+
+**Alternatives rejected:**
+- Avoid snapshot and assert piecemeal fields manually — rejected: weaker
+  protection for tuple ordering/shape regressions.
+- Update all snapshots wholesale — rejected by governance; only the single new
+  node was generated.
+
+## D19 — test_create_library_logic_dict_arch golden changed from list-shape to dict-shape
+**Context:** Diff vs `develop` shows the snapshot node
+`test_create_library_logic_dict_arch` in
+`LibraryIO/__snapshots__/test_logiccontract_char.ambr` moved from a legacy
+matching-table list representation to canonical dict-format library logic.
+
+**Decision:** Keep the new dict-format golden and document it as intentional.
+
+**Why:** The serialization contract being characterized is now dict-first for
+`createLibraryLogic`, with explicit root keys (`ArchitectureName`, `CUCount`,
+`DefaultSolution`, `Solutions`, `LibraryType`, etc.). The old list-shape golden
+encoded the prior format and would now mask the intended migration. The new
+golden also captures that for the gfx942 + CUCount!=304 branch, architecture is
+materialized as `ArchitectureName` + `CUCount` in dict logic rather than a list
+field tuple position.
+
+**Alternatives rejected:**
+- Revert to list-shaped snapshot for compatibility optics — rejected: it would
+  assert obsolete output and fight the dict-format migration.
+- Keep both shapes in one test — rejected: conflates two contracts; list-format
+  coverage is already pinned separately via parse-list roundtrip tests.
+
+## D20 — KnownBugs keyed on solution_name (intended behavior change)
+
+**ADR:** [`adr/0002-knownbugs-key-on-solution-name.md`](adr/0002-knownbugs-key-on-solution-name.md).
+
+**Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on
+`(path, solution_name)` (the solution's stable `SolutionNameMin`) instead of the
+positional `(path, solution_index)`; `solution_index` support is dropped. The
+`test_knownbugs_char.py` goldens for `test_is_known_bug_hit_and_miss` and
+`test_load_roundtrip_multi` were re-recorded to match. This is an intended
+behavior change (not a pinned bug): positional indices shift on re-tuning and
+forced manual edits to `known_bugs.yaml`, whereas the content-derived name is
+stable and self-invalidating. Motivating context: ROCM-7144.
+
+**Note:** the two golden nodes were hand-edited to match syrupy's amber format
+and must be confirmed byte-identical via `--snapshot-update` in a build
+environment; the `-m unit` lane needs the compiled rocisa module, which is not
+available where this change was authored.

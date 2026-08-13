@@ -126,11 +126,10 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, typename I, typename A, typename T>
-    ROCSPARSE_DEVICE_ILF void scale_2d_device(
-        I m, I n, int64_t ld, int64_t stride, T value, A* __restrict__ array, rocsparse_order order)
+    ROCSPARSE_DEVICE_ILF void
+        scale_2d_device(I m, I n, int64_t ld, T value, A* __restrict__ array, rocsparse_order order)
     {
-        I gid   = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-        I batch = hipBlockIdx_y;
+        I gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
         if(gid >= m * n)
         {
@@ -142,11 +141,11 @@ namespace rocsparse
 
         if(value == static_cast<T>(0))
         {
-            array[lid + ld * wid + stride * batch] = static_cast<A>(0);
+            array[lid + ld * wid] = static_cast<A>(0);
         }
         else
         {
-            array[lid + ld * wid + stride * batch] *= value;
+            array[lid + ld * wid] *= value;
         }
     }
 
@@ -207,6 +206,7 @@ namespace rocsparse
     void scale_2d_kernel(I       m,
                          I       n,
                          int64_t ld,
+                         int64_t batch_count,
                          int64_t stride,
                          ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, scalar),
                          A* __restrict__ array,
@@ -217,10 +217,13 @@ namespace rocsparse
 
         if(scalar != static_cast<T>(1))
         {
-            rocsparse::scale_2d_device<BLOCKSIZE>(m, n, ld, stride, scalar, array, order);
+            for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+            {
+                rocsparse::scale_2d_device<BLOCKSIZE>(
+                    m, n, ld, scalar, rocsparse::load_pointer(array, batch, stride), order);
+            }
         }
     }
-
 }
 
 template <typename I, typename T>
@@ -243,12 +246,15 @@ rocsparse_status rocsparse::valset_2d(
 }
 
 template <typename I, typename A, typename T>
-rocsparse_status
-    rocsparse::scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array)
+rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,
+                                        I                      length,
+                                        rocsparse_pointer_mode pointer_mode,
+                                        const T*               scalar_device_host,
+                                        A*                     array)
 {
     if(length > 0)
     {
-        const bool on_host = handle->pointer_mode == rocsparse_pointer_mode_host;
+        const bool on_host = pointer_mode == rocsparse_pointer_mode_host;
         if(on_host && *scalar_device_host == static_cast<T>(0))
         {
             RETURN_IF_HIP_ERROR(
@@ -263,12 +269,19 @@ rocsparse_status
                 0,
                 handle->stream,
                 length,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, scalar_device_host),
+                ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(pointer_mode, scalar_device_host),
                 array,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
+                on_host);
         }
     }
     return rocsparse_status_success;
+}
+
+template <typename I, typename A, typename T>
+rocsparse_status
+    rocsparse::scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array)
+{
+    return rocsparse::scale_array(handle, length, handle->pointer_mode, scalar_device_host, array);
 }
 
 template <typename I, typename X, typename Y, typename T>
@@ -321,13 +334,14 @@ rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,
     {
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::scale_2d_kernel<256>),
-            dim3((int64_t(m) * n - 1) / 256 + 1, batch_count),
+            dim3((int64_t(m) * n - 1) / 256 + 1, (batch_count > 65535) ? 65535 : batch_count),
             dim3(256),
             0,
             handle->stream,
             m,
             n,
             ld,
+            batch_count,
             stride,
             ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, scalar_device_host),
             array,
@@ -364,6 +378,11 @@ INSTANTIATE(int64_t, rocsparse_double_complex);
 #define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                          \
     template rocsparse_status rocsparse::scale_array(                                             \
         rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);    \
+    template rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,               \
+                                                     ITYPE                  length,               \
+                                                     rocsparse_pointer_mode pointer_mode,         \
+                                                     const TTYPE*           scalar_device_host,   \
+                                                     ATYPE*                 array);                               \
     template rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,             \
                                                              ITYPE            length,             \
                                                              rocsparse_int    num_extra,          \

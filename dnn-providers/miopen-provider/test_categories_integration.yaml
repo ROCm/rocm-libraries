@@ -12,9 +12,14 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Fast external integration coverage: Smoke GPU cases plus quick CPU golden-reference bundles"
+    description: "Fast external integration coverage: Smoke GPU cases, quick-tier bundle sweeps, plus quick CPU golden-reference bundles"
     test_patterns:
+      # "Smoke/*" (slash) matches the C++ parameterised smoke suites (legacy
+      # naming, to be renamed later); "quick_*" matches the bundle sweep
+      # suites whose names mirror the on-disk tier directory. GTest treats
+      # '/' and '_' as literal chars, so both patterns are needed.
       - "Smoke/*"
+      # - "quick_*"  # uncomment when bundles are the CI driver
       - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
@@ -26,6 +31,7 @@ test_categories:
     description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
     test_patterns:
       - "Smoke/*"
+      # - "quick_*"  # uncomment when bundles are the CI driver
       - "TestCpu*GoldenReference*"
       - "TestCpu*GoldenRefStd*"
     exclude: *common_excludes
@@ -52,6 +58,20 @@ test_categories:
     labels:
       - "full"
       - "all"
+
+  ffm_quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: one Smoke case per operation for rapid signal"
+    test_patterns:
+      - "Smoke/IntegrationGpuConvFwd2dFp32.Correctness/0"
+      - "Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
+      - "Smoke/IntegrationGpuActivationForwardFp32.Correctness/0"
+      - "Smoke/IntegrationGpuReductionFp32.Correctness/0"
+      - "Smoke/IntegrationGpuRMSNormFp32.Correctness/0"
+      - "Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/mha"
+    exclude: *common_excludes
+    labels:
+      - "ffm_quick"
+      - "ffm_full"
 
 exclude_gpu:
   exclude_gpu_gfx110X_windows:

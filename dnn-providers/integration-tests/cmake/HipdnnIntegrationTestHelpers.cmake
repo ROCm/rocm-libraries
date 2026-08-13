@@ -22,8 +22,10 @@
 #         [TEST_CATEGORIES_YAML <path>]
 #         [INSTALL_TEST_FILE <path>]
 #         [TEST_NAME_PREFIX <prefix>]
-#
 #         [TEST_CONFIG <path>]
+#         [REFERENCE_EXECUTOR <cpu|gpu>]
+#         [ENVIRONMENT <VAR=value>...]
+#         [INSTALL_ENVIRONMENT <VAR=value>...]
 #         [GTEST_FILTER <filter>...]
 #     )
 #
@@ -50,6 +52,17 @@
 #     Optional path to a TOML configuration file for per-test tolerance
 #     overrides. Passed via ``--test-config`` to the test binary.
 #
+#   ``REFERENCE_EXECUTOR``
+#     Optional reference executor passed via ``--reference-executor``.
+#
+#   ``ENVIRONMENT``
+#     Optional list of ``VAR=value`` entries applied to the build-tree custom
+#     target and CTest test.
+#
+#   ``INSTALL_ENVIRONMENT``
+#     Optional list of ``VAR=value`` entries for the staged install-tree CTest
+#     test. Defaults to ``ENVIRONMENT`` when omitted.
+#
 #   ``GTEST_FILTER``
 #     Optional list of Google Test filter expressions. Each entry is joined
 #     with ``:`` to form the final filter string passed via ``--gtest_filter``.
@@ -70,6 +83,7 @@
 #   ``TEST_NAME_PREFIX``
 #     Optional prefix for generated category suite CTest names. Defaults to
 #     ``TARGET_NAME``.
+
 # Builds the build-tree command for an external integration test.
 #
 # Arguments:
@@ -83,6 +97,9 @@ macro(_build_external_integration_command out_var)
     )
     if(ARG_TEST_CONFIG)
         list(APPEND ${out_var} "--test-config" "${ARG_TEST_CONFIG}")
+    endif()
+    if(ARG_REFERENCE_EXECUTOR)
+        list(APPEND ${out_var} "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
     endif()
     if(ARG_GTEST_FILTER)
         list(JOIN ARG_GTEST_FILTER ":" _GTEST_FILTER_STR)
@@ -124,12 +141,27 @@ macro(_stage_external_integration_install_test)
             if(ARG_TEST_CONFIG)
                 string(APPEND _install_cmd " \"--test-config\" \"${_install_config}\"")
             endif()
+            if(ARG_REFERENCE_EXECUTOR)
+                string(APPEND _install_cmd " \"--reference-executor\" \"${ARG_REFERENCE_EXECUTOR}\"")
+            endif()
             if(ARG_GTEST_FILTER)
                 string(APPEND _install_cmd " \"--gtest_filter=${_GTEST_FILTER_STR}\"")
             endif()
             string(APPEND _install_cmd ")\n")
+
+            set(_install_properties "LABELS \"${_LABELS}\"")
+            if(ARG_INSTALL_ENVIRONMENT)
+                set(_install_environment "${ARG_INSTALL_ENVIRONMENT}")
+            else()
+                set(_install_environment "${ARG_ENVIRONMENT}")
+            endif()
+            if(_install_environment)
+                string(REPLACE ";" "\\;" _install_environment_escaped "${_install_environment}")
+                string(APPEND _install_properties " ENVIRONMENT \"${_install_environment_escaped}\"")
+            endif()
+
             string(APPEND _install_cmd
-                "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES LABELS \"${_LABELS}\")\n"
+                "set_tests_properties(\"${ARG_TARGET_NAME}\" PROPERTIES ${_install_properties})\n"
             )
 
             set_property(GLOBAL APPEND_STRING
@@ -158,6 +190,9 @@ macro(_add_external_integration_category_suites)
         if(ARG_TEST_CONFIG)
             list(APPEND _category_command_args "--test-config" "${ARG_TEST_CONFIG}")
         endif()
+        if(ARG_REFERENCE_EXECUTOR)
+            list(APPEND _category_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+        endif()
 
         set(_apply_category_args
             TEST_NAME_PREFIX "${_category_prefix}"
@@ -167,6 +202,13 @@ macro(_add_external_integration_category_suites)
         if(ARG_ENVIRONMENT)
             list(APPEND _apply_category_args ENVIRONMENT ${ARG_ENVIRONMENT})
         endif()
+        if(ARG_ENVIRONMENT_MODIFICATION)
+            list(APPEND _apply_category_args
+                ENVIRONMENT_MODIFICATION ${ARG_ENVIRONMENT_MODIFICATION})
+        endif()
+        if(ARG_FIXTURES_REQUIRED)
+            list(APPEND _apply_category_args FIXTURES_REQUIRED ${ARG_FIXTURES_REQUIRED})
+        endif()
 
         if(ARG_INSTALL_TEST_FILE AND _install_bin)
             set(_category_install_command_args
@@ -175,6 +217,9 @@ macro(_add_external_integration_category_suites)
             )
             if(ARG_TEST_CONFIG)
                 list(APPEND _category_install_command_args "--test-config" "${_install_config}")
+            endif()
+            if(ARG_REFERENCE_EXECUTOR)
+                list(APPEND _category_install_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
             endif()
 
             list(APPEND _apply_category_args
@@ -202,8 +247,8 @@ function(add_external_integration_test_target)
     cmake_parse_arguments(
         ARG
         ""
-        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
-        "GTEST_FILTER;ENVIRONMENT"
+        "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
+        "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
         ${ARGN}
     )
 
@@ -219,8 +264,13 @@ function(add_external_integration_test_target)
 
     _build_external_integration_command(_CMD)
 
+    set(_TARGET_CMD ${_CMD})
+    if(ARG_ENVIRONMENT)
+        set(_TARGET_CMD ${CMAKE_COMMAND} -E env ${ARG_ENVIRONMENT} ${_CMD})
+    endif()
+
     add_custom_target(${ARG_TARGET_NAME}
-        COMMAND ${_CMD}
+        COMMAND ${_TARGET_CMD}
         DEPENDS ${ARG_PLUGIN_TARGET} hipdnn_integration_tests
         COMMENT "Running integration tests for ${ARG_ENGINE_NAME}"
         USES_TERMINAL
@@ -232,12 +282,32 @@ function(add_external_integration_test_target)
         set(_GENERATE_EXTERNAL_CATEGORY_SUITES TRUE)
     endif()
 
+    # Register with ctest so the cross-provider integration suite is picked up
+    # by the calling project's `<project>-integration-check` target (which runs
+    # `ctest -L integration_test`) and by direct `ctest` invocations from the
+    # project's build subdir. Labels mirror add_integration_test_target so the
+    # test is selected the same way as the provider's own integration tests,
+    # plus an `external_integration_test` label and the engine name for filtering.
     set(_LABELS "integration_test;slow;external_integration_test;${ARG_ENGINE_NAME}")
     if(NOT _GENERATE_EXTERNAL_CATEGORY_SUITES)
         add_test(NAME ${ARG_TARGET_NAME} COMMAND ${_CMD})
         set_tests_properties(${ARG_TARGET_NAME} PROPERTIES LABELS "${_LABELS}")
+        if(ARG_ENVIRONMENT)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES ENVIRONMENT "${ARG_ENVIRONMENT}")
+        endif()
+        if(ARG_ENVIRONMENT_MODIFICATION)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES
+                ENVIRONMENT_MODIFICATION "${ARG_ENVIRONMENT_MODIFICATION}")
+        endif()
+        if(ARG_FIXTURES_REQUIRED)
+            set_tests_properties(${ARG_TARGET_NAME} PROPERTIES
+                FIXTURES_REQUIRED "${ARG_FIXTURES_REQUIRED}")
+        endif()
     endif()
 
+    # Stage an install-tree add_test() snippet so install_provider_ctest_files
+    # can include this test in the installed CTestTestfile.cmake. Required for
+    # CI flows that invoke ctest from the install tree (e.g. TheRock).
     _stage_external_integration_install_test()
     _add_external_integration_category_suites()
 endfunction()

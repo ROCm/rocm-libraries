@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -501,7 +501,6 @@ double norm_check_general(char        norm_type,
 template <typename T>
 bool norm_check(double norm_error)
 {
-    hipsparselt_cout << norm_error << std::endl;
     if(std::is_same<T, float>{})
         return norm_error < 0.00001;
     if(std::is_same<T, double>{})
