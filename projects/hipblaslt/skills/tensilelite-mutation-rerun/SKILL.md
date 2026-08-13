@@ -48,10 +48,11 @@ configuration, strict kill semantics, and restoration across reruns.
    complete input ID set before grouping, inspect each mutant with `mutmut show`,
    and maintain a one-row-per-mutant conservation ledger. Treat `survived`,
    `no tests`, `timeout`, and suspicious/infrastructure outcomes separately.
-8. **Add behavior-distinguishing tests.** For each proposed assertion, state
-   what source mutation makes it fail. Do not add coverage-only assertions,
-   silently skip tests, or idealize behavior that the current source does not
-   implement.
+8. **Add behavior-distinguishing tests.** Read
+   [references/test-authoring.md](references/test-authoring.md). For each
+   proposed assertion, state what source mutation makes it fail. Do not add
+   coverage-only assertions, silently skip tests, or idealize behavior that the
+   current source does not implement.
 9. **Verify claimed kills.** Rerun the named mutant with one child and, when a
    manifest is available, use `mutmut-verify.sh`. Count a kill only when the
    clean node passes, the mutated node returns pytest assertion status 1, and
