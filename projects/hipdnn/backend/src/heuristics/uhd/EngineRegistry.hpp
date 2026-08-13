@@ -38,6 +38,10 @@ struct UhdConfig
 {
     std::string uhdId;
     std::string name;
+
+    // RFC 0019 §6.4: Derived values (ordered map of name → JsonLogic expression)
+    std::vector<std::pair<std::string, std::string>> derived; // name, expression (JSON string)
+
     std::vector<std::string> featuresSignature;
     std::string featuresHash;
     std::string objective = "max"; // "max" or "min"

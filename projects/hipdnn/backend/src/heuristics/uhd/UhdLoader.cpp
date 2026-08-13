@@ -101,6 +101,19 @@ std::optional<UhdConfig>
         config.name = uhd->name()->str();
     }
 
+    // Derived values (RFC 0019 §6.4)
+    if(uhd->derived())
+    {
+        config.derived.reserve(uhd->derived()->size());
+        for(const auto* entry : *uhd->derived())
+        {
+            if(entry && entry->name() && entry->expression())
+            {
+                config.derived.emplace_back(entry->name()->str(), entry->expression()->str());
+            }
+        }
+    }
+
     // Features signature
     if(uhd->features_signature())
     {

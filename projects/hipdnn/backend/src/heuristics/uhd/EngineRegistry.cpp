@@ -330,7 +330,8 @@ std::shared_ptr<FeatureExtractor>
     if(!entry->uhdConfig.featuresSignature.empty())
     {
         entry->cachedExtractor
-            = std::make_shared<FeatureExtractor>(entry->uhdConfig.featuresSignature);
+            = std::make_shared<FeatureExtractor>(entry->uhdConfig.featuresSignature,
+                                                  entry->uhdConfig.derived);
     }
 
     return entry->cachedExtractor;

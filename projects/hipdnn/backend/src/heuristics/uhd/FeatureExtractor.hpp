@@ -68,13 +68,18 @@ private:
 /// @brief Feature extractor for UHD heuristic evaluation.
 ///
 /// Extracts feature vectors from a features_signature (ordered list of JsonLogic
-/// expressions) using a FeatureExtractionContext. Also computes signature hashes
-/// for contract validation.
+/// expressions) using a FeatureExtractionContext. Supports RFC 0019 §6.4 derived
+/// values which are evaluated in order and bound to $derived.* namespace before
+/// evaluating the main signature. Also computes signature hashes for contract validation.
 class FeatureExtractor
 {
 public:
     /// Construct with a features signature (list of JsonLogic expression strings).
-    explicit FeatureExtractor(const std::vector<std::string>& signature);
+    /// @param signature Ordered list of feature expressions.
+    /// @param derived Optional derived values (RFC 0019 §6.4) as (name, expression) pairs.
+    explicit FeatureExtractor(const std::vector<std::string>& signature,
+                               const std::vector<std::pair<std::string, std::string>>& derived
+                               = {});
 
     /// Extract feature vector from context.
     /// @returns Ordered vector of feature values matching the signature.
@@ -156,6 +161,15 @@ public:
         getMissingKmdFields(const std::unordered_set<std::string>& kmdFieldNames) const;
 
 private:
+    /// Evaluate and bind derived values to $derived.* namespace (RFC 0019 §6.4).
+    /// @param ctx Context to bind derived values into (mutable because binding is lazy).
+    void evaluateDerived(FeatureExtractionContext& ctx) const;
+
+    // Derived values (RFC 0019 §6.4): ordered (name, parsed-expression) pairs
+    std::vector<std::pair<std::string, nlohmann::json>> _parsedDerived;
+    /// Derived value indices that depend on $kernel.* (must be re-evaluated per candidate)
+    std::unordered_set<size_t> _kernelDependentDerivedIndices;
+
     std::vector<nlohmann::json> _parsedExprs;
     std::unordered_set<std::string> _varRefs;
     /// Signature positions with no $kernel.* reference — evaluated once per selection.

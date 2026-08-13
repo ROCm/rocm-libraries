@@ -3,6 +3,20 @@
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
+/// @brief Key-value pair for derived feature expressions (RFC 0019 §6.4).
+///
+/// Each entry is a named JsonLogic expression that can reference $device.*,
+/// $kernel.*, $q.*, and earlier $derived.* entries. Evaluated in order to
+/// form the $derived.* namespace.
+table UhdDerivedEntry {
+    /// Feature name (e.g., "num_tiles_m", "arithmetic_intensity").
+    name: string (required);
+
+    /// JsonLogic expression as a JSON string.
+    /// Example: "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m0\"]}"
+    expression: string (required);
+}
+
 /// @brief Adapter type for UHD model evaluation.
 ///
 /// Determines how the heuristic computes scores for kernel candidates.
@@ -59,8 +73,14 @@ table UHD {
     /// Adapter type determining how scores are computed.
     adapter: UhdAdapter = STATIC_ORDER;
 
+    /// Ordered list of derived feature definitions (RFC 0019 §6.4).
+    /// Evaluated in order to form the $derived.* namespace. Each expression
+    /// can reference $device.*, $kernel.*, $q.*, and earlier $derived.* entries.
+    /// Values are cached per-candidate when they reference only $kernel.*.
+    derived: [UhdDerivedEntry];
+
     /// Ordered list of feature expressions (JsonLogic format).
-    /// Each expression references $device.*, $kernel.*, or $q.* variables.
+    /// Each expression references $device.*, $kernel.*, $q.*, or $derived.* variables.
     /// Order must match training; the contract is frozen at model export.
     features_signature: [string];
 

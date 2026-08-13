@@ -286,11 +286,34 @@ nlohmann::json FeatureExtractor::parseSignatureEntry(const std::string& entry)
     return JsonLogicEvaluator::parse(entry);
 }
 
-FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
+FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
+                                     const std::vector<std::pair<std::string, std::string>>& derived)
 {
-    _parsedExprs.reserve(signature.size());
-
+    // Parse and analyze derived values (RFC 0019 §6.4)
+    _parsedDerived.reserve(derived.size());
     const std::string kernelPrefix = "$kernel.";
+    const std::string derivedPrefix = "$derived.";
+
+    for(size_t i = 0; i < derived.size(); ++i)
+    {
+        const auto& [name, exprStr] = derived[i];
+        auto parsed = parseSignatureEntry(exprStr);
+        _parsedDerived.emplace_back(name, std::move(parsed));
+
+        // Check if this derived value depends on $kernel.*
+        auto vars = JsonLogicEvaluator::extractVariables(_parsedDerived.back().second);
+        const bool kernelDependent
+            = std::any_of(vars.begin(), vars.end(), [&kernelPrefix](const std::string& v) {
+                  return v == "$kernel" || v.rfind(kernelPrefix, 0) == 0;
+              });
+
+        if(kernelDependent)
+        {
+            _kernelDependentDerivedIndices.insert(i);
+        }
+    }
+
+    _parsedExprs.reserve(signature.size());
 
     for(const auto& exprStr : signature)
     {
@@ -329,6 +352,11 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature)
 
 std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ctx) const
 {
+    // Evaluate and bind derived values (RFC 0019 §6.4)
+    // Note: This requires a mutable context - derived values are lazily computed
+    auto& mutableCtx = const_cast<FeatureExtractionContext&>(ctx);
+    evaluateDerived(mutableCtx);
+
     std::vector<double> features;
     features.reserve(_parsedExprs.size());
 
@@ -342,6 +370,20 @@ std::vector<double> FeatureExtractor::extract(const FeatureExtractionContext& ct
 
 std::vector<double> FeatureExtractor::extractSharedRow(const FeatureExtractionContext& ctx) const
 {
+    // Evaluate and bind kernel-independent derived values (RFC 0019 §6.4)
+    auto& mutableCtx = const_cast<FeatureExtractionContext&>(ctx);
+    for(size_t i = 0; i < _parsedDerived.size(); ++i)
+    {
+        // Skip kernel-dependent derived values in the shared pass
+        if(_kernelDependentDerivedIndices.count(i) > 0)
+        {
+            continue;
+        }
+        const auto& [name, expr] = _parsedDerived[i];
+        const double value = _evaluator.evaluateDouble(expr, ctx.getContext());
+        mutableCtx.bind("$derived." + name, value);
+    }
+
     std::vector<double> row(_parsedExprs.size(), 0.0);
 
     for(const size_t i : _sharedIndices)
@@ -360,6 +402,20 @@ void FeatureExtractor::extractKernelInto(const FeatureExtractionContext& ctx,
         throw JsonLogicError("extractKernelInto: row width " + std::to_string(row.size())
                              + " does not match signature width "
                              + std::to_string(_parsedExprs.size()));
+    }
+
+    // Evaluate kernel-dependent derived values (RFC 0019 §6.4)
+    auto& mutableCtx = const_cast<FeatureExtractionContext&>(ctx);
+    for(size_t i = 0; i < _parsedDerived.size(); ++i)
+    {
+        // Only evaluate kernel-dependent derived values here
+        if(_kernelDependentDerivedIndices.count(i) == 0)
+        {
+            continue;
+        }
+        const auto& [name, expr] = _parsedDerived[i];
+        const double value = _evaluator.evaluateDouble(expr, ctx.getContext());
+        mutableCtx.bind("$derived." + name, value);
     }
 
     for(const size_t i : _kernelIndices)
@@ -453,6 +509,28 @@ std::vector<std::string> FeatureExtractor::getMissingKmdFields(
         }
     }
     return missing;
+}
+
+void FeatureExtractor::evaluateDerived(FeatureExtractionContext& ctx) const
+{
+    // RFC 0019 §6.4: Evaluate derived values in order and bind to $derived.* namespace.
+    // Each expression can reference $device.*, $kernel.*, $q.*, and earlier $derived.* entries.
+    for(size_t i = 0; i < _parsedDerived.size(); ++i)
+    {
+        const auto& [name, expr] = _parsedDerived[i];
+        try
+        {
+            const double value = _evaluator.evaluateDouble(expr, ctx.getContext());
+            ctx.bind("$derived." + name, value);
+        }
+        catch(const JsonLogicError& e)
+        {
+            std::ostringstream oss;
+            oss << "Failed to evaluate derived value '$derived." << name
+                << "': " << e.what();
+            throw JsonLogicError(oss.str());
+        }
+    }
 }
 
 } // namespace hipdnn_backend::heuristics::uhd
