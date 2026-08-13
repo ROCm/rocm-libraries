@@ -207,16 +207,15 @@ jobs:
             done
             echo ""
             echo "Files WITHOUT -fprofile-instr-generate (first 10):"
-            python3 -c "
-import json
-with open('$CC_FILE') as f:
+            python3 <<'PYEOF' 2>/dev/null || echo "Python check failed"
+import json, os
+with open('TheRock/build-coverage/math-libs/hipRAND/build/compile_commands.json') as f:
     entries = json.load(f)
     no_profile = [e for e in entries if '-fprofile-instr-generate' not in e['command']]
     for e in no_profile[:10]:
-        import os
-        print(f\"  - {os.path.basename(e['file'])}\")
+        print(f"  - {os.path.basename(e['file'])}")
     print(f'Total without coverage: {len(no_profile)}/{len(entries)}')
-" 2>/dev/null || echo "Python check failed"
+PYEOF
           fi
           echo "===== END SINGLE FPROFILE DEBUG ====="
 
