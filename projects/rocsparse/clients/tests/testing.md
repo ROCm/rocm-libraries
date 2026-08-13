@@ -183,10 +183,10 @@ numbers are not comparable across GFX targets.
 | Stack layer | Core SDK (sparse BLAS primitive) |
 | Metrics measured | Time, GFLOP/s, and memory bandwidth per routine |
 | How benchmarks are run | `rocsparse-bench` from `clients/staging/`, e.g. `./rocsparse-bench -f csrmv --bench-x -M 10 20 30 40` (command-line expansion sweeps option lists) |
-| Baseline — stored per architecture | In-repo tooling does not store/aggregate baselines (manual comparison); automated per-architecture baselines are maintained by internal AMD tooling outside this repo. Results must not be aggregated across GFX |
+| Baseline — stored per architecture | Not stored/aggregated in this repo (manual comparison); perf regression is tracked outside this repo. Results must not be aggregated across GFX |
 | Where results are stored | JSON by default (`a.json`); optional YAML export; optional `rocsparse_bench_memstat.json` with memstat |
-| Regression threshold | In-repo: `scripts/rocsparse-bench-regression.py` compares JSON runs with a `--tol` (default 2%); not wired into public CI. Internal AMD tooling enforces automated thresholds daily |
-| Gating approach | Manual in-repo; automated in internal AMD tooling |
+| Regression threshold | In-repo: `scripts/rocsparse-bench-regression.py` compares JSON runs with a `--tol` (default 2%); not wired into public CI. Perf regression is tracked outside this repo |
+| Gating approach | Manual in-repo; perf regression tracked outside this repo |
 | GPU profiling | Not integrated into the benchmark flow |
 
 **Gating:**
@@ -194,13 +194,13 @@ numbers are not comparable across GFX targets.
 | Gating Level | Status | Notes |
 |---|---|---|
 | Public CI (TheRock) automated gate | No | No perf gate in this repo's PR or nightly CI |
-| Internal automated regression | Yes | Automated daily perf-regression runs across multiple architectures and matrices in internal AMD tooling (not part of this public repo) |
+| Regression tracked outside this repo | Yes | Perf regression is tracked outside this repo |
 | Manual review (in-repo) | Yes | `rocsparse-bench-regression.py` compares runs on request |
 | Release qualification | Partial | Performance reviewed before release; not an automated sign-off in this repo |
 
-**Known gaps:** no per-architecture baseline or automated regression threshold in the *public* repo /
-TheRock CI. Automated multi-arch/multi-matrix perf regression is covered daily by internal AMD
-tooling; the gap here is that this coverage is not visible or reproducible from this repository.
+**Known gaps:** no per-architecture baseline or automated regression threshold in this repo /
+TheRock CI. Perf regression is tracked outside this repo; the gap here is that this coverage is not
+visible or reproducible from this repository.
 
 ---
 
@@ -377,8 +377,8 @@ device configurations are not ASAN-covered.
 
 | Gap | Regression risk | Impact | Mitigation today |
 |---|---|---|---|
-| No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Automated daily multi-arch/multi-matrix perf regression runs in internal AMD tooling; in-repo `rocsparse-bench-regression.py` for manual checks |
-| No per-architecture perf baseline reproducible from this repo | Medium | Medium | Baselines maintained by internal AMD tooling; in-repo JSON logs only |
+| No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
+| No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
 | Device-code coverage not captured (host-side instrumentation only) | Medium | Medium | Codecov reports host paths; device coverage untracked |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Medium | Medium | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No separate host-only unit-test binary | Low | Medium | `*bad_arg*` / auxiliary cases cover host paths inside `rocsparse-test` |

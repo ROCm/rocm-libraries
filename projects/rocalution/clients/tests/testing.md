@@ -182,10 +182,10 @@ numbers are not comparable across GFX targets.
 | Metrics measured | Solver iteration/solve time and convergence per solver × preconditioner × format |
 | How benchmarks are run | `rocalution-bench` from `clients/staging/`; single-run by default, batch/sweep mode when `--bench-x` / `--bench-o` / `--bench-n` / `--bench-std` are given |
 | Solvers / preconditioners | selectable via CLI (`--iterative_solver`, `--preconditioner`, `--direct_solver`, `--format`, tolerances, `--ndim`, `--matrix_filename`, …) |
-| Baseline — stored per architecture | In-repo tooling does not store/aggregate baselines (manual comparison); automated per-architecture baselines are maintained by internal AMD tooling outside this repo. Must not be aggregated across GFX |
+| Baseline — stored per architecture | Not stored/aggregated in this repo (manual comparison); perf regression is tracked outside this repo. Must not be aggregated across GFX |
 | Where results are stored | Benchmark output files (JSON/XML); `scripts/rocalution_bench_gnuplot_helper.py` renders histograms |
-| Regression threshold | Not automated in this repo; internal AMD tooling enforces automated thresholds daily |
-| Gating approach | Manual in-repo; automated in internal AMD tooling |
+| Regression threshold | Not automated in this repo; perf regression is tracked outside this repo |
+| Gating approach | Manual in-repo; perf regression tracked outside this repo |
 | GPU profiling | Not integrated |
 
 **Gating:**
@@ -193,7 +193,7 @@ numbers are not comparable across GFX targets.
 | Gating Level | Status | Notes |
 |---|---|---|
 | Public CI (TheRock) automated gate | No | No perf gate in this repo's PR or nightly CI |
-| Internal automated regression | Yes | Automated daily perf-regression runs across multiple architectures and matrices in internal AMD tooling (not part of this public repo) |
+| Regression tracked outside this repo | Yes | Perf regression is tracked outside this repo |
 | Manual review (in-repo) | Yes | On request via the bench + gnuplot helper |
 | Release qualification | Partial | Reviewed before release; not an automated sign-off in this repo |
 
@@ -360,8 +360,8 @@ device configurations are not ASAN-covered.
 
 | Gap | Regression risk | Impact | Mitigation today |
 |---|---|---|---|
-| No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Automated daily multi-arch/multi-matrix perf regression runs in internal AMD tooling; in-repo `rocalution-bench` + gnuplot for manual checks |
-| No per-architecture perf baseline reproducible from this repo | Medium | Medium | Baselines maintained by internal AMD tooling; in-repo output files only |
+| No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocalution-bench` + gnuplot for manual checks |
+| No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo output files only |
 | Tier not encoded in test names; legacy `*checkin*`/`*nightly*` filters match nothing | Medium | Medium | Tiering works via `ROCALUTION_EMULATION_*`; Jenkins runs full suite |
 | No `known_bugs.yaml` / quarantine mechanism | Medium | Medium | None; flaky tests handled ad-hoc |
 | Device-code coverage not captured; complex disabled under coverage | Medium | Medium | Host gcov only |
