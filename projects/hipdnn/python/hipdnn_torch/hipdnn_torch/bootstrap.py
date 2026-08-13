@@ -54,6 +54,24 @@ tied to one machine:
     is not importable.
   * ``HIPDNN_TORCH_BACKEND_GLOB`` -- override the glob used to locate torch's
     bundled ``libhipdnn_backend.so`` (rarely needed).
+  * ``HIPDNN_TORCH_PLUGIN_MODE`` -- how the named provider(s) combine with the
+    backend's auto-discovered *default* plugins (default ``absolute``):
+      - ``absolute``: load ONLY the named provider(s); ignore the default set.
+        This is the injection's contract ("route through the provider I built")
+        and the ONLY correct choice when a locally-built provider re-implements a
+        shipped engine id. The backend auto-loads the plugins that ship beside its
+        own ``.so``/``.dll`` (e.g. the TheRock nightly's prebuilt
+        ``_rocm_sdk_libraries/bin/hipdnn_plugins/engines/hip_kernel_provider``) in
+        addition to the named provider(s). Engine-id ownership is then decided by
+        last-writer-wins over the load set (the backend maps ``engineId ->
+        handle`` with no cross-plugin de-dup), so the prebuilt (empty/old-catalog)
+        copy of ``AOT_CATALOG_ENGINE`` can SHADOW the local build and SILENTLY
+        decline every graph (census ``aot=0``, no ``[hipdnn aot-catalog]`` trace).
+        ``absolute`` makes the named provider(s) REPLACE that default set, so the
+        outcome no longer depends on load order.
+      - ``additive``: load the named provider(s) *in addition to* the default set
+        (hipDNN's own default). Only useful to extend the shipped engines with a
+        provider whose engine ids don't collide with them.
 
 Importing this module does NOT import torch or touch the GPU. All of that happens
 lazily on the first :func:`bootstrap` call (which the overrides trigger from
@@ -187,6 +205,75 @@ def _torch_backend_path(torch) -> str:
     return hits[0]
 
 
+_dll_dir_cookies = []  # keep os.add_dll_directory handles alive for the process lifetime
+
+
+def _add_dll_search_dirs(backend_path: str, providers: list) -> None:
+    """Windows-only: register the ROCm runtime DLL directories so the backend, the
+    provider plugins, and the frontend ``.pyd`` can resolve their sibling ROCm DLLs.
+
+    Necessary because on Windows the ``RTLD_GLOBAL`` dlopen in :func:`bootstrap` is a
+    no-op (``ctypes.CDLL(mode=...)`` ignores POSIX flags) and LoadLibrary's secure
+    dependency search does NOT consult ``PATH``. ``os.add_dll_directory`` is the only
+    reliable mechanism. In particular the TheRock nightly splits its runtime SDK across
+    sibling wheels -- ``_rocm_sdk_core`` ships ``hiprtc``/``amd_comgr`` (which
+    ``hip_kernel_provider`` links for rocKE JIT) while ``_rocm_sdk_libraries`` ships the
+    backend; adding only the backend's dir makes the provider load fail its ``hiprtc``
+    dependency and the backend then SILENTLY declines every graph. No-op on POSIX."""
+    if os.name != "nt":
+        return
+    dirs = [os.path.dirname(backend_path)]
+    dirs += [os.path.dirname(so) for so in providers]
+    # Sibling _rocm_sdk_*/bin under the backend's site-packages (bin -> pkg -> site).
+    site = os.path.dirname(os.path.dirname(os.path.dirname(backend_path)))
+    dirs += glob.glob(os.path.join(site, "_rocm_sdk_*", "bin"))
+    extra = os.environ.get("HIPDNN_TORCH_DLL_DIRS")
+    if extra:
+        dirs += [p for chunk in extra.split(os.pathsep) for p in chunk.split(",")]
+    for d in dict.fromkeys(dirs):  # dedupe, preserve order
+        if d and os.path.isdir(d):
+            try:
+                _dll_dir_cookies.append(os.add_dll_directory(d))
+            except OSError:
+                pass
+
+
+def _set_engine_plugin_paths(hipdnn, providers: list) -> None:
+    """Register the provider plugin(s), replacing the backend's auto-discovered
+    default set unless ``HIPDNN_TORCH_PLUGIN_MODE=additive``.
+
+    ``absolute`` (default) is what makes a locally-built provider actually serve:
+    the backend also loads the plugins shipped beside its own ``.so``/``.dll``, and
+    with no cross-plugin engine-id de-dup the prebuilt (empty/old-catalog) copy of a
+    re-implemented engine id can win by load order and shadow the local build, so it
+    declines every graph. ``absolute`` clears the default set and loads only the
+    named provider(s). Falls back gracefully on bindings too old to expose the mode
+    enum/param."""
+    mode_name = os.environ.get("HIPDNN_TORCH_PLUGIN_MODE", "absolute").strip().lower()
+    if mode_name not in ("absolute", "additive"):
+        raise BootstrapError(
+            f"HIPDNN_TORCH_PLUGIN_MODE={mode_name!r} is not valid; use 'absolute' "
+            "(load only the named provider(s) -- the default) or 'additive' (add "
+            "them to hipDNN's default plugin set)."
+        )
+    enum = getattr(hipdnn, "PluginLoadingMode", None)
+    mode = getattr(enum, mode_name.upper(), None) if enum is not None else None
+    if mode is not None:
+        hipdnn.set_engine_plugin_paths(providers, mode)
+    elif mode_name == "absolute":
+        # Bindings predate the mode param: absolute is unachievable, and additive
+        # would silently shadow the local provider. Fail loud rather than mislead.
+        raise BootstrapError(
+            "This frontend build's set_engine_plugin_paths has no plugin-loading "
+            "mode; it can only load ADDITIVELY, which lets the backend's prebuilt "
+            "plugins shadow the local provider (census aot=0). Rebuild the frontend "
+            "bindings from a revision that exposes PluginLoadingMode, or set "
+            "HIPDNN_TORCH_PLUGIN_MODE=additive to accept additive loading."
+        )
+    else:
+        hipdnn.set_engine_plugin_paths(providers)
+
+
 def _import_frontend():
     """Prefer the installed ``hipdnn-frontend`` wheel; fall back to a raw
     ``frontend_bindings/build`` dir named by HIPDNN_TORCH_FRONTEND_DIR."""
@@ -249,13 +336,20 @@ def bootstrap() -> State:
         torch.zeros(1, device="cuda")
         torch.cuda.synchronize()
 
+    backend = _torch_backend_path(torch)
+
+    # (Windows) Register the ROCm DLL search dirs BEFORE loading the backend so the
+    # backend, provider plugins, and frontend .pyd resolve their sibling ROCm DLLs
+    # (PATH is ignored by secure search; RTLD_GLOBAL is a no-op here). No-op on POSIX.
+    _add_dll_search_dirs(backend, providers)
+
     # (2) dlopen torch's OWN hipdnn backend RTLD_GLOBAL (0x101 == RTLD_LAZY |
     #     RTLD_GLOBAL) so the frontend binds to the exact backend torch ships.
-    ctypes.CDLL(_torch_backend_path(torch), mode=0x101)
+    ctypes.CDLL(backend, mode=0x101)
 
     # (3) Frontend bindings -> provider plugin -> handle.
     hipdnn = _import_frontend()
-    hipdnn.set_engine_plugin_paths(providers)
+    _set_engine_plugin_paths(hipdnn, providers)
     handle = hipdnn.Handle()
 
     dtype_map = _build_dtype_map(torch, hipdnn)
