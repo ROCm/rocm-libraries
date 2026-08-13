@@ -55,14 +55,6 @@ from ..KernelWriterModules import hasSequentialValuC
 from math import ceil, log2
 
 
-# Granularity of the SubtileNGuard contract: _emitSubtileGuards reduces the clamped valid-N
-# COLUMN count to blocks by >>4 (under SubtileStoreAlign8 it leaves the column count intact and
-# use sites apply >>4 / &0xF themselves). This is the guard's own unit, NOT MatrixInstN -- the two
-# happen to coincide for 16x16 MFMA, so deriving it from MatrixInstN would silently desync the
-# consumer from the producer on any other MatrixInstN.
-SUBTILE_N_BLOCK_COLS = 16
-
-
 def _scmpGtU32(writer, src, imm, comment=""):
     """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
     if writer.states.asmCaps["HasSCMPK"]:
@@ -1656,8 +1648,6 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
     storeCode = Module("GroupLoadStore")
-
-
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
@@ -1716,14 +1706,7 @@ class GlobalWriteBatchWriter:
       # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
       if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
         blockIdxN = element[0]
-        # Ragged-M hang fix (Stage14): for the 16bit subtile path the stores are collected into
-        # `storeCode` (emitted after this loop / inside the interior-peel), so the N-group skip
-        # label and its deferred SrdD increment MUST live in the same module as the stores. If
-        # left in `module` they land BEFORE all of storeCode, so the M-guard branches (in
-        # storeCode) that target this label branch backwards past the stores -> scrambled control
-        # flow whenever a partial M-tile's guard fires (ragged M). Stock keeps stores inline in
-        # `module` so it is unaffected. Predicate matches _emitSubtileOobGuard /
-        # _finalizeSubtileOobGuards so the label and its M-guard branch can never desync.
+        # Emit the N-group skip label and its deferred SrdD increment in the same module as the stores.
         _ngTarget = storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtile) else module
         if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
           self._flushNGroupSkipLabel(_ngTarget)
@@ -2160,7 +2143,7 @@ class GlobalWriteBatchWriter:
         #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
-        # Lever 1 (SubtileBf16EpilogueOpt Stage2): route 16bit subtile stores into the
+
         # separate `storeCode` module so the whole store body can be wrapped by an interior
         # fast-path peel (guard-free/mask-free) selected at runtime below.
         storeCodeModule = storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtile) else module
@@ -2310,8 +2293,6 @@ class GlobalWriteBatchWriter:
     if self.kernel["ProblemType"]["StochasticRounding"]:
       self.parentWriter.vgprPool.checkIn(vgprRND)
 
-    # Lever 1 (SubtileBf16EpilogueOpt Stage2): interior fast-path peel.
-    #
     # `storeCode` (built above) is the GUARDED boundary body: per-element M/N OOB branches
     # plus per-block exec masks.  When the whole wave-group is provably in-bounds (every M
     # and N block interior) all of that overhead is dead weight.  Emit a runtime test that
@@ -2355,7 +2336,7 @@ class GlobalWriteBatchWriter:
       if nGuardSgpr is not None:
         if self.parentWriter.states.storeAlign8:
           # SubtileNGuard = clamped valid-N COLUMN count, so compare in columns.
-          nExtent = (maxBlockIdxN + 1) * SUBTILE_N_BLOCK_COLS
+          nExtent = (maxBlockIdxN + 1) * 16
           nCmp = nExtent - 1
           nComment = f"fully interior in N? (NGuard >= {nExtent})"
         else:
@@ -2703,7 +2684,7 @@ class GlobalWriteBatchWriter:
     module.add(nMaskDone)
 
   def _buildSubtileInteriorStores(self) -> Module:
-    """Lever 1 (SubtileBf16EpilogueOpt Stage2) — guard-free/mask-free interior store body.
+    """Guard-free/mask-free interior store body.
 
     Re-emits the 16bit subtile stores for the current batch WITHOUT `_emitSubtileOobGuard`
     (no `s_cmp`/`s_cbranch`) and WITHOUT the align8 exec mask (interior blocks yield mask
