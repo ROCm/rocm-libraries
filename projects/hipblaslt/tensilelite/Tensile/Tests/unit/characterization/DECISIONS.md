@@ -471,16 +471,3 @@ stable and self-invalidating. Motivating context: ROCM-7144.
 and must be confirmed byte-identical via `--snapshot-update` in a build
 environment; the `-m unit` lane needs the compiled rocisa module, which is not
 available where this change was authored.
-## D21 — LibraryIO characterization: add-only mutation-kill snapshot cases
-**Decision:** The LibraryIO mutation-hardening slice pins additional *current*
-LibraryIO behavior by appending new syrupy cases to three existing goldens
-(`test_parse_integration_char.ambr`, `test_serializers_char.ambr`,
-`test_writesolutions_char.ambr`); no existing snapshot value is re-recorded.
-**Classification:** category (a) intended behavior capture -- new cases pinning
-previously-unsnapshotted read/write/parse behavior to raise mutation kill power,
-not a change to any pinned behavior. The diffs are insertion-only (+258/-0,
-+9/-0, +54/-0) and confined to the LibraryIO node, so no ADR is required (nothing
-behavior-changing or known-wrong is pinned); this registry line is the record.
-The parse_integration additions begin in the mutation infra base and continue
-in this slice.
-**Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
