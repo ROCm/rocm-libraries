@@ -124,7 +124,7 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 # ---------------------------------------------------------------------------
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
-<<<<<<< HEAD
+  unit_test_host_conversion_sort.cpp
   unit_test_internal_collectives.cpp
   unit_test_internal_infostructs.cpp
   unit_test_internal_hostblocks.cpp
@@ -139,9 +139,6 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
 set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3/rocsparse_csrmm_default_alg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_determine_indextype.cpp
-=======
-  unit_test_host_conversion_sort.cpp
->>>>>>> upstream/develop
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
