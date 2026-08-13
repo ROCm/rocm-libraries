@@ -122,6 +122,33 @@ TEST(TestEngineManager, AddMultipleEngines)
     EXPECT_EQ(engineIds.size(), 3u);
 }
 
+/// Two engines hashing onto one id is an authoring collision (RFC 0003). The manager keeps
+/// whoever claimed the id and reports the loser rather than dropping it into the void,
+/// which is what a bare map insert did: the count stayed at one while the caller that
+/// advertised the second id went on reporting it.
+///
+/// Keep-first here is not the descriptor rule. RFC 0020 §10.2.1 drops *every* UED in a
+/// name collision, and the descriptor loader applies that before construction; this is the
+/// backstop for pairs that rule cannot see, where refusing both would take a working
+/// engine down to punish a duplicate.
+TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
+{
+    TestEngineManager manager;
+    manager.addEngine(createTestEngine(1, true, 2048));
+    manager.addEngine(createTestEngine(1, true, 4096));
+
+    auto engineIds = manager.getAllEngineIds();
+    ASSERT_EQ(engineIds.size(), 1u);
+    EXPECT_EQ(engineIds[0], 1);
+
+    // The incumbent is the one still answering, not the arrival that lost the insert.
+    const TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockEngineConfig> mockConfig;
+    ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
+    EXPECT_EQ(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), 2048u);
+}
+
 TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
 {
     TestEngineManager manager;

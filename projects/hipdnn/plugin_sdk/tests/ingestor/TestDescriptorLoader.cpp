@@ -180,6 +180,10 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
          {"kind", "native"},
          {"payload", SCORE_SYMBOL}},
         {{"schema", "hipdnn.ued/v1"},
+         // Required on the UED alone (RFC 0020 §4.2). The other six documents here leave
+         // it absent on purpose, so every test that does not name a version exercises the
+         // absence-safe default the other five types rely on.
+         {"version", "1.0"},
          {"id", engineId},
          {"name", engineName},
          {"heuristic", heuristicId},
@@ -429,6 +433,43 @@ INSTANTIATE_TEST_SUITE_P(
         ViolationCase{"unparsable_id",
                       [](Documents& documents) {
                           documentWithSchema(documents, "hipdnn.ued/v1")["id"] = "not-a-uuid";
+                      }},
+        // RFC 0020 §4.2 makes `version` a required UED member; absent is malformed, not
+        // the 1.0 default the other five types get.
+        ViolationCase{"ued_missing_version",
+                      [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.ued/v1").erase("version");
+                      }},
+        // RFC 0020 §11.1: `file.minor <= provider.minor`. A newer minor may carry fields
+        // this build has no reader for.
+        ViolationCase{"version_newer_minor",
+                      [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "1.1";
+                      }},
+        // RFC 0020 §11.1: a major mismatch is a hard break in either direction.
+        ViolationCase{"version_newer_major",
+                      [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "2.0";
+                      }},
+        ViolationCase{"version_older_major",
+                      [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "0.9";
+                      }},
+        // `major.minor`, exactly two numeric halves: a three-part version is the SDK's
+        // `Version` spelling, not this field's, and reading it as 1.0 would accept a file
+        // stamped for a generation this build never saw.
+        ViolationCase{"version_three_components",
+                      [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "1.0.0";
+                      }},
+        ViolationCase{"version_not_numeric",
+                      [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "1.x";
+                      }},
+        // The gate is per file type, not UED-only: a KMD this build cannot read is
+        // skipped, and the engine whose `metadata` named it drops with it.
+        ViolationCase{"non_ued_newer_minor", [](Documents& documents) {
+                          documentWithSchema(documents, "hipdnn.kmd/v1")["version"] = "1.1";
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
 
@@ -842,6 +883,98 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The five non-UED types accept the field they do not require, so an author can stamp
+/// every descriptor uniformly (as the shipped corpus does) without tripping the
+/// unknown-key rejection.
+TEST(TestDescriptorLoader, AcceptsAnExplicitCurrentVersionOnEveryDescriptorType)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_all"));
+    auto documents = makeSetDocuments('1', "test:versioned");
+    for(auto& document : documents)
+    {
+        document["version"] = "1.0";
+    }
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:versioned");
+}
+
+/// RFC 0020 §10.2.1: the version check runs before duplicate detection, so a UED the
+/// runtime cannot read is dropped for its version alone and the descriptor it would have
+/// collided with is retained. Ordered the other way, an unreadable file would take a
+/// perfectly good engine down with it.
+TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideByName)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_first"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:contested"));
+
+    auto newer = makeSetDocuments('2', "test:contested");
+    documentWithSchema(newer, "hipdnn.ued/v1")["version"] = "2.0";
+    writeDocuments(dir.path(), newer);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:contested");
+    EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
+}
+
+/// The same ordering for the `id` invariant: two UEDs share an id and differ in content,
+/// which is normally a drop-all collision, but one is unreadable so it never participates.
+TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_first_id"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:survivor"));
+
+    // Written to a second directory rather than beside the first: files are named for the
+    // id they carry, so writing this into one directory would overwrite the descriptor it
+    // is supposed to collide with and prove nothing. Without the version bump this is the
+    // drop-all case DropsAnIdTwoFilesDisagreeAbout covers.
+    auto casualtySet = makeSetDocuments('2', "test:casualty");
+    auto casualty = documentWithSchema(casualtySet, "hipdnn.ued/v1");
+    casualty["id"] = testUuid('1', ROLE_ENGINE);
+    casualty["version"] = "2.0";
+    writeDocument(dir.path() / "gfx950", casualty);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:survivor");
+}
+
+/// RFC 0020 §4.3: the authored form is JSONC. Comments are the parser's business only --
+/// they must not reach the duplicate check, which compares parsed documents, so the same
+/// descriptor commented and uncommented is one definition rather than a collision.
+TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenComparing)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("jsonc"));
+    const auto documents = makeSetDocuments('1', "test:commented");
+    writeDocuments(dir.path(), documents);
+
+    // The same set again under a second arch directory, this time with a comment on every
+    // file: RFC 0020 §10.2.1's content-identical exception has to see through it.
+    const auto commented = dir.path() / "gfx950";
+    std::filesystem::create_directories(commented);
+    for(const auto& document : documents)
+    {
+        std::ofstream file(commented / (document.at("id").get<std::string>() + ".json"),
+                           std::ios::binary);
+        file << "// authored with a comment, per RFC 0020 §4.3\n" << document.dump(2) << "\n";
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:commented");
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -1,5 +1,6 @@
 {
   "schema": "hipdnn.ued/v1",
+  "version": "1.0",
   "id": "d49308c3-5e9e-4fea-8bc5-4ee6aec001fe",
   "name": "hipkernel:PointwiseSub",
   "heuristic": "f02bf944-c856-44fe-99f5-b0fe563bac6b",

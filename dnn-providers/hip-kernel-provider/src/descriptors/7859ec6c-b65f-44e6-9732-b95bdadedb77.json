@@ -1,5 +1,6 @@
 {
   "schema": "hipdnn.kmd/v1",
+  "version": "1.0",
   "id": "7859ec6c-b65f-44e6-9732-b95bdadedb77",
   "name": "pointwise sub variant fields",
   "fields": [

@@ -8,10 +8,12 @@
 #include <unordered_map>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -57,12 +59,29 @@ public:
     /**
      * @brief Adds an engine to this manager.
      *
+     * An id already present keeps the engine that claimed it and logs the loser: two
+     * engines hashing onto one 64-bit id (RFC 0003) is an authoring collision, and the
+     * map would otherwise discard the second silently while whoever advertised its id
+     * still reports it. Keep-first is deliberate here and is not the descriptor policy:
+     * RFC 0020 §10.2.1 drops *every* participant in a UED name collision, which the
+     * descriptor loader applies before it ever reaches this list. This is the backstop
+     * for the pairs that rule cannot see -- two hand-written engines, or a descriptor
+     * engine against a hand-written one -- where refusing both would take down a working
+     * engine to punish a duplicate.
+     *
      * @param engine The engine to add. Ownership is transferred.
      */
     void addEngine(std::unique_ptr<Engine> engine)
     {
         auto id = engine->id();
-        _engines.emplace(id, std::move(engine));
+        if(!_engines.emplace(id, std::move(engine)).second)
+        {
+            // Hex id only: getEngineNameFromId throws when the id was never registered
+            // under a name, which is exactly the malformed case this line reports.
+            HIPDNN_PLUGIN_LOG_ERROR("engine manager: an engine with id "
+                                    << hipdnn_data_sdk::utilities::formatEngineIdHex(id)
+                                    << " is already registered; the duplicate is discarded");
+        }
     }
 
     /**

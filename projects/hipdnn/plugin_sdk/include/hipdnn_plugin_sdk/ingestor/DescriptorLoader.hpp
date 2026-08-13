@@ -123,13 +123,20 @@ namespace detail
 /// but carries that in a sibling `version` field, not in this tag, so the tag is matched
 /// exactly and a `/v2` file is an unrecognised type -- which is the right answer for a
 /// major bump anyway, since no reader for it exists here. The minor half of the accept
-/// rule arrives with `version` when the loader parses it.
+/// rule lives in the sibling `version` field, applied by versionIsSupported() below.
 inline constexpr std::string_view SCHEMA_KMD = "hipdnn.kmd/v1";
 inline constexpr std::string_view SCHEMA_UHD = "hipdnn.uhd/v1";
 inline constexpr std::string_view SCHEMA_UED = "hipdnn.ued/v1";
 inline constexpr std::string_view SCHEMA_UMD = "hipdnn.umd/v1";
 inline constexpr std::string_view SCHEMA_UDD = "hipdnn.udd/v1";
 inline constexpr std::string_view SCHEMA_KDP = "hipdnn.kdp/v1";
+
+/// The descriptor format version this build implements. RFC 0017 §4 versions each file
+/// type independently and RFC 0020 §11.1 fixes the rule: accept iff `file.major` equals
+/// ours and `file.minor` is no newer. All six types sit at 1.0, so one pair serves them
+/// all; the first type to advance alone is what splits this into a per-type table.
+inline constexpr int SUPPORTED_MAJOR = 1;
+inline constexpr int SUPPORTED_MINOR = 0;
 
 /// Every parse violation leaves through here, so the caller catches one type and the
 /// message never carries the path: the caller already has it and adds it to the log.
@@ -189,6 +196,88 @@ inline std::string
         fail("key '" + std::string(key) + "' in " + where + " must not be empty");
     }
     return text;
+}
+
+/// A descriptor's declared `major.minor`. Deliberately not `hipdnn_data_sdk::Version`,
+/// which is `major.minor.patch`: RFC 0020 §4.2 spells this field with exactly two
+/// components, so `1.0.0` is a malformed descriptor version rather than a second opinion
+/// about the same value. The two types also answer different questions -- this one gates
+/// the file at load, `Version` gates a graph against an engine at match time.
+struct DescriptorVersion
+{
+    int major = 0;
+    int minor = 0;
+};
+
+/// Parses `<major>.<minor>`, each a plain digit run.
+///
+/// The halves are separate integers, not a decimal fraction: RFC 0020 §11.1 compares them
+/// as integers, so `1.10` is newer than `1.9`. Reading the field as a number would order
+/// those two backwards, which is why this never goes near a float.
+inline DescriptorVersion parseDescriptorVersion(const std::string& text, const std::string& where)
+{
+    const std::string_view all{text};
+    const auto dot = all.find('.');
+    // Nine digits keeps the stoi calls below inside int without a range check of their
+    // own; a version component that long is a malformed file, not a real generation.
+    const auto isDigits = [](std::string_view part) {
+        return !part.empty() && part.size() <= 9
+               && std::all_of(part.begin(), part.end(), [](unsigned char c) {
+                      return std::isdigit(c) != 0;
+                  });
+    };
+    if(dot == std::string_view::npos || !isDigits(all.substr(0, dot))
+       || !isDigits(all.substr(dot + 1)))
+    {
+        fail("key 'version' in " + where
+             + " must be '<major>.<minor>' with numeric halves, not '" + text + "'");
+    }
+
+    DescriptorVersion version;
+    version.major = std::stoi(text.substr(0, dot));
+    version.minor = std::stoi(text.substr(dot + 1));
+    return version;
+}
+
+/// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed, so a
+/// file this build cannot read is skipped whole rather than half-understood.
+///
+/// Required on the UED, which RFC 0020 §4.2 makes a mandatory member. The other five
+/// types have no merged RFC of their own yet, so the field is optional there and its
+/// absence means `1.0` -- the version every descriptor authored before the field existed
+/// was implicitly stamped with. That is absence-safe in RFC 0020 §11.2's sense, so files
+/// predating this check keep loading, and each type's RFC promotes it to required by
+/// moving one key from the optional side to the required one.
+///
+/// Runs ahead of the catalog insert, which is what puts it ahead of duplicate detection:
+/// RFC 0020 §10.2.1 requires an unsupported-version UED to drop for its version alone and
+/// leave the descriptors it would have collided with standing.
+inline bool versionIsSupported(const nlohmann::json& document,
+                               std::string_view schema,
+                               const std::filesystem::path& path)
+{
+    const std::string where{schema};
+    if(document.find("version") == document.end())
+    {
+        if(schema == SCHEMA_UED)
+        {
+            fail("missing required key 'version' in " + where);
+        }
+        return true;
+    }
+
+    const auto version = parseDescriptorVersion(requireString(document, "version", where), where);
+    if(version.major != SUPPORTED_MAJOR || version.minor > SUPPORTED_MINOR)
+    {
+        // Warning, not error: a descriptor from a newer toolchain landing beside an older
+        // provider is a version skew the operator can act on, not a malformed file.
+        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: "
+                               << path << " declares " << where << " version " << version.major
+                               << "." << version.minor << "; this build reads " << SUPPORTED_MAJOR
+                               << "." << SUPPORTED_MINOR << " and earlier minors; skipping");
+        return false;
+    }
+    return true;
 }
 
 inline DescriptorId
@@ -407,7 +496,7 @@ inline bool coerceToDeclaredType(MetadataValue& value, MetadataType declared)
 inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 {
     const std::string where{SCHEMA_KMD};
-    requireOnlyKeys(root, {"schema", "id", "name", "fields"}, where);
+    requireOnlyKeys(root, {"schema", "version", "id", "name", "fields"}, where);
 
     MetadataSchema schema;
     schema.id = requireId(root, "id", where);
@@ -446,7 +535,7 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root)
 {
     const std::string where{SCHEMA_UHD};
-    requireOnlyKeys(root, {"schema", "id", "name", "kind", "payload"}, where);
+    requireOnlyKeys(root, {"schema", "version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
@@ -475,8 +564,16 @@ inline void requireNoDuplicates(const std::vector<std::string>& values,
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
 {
     const std::string where{SCHEMA_UED};
+    // `sdk_version` is a known deviation from RFC 0020 §4.2, whose field table and
+    // `additionalProperties: false` schema do not list it: RFC 0017 §4 puts the graph
+    // schema version on the UMD ("Every other descriptor needs only its own version"),
+    // while the ingestor carries it on the engine, because every descriptor under an
+    // engine reads the tokens that engine's binding produced and so must agree on one
+    // schema. Accepted here pending the RFC amendment that moves the field; a §11.3
+    // schema validator would reject it until then.
     requireOnlyKeys(root,
                     {"schema",
+                     "version",
                      "id",
                      "name",
                      "sdk_version",
@@ -533,7 +630,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
 {
     const std::string where{SCHEMA_UMD};
-    requireOnlyKeys(root, {"schema", "id", "name", "scope", "match_symbol"}, where);
+    requireOnlyKeys(root, {"schema", "version", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
@@ -546,7 +643,7 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
 inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root)
 {
     const std::string where{SCHEMA_UDD};
-    requireOnlyKeys(root, {"schema", "id", "name", "dispatch_symbol"}, where);
+    requireOnlyKeys(root, {"schema", "version", "id", "name", "dispatch_symbol"}, where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
@@ -620,10 +717,16 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
 inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root)
 {
     const std::string where{SCHEMA_KDP};
-    requireOnlyKeys(
-        root,
-        {"schema", "id", "name", "matcher_ids", "engine_id", "dispatch_id", "kernels"},
-        where);
+    requireOnlyKeys(root,
+                    {"schema",
+                     "version",
+                     "id",
+                     "name",
+                     "matcher_ids",
+                     "engine_id",
+                     "dispatch_id",
+                     "kernels"},
+                    where);
 
     KernelDescriptorPack pack;
     pack.id = requireId(root, "id", where);
@@ -903,7 +1006,12 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
                 HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: failed to open " << path);
                 continue;
             }
-            document = nlohmann::json::parse(file);
+            // JSONC: RFC 0017 presents every descriptor with comments and RFC 0020 §4.3
+            // makes that the authored form, stripped before validation. Only the parser
+            // ever sees them -- `insertCatalogEntry` compares the parsed documents, so a
+            // comment cannot make two copies of one descriptor look like a collision.
+            document = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/true,
+                                             /*ignore_comments=*/true);
         }
         catch(const std::exception& parseError)
         {
@@ -916,6 +1024,10 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
         {
             detail::requireObject(document, "the document root");
             const auto schema = detail::requireString(document, "schema", "the document root");
+            if(!detail::versionIsSupported(document, schema, path))
+            {
+                continue;
+            }
             if(schema == detail::SCHEMA_KMD)
             {
                 detail::insertCatalogEntry(

@@ -1,5 +1,6 @@
 {
   "schema": "hipdnn.udd/v1",
+  "version": "1.0",
   "id": "8bd42efc-96dc-4de3-84a9-9cbeed5fc420",
   "name": "pointwise sub dispatch",
   "dispatch_symbol": "hipkernel.pointwise_sub.dispatch"
