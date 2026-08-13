@@ -16,18 +16,8 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief A bounded, thread-safe least-recently-used cache.
- *
- * Sized by entry count rather than bytes: entries hold descriptor ids and bound field
- * values, not kernels or graphs.
- *
- * Eviction costs a rematch, never a wrong answer.
- *
- * @tparam Key   Must be hashable by @p Hash and equality-comparable.
- * @tparam Value Copied in and out; callers hold snapshots, not references into the cache.
- * @tparam Hash  Defaults to std::hash<Key>; composite keys need an explicit hash.
- */
+/// A bounded, thread-safe least-recently-used cache, sized by entry count.
+/// @tparam Value Copied in and out; callers hold snapshots, not references.
 template <typename Key, typename Value, typename Hash = std::hash<Key>>
 class LruCache
 {
@@ -42,7 +32,6 @@ public:
         }
     }
 
-    /// @brief Looks up @p key, marking it most-recently-used on a hit.
     /// @return A copy of the cached value, or nullopt on a miss.
     std::optional<Value> get(const Key& key)
     {
@@ -58,8 +47,6 @@ public:
         return it->second->second;
     }
 
-    /// @brief Inserts or overwrites @p key, marking it most-recently-used and evicting the
-    ///        least-recently-used entry if that pushes the cache over capacity.
     void put(const Key& key, Value value)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -82,17 +69,9 @@ public:
         }
     }
 
-    /**
-     * @brief Inserts @p key only if it is absent, marking it most-recently-used and
-     *        evicting as put() does. An existing entry is left untouched.
-     *
-     * @return true if the value was inserted.
-     *
-     * For callers whose value is one of several equally-valid states for a key, where
-     * a concurrently-installed entry may be strictly better than the one about to be
-     * written. The test-and-insert is atomic under this cache's lock, which a get()
-     * followed by a put() would not be.
-     */
+    /// Inserts only if absent; use over put() when a racing writer may already have
+    /// installed a value strictly better than this one (e.g. unsorted vs. ranked).
+    /// @return true if the value was inserted.
     bool putIfAbsent(const Key& key, Value value)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
@@ -130,8 +109,7 @@ private:
 
     mutable std::mutex _mutex;
     size_t _capacity;
-    /// Most-recently-used first; a list keeps splice-to-front from invalidating _index iterators.
-    std::list<Entry> _order;
+    std::list<Entry> _order; ///< Most-recently-used first.
     std::unordered_map<Key, typename std::list<Entry>::iterator, Hash> _index;
 };
 

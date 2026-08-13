@@ -16,30 +16,18 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief One catalog entry: a kernel that passed every matcher for a graph.
- *
- * Copied out of KernelIngestorStateManager rather than referenced, so a caller holds a
- * stable snapshot while the source cache is concurrently evicted or refilled.
- *
- * Carries the kernel's completed metadata tuple (its catalog key), enough source
- * detail to load it, and the ids needed to find its dispatch descriptor.
- */
+/// One catalog entry: a kernel that passed every matcher for a graph. Copied out of
+/// KernelIngestorStateManager rather than referenced, so a caller holds a stable
+/// snapshot while the source cache is concurrently evicted or refilled.
 struct KernelDefinition
 {
     DescriptorId kernelId;
-    /// The pack this kernel came from; owns the matchers and UDD that apply to it.
     DescriptorId packId;
-    /// Dispatch descriptor id, denormalized from the pack so a caller holding only a
-    /// KernelDefinition can reach it without walking the pack list.
-    DescriptorId dispatchId;
-    /// Where this kernel's code comes from and how to load it.
+    DescriptorId dispatchId; ///< Denormalized from the pack for direct lookup.
     KernelSource source;
-    /// Every KMD field, with defaults filled in for fields the UKD omitted.
     MetadataValues metadata;
     int64_t priority = 0;
 
-    /// @brief The value of a KMD field, or nullopt if the kernel has no such field.
     std::optional<MetadataValue> tryGetMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);
@@ -50,9 +38,9 @@ struct KernelDefinition
         return it->second;
     }
 
-    /// @brief The integer value of a KMD field.
     /// @throws std::out_of_range if absent, std::invalid_argument if a different
-    ///         alternative is held.
+    ///         alternative is held. getStringMetadata/getIntListMetadata throw on
+    ///         the same terms.
     int64_t getIntMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);
@@ -70,7 +58,6 @@ struct KernelDefinition
         return *value;
     }
 
-    /// @brief The string value of a KMD field. Throws on the same terms as getIntMetadata.
     const std::string& getStringMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);
@@ -88,7 +75,6 @@ struct KernelDefinition
         return *value;
     }
 
-    /// @brief The int-list value of a KMD field (e.g. `stride_order`).
     const std::vector<int64_t>& getIntListMetadata(const std::string& field) const
     {
         auto it = metadata.find(field);

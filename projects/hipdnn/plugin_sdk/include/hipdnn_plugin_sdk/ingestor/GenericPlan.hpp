@@ -19,25 +19,12 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief An executable plan for one descriptor-selected kernel.
- *
- * Holds the selected kernel, its dispatch handler, and launch details resolved from
- * the graph at construction; execute() re-matches nothing.
- *
- * Immutable after construction: the same plan may execute concurrently from multiple
- * threads with different device buffers.
- */
+/// An executable plan for one descriptor-selected kernel; execute() re-matches
+/// nothing and may run concurrently from multiple threads with different buffers.
 template <typename THandle>
 class GenericPlan : public IPlan<THandle>
 {
 public:
-    /**
-     * @param dispatcher The selected kernel and its resolved dispatch handler.
-     * @param context    Bound graph and device state, read during construction only;
-     *                   not retained.
-     * @param bound      What matching resolved about the graph.
-     */
     GenericPlan(KernelDispatcher<THandle> dispatcher,
                 const MatchContext& context,
                 const BoundTokens& bound)
@@ -77,7 +64,6 @@ public:
         _dispatcher.handler->launch(handle, *_prepared, deviceBuffers, numDeviceBuffers, workspace);
     }
 
-    /// The kernel this plan launches (used by resolved-plan diagnostics, RFC 0017 §10).
     const KernelDefinition& kernel() const
     {
         return _dispatcher.kernel;

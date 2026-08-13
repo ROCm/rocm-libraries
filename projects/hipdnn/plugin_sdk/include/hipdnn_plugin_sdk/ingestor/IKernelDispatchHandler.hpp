@@ -16,70 +16,40 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief Launch state derived from the graph, resolved once at plan build.
- *
- * A provider derives from this to hold what its kernels need (argument uids, launch
- * geometry, code object, argument buffer). Must not reference the MatchContext or
- * BoundTokens it was built from (RFC 0017 §8.5).
- */
+/// Launch state derived from the graph, resolved once at plan build. Must not
+/// reference the MatchContext or BoundTokens it was built from.
 class PreparedDispatch
 {
 public:
     virtual ~PreparedDispatch() = default;
 };
 
-/**
- * @brief Native escape hatch for a UDD: sizes, prepares, and launches a kernel.
- *
- * Templated on THandle to match IPlanBuilder and IPlan. Also answers workspace size
- * (RFC 0017 §6), since that query arrives before a kernel is chosen.
- */
+/// Native escape hatch for a UDD: sizes, prepares, and launches a kernel.
 template <typename THandle>
 class IKernelDispatchHandler
 {
 public:
     virtual ~IKernelDispatchHandler() = default;
 
-    /**
-     * @brief Global scratch this kernel requires, in bytes.
-     *
-     * Answered per kernel before selection; must not depend on which other kernels
-     * are present (the catalog is never passed in).
-     *
-     * @param bound Graph state matching already resolved (RFC 0017 §8.1: not re-derived).
-     */
+    /// Global scratch this kernel requires, in bytes. Lives on this interface
+    /// because the query arrives before a kernel is chosen.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual size_t workspaceBytes(const MatchContext& context,
                                   const BoundTokens& bound,
                                   const KernelDefinition& kernel) const
         = 0;
 
-    /**
-     * @brief Resolves everything @p kernel's launch needs from the bound token state.
-     *
-     * Called once at plan build, while @p context is still valid. The returned object
-     * is owned by the plan and MUST NOT reference @p context or @p bound.
-     */
+    /// Resolves everything @p kernel's launch needs while @p context is still valid.
+    /// The returned object is owned by the plan and MUST NOT reference @p context or
+    /// @p bound.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
                                                       const BoundTokens& bound,
                                                       const KernelDefinition& kernel) const
         = 0;
 
-    /**
-     * @brief Launches a prepared kernel against the caller's device buffers.
-     *
-     * @param handle           Supplies the stream the launch is ordered on.
-     * @param prepared         The object this handler returned from prepare().
-     * @param deviceBuffers    uid/pointer pairs; resolve via
-     *                         hipdnn_plugin_sdk::findDeviceBuffer.
-     * @param numDeviceBuffers Length of @p deviceBuffers.
-     * @param workspace        The plan's scratch, or nullptr when workspaceBytes() was 0.
-     *
-     * @note May run concurrently across threads; must not mutate @p prepared or the
-     *       handler.
-     */
+    /// @note May run concurrently across threads; must not mutate @p prepared or the
+    ///       handler.
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void launch(const THandle& handle,
                         const PreparedDispatch& prepared,

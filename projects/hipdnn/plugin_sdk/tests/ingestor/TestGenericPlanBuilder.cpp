@@ -45,13 +45,6 @@ using ::testing::Ref;
 using ::testing::Return;
 using ::testing::ReturnRef;
 
-// ---------------------------------------------------------------------------
-// isApplicable / getMaxWorkspaceSize / buildPlan / getCustomKnobs, using a
-// two-survivor catalog (TestHandle = int).
-// ---------------------------------------------------------------------------
-
-/// Workspace requirement equals the kernel's block_size, so getMaxWorkspaceSize can assert
-/// a real max instead of a shared constant.
 class WorkspaceEqualsBlockSizeHandler : public IKernelDispatchHandler<TestHandle>
 {
 public:
@@ -92,7 +85,6 @@ struct KnobFilterContext
         _plan = std::move(plan);
     }
 
-    /// Safe without RTTI: setPlan() only ever receives a GenericPlan<TestHandle> here.
     const GenericPlan<TestHandle>& plan() const
     {
         return static_cast<const GenericPlan<TestHandle>&>(*_plan);
@@ -150,14 +142,11 @@ TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeTakesTheMaxAcrossSurvivo
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x92));
-    // Two survivors (block_size 64, 256): expects the max, not the first entry or a sum.
     EXPECT_EQ(builder.getMaxWorkspaceSize(0, graph, KnobFilterSettings{}), 256U);
 }
 
 TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorOnAnEmptyRankedCatalog)
 {
-    // Applicability accepted a graph with no matching kernel at all (not a knob issue);
-    // this must carry a different status/message than the knob-filtering case below.
     const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
@@ -184,7 +173,6 @@ TEST(TestIngestorGenericPlanBuilder, BuildPlanThrowsInternalErrorOnAnEmptyRanked
 
 TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeThrowsInternalErrorOnAnEmptyCatalog)
 {
-    // Must agree with buildPlan()'s empty-catalog case above, not silently return 0.
     const ScopedSymbols symbols("test.graph", rejectGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
@@ -226,14 +214,11 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsReportsMinMaxStepAndRankedDef
     EXPECT_EQ(constraint.max_value, 256);
     EXPECT_EQ(constraint.step, 1);
     ASSERT_TRUE(knob.default_value.AsIntValue() != nullptr);
-    // The heuristic ranks 256 first, so leaving the knob alone must reproduce that pick.
     EXPECT_EQ(knob.default_value.AsIntValue()->value, 256);
 }
 
 TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValues)
 {
-    // dtype takes only string values, so it can never become an integer knob and must be
-    // skipped.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, DTYPE});
@@ -247,13 +232,8 @@ TEST(TestIngestorGenericPlanBuilder, GetCustomKnobsSkipsFieldsWithNoIntegerValue
     EXPECT_EQ(knobs.front().knob_id, BLOCK_SIZE);
 }
 
-// ---------------------------------------------------------------------------
-// Knob filtering: setting a knob must actually restrict kernel selection.
-// ---------------------------------------------------------------------------
-
 TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristicDefault)
 {
-    // The heuristic would pick 256 by default; setting block_size=64 must override it.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
@@ -285,8 +265,6 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
-    // No surviving kernel carries block_size 999: the catalog matches (two FLOAT
-    // kernels), but knob filtering excludes both.
     flatbuffers::FlatBufferBuilder fbb;
     const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 999);
 
@@ -303,7 +281,6 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
         EXPECT_EQ(ex.getStatus(), HIPDNN_PLUGIN_STATUS_INVALID_VALUE);
         EXPECT_NE(ex.getMessage().find(BLOCK_SIZE), std::string::npos);
         EXPECT_NE(ex.getMessage().find("999"), std::string::npos);
-        // Survivor count distinguishes "knobs excluded everything" from "graph matched nothing".
         EXPECT_NE(ex.getMessage().find("2 kernel(s) matched the graph before knob filtering"),
                   std::string::npos);
     }
@@ -311,8 +288,6 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
 
 TEST(TestIngestorGenericPlanBuilder, GetMaxWorkspaceSizeHonorsTheSameKnobFilterAsBuildPlan)
 {
-    // getMaxWorkspaceSize and buildPlan must apply the same knob filter: block_size=64
-    // caps the max at 64, not the unfiltered catalog's 256.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const WorkspaceEqualsBlockSizeHandler handler;
     const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
@@ -365,7 +340,6 @@ TEST(TestIngestorGenericPlanBuilder,
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     flatbuffers::FlatBufferBuilder fbb;
-    // An empty engine config exercises the no-kernels-at-all path, not knob filtering.
     const auto engineConfig = makeEmptyEngineConfig(fbb);
 
     const TestGraph graph(makeGraphId(32));
@@ -383,10 +357,6 @@ TEST(TestIngestorGenericPlanBuilder,
                   "engine '" + engine.name + "' accepted this graph but has no applicable kernel");
     }
 }
-
-// ---------------------------------------------------------------------------
-// readKnobFilter(): rejecting a non-integer setting for an engine-exposed knob.
-// ---------------------------------------------------------------------------
 
 TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAFloatValuedKnobSetting)
 {
@@ -442,11 +412,6 @@ TEST(TestIngestorGenericPlanBuilder, InitializeExecutionSettingsRejectsAStringVa
     }
 }
 
-// ---------------------------------------------------------------------------
-// contextFor(): a mocked device resolver proves per-handle device resolution folds into
-// the MatchContext (uses StubHandle/StubSettings/StubContext to match IngestorMocks.hpp).
-// ---------------------------------------------------------------------------
-
 constexpr DeviceId DEVICE_FOR_HANDLE_A = 42;
 constexpr DeviceId DEVICE_FOR_HANDLE_B = 7;
 constexpr const char* DEVICE_GATED_MATCH_SYMBOL
@@ -498,20 +463,12 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
         engine, manager, resolver);
     const TestGraph graph(makeGraphId(0x98));
 
-    // Same builder and graph, two handles differing only in resolved device: isApplicable
-    // can differ only if contextFor() asks the resolver per handle.
     EXPECT_TRUE(builder.isApplicable(handleA, graph));
     EXPECT_FALSE(builder.isApplicable(handleB, graph));
 
     GraphMatcherRegistry::unregisterSymbol(DEVICE_GATED_MATCH_SYMBOL);
     ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
 }
-
-// ---------------------------------------------------------------------------
-// RFC 0017 §4: the UED's sdk_version. Graph-level matching and token binding are
-// the engine's, so the engine declines a graph whose schema it does not
-// understand before any pack, matcher, or kernel is looked at.
-// ---------------------------------------------------------------------------
 
 /// A graph schema floor an engine declaring the baseline cannot serve.
 const hipdnn_data_sdk::utilities::Version NEWER_THAN_BASELINE{
@@ -530,8 +487,6 @@ TEST(TestIngestorGenericPlanBuilder, EngineDecliningTheGraphsSchemaNeverMatches)
     const TestGraph graph(makeGraphId(0xA0), NEWER_THAN_BASELINE);
 
     EXPECT_FALSE(builder.isApplicable(0, graph));
-    // Bailed before the state manager: no matcher ran, so nothing bound tokens from
-    // a graph this engine cannot read.
     EXPECT_EQ(counters().graphCalls, 0);
     EXPECT_EQ(counters().kernelCalls, 0);
 }
@@ -546,7 +501,6 @@ TEST(TestIngestorGenericPlanBuilder, EngineDeclaringTheGraphsSchemaMatchesNormal
 
     const TestGraph graph(makeGraphId(0xA1), NEWER_THAN_BASELINE);
 
-    // Equal to the floor is understood: the rule declines below it, not at it.
     EXPECT_TRUE(builder.isApplicable(0, graph));
     EXPECT_EQ(counters().graphCalls, 1);
 }
@@ -559,8 +513,6 @@ TEST(TestIngestorGenericPlanBuilder, EngineNewerThanTheGraphNeedsMatchesNormally
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
-    // A graph that leaves the newer field unset still requires only the baseline, so
-    // an engine that understands more serves it as before.
     const TestGraph graph(makeGraphId(0xA2), BASELINE);
 
     EXPECT_TRUE(builder.isApplicable(0, graph));
@@ -570,12 +522,10 @@ TEST(TestIngestorGenericPlanBuilder, AnUnstampedGraphReadsAsTheBaselineAndMatche
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    // The engine leaves sdkVersion at its default, as every pack shipping today does.
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, *manager, resolver);
 
-    // No schema floor: a writer that never populated the field.
     const TestGraph graph(makeGraphId(0xA3));
 
     EXPECT_TRUE(builder.isApplicable(0, graph));

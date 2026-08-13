@@ -30,12 +30,8 @@
  * @brief The pack's dispatch: workspace sizing, prepare's unhappy paths, and a real
  *        compile-and-launch.
  *
- * The handler is reached through DispatchRegistry, the way a plan build reaches it:
- * it is internal to PointwiseAddNative.cpp, and its process-lifetime instance is the
- * one a plan actually runs.
- *
- * The launch tests run on device to exercise the runtime compile and uid-to-pointer
- * resolution. Everything that fails before those is asserted CPU-only.
+ * Reached through DispatchRegistry, the way a plan build reaches it. Launch tests run
+ * on device to exercise the runtime compile and uid-to-pointer resolution.
  */
 namespace
 {
@@ -46,8 +42,7 @@ using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 
-/// The bindings a real plan build would hand the handler, produced by running the graph
-/// matcher rather than built by hand.
+/// Bindings a real plan build would hand the handler, from running the graph matcher.
 BoundTokens bindingsFor(const MatchContext& context)
 {
     BoundTokens bound;
@@ -58,8 +53,7 @@ BoundTokens bindingsFor(const MatchContext& context)
     return bound;
 }
 
-/// Device buffers for one 1-element add, freed on scope exit. Templated on the element
-/// type to serve every dtype this pack's dispatch handler compiles for.
+/// Device buffers for one 1-element add, freed on scope exit.
 template <typename T>
 class AddBuffers
 {
@@ -103,9 +97,7 @@ private:
     void* _c = nullptr;
 };
 
-// ---------------------------------------------------------------------------
 // Workspace
-// ---------------------------------------------------------------------------
 
 struct WorkspaceCase
 {
@@ -140,8 +132,7 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
     const auto& handler = dispatchHandler(POINTWISE_ADD);
 
-    // The query is answered per kernel, before selection and before any plan exists, so
-    // the answer must not depend on which other kernels are in the catalog.
+    // Answered per kernel before selection, so must not depend on the catalog's contents.
     const auto first = handler.workspaceBytes(
         fixture.context(), bindingsFor(fixture.context()), makeKernel(256, "FLOAT"));
     static_cast<void>(handler.workspaceBytes(
@@ -152,21 +143,10 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
     EXPECT_EQ(first, second);
 }
 
-// ---------------------------------------------------------------------------
 // Prepare: unhappy paths, CPU-only, since each fails before reaching a compiler.
-// ---------------------------------------------------------------------------
-//
-// prepare()'s compile options are not asserted against a mock compiler: the handler is
-// internal to PointwiseAddNative.cpp, reachable only as the process-lifetime instance
-// the registry holds, so there is no seam to inject one through. The HALF launch below
-// fails if the dtype option is wrong, and the E2E suite fails if the kernel does not
-// compile. Both need a device.
 
 TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 {
-    // elementTypeFor's dtype switch is unreachable via matching, which admits only the
-    // dtypes this pack declares (FLOAT, HALF). Never reaches the compiler --
-    // elementTypeFor throws before prepare() calls it.
     const GraphFixture fixture(buildPointwiseGraph());
     const auto& handler = dispatchHandler(POINTWISE_ADD);
 
@@ -177,21 +157,16 @@ TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 
 TEST(TestPointwiseAddDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
-    // Binding lookup throws on a missing token before prepare() touches HIP.
+    // Binding lookup throws on a missing token before touching HIP.
     const GraphFixture fixture(buildPointwiseGraph());
     const auto& handler = dispatchHandler(POINTWISE_ADD);
 
-    // Preparation reads the operand uids the matcher bound rather than re-deriving them;
-    // bindings not produced by this pack's matcher are a wiring error.
     EXPECT_THROW(handler.prepare(fixture.context(), BoundTokens{}, makeKernel(64, "FLOAT")),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-// ---------------------------------------------------------------------------
 // Prepare and launch on device
-// ---------------------------------------------------------------------------
 
-// Runs over every dtype the pack ships a kernel for.
 struct RealLaunchCase
 {
     std::string name;
@@ -255,8 +230,7 @@ TEST(TestPointwiseAddDispatch, LaunchesTheSameResultForEitherBlockSize)
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
     const auto& handler = dispatchHandler(POINTWISE_ADD);
 
-    // block_size reaches the compiler and the launch geometry; a one-element add must
-    // still agree across both kernels.
+    // A one-element add must agree across both kernel block sizes.
     for(const int64_t blockSize : {64, 256})
     {
         const auto prepared = handler.prepare(
@@ -279,8 +253,7 @@ TEST(TestPointwiseAddDispatch, PreparedLaunchIsReusableAcrossExecutions)
     const GraphFixture fixture(buildPointwiseGraph(), currentDeviceProperties());
     const auto& handler = dispatchHandler(POINTWISE_ADD);
 
-    // A plan is built once and executes many times, so preparation must hold nothing
-    // tied to one execution.
+    // A plan built once and executed many times must hold nothing tied to one execution.
     const auto prepared = handler.prepare(
         fixture.context(), bindingsFor(fixture.context()), makeKernel(64, "FLOAT"));
     const Handle handle;
@@ -302,10 +275,8 @@ TEST(TestPointwiseAddDispatch, DispatchStaysResolvableAcrossContainerLifetimes)
 {
     SKIP_IF_NO_DEVICES();
 
-    // Registered dispatch implementations live in a process-wide registry and must
-    // outlive every container. This asserts a rebuilt container still resolves and runs
-    // the registration; a use-after-free is instead caught by the integration binary's
-    // exit status at process teardown.
+    // Registered dispatch implementations outlive every container; a rebuilt container
+    // must still resolve and run the registration.
     {
         const core::Container first;
     }

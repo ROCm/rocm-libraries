@@ -22,10 +22,6 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
-// ---------------------------------------------------------------------------
-// CatalogKey::operator==
-// ---------------------------------------------------------------------------
-
 TEST(TestIngestorMatchContext, CatalogKeysWithEqualFieldsCompareEqual)
 {
     const CatalogKey first{makeGraphId(1), 0};
@@ -59,17 +55,12 @@ INSTANTIATE_TEST_SUITE_P(
                       CatalogKeyInequalityCase{"DifferentDeviceId", CatalogKey{makeGraphId(1), 1}}),
     [](const ::testing::TestParamInfo<CatalogKeyInequalityCase>& info) { return info.param.name; });
 
-// ---------------------------------------------------------------------------
-// CatalogKeyHash
-// ---------------------------------------------------------------------------
-
 TEST(TestIngestorMatchContext, CatalogKeyHashIsConsistentForEqualKeys)
 {
     const CatalogKey first{makeGraphId(3), 2};
     const CatalogKey second{makeGraphId(3), 2};
     const CatalogKeyHash hash;
 
-    // Equal keys must hash equal, or LruCache's unordered_map lookup breaks silently.
     EXPECT_EQ(hash(first), hash(second));
 }
 
@@ -79,14 +70,8 @@ TEST(TestIngestorMatchContext, CatalogKeyHashDistinguishesDifferentDeviceIds)
     const CatalogKey onDeviceZero{makeGraphId(4), 0};
     const CatalogKey onDeviceOne{makeGraphId(4), 1};
 
-    // Collisions are legal, but this hash folds in deviceId; ignoring it would regress
-    // lookup cost while still "working" via collision.
     EXPECT_NE(hash(onDeviceZero), hash(onDeviceOne));
 }
-
-// ---------------------------------------------------------------------------
-// tryGetGraphId
-// ---------------------------------------------------------------------------
 
 TEST(TestIngestorMatchContext, TryGetGraphIdReturnsTheGraphsIdentity)
 {
@@ -108,7 +93,7 @@ TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForAGraphWithNoIdentit
 
 TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForANilId)
 {
-    // A present-but-nil id must not read as a valid, cacheable key.
+    // Present-but-nil must not read as a valid, cacheable key.
     const TestGraph graph(makeNilGraphId());
 
     EXPECT_EQ(tryGetGraphId(graph), std::nullopt);
@@ -116,7 +101,6 @@ TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForANilId)
 
 TEST(TestIngestorMatchContext, TryGetGraphIdReturnsNulloptForANonV4Id)
 {
-    // Any non-v4 id is as unable to promise per-graph uniqueness as nil.
     const TestGraph graph(makeNonV4GraphId(0x55));
 
     EXPECT_EQ(tryGetGraphId(graph), std::nullopt);

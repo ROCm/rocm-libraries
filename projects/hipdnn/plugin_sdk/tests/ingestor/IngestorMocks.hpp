@@ -17,17 +17,13 @@
 
 /**
  * @file IngestorMocks.hpp
- * @brief gmock doubles for the ingestor's two pure interfaces.
- *
- * IKernelDispatchHandler and IDeviceResolver are exercised only through the generic code
- * that consumes them (GenericPlan/GenericPlanBuilder for the dispatch handler,
- * GenericPlanBuilder::contextFor for the device resolver); these mocks back those tests.
+ * @brief gmock doubles for the ingestor's two pure interfaces, IKernelDispatchHandler
+ *        and IDeviceResolver.
  */
 namespace hipdnn_plugin_sdk::ingestor::testing
 {
 
-/// Mocks the native dispatch escape hatch, so GenericPlan/GenericPlanBuilder tests can
-/// assert what a plan asked of it without a real kernel launch.
+/// Mocks the native dispatch escape hatch for asserting what a plan asked of it.
 class MockKernelDispatchHandler : public IKernelDispatchHandler<StubHandle>
 {
 public:
@@ -53,9 +49,7 @@ public:
                 (const, override));
 };
 
-/// Mocks device resolution so GenericPlanBuilder::contextFor() can be shown resolving
-/// per-handle device facts into the MatchContext it builds, per call rather than once at
-/// construction.
+/// Resolves per-handle device facts per call, not once at construction.
 class MockDeviceResolver : public IDeviceResolver<StubHandle>
 {
 public:

@@ -23,21 +23,16 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// The device a catalog was built for: a plain HIP device ordinal (hipGetDevice).
+/// The device a catalog was built for: a plain HIP device ordinal.
 using DeviceId = int;
 
-/// Device id meaning "no resolvable device". Negative so it never aliases a real ordinal;
-/// matchers decline on it rather than matching against another device's facts.
+/// "No resolvable device"; negative so it never aliases a real ordinal.
 inline constexpr DeviceId NO_DEVICE = -1;
 
 /// A finalized graph's stable identity, preserved across serialization round trips.
 using GraphId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
-/// The catalog cache key. Excludes the handle: a handle's lifetime is unrelated to a plan's
-/// validity, so keying on it would be wrong.
-///
-/// RFC 0017 §8.1 also keys this on engine id and a descriptor-inventory generation (§8.6);
-/// both are constant today so they are omitted.
+/// The catalog cache key. Excludes the handle: unrelated to a plan's validity.
 struct CatalogKey
 {
     GraphId graphId;
@@ -49,12 +44,10 @@ struct CatalogKey
     }
 };
 
-/// A user-defined key has no std::hash, so the cache is given this explicitly.
 struct CatalogKeyHash
 {
     size_t operator()(const CatalogKey& key) const noexcept
     {
-        // UUID v4 bytes are already well-distributed; this folds them with the device ordinal.
         size_t hash = 1469598103934665603ULL;
         for(const uint8_t byte : key.graphId)
         {
@@ -69,8 +62,6 @@ struct CatalogKeyHash
 /// Token name to MetadataValue map of what matching resolved for one graph.
 using BoundTokens = std::unordered_map<std::string, MetadataValue>;
 
-/// Returns nullopt when absent or bound to a non-integer value, so type confusion never reads
-/// as a missing token.
 inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::string_view token)
 {
     const auto it = bound.find(std::string(token));
@@ -86,13 +77,8 @@ inline std::optional<int64_t> tryGetBoundInt(const BoundTokens& bound, std::stri
     return *value;
 }
 
-/**
- * @brief Bound token state a matcher, scorer, or dispatch formula reads (`$graph.*`,
- *        `$device.*`); `$kernel.*` arrives separately as a KernelDefinition per candidate.
- *
- * Holds references, not copies: built on the stack for one matching pass and must not
- * outlive the graph it names.
- */
+/// Bound token state a matcher, scorer, or dispatch formula reads. Holds references,
+/// not copies: built on the stack for one matching pass, must not outlive the graph.
 struct MatchContext
 {
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph;
@@ -100,8 +86,7 @@ struct MatchContext
     const DeviceProperties& deviceProperties;
 };
 
-/// @brief The graph's stable identity, or nullopt when absent (legacy/unfinalized graphs) or
-/// non-v4 (uniqueness is otherwise unguaranteed). Callers must treat both as "cannot cache".
+/// nullopt when absent or non-v4 (both mean "cannot cache").
 inline std::optional<GraphId>
     tryGetGraphId(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {
@@ -118,17 +103,8 @@ inline std::optional<GraphId>
     return bytes;
 }
 
-/**
- * @brief The graph schema version @p graph's own contents require (RFC 0017 §4).
- *
- * Reads `min_required_engine_api_version`, which hipDNN stamps from the optional
- * features the graph uses (PluginVersionConstants.hpp's
- * computeMinimumEnginePluginApiVersion). A matcher whose `sdkVersion` is below this
- * floor is declined before it runs.
- *
- * An unstamped graph reads as the baseline, matching how the plugin-version filter
- * already treats one.
- */
+/// The graph schema version @p graph's own contents require; unstamped reads as
+/// baseline.
 inline hipdnn_data_sdk::utilities::Version
     graphSchemaFloor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
 {

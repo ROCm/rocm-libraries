@@ -28,11 +28,8 @@
  * @brief The second reference pack: what its matchers accept and refuse, how it ranks,
  *        and that it subtracts in the right direction.
  *
- * Deliberately smaller than the add pack's suite, which owns the exhaustive refusal
- * matrix for the shape both share. Repeating all eleven cases would assert one code
- * path twice. What is here is this pack's own: that it claims SUB and declines ADD,
- * that its bindings are ordered since subtraction does not commute, and that the
- * inherited refusals reached this matcher rather than being assumed.
+ * Smaller than the add pack's suite, which owns the exhaustive refusal matrix for the
+ * shared shape; this file covers only what is unique to SUB.
  */
 namespace
 {
@@ -44,23 +41,19 @@ using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-/// Runs the sub pack's graph matcher, discarding what it binds.
 bool matches(const MatchContext& context)
 {
     BoundTokens bound;
     return matchesGraph(POINTWISE_SUB, context, bound);
 }
 
-/// A kernel definition naming this pack's source, since makeKernel defaults to the add
-/// pack's.
+/// Names this pack's source; makeKernel defaults to the add pack's.
 hipdnn_plugin_sdk::ingestor::KernelDefinition subKernel(int64_t blockSize, const std::string& dtype)
 {
     return makeKernel(blockSize, dtype, "PointwiseSub");
 }
 
-// ---------------------------------------------------------------------------
 // The operation gate: this is what separates two packs over one graph shape
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseSubMatcher, AcceptsASingleElementFloatSubtract)
 {
@@ -71,9 +64,7 @@ TEST(TestPointwiseSubMatcher, AcceptsASingleElementFloatSubtract)
 
 TEST(TestPointwiseSubMatcher, RefusesTheAddGraphItsSiblingPackServes)
 {
-    // The two packs are distinguished by operation alone: same node count, same shape,
-    // same dtypes. If this returned true both engines would claim every pointwise graph
-    // and selection would be arbitrary.
+    // Same node count, shape, and dtypes; only operation distinguishes the packs.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
 
     EXPECT_FALSE(matches(fixture.context()));
@@ -81,17 +72,14 @@ TEST(TestPointwiseSubMatcher, RefusesTheAddGraphItsSiblingPackServes)
 
 TEST(TestPointwiseAddMatcher, RefusesTheSubGraphItsSiblingPackServes)
 {
-    // The converse, asserted here rather than in the add pack's file because it only
-    // became meaningful once a second pack existed.
+    // The converse of the case above.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
 
     BoundTokens bound;
     EXPECT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
 }
 
-// ---------------------------------------------------------------------------
 // Refusals this pack must have inherited, not merely been assumed to
-// ---------------------------------------------------------------------------
 
 /// One graph the sub matcher must refuse, plus a readable name for a failing run.
 struct SubRefusalCase
@@ -121,8 +109,6 @@ INSTANTIATE_TEST_SUITE_P(
                  data_objects::PointwiseMode::SUB, data_objects::DataType::FLOAT, {1, 1, 2, 2});
          }},
         {"ATensorWithNoStrides",
-         // Same refusal the add pack owes: the layout classifier dereferences strides(),
-         // and applicability runs before anything has validated the graph.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::SUB,
                                         data_objects::DataType::FLOAT,
@@ -150,7 +136,6 @@ INSTANTIATE_TEST_SUITE_P(
                  data_objects::PointwiseMode::SUB, data_objects::DataType::FLOAT, {1});
          }},
         {"AUnaryPointwise",
-         // A subtract with one operand is not a subtract.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::SUB,
                                         data_objects::DataType::FLOAT,
@@ -183,13 +168,11 @@ INSTANTIATE_TEST_SUITE_P(
     }),
     [](const ::testing::TestParamInfo<SubRefusalCase>& info) { return info.param.name; });
 
-// ---------------------------------------------------------------------------
 // Kernel-scoped matching and ranking
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseSubMatcher, RefusesAKernelBakedForAnotherDtype)
 {
-    // An f16 kernel handed f32 operands does not fail; it returns wrong numbers.
+    // An f16 kernel handed f32 operands returns wrong numbers, not a failure.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
 
     EXPECT_TRUE(matchesKernel(POINTWISE_SUB, fixture.context(), subKernel(64, "FLOAT")));
@@ -204,9 +187,7 @@ TEST(TestPointwiseSubScore, PrefersTheLargerBlockSize)
               scoreKernel(POINTWISE_SUB, subKernel(64, "FLOAT"), fixture.context()));
 }
 
-// ---------------------------------------------------------------------------
 // Binding order: the property subtraction has and addition does not
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseSubBinding, BindsTheMinuendAndSubtrahendInGraphOrder)
 {
@@ -215,8 +196,7 @@ TEST(TestPointwiseSubBinding, BindsTheMinuendAndSubtrahendInGraphOrder)
     BoundTokens bound;
     ASSERT_TRUE(matchesGraph(POINTWISE_SUB, fixture.context(), bound));
 
-    // Swapping these computes b-a, which is a plausible answer of the wrong sign rather
-    // than a failure, so it is asserted here and again numerically on device.
+    // Swapping these computes b-a: a plausible wrong-sign answer, not a failure.
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputAToken),
               INPUT_A_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputBToken),
@@ -227,9 +207,7 @@ TEST(TestPointwiseSubBinding, BindsTheMinuendAndSubtrahendInGraphOrder)
 
 TEST(TestPointwiseSubBinding, BindsUnderItsOwnTokenNamesNotItsSiblings)
 {
-    // Both packs bind three operand uids. If they shared token names, mergeBound would
-    // see two packs binding one token, agreeing here by luck and conflicting the
-    // moment a graph gives them different operands.
+    // Shared token names would let mergeBound conflate the two packs' operands.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
 
     BoundTokens bound;
@@ -240,9 +218,7 @@ TEST(TestPointwiseSubBinding, BindsUnderItsOwnTokenNamesNotItsSiblings)
     EXPECT_EQ(bound.count(std::string(POINTWISE_ADD.outputToken)), 0U);
 }
 
-// ---------------------------------------------------------------------------
 // Descriptor set
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseSubPack, EveryKernelNamesThisPacksOwnSource)
 {
@@ -282,9 +258,7 @@ TEST(TestPointwiseSubPack, PackCrossReferencesResolveWithinTheDescriptorSet)
 
 TEST(TestPointwiseSubPack, SharesNoDescriptorIdWithTheAddPack)
 {
-    // Both sets load into one provider and descriptors reference each other by id, so a
-    // collision would silently make two engines one. This is the check a loader will
-    // need across installed files, exercised here while there are only two.
+    // Loaded into one provider; a collision would silently merge two engines into one.
     const auto add = buildPointwiseAddDescriptorSet();
     const auto sub = buildPointwiseSubDescriptorSet();
 
@@ -335,16 +309,13 @@ TEST(TestPointwiseSubPack, RegistersADistinctEngineName)
     EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(subId), POINTWISE_SUB.engineName);
 }
 
-// ---------------------------------------------------------------------------
 // Dispatch, on device
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseSubDispatch, SubtractsInTheRightDirection)
 {
     SKIP_IF_NO_DEVICES();
 
-    // The whole point of a second op: a+b and a-b differ, and an asymmetric operation
-    // catches an operand swap that a commutative one cannot.
+    // An asymmetric op catches an operand swap a commutative one cannot.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB),
                                currentDeviceProperties());
     const auto& handler = dispatchHandler(POINTWISE_SUB);
@@ -379,7 +350,6 @@ TEST(TestPointwiseSubDispatch, SubtractsInTheRightDirection)
     float result = 0.0f;
     ASSERT_EQ(hipSuccess, hipMemcpy(&result, deviceC, sizeof(float), hipMemcpyDeviceToHost));
 
-    // 3.0, not -3.0: an operand swap compiles, launches, and returns the wrong sign.
     EXPECT_FLOAT_EQ(result, 3.0f);
 
     static_cast<void>(hipFree(deviceA));

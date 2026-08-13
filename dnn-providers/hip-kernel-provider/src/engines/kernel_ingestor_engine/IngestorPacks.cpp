@@ -10,9 +10,8 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 const std::vector<IngestorPack>& ingestorPacks()
 {
-    // Function-local static: no dependence on namespace-scope init order, and the
-    // entries are plain function pointers, so building this list cannot fail in a way
-    // that matters before main().
+    // Function-local static: entries are plain function pointers, so this cannot fail
+    // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:PointwiseAdd", &registerPointwiseAddSymbols, &buildPointwiseAddDescriptorSet},
         {"hipkernel:PointwiseSub", &registerPointwiseSubSymbols, &buildPointwiseSubDescriptorSet},

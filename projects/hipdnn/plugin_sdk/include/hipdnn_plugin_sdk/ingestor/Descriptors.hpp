@@ -17,49 +17,24 @@
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 
-/**
- * @file Descriptors.hpp
- * @brief The universal descriptor set from RFC 0017, as parsed in-memory data.
- *
- * Each descriptor kind maps 1:1 onto a concept hipDNN already has:
- *
- * | Descriptor | Describes                                                    |
- * |------------|--------------------------------------------------------------|
- * | KMD        | the variant fields every kernel in an engine carries          |
- * | UHD        | how to rank the kernels that fit a graph                      |
- * | UED        | the engine: its identity, its one UHD, its one KMD, its knobs |
- * | UMD        | one applicability check over the graph and kernel metadata    |
- * | UDD        | how to invoke a kernel: workspace and launch                  |
- * | UKD        | one launchable kernel: a source plus its KMD values           |
- * | KDP        | binds a matcher set, one engine, and one UDD over N kernels   |
- *
- * Descriptors reference each other by `id` only, never by pointer or index, so a pack
- * authored independently can name a matcher or an engine it does not own.
- *
- * These are the *parsed* form; nothing here parses, loads, or validates a file. The
- * loader that produces them from disk is ALMIOPEN-2401; the expression language that
- * replaces the native symbol fields below is the UMD/UDD follow-up RFC.
- */
+/// @file Descriptors.hpp
+/// @brief The universal descriptor set, as parsed in-memory data: KMD (kernel
+/// metadata fields), UHD (ranking model), UED (engine identity), UMD (applicability
+/// check), UDD (invocation ABI), UKD (one kernel), KDP (pack binding the above over N
+/// kernels). Descriptors reference each other by `id` only. This is the parsed form;
+/// nothing here parses, loads, or validates a file.
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Stable, globally unique id every descriptor carries; descriptors reference each
-/// other only by this id. A 128-bit UUID, matching hipDNN's graph identity (RFC 0017 §4).
+/// Stable, globally unique id every descriptor carries and is referenced by.
 using DescriptorId = hipdnn_flatbuffers_sdk::utilities::UuidBytes;
 
-/// @brief A descriptor id in its canonical text form, for diagnostics.
 inline std::string toString(const DescriptorId& id)
 {
     return hipdnn_flatbuffers_sdk::utilities::formatUuid(id);
 }
 
-/**
- * @brief How a descriptor is named in a diagnostic: its kind, its name, and its id.
- *
- * An id alone is a UUID an operator cannot grep the source for, and a name alone is
- * not unique. Every message about a descriptor should be built from this so they read
- * the same wherever they come from.
- */
+/// How a descriptor is named in a diagnostic: its kind, name, and id.
 inline std::string
     describeDescriptor(std::string_view kind, const std::string& name, const DescriptorId& id)
 {
@@ -71,7 +46,7 @@ struct DescriptorIdHash
 {
     size_t operator()(const DescriptorId& id) const noexcept
     {
-        // FNV-1a fold over the UUID bytes; not persisted or exposed outside this process.
+        // FNV-1a fold over the UUID bytes.
         size_t hash = 1469598103934665603ULL;
         for(const uint8_t byte : id)
         {
@@ -82,13 +57,10 @@ struct DescriptorIdHash
     }
 };
 
-/// Value type for a KMD field or a bound `$graph.*` fact (MatchContext.hpp's
-/// BoundTokens). `bool` is distinct from `int64_t` so a flag doesn't compare as 1;
-/// `std::vector<int64_t>` covers list-valued facts like `stride_order`.
+/// Value type for a KMD field or a bound `$graph.*` fact.
 using MetadataValue = std::variant<bool, int64_t, double, std::string, std::vector<int64_t>>;
 
-/// The type a KMD field or bound graph fact holds. Ordered to match MetadataValue's
-/// alternatives.
+/// The type a KMD field or bound graph fact holds.
 enum class MetadataType
 {
     BOOL,
@@ -98,16 +70,13 @@ enum class MetadataType
     INT_LIST,
 };
 
-/// @brief The type of a value, for checking one against its field's declaration.
-///
-/// Relies on MetadataType's enumerators being in MetadataValue's alternative order.
-/// The assertions below make a reordering a compile error here rather than a silent
-/// mis-typing of every kernel in every pack.
 inline MetadataType metadataTypeOf(const MetadataValue& value)
 {
     return static_cast<MetadataType>(value.index());
 }
 
+// MetadataType's order must match MetadataValue's alternative order; kept in sync by
+// the asserts below.
 static_assert(std::variant_size_v<MetadataValue> == 5,
               "MetadataValue gained or lost an alternative; add the matching MetadataType "
               "enumerator and extend the assertions below.");
@@ -133,9 +102,7 @@ static_assert(
         std::vector<int64_t>>,
     "MetadataType::INT_LIST no longer indexes MetadataValue's vector<int64_t> alternative.");
 
-/// A kernel's complete metadata tuple: every KMD field mapped to this kernel's value.
-/// Must be unique per kernel within an engine (RFC 0017 §4); ordered so equal tuples
-/// compare equal regardless of insertion order.
+/// A kernel's complete metadata tuple; must be unique per kernel within an engine.
 using MetadataValues = std::map<std::string, MetadataValue>;
 
 /// One field a kernel may vary along, as declared by an engine's KMD.
@@ -143,12 +110,12 @@ struct MetadataField
 {
     std::string name;
     MetadataType type = MetadataType::INT;
-    /// Value used when a kernel omits this field; nullopt means the field is mandatory.
+    /// nullopt means the field is mandatory.
     std::optional<MetadataValue> defaultValue;
 };
 
-/// KMD: the metadata schema, one per engine, shared by every kernel it owns. The
-/// field set is the engine's kernel key; matchers read fields as `$kernel.<field>`.
+/// KMD: the metadata schema, one per engine. Field set is the kernel key; matchers
+/// read fields as `$kernel.<field>`.
 struct MetadataSchema
 {
     DescriptorId id;
@@ -156,79 +123,43 @@ struct MetadataSchema
     std::vector<MetadataField> fields;
 };
 
-/// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload` (RFC 0017
-/// §9.1).
+/// Which adapter builds an engine's IKernelHeuristic from a UHD's `payload`.
 enum class HeuristicKind
 {
-    /// `payload` is a NativeRegistry score symbol (IKernelHeuristic.hpp's
-    /// makeKernelHeuristic()). Only kind with an adapter today.
-    NATIVE,
-    /// Trained model artifact plus feature signature (UHD follow-up RFC). No adapter yet.
-    MODEL,
+    NATIVE, ///< NativeRegistry score symbol. Only kind with an adapter today.
+    MODEL, ///< Trained model artifact plus feature signature. No adapter yet.
 };
 
-/// UHD: the kernel-selection model for one engine. Chooses which kernel within an
-/// engine to run, given the kernels that fit the graph.
+/// UHD: the kernel-selection model for one engine.
 struct HeuristicDescriptor
 {
     DescriptorId id;
     std::string name;
     HeuristicKind kind = HeuristicKind::NATIVE;
-    /// `kind`'s payload: a NativeRegistry score symbol when kind == NATIVE.
     std::string payload;
 };
 
 /// UED: the engine itself, carrying no logic of its own. `name` hashes into hipDNN's
-/// engine-id space (EngineNames.hpp); must be globally unique, e.g. "rocke:SDPA".
+/// engine-id space; must be globally unique, e.g. "rocke:SDPA".
 struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
     DescriptorId heuristicId;
     DescriptorId metadataSchemaId;
-    /// KMD field names this engine exposes to the caller. Unmatched name is a load error.
     std::vector<std::string> knobs;
-    /// `hipdnnBackendBehaviorNote_t` values (BehaviorNote.h), reported via EngineDetails.
-    /// Stored as int32 so an unrecognized newer note value isn't truncated.
+    /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
     std::vector<int32_t> behaviorNotes;
-    /**
-     * @brief The hipDNN graph schema version this engine's descriptors understand
-     *        (RFC 0017 §4's `sdk_version`).
-     *
-     * Graph-level matching and token binding belong to the engine: every descriptor
-     * under it reads the tokens that binding produces, so they must all agree on the
-     * schema those tokens were derived from. One version on the UED is that shared
-     * agreement, and it lets a graph the engine cannot understand bail before any
-     * pack, matcher, or kernel is looked at.
-     *
-     * A graph reports the version its own contents require via
-     * `min_required_engine_api_version` (graph.fbs), computed from the optional
-     * fields it sets. An engine declaring less than that floor declines the graph
-     * rather than matching it: it would otherwise bind the fields it knows and
-     * silently ignore one that changes what the graph means.
-     *
-     * Defaults to the baseline, which every graph's floor is at least equal to, so
-     * an engine that sets nothing behaves exactly as before.
-     *
-     * This is a match-time gate, not a load-time one: the floor is a property of
-     * each graph, not of the runtime, so it cannot be resolved when the descriptor
-     * is read. The per-file-type `major.minor` of RFC 0017 §4's version table is a
-     * separate, load-time check and belongs to the loader (ALMIOPEN-2401).
-     */
+    /// Graph schema version this engine understands; a graph below this floor is
+    /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
 };
 
-/// Which inputs a matcher reads; determines how often it runs and what its failure
-/// prunes (RFC 0017 §5). Provisional until the criteria language lands, when this
-/// becomes derived from whether the expression references `$kernel.*`.
+/// Which inputs a matcher reads, and so what its failure prunes.
 enum class MatchScope
 {
-    /// Runs once per (graph, device); failure disqualifies every kernel in every pack
-    /// that lists it.
-    GRAPH,
-    /// Also reads `$kernel.*`; re-evaluated per candidate kernel, disqualifying only
-    /// that kernel.
-    KERNEL,
+    GRAPH, ///< Once per (graph, device); failure disqualifies every kernel in the pack.
+    KERNEL, ///< Reads `$kernel.*` too; disqualifies only the one kernel.
 };
 
 /// UMD: one applicability check, shared by id across packs.
@@ -236,118 +167,62 @@ struct MatchDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// Defaulted like every other enum member here. GRAPH is the safer default: the
-    /// consumer is a two-way branch, so an indeterminate value would resolve out of the
-    /// wrong registry and report a correctly-spelled symbol as missing.
     MatchScope scope = MatchScope::GRAPH;
-    /// Resolved through NativeRegistry; a data-driven form (structural node pattern plus
-    /// declarative criteria) is the UMD follow-up RFC.
-    std::string matchSymbol;
+    std::string matchSymbol; ///< Resolved through NativeRegistry.
 };
 
-/// UDD: how to invoke a kernel: the dispatch ABI, shared by every kernel in a pack.
-/// A kernel with a different argument list or launch-formula shape belongs in
-/// another pack with its own UDD (RFC 0017 §6).
+/// UDD: how to invoke a kernel, shared by every kernel in a pack.
 struct DispatchDescriptor
 {
     DescriptorId id;
     std::string name;
-    /// Resolved through NativeRegistry to a handler supplying workspace and launch. A
-    /// data-driven form (symbolic grid/block/shared-memory/workspace/args) is the UDD
-    /// follow-up RFC.
-    std::string dispatchSymbol;
+    std::string dispatchSymbol; ///< Resolved through NativeRegistry.
 };
 
-/// Which adapter loads and prepares one kernel's code, given its source's payload (RFC
-/// 0017 §9.1's adapter dispatch point).
+/// Which adapter loads and prepares one kernel's code.
 enum class KernelSourceKind
 {
-    /// A named source file plus an entry point, compiled at plan-build time. The only
-    /// kind this POC implements.
-    EMBEDDED_SOURCE,
-    /// A prebuilt kpack library plus the symbol to resolve inside it. No adapter yet.
-    KPACK_SYMBOL,
-    /// A standalone `.hsaco` code-object file. No adapter yet.
-    HSACO_FILE,
-    /// A rocke builder name plus its build values. No adapter yet.
-    ROCKE_BUILDER,
+    EMBEDDED_SOURCE, ///< Source file plus entry point, compiled at plan-build time.
+    KPACK_SYMBOL, ///< Prebuilt kpack library plus symbol. No adapter yet.
+    HSACO_FILE, ///< Standalone `.hsaco` code-object file. No adapter yet.
+    ROCKE_BUILDER, ///< rocke builder name plus build values. No adapter yet.
 };
 
-/// UKD's source: where a kernel's code comes from, a tagged union over RFC 0017 §7's
-/// source kinds. Only `EMBEDDED_SOURCE` is implemented.
+/// UKD's source. Only `EMBEDDED_SOURCE` is implemented.
 struct KernelSource
 {
     KernelSourceKind kind = KernelSourceKind::EMBEDDED_SOURCE;
-    /// `EMBEDDED_SOURCE`: source file name. Unused by other kinds.
     std::string sourceFile;
-    /// `EMBEDDED_SOURCE`: entry point within `sourceFile`. Unused by other kinds.
     std::string entryPoint;
 };
 
-/// UKD: one launchable kernel: a source plus concrete values for its engine KMD's
-/// fields. Matchers, engine, and dispatch are inherited from its pack.
+/// UKD: one launchable kernel. Matchers, engine, and dispatch come from its pack.
 struct KernelDescriptor
 {
     DescriptorId id;
     std::string name;
     KernelSource source;
-    /// This kernel's values for the KMD's fields; omitted fields take the KMD default.
-    /// The completed tuple is this kernel's catalog key, unique engine-wide.
+    /// Omitted fields take the KMD default; completed tuple is the catalog key.
     MetadataValues metadata;
-    /// Tie-break when the heuristic is not decisive. Higher wins.
-    int64_t priority = 0;
+    int64_t priority = 0; ///< Tie-break when the heuristic is not decisive.
 };
 
-/// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over a
-/// vector of child kernels. Everything except the child kernels is shared by id.
+/// KDP: one pack binding a matcher set, one engine, and one dispatch descriptor over
+/// a vector of child kernels.
 struct KernelDescriptorPack
 {
     DescriptorId id;
     std::string name;
-    /// A child kernel applies only when every one of these matchers passes.
     std::vector<DescriptorId> matcherIds;
     DescriptorId engineId;
     DescriptorId dispatchId;
-    /**
-     * @brief GFX targets this pack's kernels support, e.g. `{"gfx942", "gfx950"}`.
-     *
-     * **Empty means arch-independent:** the pack applies on every device. That is the
-     * default, so a pack with no architecture constraint needs no edit.
-     *
-     * Base identifiers, without the target-id feature suffix: a device reports
-     * `gfx942:sramecc+:xnack-`, and the comparison strips that before matching. Matching
-     * is exact on the base id, not by prefix or family, so `gfx942` never silently
-     * accepts `gfx950`; a pack serving a family lists every member.
-     *
-     * A pack property rather than a kernel one because a pack is already the unit
-     * binding one dispatch ABI over N kernels, and a differently-targeted kernel needs
-     * its own pack regardless. Per-kernel arch would be a second source of truth against
-     * the pack's own dispatch handler.
-     *
-     * Enforced in two places, and they are not redundant. Here, at catalog build, using
-     * the device *this call* targets, which a multi-GPU box with mixed architectures
-     * needs per call. ALMIOPEN-2401 adds the second gate at load (RFC 0017 §12), using
-     * the machine's devices at startup, so a pack no local device can run is never built.
-     *
-     * An arch-excluded pack is a correct, expected decline, the same category as a
-     * matcher returning false. It is not a malformed entity and must not be reported as
-     * one, or a healthy cross-arch install reads as a pile of failures.
-     */
+    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent.
+    /// Matches the base target id exactly, so `gfx942` never accepts `gfx950`.
     std::vector<std::string> arch;
     std::vector<KernelDescriptor> kernels;
 };
 
-/**
- * @brief One engine and every descriptor it references by id: what a loader produces
- *        from one installed descriptor set, and what an engine is built from.
- *
- * Ids are resolved within a set, so a set is self-contained. ALMIOPEN-2401 replaces the
- * C++ that builds these with a directory scan producing the same type; nothing
- * downstream of it changes.
- *
- * A set is not a file: one engine's packs may be authored across several files, and a
- * loader is free to merge them into one set before handing it over.
- */
+/// One engine and every descriptor it references by id; self-contained.
 struct DescriptorSet
 {
     EngineDescriptor engine;

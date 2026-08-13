@@ -32,7 +32,6 @@ TEST(TestPointwiseAddPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes
     const auto& kernels = set.packs.front().kernels;
     ASSERT_EQ(kernels.size(), 3U);
 
-    // The two FLOAT kernels differ only in block size; HALF is pruned on a FLOAT graph.
     const auto describes = [&kernels](int64_t blockSize, const std::string& dtype) {
         return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
             return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD))) == blockSize
@@ -63,7 +62,6 @@ TEST(TestPointwiseAddPack, PackCrossReferencesResolveWithinTheDescriptorSet)
     const auto set = buildPointwiseAddDescriptorSet();
     const auto& pack = set.packs.front();
 
-    // A pack names its engine, matchers, and dispatch by id; every one must resolve.
     EXPECT_EQ(pack.engineId, set.engine.id);
 
     ASSERT_EQ(pack.matcherIds.size(), 2U);
@@ -83,7 +81,6 @@ TEST(TestPointwiseAddPack, EngineNamesItsHeuristicAndMetadataSchema)
 {
     const auto set = buildPointwiseAddDescriptorSet();
 
-    // An engine carries exactly one heuristic and one metadata schema.
     EXPECT_EQ(set.engine.heuristicId, set.heuristic.id);
     EXPECT_EQ(set.engine.metadataSchemaId, set.schema.id);
 }
@@ -92,7 +89,6 @@ TEST(TestPointwiseAddPack, ExposesBlockSizeAsAKnobAndDtypeAsInternal)
 {
     const auto set = buildPointwiseAddDescriptorSet();
 
-    // dtype is pinned by the graph rather than chosen.
     ASSERT_EQ(set.engine.knobs.size(), 1U);
     EXPECT_EQ(set.engine.knobs.front(), std::string(BLOCK_SIZE_FIELD));
 }
@@ -101,7 +97,6 @@ TEST(TestPointwiseAddPack, EveryKnobNamesADeclaredMetadataField)
 {
     const auto set = buildPointwiseAddDescriptorSet();
 
-    // A knob naming a field the schema does not declare could never be filtered or defaulted.
     for(const auto& knob : set.engine.knobs)
     {
         EXPECT_TRUE(std::any_of(set.schema.fields.begin(),
@@ -114,7 +109,6 @@ TEST(TestPointwiseAddPack, MatchersCoverBothScopes)
 {
     const auto set = buildPointwiseAddDescriptorSet();
 
-    // Graph-scoped prunes the whole pack once per graph; kernel-scoped prunes per candidate.
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
@@ -133,16 +127,12 @@ TEST(TestPointwiseAddPack, MatchersCoverBothScopes)
 
 TEST(TestPointwiseAddPack, EngineIdIsTheHashOfItsScopedName)
 {
-    // A descriptor-backed engine's id comes from its UED name, so the provider and
-    // hipDNN derive the same id without sharing a table.
     EXPECT_EQ(registerEngineName(std::string(POINTWISE_ADD.engineName)),
               hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName));
 }
 
 TEST(TestPointwiseAddPack, RegisteringTheEngineNameTwiceIsIdempotent)
 {
-    // Called once per discovered set per process, but Containers come and go; a second
-    // call must return the same id rather than throwing on a duplicate registration.
     const auto first = registerEngineName(std::string(POINTWISE_ADD.engineName));
     const auto second = registerEngineName(std::string(POINTWISE_ADD.engineName));
 
@@ -151,7 +141,6 @@ TEST(TestPointwiseAddPack, RegisteringTheEngineNameTwiceIsIdempotent)
 
 TEST(TestPointwiseAddPack, RegistersTheEngineNameForDiagnostics)
 {
-    // Registered at run time so a log line or collision report can name the engine.
     const auto id = registerEngineName(std::string(POINTWISE_ADD.engineName));
 
     EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(id), POINTWISE_ADD.engineName);

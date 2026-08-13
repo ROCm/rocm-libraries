@@ -37,16 +37,9 @@ using namespace hip_kernel_provider::test_utilities;
 
 /**
  * @file IntegrationGpuKernelIngestor.cpp
- * @brief The kernel ingestor pack, end to end through the hipDNN frontend API.
- *
- * Drives the same path a real caller takes: Graph::pointwise(),
- * get_ranked_engine_ids(), get_knobs_for_engine(), get_workspace_size(), execute().
- * The descriptor set, matchers, heuristic, and dispatch handler are exercised as they
- * compose in production.
- *
- * Exception: `hipdnnEnginePluginGetAllEngineIds` enumerates every engine a plugin
- * exports independent of any graph, and has no frontend equivalent, so that one
- * assertion crosses the raw C ABI via a minimal dlopen helper.
+ * @brief The kernel ingestor pack, end to end through the hipDNN frontend API: proves
+ *        the descriptor set, matchers, heuristic, and dispatch handler compose in
+ *        production, driving the same path a real caller takes.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -72,9 +65,6 @@ std::shared_ptr<TensorAttributes> makeScalarTensor(int64_t uid, const std::strin
     return tensor;
 }
 
-/// A single binary-pointwise node over 1-element FLOAT tensors: the one shape these
-/// packs accept, differing only in operation. Each call returns a fresh graph, never
-/// shared build/plan state.
 std::shared_ptr<Graph> buildPointwiseGraph(PointwiseMode mode)
 {
     auto graph = std::make_shared<Graph>();
@@ -104,7 +94,6 @@ std::shared_ptr<Graph> buildPointwiseSubGraph()
     return buildPointwiseGraph(PointwiseMode::SUB);
 }
 
-/// A graph this pack must decline: two nodes, so no single prebuilt kernel serves it.
 std::shared_ptr<Graph> buildUnsupportedGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -129,7 +118,7 @@ std::shared_ptr<Graph> buildUnsupportedGraph()
     return graph;
 }
 
-/// Execute shapes: a single call, and several reusing the same built plan.
+/// A single call, and several reusing the same built plan.
 struct ExecuteCase
 {
     std::string name;
@@ -153,8 +142,7 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(SUB_ENGINE_NAME);
     }
 
-    /// Builds `graph`, pins @p pinnedEngineId before plan creation, and compiles a plan
-    /// with default knobs.
+    /// Pins @p pinnedEngineId before plan creation and compiles with default knobs.
     void buildAndCompile(Graph& graph, int64_t pinnedEngineId)
     {
         graph.set_preferred_engine_id_ext(pinnedEngineId);
@@ -172,16 +160,13 @@ protected:
         ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     }
 
-    /// Builds and compiles pinned to the add pack, the default for the tests below
-    /// that predate the second engine.
     void buildAndCompile(Graph& graph)
     {
         buildAndCompile(graph, engineId());
     }
 
-    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes it once on GPU with
-    /// `workspace`, and verifies against CpuReferenceGraphExecutor. `seed` varies the
-    /// input values so repeated calls never compare against stale buffers.
+    /// Executes `graph` once on GPU with `workspace` and verifies against
+    /// CpuReferenceGraphExecutor.
     void executeAndVerify(Graph& graph, void* workspace, unsigned int seed)
     {
         GraphTensorBundle gpuBundle;
@@ -203,9 +188,8 @@ protected:
         });
         for(auto& [uid, tensor] : gpuBundle.tensors)
         {
-            // Offset per uid: randomizeTensor seeds a fresh mt19937, so a shared seed
-            // makes every operand byte-identical and allClose() would pass on a+a as
-            // readily as a+b, no longer witnessing uid-based argument resolution.
+            // Per-uid offset so operands are never byte-identical, or allClose() would
+            // pass on a+a as readily as a+b.
             const auto tensorSeed = seed + static_cast<unsigned int>(uid);
             gpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
             cpuBundle.randomizeTensor(uid, -4.0f, 4.0f, tensorSeed);
@@ -224,18 +208,12 @@ protected:
         auto& gpuOut = gpuBundle.getTensor(3);
         auto& cpuOut = cpuBundle.getTensor(3);
         gpuOut.markDeviceModified();
-        // Proves the full chain: matcher admission, heuristic ranking, handler compile
-        // and launch, and argument resolution by tensor uid.
         EXPECT_TRUE(CpuFpReferenceValidation<float>().allClose(cpuOut, gpuOut));
     }
 };
 
-// ---------------------------------------------------------------------------
 // Direct ABI: load-time self-registration
-// ---------------------------------------------------------------------------
 
-// The frontend never lists "every engine this plugin exports", so proving load-time
-// self-registration needs the raw C ABI.
 TEST(IntegrationGpuKernelIngestorDirectAbi, SelfRegistersAllEngineIds)
 {
     const std::filesystem::path pluginTarget(PLUGIN_PATH);
@@ -260,9 +238,7 @@ TEST(IntegrationGpuKernelIngestorDirectAbi, SelfRegistersAllEngineIds)
               engines.end());
 }
 
-// ---------------------------------------------------------------------------
 // Applicability
-// ---------------------------------------------------------------------------
 
 TEST_F(IntegrationGpuKernelIngestor, AcceptsTheGraphItsDescriptorsDescribe)
 {
@@ -292,9 +268,7 @@ TEST_F(IntegrationGpuKernelIngestor, DeclinesATwoNodeGraph)
     EXPECT_TRUE(rankedEngineIds.empty());
 }
 
-// ---------------------------------------------------------------------------
 // Engine details: knobs from the catalog
-// ---------------------------------------------------------------------------
 
 TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
 {
@@ -309,42 +283,32 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
     ASSERT_EQ(knobs.size(), 1U);
     EXPECT_EQ(knobs[0].knobId(), BLOCK_SIZE_KNOB);
 
-    // The pack ships three kernels; the HALF one is pruned for this FLOAT graph, so the
-    // knob offers exactly the two block sizes the surviving kernels implement.
+    // The HALF kernel is pruned for this FLOAT graph.
     const auto* constraint = dynamic_cast<const IntConstraint*>(knobs[0].constraint());
     ASSERT_NE(constraint, nullptr);
     const auto& validValues = constraint->getValidValues();
     EXPECT_EQ(validValues, (std::unordered_set<int64_t>{64, 256}));
 
-    // The default is whatever the heuristic ranked first.
     const auto* defaultValue = std::get_if<int64_t>(&knobs[0].defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_EQ(*defaultValue, 256);
 }
 
-// ---------------------------------------------------------------------------
 // Workspace
-// ---------------------------------------------------------------------------
 
 TEST_F(IntegrationGpuKernelIngestor, ReportsTheMaximumWorkspaceAcrossSurvivingKernels)
 {
     auto graph = buildPointwiseAddGraph();
     buildAndCompile(*graph);
 
-    // One surviving kernel declares 0 bytes and the other 1024, so this proves the
-    // query aggregates across the catalog rather than reporting one kernel's value.
+    // A max across the catalog, not one kernel's value.
     int64_t workspaceSize = 0;
     auto result = graph->get_workspace_size(workspaceSize);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
     EXPECT_EQ(workspaceSize, EXPECTED_WORKSPACE_BYTES);
 }
 
-// ---------------------------------------------------------------------------
 // Plan build and execute
-// ---------------------------------------------------------------------------
-
-// Every decision the plan makes happens at build, so execution must never depend on
-// the previous call.
 TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
 {
     const auto& testCase = GetParam();
@@ -362,10 +326,6 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
     }
 }
 
-// GraphDescriptor::finalize() always synthesizes a fresh UUID, so every graph built
-// through the frontend is a guaranteed catalog miss relative to every other one. Two
-// independently built graphs must both match the reference executor, proving the
-// recompute path is correct rather than relying on state left by a prior graph.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)
 {
     auto graphA = buildPointwiseAddGraph();
@@ -383,13 +343,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
     executeAndVerify(*graphB, workspaceB.get(), 1);
 }
 
-// ---------------------------------------------------------------------------
 // Two packs, one provider: the topology commit 2 exists to prove
-// ---------------------------------------------------------------------------
-
-// The claim the seam makes good on. Two engines are described entirely by data and
-// native symbols resolved by name, and hipDNN routes a graph to the right one with no
-// code above the packs knowing either exists.
 TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
 {
     auto addGraph = buildPointwiseAddGraph();
@@ -406,17 +360,13 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
         return std::find(engines.begin(), engines.end(), id) != engines.end();
     };
 
-    // Each engine claims its own operation...
     EXPECT_TRUE(offers(addEngines, engineId()));
     EXPECT_TRUE(offers(subEngines, subEngineId()));
-    // ...and declines the other's. Without this the two packs would both match every
-    // pointwise graph and selection between them would be arbitrary.
+    // Declines the other's op, or selection between packs would be arbitrary.
     EXPECT_FALSE(offers(addEngines, subEngineId()));
     EXPECT_FALSE(offers(subEngines, engineId()));
 }
 
-// Numeric proof, not just routing: a-b and b-a are both plausible, so only comparing
-// against the CPU reference catches an operand swap in the second pack's binding.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
 {
     auto graph = buildPointwiseSubGraph();
@@ -429,10 +379,6 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
     executeAndVerify(*graph, workspace.get(), 0);
 }
 
-// Both packs' catalogs are cached under (graph, device) keys in per-engine state
-// managers. Executing one after the other proves neither engine's catalog or bound
-// token state reaches the other, a failure mode that only exists once a provider
-// serves more than one descriptor set.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
 {
     auto addGraph = buildPointwiseAddGraph();
@@ -449,7 +395,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
     const hipdnn_data_sdk::utilities::Workspace subWorkspace(static_cast<size_t>(subWorkspaceSize));
     executeAndVerify(*subGraph, subWorkspace.get(), 1);
 
-    // And the add graph still answers correctly after the sub graph ran.
+    // Confirms the add graph still answers correctly after the sub graph ran.
     executeAndVerify(*addGraph, addWorkspace.get(), 2);
 }
 

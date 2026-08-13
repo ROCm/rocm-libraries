@@ -27,14 +27,8 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 
-/**
- * @brief One pack's contract as the test side sees it: the strings its descriptors
- *        carry and its native file implements.
- *
- * Restated here rather than shared through a header, as the two halves restate it to
- * each other. After ALMIOPEN-2401 descriptors are data, so a test names these strings
- * itself the way an operator authoring a descriptor would.
- */
+/// One pack's contract as the test side sees it: the strings its descriptors carry and
+/// its native file implements.
 struct PackSymbols
 {
     std::string_view engineName;
@@ -65,18 +59,12 @@ inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:PointwiseSub",
                                            "pointwise_sub.input_b.uid",
                                            "pointwise_sub.output.uid"};
 
-/// KMD fields both reference packs vary along. Shared because the *schema* shape is
-/// what a pack author copies, unlike the symbol names, which must differ per pack.
+/// KMD fields both reference packs vary along.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 
-/// A pack's native functions, reached the only way anything reaches them: by the symbol
-/// name its descriptors carry. Each registers the provider's packs first, which is
-/// idempotent and is what Container's constructor does, so a test needs no fixture or
-/// ordering discipline.
-///
-/// Resolving rather than calling a declared function is also what surfaces the failure
-/// mode the string-valued contract introduces: a descriptor naming a symbol nothing
+/// A pack's native functions, reached by the symbol name its descriptors carry.
+/// Resolving (not calling directly) surfaces a descriptor naming a symbol nothing
 /// implements.
 inline hipdnn_plugin_sdk::ingestor::GraphMatcherFn graphMatcher(const PackSymbols& pack)
 {
@@ -98,7 +86,6 @@ inline hipdnn_plugin_sdk::ingestor::ScoreFn scorer(const PackSymbols& pack)
     return hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(std::string(pack.score));
 }
 
-/// A pack's dispatch handler, from the registry that owns its process lifetime.
 inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
     dispatchHandler(const PackSymbols& pack)
 {
@@ -108,7 +95,6 @@ inline const hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>&
     return *handler;
 }
 
-/// Runs a pack's graph matcher, binding into @p bound.
 inline bool matchesGraph(const PackSymbols& pack,
                          const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                          hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
@@ -116,7 +102,6 @@ inline bool matchesGraph(const PackSymbols& pack,
     return graphMatcher(pack)(context, bound);
 }
 
-/// Runs a pack's kernel-scoped matcher against one candidate.
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
@@ -124,7 +109,6 @@ inline bool matchesKernel(const PackSymbols& pack,
     return kernelMatcher(pack)(context, kernel);
 }
 
-/// Scores one candidate with a pack's scorer.
 inline double scoreKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context)
@@ -138,16 +122,13 @@ constexpr int64_t INPUT_B_UID = 2;
 constexpr int64_t OUTPUT_UID = 3;
 /// A real third operand, added when `includeThirdOperand` is set.
 constexpr int64_t INPUT_C_UID = 4;
-/// Uid named by `in_1_tensor_uid` when `danglingInputBUid` is not overridden; guaranteed
-/// absent from every graph this file builds.
+/// Uid named by `in_1_tensor_uid` unless `danglingInputBUid` overrides it; never inserted.
 constexpr int64_t DEFAULT_DANGLING_UID = 999;
 
 /// A fixed, warp-64 device, for CPU-only matcher tests that never compile or launch.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
 {
     hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
-    // Never compiled against, so any arch reads the same; the dispatch tests that do
-    // compile use currentDeviceProperties() below.
     properties.gcnArchName = "gfx000";
     properties.warpSize = 64;
     return properties;
@@ -171,19 +152,14 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 
 /**
  * @brief Builds a single-node binary-pointwise-add graph, parameterized on everything
- *        this pack's matchers gate: operation, dtype (uniform and per-operand), shape,
- *        arity, and operand validity.
+ *        this pack's matchers gate.
  *
- * @param inputBDataType Overrides input B's dtype away from @p dataType.
- * @param includeThirdOperand Adds a real third tensor (`INPUT_C_UID`) and sets
- *        `in_2_tensor_uid`, producing a ternary op.
+ * @param includeThirdOperand Adds a real third tensor (`INPUT_C_UID`), producing a
+ *        ternary op.
  * @param danglingInputBUid When set, `in_1_tensor_uid` names this value instead of
  *        `INPUT_B_UID`, and no tensor is inserted for it.
- * @param inputAVirtual Marks input A virtual.
- * @param inputAIsRuntimePassByValue Marks input A runtime-pass-by-value.
- * @param omitStrides Builds every tensor with no strides vector at all. A frontend-built
- *        graph always carries strides, but a plugin-ABI caller or a deserialized graph
- *        need not, and an applicability check runs before anything has validated that.
+ * @param omitStrides Builds every tensor with no strides vector at all: applicability
+ *        runs before anything has validated a caller-supplied graph.
  */
 inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation
@@ -205,7 +181,7 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
     flatbuffers::FlatBufferBuilder builder;
-    // Packed strides by default; an explicit set describes a view into a larger buffer.
+    // An explicit set describes a view into a larger buffer.
     const std::vector<int64_t> strides
         = explicitStrides.has_value() ? *explicitStrides : std::vector<int64_t>(dims.size(), 1);
     // Null, not empty: the field is omitted entirely, so strides() returns nullptr.
@@ -336,13 +312,7 @@ inline hipdnn_flatbuffers_sdk::utilities::UuidBytes makeGraphId(uint8_t seed)
     return id;
 }
 
-/**
- * @brief Wraps a built graph buffer so a test reads it the way an engine does.
- *
- * Parameterized on the device-properties source: the matcher tests are CPU-only and use
- * a fixed testDeviceProperties(), while the dispatch-handler tests compile through
- * hiprtc and need currentDeviceProperties() for the device they launch on.
- */
+/// Wraps a built graph buffer so a test reads it the way an engine does.
 class GraphFixture
 {
 public:
@@ -371,11 +341,7 @@ private:
     hipdnn_plugin_sdk::ingestor::DeviceProperties _properties;
 };
 
-/// @brief A KernelDefinition for a reference pack's kernel, for tests that never need
-/// a real descriptor set.
-///
-/// @param entryPoint The kernel's entry point; its source file is assumed to be
-///        `<entryPoint>.cpp`, which holds for both reference packs.
+/// A KernelDefinition for a reference pack's kernel.
 inline hipdnn_plugin_sdk::ingestor::KernelDefinition makeKernel(int64_t blockSize,
                                                                 const std::string& dtype,
                                                                 const std::string& entryPoint

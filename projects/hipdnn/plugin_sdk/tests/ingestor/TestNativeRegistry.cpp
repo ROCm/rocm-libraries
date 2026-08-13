@@ -36,7 +36,6 @@ TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
 {
     GraphMatcherRegistry::registerSymbol("registry.duplicate", acceptGraph);
 
-    // Two implementations behind one name: which wins depends on static-init order.
     EXPECT_THROW(GraphMatcherRegistry::registerSymbol("registry.duplicate", rejectGraph),
                  std::runtime_error);
 
@@ -45,7 +44,6 @@ TEST(TestIngestorNativeRegistry, RejectsDuplicateRegistration)
 
 TEST(TestIngestorNativeRegistry, FailsClosedOnUnknownSymbol)
 {
-    // Unshipped symbol must error, not silently match nothing.
     EXPECT_THROW(GraphMatcherRegistry::resolve("registry.never_registered"), std::runtime_error);
 }
 

@@ -19,24 +19,19 @@
  * @file TestHandleDeviceResolver.cpp
  * @brief HandleDeviceResolver's device-id resolution and its device-properties cache.
  *
- * The resolver is a process-lifetime static (see KernelIngestorEngine.cpp's
- * deviceResolver()), so a stale or invalidated cache entry is a process-lifetime bug,
- * not one scoped to a single engine or container.
- *
- * deviceId() has four paths; the fourth (no usable HIP context) has no test hook here
- * and is documented but not exercised.
+ * A process-lifetime static (see KernelIngestorEngine.cpp's deviceResolver()), so a
+ * stale cache entry is a process-lifetime bug, not one scoped to one engine.
  */
 namespace
 {
 
 using hip_kernel_provider::kernel_ingestor_engine::HandleDeviceResolver;
 
-/// Answers every property query successfully, so a test can grow the cache past a
-/// rehash without needing many physical devices.
+/// Answers every query, so a test can grow the cache past a rehash without real devices.
 class FakeQueryResolver : public HandleDeviceResolver
 {
 public:
-    /// warpSize is set from the id so a caller can tell one faked entry from another.
+    /// warpSize is set from the id so a caller can tell entries apart.
     hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
                                      hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
     {
@@ -58,15 +53,12 @@ public:
     }
 };
 
-// ---------------------------------------------------------------------------
 // deviceId()
-// ---------------------------------------------------------------------------
 
 TEST(TestHandleDeviceResolver, ResolvesTheCurrentDeviceForANullStream)
 {
     SKIP_IF_NO_DEVICES();
 
-    // A null stream means the default stream, which belongs to the current device.
     const HandleDeviceResolver resolver;
     Handle handle;
     handle.setStream(nullptr);
@@ -101,9 +93,7 @@ TEST(TestHandleDeviceResolver, FallsThroughToTheCurrentDeviceWhenTheStreamCannot
 {
     SKIP_IF_NO_DEVICES();
 
-    // A stream hipStreamGetDevice cannot resolve (already destroyed) falls through like
-    // a null stream. Destroying it leaves a pending HIP error, cleared below so it does
-    // not fail an unrelated test.
+    // A stream hipStreamGetDevice cannot resolve falls through like a null stream.
     hipStream_t stream = nullptr;
     ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
@@ -121,9 +111,7 @@ TEST(TestHandleDeviceResolver, FallsThroughToTheCurrentDeviceWhenTheStreamCannot
     static_cast<void>(hipExtGetLastError());
 }
 
-// ---------------------------------------------------------------------------
 // deviceProperties(): cache hit vs miss, and the growth-safety invariant
-// ---------------------------------------------------------------------------
 
 TEST(TestHandleDeviceResolver, CachesDevicePropertiesAcrossCalls)
 {
@@ -131,8 +119,7 @@ TEST(TestHandleDeviceResolver, CachesDevicePropertiesAcrossCalls)
 
     const HandleDeviceResolver resolver;
 
-    // A hit for the same device returns the same address: deviceProperties() promises a
-    // reference stable for the resolver's lifetime.
+    // A hit returns the same address: the reference is stable for the resolver's lifetime.
     const auto& first = resolver.deviceProperties(0);
     const auto& second = resolver.deviceProperties(0);
 
@@ -142,16 +129,12 @@ TEST(TestHandleDeviceResolver, CachesDevicePropertiesAcrossCalls)
 
 TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 {
-    // Verifies HandleDeviceResolver's stated invariant: references stay valid across
-    // cache growth (std::unordered_map keeps node handles stable across rehash).
-    //
-    // Uses FakeQueryResolver rather than invalid device ids, since deviceProperties()
-    // does not cache failed queries. CPU-only.
+    // std::unordered_map keeps node handles stable across rehash. Uses FakeQueryResolver
+    // since deviceProperties() does not cache failed queries.
     const FakeQueryResolver resolver;
 
     const auto& firstInserted = resolver.deviceProperties(1000);
 
-    // Enough insertions to force a rehash of the default bucket count.
     for(int deviceId = 1001; deviceId < 1064; ++deviceId)
     {
         static_cast<void>(resolver.deviceProperties(deviceId));
@@ -159,31 +142,25 @@ TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 
     const auto& sameEntryAfterGrowth = resolver.deviceProperties(1000);
     EXPECT_EQ(&firstInserted, &sameEntryAfterGrowth);
-    // Value must match too: a surviving address alone is not sufficient proof.
     EXPECT_EQ(sameEntryAfterGrowth.warpSize, 1000);
 }
 
 TEST(TestHandleDeviceResolver, RefusesAndDoesNotCacheAFailedPropertyQuery)
 {
-    // A zeroed hipDeviceProp_t is not cached: this cache is never invalidated, so a
-    // false answer would persist for the process's life.
+    // Not cached: this cache is never invalidated, so a false answer would persist.
     const FailingQueryResolver resolver;
 
     EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
-    // Still refused on the second ask: the failure was not remembered as an answer.
     EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
 {
-    // The cache is mutex-guarded (see class doc); many threads querying the same small
-    // id set maximize a real race's chance to corrupt the map.
-    //
-    // Every result is checked rather than discarded. FakeQueryResolver encodes the
-    // device id in warpSize precisely so a torn or cross-wired entry is observable, and
-    // discarding the value left the test unable to fail on anything short of a crash.
+    // Mutex-guarded; many threads on a small id set maximize a race's chance to corrupt
+    // the map. FakeQueryResolver encodes the device id in warpSize so a torn or
+    // cross-wired entry is observable.
     const FakeQueryResolver resolver;
     std::atomic<int> mismatches{0};
 

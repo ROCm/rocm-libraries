@@ -31,23 +31,17 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
-/// Binds "test.bound_token" to a value that disagrees with acceptGraph's.
 inline bool bindConflictingTokenValue(const MatchContext& /*context*/, BoundTokens& bound)
 {
     bound["test.bound_token"] = BOUND_TOKEN_VALUE + 1;
     return true;
 }
 
-/// Binds "test.bound_token" to acceptGraph's value, via a different matcher id.
 inline bool bindAgreeingTokenValue(const MatchContext& /*context*/, BoundTokens& bound)
 {
     bound["test.bound_token"] = BOUND_TOKEN_VALUE;
     return true;
 }
-
-// ---------------------------------------------------------------------------
-// Matching and pruning
-// ---------------------------------------------------------------------------
 
 TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
 {
@@ -59,7 +53,6 @@ TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
 
     const auto definitions = manager->unsortedDefinitions(context);
 
-    // Three kernels in the pack; the HALF one does not survive.
     ASSERT_EQ(definitions.size(), 2U);
     for(const auto& definition : definitions)
     {
@@ -76,7 +69,6 @@ TEST(TestKernelIngestorStateManager, GraphLevelMatcherFailurePrunesTheWholePack)
     const MatchContext context{graph, 0, properties};
 
     EXPECT_TRUE(manager->unsortedDefinitions(context).empty());
-    // A rejected graph costs one matcher call, not one per kernel.
     EXPECT_EQ(counters().graphCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 0);
 }
@@ -94,7 +86,6 @@ TEST(TestKernelIngestorStateManager, MatchesOncePerGraphAndDevice)
     manager->unsortedDefinitions(context);
 
     EXPECT_EQ(counters().graphCalls, 1);
-    // One call per kernel in the pack, on the single uncached pass.
     EXPECT_EQ(counters().kernelCalls, 3);
 }
 
@@ -102,9 +93,6 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    // Matchers are shared by id, so the graph-scoped check runs once, not once per pack.
-    // The first pack also fails a second, unshared matcher, so only the second pack
-    // survives, isolating binding reuse (read from the memo) from re-evaluation.
     constexpr const char* UNSHARED_FAIL_SYMBOL = "test.cross_pack_binding_reuse.fail";
     GraphMatcherRegistry::registerSymbol(UNSHARED_FAIL_SYMBOL, rejectGraph);
     const auto unsharedFailMatcherId = testId(0x84);
@@ -112,7 +100,6 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
     const KernelDescriptorPack first = makePack({GRAPH_MATCHER_ID, unsharedFailMatcherId});
     KernelDescriptorPack second = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     second.id = testId(0x80);
-    // Distinct metadata tuple: uniqueness is engine-wide, not per pack.
     second.kernels = {makeKernel(testId(0x81), "second_pack_kernel", 512, "FLOAT")};
 
     const StateManager manager(
@@ -128,14 +115,9 @@ TEST(TestKernelIngestorStateManager, EvaluatesASharedGraphMatcherOncePerGraphNot
     const auto properties = testDeviceProperties();
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    // Two calls: the shared matcher once, plus the first pack's unshared failing matcher.
     EXPECT_EQ(counters().graphCalls, 2);
-    // Only the second pack's kernel survives; the first pack was pruned before its
-    // kernels ran.
     ASSERT_EQ(catalog.entries.size(), 1U);
     EXPECT_EQ(catalog.entries.front().packId, second.id);
-    // The binding reaches catalog.bound via the second pack's memo read, not the
-    // pruned first pack that actually ran the matcher.
     EXPECT_EQ(catalog.bound.count("test.bound_token"), 1U);
 
     GraphMatcherRegistry::unregisterSymbol(UNSHARED_FAIL_SYMBOL);
@@ -167,16 +149,12 @@ TEST(TestKernelIngestorStateManager, ASharedGraphMatcherFailurePrunesEveryPackLi
 
 TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingPackKernels)
 {
-    // Two packs share an engine. The pruned pack's own matcher binds a token before a
-    // second matcher in the same pack fails and prunes it; the surviving pack lists
-    // neither matcher, so it must not see that binding.
+    // Pruned pack's matcher binds a token before a second fails and prunes it; the
+    // surviving pack lists neither matcher and must not see the binding.
     constexpr const char* PASS_NO_BIND_SYMBOL = "test.pruned_bound_isolation.pass_no_bind";
     constexpr const char* LEAK_THEN_PRUNE_SYMBOL = "test.pruned_bound_isolation.leak";
     constexpr const char* ALWAYS_FAILS_SYMBOL = "test.pruned_bound_isolation.fail";
 
-    // acceptAnyGraph passes and binds nothing; acceptGraph passes and binds
-    // "test.bound_token"; rejectGraph always fails. Registered before the manager,
-    // which resolves every matcher symbol at construction.
     const ScopedBlockSizeScore scorer;
     GraphMatcherRegistry::registerSymbol(PASS_NO_BIND_SYMBOL, &acceptAnyGraph);
     GraphMatcherRegistry::registerSymbol(LEAK_THEN_PRUNE_SYMBOL, &acceptGraph);
@@ -198,8 +176,6 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     KernelDescriptorPack prunedPack;
     prunedPack.id = testId(0xA2);
     prunedPack.name = "pruned pack";
-    // Order matters: the leaking matcher must run before the failing one prunes the
-    // pack (matchers run in listed order).
     prunedPack.matcherIds = {leakMatcherId, failMatcherId};
     prunedPack.engineId = ENGINE_ID;
     prunedPack.dispatchId = DISPATCH_ID;
@@ -218,12 +194,9 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     const auto properties = testDeviceProperties();
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
-    // Only the surviving pack's kernel enters the catalog.
     ASSERT_EQ(catalog.entries.size(), 1U);
     EXPECT_EQ(catalog.entries.front().packId, survivingPack.id);
 
-    // The pruned pack's bound token must not reach the catalog the surviving pack
-    // reads, even though its matcher returned true before the pack was pruned.
     EXPECT_EQ(catalog.bound.count("test.bound_token"), 0U);
 
     GraphMatcherRegistry::unregisterSymbol(PASS_NO_BIND_SYMBOL);
@@ -233,19 +206,12 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
 
 TEST(TestKernelIngestorStateManager, TwoMatchersInOnePackBindingOneTokenDifferentlyThrows)
 {
-    // The same authoring error as the cross-pack case below, one scope narrower, and it
-    // used to be resolved silently: the pack's view was folded with unordered_map's
-    // insert, which does not overwrite, so whichever matcher appeared earlier in
-    // matcherIds won. Matchers are shared by id and composed per pack, so a pack listing
-    // two binding matchers is ordinary; for the reference packs these tokens are tensor
-    // uids, making the silent winner a kernel launched against the wrong buffer.
     constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.within_pack";
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
 
     const auto conflictingMatcherId = testId(0xC0);
 
-    // One pack, both binding matchers.
     const KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, conflictingMatcherId});
 
     const StateManager manager(makeSchema(),
@@ -268,7 +234,6 @@ TEST(TestKernelIngestorStateManager, TwoMatchersInOnePackBindingOneTokenDifferen
     }
     catch(const std::runtime_error& error)
     {
-        // Names the matcher, since that is the descriptor to go and fix.
         const std::string message = error.what();
         EXPECT_NE(message.find("binds a conflicting value"), std::string::npos);
         EXPECT_NE(message.find("test.bound_token"), std::string::npos);
@@ -279,10 +244,7 @@ TEST(TestKernelIngestorStateManager, TwoMatchersInOnePackBindingOneTokenDifferen
 
 TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThrows)
 {
-    // Conflicting values under one token name is an authoring error; a silent merge
-    // would hide it.
     constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.conflicting";
-    // Ahead of the manager: matcher symbols resolve at construction.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
 
@@ -313,8 +275,6 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThr
     }
     catch(const std::runtime_error& error)
     {
-        // The message has to identify which pack to go and fix, not only that some
-        // pack disagreed.
         const std::string message = error.what();
         EXPECT_NE(message.find("the conflicting pack"), std::string::npos);
         EXPECT_NE(message.find(toString(second.id)), std::string::npos);
@@ -326,7 +286,6 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThr
 
 TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeCleanly)
 {
-    // Packs agreeing on a token's value must still merge cleanly.
     constexpr const char* AGREEING_SYMBOL = "test.bound_conflict.agreeing";
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     GraphMatcherRegistry::registerSymbol(AGREEING_SYMBOL, &bindAgreeingTokenValue);
@@ -351,7 +310,6 @@ TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToTheSameValueMergeC
     const auto catalog = manager.unsortedCatalog(MatchContext{graph, 0, properties});
 
     EXPECT_EQ(tryGetBoundInt(catalog.bound, "test.bound_token"), BOUND_TOKEN_VALUE);
-    // Agreement never prunes anything: all 4 kernels across both packs survive.
     EXPECT_EQ(catalog.entries.size(), 4U);
 }
 
@@ -365,7 +323,6 @@ TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
     manager->unsortedDefinitions(MatchContext{graph, 0, properties});
     manager->unsortedDefinitions(MatchContext{graph, 1, properties});
 
-    // A kernel applicable on one device need not be applicable on another.
     EXPECT_EQ(counters().graphCalls, 2);
 }
 
@@ -373,8 +330,6 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    // A graph with no identity has no key to memoize under; inventing one would alias
-    // unrelated graphs.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -382,7 +337,6 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
     const auto first = manager->unsortedDefinitions(context);
     const auto second = manager->unsortedDefinitions(context);
 
-    // Correct both times; only the caching is lost.
     EXPECT_EQ(first.size(), 2U);
     EXPECT_EQ(second.size(), 2U);
     EXPECT_EQ(counters().graphCalls, 2);
@@ -390,9 +344,6 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
 
 TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
 {
-    // The single-threaded half of D3: once a key is ranked, neither accessor rematches
-    // or re-ranks it. The concurrent half needs two threads and lives in the concurrency
-    // suite as ARankingSurvivesAConcurrentUnsortedAccess.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const TestGraph graph(makeGraphId(0x5D));
@@ -404,14 +355,11 @@ TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
     static_cast<void>(manager->unsortedCatalog(context));
 
     EXPECT_TRUE(manager->sortedCatalog(context).isSorted);
-    // One match total: everything after the first call was a cache hit.
     EXPECT_EQ(counters().graphCalls, 1);
 }
 
 TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACatalogEntry)
 {
-    // Two graphs sharing the nil id must not share a cache entry, or the second would
-    // get the first's catalog.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const TestGraph first(makeNilGraphId());
@@ -427,14 +375,8 @@ TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACa
     EXPECT_EQ(secondDefinitions.size(), 2U);
 }
 
-// ---------------------------------------------------------------------------
-// Bound state alongside the catalog
-// ---------------------------------------------------------------------------
-
 TEST(TestKernelIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
 {
-    // RFC 0017 section 8.5: matching also binds the fields dispatch reads, instead of
-    // re-deriving them from the graph.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto properties = testDeviceProperties();
@@ -444,16 +386,11 @@ TEST(TestKernelIngestorStateManager, CarriesWhatMatchingBoundThroughToDispatch)
     const auto bound = manager->unsortedCatalog(context).bound;
 
     ASSERT_EQ(bound.count("test.bound_token"), 1U);
-    // tryGetBoundInt also pins that the bound value is the integer alternative, not
-    // another.
     EXPECT_EQ(tryGetBoundInt(bound, "test.bound_token"), BOUND_TOKEN_VALUE);
 }
 
 TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematch)
 {
-    // Section 8.1: bound state is cached with the catalog, so recovering it never
-    // re-matches. The graph carries an identity, so a cache entry serves the second
-    // and third reads.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const auto properties = testDeviceProperties();
@@ -463,8 +400,6 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     static_cast<void>(manager->unsortedCatalog(context));
     const auto afterMatching = counters().graphCalls;
 
-    // Asserting only graphCalls would miss a cache that emptied Catalog::bound; the
-    // cached reads must carry it too.
     const auto secondRead = manager->unsortedCatalog(context).bound;
     const auto thirdRead = manager->sortedCatalog(context).bound;
 
@@ -472,10 +407,6 @@ TEST(TestKernelIngestorStateManager, ReadingBoundStateAfterMatchingDoesNotRematc
     EXPECT_EQ(tryGetBoundInt(secondRead, "test.bound_token"), BOUND_TOKEN_VALUE);
     EXPECT_EQ(tryGetBoundInt(thirdRead, "test.bound_token"), BOUND_TOKEN_VALUE);
 }
-
-// ---------------------------------------------------------------------------
-// Caching
-// ---------------------------------------------------------------------------
 
 TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)
 {
@@ -489,14 +420,8 @@ TEST(TestKernelIngestorStateManager, RematchesAfterCacheEviction)
     manager->unsortedDefinitions(MatchContext{second, 0, properties});
     manager->unsortedDefinitions(MatchContext{first, 0, properties});
 
-    // Capacity 1 evicts the first graph, forcing a rematch; eviction costs work, not
-    // correctness.
     EXPECT_EQ(counters().graphCalls, 3);
 }
-
-// ---------------------------------------------------------------------------
-// Ranking reuse and knob value discovery
-// ---------------------------------------------------------------------------
 
 TEST(TestKernelIngestorStateManager, SortedDefinitionsAreRankedBestFirst)
 {
@@ -524,7 +449,6 @@ TEST(TestKernelIngestorStateManager, RankingReusesTheAlreadyMatchedCatalog)
     manager->sortedDefinitions(context);
     manager->sortedDefinitions(context);
 
-    // Ranking is a read of the cached catalog, never a rematch.
     EXPECT_EQ(counters().graphCalls, 1);
     EXPECT_EQ(counters().kernelCalls, 3);
 }
@@ -539,8 +463,6 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
 
     const auto values = StateManager::knobValues(manager->sortedDefinitions(context), BLOCK_SIZE);
 
-    // The pruned HALF kernel also has block_size 64 but contributes no value; a knob
-    // reflects the surviving catalog, not the schema range.
     ASSERT_EQ(values.size(), 2U);
     EXPECT_EQ(std::get<int64_t>(values[0]), 256);
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
@@ -548,12 +470,8 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
 
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDispatchSymbol)
 {
-    // The fourth symbol kind. Matchers and the scorer already resolved at construction;
-    // dispatch did not, so a UDD naming a symbol this build does not ship survived load
-    // and survived isApplicable, then threw at plan build, past the point RFC 0017 §8.6
-    // made applicability a binding promise. That is the failure eager resolution exists
-    // to remove, and the two-file pack split is what makes it reachable: the descriptor
-    // and native halves agree by string value with no compile-time check.
+    // Descriptor and native halves agree on dispatch symbols by string with no
+    // compile-time check; eager resolution must catch a misspelled one.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
     try
@@ -571,26 +489,15 @@ TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDisp
     {
         const std::string message = error.what();
         EXPECT_NE(message.find("test.dispatch.not_registered"), std::string::npos);
-        // Names the descriptor, not just the symbol: after ALMIOPEN-2401 that is what
-        // tells an operator which file to fix.
         EXPECT_NE(message.find("misspelled dispatch"), std::string::npos);
     }
 }
 
-// ---------------------------------------------------------------------------
-// getDispatchDetails
-// ---------------------------------------------------------------------------
-
 TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatchId)
 {
-    // A missing dispatch after a graph was accepted is a hard error, not a silent
-    // decline. Built directly, bypassing pack validation, since validateAndIndexPacks()
-    // cannot see a definition that never went through a pack.
-    //
-    // The dispatch id must be one the manager does not know. makeDefinition() hands
-    // back the registered DISPATCH_ID, so this test used to observe the *resolve* on
-    // the next line failing and never reach the branch it names; deleting the guard
-    // left it green.
+    // Built directly since validation cannot see a definition never in a pack. The
+    // dangling id must not be one the manager registered, or this fails at resolve
+    // before reaching the branch under test.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     auto kernel = makeDefinition(testId(0x01), 64);
@@ -609,16 +516,11 @@ TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatch
     }
 }
 
-// ---------------------------------------------------------------------------
-// completeMetadata (exercised through the constructor/matching path)
-// ---------------------------------------------------------------------------
-
 TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
     KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
-    // Omits block_size, which defaults, and states dtype, which does not.
     KernelDescriptor sparse;
     sparse.id = testId(0x70);
     sparse.name = "kernel_defaults";
@@ -640,18 +542,9 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
     EXPECT_EQ(definitions.front().getStringMetadata(DTYPE), "FLOAT");
 }
 
-// ---------------------------------------------------------------------------
-// Construction-time validation (TEST_P): each case must fail construction with
-// std::invalid_argument, carrying a message that identifies what to fix.
-// ---------------------------------------------------------------------------
-
 struct StateManagerConstructionThrowCase
 {
     std::string name;
-    /// Substring the failure must contain. Asserting the type alone cannot tell a
-    /// rejected descriptor apart from an unrelated bug that happens to throw the same
-    /// type. After ALMIOPEN-2401 these messages are what an operator gets instead of a
-    /// compiler error, so they are part of the contract.
     std::string expectedMessageSubstring;
     std::function<std::unique_ptr<StateManager>()> construct;
 };
@@ -663,9 +556,6 @@ class TestKernelIngestorStateManagerConstructionThrows
 
 TEST_P(TestKernelIngestorStateManagerConstructionThrows, RejectsAtConstruction)
 {
-    // Every case below names the fixture's symbols, and the constructor resolves them
-    // eagerly, so without these registered each case would throw runtime_error for an
-    // unresolved symbol before reaching the invalid_argument it exists to assert.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
     try
@@ -689,7 +579,6 @@ INSTANTIATE_TEST_SUITE_P(
             "RejectsAKernelOmittingAFieldWithNoDefault",
             "which declares no default",
             [] {
-                // dtype has no schema default, so every kernel must state it explicitly.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
                 KernelDescriptor missingDtype;
                 missingDtype.id = testId(0x71);
@@ -707,8 +596,6 @@ INSTANTIATE_TEST_SUITE_P(
             "RejectsAKernelSupplyingAFieldTheSchemaDoesNotDeclare",
             "does not declare",
             [] {
-                // An undeclared field (e.g. a misspelling) silently takes its default
-                // while the stray value joins the catalog key unread.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
                 KernelDescriptor undeclared;
                 undeclared.id = testId(0x74);
@@ -728,8 +615,6 @@ INSTANTIATE_TEST_SUITE_P(
             "RejectsAKernelSupplyingAFieldOfTheWrongType",
             "a value of the wrong type",
             [] {
-                // A wrong-typed field would otherwise surface as a bad_variant_access far
-                // away, inside a matcher or scorer.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
                 KernelDescriptor wrongType;
                 wrongType.id = testId(0x72);
@@ -748,8 +633,6 @@ INSTANTIATE_TEST_SUITE_P(
             "RejectsAPackNamingAnUnknownMatcher",
             "names unknown matcher",
             [] {
-                // A dangling matcher reference is caught at construction, not when a
-                // graph first arrives.
                 return std::make_unique<StateManager>(
                     makeSchema(),
                     std::vector<MatchDescriptor>{},
@@ -772,8 +655,6 @@ INSTANTIATE_TEST_SUITE_P(
             "RejectsTwoKernelsSharingAMetadataTuple",
             "duplicates the metadata tuple",
             [] {
-                // Same completed tuple as kernel_64_float: selection would have two
-                // indistinguishable candidates and no basis to prefer either.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID});
                 pack.kernels.push_back(makeKernel(testId(0x73), "kernel_duplicate", 64, "FLOAT"));
                 return std::make_unique<StateManager>(
@@ -787,8 +668,6 @@ INSTANTIATE_TEST_SUITE_P(
             "RejectsADuplicateMatchDescriptorId",
             "duplicate match descriptor id",
             [] {
-                // Silent first-wins under a duplicate id would run whichever matcher
-                // loaded first.
                 std::vector<MatchDescriptor> matchers = makeTestMatchers();
                 matchers.push_back({GRAPH_MATCHER_ID,
                                     "a different matcher entirely",
@@ -806,8 +685,6 @@ INSTANTIATE_TEST_SUITE_P(
             "duplicate dispatch descriptor id",
             [] {
                 std::vector<DispatchDescriptor> dispatches = makeTestDispatches();
-                // Same symbol, since the case is about a duplicate id; a second
-                // symbol would fail resolution first and never reach the id check.
                 dispatches.push_back(
                     {DISPATCH_ID, "a different dispatch entirely", "test.dispatch"});
                 return std::make_unique<StateManager>(

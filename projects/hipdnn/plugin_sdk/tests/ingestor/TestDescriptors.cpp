@@ -24,17 +24,12 @@ namespace
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
 
-// ---------------------------------------------------------------------------
-// toString(DescriptorId) / DescriptorIdHash
-// ---------------------------------------------------------------------------
-
 TEST(TestIngestorDescriptors, ToStringFormatsAsCanonicalUuidText)
 {
     const auto id = testId(0xAB);
 
     const auto text = toString(id);
 
-    // Canonical UUID text form: 32 hex digits plus 4 hyphens, 36 characters.
     EXPECT_EQ(text.size(), 36U);
     EXPECT_EQ(text.find("ab"), 0U);
 }
@@ -54,10 +49,6 @@ TEST(TestIngestorDescriptors, DescriptorIdHashDistinguishesDifferentIds)
 
     EXPECT_NE(hash(testId(0x11)), hash(testId(0x22)));
 }
-
-// ---------------------------------------------------------------------------
-// metadataTypeOf: MetadataType must track MetadataValue's variant order exactly.
-// ---------------------------------------------------------------------------
 
 struct MetadataTypeCase
 {
@@ -87,13 +78,10 @@ INSTANTIATE_TEST_SUITE_P(
             "IntList", MetadataValue{std::vector<int64_t>{1, 2, 3}}, MetadataType::INT_LIST}),
     [](const ::testing::TestParamInfo<MetadataTypeCase>& info) { return info.param.name; });
 
-// ---------------------------------------------------------------------------
-// KernelSourceKind / KernelSource: tagged union over RFC 0017 §7's source kinds.
-// ---------------------------------------------------------------------------
+// KernelSourceKind / KernelSource: tagged union over the source kinds.
 
 TEST(TestIngestorDescriptors, KernelSourceDefaultsToEmbeddedSource)
 {
-    // Only kind this POC implements.
     const KernelSource source{};
 
     EXPECT_EQ(source.kind, KernelSourceKind::EMBEDDED_SOURCE);
@@ -112,9 +100,7 @@ TEST(TestIngestorDescriptors, KernelSourceCarriesEmbeddedSourceFileAndEntryPoint
     EXPECT_EQ(source.entryPoint, "pointwise_add_kernel");
 }
 
-// ---------------------------------------------------------------------------
 // HeuristicDescriptor: HeuristicKind as data; dispatch is tested in TestKernelHeuristic.cpp.
-// ---------------------------------------------------------------------------
 
 TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToNativeKind)
 {

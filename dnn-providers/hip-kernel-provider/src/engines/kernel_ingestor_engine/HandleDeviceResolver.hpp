@@ -18,17 +18,9 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
-/**
- * @brief Resolves a call's device from the stream its handle carries.
- *
- * A handle can be rebound between calls, so the device is read per call from the
- * handle's stream rather than the calling thread's current device.
- *
- * Device properties are cached for this resolver's lifetime; the cache is never
- * invalidated. Only successful queries are cached.
- *
- * One instance per process (see KernelIngestorEngine.cpp's deviceResolver()).
- */
+/// Resolves a call's device from the stream its handle carries; a handle can be
+/// rebound between calls, so this reads per call rather than caching per-thread.
+/// Successful device-property queries are cached for this resolver's lifetime.
 class HandleDeviceResolver : public hipdnn_plugin_sdk::ingestor::IDeviceResolver<Handle>
 {
 public:
@@ -36,7 +28,7 @@ public:
     {
         int deviceId = 0;
 
-        // A null stream means the default stream, which belongs to the current device.
+        // Null stream: default stream belongs to the current device.
         if(handle.getStream() != nullptr)
         {
             if(hipStreamGetDevice(handle.getStream(), &deviceId) == hipSuccess)
@@ -47,8 +39,6 @@ public:
 
         if(hipGetDevice(&deviceId) != hipSuccess)
         {
-            // Neither 0 nor a throw: deviceId() runs under isApplicable(), which
-            // EngineManager walks with no try/catch. Matchers decline on NO_DEVICE.
             return hipdnn_plugin_sdk::ingestor::NO_DEVICE;
         }
         return deviceId;
@@ -57,8 +47,7 @@ public:
     const hipdnn_plugin_sdk::ingestor::DeviceProperties&
         deviceProperties(hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const override
     {
-        // Inert values for a call with no resolvable device; MatchContext binds
-        // properties before any matcher runs, so the caller receives this regardless.
+        // MatchContext binds properties before any matcher runs.
         if(deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
         {
             static const hipdnn_plugin_sdk::ingestor::DeviceProperties s_noDevice{};
@@ -77,16 +66,13 @@ public:
         const auto status = queryDeviceProperties(&properties, deviceId);
         if(status != hipSuccess)
         {
-            // Never cached; see the class doc.
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "hipGetDeviceProperties failed for device " + std::to_string(deviceId) + ": "
                     + hipGetErrorString(status));
         }
 
-        // The translation the SDK type exists for: HIP's fields narrow to the ones the
-        // ingestor's `$device.*` namespace exposes, and this is the one place that
-        // knows both shapes.
+        // HIP's fields narrow to the ingestor's `$device.*` namespace.
         hipdnn_plugin_sdk::ingestor::DeviceProperties resolved;
         resolved.gcnArchName = properties.gcnArchName;
         resolved.warpSize = properties.warpSize;
@@ -96,9 +82,7 @@ public:
     }
 
 protected:
-    /// Seam for tests that need to grow the cache without that many real devices;
-    /// overriding it lets a test supply successful answers for ids this machine
-    /// does not have.
+    /// Test seam: lets a test supply properties for devices this machine lacks.
     virtual hipError_t queryDeviceProperties(hipDeviceProp_t* properties,
                                              hipdnn_plugin_sdk::ingestor::DeviceId deviceId) const
     {

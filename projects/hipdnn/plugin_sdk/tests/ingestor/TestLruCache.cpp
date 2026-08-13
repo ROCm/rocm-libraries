@@ -14,7 +14,6 @@
 /**
  * @file TestLruCache.cpp
  * @brief Tests for the bounded, thread-safe LRU cache LruCache.hpp declares.
- *        Concurrent access is covered separately by TestKernelIngestorConcurrency.cpp.
  */
 namespace
 {
@@ -41,17 +40,13 @@ TEST(TestIngestorLruCache, ReportsMissForAbsentKey)
 
 TEST(TestIngestorLruCache, RejectsZeroCapacity)
 {
-    // Zero capacity would evict every entry on insert; always a caller bug.
     using IntCache = LruCache<int, int>;
     EXPECT_THROW(IntCache(0), std::invalid_argument);
 }
 
-// Eviction order: depends on recency, not insertion order; get() counts as a touch.
-
 struct LruEvictionCase
 {
     std::string name;
-    /// Populates the cache, leaving it one insert away from a capacity-2 overflow.
     std::function<void(LruCache<int, std::string>&)> setup;
     int expectedEvicted;
     int expectedSurvivor;
@@ -67,7 +62,6 @@ TEST_P(TestIngestorLruCacheEvictionOrder, EvictsByRecencyNotInsertionOrder)
     LruCache<int, std::string> cache(2);
     testCase.setup(cache);
 
-    // Key 3 is always most-recently-used and must survive the crossing insert.
     cache.put(3, "three");
 
     EXPECT_FALSE(cache.get(testCase.expectedEvicted).has_value());
@@ -89,7 +83,6 @@ INSTANTIATE_TEST_SUITE_P(EvictionOrder,
                                                            [](LruCache<int, std::string>& cache) {
                                                                cache.put(1, "one");
                                                                cache.put(2, "two");
-                                                               // Touching 1 makes 2 LRU.
                                                                ASSERT_TRUE(
                                                                    cache.get(1).has_value());
                                                            },
@@ -99,7 +92,6 @@ INSTANTIATE_TEST_SUITE_P(EvictionOrder,
                                                            [](LruCache<int, std::string>& cache) {
                                                                cache.put(1, "one");
                                                                cache.put(2, "two");
-                                                               // Overwrite counts as a touch.
                                                                cache.put(1, "uno");
                                                            },
                                                            /*expectedEvicted=*/2,
@@ -121,10 +113,6 @@ TEST(TestIngestorLruCache, OverwritingAKeyDoesNotGrowTheCache)
     EXPECT_EQ(cache.size(), 1U);
 }
 
-// ---------------------------------------------------------------------------
-// putIfAbsent: for callers whose write may be worse than what is already there
-// ---------------------------------------------------------------------------
-
 TEST(TestIngestorLruCache, PutIfAbsentInsertsWhenTheKeyIsMissing)
 {
     LruCache<int, std::string> cache(2);
@@ -145,8 +133,6 @@ TEST(TestIngestorLruCache, PutIfAbsentLeavesAnExistingValueAlone)
 
     const auto found = cache.get(1);
     ASSERT_TRUE(found.has_value());
-    // The distinction the state manager relies on: the existing entry may be strictly
-    // better than the one being offered, so a no-op must not silently overwrite.
     EXPECT_EQ(*found, "one");
     EXPECT_EQ(cache.size(), 1U);
 }
@@ -170,8 +156,6 @@ TEST(TestIngestorLruCache, PutIfAbsentRefreshesRecencyOnAKeyItDidNotWrite)
     cache.put(1, "one");
     cache.put(2, "two");
 
-    // Declining to write still counts as touching the key: the caller wanted this
-    // entry, so it is not the one to evict next.
     EXPECT_FALSE(cache.putIfAbsent(1, "uno"));
     cache.put(3, "three");
 

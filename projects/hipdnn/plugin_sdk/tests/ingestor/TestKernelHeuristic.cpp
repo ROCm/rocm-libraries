@@ -18,7 +18,7 @@
 
 /**
  * @file TestKernelHeuristic.cpp
- * @brief Tests for IKernelHeuristic.hpp: lazy symbol resolution, ranking/tie-break
+ * @brief Tests for IKernelHeuristic.hpp: eager symbol resolution, ranking/tie-break
  *        order, and the makeKernelHeuristic() factory.
  */
 namespace
@@ -29,19 +29,15 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 TEST(TestIngestorKernelHeuristic, RefusesToConstructAgainstAnUnregisteredSymbol)
 {
-    // The inverse of what this asserted before eager resolution. Resolving on first
-    // score() means a UHD naming a scorer this build does not ship survives load and
-    // survives isApplicable(), then throws at plan build, past the point RFC 0017
-    // §8.6 makes applicability a promise the engine must keep. Failing here instead
-    // turns that into a load-time exclusion.
+    // Eager resolution turns an unshipped scorer symbol into a load-time exclusion,
+    // instead of surviving to throw at plan build.
     EXPECT_THROW(NativeKernelHeuristic("hipdnn.kernel_ingestor.test.not_yet_registered"),
                  std::runtime_error);
 }
 
 TEST(TestIngestorKernelHeuristic, NamesTheDescriptorThatCouldNotResolve)
 {
-    // The whole diagnostic for a typo'd symbol, so it must name the descriptor to fix
-    // rather than only the symbol that was missing.
+    // Must name the descriptor to fix, not only the missing symbol.
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "misspelled selector";
@@ -108,7 +104,6 @@ TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcros
     const MatchContext context{graph, 0, properties};
 
     Catalog catalog;
-    // Inserted highest-id first: result must not depend on load order.
     const auto lowerId = testId(0x01);
     const auto higherId = testId(0x02);
     catalog.entries = {makeDefinition(higherId, 64), makeDefinition(lowerId, 64)};
@@ -119,8 +114,6 @@ TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcros
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, lowerId);
 }
-
-// makeKernelHeuristic(): the UHD -> IKernelHeuristic adapter factory.
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNativeKind)
 {
@@ -135,7 +128,6 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     const auto heuristic = makeKernelHeuristic(descriptor);
 
     ASSERT_NE(heuristic, nullptr);
-    // Confirms the factory wired the payload symbol through.
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
@@ -144,8 +136,7 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
 {
-    // HeuristicKind::MODEL has no adapter yet (RFC 0017's UHD follow-up); fails at
-    // descriptor-assembly time, not at first rank().
+    // HeuristicKind::MODEL has no adapter yet; fails at assembly time, not first rank().
     HeuristicDescriptor descriptor;
     descriptor.id = HEURISTIC_ID;
     descriptor.name = "model heuristic";

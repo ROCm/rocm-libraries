@@ -21,30 +21,18 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief Chooses which kernel within an engine to run, given the kernels that fit.
- *
- * One level below hipDNN's engine-selection heuristic, which picks the engine.
- *
- * An implementation supplies only `score()`: it ranks one kernel at a time and never
- * sees the catalog, so filtering and ranking commute (RFC 0017 §9.2). `rank()` is
- * non-virtual; a selector over the whole candidate set is the heuristic follow-up RFC.
- */
+/// Chooses which kernel within an engine to run. An implementation supplies only
+/// `score()`, ranking one kernel at a time without seeing the catalog, so filtering
+/// and ranking commute.
 class IKernelHeuristic
 {
 public:
     virtual ~IKernelHeuristic() = default;
 
-    /// @brief Scores one kernel for one problem. Higher wins.
     virtual double score(const KernelDefinition& kernel, const MatchContext& context) const = 0;
 
-    /**
-     * @brief Orders @p catalog best-first.
-     *
-     * Scores each entry once, then sorts descending, breaking ties on the kernel's
-     * `priority`, then its descriptor id as bytes (stable across runs, load orders,
-     * and machines).
-     */
+    /// Orders @p catalog best-first, breaking ties on `priority`, then descriptor id
+    /// bytes (stable across runs).
     std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
     {
         std::vector<std::pair<double, const KernelDefinition*>> scored;
@@ -76,37 +64,12 @@ public:
     }
 };
 
-/**
- * @brief An IKernelHeuristic whose score() is a native function resolved by symbol.
- *
- * The UHD escape hatch: the descriptor names a symbol, this resolves it at
- * construction.
- *
- * Eager because the check is a fact about the build. The registry is fully populated
- * before any state manager exists and never mutates, so passing once means passing
- * forever, and failing means this binary does not ship what the descriptor names.
- * Resolving on first score() instead would run after isApplicable() already answered
- * true, past the point RFC 0017 §8.6 makes that a binding promise. It also drops a
- * mutexed lookup and a once_flag from every ranking call.
- *
- * That argument does not extend to loading a model artifact (HeuristicKind::MODEL).
- * An artifact is a fact about the environment: I/O, potentially large against §3/§8.1's
- * cheap-construction rule, and removable between load and first rank(). Such an adapter
- * should validate its descriptor eagerly and load its artifact lazily.
- *
- * Nor is a failure to rank a failure to serve. Ranking runs only from
- * sortedDefinitions(), over a catalog whose entries already passed every matcher, so
- * each is launchable. An adapter whose artifact will not load should degrade to
- * rank()'s priority-then-id order (§9.2's `static_order`) and log once rather than fail
- * a plan: losing the best kernel is a performance regression, losing the plan is an
- * outage.
- */
+/// score() is a native function resolved by symbol, eagerly at construction: the
+/// registry is fully populated and immutable by then, so a missing symbol is a build
+/// fact, not a per-call race.
 class NativeKernelHeuristic : public IKernelHeuristic
 {
 public:
-    /// @param scoreSymbol Resolved immediately.
-    /// @param describedBy The UHD naming @p scoreSymbol, for the failure message.
-    ///
     /// @throws std::runtime_error if @p scoreSymbol is not registered.
     explicit NativeKernelHeuristic(const std::string& scoreSymbol,
                                    const std::string& describedBy = {})
@@ -123,18 +86,7 @@ private:
     ScoreFn _scoreFn;
 };
 
-/**
- * @brief Builds the IKernelHeuristic a UHD names, keyed on its kind.
- *
- * @throws std::invalid_argument if @p descriptor names a kind with no adapter yet
- *         (HeuristicKind::MODEL).
- * @throws std::runtime_error if a NATIVE descriptor names a scorer this build does not
- *         ship.
- *
- * Both are descriptor errors, and both fail here rather than at the first rank(). An
- * adapter needing an artifact from disk should not load it here; see
- * NativeKernelHeuristic for why that boundary sits where it does.
- */
+/// @throws std::invalid_argument if @p descriptor names a kind with no adapter yet.
 inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(const HeuristicDescriptor& descriptor)
 {
     switch(descriptor.kind)

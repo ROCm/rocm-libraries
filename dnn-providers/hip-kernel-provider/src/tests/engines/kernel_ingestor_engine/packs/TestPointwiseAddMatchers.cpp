@@ -19,14 +19,6 @@
 /**
  * @file TestPointwiseAddMatchers.cpp
  * @brief The pack's two matcher shapes: what each accepts, and what each refuses.
- *
- * An under-specified refusal accepts a graph the kernel cannot serve, which is silently
- * wrong rather than merely a missed optimization.
- *
- * The matchers are reached through the registry rather than called directly: they are
- * internal to PointwiseAddNative.cpp, and the registry is the only door the descriptors
- * reach them by, so testing through it also proves the pack registered what its
- * descriptors name.
  */
 namespace
 {
@@ -37,16 +29,13 @@ using hipdnn_plugin_sdk::ingestor::BoundTokens;
 using hipdnn_plugin_sdk::ingestor::MatchContext;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-/// Runs the graph matcher, discarding what it binds; binding is asserted separately below.
 bool matches(const MatchContext& context)
 {
     BoundTokens bound;
     return matchesGraph(POINTWISE_ADD, context, bound);
 }
 
-// ---------------------------------------------------------------------------
 // Graph-scoped matcher: acceptances
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseAddGraphMatcher, AcceptsASingleElementFloatAdd)
 {
@@ -57,8 +46,7 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsASingleElementFloatAdd)
 
 TEST(TestPointwiseAddGraphMatcher, AcceptsAHalfPrecisionAdd)
 {
-    // The graph-level gate is dtype-agnostic; pinning the kernel's baked dtype is the
-    // kernel-scoped matcher's job.
+    // Graph-level gate is dtype-agnostic; the kernel-scoped matcher pins dtype.
     const GraphFixture fixture(
         buildPointwiseGraph(data_objects::PointwiseMode::ADD, data_objects::DataType::HALF));
 
@@ -73,12 +61,9 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
     EXPECT_TRUE(matches(fixture.context()));
 }
 
-// ---------------------------------------------------------------------------
 // Graph-scoped matcher: refusals
-// ---------------------------------------------------------------------------
 
-/// One graph the matcher must refuse, plus a readable name for a failing run. The builder
-/// is a plain function pointer, not std::function, since FlatBufferBuilder is move-only.
+/// Builder is a plain function pointer, not std::function: FlatBufferBuilder is move-only.
 struct GraphMatcherRefusalCase
 {
     std::string name;
@@ -109,9 +94,7 @@ INSTANTIATE_TEST_SUITE_P(
                  data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2});
          }},
         {"ATensorWithNoStrides",
-         // The layout classifier dereferences strides(). A refusal predicate runs on a
-         // graph nothing has validated, so a caller that omits strides must be declined,
-         // not crashed on. Without the null guard this segfaults rather than failing.
+         // The layout classifier dereferences strides(); applicability runs before validation.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -128,22 +111,18 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*omitStrides=*/true);
          }},
         {"DimsWhoseProductIsOneButAreNotAllOne",
-         // {-1,-1,1,1} multiplies to 1. The kernel indexes element 0 only, so the claim
-         // is about extent, not product; a product check accepts this and the pack then
-         // owns a graph it cannot serve.
+         // {-1,-1,1,1} multiplies to 1; the kernel indexes element 0 only.
          []() {
              return buildPointwiseGraph(
                  data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {-1, -1, 1, 1});
          }},
         {"ARankTheDispatchPathCannotServe",
-         // The provider derives layout from tensor rank and rejects anything below rank 4.
          []() {
              return buildPointwiseGraph(
                  data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1});
          }},
         {"AStrideOrderTheDispatchPathCannotClassify",
-         // The provider derives layout from tensor strides and only classifies NCHW or
-         // NHWC; other orders reach plan build and fail there (RFC 0017 §8.6).
+         // Layout derives from stride order; only NCHW/NHWC classify.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -160,12 +139,8 @@ INSTANTIATE_TEST_SUITE_P(
                                         std::nullopt,
                                         /*binary=*/false);
          }},
-        {"AMultiNodeGraph",
-         // A prebuilt kernel serves one complete graph, not a graph containing it.
-         []() { return buildTwoNodePointwiseGraph(); }},
+        {"AMultiNodeGraph", []() { return buildTwoNodePointwiseGraph(); }},
         {"CrossOperandDtypeMismatch",
-         // This pack's kernel reads one dtype for every operand; mismatched inputs are
-         // unreadable, not merely unoptimized.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -176,8 +151,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*inputBDataType=*/data_objects::DataType::HALF);
          }},
         {"AThirdOperand",
-         // A third operand is a different operation from this pack's binary add, not a
-         // larger instance of the same one.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -189,8 +162,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*includeThirdOperand=*/true);
          }},
         {"ADanglingTensorUid",
-         // The uid names a tensor absent from the graph's tensor map, distinct from one
-         // the matcher reads and declines.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -203,7 +174,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*danglingInputBUid=*/DEFAULT_DANGLING_UID);
          }},
         {"AVirtualOperand",
-         // A virtual tensor never appears in the launch's variant pack.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -217,8 +187,6 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*inputAVirtual=*/true);
          }},
         {"ARuntimePassByValueOperand",
-         // This pack's supported shape is indistinguishable from a pass-by-value
-         // scalar, whose variant-pack slot is a host pointer, not a device one.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -233,10 +201,8 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*inputAIsRuntimePassByValue=*/true);
          }},
         {"AVirtualOutput",
-         // The output, not input A. The matcher checks all three operands, and this is
-         // the case that distinguishes that from checking only the first: a virtual
-         // output has no device buffer for findDeviceBuffer to resolve at launch, so
-         // accepting it is a wrong answer rather than a failed one.
+         // Checks every operand, not just input A: a virtual output has no buffer to
+         // resolve at launch.
          []() {
              return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
                                         data_objects::DataType::FLOAT,
@@ -254,9 +220,7 @@ INSTANTIATE_TEST_SUITE_P(
     }),
     [](const ::testing::TestParamInfo<GraphMatcherRefusalCase>& info) { return info.param.name; });
 
-// ---------------------------------------------------------------------------
 // Kernel-scoped matcher
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseAddKernelMatcher, AcceptsAKernelWhoseDtypeMatchesTheGraph)
 {
@@ -290,9 +254,7 @@ TEST(TestPointwiseAddKernelMatcher, IgnoresBlockSizeWhichTheGraphDoesNotConstrai
     EXPECT_TRUE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(256, "FLOAT")));
 }
 
-// ---------------------------------------------------------------------------
 // Score and binding
-// ---------------------------------------------------------------------------
 
 TEST(TestPointwiseAddScore, PrefersTheLargerBlockSize)
 {
@@ -309,9 +271,7 @@ TEST(TestPointwiseAddBinding, TheMatcherBindsTheOperandUidsItResolved)
     BoundTokens bound;
     ASSERT_TRUE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
 
-    // Asserted by token name rather than through a binding struct: the names are the
-    // contract a descriptor's dispatch formulas will reference (RFC 0017 §5), and they
-    // are what survives this pack's C++ becoming data.
+    // Asserted by token name: the contract a descriptor's dispatch formulas reference.
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_ADD.inputAToken),
               INPUT_A_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_ADD.inputBToken),
@@ -327,8 +287,7 @@ TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)
     BoundTokens bound;
     ASSERT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
 
-    // Dispatch reads these tokens back; a refused graph must leave nothing for it to
-    // read, or a later pack's dispatch could prepare against another pack's operands.
+    // A refused graph must leave nothing bound, or a later pack could read stale operands.
     EXPECT_TRUE(bound.empty());
 }
 

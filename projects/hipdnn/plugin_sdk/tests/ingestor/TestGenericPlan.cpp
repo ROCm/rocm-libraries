@@ -41,8 +41,6 @@ KernelDispatcher<StubHandle> makeDispatcher(const MockKernelDispatchHandler& han
 
 TEST(TestIngestorGenericPlan, ConstructorThrowsInternalErrorWhenPrepareReturnsNull)
 {
-    // prepare() returning null means dispatch resolved no launch for a kernel that
-    // applicability already accepted: an internal inconsistency, not a caller error.
     const MockKernelDispatchHandler handler;
     EXPECT_CALL(handler, workspaceBytes(_, _, _)).WillOnce(Return(0));
     EXPECT_CALL(handler, prepare(_, _, _)).WillOnce(Return(nullptr));
@@ -87,7 +85,6 @@ TEST(TestIngestorGenericPlan, ExecuteThrowsInvalidValueWhenWorkspaceRequiredButN
     EXPECT_CALL(handler, workspaceBytes(_, _, _)).WillOnce(Return(size_t{1024}));
     EXPECT_CALL(handler, prepare(_, _, _))
         .WillOnce(Return(::testing::ByMove(std::make_unique<PreparedDispatch>())));
-    // Workspace is missing, so launch() must never be reached.
     EXPECT_CALL(handler, launch(_, _, _, _, _)).Times(0);
 
     const TestGraph graph;

@@ -13,23 +13,13 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief An engine's kernels that fit one graph on one device, plus their sort state.
- *
- * Built once per (graph, device) by running the matchers, then cached. An engine is
- * applicable exactly when its catalog is non-empty.
- *
- * `isSorted` defers ranking until something asks for an order; once sorted, `entries`
- * stays in heuristic-ranked order for the life of the cache entry.
- */
+/// An engine's kernels that fit one graph on one device, plus sort state. An engine
+/// is applicable exactly when its catalog is non-empty.
 struct Catalog
 {
     std::vector<KernelDefinition> entries;
     bool isSorted = false;
-    /// What this engine's graph-scoped matchers resolved, merged across surviving packs
-    /// (RFC 0017 §8.1); a pruned pack's bindings are discarded unmerged. One token name
-    /// binding to different values across packs is an authoring error, rejected at merge.
-    BoundTokens bound;
+    BoundTokens bound; ///< What graph-scoped matchers resolved, merged across packs.
 };
 
 } // namespace hipdnn_plugin_sdk::ingestor

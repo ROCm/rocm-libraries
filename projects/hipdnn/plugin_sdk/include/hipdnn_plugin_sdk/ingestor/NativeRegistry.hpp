@@ -14,49 +14,26 @@
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
-/**
- * @file NativeRegistry.hpp
- * @brief Symbol name to native function, the escape hatch descriptors resolve through.
- *
- * A descriptor names a custom predicate or plan by symbol rather than carrying inline
- * code (RFC 0017); the provider resolves it here. Lookup fails closed.
- */
+/// @file NativeRegistry.hpp
+/// @brief Symbol name to native function, the escape hatch descriptors resolve
+/// through instead of carrying inline code. Lookup fails closed.
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Graph-scoped applicability check: reads only graph/device facts, so it runs once per
-/// (graph, device); failure prunes every kernel in the pack. On success, writes resolved
-/// values into @p bound (RFC 0017 §8.5). Must be thread-safe.
+/// Implementations of these three must be thread-safe.
 using GraphMatcherFn = bool (*)(const MatchContext&, BoundTokens& bound);
-
-/// Kernel-scoped applicability check: also reads the candidate's metadata, so it runs
-/// once per surviving kernel and disqualifies that kernel alone. Must be thread-safe.
 using KernelMatcherFn = bool (*)(const MatchContext&, const KernelDefinition&);
-
-/// Scores one kernel for one problem. Higher is better. Never handed the catalog (see
-/// IKernelHeuristic). Must be thread-safe.
 using ScoreFn = double (*)(const KernelDefinition&, const MatchContext&);
 
-/**
- * @brief The provider's registry of native implementations, keyed by symbol name.
- *
- * One instance per registered type per loaded image: requires `CXX_VISIBILITY_PRESET
- * hidden` and `--exclude-libs=ALL` (`src/CMakeLists.txt`) so two loaded copies do not
- * share a registry.
- *
- * Thread-safe: registration and lookup are mutex-guarded.
- *
- * @tparam T The registered callable or interface pointer type.
- */
+/// The provider's registry of native implementations, keyed by symbol name. One
+/// instance per registered type per loaded image: requires `CXX_VISIBILITY_PRESET
+/// hidden` and `--exclude-libs=ALL` so two loaded copies do not share a registry.
+/// Thread-safe.
 template <typename T>
 class NativeRegistry
 {
 public:
-    /**
-     * @brief Registers @p implementation under @p symbol.
-     * @throws std::runtime_error if @p symbol is already registered (which wins would
-     *         depend on static-init order).
-     */
+    /// @throws std::runtime_error if @p symbol is already registered.
     static void registerSymbol(const std::string& symbol, T implementation)
     {
         auto& self = instance();
@@ -69,15 +46,7 @@ public:
         }
     }
 
-    /**
-     * @brief Resolves @p symbol.
-     *
-     * @param describedBy What names @p symbol, for the failure message: a symbol name
-     *        alone tells an operator nothing about which descriptor to go and fix.
-     *        Callers holding a descriptor should pass describeDescriptor().
-     *
-     * @throws std::runtime_error if no implementation is registered under it.
-     */
+    /// @throws std::runtime_error if no implementation is registered under @p symbol.
     static T resolve(const std::string& symbol, const std::string& describedBy = {})
     {
         auto& self = instance();
@@ -94,10 +63,6 @@ public:
         return it->second;
     }
 
-    /// @brief Resolves @p symbol, or returns a value-initialized T if it is absent.
-    ///
-    /// For callers asking whether a symbol is registered rather than depending on it.
-    /// Production code should use resolve(), which fails closed with a diagnostic.
     static T tryResolve(const std::string& symbol)
     {
         auto& self = instance();
@@ -107,12 +72,7 @@ public:
         return it == self._symbols.end() ? T{} : it->second;
     }
 
-    /// @brief Registers @p implementation under @p symbol, replacing any existing
-    ///        entry, and returns what was there before (value-initialized if nothing).
-    ///
-    /// Never throws, so it is safe from a destructor. Used by tests to take a symbol
-    /// over for a scope and hand it back; production registration uses registerSymbol,
-    /// which fails closed on a duplicate rather than silently winning.
+    /// Test-only: replaces and returns the previous entry.
     static T replaceSymbol(const std::string& symbol, T implementation)
     {
         auto& self = instance();
@@ -130,8 +90,6 @@ public:
         return previous;
     }
 
-    /// @brief Removes @p symbol if present. Used by tests to swap in a temporary
-    /// implementation and restore the original; production code never unregisters.
     static void unregisterSymbol(const std::string& symbol)
     {
         auto& self = instance();
@@ -142,7 +100,6 @@ public:
 private:
     static NativeRegistry& instance()
     {
-        // Function-local static: avoids depending on unspecified namespace-scope init order.
         static NativeRegistry s_instance;
         return s_instance;
     }
@@ -155,8 +112,8 @@ using GraphMatcherRegistry = NativeRegistry<GraphMatcherFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
 
-/// Non-owning: the provider owns each handler and must keep it alive for as long as
-/// any plan built from it can execute.
+/// Non-owning: the provider must keep each handler alive for as long as any plan
+/// built from it can execute.
 template <typename THandle>
 using DispatchRegistry = NativeRegistry<const IKernelDispatchHandler<THandle>*>;
 

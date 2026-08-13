@@ -26,16 +26,8 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/**
- * @brief One hipDNN engine, defined entirely by a UED and the packs naming it.
- *
- * Satisfies hipDNN's IEngine contract using descriptor data.
- *
- * The engine's id is its UED name hashed into hipDNN's engine-id space, registered at
- * construction, so an id collision surfaces as a failure to create the engine.
- *
- * Holds exactly one plan builder: a catalog entry is a candidate, not a builder.
- */
+/// One hipDNN engine, defined entirely by a UED and the packs naming it. The
+/// engine's id is its UED name hashed into hipDNN's engine-id space.
 template <typename THandle, typename TSettings, typename TContext>
 class GenericEngine : public IEngine<THandle, TSettings, TContext>
 {
@@ -43,17 +35,7 @@ public:
     using IGraph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
     using IEngineConfig = hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig;
 
-    /**
-     * @param engine         The UED this engine is; its name is this engine's identity
-     *        and its knob list is what it exposes.
-     * @param stateManager   The descriptor state this engine selects over, already
-     *        validated.
-     * @param deviceResolver Answers which device each call is for. Held by reference;
-     *        owned by the provider, which must keep it alive for the engine's lifetime.
-     *
-     * @throws std::invalid_argument if a knob names no field in the engine's metadata
-     *         schema (RFC 0017 §4).
-     */
+    /// @throws std::invalid_argument if a knob names no field in the metadata schema.
     GenericEngine(EngineDescriptor engine,
                   std::unique_ptr<KernelIngestorStateManager<THandle>> stateManager,
                   const IDeviceResolver<THandle>& deviceResolver)
@@ -83,7 +65,6 @@ public:
     GenericEngine(GenericEngine&&) = delete;
     GenericEngine& operator=(GenericEngine&&) = delete;
 
-    /// The descriptor this engine was built from, for diagnostics.
     const EngineDescriptor& descriptor() const
     {
         return _engine;
@@ -99,11 +80,6 @@ public:
         return _planBuilder.isApplicable(handle, opGraph);
     }
 
-    /**
-     * @brief Reports this engine's knobs for @p opGraph.
-     *
-     * The returned buffer is detached and handed to the caller's handle to own.
-     */
     void getDetails(THandle& handle,
                     const IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override
@@ -117,12 +93,12 @@ public:
         }
 
         auto knobs = builder.CreateVector(knobOffsets);
-        // The UED's notes reach the caller the same way every other engine's do.
         auto behaviorNotes = builder.CreateVector(_engine.behaviorNotes);
         auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
             builder, _id, knobs, behaviorNotes);
         builder.Finish(engineDetails);
 
+        // Detached buffer outlives this call; the handle takes ownership.
         auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
         detailsOut.ptr = detachedBuffer->data();
         detailsOut.size = detachedBuffer->size();
@@ -151,8 +127,6 @@ public:
 
 private:
     EngineDescriptor _engine;
-    /// Owned outright: held by pointer so the plan builder can bind a reference to it
-    /// in the member initializer list, which needs a stable address.
     std::unique_ptr<KernelIngestorStateManager<THandle>> _stateManager;
     int64_t _id;
     GenericPlanBuilder<THandle, TSettings, TContext> _planBuilder;

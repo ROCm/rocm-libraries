@@ -32,16 +32,10 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 
 using StubEngine = GenericEngine<StubHandle, StubSettings, StubContext>;
 
-// GenericEngine holds its plan builder by reference to its own members, so it is
-// non-movable and non-copyable.
 static_assert(!std::is_move_constructible_v<StubEngine>);
 static_assert(!std::is_move_assignable_v<StubEngine>);
 static_assert(!std::is_copy_constructible_v<StubEngine>);
 static_assert(!std::is_copy_assignable_v<StubEngine>);
-
-// ---------------------------------------------------------------------------
-// Construction: knob validation against the metadata schema.
-// ---------------------------------------------------------------------------
 
 TEST(TestIngestorGenericEngine, AcceptsAKnobNamingADeclaredMetadataField)
 {
@@ -57,15 +51,10 @@ TEST(TestIngestorGenericEngine, RejectsAKnobNamingNoMetadataField)
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
 
-    // A knob naming no metadata field would otherwise be silently dropped.
     EXPECT_THROW(
         (StubEngine(makeEngineWithKnobs({"no_such_field"}), makeStubStateManager(), resolver)),
         std::invalid_argument);
 }
-
-// ---------------------------------------------------------------------------
-// IEngine overrides: each delegates to the plan builder or the state manager.
-// ---------------------------------------------------------------------------
 
 TEST(TestIngestorGenericEngine, IdHashesTheUedNameIntoHipdnnsEngineIdSpace)
 {
@@ -73,7 +62,6 @@ TEST(TestIngestorGenericEngine, IdHashesTheUedNameIntoHipdnnsEngineIdSpace)
     const StubDeviceResolver resolver;
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
 
-    // Pins that construction produces a stable, non-zero id.
     EXPECT_NE(engine.id(), 0);
 }
 
@@ -91,8 +79,7 @@ TEST(TestIngestorGenericEngine, IsApplicableTrueWhenTheStateManagerHasASurviving
 
 TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
 {
-    // A distinct symbol avoids colliding with ScopedTestSymbols' matcher running
-    // concurrently in another test.
+    // Distinct symbol avoids colliding with ScopedTestSymbols' matcher elsewhere.
     constexpr const char* REJECT_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.reject";
     GraphMatcherRegistry::registerSymbol(REJECT_SYMBOL, &rejectGraph);
     ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
@@ -154,10 +141,6 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
 {
-    // Asserted positively rather than by an expected throw. These once proved
-    // delegation by leaving the dispatch symbol unregistered, which stopped working
-    // when dispatch symbols began resolving at construction; and a test that passes
-    // because something upstream threw cannot tell delegation from any other failure.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
     const StubWorkspaceHandler handler;
@@ -169,8 +152,8 @@ TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
     const TestGraph graph(makeGraphId(0x63));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper emptyConfig(nullptr, 0);
 
-    // The stub manager ships one 64-block kernel, and the handler reports block_size as
-    // its workspace, so this value can only come from the plan builder having run.
+    // Stub manager ships one 64-block kernel; only the plan builder having run
+    // explains this value.
     EXPECT_EQ(engine.getMaxWorkspaceSize(handle, graph, emptyConfig), 64U);
 }
 
@@ -190,7 +173,6 @@ TEST(TestIngestorGenericEngine, InitializeExecutionContextDelegatesToThePlanBuil
 
     engine.initializeExecutionContext(handle, graph, emptyConfig, context);
 
-    // A plan reached the context, which only the plan builder can put there.
     EXPECT_TRUE(context.hasPlan());
 }
 

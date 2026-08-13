@@ -29,21 +29,10 @@
 #include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
-/**
- * @file PointwiseAddNative.cpp
- * @brief The pointwise-add pack's native half: matching, scoring, dispatch, and the
- *        one function that registers them.
- *
- * The permanent side of the seam: everything a descriptor cannot express as data.
- * ALMIOPEN-2401 turns PointwiseAddDescriptors.cpp into a parsed file and leaves this
- * one alone.
- *
- * The symbol names below are restated rather than shared through a header, because a
- * descriptor file cannot export a constant to C++. The two sides agree by string
- * value, so a typo is not a compile error. That is safe only because matcher and
- * scorer symbols resolve when the state manager is constructed, making a mismatch a
- * load-time exclusion that names the descriptor.
- */
+/// @file PointwiseAddNative.cpp
+/// The pointwise-add pack's native half: matching, scoring, dispatch, and the
+/// function that registers them. Symbol names are restated rather than shared through
+/// a header, since a descriptor file cannot export a C++ constant.
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -53,26 +42,21 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-// The contract with PointwiseAddDescriptors.cpp, which restates these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise_add.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise_add.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise_add.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dispatch";
 
-// KMD fields this pack varies along, and the tokens matching binds for dispatch.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view INPUT_A_TOKEN = "pointwise_add.input_a.uid";
 constexpr std::string_view INPUT_B_TOKEN = "pointwise_add.input_b.uid";
 constexpr std::string_view OUTPUT_TOKEN = "pointwise_add.output.uid";
 
-/// Scratch reported by the larger-block kernel. Arbitrary: its only job is to make the
-/// engine's max-across-survivors answer observably non-zero.
+/// Scratch reported by the larger-block kernel; keeps max-across-survivors non-zero.
 constexpr size_t LARGE_BLOCK_WORKSPACE_BYTES = 1024;
 constexpr int64_t LARGE_BLOCK_SIZE = 256;
 
-/// The tensor ranks this pack accepts; compile options derive layout from the tensor
-/// and reject anything outside this range.
 constexpr uint32_t MIN_SUPPORTED_RANK = 4;
 constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 
@@ -80,7 +64,6 @@ constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 // Matching
 // ---------------------------------------------------------------------------
 
-/// The tensor uids a matched pointwise-add graph binds, in argument order.
 struct PointwiseAddBinding
 {
     int64_t inputA = 0;
@@ -95,8 +78,7 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-/// True when the tensor's stride order is channel-first or channel-last, the only
-/// orders the dispatch path's compile options can classify.
+/// Channel-first or channel-last stride order, the only orders compile options classify.
 bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
 {
     try
@@ -110,26 +92,22 @@ bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
     }
 }
 
-/// True when the tensor is a supported rank and layout holding exactly one element.
-///
-/// Runs as an applicability check on a graph nothing has validated yet, so it must be
-/// total: a plugin-ABI caller or a deserialized graph can present a tensor the frontend
-/// would have rejected.
+/// Runs on an unvalidated graph, so must be total: a caller can present a tensor the
+/// frontend would have rejected.
 bool isSingleElement(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
     const auto* strides = tensor.strides();
-    // strides is as optional as dims, and the layout classifier below dereferences it
-    // without checking. A refusal predicate must not be able to crash the process.
+    // isChannelLastLayout below dereferences strides unchecked; this predicate must
+    // not crash.
     if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
        || dims->size() < MIN_SUPPORTED_RANK || dims->size() > MAX_SUPPORTED_RANK)
     {
         return false;
     }
 
-    // Every dim must be 1, not merely multiply to 1: {-1,-1,1,1} has product 1, and a
-    // large-dim product can overflow onto 1. The kernel indexes element 0 and nothing
-    // else, so the claim being made here is about extent, not about a product.
+    // Every dim must be 1, not merely multiply to 1 -- the claim is about extent, not
+    // a product.
     for(const auto dim : *dims)
     {
         if(dim != 1)
@@ -141,8 +119,6 @@ bool isSingleElement(const data_objects::TensorAttributes& tensor)
     return hasSupportedLayout(tensor);
 }
 
-/// The graph's element type, from the first input; the matcher below requires every
-/// operand to agree, so any of them would answer the same.
 std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)
@@ -170,22 +146,13 @@ std::string dataTypeName(data_objects::DataType dataType)
     return data_objects::EnumNameDataType(dataType);
 }
 
-/**
- * @brief Graph-scoped applicability: is this a single-node pointwise ADD over
- *        1-element tensors?
- *
- * Evaluated once per (graph, device); a failure disqualifies every kernel in the pack.
- */
 bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    // No device, no launch. Every fact this matcher selects on, including the device
-    // properties the compile is configured from, is meaningless without one.
     if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
     {
         return false;
     }
 
-    // Exactly one node: this pack's kernel serves one complete graph.
     if(context.graph.nodeCount() != 1)
     {
         return false;
@@ -203,7 +170,6 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // Binary add: a second operand is required, a third would be a different operation.
     if(!attributes.in_1_tensor_uid().has_value() || attributes.in_2_tensor_uid().has_value())
     {
         return false;
@@ -217,20 +183,16 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // One element each: this pack's kernel indexes element 0 and nothing else.
     if(!isSingleElement(*inputA) || !isSingleElement(*inputB) || !isSingleElement(*output))
     {
         return false;
     }
 
-    // A virtual tensor has no device buffer for findDeviceBuffer to resolve at launch.
     if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
     {
         return false;
     }
 
-    // A 1-element rank-4 tensor is also the shape of a pass-by-value scalar, whose
-    // variant-pack slot holds a host pointer, not a device one.
     if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputA)
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputB)
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(output))
@@ -238,26 +200,17 @@ bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // Uniform dtype across operands; mixed precision is a different kernel.
     if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
     {
         return false;
     }
 
-    // Binds operand uids for the dispatch handler to read back rather than re-deriving
-    // them from the graph.
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
     return true;
 }
 
-/**
- * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
- *
- * Evaluated once per candidate kernel. Without it, an f32 graph could reach an f16
- * binary and return wrong numbers rather than failing.
- */
 bool pointwiseAddKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
 {
     const auto dataType = graphDataType(context);
@@ -266,26 +219,16 @@ bool pointwiseAddKernelMatches(const MatchContext& context, const KernelDefiniti
         return false;
     }
 
-    // Pins the kernel's baked dtype against the graph's, so an f32 graph cannot reach
-    // an f16 kernel and get wrong numbers back.
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
 double pointwiseAddScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
 {
-    // A stand-in for a trained model: prefers the larger block size.
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }
 
-/**
- * @brief Re-reads the operand bindings a match established.
- *
- * @throws HipdnnPluginException if the graph is not one this matcher accepts.
- */
 PointwiseAddBinding pointwiseAddBinding(const BoundTokens& bound)
 {
-    // Every token was written by the graph matcher that admitted this graph; a missing
-    // one means the catalog was built by a matcher other than ours.
     const auto read = [&bound](std::string_view token) {
         const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
         if(!value.has_value())
@@ -305,8 +248,6 @@ PointwiseAddBinding pointwiseAddBinding(const BoundTokens& bound)
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The compiled kernel plus the operand uids it launches with: everything read from the
-/// graph, resolved once, owning nothing that points back into it.
 class PreparedPointwiseAdd : public PreparedDispatch
 {
 public:
@@ -330,14 +271,13 @@ public:
     }
 
 private:
-    // The runnable kernel is a view into its program's module, so the program must
-    // outlive it; both are held here for the plan's lifetime.
+    // Runnable kernel is a view into its program's module; both are held for the
+    // plan's lifetime.
     std::unique_ptr<compilation::ICompiledProgram> _program;
     std::unique_ptr<compilation::IRunnableKernel> _kernel;
     PointwiseAddBinding _binding;
 };
 
-/// The C++ type the kernel is compiled for, from the kernel's dtype metadata.
 std::string elementTypeFor(const KernelDefinition& kernel)
 {
     const auto& dtype = kernel.getStringMetadata(std::string(DTYPE_FIELD));
@@ -350,7 +290,6 @@ std::string elementTypeFor(const KernelDefinition& kernel)
         return "_Float16";
     }
 
-    // Unreachable via matching, which admits only dtypes this pack declares.
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
         "kernel '" + toString(kernel.kernelId) + "' declares unsupported dtype '" + dtype + "'");
@@ -370,33 +309,15 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
     return *it->second;
 }
 
-/**
- * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise add.
- *
- * Splits per RFC 0017 §8.5: everything derived from the graph and chosen kernel
- * resolves once at plan build; execute only resolves device pointers by uid and
- * launches. A plan may execute concurrently from several threads, so nothing here
- * mutates after preparation.
- */
 class PointwiseAddDispatchHandler
     : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
-    /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
-    ///
-    /// Device properties are not held; they arrive per call on the MatchContext, so a
-    /// kernel is compiled for the device the call is actually for.
     explicit PointwiseAddDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
         : _kernelCompiler(kernelCompiler)
     {
     }
 
-    /**
-     * @brief Scratch this kernel requires.
-     *
-     * A one-element add needs none. The 256-block kernel reports a non-zero
-     * requirement so the engine's max-across-survivors is observably a maximum.
-     */
     size_t workspaceBytes(const MatchContext& /*context*/,
                           const BoundTokens& /*bound*/,
                           const KernelDefinition& kernel) const override
@@ -410,7 +331,6 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        // Reads the operand uids the matcher bound rather than re-deriving them.
         const auto binding = pointwiseAddBinding(bound);
 
         const auto blockSize
@@ -421,11 +341,9 @@ public:
         options.add("HIP_PLUGIN_POINTWISE_ADD_TYPE", elementTypeFor(kernel));
         options.add("HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE", blockSize);
 
-        // The only KernelSourceKind this dispatch handler knows how to load.
         auto program = _kernelCompiler.compile(kernel.source.sourceFile, options);
         auto runnableKernel = program->getKernel(kernel.source.entryPoint);
 
-        // One element, so one workgroup; block size comes from kernel metadata.
         runnableKernel->setBlockSize(blockSize, 1, 1);
         runnableKernel->setGridSize(1, 1, 1);
 
@@ -456,11 +374,6 @@ private:
     const compilation::IKernelCompiler& _kernelCompiler;
 };
 
-/// This pack's dispatch handler.
-///
-/// Process-lifetime: the registry holds a non-owning pointer to it while a provider's
-/// Container is created and destroyed per handle, so it must outlive every Container.
-/// The compiler it holds is a static for the same reason.
 const PointwiseAddDispatchHandler& pointwiseAddDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;

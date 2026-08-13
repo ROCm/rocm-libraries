@@ -38,10 +38,6 @@ KernelDefinition makeKernelWithMetadata(MetadataValues metadata)
             /*priority=*/0};
 }
 
-// ---------------------------------------------------------------------------
-// tryGetMetadata
-// ---------------------------------------------------------------------------
-
 TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsTheValueWhenPresent)
 {
     const auto kernel = makeKernelWithMetadata({{BLOCK_SIZE, MetadataValue{int64_t{64}}}});
@@ -54,13 +50,10 @@ TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsTheValueWhenPresent)
 
 TEST(TestIngestorKernelDefinition, TryGetMetadataReturnsNulloptWhenAbsent)
 {
-    // Nullopt rather than throwing: lets callers query fields an older kernel predates.
     const auto kernel = makeKernelWithMetadata({});
 
     EXPECT_EQ(kernel.tryGetMetadata(BLOCK_SIZE), std::nullopt);
 }
-
-// Typed accessor happy path.
 
 TEST(TestIngestorKernelDefinition, GetIntMetadataReturnsTheIntegerValue)
 {
@@ -85,18 +78,12 @@ TEST(TestIngestorKernelDefinition, GetIntListMetadataReturnsTheListValue)
     EXPECT_EQ(kernel.getIntListMetadata(STRIDE_ORDER), (std::vector<int64_t>{3, 1, 2, 0}));
 }
 
-// Throw matrix: each typed getter x "field absent" (out_of_range) / "wrong alternative"
-// (invalid_argument).
-
+// Throw matrix: each typed getter x field-absent/wrong-alternative.
 struct KernelDefinitionThrowCase
 {
     std::string name;
-    /// Builds the kernel this case exercises.
     std::function<KernelDefinition()> makeKernel;
-    /// Invokes the getter under test.
     std::function<void(const KernelDefinition&)> callGetter;
-    /// True for std::out_of_range (field absent); false for std::invalid_argument (wrong
-    /// alternative). RTTI is disabled, so distinguished via EXPECT_THROW's static type.
     bool expectsOutOfRange;
 };
 
