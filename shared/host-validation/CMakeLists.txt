@@ -28,9 +28,21 @@ option(HOST_VALIDATION_BUILD_MX_BACKEND
 option(HOST_VALIDATION_BUILD_BENCHMARKS
        "Build host-validation development benchmarks."
        OFF)
+option(HOST_VALIDATION_ENABLE_FETCH
+       "Allow host-validation tests to fetch missing dependencies."
+       ${HOST_VALIDATION_STANDALONE})
+option(HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP
+       "Use OpenMP for large AMD GPU physical-layout transforms when available."
+       ON)
 
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
+
+add_library(host-validation-amd-gpu-layout INTERFACE)
+add_library(
+    roc::host-validation-amd-gpu-layout
+    ALIAS host-validation-amd-gpu-layout
+)
 
 add_library(host-validation STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/axpby.cpp"
@@ -63,6 +75,38 @@ target_sources(host-validation-core
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/tensor.hpp"
 )
+
+target_compile_features(host-validation-amd-gpu-layout INTERFACE cxx_std_17)
+target_include_directories(host-validation-amd-gpu-layout
+    INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_sources(host-validation-amd-gpu-layout
+    INTERFACE
+        FILE_SET HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/host_validation/amd_gpu_layout/mx.hpp"
+)
+set_target_properties(host-validation-amd-gpu-layout
+    PROPERTIES
+        VERIFY_INTERFACE_HEADER_SETS ON
+)
+if(HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP)
+    find_package(OpenMP QUIET COMPONENTS CXX)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(
+            host-validation-amd-gpu-layout
+            INTERFACE
+                OpenMP::OpenMP_CXX
+        )
+        set_property(
+            TARGET host-validation-amd-gpu-layout
+            PROPERTY ROC_HOST_VALIDATION_USES_OPENMP ON
+        )
+    endif()
+endif()
 
 target_compile_features(host-validation PUBLIC cxx_std_20)
 target_include_directories(host-validation
@@ -251,7 +295,12 @@ if(HOST_VALIDATION_BUILD_TESTING)
 endif()
 
 # cmake-lint: disable=E1122
-install(TARGETS host-validation-core host-validation host-validation-tiled
+install(
+    TARGETS
+        host-validation-core
+        host-validation-amd-gpu-layout
+        host-validation
+        host-validation-tiled
     EXPORT host-validation-targets
     ARCHIVE
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -324,6 +373,14 @@ function(roc_host_validation_finalize_package)
             set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
         endif()
     endif()
+    get_target_property(
+        _host_validation_amd_gpu_layout_uses_openmp
+        host-validation-amd-gpu-layout
+        ROC_HOST_VALIDATION_USES_OPENMP
+    )
+    if(_host_validation_amd_gpu_layout_uses_openmp)
+        set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
+    endif()
 
     configure_package_config_file(
         "${_host_validation_source_dir}/cmake/ROCHostValidationConfig.cmake.in"
@@ -354,4 +411,9 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
     DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
     COMPONENT devel
+)
+install(
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+    COMPONENT docs
 )

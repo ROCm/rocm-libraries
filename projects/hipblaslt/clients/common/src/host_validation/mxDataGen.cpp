@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <roc/mx_layout_transforms/pre_swizzle.hpp>
+#include <roc/host_validation/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -170,11 +170,11 @@ namespace
         switch(scaleLayout)
         {
         case MXScaleLayout::GFX950:
-            return roc::mx_layout_transforms::preSwizzleScalesGFX950(
+            return roc::host_validation::amd_gpu_layout::preSwizzleScalesGFX950(
                 scaleBytes, {slowDimension, fastDimension});
         case MXScaleLayout::GFX1250:
             if(blockSize > 0)
-                return roc::mx_layout_transforms::preSwizzleScalesGFX1250(
+                return roc::host_validation::amd_gpu_layout::preSwizzleScalesGFX1250(
                     scaleBytes, slowDimension, fastDimension, blockSize);
             break;
         case MXScaleLayout::None:

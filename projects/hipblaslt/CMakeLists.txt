@@ -307,13 +307,9 @@ if(_hipblaslt_host_validation_enabled
     if(NOT TARGET roc::host-validation
             AND NOT EXISTS
                 "${_hipblaslt_host_validation_source}/CMakeLists.txt")
-        set(_hipblaslt_shared_paths shared/host-validation)
-        if(_hipblaslt_mxdatagen_enabled)
-            list(APPEND _hipblaslt_shared_paths shared/mx-layout-transforms)
-        endif()
         hipblaslt_materialize_monorepo_paths(
             _hipblaslt_materialized_root
-            ${_hipblaslt_shared_paths}
+            shared/host-validation
         )
         if(_hipblaslt_materialized_root)
             set(_hipblaslt_host_validation_source
@@ -344,6 +340,14 @@ if(_hipblaslt_host_validation_enabled
             "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
         )
     endif()
+endif()
+if(_hipblaslt_host_validation_enabled
+        AND _hipblaslt_mxdatagen_enabled
+        AND NOT TARGET roc::host-validation-amd-gpu-layout)
+    message(FATAL_ERROR
+        "hipBLASLt MX clients require the "
+        "roc::host-validation-amd-gpu-layout target."
+    )
 endif()
 if(_hipblaslt_host_validation_enabled
         AND _hipblaslt_mxdatagen_enabled

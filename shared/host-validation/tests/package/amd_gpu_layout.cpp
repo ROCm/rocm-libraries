@@ -3,11 +3,11 @@
 
 #include <cstdint>
 #include <numeric>
-#include <roc/mx_layout_transforms/pre_swizzle.hpp>
+#include <roc/host_validation/amd_gpu_layout/mx.hpp>
 #include <vector>
 
 int main() {
-    using namespace roc::mx_layout_transforms;
+    using namespace roc::host_validation::amd_gpu_layout;
 
     std::vector<int> tiledInput{0, 1, 2, 3, 4, 5, 6, 7};
     auto tiled = preSwizzle(tiledInput, {2, 4}, {}, {2, 4});

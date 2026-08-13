@@ -4,6 +4,7 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(ROCHostValidationPackageTest LANGUAGES CXX)
 
+enable_testing()
 find_package(ROCHostValidation CONFIG REQUIRED)
 
 add_executable(host-validation-package-test main.cpp)
@@ -38,3 +39,17 @@ if(TARGET roc::host-validation-mx)
             roc::host-validation-mx
     )
 endif()
+
+add_executable(
+    host-validation-amd-gpu-layout-package-test
+    amd_gpu_layout.cpp
+)
+target_link_libraries(
+    host-validation-amd-gpu-layout-package-test
+    PRIVATE
+        roc::host-validation-amd-gpu-layout
+)
+add_test(
+    NAME host-validation-amd-gpu-layout-package-consumer
+    COMMAND host-validation-amd-gpu-layout-package-test
+)

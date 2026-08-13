@@ -1,7 +1,8 @@
 # ROCm host validation
 
-`host-validation` owns GPU-independent generation, reference arithmetic, and
-comparison used by ROCm library clients and tests.
+`host-validation` owns product-independent CPU generation, reference
+arithmetic, and comparison used by ROCm library clients and tests. It also
+contains a separate CPU-only module for constructing physical AMD GPU layouts.
 
 ## Targets
 
@@ -9,6 +10,13 @@ comparison used by ROCm library clients and tests.
   - The stable, GPU-independent tensor layer.
   - Exports only `roc/host_validation/tensor.hpp`.
   - Builds with an ordinary host compiler and the C++ standard library.
+- `roc::host-validation-amd-gpu-layout`
+  - Header-only physical MX layout permutations requested by product adapters.
+  - Exports `roc/host_validation/amd_gpu_layout/mx.hpp`.
+  - Does not depend on the tensor or numerical targets.
+  - Uses optional OpenMP parallelism, disabled with
+    `HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF`. Large transforms use at
+    most eight threads by default; `OMP_NUM_THREADS` overrides the cap.
 - `roc::host-validation`
   - Transitional validation operations layered on the tensor core.
   - Exports `axpby.hpp`, `comparison.hpp`, `epilogue.hpp`, `generation.hpp`,
@@ -51,16 +59,19 @@ translate their descriptors into component-owned tensor and operation types:
 
 ```text
 private product adapter -> roc::host-validation -> roc::host-validation-core
+private product adapter -> roc::host-validation-amd-gpu-layout
 ```
 
 The dependency may never point in the opposite direction. The
 `host-validation-component-boundary` test scans the complete component source
-tree for forbidden product dependencies.
+tree for forbidden product dependencies. Generic tensor and numerical code
+must not include or link the AMD GPU layout module.
 
 ## Layout
 
 ```text
 include/roc/host_validation/
+  amd_gpu_layout/mx.hpp
   tensor.hpp
   comparison.hpp
   typed_comparison.hpp
