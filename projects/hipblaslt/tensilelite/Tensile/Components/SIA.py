@@ -29,6 +29,7 @@ from rocisa.container import DSModifiers, HolderContainer, replaceHolder
 from rocisa.instruction import SWaitCnt, SWaitAlu, DSStoreB128, DSStoreB64, DSStoreB32, TensorLoadToLds
 
 from ..Common import roundUp, print2
+from ..Common.DecouplePgr import decoupledOneBlockBoth
 from ..Component import SIA
 
 from copy import deepcopy
@@ -75,7 +76,7 @@ class SIA3(SIA):
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
             writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex
-            if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
+            if kernel["1LDSBuffer"] or kernel["DirectToLds"] or decoupledOneBlockBoth(kernel):
                 writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=isNGLL)
@@ -980,7 +981,7 @@ def assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEnd
     if writer.states.lwStartMfmaIndex < writer.states.grEndMfmaIndex:
           # adjust lwStartMfmaIndex for PGR1
           writer.states.lwStartMfmaIndex = writer.states.grEndMfmaIndex
-    if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
+    if kernel["1LDSBuffer"] or kernel["DirectToLds"] or decoupledOneBlockBoth(kernel):
         writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
     startIter = writer.states.lwStartMfmaIndex//numMfmaPerIter
     assert startIter < localWriteEndIter+1 # startIter should be at or before the endIter

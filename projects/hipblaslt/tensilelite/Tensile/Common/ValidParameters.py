@@ -347,6 +347,19 @@ validParameters = { # we need to make sure this matches develop
     # Need to allocate PGR+1 or PGR LDS buffer
     # Allocating PGR+1 LDS buffer is better for instruction scheduling.
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
+    # Per-tensor LDS block count for A and B, spelled on the PrefetchGlobalRead
+    # scale but read as a block count, not as a level: 0 and 1 both give one
+    # block, 2 gives two. Common.DecouplePgr.ldsBlocksForPgrLevel is the map.
+    # Absent means "not specified, use the scalar", so 0 is a real value and not
+    # an off switch.
+    # Setting either key requires the TDM on both tensors (TDMInst == 3): a block
+    # count is a prefetch depth only where nothing stages the tile in VGPRs
+    # first, so off that path the value has no defined meaning.
+    # Setting either key also DERIVES PrefetchGlobalRead from the pair, with a
+    # warning, and ignores whatever scalar was written: the pin leaves exactly
+    # one valid scalar, so it is computed rather than demanded.
+    "PrefetchGlobalReadA": [0, 1, 2] + list(range(3,16 + 1)),
+    "PrefetchGlobalReadB": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
     # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
@@ -1175,6 +1188,58 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
+    # TDMFuse -- which tensors share one TDM descriptor register set and therefore
+    # ride on a single emitted tensor_load_to_lds, the wave index selecting which
+    # member a given wave actually moves.
+    #
+    # A fused group is one descriptor set AND one instruction; here those are the
+    # same thing. rocisa::TensorLoadToLds carries exactly one descriptor --
+    # group0 is one LDS address plus one 64-bit global address, group1 one set of
+    # dims, strides and tile -- and group2/group3 are iterate-mode operands for
+    # the SAME tensor. There is no encoding for two heterogeneous regions in one
+    # instruction, so "fused" can only mean sharing the descriptor set and being
+    # programmed per wave.
+    #
+    #   0  OFF, and the default. Hidden from the kernel name. The grouping is
+    #      left to the derivation in KernelWriterAssembly.defineTdmSgprs, which
+    #      is not one fixed grouping: it aliases B onto A and MXSB onto MXSA
+    #      under NumWaves > 1 and not UseSubtileImpl, giving {A,B} + {MXSA,MXSB},
+    #      and gives every tensor its own descriptor otherwise. 0 therefore
+    #      means "leave this alone", NOT "do not fuse".
+    #   4  {MXSA,MXSB} + {A,B}. Two fused groups on a TWO-WAY wave-parity
+    #      dispatch: s_bitcmp1_b32 s[sgprWaveIdx], 0 sends even waves down the
+    #      A / MXSA arm and odd waves down the B / MXSB arm. This is what 0
+    #      already produces on wave-separated MX shapes, so it moves no
+    #      assembly; what it buys is that the grouping is REFUSED wherever it
+    #      would not be produced (NumWaves == 1, UseSubtileImpl, no MX scales,
+    #      sparse metadata) rather than degrading silently under a name that
+    #      claims it.
+    #   6  {A} + {B} + {MXSA,MXSB}. Three descriptor sets: A and B each own one,
+    #      the MX scales stay parity-aliased on a third. Not in the design table,
+    #      which runs 0..5, so 6 sits above the table rather than in it. Costs 12
+    #      SGPRs for B's own set against a ceiling of 106, so it is expensive and
+    #      can fail to fit. Requires a divergent decoupled pair, which is the only
+    #      envelope the cadence was verified on.
+    #
+    # TDMSplit is orthogonal: it halves each data tensor's load into two
+    # instructions without changing which tensors share a descriptor.
+    #
+    # THE NUMBERING NEEDS SETTLING BEFORE THIS SHIPS. 0 is spent on "off", so the
+    # design table's `None` grouping -- every tensor on its own instruction --
+    # has no number. Renumbering costs nothing today and is a compatibility
+    # problem once tuning libraries carry values. The unimplemented rows keep the
+    # table's numbers provisionally:
+    #     1  `AB`      {A,B}, MX scales unfused
+    #     2  `A_MX`    {A,MXSA,MXSB} + {B}
+    #     3  `B_MX`    {B,MXSA,MXSB} + {A}
+    #     5  `paired`  {MXSA,A} + {MXSB,B}
+    # Rows 2 and 3 are realisable but not expressible by today's generator: a
+    # three-member group needs a three-way wave dispatch, and
+    # TensorDataMover.calculateStartAddrWaveSeparated knows only the parity split
+    # (numComp = numWaves // 2, asserting numWaves > 1). Any value added here
+    # must document the dispatch it implies, or it will not survive a different
+    # NumWaves.
+    "TDMFuse": [0, 4, 6],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
