@@ -433,8 +433,10 @@ class InsertDelayAluPassImpl : public Pass {
                 });
             }
 
-            // Record dest registers with fresh delay info
-            if (type != OTHER) {
+            // Record dest registers with fresh delay info.
+            // Skip WMMA/XDL as a delay producer: matrix ops are meant to issue
+            // back-to-back or co-execute with core/side MACC, not yield via a delay hint.
+            if (type != OTHER && !isMatrixInstruction(*inst)) {
                 unsigned latency = inst->latencyCycles;
                 PASS_DEBUG(std::cerr << "[DelayAlu]   " << delayTypeName(type)
                                      << " def: " << inst->getHwInstDesc()->mnemonic

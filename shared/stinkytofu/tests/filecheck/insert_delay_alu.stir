@@ -250,48 +250,30 @@ st.func @mem_clears_state() {
   v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- XDL WMMA as TRANS: gfx1250-specific WMMA tracked in TRANS scoreboard
-# CHECK-LABEL: @xdl_wmma_as_trans
+#--- WMMA/XDL not tracked as producer: consecutive matrix ops chain through the
+# accumulator and the VALU pipe serializes them itself, so no s_delay_alu is
+# emitted for a consumer of a WMMA result.
+# CHECK-LABEL: @xdl_wmma_no_producer_delay
 # CHECK: v_wmma_f32_16x16x32_f16
-# CHECK-NEXT: s_delay_alu
-# CHECK-SAME: instid0Type = "TRANS"
-# CHECK-SAME: instid0Distance = 1
+# CHECK-NOT: s_delay_alu
 # CHECK: v_add_f32
 
-st.func @xdl_wmma_as_trans() {
+st.func @xdl_wmma_no_producer_delay() {
 ^entry:
   a[0:7] = "st.v_wmma_f32_16x16x32_f16"(v[0:7], v[8:15], a[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
   v20 = "st.v_add_f32"(a0, v21) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- Non-XDL WMMA as VALU: FP32-input WMMA tracked in VALU scoreboard
-# CHECK-LABEL: @non_xdl_wmma_as_valu
+#--- Non-XDL (FP32-input) WMMA also not tracked as producer.
+# CHECK-LABEL: @non_xdl_wmma_no_producer_delay
 # CHECK: v_wmma_f32_16x16x4_f32
-# CHECK-NEXT: s_delay_alu
-# CHECK-SAME: instid0Type = "VALU"
-# CHECK-SAME: instid0Distance = 1
+# CHECK-NOT: s_delay_alu
 # CHECK: v_add_f32
 
-st.func @non_xdl_wmma_as_valu() {
+st.func @non_xdl_wmma_no_producer_delay() {
 ^entry:
   a[0:7] = "st.v_wmma_f32_16x16x4_f32"(v[0:1], v[2:3], a[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
   v20 = "st.v_add_f32"(a0, v21) { issueCycles = 1, latencyCycles = 5 }
-}
-
-#--- XDL WMMA with intervening TRANS: both tracked in TRANS scoreboard
-# CHECK-LABEL: @xdl_wmma_then_trans
-# CHECK: v_wmma_f32_16x16x32_f16
-# CHECK: v_exp_f32
-# CHECK-NEXT: s_delay_alu
-# CHECK-SAME: instid0Type = "TRANS"
-# CHECK-SAME: instid0Distance = 2
-# CHECK: v_add_f32
-
-st.func @xdl_wmma_then_trans() {
-^entry:
-  a[0:7] = "st.v_wmma_f32_16x16x32_f16"(v[0:7], v[8:15], a[0:7]) { mod.mfma = { reuseA = false, reuseB = false } }
-  v16 = "st.v_exp_f32"(v17) { issueCycles = 1, latencyCycles = 8 }
-  v18 = "st.v_add_f32"(a0, v19) { issueCycles = 1, latencyCycles = 5 }
 }
 
 #--- Dual dep on same inst: TRANS + VALU both needed
