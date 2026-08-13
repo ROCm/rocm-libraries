@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "TreeDataAdapter.hpp"
+#include "../Sha256.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -56,10 +57,17 @@ std::unique_ptr<TreeDataAdapter> TreeDataAdapter::loadFromBuffer(const uint8_t* 
         return nullptr;
     }
 
-    // TODO: Validate model hash if provided (RFC 0019 §9.2 integrity validation).
-    // Requires SHA-256 implementation or OpenSSL dependency.
-    // For now, the hash is loaded and stored but not validated.
-    (void)expectedModelHash; // Suppress unused parameter warning
+    // Validate model hash if provided (RFC 0019 §9.2 integrity validation)
+    if(!expectedModelHash.empty())
+    {
+        const std::string actualHash = sha256(buffer, size);
+        if(actualHash != expectedModelHash)
+        {
+            HIPDNN_SDK_LOG_WARN("TreeDataAdapter: model hash mismatch - computed='"
+                                << actualHash << "' expected='" << expectedModelHash << "'");
+            return nullptr;
+        }
+    }
 
     // Verify file identifier
     if(!flatbuffers::BufferHasIdentifier(buffer, fb::GbdtModelIdentifier()))
