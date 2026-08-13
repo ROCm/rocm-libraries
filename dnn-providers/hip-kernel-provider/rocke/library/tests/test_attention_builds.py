@@ -1361,8 +1361,8 @@ class TestAttentionHelpers(unittest.TestCase):
 
         spec = AttentionDenseSpec(
             batch=1,
-            seqlen_q=8192,
-            seqlen_kv=8192,
+            seqlen_q=256,
+            seqlen_kv=256,
             num_query_heads=32,
             num_kv_heads=8,
             head_size=128,
@@ -1371,7 +1371,7 @@ class TestAttentionHelpers(unittest.TestCase):
             sliding_window=4096,
             block_n=64,
             paged=True,
-            block_size=16,
+            block_size=64,
             num_kv_blocks=512,
         )
         want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
@@ -1380,7 +1380,7 @@ class TestAttentionHelpers(unittest.TestCase):
         out = SimpleNamespace(shape=qshape)
         k = SimpleNamespace(shape=want)
         v = SimpleNamespace(shape=want)
-        kv_lens = [64]  # ceil(64/16) = 4 pages actually dereferenced
+        kv_lens = [256]  # == seqlen_kv (enforced) -> ceil(256/64)=4 pages deref
         good_bt = [[0, 1, 2, 3]]  # all in [0, 512)
         bad_bt = [[0, 1, 600, 3]]  # 600 >= num_kv_blocks at a USED page
         sentinel = RuntimeError("reached-compile")
@@ -1402,8 +1402,8 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertIn("600", msg)
         self.assertIn("num_kv_blocks=512", msg)
 
-        # Only DEREFERENCED pages are checked: a bad id BEYOND n_pages is ignored.
-        # kv_lens=[16] -> n_pages=1, so block_tables[0][1]=600 is never read.
+        # Only DEREFERENCED pages are checked: a bad id in a column BEYOND n_pages
+        # (index >= ceil(256/64)=4) is never read, so it is ignored.
         ad._DENSE_LAUNCHER_CACHE.clear()
         with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
             with self.assertRaises(RuntimeError) as beyond:
@@ -1414,8 +1414,8 @@ class TestAttentionHelpers(unittest.TestCase):
                     v=v,
                     out=out,
                     scale=1.0,
-                    block_tables=[[0, 600]],
-                    kv_lens=[16],
+                    block_tables=[[0, 1, 2, 3, 600]],
+                    kv_lens=kv_lens,
                 )
             self.assertIs(beyond.exception, sentinel)
 
@@ -1449,6 +1449,95 @@ class TestAttentionHelpers(unittest.TestCase):
                     scale=1.0,
                     block_tables=good_bt,
                     kv_lens=kv_lens,
+                )
+            self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_paged_launcher_validates_kv_len_contract(self):
+        """Gated CONTENTS check: the kernel visits ALL compile-time seqlen_kv
+        tiles but the page-bounds mask uses the runtime kv_len, so a kv_len
+        shorter than seqlen_kv leaves uncovered tiles reading page 0 (the masked
+        block-table default) -> silently wrong output. validate_paged=True
+        enforces kv_lens[i] == seqlen_kv; validate_paged=False skips it (hot
+        path). Host-only (plain lists), no torch / GPU."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=64,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=want)
+        v = SimpleNamespace(shape=want)
+        good_bt = [[0, 1, 2, 3]]
+        sentinel = RuntimeError("reached-compile")
+
+        # Negative (validate on, default): kv_len < seqlen_kv -> reject loudly.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                block_tables=good_bt,
+                kv_lens=[128],
+            )
+        msg = str(ctx.exception)
+        self.assertIn("kv_lens[0]=128", msg)
+        self.assertIn("seqlen_kv=256", msg)
+
+        # Gate off: the contract is not checked -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as gated:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=[128],
+                    validate_paged=False,
+                )
+            self.assertIs(gated.exception, sentinel)
+
+        # Positive (kv_len == seqlen_kv): passes the gate -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=[256],
                 )
             self.assertIs(ok.exception, sentinel)
 

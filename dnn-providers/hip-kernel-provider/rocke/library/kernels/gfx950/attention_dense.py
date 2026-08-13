@@ -1902,10 +1902,13 @@ def run_attention_dense_torch(
     ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous. Single-sequence
     only in this revision (``batch == 1``); ``spec.block_size`` is the cache page
     size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. ``validate_paged``
-    (default True) host-checks the used ``block_tables`` entries lie in
-    ``[0, num_kv_blocks)`` (a device->host sync); pass False on the hot /
-    graph-captured path to rely on the bounds-checked cache SRD (an out-of-range
-    id then reads 0 rather than OOB)."""
+    (default True) host-checks the paged CONTENTS (a device->host sync): the used
+    ``block_tables`` entries lie in ``[0, num_kv_blocks)``, and each
+    ``kv_lens[i] == seqlen_kv`` (the kernel visits all compile-time ``seqlen_kv``
+    tiles, so a shorter ``kv_len`` reads page 0 for the uncovered tiles ->
+    wrong output). Pass False on the hot / graph-captured path to skip the sync
+    (block ids then rely on the bounds-checked cache SRD reading 0, and the
+    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -1955,7 +1958,19 @@ def run_attention_dense_torch(
             # [0, ceil(kv_len/block_size)) per seq; the rest are masked on device.
             _kvl = kv_lens.tolist() if hasattr(kv_lens, "tolist") else list(kv_lens)
             for _i in range(spec.batch):
-                _npages = (int(_kvl[_i]) + spec.block_size - 1) // spec.block_size
+                _kl = int(_kvl[_i])
+                # Single-seq contract: the kernel visits ALL compile-time seqlen_kv
+                # tiles, but the page-bounds mask uses the runtime kv_len -- so a
+                # kv_len shorter than seqlen_kv leaves the uncovered tiles reading
+                # page 0 (the masked block-table default) and folds them into the
+                # softmax -> silently wrong output. Enforce the contract here.
+                if _kl != spec.seqlen_kv:
+                    raise ValueError(
+                        f"paged kv_lens[{_i}]={_kl} != seqlen_kv={spec.seqlen_kv}; the "
+                        "kernel reads all seqlen_kv tiles, so a shorter kv_len leaves "
+                        "uncovered tiles reading page 0 -> silently wrong output"
+                    )
+                _npages = (_kl + spec.block_size - 1) // spec.block_size
                 if _npages <= 0:
                     continue
                 _used = block_tables[_i][:_npages]
