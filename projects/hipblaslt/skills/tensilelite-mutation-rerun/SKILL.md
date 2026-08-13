@@ -26,8 +26,11 @@ configuration, strict kill semantics, and restoration across reruns.
 
 ## Run one mutation slice
 
-1. **Choose one target module.** Keep the slice small enough to explain and
-   recount independently.
+1. **Define and validate the slice.** Read
+   [references/slice-planning.md](references/slice-planning.md). Pin the source
+   SHA, target module(s), reviewed test selection, container, worker bound, and
+   artifact directory before changing configuration. Keep the slice small
+   enough to explain and recount independently.
 2. **Build and validate a covering set.** Read
    [references/covering-set.md](references/covering-set.md) and stop unless the
    exact target-module row meets the threshold with pytest exit status 0.
