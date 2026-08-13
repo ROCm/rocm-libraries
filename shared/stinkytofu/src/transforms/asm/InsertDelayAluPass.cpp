@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <iostream>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
@@ -147,16 +146,6 @@ struct DelayInfo {
             default:
                 break;
         }
-    }
-
-    bool operator==(const DelayInfo& rhs) const {
-        return VALUCycles == rhs.VALUCycles && VALUNum == rhs.VALUNum &&
-               TRANSCycles == rhs.TRANSCycles && TRANSNum == rhs.TRANSNum &&
-               TRANSNumVALU == rhs.TRANSNumVALU && SALUCycles == rhs.SALUCycles;
-    }
-
-    bool operator!=(const DelayInfo& rhs) const {
-        return !(*this == rhs);
     }
 
     // Merge another DelayInfo, taking worst-case (smallest position / largest cycles).
@@ -349,16 +338,16 @@ class InsertDelayAluPassImpl : public Pass {
         return hasId1 ? nullptr : delayInst;
     }
 
-    // Process a single basic block.
-    // Phase 1 (emit=false): compute delay state, return true if exit state changed.
-    // Phase 2 (emit=true): insert s_delay_alu instructions.
-    bool runOnBasicBlock(BasicBlock& bb, bool emit, GfxArchID archId) {
+    // Merge predecessor exit states, then emit s_delay_alu in one BB walk.
+    // Visited once per BB in RPO, so forward predecessors are ready; back-edges
+    // are not iterated (a missing loop-carried hint is safe for a perf hint).
+    void runOnBasicBlock(BasicBlock& bb, GfxArchID archId) {
         // Merge predecessor exit states into entry state
         DelayState state;
         for (auto* pred : bb.getPredecessors()) state.merge(blockExitState[pred]);
 
-        PASS_DEBUG(std::cerr << "[DelayAlu] " << (emit ? "emit" : "analyze") << " bb=\""
-                             << bb.getLabel() << "\"" << " preds=" << bb.getPredecessors().size()
+        PASS_DEBUG(std::cerr << "[DelayAlu] bb=\"" << bb.getLabel() << "\""
+                             << " preds=" << bb.getPredecessors().size()
                              << " state_entries=" << state.size() << "\n");
 
         StinkyInstruction* lastDelayAlu = nullptr;
@@ -432,18 +421,16 @@ class InsertDelayAluPassImpl : public Pass {
                 });
 
                 // Emit s_delay_alu if needed
-                if (emit) {
-                    auto* prev = lastDelayAlu;
-                    lastDelayAlu = emitDelayAlu(bb, inst, delay, lastDelayAlu, irBuilder, archId);
-                    PASS_DEBUG(if (lastDelayAlu != prev) {
-                        if (lastDelayAlu)
-                            std::cerr << "[DelayAlu]   new s_delay_alu before "
-                                      << inst->getHwInstDesc()->mnemonic << "\n";
-                        else if (!prev)
-                            std::cerr << "[DelayAlu]   packed into prev before "
-                                      << inst->getHwInstDesc()->mnemonic << "\n";
-                    });
-                }
+                auto* prev = lastDelayAlu;
+                lastDelayAlu = emitDelayAlu(bb, inst, delay, lastDelayAlu, irBuilder, archId);
+                PASS_DEBUG(if (lastDelayAlu != prev) {
+                    if (lastDelayAlu)
+                        std::cerr << "[DelayAlu]   new s_delay_alu before "
+                                  << inst->getHwInstDesc()->mnemonic << "\n";
+                    else if (!prev)
+                        std::cerr << "[DelayAlu]   packed into prev before "
+                                  << inst->getHwInstDesc()->mnemonic << "\n";
+                });
             }
 
             // Record dest registers with fresh delay info
@@ -469,18 +456,8 @@ class InsertDelayAluPassImpl : public Pass {
             state.advance(type, cycles);
         }
 
-        // Save or compare exit state
-        if (emit) {
-            return false;
-        }
-        DelayState& saved = blockExitState[&bb];
-        if (state != saved) {
-            PASS_DEBUG(std::cerr << "[DelayAlu]   state changed for bb=\"" << bb.getLabel()
-                                 << "\", re-queue successors\n");
-            saved = std::move(state);
-            return true;  // state changed, successors need re-processing
-        }
-        return false;
+        // Save exit state for successors.
+        blockExitState[&bb] = std::move(state);
     }
 
    public:
@@ -500,44 +477,16 @@ class InsertDelayAluPassImpl : public Pass {
 
         if (shouldSkipForLowOccupancy(func, archId)) return PreservedAnalyses::all();
 
-        // Get RPO ordering from BBIndexAnalysis for efficient convergence.
+        // Single RPO walk: each BB is visited once, after its forward
+        // predecessors, so their exit states are ready to merge in. Delay state
+        // and emission happen together. Loop back-edges are not iterated.
         const auto& bbIndex = AM.getResult<BBIndexAnalysis>(func);
         const auto& rpoOrder = bbIndex.rpo;
 
-        PASS_DEBUG(std::cerr << "[DelayAlu] Phase 1: fixed-point state computation ("
-                             << rpoOrder.size() << " BBs in RPO)\n");
+        PASS_DEBUG(std::cerr << "[DelayAlu] single RPO pass (" << rpoOrder.size() << " BBs)\n");
 
-        // Phase 1: fixed-point iteration to compute stable delay state per BB.
-        // Initialize worklist in reverse RPO so pop_back gives RPO processing order.
-        std::vector<BasicBlock*> workList;
-        std::unordered_set<BasicBlock*> inWorkList;
-        for (auto it = rpoOrder.rbegin(); it != rpoOrder.rend(); ++it) {
-            workList.push_back(*it);
-            inWorkList.insert(*it);
-        }
-
-        unsigned iteration = 0;
-        while (!workList.empty()) {
-            BasicBlock* bb = workList.back();
-            workList.pop_back();
-            inWorkList.erase(bb);
-            ++iteration;
-
-            bool changed = runOnBasicBlock(*bb, /*emit=*/false, archId);
-            if (changed) {
-                for (auto* succ : bb->getSuccessors()) {
-                    if (inWorkList.insert(succ).second) workList.push_back(succ);
-                }
-            }
-        }
-
-        PASS_DEBUG(std::cerr << "[DelayAlu] Phase 1 converged after " << iteration
-                             << " BB visits\n");
-        PASS_DEBUG(std::cerr << "[DelayAlu] Phase 2: emitting s_delay_alu instructions\n");
-
-        // Phase 2: emit s_delay_alu instructions using converged state.
         for (auto* bb : rpoOrder) {
-            runOnBasicBlock(*bb, /*emit=*/true, archId);
+            runOnBasicBlock(*bb, archId);
         }
 
         blockExitState.clear();
