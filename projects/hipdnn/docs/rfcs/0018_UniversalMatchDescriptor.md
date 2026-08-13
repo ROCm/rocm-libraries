@@ -1,4 +1,4 @@
-# RFC 0019: The Graph Matcher: the UED's Pattern and the UMD's Criteria
+# RFC 0018: The Graph Matcher: the UED's Pattern and the UMD's Criteria
 
 - Contributors: Brian Harrison
 
