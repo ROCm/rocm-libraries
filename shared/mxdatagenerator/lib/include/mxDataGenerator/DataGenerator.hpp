@@ -275,12 +275,22 @@ namespace DGen
                || std::holds_alternative<NaNs>(mode) || std::holds_alternative<Infs>(mode);
     }
 
+    // A constant scale makes every scale block interchangeable, so a kernel that
+    // fetches the right value from the wrong block still validates. RowIndex gives
+    // each block its own scale, which makes that class of bug observable.
+    inline bool isBlockVaryingScaleInitMode(DataInitMode const& mode)
+    {
+        return std::holds_alternative<RowIndex>(mode);
+    }
+
     // Phase 1: random-like data init + constant scale init (e.g. Bounded + Ones).
+    // Phase 2: random-like data init + block-varying scale init (Bounded + RowIndex).
     inline bool canDecoupleScaleInit(DataInitMode const& dataMode, DataInitMode const& scaleMode)
     {
         if(dataInitModesEqual(dataMode, scaleMode))
             return true;
-        return isRandomLikeDataInitMode(dataMode) && isConstantScaleInitMode(scaleMode);
+        return isRandomLikeDataInitMode(dataMode)
+               && (isConstantScaleInitMode(scaleMode) || isBlockVaryingScaleInitMode(scaleMode));
     }
 
     enum DataScaling
@@ -779,18 +789,62 @@ namespace DGen
         const auto           refFloats  = getReferenceFloat();
         const index_t        block_size = m_options.blockScaling;
         std::vector<uint8_t> s_template(m_scaleDesc.byte_size, 0x00);
-        fillScaleTemplateBytes(scaleMode, s_template);
 
         using scaleInfo = scale_info_t<DTYPE>;
-        const double scaleValue = getScaleValue<scaleInfo>(s_template[0]);
-        const bool   scaleIsNan = std::isnan(scaleValue);
+
+        // The exponent spread is deliberately narrow. Data is re-quantized below as
+        // ref/scale, so a wide range would saturate every block to zero or to the
+        // format maximum and destroy the very variation this mode exists to create.
+        const bool varyPerBlock = isBlockVaryingScaleInitMode(scaleMode);
+
+        // A block-varying mode has no single template byte, and fillScaleTemplateBytes
+        // rejects it by design; every byte is computed per block below instead.
+        if(!varyPerBlock)
+            fillScaleTemplateBytes(scaleMode, s_template);
+
+        auto scaleByteForBlock = [&](index_t scale_i) -> uint8_t {
+            if(!varyPerBlock)
+                return s_template[0];
+            // span 4 keeps the exponent in [-2,1]: ref lies in [-1,1] and the data is
+            // re-quantized as ref/scale, which FP4 represents without saturating.
+            constexpr int span = 4;
+            // Mix the row index rather than using it modulo span directly: a bare modulo
+            // would make the exponent a periodic function of the row, so rows that alias
+            // to the same residue would be indistinguishable.
+            // Vary by row, not by block: every K block of a row must share a scale, or a
+            // wrong-row read could not be told apart from a wrong-K-block read.
+            const index_t blocksPerRow = std::max<index_t>(1, layout().scaleBlocksPerRow());
+            uint32_t      h = static_cast<uint32_t>(scale_i / blocksPerRow) + 0x9E3779B9u;
+            h          = (h ^ (h >> 16)) * 0x85EBCA6Bu;
+            h          = (h ^ (h >> 13)) * 0xC2B2AE35u;
+            h ^= h >> 16;
+            const int exp = static_cast<int>(h % span) - (span / 2);
+            if constexpr(isScaled<DTYPE>())
+            {
+                if constexpr(hasFullRangeScale<DTYPE>())
+                {
+                    const auto candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+                    return nearestFiniteScaleByte<scaleInfo>(
+                        std::exp2(static_cast<double>(exp)), candidates);
+                }
+                else
+                    return static_cast<uint8_t>(exp + getScaleBias<DTYPE>());
+            }
+            else
+                return s_template[0];
+        };
 
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < m_scaleDesc.array_size; scale_i++)
         {
+            const uint8_t scaleByte  = scaleByteForBlock(scale_i);
+            const double  scaleValue = getScaleValue<scaleInfo>(scaleByte);
+            const bool    scaleIsNan = std::isnan(scaleValue);
+
             std::memcpy(&m_scaleBytes[scale_i * m_scaleDesc.byte_size],
                         s_template.data(),
                         m_scaleDesc.byte_size);
+            m_scaleBytes[scale_i * m_scaleDesc.byte_size] = scaleByte;
 
             for(index_t block_i = 0; block_i < scaleBlockElementCount(scale_i, block_size); block_i++)
             {

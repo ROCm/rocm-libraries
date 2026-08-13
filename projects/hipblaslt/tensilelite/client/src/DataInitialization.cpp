@@ -2006,11 +2006,39 @@ namespace TensileLite
             }
         }
 
+        // A constant scale makes every scale block interchangeable, so a kernel that
+        // fetches the right value from the wrong block still validates. The Serial
+        // modes request a per-block scale instead, which makes that bug observable.
+        static bool isBlockVaryingScaleInitMode(InitMode mode)
+        {
+            switch(mode)
+            {
+            case InitMode::SerialIdx:
+            case InitMode::SerialDim0:
+            case InitMode::SerialDim1:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        // Scale tensors map the Serial modes to RowIndex rather than Sequential:
+        // Sequential is a data-fill pattern, while the scale side needs a value that
+        // differs from one scale block to the next.
+        static std::string_view initModeToMXScaleMethod(InitMode mode)
+        {
+            if(isBlockVaryingScaleInitMode(mode))
+                return "RowIndex";
+            return initModeToMXMethod(mode);
+        }
+
         static bool canDecoupleMXScaleInit(InitMode dataInit, InitMode scaleInit)
         {
             if(dataInit == scaleInit)
                 return true;
-            return isRandomLikeInitMode(dataInit) && isConstantScaleInitMode(scaleInit);
+            return isRandomLikeInitMode(dataInit)
+                   && (isConstantScaleInitMode(scaleInit)
+                       || isBlockVaryingScaleInitMode(scaleInit));
         }
 
         // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
@@ -2189,7 +2217,7 @@ namespace TensileLite
                                       initModeToMXMethod(dataInitMode),
                                       -1.0f,
                                       1.0f,
-                                      initModeToMXMethod(scaleInitMode));
+                                      initModeToMXScaleMethod(scaleInitMode));
                       if(kFast)
                           restrideMXScaleBufferKFast(
                               scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
@@ -2244,7 +2272,7 @@ namespace TensileLite
                                           initModeToMXMethod(dataInitMode),
                                           -1.0f,
                                           1.0f,
-                                          initModeToMXMethod(scaleInitMode));
+                                          initModeToMXScaleMethod(scaleInitMode));
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
@@ -2276,8 +2304,9 @@ namespace TensileLite
                           << " for MX generation; scale init is ignored. "
                           << "Supported decoupling: random-like data init (Random, "
                           "RandomNarrow, RandomNegPosLimited, UniformLowPrecision) with "
-                          "constant scale init (Zero, One, Two, Max, NaN, Inf, BadInput, "
-                          "BadOutput). This warning is shown once per process."
+                          "either a constant scale init (Zero, One, Two, Max, NaN, Inf, "
+                          "BadInput, BadOutput) or a per-block scale init (SerialIdx, "
+                          "SerialDim0, SerialDim1). This warning is shown once per process."
                           << std::endl;
                   };
 
