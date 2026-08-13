@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Portable CK-DSL IR + builder-recipe tooling (Python authoring side).
+# Portable rocKE IR + builder-recipe tooling (Python authoring side).
 #
 # Layout:
 #   src/      core engine + runtime binding

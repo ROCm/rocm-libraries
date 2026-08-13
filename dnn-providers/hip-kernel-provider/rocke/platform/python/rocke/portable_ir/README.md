@@ -1,6 +1,6 @@
 # Portable IR — record · roll · replay
 
-This package turns a **Python-authored** CK-DSL kernel into a **compact, portable
+This package turns a **Python-authored** rocKE kernel into a **compact, portable
 artifact** that a **pure-C runtime** can re-emit and lower to a byte-identical
 HSACO — with no CPython at JIT/serve time. It is the "author in Python, ship and
 run without Python" path.
@@ -1251,6 +1251,43 @@ space. One `roll_nd` recipe covers 65 points in the volume for 548.6 KiB: 7x few
 bytes for 4x the coverage, or 8.4 KiB per point against 256 KiB, 30x better per
 point served. The last row is the honest floor — `fastkv_regp` has one rollable
 axis, so there is nothing to cross and the two forms are the same recipe.
+
+**Reproducing these outside the sweep.** The numbers come from
+`roll_gfx950_sweep`, but the rolling is `roll_kernel`'s, so the same figures come
+back from naming the kernel directly — given the sweep's base config as `fixed`
+and the grid its `choose_grid` picked as `axes`. Four of the five reproduce
+byte-for-byte from a module path alone:
+
+```bash
+python3 -m rocke.portable_ir.drivers.roll_kernel \
+    --kernel kernels.gfx950.attention_dense --arch gfx950 \
+    --fixed batch=1 --fixed seqlen_q=512 --fixed seqlen_kv=512 \
+    --fixed num_query_heads=128 --fixed num_kv_heads=8 --fixed head_size=128 \
+    --fixed causal=true --fixed dtype=bf16 --fixed block_n=64 --fixed waves_per_eu=2 \
+    --axis batch=1,22 --axis seqlen_kv=64,704 --axis num_query_heads=16,176 \
+    --axis seqlen_q=256,1536 --axis num_persistent=64,384 --axis waves_per_eu=1,3 \
+    --holdout batch=64 --holdout seqlen_kv=2048 --holdout num_query_heads=512 \
+    --holdout seqlen_q=4096 --holdout num_persistent=1024 --holdout waves_per_eu=8
+```
+
+```
+recorded 22 trace(s), verified 65 point(s)
+CBOR     : 548.6 KiB parametric vs 35616.6 KiB for the same points concrete
+```
+
+`attention_tiled_3d` and `attention_reduce` live in one module, so they need
+`--spec`/`--build` to say which. `fastkv_regp` is the exception and cannot be
+reached from the command line at all: its spec is built by passing *another*
+kernel's spec through `make_fastkv_register_p_spec`, which no flag expresses. It
+needs a `Kernel(make_spec=...)`, which reproduces its 3 points / 459.5 KiB
+exactly — see [`drivers/README.md`](drivers/README.md#kernels-that-do-not-follow-the-conventions).
+
+Two caveats about the grid. `choose_grid` picks values that are legal
+*together*, which is why the axis lists look arbitrary (`batch=1,22` rather than
+`1,2`) and why `num_kv_heads` is absent despite rolling on its own — only one of
+its values stays legal beside the other five axes. And the sweep's per-axis
+`_samples` spread is deliberate: adjacent powers of two make every magic
+multiplier 1, so a frozen constant reads as correct.
 
 ## Running things
 

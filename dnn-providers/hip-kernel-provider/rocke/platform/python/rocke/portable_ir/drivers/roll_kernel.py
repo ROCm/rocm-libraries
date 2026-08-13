@@ -104,6 +104,7 @@ import copy
 import dataclasses
 import hashlib
 import importlib
+import inspect
 import itertools
 import os
 import sys
@@ -205,6 +206,7 @@ class Kernel:
     gate: Optional[Callable[..., Any]] = None  # is_valid_spec / supports_*
     coherent: Optional[Callable[[Point], bool]] = None
     build_at: Optional[Callable[..., Any]] = None  # (**point) -> IRBuilder
+    gate_note: str = ""  # why there is no gate, when one was found but unusable
 
     def spec_from(self, values: Dict[str, Any]) -> Any:
         if self.make_spec is not None:
@@ -239,8 +241,18 @@ def resolve(
     if gate is None:  # the other convention in this tree
         cands = [n for n in _public(mod) if n.startswith("supports_")]
         gate = getattr(mod, cands[0]) if len(cands) == 1 else None
+    note = ""
+    if gate is not None and gate_call(gate) is None:
+        note = (
+            f"{gate.__name__} takes keyword arguments describing a shape rather "
+            f"than a spec,\n         so it cannot be asked about the one being "
+            f"built. Pass Kernel(gate=...) to\n         adapt it and have the "
+            f"target checked before anything is recorded."
+        )
+        gate = None
     return Kernel(
         label=mod.__name__,
+        gate_note=note,
         spec_cls=_pick(
             mod, "spec dataclass", spec, lambda o, n: dataclasses.is_dataclass(o)
         ),
@@ -483,14 +495,59 @@ def recipe_ops(program: Any) -> int:
     return n
 
 
+def gate_call(gate: Any) -> Optional[str]:
+    """How to hand a spec to a gate: "arch", "spec", "probe", or None for one
+    that cannot be asked about a spec at all.
+
+    Both conventions here put the spec first, but ``is_valid_spec(spec, arch)``
+    leaves the arch positional while ``supports_attention_dense(spec, *, arch=)``
+    makes it keyword-only. Passing it positionally and falling back on TypeError
+    looks like it handles both and does not: the fallback drops the arch, so the
+    gate answers about its *default* target while the recipe is built for the
+    requested one. Sending it by keyword is what both actually accept.
+
+    A ``supports_*`` taking only keyword arguments (``head_size=``,
+    ``block_size=``, ...) describes a shape rather than a spec, and there is no
+    honest way to ask it about one."""
+    try:
+        params = inspect.signature(gate).parameters
+    except (TypeError, ValueError):  # a builtin or C callable
+        return "probe"
+    kinds = [p.kind for p in params.values()]
+    if (
+        not any(
+            k
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+            for k in kinds
+        )
+        and inspect.Parameter.VAR_POSITIONAL not in kinds
+    ):
+        return None
+    return "arch" if "arch" in params else "spec"
+
+
 def _verdict(gate: Any, spec: Any, arch: str) -> Tuple[bool, str]:
     """Normalize the two gate conventions to ``(ok, reason)``.
 
     ``is_valid_spec`` returns the pair; some ``supports_*`` return a bare bool."""
-    try:
-        out = gate(spec, arch)
-    except TypeError:  # a gate that does not take an arch
+    how = gate_call(gate)
+    if how == "arch":
+        out = gate(spec, arch=arch)
+    elif how == "spec":
         out = gate(spec)
+    elif how is None:
+        raise UsageError(
+            f"{getattr(gate, '__name__', 'the gate')} cannot be asked about a spec; "
+            f"describe the kernel with Kernel(gate=...) instead"
+        )
+    else:
+        try:
+            out = gate(spec, arch)
+        except TypeError:
+            out = gate(spec)
     if isinstance(out, tuple):
         return bool(out[0]), str(out[1]) if len(out) > 1 else ""
     return bool(out), ""
@@ -967,8 +1024,12 @@ def roll(
             )
         return answer
     if gate_fn is None and makes_spec:
-        say(f"   note: {kernel_name} exposes no is_valid_spec/supports_* gate,")
-        say(f"         so nothing verified that it serves {arch} before build.\n")
+        say(
+            f"   note: {bound.gate_note}\n"
+            if bound.gate_note
+            else f"   note: {kernel_name} exposes no is_valid_spec/supports_* gate,\n"
+            f"         so nothing verified that it serves {arch} before build.\n"
+        )
 
     if probe:
         return RollResult(0 if probe_axes(build_at, axes, structural, say) else 1)

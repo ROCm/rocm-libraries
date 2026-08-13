@@ -237,6 +237,19 @@ offending values, so `head_size=100` is an early "must be a multiple of 16"
 rather than a traceback from inside the builder. If the module exposes no gate
 at all, the run says so instead of implying the arch was checked.
 
+The arch reaches the gate **by keyword**, because the two conventions disagree
+about it: `is_valid_spec(spec, arch)` leaves it positional while
+`supports_attention_dense(spec, *, arch=)` makes it keyword-only. Passing it
+positionally and retrying on `TypeError` looks like it handles both and does not
+— the retry drops the arch, so the gate answers about its *default* target while
+the recipe is built for the requested one. That silently admitted a gfx950-only
+kernel for gfx942.
+
+A `supports_*` taking only keyword arguments (`head_size=`, `block_size=`, ...)
+describes a shape rather than a spec, so it cannot be asked about the one being
+built. Those degrade to no gate, with a note saying so and pointing at
+`Kernel(gate=...)`, rather than failing the run.
+
 A refusal alone does not say *which* mistake you made, so the driver re-asks the
 gate on the other `known_arches()`. A spec accepted somewhere else is a target
 you aimed wrong at, and the report names the arches that would take it. A spec

@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 #
 # export_mha.py -- build the unified-attention 2D scalar MHA/SDPA kernel (the
-# same kernel benchmarked in dsl_docs/architecture/SDPA_CKDSL_Provider_Comparison)
-# and either export it to portable CK-DSL IR JSON or print its Python-lowered
+# same kernel benchmarked in dsl_docs/architecture/attention_2d_experiment_summary.md)
+# and either export it to portable rocKE IR JSON or print its Python-lowered
 # AMDGPU LLVM IR.
 #
 # Shape-polymorphism: head_size and dtype select the kernel *family* (head_size
