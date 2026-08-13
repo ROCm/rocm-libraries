@@ -44,6 +44,20 @@ from ...Common.GlobalParameters import globalParameters
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
 
+def _scale_tile_vgpr_count(kernel, defaultCount):
+    """VGPRs per scale tile group.
+
+    Under the interleaved data local-read map a group's two M-adjacent tiles land in
+    adjacent dwords, so the group is read as a b64 and packed back into the low
+    register with a v_perm; that needs an aligned pair. Condition mirrors
+    TileInfo.lrInterleaveVW.
+    """
+    if kernel is not None and kernel.get("SourceSwap", False) \
+       and int(kernel.get("VectorWidthA", 1)) > 1:
+        return 2
+    return defaultCount
+
+
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
     from Tensile.Components.Subtile.Kernel import RegisterTileInfo
@@ -3787,7 +3801,7 @@ class LogicalScheduler:
     # ── VGPR tile allocation ──────────────────────────────
 
     def getNumVgpr(self, tileInfoA, tileInfoB,
-                        scaleTileInfoA=None, scaleTileInfoB=None) -> int:
+                        scaleTileInfoA=None, scaleTileInfoB=None, kernel=None) -> int:
         """Return the total number of VGPRs needed across all tensors (A, B, SA, SB)
         without performing any allocation.
 
@@ -3808,8 +3822,8 @@ class LogicalScheduler:
             t = peaks.get('A', 0) * _tile_vgpr_count(tileInfoA, cfg.lrA) \
               + peaks.get('B', 0) * _tile_vgpr_count(tileInfoB, cfg.lrB)
             if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
-                t += peaks.get('SA', 0) * _tile_vgpr_count(scaleTileInfoA, cfg.lrSA) \
-                   + peaks.get('SB', 0) * _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)
+                t += peaks.get('SA', 0) * _scale_tile_vgpr_count(kernel, _tile_vgpr_count(scaleTileInfoA, cfg.lrSA)) \
+                   + peaks.get('SB', 0) * _scale_tile_vgpr_count(kernel, _tile_vgpr_count(scaleTileInfoB, cfg.lrSB))
             return t
 
         mainloop_total = _total_for(self.tile_peaks)
@@ -3818,7 +3832,7 @@ class LogicalScheduler:
         return max(mainloop_total, tail_total)
 
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
-                       scaleTileInfoA=None, scaleTileInfoB=None):
+                       scaleTileInfoA=None, scaleTileInfoB=None, kernel=None):
         """Allocate physical VGPR tiles based on assign_vgpr_tiles() peaks.
 
         Each vgprTile holds one LR granularity worth of data:
@@ -3847,10 +3861,13 @@ class LogicalScheduler:
                                        _tile_vgpr_count(tileInfoB, cfg.lrB))
 
         if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
+            # Under the interleaved data map a scale group's two M-adjacent tiles sit in
+            # adjacent dwords, so the group is read as a b64 and packed back down with a
+            # v_perm. That needs an aligned pair per group instead of a single register.
             self.vgprTilesSA = _alloc_tiles(self.tile_peaks.get('SA', 0),
-                                            _tile_vgpr_count(scaleTileInfoA, cfg.lrSA))
+                                            _scale_tile_vgpr_count(kernel, _tile_vgpr_count(scaleTileInfoA, cfg.lrSA)))
             self.vgprTilesSB = _alloc_tiles(self.tile_peaks.get('SB', 0),
-                                            _tile_vgpr_count(scaleTileInfoB, cfg.lrSB))
+                                            _scale_tile_vgpr_count(kernel, _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)))
         else:
             self.vgprTilesSA = []
             self.vgprTilesSB = []
@@ -3858,6 +3875,7 @@ class LogicalScheduler:
         # Stash tile-info so _realloc_tail_tiles_flat can reallocate the
         # tail's flat tile set without the caller plumbing them in again.
         self._alloc_tile_info = {
+            'kernel': kernel,
             'tileInfoA': tileInfoA, 'tileInfoB': tileInfoB,
             'scaleTileInfoA': scaleTileInfoA, 'scaleTileInfoB': scaleTileInfoB}
 
@@ -4014,10 +4032,12 @@ class LogicalScheduler:
         if cfg.hasScale and info['scaleTileInfoA'] and info['scaleTileInfoB']:
             _swap(self.vgprTilesSA,
                   _alloc_tiles(peaks.get('SA', 0),
-                               _tile_vgpr_count(info['scaleTileInfoA'], cfg.lrSA)))
+                               _scale_tile_vgpr_count(info.get('kernel'),
+                                                      _tile_vgpr_count(info['scaleTileInfoA'], cfg.lrSA))))
             _swap(self.vgprTilesSB,
                   _alloc_tiles(peaks.get('SB', 0),
-                               _tile_vgpr_count(info['scaleTileInfoB'], cfg.lrSB)))
+                               _scale_tile_vgpr_count(info.get('kernel'),
+                                                      _tile_vgpr_count(info['scaleTileInfoB'], cfg.lrSB))))
         else:
             _swap(self.vgprTilesSA, [])
             _swap(self.vgprTilesSB, [])

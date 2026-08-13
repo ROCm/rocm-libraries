@@ -17,7 +17,8 @@ from Tensile.Components.Subtile.SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
 )
 from Tensile.Components.Subtile.SubtileScaleEmit import (
-    globalReadDoScaleSubtile, globalReadScalePtrUpdates,
+    emitScaleGroupLoad, globalReadDoScaleSubtile, globalReadScalePtrUpdates,
+    scaleRemapEnabled,
 )
 from rocisa.code import Module
 from rocisa.instruction import (
@@ -241,11 +242,17 @@ class InstructionEmitter:
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
-                module.add(DSLoadB32(
-                    dst=vgpr(vdst),
-                    src=vgpr(ti.sharedVgprLROffset[0]),
-                    ds=DSModifiers(offset=dsOffset),
-                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
+                if scaleRemapEnabled(self.kernel):
+                    # The interleaved map puts all K-blocks of a line inside the lane's
+                    # own base offset, so a second K group would address a line this
+                    # scheme has not been derived for. Fail loudly instead of emitting
+                    # a silently wrong address.
+                    assert numKGroups == 1 and kGroupIdx == 0, (
+                        "scale%s: SourceSwap remap assumes a single scale K group, got %d"
+                        % (tc, numKGroups))
+                module.add(emitScaleGroupLoad(
+                    self.writer, self.kernel, ti, tc, vdst, scaleGroupIdx, dsOffset,
+                    f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
         return list(module.flatitems())
 
     def emit_gr(self, placement):

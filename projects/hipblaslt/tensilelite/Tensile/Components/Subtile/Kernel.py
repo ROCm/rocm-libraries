@@ -706,6 +706,12 @@ class TileInfo:
       self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
       self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
       self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
+      # Under SourceSwap the scale byte a lane needs sits at a lane-dependent position
+      # in the dword, which the MFMA's compile-time byte select cannot express. The
+      # scale ds_read becomes a b64 and a v_perm with this per-lane selector packs the
+      # four bytes into the layout the existing select already uses.
+      if kernel.get("SourceSwap", False) and int(kernel.get("VectorWidthA", 1)) > 1:
+        self._sharedVgprScalePermSel = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprScalePermSel")]
 
   def allocVgprTileRegisters_legacy(self, writer, kernel):
     """Allocate data tile registers for A/B/D MMA operands.
@@ -719,6 +725,12 @@ class TileInfo:
     if isinstance(self.geometry, MXScaleTilePair):
       numMMATilesPerReg = 4
     numDword = int(math.ceil(self.mmaTileRegCount))
+    # The interleaved map splits a scale group's two M-adjacent tiles across adjacent
+    # dwords, so the group is read as a b64 and packed back into the low register with
+    # a v_perm; that needs an aligned pair. Condition mirrors lrInterleaveVW above.
+    if isinstance(self.geometry, MXScaleTilePair) \
+       and kernel.get("SourceSwap", False) and int(kernel.get("VectorWidthA", 1)) > 1:
+      numDword = 2
 
     isDTile = isinstance(self.geometry, CDTileGeometry)
     maxAgpr = writer.states.regCaps["PhysicalMaxVgpr"] - writer.states.regCaps["MaxVgpr"] if isDTile else 0
@@ -743,7 +755,8 @@ class TileInfo:
     if self.lr is not None:
       self.lr.deallocOffsetRegisters(self, writer, kernel)
     # MXScaleTilePair dealloc
-    for attr in ('_sharedVgprGROffset', '_sharedVgprLROffset', '_sharedVgprLROffsetSwap'):
+    for attr in ('_sharedVgprGROffset', '_sharedVgprLROffset', '_sharedVgprLROffsetSwap',
+                 '_sharedVgprScalePermSel'):
       for v in getattr(self, attr, []):
         writer.vgprPool.checkIn(v)
       if hasattr(self, attr):
@@ -830,6 +843,10 @@ class TileInfo:
   def sharedVgprLROffsetSwap(self):
     if self.lr: return self.lr.sharedVgprLROffsetSwap
     return getattr(self, '_sharedVgprLROffsetSwap', [])
+
+  @property
+  def sharedVgprScalePermSel(self):
+    return getattr(self, '_sharedVgprScalePermSel', [])
 
   def grOffsetVgpr(self, idx: int) -> int:
     """VGPR holding per-lane GR byte offset for load `idx` within a subtile."""
@@ -1417,11 +1434,11 @@ def mainLoop(writer, kernel):
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
-      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB, kernel=kernel)
       if vgprUsed + numVgpr <= vgprBudget:
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
-                           scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+                           scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB, kernel=kernel)
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize

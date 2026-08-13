@@ -21,9 +21,9 @@ from rocisa.code import Module
 from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
-    DSLoadB32,
-    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SMulI32, SNop, SXorB32,
-    VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
+    DSLoadB32, DSLoadB64,
+    SAddCU32, SAddU32, SLShiftLeftB32, SMovB32, SMulI32, SNop, SWaitCnt, SXorB32,
+    VAddU32, VAndB32, VMulLOU32, VPermB32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
 )
 
@@ -373,6 +373,85 @@ def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId):
 #   swapVgpr = lrOffset XOR (lrOffset + ldsTotalSize)
 # This lets localReadLDSBufferSwap toggle between buffer 0 and buffer 1.
 #
+##################################################
+# Scale LR offset under SourceSwap.
+#
+# The scale bytes in LDS are in the host's blocked order: LDS byte q belongs to
+# global line q//256, and within a line byte 4*L' + p + 2k carries M row
+# 32*line + 16p + (L'%16) for K-block 2*(L'//16) + k.
+#
+# Without SourceSwap, lane L of tile j reads at 4*L with a per-group offset of
+# 256*(j//2), which resolves to M row 16j + (L%16) - exactly the blocked row that
+# lane computes. SourceSwap changes the data map so the same lane computes M row
+# 8a + j instead (a = L%16), while this offset was left alone: every lane read a
+# scale belonging to a different row. It went unnoticed because the harness
+# generated scales that did not vary across M rows.
+#
+# Solving 8a + j for the LDS position gives, with a = L%16 and c = L//16:
+#   line   = a//4          (independent of j, so it moves into the lane base)
+#   dword  = 8*(a%2) + j + 16c
+#   byte   = p' + 2k with p' = (a%4)//2   (independent of j, but LANE dependent)
+# so the per-lane base becomes 256*(a//4) + 64*c + 32*(a%2) and the per-tile part
+# is 4*j, which is why the group offset shrinks from 256 to 8 (see the LR emit).
+#
+# p' being lane dependent is the reason the ds_read cannot stay a plain b32: the
+# MFMA selects its scale byte with a compile-time field, so the byte has to be
+# moved into a fixed position first. That is what the v_perm in the LR emit does.
+def scaleRemapEnabled(kernel):
+  """True when the scale rows have to follow an interleaved data local-read map.
+
+  The data map is interleaved only when SourceSwap is on *and* VectorWidthA > 1
+  (this mirrors TileInfo.lrInterleaveVW). With VectorWidth 1 the data map stays
+  blocked, and the scale path has to stay blocked with it."""
+  return bool(kernel.get("SourceSwap", False)) and int(kernel.get("VectorWidthA", 1)) > 1
+
+
+def _emitScaleLaneOffsetInterleaved(module, writer, kernel, laneId, tileInfos):
+  tmp = writer.vgprPool.checkOut(1, tag="_emitScaleLaneOffsetInterleaved_tmp")
+  acc = writer.vgprPool.checkOut(1, tag="_emitScaleLaneOffsetInterleaved_acc")
+
+  # 256 * (a // 4), a = laneId % 16  ->  ((laneId >> 2) & 3) << 8
+  module.add(VLShiftRightB32(dst=vgpr(acc), shiftHex=hex(2), src=vgpr(laneId), comment="scale: laneId / 4"))
+  module.add(VAndB32(dst=vgpr(acc), src0=3, src1=vgpr(acc), comment="scale: a / 4 (a = laneId %% 16)"))
+  module.add(VLShiftLeftB32(dst=vgpr(acc), shiftHex=hex(8), src=vgpr(acc), comment="scale: line = 256 * (a / 4)"))
+
+  # 64 * c, c = laneId // 16  ->  K-block pair, unchanged from the blocked map
+  module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(4), src=vgpr(laneId), comment="scale: c = laneId / 16"))
+  module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(6), src=vgpr(tmp), comment="scale: 64 * c"))
+  module.add(VAddU32(dst=vgpr(acc), src0=vgpr(acc), src1=vgpr(tmp), comment="scale: += 64 * c"))
+
+  # 32 * (a % 2)
+  module.add(VAndB32(dst=vgpr(tmp), src0=1, src1=vgpr(laneId), comment="scale: a %% 2"))
+  module.add(VLShiftLeftB32(dst=vgpr(tmp), shiftHex=hex(5), src=vgpr(tmp), comment="scale: 32 * (a %% 2)"))
+  module.add(VAddU32(dst=vgpr(acc), src0=vgpr(acc), src1=vgpr(tmp), comment="scale: += 32 * (a %% 2)"))
+
+  for ti_ in tileInfos:
+    module.add(VAddU32(dst=vgpr(ti_.sharedVgprLROffset[0]), src0=vgpr(acc), src1=vgpr(ti_.sharedVgprLROffset[0]),
+                       comment="scale%s: lrOffset = interleaved lane base" % ti_.tc))
+
+  # v_perm selector. The MFMA selects its scale byte as (tile parity) + 2*k, so the
+  # packed register must be k-major: byte s takes byte p' + 2*(s//2) of dword (s%2),
+  # where dword 0/1 are the group's two M-adjacent tiles. With src1 = dword0 (selector
+  # values 0-3) and src0 = dword1 (values 4-7) that is [0,4,2,6] = 0x06020400 at p'=0.
+  # p' = (a%4)//2 = (laneId >> 1) & 1 biases every selector byte equally.
+  # v_mul_lo_u32 is VOP3 and takes no literal, so the byte-replication constant
+  # has to come from an SGPR.
+  permSgpr = writer.sgprPool.checkOut(1, tag="_emitScaleLaneOffsetInterleaved_permSgpr")
+  module.add(SMovB32(dst=sgpr(permSgpr), src=hex(0x01010101), comment="scale: byte-replicate constant"))
+  for ti_ in tileInfos:
+    sel = ti_.sharedVgprScalePermSel
+    if not sel:
+      continue
+    module.add(VLShiftRightB32(dst=vgpr(tmp), shiftHex=hex(1), src=vgpr(laneId), comment="scale%s: laneId / 2" % ti_.tc))
+    module.add(VAndB32(dst=vgpr(tmp), src0=1, src1=vgpr(tmp), comment="scale%s: p' = (a %% 4) / 2" % ti_.tc))
+    module.add(VMulLOU32(dst=vgpr(tmp), src0=sgpr(permSgpr), src1=vgpr(tmp), comment="scale%s: p' in every byte" % ti_.tc))
+    module.add(VAddU32(dst=vgpr(sel[0]), src0=0x06020400, src1=vgpr(tmp), comment="scale%s: v_perm byte selector" % ti_.tc))
+  writer.sgprPool.checkIn(permSgpr)
+
+  writer.vgprPool.checkIn(acc)
+  writer.vgprPool.checkIn(tmp)
+
+
 def lraTileAssignmentScaleSwizzled(writer, kernel):
   return _lraTileAssignmentScaleSwizzled_legacy(writer, kernel)
 
@@ -391,9 +470,12 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   writer.vgprPool.checkIn(waveIdVgpr)
   laneOffset = writer.vgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_laneOffset")
   module.add(VAndB32(dst=vgpr(laneOffset), src0=vgpr("Serial"), src1=wavesize-1, comment="scale: laneId"))
-  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4"))
-  module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * 4"))
-  module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * 4"))
+  if scaleRemapEnabled(kernel):
+    _emitScaleLaneOffsetInterleaved(module, writer, kernel, laneOffset, [tiA_, tiB_])
+  else:
+    module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4"))
+    module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * 4"))
+    module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * 4"))
   writer.vgprPool.checkIn(laneOffset)
   tmpSgpr = writer.sgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_tmpSgpr")
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSA), comment="scale: LDS offset for A scale"))
@@ -454,9 +536,45 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 # Each 32-bit VGPR holds 4 E8M0 scale bytes; opsel/opsel_hi selects
 # the correct byte per MFMA invocation.
 #
+##################################################
+# Emit one scale group load.
+#
+# Blocked map: one ds_read_b32 at 256*group gives the 4 bytes the group needs
+# (2 M-adjacent tiles x 2 K subiters), already in MFMA select order.
+#
+# Interleaved map (SourceSwap): the two M-adjacent tiles of a group live in
+# adjacent dwords rather than in one, so the group is read as a b64 at 8*group.
+# The byte each lane needs inside a dword is p' = (a%4)/2, which varies by lane
+# and so cannot be reached by the MFMA's compile-time byte select; the v_perm
+# gathers bytes p' and p'+2 out of both dwords into the same order the blocked
+# map produced, which is what lets the select stay unchanged.
+def emitScaleGroupLoad(writer, kernel, tileInfo, tc, vdst, scaleGroupIdx, blockedOffset, comment):
+  module = Module()
+  if not scaleRemapEnabled(kernel):
+    module.add(DSLoadB32(dst=vgpr(vdst),
+                         src=vgpr(tileInfo.sharedVgprLROffset[0]),
+                         ds=DSModifiers(offset=blockedOffset),
+                         comment=comment))
+    return module
+
+  sel = tileInfo.sharedVgprScalePermSel
+  assert sel, "scale%s: SourceSwap remap needs its v_perm selector VGPR" % tc
+  module.add(DSLoadB64(dst=vgpr(vdst, 2),
+                       src=vgpr(tileInfo.sharedVgprLROffset[0]),
+                       ds=DSModifiers(offset=8 * scaleGroupIdx),
+                       comment=comment + " (interleaved: dwords for tiles 2g, 2g+1)"))
+  # The pack consumes the load's own destination, so it cannot be left for the
+  # scheduler's wait before the MFMA: without a wait here the v_perm reads stale
+  # registers and the landing ds_read then overwrites its result, which degenerates
+  # to passing the first dword through unchanged.
+  module.add(SWaitCnt(dscnt=0, comment="scale%s[group%u]: pack needs the b64 landed" % (tc, scaleGroupIdx)))
+  module.add(VPermB32(dst=vgpr(vdst), src0=vgpr(vdst + 1), src1=vgpr(vdst), src2=vgpr(sel[0]),
+                      comment="scale%s[group%u]: pack lane bytes into MFMA select order" % (tc, scaleGroupIdx)))
+  return module
+
+
 def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
-  """Emit a single DSLoadB32 for a scale group (2 M-adjacent [1,2] subtiles).
-  Each ds_read_b32 loads 4 bytes = 4 E8M0 scale values into one VGPR."""
+  """Emit the LDS read for a scale group (2 M-adjacent [1,2] subtiles)."""
   module = Module()
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
 
@@ -471,10 +589,8 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
     groupStride = 2 * tileInfo.subtileSize
   dsOffset = groupStride * scaleGroupIdx
   vdst = tileInfo.vgprTiles[4 * scaleGroupIdx].regList.indices[0]
-  module.add(DSLoadB32(dst=vgpr(vdst),
-                       src=vgpr(tileInfo.sharedVgprLROffset[0]),
-                       ds=DSModifiers(offset=dsOffset),
-                       comment="scale%s[group%u]: load 4B from LDS" % (tc, scaleGroupIdx)))
+  module.add(emitScaleGroupLoad(writer, kernel, tileInfo, tc, vdst, scaleGroupIdx, dsOffset,
+                                "scale%s[group%u]: load 4B from LDS" % (tc, scaleGroupIdx)))
   return module
 
 def localReadDoScaleSubtile(tc, writer, kernel):
