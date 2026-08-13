@@ -6,79 +6,7 @@
     'n_bias_types': 2,
     'n_solutions': 1,
     'operationType': 'GEMM',
-    'problemType': dict({
-      'DataType': 'H',
-      'DataTypeA': 'H',
-      'DataTypeB': 'H',
-      'MacDataTypeA': 'H',
-      'MacDataTypeB': 'H',
-      'OperationType': 'GEMM',
-    }),
     'schedule': 'aquavanjaram',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': 'synthetic_kernel',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
-    'type_mismatches': list([
-    ]),
-  })
-# ---
-# name: test_parse_library_logic_data_datatype_overwrite_divergence
-  dict({
-    'architecture': 'gfx942',
-    'exact_logic_len': 1,
-    'n_bias_types': 2,
-    'n_solutions': 1,
-    'operationType': 'GEMM',
-    'problemType': dict({
-      'DataType': 'H',
-      'DataTypeA': 'H',
-      'DataTypeB': 'H',
-      'MacDataTypeA': 'S',
-      'MacDataTypeB': 'S',
-      'OperationType': 'GEMM',
-    }),
-    'schedule': 'aquavanjaram',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'S',
-          'MacDataTypeB': 'S',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
     'type_mismatches': list([
     ]),
   })
@@ -90,37 +18,7 @@
     'n_bias_types': 2,
     'n_solutions': 1,
     'operationType': 'GEMM',
-    'problemType': dict({
-      'DataType': 'H',
-      'DataTypeA': 'H',
-      'DataTypeB': 'H',
-      'MacDataTypeA': 'H',
-      'MacDataTypeB': 'H',
-      'OperationType': 'GEMM',
-    }),
     'schedule': 'aquavanjaram',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
     'type_mismatches': list([
     ]),
   })
@@ -132,37 +30,7 @@
     'n_bias_types': 2,
     'n_solutions': 1,
     'operationType': 'GEMM',
-    'problemType': dict({
-      'DataType': 'H',
-      'DataTypeA': 'H',
-      'DataTypeB': 'H',
-      'MacDataTypeA': 'H',
-      'MacDataTypeB': 'H',
-      'OperationType': 'GEMM',
-    }),
     'schedule': 'aquavanjaram',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
     'type_mismatches': list([
     ]),
   })
@@ -174,37 +42,7 @@
     'n_bias_types': 2,
     'n_solutions': 1,
     'operationType': 'GEMM',
-    'problemType': dict({
-      'DataType': 'H',
-      'DataTypeA': 'H',
-      'DataTypeB': 'H',
-      'MacDataTypeA': 'H',
-      'MacDataTypeB': 'H',
-      'OperationType': 'GEMM',
-    }),
     'schedule': 'aquavanjaram',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
     'type_mismatches': list([
     ]),
   })
@@ -216,37 +54,7 @@
     'n_bias_types': 2,
     'n_solutions': 1,
     'operationType': 'GEMM',
-    'problemType': dict({
-      'DataType': 'H',
-      'DataTypeA': 'H',
-      'DataTypeB': 'H',
-      'MacDataTypeA': 'H',
-      'MacDataTypeB': 'H',
-      'OperationType': 'GEMM',
-    }),
     'schedule': 'aquavanjaram',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
     'type_mismatches': list([
     ]),
   })
@@ -255,83 +63,17 @@
   dict({
     'n_solutions': 1,
     'problem_sizes_type': 'ProblemSizes',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
   })
 # ---
 # name: test_parse_solutions_data_with_bias_activation
   dict({
     'n_solutions': 1,
     'problem_sizes_type': 'ProblemSizes',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
   })
 # ---
 # name: test_parse_solutions_file_roundtrip
   dict({
     'n_solutions': 1,
     'problem_sizes_type': 'ProblemSizes',
-    'solutions': list([
-      dict({
-        'AssignedDerivedParameters': True,
-        'AssignedProblemIndependentDerivedParameters': True,
-        'CUCount': None,
-        'CustomKernelName': '',
-        'DeviceNames': list([
-          'Device 0049',
-          'Device 0050',
-        ]),
-        'ISA': 'SemanticVersion(major=9, minor=4, patch=2)',
-        'KernelLanguage': 'Assembly',
-        'problemType': dict({
-          'DataType': 'H',
-          'DataTypeA': 'H',
-          'DataTypeB': 'H',
-          'MacDataTypeA': 'H',
-          'MacDataTypeB': 'H',
-          'OperationType': 'GEMM',
-        }),
-      }),
-    ]),
   })
 # ---

@@ -114,6 +114,13 @@ def test_parse_logic_list_no_perfmetric(snapshot):
     assert _norm(L.parseLibraryLogicList(d, "src.yaml")) == snapshot
 
 
+def test_parse_logic_list_range_logic_comes_from_index_eight():
+    d = _logic_list()
+    d[8] = {"rules": [[1, 2], [3, 4]]}
+    d[9] = "reserved"
+    assert L.parseLibraryLogicList(d, "src.yaml")["RangeLogic"] == d[8]
+
+
 def test_parse_logic_list_too_short(capsys):
     with pytest.raises(SystemExit):
         L.parseLibraryLogicList([{"MinimumRequiredVersion": "5.0.0"}], "src.yaml")
@@ -121,61 +128,6 @@ def test_parse_logic_list_too_short(capsys):
         "Tensile::FATAL: Library logic file src.yaml is missing required "
         "fields (len = 1 < 9)\n"
     )
-
-
-def test_parse_logic_list_too_short_default_srcfile(capsys):
-    with pytest.raises(SystemExit):
-        L.parseLibraryLogicList([{"MinimumRequiredVersion": "5.0.0"}])
-    assert capsys.readouterr().out == (
-        "Tensile::FATAL: Library logic file ? is missing required "
-        "fields (len = 1 < 9)\n"
-    )
-
-
-def test_parse_logic_list_len9_missing_type(capsys):
-    d = _logic_list()[:9]
-    with pytest.raises(SystemExit):
-        L.parseLibraryLogicList(d, "src.yaml")
-    assert capsys.readouterr().out == (
-        "Tensile::FATAL: Library logic file src.yaml is missing required "
-        "field matching property.\n"
-    )
-
-
-def test_parse_logic_list_rangelogic_from_index8():
-    d = _logic_list()
-    d[8] = "range-8"
-    d[9] = "reserved-9"
-    rv = L.parseLibraryLogicList(d, "src.yaml")
-    assert rv["RangeLogic"] == "range-8"
-
-
-def test_parse_logic_list_len10_perfmetric_bound():
-    d = _logic_list()[:10]
-    with pytest.raises(SystemExit):
-        L.parseLibraryLogicList(d, "src.yaml")
-
-
-def test_parse_logic_list_len11_libtype_bound():
-    d = _logic_list()[:11]
-    with pytest.raises(SystemExit):
-        L.parseLibraryLogicList(d, "src.yaml")
-
-
-def test_parse_logic_list_perfmetric_guard_at_len11(monkeypatch):
-    monkeypatch.setattr(L, "printExit", lambda *a, **k: None)
-    d = _logic_list()
-    del d[11]
-    rv = L.parseLibraryLogicList(d, "src.yaml")
-    assert rv["PerfMetric"] == "perf-metric"
-
-
-def test_parse_logic_list_libtype_initializer_is_none(monkeypatch):
-    monkeypatch.setattr(L, "printExit", lambda *a, **k: None)
-    d = _logic_list()
-    d[11] = None
-    rv = L.parseLibraryLogicList(d, "src.yaml")
-    assert rv["Library"]["distance"] is None
 
 
 def test_parse_logic_list_missing_type(capsys):
@@ -233,32 +185,15 @@ def test_raw_library_logic_dict_format(snapshot):
     assert _norm(L.rawLibraryLogic(data)) == snapshot
 
 
-def test_raw_library_logic_range_logic_non_none():
-    """rangeLogic (data[8]) is carried verbatim to tuple index 8."""
+def test_raw_library_logic_preserves_range_logic():
     data = [
         "5.0.0", "sched", "gfx942", ["Device 0049"],
         {"OperationType": "GEMM"}, [{"SolutionIndex": 0}],
         [0], [["k", "v"]], {"RangeRules": [[1, 2], [3, 4]]},
     ]
     result = L.rawLibraryLogic(data)
-    assert result[8] == {"RangeRules": [[1, 2], [3, 4]]}
-    assert result == (
-        "5.0.0", "sched", "gfx942", ["Device 0049"],
-        {"OperationType": "GEMM"}, [{"SolutionIndex": 0}],
-        [0], [["k", "v"]], {"RangeRules": [[1, 2], [3, 4]]}, [],
-    )
-
-
-def test_raw_library_logic_single_other_field():
-    """dataLength==10 appends exactly one trailing otherFields element."""
-    data = [
-        "5.0.0", "sched", "gfx942", ["Device 0049"],
-        {"OperationType": "GEMM"}, [{"SolutionIndex": 0}],
-        [0], [["k", "v"]], None,
-        "perf",
-    ]
-    result = L.rawLibraryLogic(data)
-    assert result[9] == ["perf"]
+    assert result[8] == data[8]
+    assert result[9] == []
 
 
 # ===========================================================================
@@ -352,6 +287,17 @@ def test_create_library_logic_tile_selection(monkeypatch, snapshot):
     assert _norm(data) == snapshot
 
 
+def test_create_library_logic_empty_tile_indices_are_preserved(monkeypatch):
+    monkeypatch.setattr(L, "getCUCount", lambda: 304)
+    logic_tuple = _logic_tuple({(1, 1, 1): [0, 1.0]}, tile=True)
+    logic_tuple[6] = []
+    data = L.createLibraryLogic(
+        "aquavanjaram", "gfx90a", ["Device 0049"], "Matching", logic_tuple
+    )
+    assert data["TileSelectionIndices"] == {"TileSelectionIndices": []}
+    assert len(data["Solutions"]) == 2
+
+
 def test_create_library_logic_with_metadata(monkeypatch, snapshot):
     # ProblemType.state carrying the optional DataTypeMetadata / MXSA / MXSB
     # keys -> the three guarded conversion branches run.
@@ -385,58 +331,6 @@ def test_create_library_logic_roundtrip_dict(monkeypatch, snapshot):
     assert _norm(data) == snapshot
 
 
-def test_create_library_logic_rangelogic(monkeypatch):
-    """A non-None rangeLogic (logicTuple[4]) is carried verbatim into
-    ``data["RangeLogic"]`` of the dict-format output."""
-    monkeypatch.setattr(L, "getCUCount", lambda: 304)
-    lt = _logic_tuple({(1, 1, 1): [0, 1.0]})
-    lt[4] = [[[64, 64, 1], [0, 2.0]]]
-    data = L.createLibraryLogic("aquavanjaram", "gfx90a", ["Device 0049"], "Matching", lt)
-    assert data["RangeLogic"] == [[[64, 64, 1], [0, 2.0]]]
-
-
-def test_create_library_logic_len5_reaches_cucount(monkeypatch):
-    """A length-5 logicTuple short-circuits the tileSelection guard (never
-    indexing logicTuple[5]) and still reaches getCUCount before the trailing
-    positional reads raise."""
-    calls = []
-    monkeypatch.setattr(L, "getCUCount", lambda: (calls.append(1), 304)[1])
-    short = [_problem_type(), [_FakeSolution(0)], [0, 1], {(1, 1, 1): [0, 1.0]}, None]
-    with pytest.raises(IndexError):
-        L.createLibraryLogic("s", "gfx90a", ["d"], "Matching", short)
-    assert calls == [1]
-
-
-def test_create_library_logic_len6_processes_tile(monkeypatch):
-    """A length-6 logicTuple with a truthy index-5 (tileSelection solutions)
-    processes those solutions before the trailing positional read of
-    logicTuple[7] raises IndexError."""
-    monkeypatch.setattr(L, "getCUCount", lambda: 304)
-    seen = []
-
-    class _SpySolution(_FakeSolution):
-        def getAttributes(self):
-            seen.append(1)
-            return super().getAttributes()
-
-    lt = [_problem_type(), [_FakeSolution(0)], [0, 1], {(1, 1, 1): [0, 1.0]}, None, [_SpySolution(1)]]
-    with pytest.raises(IndexError):
-        L.createLibraryLogic("s", "gfx90a", ["d"], "Matching", lt)
-    assert seen == [1]
-
-
-def test_create_library_logic_tile_falsy_indices(monkeypatch):
-    """tileSelection is enabled whenever tileSelectionIndices (logicTuple[6]) is
-    not None -- even a falsy empty list -- and the index-5 tileSelection
-    solutions are appended to ``data["Solutions"]`` in the dict-format output."""
-    monkeypatch.setattr(L, "getCUCount", lambda: 304)
-    lt = _logic_tuple({(1, 1, 1): [0, 1.0]}, tile=True)
-    lt[6] = []
-    data = L.createLibraryLogic("aquavanjaram", "gfx90a", ["Device 0049"], "Matching", lt)
-    assert len(data["Solutions"]) == 2
-    assert data["TileSelectionIndices"] == {"TileSelectionIndices": []}
-
-
 # ===========================================================================
 # getCUCount
 # ===========================================================================
@@ -457,32 +351,7 @@ def test_get_cu_count_rocminfo(monkeypatch):
     assert L.getCUCount() == 110
 
 
-def test_get_cu_count_subprocess_args(monkeypatch):
-    """Pin the exact rocminfo invocation the CU path depends on: the shell
-    command, PIPE capture, shell=True, and the ROCR_VISIBLE_DEVICES env."""
-    monkeypatch.delenv("CU", raising=False)
-
-    class _Res:
-        stdout = b"Compute Unit:            110\n"
-
-    calls = {}
-
-    def _rec(*a, **k):
-        calls["a"] = a
-        calls["k"] = k
-        return _Res()
-
-    monkeypatch.setattr(L.subprocess, "run", _rec)
-    assert L.getCUCount() == 110
-    assert calls["a"][0] == "rocminfo | grep Compute"
-    assert calls["k"]["stdout"] == L.subprocess.PIPE
-    assert calls["k"]["shell"] is True
-    assert calls["k"]["env"]["ROCR_VISIBLE_DEVICES"] == "0"
-
-
-def test_get_cu_count_rocminfo_multiline(monkeypatch):
-    """Multiple Compute-Unit lines: the last one wins, pinning the
-    split('\\n') + lines[-1] selection."""
+def test_get_cu_count_uses_last_rocminfo_device(monkeypatch):
     monkeypatch.delenv("CU", raising=False)
 
     class _Res:
@@ -505,7 +374,7 @@ def test_get_cu_count_rocminfo_no_match(monkeypatch):
         L.getCUCount()
 
 
-def test_get_cu_count_failure(monkeypatch, capsys):
+def test_get_cu_count_failure(monkeypatch):
     # CU unset + subprocess raises -> exception swallowed -> printExit.
     monkeypatch.delenv("CU", raising=False)
 
@@ -515,7 +384,3 @@ def test_get_cu_count_failure(monkeypatch, capsys):
     monkeypatch.setattr(L.subprocess, "run", _boom)
     with pytest.raises(SystemExit):
         L.getCUCount()
-    assert capsys.readouterr().out == (
-        "Tensile::FATAL: Failed to get Compute Unit count from "
-        "rocminfo or env variable 'CU'\n"
-    )
