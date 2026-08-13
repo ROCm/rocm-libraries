@@ -1254,6 +1254,10 @@ axis, so there is nothing to cross and the two forms are the same recipe.
 
 ## Running things
 
+The commands below are the gates and surveys. For the full driver index — and
+for pointing the pipeline at **your own** kernel rather than the pinned gfx950
+families — see [`drivers/README.md`](drivers/README.md).
+
 Everything below runs from `platform/` with the engine importable:
 
 ```bash
@@ -1338,7 +1342,8 @@ measuring nothing:
 
 - **Concrete / CPython-free path:** never — it records and lowers automatically.
 - **Rolling (shape coverage):** usually just declare the spec axes and their sample
-  values (naming which one, if any, is structural); a
+  values (naming which one, if any, is structural) — `drivers/roll_kernel.py`
+  takes them on the command line, so no gate needs editing to try it; a
   genuinely new structural-variation pattern needs a one-time roller extension
   (then amortized across all future kernels of that pattern). When the roller
   cannot prove a pattern it **declines** and says why, and the concrete path
