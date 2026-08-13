@@ -2224,7 +2224,9 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
 
         for bad in (0, -1, 9, 100):
             with self.subTest(waves_per_eu=bad):
-                with self.assertRaises(ValueError, msg=f"waves_per_eu={bad} should be rejected"):
+                with self.assertRaises(
+                    ValueError, msg=f"waves_per_eu={bad} should be rejected"
+                ):
                     AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=bad)
 
         for good in (1, 2, 8):
@@ -2235,7 +2237,10 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
     def test_waves_per_eu_ir_attribute(self):
         """Each legal waves_per_eu value appears verbatim in the lowered IR."""
         from rocke.core.lower_llvm import lower_kernel_to_llvm
-        from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
         from dataclasses import replace
 
         base = AttentionDenseSpec(**self._BASE_KWARGS)
@@ -2259,13 +2264,18 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         IR attribute (which feeds AMDGPU register-file sizing).
         """
         from dataclasses import replace
-        from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
 
         base = AttentionDenseSpec(**self._BASE_KWARGS)
         specs = {wpe: replace(base, waves_per_eu=wpe) for wpe in (1, 2)}
 
         # Cache keys must be distinct.
-        keys = {wpe: (s.kernel_name(), s.batch, s.waves_per_eu) for wpe, s in specs.items()}
+        keys = {
+            wpe: (s.kernel_name(), s.batch, s.waves_per_eu) for wpe, s in specs.items()
+        }
         self.assertNotEqual(
             keys[1],
             keys[2],
@@ -2291,14 +2301,19 @@ class TestAttentionDenseWavesPerEu(unittest.TestCase):
         """
         import hashlib
         from dataclasses import replace
-        from kernels.gfx950.attention_dense import AttentionDenseSpec, build_attention_dense
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
 
         base = AttentionDenseSpec(**self._BASE_KWARGS)
         hsaco_hashes = {}
         for wpe in (1, 2):
             with self.subTest(waves_per_eu=wpe):
                 spec = replace(base, waves_per_eu=wpe)
-                art = _compile_or_skip(build_attention_dense(spec, arch="gfx950"), arch="gfx950")
+                art = _compile_or_skip(
+                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                )
                 hsaco_hashes[wpe] = hashlib.sha256(art.hsaco).hexdigest()
 
         if len(hsaco_hashes) == 2:
