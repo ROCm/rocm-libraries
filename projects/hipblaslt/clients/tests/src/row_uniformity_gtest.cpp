@@ -5,17 +5,17 @@
 // (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
 //
 // Every case builds a column-major fp32 NN GEMM whose A holds one identical
-// K-vector in every row, so D is mathematically row-invariant and any
-// difference between two rows of D is purely an artifact of the reduction
-// order the kernel used. Rows are compared bit for bit, never with a
-// tolerance.
+// K-vector in every row, so D is mathematically row-invariant and any bitwise
+// difference between two rows of D is purely an artifact of the reduction order
+// the kernel used. Rows are compared bit for bit, never with a tolerance, and a
+// case only claims the guarantee for an algorithm shown, in that same run, to
+// produce differing rows with the mode off; otherwise it skips with a
+// diagnostic rather than reporting a green result it did not earn.
 //
-// The suite name carries the "pre_checkin" token on purpose: clients/tests/
-// test_categories.yaml selects tests by loose substring on the category token
-// that the YAML data layer prepends to parameterized test names, and a plain
-// gtest suite has no such token, so it would be invisible to every ctest
-// preset. Encoding the category in the suite name keeps the selection rule
-// identical to the one the data-driven tests already rely on.
+// The suite name carries the "pre_checkin" token on purpose:
+// clients/tests/test_categories.yaml selects by loose substring on the category
+// token the YAML data layer prepends to parameterized test names, and a plain
+// gtest suite has no such token, so it would be invisible to every ctest preset.
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -34,15 +34,11 @@ namespace
 {
     constexpr size_t kWorkspaceBytes = 256ull * 1024 * 1024;
 
-    // On some architectures most enumerated algorithms are non-uniform; without
-    // a cap the candidate loop runs for minutes without adding coverage. The
-    // budget is split so that no single source of candidates can consume it.
-    //
-    // Only a minority of candidates that witness the bug are then repaired by
-    // the StaggerU clamp -- the rest are refused by the launch gate -- so the
-    // sweep budget has to be several times the number of honored candidates
-    // wanted. At 30 per sweep the measured shapes each honor a handful while
-    // staying well inside the runtime the suite had at 6.
+    // Without a cap the candidate loop runs for minutes without adding
+    // coverage. Split so no single source of candidates can consume the whole
+    // budget, and weighted towards the sweep because only a minority of the
+    // candidates that witness the bug are repaired by the StaggerU clamp rather
+    // than refused by the launch gate.
     constexpr size_t kMaxHeuristicCandidates = 4;
     constexpr size_t kMaxSweepCandidates     = 30;
 
@@ -62,69 +58,23 @@ namespace
         return props.gcnArchName;
     }
 
-    bool bitwiseEqual(float lhs, float rhs)
-    {
-        uint32_t l = 0, r = 0;
-        std::memcpy(&l, &lhs, sizeof(l));
-        std::memcpy(&r, &rhs, sizeof(r));
-        return l == r;
-    }
-
     // Wide dynamic range, mixed sign, non-dyadic. The rand_int fill hipBLASLt
     // uses by default produces fp32 values in [-2,2], which sum exactly, so
     // every summation order would agree and these tests would pass against a
-    // completely broken implementation.
-    //
-    // Magnitudes land in [2^-12, 2^13): with K up to 12288 the largest possible
-    // accumulator stays far below FLT_MAX and the smallest product far above
-    // the smallest normal, so neither overflow nor denormal flush can occur.
-    class WideRangeFill
+    // completely broken implementation. Magnitudes land in [2^-12, 2^13): with
+    // K up to 12288 the largest possible accumulator stays far below FLT_MAX and
+    // the smallest product far above the smallest normal, so neither overflow
+    // nor denormal flush can occur.
+    float wideRangeSample(std::mt19937& rng)
     {
-    public:
-        explicit WideRangeFill(uint32_t seed)
-            : m_rng(seed)
-        {
-        }
+        std::uniform_int_distribution<int>    exponentOf{-12, 12};
+        std::uniform_real_distribution<float> mantissaOf{0.0f, 1.0f};
+        std::uniform_int_distribution<int>    signOf{0, 1};
 
-        float operator()()
-        {
-            const int   exponent = m_exponent(m_rng);
-            const float mantissa = 1.0f + m_mantissa(m_rng);
-            const float sign     = m_sign(m_rng) ? 1.0f : -1.0f;
-            return sign * std::ldexp(mantissa, exponent);
-        }
-
-    private:
-        std::mt19937                          m_rng;
-        std::uniform_int_distribution<int>    m_exponent{-12, 12};
-        std::uniform_real_distribution<float> m_mantissa{0.0f, 1.0f};
-        std::uniform_int_distribution<int>    m_sign{0, 1};
-    };
-
-    // Index of the first row that differs bitwise from row 0, or -1 when every
-    // row is identical. A row of a column-major D is strided, but "every row
-    // equals row 0" is the same statement as "every column is constant", and a
-    // column is contiguous, so one memcmp of a column against itself shifted by
-    // a single element settles the whole column at memcmp speed.
-    int64_t firstNonUniformRow(const std::vector<float>& d, int64_t m, int64_t n, int64_t ldd)
-    {
-        for(int64_t col = 0; col < n; ++col)
-        {
-            const float* base = d.data() + col * ldd;
-            if(std::memcmp(base, base + 1, static_cast<size_t>(m - 1) * sizeof(float)) == 0)
-                continue;
-
-            uint32_t row0 = 0;
-            std::memcpy(&row0, base, sizeof(row0));
-            for(int64_t row = 1; row < m; ++row)
-            {
-                uint32_t bits = 0;
-                std::memcpy(&bits, base + row, sizeof(bits));
-                if(bits != row0)
-                    return row;
-            }
-        }
-        return -1;
+        const int   exponent = exponentOf(rng);
+        const float mantissa = 1.0f + mantissaOf(rng);
+        const float sign     = signOf(rng) ? 1.0f : -1.0f;
+        return sign * std::ldexp(mantissa, exponent);
     }
 
     struct Problem
@@ -176,14 +126,10 @@ namespace
             const int64_t n = m_problem.n;
             const int64_t k = m_problem.k;
 
-            if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS)
+            if(hipblasLtCreate(&m_handle) != HIPBLAS_STATUS_SUCCESS
+               || hipStreamCreate(&m_stream) != hipSuccess)
             {
-                skipReason = "hipblasLtCreate failed";
-                return false;
-            }
-            if(hipStreamCreate(&m_stream) != hipSuccess)
-            {
-                skipReason = "hipStreamCreate failed";
+                skipReason = "hipblasLt handle or stream creation failed";
                 return false;
             }
 
@@ -192,9 +138,9 @@ namespace
                || hipMalloc(&m_deviceD, static_cast<size_t>(m * n) * sizeof(float)) != hipSuccess
                || hipMalloc(&m_deviceWorkspace, kWorkspaceBytes) != hipSuccess)
             {
-                skipReason = "hipMalloc failed (insufficient device memory for " + std::to_string(m)
+                skipReason = "hipMalloc failed: not enough device memory for " + std::to_string(m)
                              + "x" + std::to_string(n) + "x" + std::to_string(k)
-                             + " plus workspace)";
+                             + " plus workspace";
                 return false;
             }
 
@@ -207,16 +153,11 @@ namespace
                || hipblasLtMatrixLayoutCreate(&m_layoutB, HIP_R_32F, k, n, k)
                       != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatrixLayoutCreate(&m_layoutD, HIP_R_32F, m, n, m)
+                      != HIPBLAS_STATUS_SUCCESS
+               || hipblasLtMatmulDescCreate(&m_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                       != HIPBLAS_STATUS_SUCCESS)
             {
-                ADD_FAILURE() << "hipblasLtMatrixLayoutCreate failed";
-                return false;
-            }
-
-            if(hipblasLtMatmulDescCreate(&m_desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
-               != HIPBLAS_STATUS_SUCCESS)
-            {
-                ADD_FAILURE() << "hipblasLtMatmulDescCreate failed";
+                ADD_FAILURE() << "hipblasLt layout or matmul descriptor creation failed";
                 return false;
             }
 
@@ -241,7 +182,7 @@ namespace
             for(int64_t idx = m_problem.k - 1; idx >= 0; --idx)
                 reverse += m_aVector[static_cast<size_t>(idx)] * m_hostB[static_cast<size_t>(idx)];
 
-            return !bitwiseEqual(forward, reverse);
+            return std::memcmp(&forward, &reverse, sizeof(float)) != 0;
         }
 
         std::vector<hipblasLtMatmulHeuristicResult_t> candidateAlgos(int& enumeratedCount)
@@ -271,12 +212,10 @@ namespace
                                             heuristic,
                                             &heuristicCount);
             hipblasLtMatmulPreferenceDestroy(preference);
-            appendSupported(std::vector<hipblasLtMatmulHeuristicResult_t>(
-                                heuristic, heuristic + heuristicCount),
-                            0,
-                            1,
-                            kMaxHeuristicCandidates,
-                            supported);
+
+            const std::vector<hipblasLtMatmulHeuristicResult_t> defaults(
+                heuristic, heuristic + heuristicCount);
+            appendSupported(defaults, 0, 1, kMaxHeuristicCandidates, supported);
 
             std::vector<hipblasLtMatmulHeuristicResult_t> enumerated;
             hipblaslt_ext::getAllAlgos(m_handle,
@@ -291,27 +230,23 @@ namespace
                                        enumerated);
             enumeratedCount = static_cast<int>(enumerated.size());
 
-            // getAllAlgos walks a std::set of shared_ptr, so it hands back the
-            // same solutions in an order that follows their heap addresses and
-            // varies from process to process. Sorting on the solution index --
-            // a value baked into the library -- is what makes the sweep below
-            // pick the same candidates on every run.
-            std::sort(enumerated.begin(),
-                      enumerated.end(),
-                      [](const hipblasLtMatmulHeuristicResult_t& lhs,
-                         const hipblasLtMatmulHeuristicResult_t& rhs) {
-                          hipblasLtMatmulAlgo_t lhsAlgo = lhs.algo;
-                          hipblasLtMatmulAlgo_t rhsAlgo = rhs.algo;
-                          return hipblaslt_ext::getIndexFromAlgo(lhsAlgo)
-                                 < hipblaslt_ext::getIndexFromAlgo(rhsAlgo);
-                      });
+            // getAllAlgos walks a std::set of shared_ptr, so the order follows
+            // heap addresses and varies from process to process. Sorting on the
+            // solution index -- a value baked into the library -- is what makes
+            // the sweep below pick the same candidates on every run.
+            std::sort(
+                enumerated.begin(),
+                enumerated.end(),
+                [](hipblasLtMatmulHeuristicResult_t lhs, hipblasLtMatmulHeuristicResult_t rhs) {
+                    return hipblaslt_ext::getIndexFromAlgo(lhs.algo)
+                           < hipblaslt_ext::getIndexFromAlgo(rhs.algo);
+                });
 
-            // Neighbouring entries of the enumerated list are near-identical
-            // kernels that behave the same way, so the list is swept twice --
-            // once from the front and once with a coarse stride -- and each
-            // sweep gets its own share of the candidate budget. Whether a given
-            // shape has a non-uniform algorithm at all turned out to depend on
-            // which part of the list the candidates were drawn from.
+            // Neighbouring entries are near-identical kernels that behave the
+            // same way, so the list is swept twice -- once from the front, once
+            // with a coarse stride -- each with its own share of the budget:
+            // whether a shape has a non-uniform algorithm at all turned out to
+            // depend on which part of the list the candidates came from.
             const size_t stride = std::max<size_t>(1, enumerated.size() / 256);
             appendSupported(enumerated, 0, 1, kMaxSweepCandidates, supported);
             appendSupported(enumerated, stride, stride, kMaxSweepCandidates, supported);
@@ -319,19 +254,16 @@ namespace
             return supported;
         }
 
-        // Resolves one solution by the index baked into the library. Returns
-        // false with a populated reason when the index is absent from this
-        // build or cannot serve this problem; callers treat that as a failure,
-        // not a skip, because a pinned index that stops resolving means the
-        // test has quietly stopped testing anything.
+        // Resolves one solution by the index baked into the library. Callers
+        // treat a false return as a failure, not a skip: a pinned index that
+        // stops resolving means the test has quietly stopped testing anything.
         bool algoFromIndex(int                               solutionIndex,
                            hipblasLtMatmulHeuristicResult_t& out,
                            std::string&                      reason)
         {
             std::vector<int>                              indices{solutionIndex};
             std::vector<hipblasLtMatmulHeuristicResult_t> found;
-            if(hipblaslt_ext::getAlgosFromIndex(m_handle, indices, found)
-                   != HIPBLAS_STATUS_SUCCESS
+            if(hipblaslt_ext::getAlgosFromIndex(m_handle, indices, found) != HIPBLAS_STATUS_SUCCESS
                || found.empty())
             {
                 reason = "solution index " + std::to_string(solutionIndex)
@@ -339,35 +271,14 @@ namespace
                 return false;
             }
 
-            const float alpha    = 1.0f;
-            const float beta     = 0.0f;
-            size_t      required = 0;
-            if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
-                                                    m_desc,
-                                                    &alpha,
-                                                    m_layoutA,
-                                                    m_layoutB,
-                                                    &beta,
-                                                    m_layoutD,
-                                                    m_layoutD,
-                                                    found[0].algo,
-                                                    required)
-               != HIPBLAS_STATUS_SUCCESS)
+            std::string why;
+            if(!runnable(found[0], why))
             {
-                reason = "solution index " + std::to_string(solutionIndex)
-                         + " does not support this problem";
-                return false;
-            }
-            if(required > kWorkspaceBytes)
-            {
-                reason = "solution index " + std::to_string(solutionIndex) + " needs "
-                         + std::to_string(required) + " workspace bytes, more than the "
-                         + std::to_string(kWorkspaceBytes) + " this test allocates";
+                reason = "solution index " + std::to_string(solutionIndex) + " " + why;
                 return false;
             }
 
-            out               = found[0];
-            out.workspaceSize = required;
+            out = found[0];
             return true;
         }
 
@@ -387,8 +298,7 @@ namespace
             // Distinguished from a matmul-level refusal, which the caller is
             // allowed to accept: setting a legal mode value must always work.
             EXPECT_EQ(setStatus, HIPBLAS_STATUS_SUCCESS)
-                << "Setting HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT to " << mode
-                << " must succeed";
+                << "Setting UNIFORM_SUMMATION_ORDER_EXT to " << mode << " must succeed";
             if(setStatus != HIPBLAS_STATUS_SUCCESS)
                 return setStatus;
 
@@ -429,45 +339,84 @@ namespace
             return HIPBLAS_STATUS_SUCCESS;
         }
 
+        // Index of the first row of the last run that differs bitwise from row
+        // 0, or -1 when every row is identical. A row of a column-major D is
+        // strided, but "every row equals row 0" is the same statement as "every
+        // column is constant", and a column is contiguous, so one memcmp of a
+        // column against itself shifted by a single element settles the whole
+        // column at memcmp speed.
         int64_t firstNonUniformRowOfLastRun() const
         {
-            return firstNonUniformRow(m_hostD, m_problem.m, m_problem.n, m_problem.m);
+            const int64_t m = m_problem.m;
+            for(int64_t col = 0; col < m_problem.n; ++col)
+            {
+                const float* base = m_hostD.data() + col * m;
+                if(std::memcmp(base, base + 1, static_cast<size_t>(m - 1) * sizeof(float)) == 0)
+                    continue;
+
+                uint32_t row0 = 0;
+                std::memcpy(&row0, base, sizeof(row0));
+                for(int64_t row = 1; row < m; ++row)
+                {
+                    uint32_t bits = 0;
+                    std::memcpy(&bits, base + row, sizeof(bits));
+                    if(bits != row0)
+                        return row;
+                }
+            }
+            return -1;
         }
 
     private:
+        // Records the workspace this algorithm needs, or says why the library
+        // cannot run it on this problem.
+        bool runnable(hipblasLtMatmulHeuristicResult_t& candidate, std::string& reason)
+        {
+            const float alpha    = 1.0f;
+            const float beta     = 0.0f;
+            size_t      required = 0;
+            if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
+                                                    m_desc,
+                                                    &alpha,
+                                                    m_layoutA,
+                                                    m_layoutB,
+                                                    &beta,
+                                                    m_layoutD,
+                                                    m_layoutD,
+                                                    candidate.algo,
+                                                    required)
+               != HIPBLAS_STATUS_SUCCESS)
+            {
+                reason = "does not support this problem";
+                return false;
+            }
+            if(required > kWorkspaceBytes)
+            {
+                reason = "needs " + std::to_string(required) + " workspace bytes, more than the "
+                         + std::to_string(kWorkspaceBytes) + " this test allocates";
+                return false;
+            }
+
+            candidate.workspaceSize = required;
+            return true;
+        }
+
         // Walks pool from first in steps of stride and moves at most budget
-        // entries that the library can actually run into out, recording the
-        // workspace each one needs.
+        // runnable entries into out.
         void appendSupported(const std::vector<hipblasLtMatmulHeuristicResult_t>& pool,
                              size_t                                               first,
                              size_t                                               stride,
                              size_t                                               budget,
                              std::vector<hipblasLtMatmulHeuristicResult_t>&       out)
         {
-            const float alpha = 1.0f;
-            const float beta  = 0.0f;
-
-            size_t taken = 0;
+            std::string unused;
+            size_t      taken = 0;
             for(size_t idx = first; idx < pool.size() && taken < budget; idx += stride)
             {
                 hipblasLtMatmulHeuristicResult_t result = pool[idx];
-
-                size_t required = 0;
-                if(hipblaslt_ext::matmulIsAlgoSupported(m_handle,
-                                                        m_desc,
-                                                        &alpha,
-                                                        m_layoutA,
-                                                        m_layoutB,
-                                                        &beta,
-                                                        m_layoutD,
-                                                        m_layoutD,
-                                                        result.algo,
-                                                        required)
-                       != HIPBLAS_STATUS_SUCCESS
-                   || required > kWorkspaceBytes)
+                if(!runnable(result, unused))
                     continue;
 
-                result.workspaceSize = required;
                 out.push_back(result);
                 ++taken;
             }
@@ -479,15 +428,15 @@ namespace
             const int64_t n = m_problem.n;
             const int64_t k = m_problem.k;
 
-            WideRangeFill fill(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
+            std::mt19937 rng(0x52755f31u ^ static_cast<uint32_t>(m * 31 + n * 17 + k));
 
             m_aVector.resize(static_cast<size_t>(k));
             for(auto& value : m_aVector)
-                value = fill();
+                value = wideRangeSample(rng);
 
             m_hostB.resize(static_cast<size_t>(k * n));
             for(auto& value : m_hostB)
-                value = fill();
+                value = wideRangeSample(rng);
 
             if(hipMemcpy(
                    m_deviceB, m_hostB.data(), m_hostB.size() * sizeof(float), hipMemcpyHostToDevice)
@@ -532,22 +481,21 @@ namespace
         std::vector<float>      m_hostD;
     };
 
-    // A fixture rather than bare TEST() only so the shared driver can reach
+    // A fixture rather than bare TEST() only so the shared drivers can reach
     // RecordProperty, which gtest exposes to Test subclasses alone.
     class RowUniformity_pre_checkin : public ::testing::Test
     {
     protected:
-        // A pass is reachable only when some algorithm was shown to produce
-        // differing rows with the mode off in this very run; otherwise the case
-        // skips with a diagnostic rather than reporting a green result it did
-        // not earn.
-        void checkRowUniformity(const Problem& problem)
+        // Brings the harness up, or skips (no GPU, no memory) or fails (setUp
+        // error, degenerate fill). Callers must stop on IsSkipped/HasFailure:
+        // a skip or an ADD_FAILURE inside a helper does not return for them,
+        // and the harness is not usable afterwards.
+        void prepare(RowUniformityHarness& harness)
         {
             if(!gpuAvailable())
                 GTEST_SKIP() << "No GPU available";
 
-            RowUniformityHarness harness(problem);
-            std::string          skipReason;
+            std::string skipReason;
             if(!harness.setUp(skipReason))
             {
                 if(skipReason.empty())
@@ -558,6 +506,14 @@ namespace
             ASSERT_TRUE(harness.referenceOrderMatters())
                 << "Forward and reverse fp32 reference dot products are bitwise equal, so the "
                    "fill is degenerate and this test cannot detect a summation-order change";
+        }
+
+        void checkRowUniformity(const Problem& problem)
+        {
+            RowUniformityHarness harness(problem);
+            prepare(harness);
+            if(IsSkipped() || HasFailure())
+                return;
 
             int        enumeratedCount = 0;
             const auto candidates      = harness.candidateAlgos(enumeratedCount);
@@ -611,31 +567,17 @@ namespace
         }
 
         // Pins one solution measured to be repaired by the StaggerU clamp in
-        // calculateAutoStaggerU: non-uniform with the mode off, and uniform
-        // rather than refused with the mode on.
-        //
-        // checkRowUniformity above can only assert the guarantee on whichever
-        // candidates its sweep happens to surface, and most of those exercise
-        // the launch gate's clean-rejection path instead. Naming a solution
-        // that the clamp actually repairs is what keeps the honored branch
-        // covered unconditionally.
+        // calculateAutoStaggerU. checkRowUniformity can only assert the
+        // guarantee on whichever candidates its sweep surfaces, and most of
+        // those exercise the launch gate's clean-rejection path instead, so
+        // naming a repaired solution is what keeps the honored branch covered
+        // unconditionally.
         void checkClampRepairedSolution(const Problem& problem, int solutionIndex)
         {
-            if(!gpuAvailable())
-                GTEST_SKIP() << "No GPU available";
-
             RowUniformityHarness harness(problem);
-            std::string          skipReason;
-            if(!harness.setUp(skipReason))
-            {
-                if(skipReason.empty())
-                    return;
-                GTEST_SKIP() << skipReason;
-            }
-
-            ASSERT_TRUE(harness.referenceOrderMatters())
-                << "Forward and reverse fp32 reference dot products are bitwise equal, so the "
-                   "fill is degenerate and this test cannot detect a summation-order change";
+            prepare(harness);
+            if(IsSkipped() || HasFailure())
+                return;
 
             hipblasLtMatmulHeuristicResult_t candidate{};
             std::string                      reason;
@@ -655,15 +597,14 @@ namespace
                 << ") is row-uniform with the mode off, so it no longer witnesses the "
                    "summation-order difference this test exists to catch; re-measure the pin";
 
-            const auto status = harness.run(candidate, /*uniformMode=*/true);
-            ASSERT_EQ(status, HIPBLAS_STATUS_SUCCESS)
+            ASSERT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
                 << "Solution " << solutionIndex << " (" << name
                 << ") is reachable by the StaggerU clamp, so uniform summation order must honor "
                    "it rather than refuse it";
 
             const int64_t badRow = harness.firstNonUniformRowOfLastRun();
-            EXPECT_EQ(badRow, -1) << "Row " << badRow << " of D differs bitwise from row 0 for "
-                                     "solution "
+            EXPECT_EQ(badRow, -1) << "Row " << badRow
+                                  << " of D differs bitwise from row 0 for solution "
                                   << solutionIndex << " (" << name
                                   << ") with uniform summation order enabled";
         }

@@ -114,15 +114,13 @@ namespace hipblaslt_ext
          *  The ``hipblaslt_ext`` equivalent of
          *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``. When enabled,
          *  hipBLASLt guarantees that if every row of matrix A is the identical
-         *  vector, then every row of the output matrix D is bitwise identical.
-         *  This is uniformity across the M dimension within a single run; it is
-         *  **not** run-to-run determinism and must not be relied upon as such.
-         *
-         *  Defaults to ``false``. Enabling the mode restricts kernel selection
-         *  and the launch configuration, so it can reduce performance; if no
-         *  uniform-safe configuration exists for the resolved launch, ``run()``
-         *  returns ``HIPBLAS_STATUS_INVALID_VALUE`` rather than silently
-         *  producing a non-uniform result.
+         *  vector, every row of the output matrix D is bitwise identical. This is
+         *  uniformity across the M dimension within a single run; it is **not**
+         *  run-to-run determinism. Defaults to ``false``. Enabling it restricts
+         *  kernel selection and the launch configuration, so it can reduce
+         *  performance, and ``run()`` returns ``HIPBLAS_STATUS_INVALID_VALUE``
+         *  when no uniform-safe configuration exists for the resolved launch
+         *  rather than silently producing a non-uniform result.
          *
          *  @param[in]
          *  value  ``true`` to enable the mode, ``false`` (default) to disable it.

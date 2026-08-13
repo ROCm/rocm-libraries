@@ -20,8 +20,7 @@
 // CLI token (off|on|auto or 0|1|2) before client.cpp resolves it.
 //
 // uniform_summation_order maps to HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT
-// as {0=off, 1=on} and follows the same -1 "unset" convention;
-// uniform_summation_order_str() holds the raw CLI token (off|on or 0|1).
+// as {0=off, 1=on} and follows the same convention.
 namespace hipblaslt_bench_options
 {
     int32_t&     sm_count_target();

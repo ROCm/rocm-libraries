@@ -89,9 +89,7 @@ namespace TensileLite
             // uniformSummationOrderSupported() likewise excludes solutions that
             // can never produce row-uniform output once the caller has opted
             // into uniform summation order, so the incompatibility surfaces at
-            // heuristic-query time instead of at the matmul call. It tests only
-            // statically-knowable facts; the fail-closed gate in
-            // ContractionSolution::solve() stays authoritative.
+            // heuristic-query time instead of at the matmul call.
             return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
                    && solutions.streamKDynamicQueueSupported(problem, hardware)
                    && solutions.uniformSummationOrderSupported(problem, hardware);
