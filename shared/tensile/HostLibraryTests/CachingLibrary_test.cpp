@@ -1064,10 +1064,31 @@ TEST(CachingLibrary, Parsing)
 
     EXPECT_EQ(probSol.second, 3976);
 
+    // Remapped indices, negative as used by clients such as rocBLAS
+    std::vector<std::string> entriesNegative{"T",
+                                             "N",
+                                             "2304",
+                                             "256",
+                                             "1",
+                                             "1729",
+                                             "1",
+                                             "1",
+                                             "1729",
+                                             "1729",
+                                             "2304",
+                                             "f16_r",
+                                             "f16_r",
+                                             "f32_r",
+                                             "-762"};
+
+    probSol = problemFromEntries<ContractionProblem>(entriesNegative);
+    EXPECT_EQ(probSol.first.m(), 2304);
+    EXPECT_EQ(probSol.second, -762);
+
     // Bad args
     std::vector<std::string> entries2{"N", "T", "104"}; // Too short
     probSol = problemFromEntries<ContractionProblem>(entries2);
-    EXPECT_EQ(probSol.second, -1);
+    EXPECT_EQ(probSol.second, InvalidOverrideSolutionIndex);
 
     std::vector<std::string> entries3{"T",
                                       "N",
@@ -1085,7 +1106,7 @@ TEST(CachingLibrary, Parsing)
                                       "f32_r",
                                       "752"};
     probSol = problemFromEntries<ContractionProblem>(entries3);
-    EXPECT_EQ(probSol.second, -1);
+    EXPECT_EQ(probSol.second, InvalidOverrideSolutionIndex);
 
     std::vector<std::string> entries4{"T",
                                       "N",
@@ -1103,5 +1124,5 @@ TEST(CachingLibrary, Parsing)
                                       "f32_r",
                                       "752"};
     probSol = problemFromEntries<ContractionProblem>(entries4);
-    EXPECT_EQ(probSol.second, -1);
+    EXPECT_EQ(probSol.second, InvalidOverrideSolutionIndex);
 }

@@ -188,8 +188,9 @@ int main(int argc, char* argv[])
             // run benchmark
             int best_solution_index = rocblas_gemm_dispatch<GEMMTunerDispatch>(arg);
 
-            // log result, if solution is found
-            if(best_solution_index > 0)
+            // log result, if solution is found. Tensile solutions are now reported as
+            // negative indices so only the default index means no solution was found
+            if(best_solution_index != 0)
             {
                 *current_entry = true;
                 *current_os << arg_key << DELIM << best_solution_index << "\n";

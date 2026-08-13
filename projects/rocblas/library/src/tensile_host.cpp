@@ -619,6 +619,37 @@ namespace
         return inputs;
     }
 
+    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
+    {
+        // need to ensure tensile indices not so large as to already be into sign bit
+
+        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
+    }
+
+    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
+    {
+        return -(idx + 1)
+               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
+    }
+
+    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
+    {
+        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
+    }
+
+    static int map_index_override_to_tensile(int idx)
+    {
+        // Override files hold either the rocblas indices reported by
+        // rocblas_gemm_ex_get_solutions, which are biased and negative for Tensile
+        // solutions, or raw one based Tensile indices as written by older tuning runs.
+        // Anything else, such as a hipBLASLt or rocBLAS source kernel index, has no
+        // Tensile equivalent and is rejected by returning a negative index.
+        if(rocblas_tensile_index(idx))
+            return map_index_rocblas_to_tensile(idx);
+
+        return idx > 0 ? idx - 1 : -1; // 1 based to 0 based : invalid index
+    }
+
     /**************************************************
      * The TensileHost struct interfaces with Tensile *
      **************************************************/
@@ -1079,7 +1110,8 @@ namespace
                 auto                        archLib = m_libraryMap[processor];
                 if(archLib)
                 {
-                    bool success = archLib->setOverridesFromFile(*hardware, overridePath);
+                    bool success = archLib->setOverridesFromFile(
+                        *hardware, overridePath, map_index_override_to_tensile);
                     if(!success)
                     {
                         rocblas_cerr << "\nrocBLAS warning: One or more problem overrides failed "
@@ -1178,24 +1210,6 @@ namespace
         {
             rocblas_cerr << std::endl << msg << std::endl;
         }
-    }
-
-    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
-    {
-        // need to ensure tensile indices not so large as to already be into sign bit
-
-        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
-    }
-
-    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
-    {
-        return -(idx + 1)
-               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
-    }
-
-    inline rocblas_int map_index_rocblas_to_hipblaslt(rocblas_int idx)
-    {
-        return idx < 0 ? 0 : idx; // map -1 and all negatives to default
     }
 
 } // namespace

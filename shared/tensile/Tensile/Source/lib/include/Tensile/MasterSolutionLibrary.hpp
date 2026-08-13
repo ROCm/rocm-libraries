@@ -27,6 +27,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -183,7 +184,17 @@ namespace Tensile
             }
         }
 
-        bool setOverridesFromFile(Hardware const& hardware, const std::string& file_path)
+        /**
+         * Translates the solution index of an override file entry into a library solution
+         * index. Clients which report remapped indices, such as rocBLAS, supply this so
+         * that an override file can use the same indices as the client API. A negative
+         * result marks an entry the client cannot translate.
+         */
+        using OverrideIndexMapping = std::function<int(int)>;
+
+        bool setOverridesFromFile(Hardware const&      hardware,
+                                  const std::string&   file_path,
+                                  OverrideIndexMapping mapSolutionIndex = nullptr)
         {
             bool debug = Debug::Instance().printOverrideLogs();
 
@@ -206,8 +217,18 @@ namespace Tensile
 
                 for(const auto& ps : probSols)
                 {
-                    // Get solution via index
-                    int sol_idx = ps.second - 1;
+                    // Get solution via index, one based in the file unless the client remaps it
+                    int sol_idx = mapSolutionIndex ? mapSolutionIndex(ps.second) : ps.second - 1;
+
+                    if(sol_idx < 0)
+                    {
+                        if(debug)
+                            std::cout << "WARNING: override file solution index: " << ps.second
+                                      << " does not refer to a library solution.\n";
+
+                        success = false;
+                        continue;
+                    }
 
                     std::shared_ptr<MySolution> solution = getSolutionByIndex(sol_idx);
                     if(!solution)
