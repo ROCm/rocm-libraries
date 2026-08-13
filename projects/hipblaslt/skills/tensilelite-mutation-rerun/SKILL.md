@@ -43,9 +43,11 @@ configuration, strict kill semantics, and restoration across reruns.
 6. **Run mutmut with bounded concurrency.** Use `mutmut run --max-children 32`
    unless a reviewed slice record requires a lower value. Capture the command,
    source SHA, container image, mutmut version, exit status, and result counts.
-7. **Inspect non-killed results.** Use `mutmut results`, `mutmut show`, and
-   `mutmut tests-for-mutant`. Treat `survived`, `no tests`, `timeout`, and
-   suspicious/infrastructure outcomes separately.
+7. **Triage every non-killed result.** Read
+   [references/survivor-triage.md](references/survivor-triage.md). Capture the
+   complete input ID set before grouping, inspect each mutant with `mutmut show`,
+   and maintain a one-row-per-mutant conservation ledger. Treat `survived`,
+   `no tests`, `timeout`, and suspicious/infrastructure outcomes separately.
 8. **Add behavior-distinguishing tests.** For each proposed assertion, state
    what source mutation makes it fail. Do not add coverage-only assertions,
    silently skip tests, or idealize behavior that the current source does not
@@ -69,6 +71,7 @@ configuration, strict kill semantics, and restoration across reruns.
 ## Guardrails
 
 - Keep mutation application and source restoration serial.
+- Require exact survivor-ledger conservation before reporting results.
 - Never use aggregate package `TOTAL` coverage as proof for a target module.
 - Never accept coverage from a failing pytest run.
 - Never silently substitute the full unit suite for an unproven focused set.
