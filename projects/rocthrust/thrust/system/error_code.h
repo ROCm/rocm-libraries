@@ -33,9 +33,7 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/system/detail/errno.h>
 
-#if !THRUST_COMPILER(NVRTC)
-#  include <iostream>
-#endif // !THRUST_COMPILER(NVRTC)
+#include <iostream>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
@@ -261,10 +259,10 @@ public:
   template <typename ErrorCodeEnum>
   error_code(ErrorCodeEnum e
 // XXX WAR msvc's problem with enable_if
-#if !THRUST_COMPILER(MSVC)
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
              ,
              _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value>* = 0
-#endif // !THRUST_COMPILER(MSVC)
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   );
 
   // [19.5.2.3] modifiers:
@@ -277,11 +275,11 @@ public:
    */
   template <typename ErrorCodeEnum>
 // XXX WAR msvc's problem with enable_if
-#if !THRUST_COMPILER(MSVC)
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value, error_code>&
 #else
   error_code&
-#endif // !THRUST_COMPILER(MSVC)
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   operator=(ErrorCodeEnum e);
 
   /*! \post <tt>value() == 0</tt> and <tt>category() == system_category()</tt>.
@@ -334,12 +332,10 @@ inline error_code make_error_code(errc::errc_t e);
  */
 inline bool operator<(const error_code& lhs, const error_code& rhs);
 
-#if !THRUST_COMPILER(NVRTC)
 /*! Effects: <tt>os << ec.category().name() << ':' << ec.value()</tt>.
  */
 template <typename charT, typename traits>
 std::basic_ostream<charT, traits>& operator<<(std::basic_ostream<charT, traits>& os, const error_code& ec);
-#endif // !THRUST_COMPILER(NVRTC)
 
 // [19.5.3] class error_condition
 
@@ -374,10 +370,10 @@ public:
   template <typename ErrorConditionEnum>
   error_condition(ErrorConditionEnum e
 // XXX WAR msvc's problem with enable_if
-#if !THRUST_COMPILER(MSVC)
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
                   ,
                   _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>* = 0
-#endif // !THRUST_COMPILER(MSVC)
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   );
 
   // [19.5.3.3] modifiers
@@ -398,11 +394,11 @@ public:
    */
   template <typename ErrorConditionEnum>
 // XXX WAR msvc's problem with enable_if
-#if !THRUST_COMPILER(MSVC)
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
 #else
   error_condition&
-#endif // !THRUST_COMPILER(MSVC)
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   operator=(ErrorConditionEnum e);
 
   /*! Clears this \p error_code object.

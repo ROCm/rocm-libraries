@@ -67,8 +67,8 @@ namespace rocsparse
 template <typename T>
 rocsparse_status rocsparse::prune_dense2csr_by_percentage_buffer_size_template(
     rocsparse_handle          handle, //0
-    rocsparse_int             m, //1
-    rocsparse_int             n, //2
+    int64_t                   m, //1
+    int64_t                   n, //2
     const T*                  A, //3
     int64_t                   lda, //4
     T                         percentage, //5
@@ -100,7 +100,7 @@ rocsparse_status rocsparse::prune_dense2csr_by_percentage_buffer_size_template(
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
-    ROCSPARSE_CHECKARG_ARRAY(3, size_t(m) * n, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, m * n, A);
 
     ROCSPARSE_CHECKARG(4, lda, (lda < m), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(5,
@@ -128,8 +128,8 @@ rocsparse_status rocsparse::prune_dense2csr_by_percentage_buffer_size_template(
 template <typename T>
 rocsparse_status
     rocsparse::prune_dense2csr_nnz_by_percentage_template(rocsparse_handle          handle, //0
-                                                          rocsparse_int             m, //1
-                                                          rocsparse_int             n, //2
+                                                          int64_t                   m, //1
+                                                          int64_t                   n, //2
                                                           const T*                  A, //3
                                                           int64_t                   lda, //4
                                                           T                         percentage, //5
@@ -158,7 +158,7 @@ rocsparse_status
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
-    ROCSPARSE_CHECKARG_ARRAY(3, size_t(m) * n, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, m * n, A);
 
     ROCSPARSE_CHECKARG(4, lda, (lda < m), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(5,
@@ -202,21 +202,32 @@ rocsparse_status
     ROCSPARSE_CHECKARG_POINTER(8, nnz_total_dev_host_ptr);
     ROCSPARSE_CHECKARG_POINTER(10, temp_buffer);
 
-    const rocsparse_int nnz_A = m * n;
+    const int64_t nnz_A = m * n;
 
-    rocsparse_int pos = rocsparse::ceil(nnz_A * (percentage / 100)) - 1;
-    pos               = rocsparse::min(pos, nnz_A - 1);
-    pos               = rocsparse::max(pos, static_cast<rocsparse_int>(0));
+    int64_t pos = rocsparse::ceil(nnz_A * (percentage / 100)) - 1;
+    pos         = rocsparse::min(pos, nnz_A - 1);
+    pos         = rocsparse::max(pos, static_cast<int64_t>(0));
 
     T* output = reinterpret_cast<T*>(temp_buffer);
 
-    // Compute absolute value of A and store in first half of output array
     {
-        dim3 grid((nnz_A - 1) / 256 + 1);
-        dim3 threads(256);
+        static constexpr int BLOCKSIZE = 256;
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (abs_kernel<256, T>), grid, threads, 0, stream, m, n, A, lda, output);
+        const int64_t nblocks = (nnz_A - 1) / BLOCKSIZE + 1;
+
+        const uint32_t grid_x = std::min(nblocks, static_cast<int64_t>(2147483647));
+        const uint32_t grid_y = std::min((nblocks - 1) / grid_x + 1, static_cast<int64_t>(65535));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((abs_kernel<BLOCKSIZE, T>),
+                                           dim3(grid_x, grid_y, 1),
+                                           dim3(BLOCKSIZE, 1, 1),
+                                           0,
+                                           stream,
+                                           m,
+                                           n,
+                                           A,
+                                           lda,
+                                           output);
     }
 
     // Determine amount of temporary storage needed for rocprim sort and inclusive scan and allocate if necessary
@@ -328,8 +339,8 @@ rocsparse_status
 template <typename T>
 rocsparse_status
     rocsparse::prune_dense2csr_by_percentage_template(rocsparse_handle          handle, //0
-                                                      rocsparse_int             m, //1
-                                                      rocsparse_int             n, //2
+                                                      int64_t                   m, //1
+                                                      int64_t                   n, //2
                                                       const T*                  A, //3
                                                       int64_t                   lda, //4
                                                       T                         percentage, //5

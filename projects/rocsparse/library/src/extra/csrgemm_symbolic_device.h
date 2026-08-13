@@ -50,7 +50,7 @@ namespace rocsparse
                                                              const J* __restrict__ csr_col_ind_D,
                                                              const I* __restrict__ csr_row_ptr_C,
                                                              J* __restrict__ csr_col_ind_C,
-                                                             I* __restrict__ workspace_B,
+                                                             I*                   workspace_B,
                                                              rocsparse_index_base idx_base_A,
                                                              rocsparse_index_base idx_base_B,
                                                              rocsparse_index_base idx_base_C,
@@ -293,7 +293,10 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I>
-    ROCSPARSE_DEVICE_ILF void csrgemm_symbolic_group_reduce(int tid, I* __restrict__ data)
+    // NOTE: 'data' points into block-shared LDS used for a cross-thread segmented
+    // reduction; it must NOT be __restrict__ (noalias would let the compiler forward
+    // reads across __syncthreads() and drop other threads' contributions).
+    ROCSPARSE_DEVICE_ILF void csrgemm_symbolic_group_reduce(int tid, I* data)
     {
         // clang-format off
     if(BLOCKSIZE > 512 && tid < 512) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 512) * GROUPS + i]; __syncthreads();
@@ -521,7 +524,9 @@ namespace rocsparse
     // Hash operation to insert key into hash table
     // Returns true if key has been added
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I>
-    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* __restrict__ table, I empty)
+    // NOTE: 'table' is a block-shared hash table read via plain loads that must
+    // observe other threads' atomic_cas writes; it must NOT be __restrict__.
+    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* table, I empty)
     {
         static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
                       "HASHSIZE must be a power of two.");
