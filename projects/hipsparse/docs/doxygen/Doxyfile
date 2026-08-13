@@ -2169,7 +2169,8 @@ PREDEFINED             = __attribute__(x)= \
                          __inline= \
                          HIPSPARSE_EXPORT= \
                          HIPSPARSE_DEPRECATED_MSG(x)= \
-                         HIPSPARSE_WITH_SPMV_BSR
+                         HIPSPARSE_WITH_SPMV_BSR \
+                         HIPSPARSE_WITH_SPGEAM
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

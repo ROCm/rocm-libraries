@@ -8,6 +8,9 @@ rocBLAS documentation is available at
 ### Optimized
 
 * `gemm` with a unit free dimension (`m == 1` or `n == 1`) and `batch_count == 1` now uses the GEMV kernels from the plain `rocblas_?gemm` entry point, not only from `gemm_ex`. The dispatch that `gemm_ex` has had since 5.0.0 is shared rather than duplicated. On gfx11 the per-precision heuristics guarding it are also bypassed, because they assume Tensile has size-tuned fp32/fp64 logic that consumer RDNA does not ship. Measured on gfx1100 at free dimension 1328, `k = 101067`: `dgemm` 10.6-10.8 ms to 1.55-1.70 ms, `sgemm` up to 9.99 ms to 0.80 ms. The `1x1` case, and architectures other than gfx11, keep the existing behaviour.
+### Added
+
+* Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
 ## rocBLAS 5.6.0
 

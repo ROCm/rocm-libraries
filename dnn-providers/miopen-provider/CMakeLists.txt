@@ -183,10 +183,10 @@ set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
+    engines/plans/MiopenUnaryActivationPlan.cpp
+    engines/plans/MiopenUnaryActivationChecks.cpp
+    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     engines/plans/MiopenBatchnormApplicabilityChecks.cpp
-    engines/plans/MiopenReluApplicabilityChecks.cpp
-    engines/plans/MiopenReluPlan.cpp
-    engines/plans/MiopenReluPlanBuilder.cpp
     engines/plans/MiopenBatchnormPlanBuilder.cpp
     engines/plans/MiopenBatchnormBwdPlan.cpp
     engines/plans/MiopenBatchnormFwdInferencePlan.cpp

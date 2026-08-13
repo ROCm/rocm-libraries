@@ -105,6 +105,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   )
 
   set(roclapack_inst_files
+    common/lapack/testing_cholqr.cpp
     common/lapack/testing_potf2_potrf.cpp
     common/lapack/testing_potrs.cpp
     common/lapack/testing_posv.cpp

@@ -121,7 +121,7 @@ protected:
         this->registerValidator(outputs.dk, this->getTolerance(graphObj, outputs.dk));
         this->registerValidator(outputs.dv, this->getTolerance(graphObj, outputs.dv));
 
-        this->synthesis().setGlobalSeed(_seed);
+        this->inputFillRecipes().setGlobalSeed(_seed);
         this->verifyGraph(graphObj);
     }
 

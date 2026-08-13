@@ -88,6 +88,8 @@ function(hipblaslt_create_device_library)
         COMMAND ${HIPBLASLT_PYTHON_COMMAND}
             "${_codegen_dir}/Tensile/bin/TensileLogic"
             "${_cdl_LOGIC_PATH}"
+            --architecture
+            "${_arches_semi}"
             --known-bugs
             "${_known_bugs}"
             --check-all
