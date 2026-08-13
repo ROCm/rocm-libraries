@@ -34,6 +34,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -761,17 +762,22 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
+        const HWModel& hw = passCtx.getHWModel();
+        const int barrierSignalToWait = hw.barrier.signalToWaitLatency;
+
         // Estimate cycles for each instruction
         // initial values
         int cycles = 0;
         int hwMFMA = -99;
-        int jumpOverhead = 6;
+        int jumpOverhead = hw.barrier.jumpOverheadCycles;
         int previousLW = 0;
         std::queue<int> hwLRFIFO;
         std::queue<int> lgkmLRFIFO;
         std::deque<int> hwGRFIFO;
         int numPreviousLRs = 0;
-        int previousBarrierSignal = -11;  // gfx1250 barrier signal latency is 11 cycles
+        // Seeded to -latency so that before any signal is seen, the wait clamp
+        // (previousBarrierSignal + latency) is 0 and therefore never binding.
+        int previousBarrierSignal = -barrierSignalToWait;
         int activeWmmaStartCycle = -1;
         int activeWmmaCoExecAdvance = 0;
         std::vector<bool> activeWmmaValuSlots;
@@ -805,7 +811,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (opcode.find("s_barrier_signal") != std::string::npos)
                     previousBarrierSignal = cycles;
                 if (opcode.find("s_barrier_wait") != std::string::npos)
-                    cycles = std::max(cycles + inst->issueCycles, previousBarrierSignal + 11);
+                    cycles = std::max(cycles + inst->issueCycles,
+                                      previousBarrierSignal + barrierSignalToWait);
                 else
                     cycles += inst->issueCycles;
             } else if (isDSRead(*inst)) {
