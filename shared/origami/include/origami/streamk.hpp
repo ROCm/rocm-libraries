@@ -78,32 +78,34 @@ ORIGAMI_EXPORT size_t select_grid_size(const problem_t& problem,
                                        const config_t& config,
                                        grid_selection_t algorithm);
 
-enum class threshold_metrics : uint8_t 
-{
-  grid_efficiency,
-  grid_waves,
-  tiles,
-  tiles_per_cu,
-  occupancy
-};
-
-enum class comparison_type : uint8_t 
-{ 
-  less_then_or_equal, 
-  greater_then 
-};
-
-struct threshold_rule 
-{
-  threshold_metrics feature;
-  double            threshold;
-  comparison_type   comparison;
-  hybrid_mode_t     mode;
-};
-
 template <class Arch>
 struct thresholds 
 {
+  enum class threshold_metrics : uint8_t 
+  {
+    grid_efficiency,
+    grid_waves,
+    tiles,
+    tiles_per_cu,
+    occupancy,
+    m_dim,
+    min_mn,
+    active_cus,
+    static_skgrid,
+    iters_per_tile
+  };
+
+  static constexpr int static_result  = -1;
+  static constexpr int dynamic_result = -2;
+
+  struct decision_node 
+  {
+    threshold_metrics feature;
+    double            threshold;
+    int               if_lte;
+    int               if_gt;
+  };
+
   static size_t output_tiles(const problem_t& problem, const config_t& config) {
     return compute_number_of_output_tiles(config.mt.m, config.mt.n, problem.size.m, problem.size.n,
                                           std::max<size_t>(problem.batch, 1));
@@ -144,6 +146,28 @@ struct thresholds
         const size_t waves_ceil = math::safe_ceil_div(tiles, grid);
         return waves_ceil ? static_cast<double>(tiles) / static_cast<double>(waves_ceil * grid) : 0.0;
       }
+      case threshold_metrics::m_dim:
+      {
+        return static_cast<double>(problem.size.m);
+      }
+      case threshold_metrics::min_mn:
+      {
+        return static_cast<double>(std::min<size_t>(problem.size.m, problem.size.n));
+      }
+      case threshold_metrics::active_cus:
+      {
+        const size_t cus = (sm_count_target > 0) ? std::min<size_t>(sm_count_target, hardware.N_CU) : hardware.N_CU;
+        return static_cast<double>(cus ? cus : hardware.N_CU);
+      }
+      case threshold_metrics::static_skgrid:
+      {
+        return static_cast<double>(select_grid_size(problem, hardware, config, grid_selection_t::k_split_aware));
+      }
+      case threshold_metrics::iters_per_tile:
+      {
+        return config.mt.k ? static_cast<double>(math::safe_ceil_div(problem.size.k, config.mt.k))
+                           : std::numeric_limits<double>::quiet_NaN();
+      }
       default:
         break;
     }
@@ -152,40 +176,58 @@ struct thresholds
 
   static hybrid_mode_t select_hybrid_mode(const problem_t& problem, const hardware_t& hardware,
                                           const config_t& config, size_t sm_count_target) {
-    for (const threshold_rule& rule : Arch::decision_tree) {
-      const double value = feature_value(rule.feature, problem, hardware, config, sm_count_target);
-      const bool   fires = (rule.comparison == comparison_type::less_then_or_equal) ? (value <= rule.threshold)
-                                                  : (value > rule.threshold);
-      if (fires) 
+    int index = 0;
+    for (;;) {
+      const decision_node& node = Arch::decision_tree[index];
+      const double         value = feature_value(node.feature, problem, hardware, config, sm_count_target);
+      const int            next  = (value <= node.threshold) ? node.if_lte : node.if_gt;
+
+      if (next  == dynamic_result) 
       {
-        return rule.mode;
+        return hybrid_mode_t::dynamic;
       }
+      else if(next == static_result)
+      {
+        return hybrid_mode_t::static_;
+      }
+      
+      index = next;
     }
-    return hybrid_mode_t::static_;
   }
 };
 
 struct gfx942_values : thresholds<gfx942_values> 
 {
-  static constexpr double grid_waves_threshold = 1.17;
-
-  static constexpr threshold_rule decision_tree[] = 
+  static constexpr decision_node decision_tree[] = 
   {
-      {threshold_metrics::grid_waves, grid_waves_threshold, comparison_type::greater_then, hybrid_mode_t::dynamic},
+      /* 0 */ {threshold_metrics::grid_waves, 1.17, static_result, dynamic_result},
   };
 };
 
 struct gfx950_values : thresholds<gfx950_values> 
 {
-  static constexpr double grid_efficiency_threshold = 0.23;
-  static constexpr double tiles_threshold           = 480;
-  static constexpr double occupancy_threshold       = 2.5;
+  static constexpr int node_grid_efficiency = 0;
+  static constexpr int node_min_mn          = 1;
+  static constexpr int node_m               = 2;
+  static constexpr int node_tiles           = 3;
+  static constexpr int node_tiles_per_cu    = 4;
+  static constexpr int node_static_skgrid   = 5;
+  static constexpr int node_iters_per_tile  = 6;
+  static constexpr int node_active_cus      = 7;
+  static constexpr int node_occupancy       = 8;
 
-  static constexpr threshold_rule decision_tree[] = 
+  static constexpr decision_node decision_tree[] = 
   {
-      {threshold_metrics::tiles, tiles_threshold, comparison_type::less_then_or_equal, hybrid_mode_t::static_},
-      {threshold_metrics::grid_efficiency, grid_efficiency_threshold, comparison_type::greater_then, hybrid_mode_t::dynamic},
-      {threshold_metrics::occupancy, occupancy_threshold, comparison_type::less_then_or_equal, hybrid_mode_t::dynamic},
+      // node                  feature                              thr      <= thr              > thr
+      /* node_grid_efficiency */ {threshold_metrics::grid_efficiency, 0.23,   node_min_mn,        node_tiles_per_cu},
+      /* node_min_mn          */ {threshold_metrics::min_mn,          1088.0, node_m,             node_tiles},
+      /* node_m               */ {threshold_metrics::m_dim,           3277.0, static_result,        dynamic_result},
+      /* node_tiles           */ {threshold_metrics::tiles,           34.0,   dynamic_result,       static_result},
+      /* node_tiles_per_cu    */ {threshold_metrics::tiles_per_cu,    0.29,   node_static_skgrid, node_active_cus},
+      /* node_static_skgrid   */ {threshold_metrics::static_skgrid,   68.0,   dynamic_result,       node_iters_per_tile},
+      /* node_iters_per_tile  */ {threshold_metrics::iters_per_tile,  458.0,  static_result,        dynamic_result},
+      /* node_active_cus      */ {threshold_metrics::active_cus,      240.0,  dynamic_result,       node_occupancy},
+      /* node_occupancy       */ {threshold_metrics::occupancy,       2.5,    dynamic_result,       static_result},
   };
 };
 
