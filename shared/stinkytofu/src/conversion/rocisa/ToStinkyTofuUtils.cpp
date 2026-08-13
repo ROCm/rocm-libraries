@@ -60,7 +60,7 @@
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
-#ifdef STINKYTOFU_BUILD_EXAMPLES
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
 #include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
 #endif
 
@@ -1388,11 +1388,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
           "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
           "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
 
-#ifdef STINKYTOFU_BUILD_EXAMPLES
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
     m.def("registerExamplePlugin", &stinkytofu::registerHelloWorldPassPlugin,
           "Register StinkyTofu's built-in example HelloWorldPass, compiled directly into "
           "rocisa (LLVM-style static-plugin pattern). Only available when rocisa was built "
-          "with ROCISA_BUILD_STINKYTOFU_EXAMPLES=ON.");
+          "with ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON.");
 #endif
 
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu

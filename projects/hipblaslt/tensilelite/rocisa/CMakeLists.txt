@@ -26,7 +26,9 @@ option(ROCISA_ENABLE_COVERAGE "Enable code coverage instrumentation for rocisa" 
 # shared or static, and of whether it was found via find_package or add_subdirectory —
 # see the rocisa.registerExamplePlugin() binding below. Used to exercise the compiled-in
 # plugin path from test_pass_plugin.py regardless of stinkytofu's own build config.
-option(ROCISA_BUILD_STINKYTOFU_EXAMPLES
+# Named after the single plugin it embeds: it does not enable StinkyTofu's example
+# suite (that is stinkytofu's own STINKYTOFU_BUILD_EXAMPLES).
+option(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN
     "Compile StinkyTofu's example HelloWorldPass plugin directly into rocisa (for testing static stinkytofu builds)"
     OFF)
 
@@ -190,14 +192,14 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
     # topology stinkytofu itself used (static/shared, find_package/add_subdirectory),
     # so rocisa.registerExamplePlugin() (bound in ToStinkyTofuUtils.cpp) is available
     # uniformly. Separate from stinkytofu's own STINKYTOFU_BUILD_EXAMPLES option.
-    if(ROCISA_BUILD_STINKYTOFU_EXAMPLES)
+    if(ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN)
         target_sources(_rocisa PRIVATE
             "${_stinkytofu_src_dir}/examples/plugins/HelloWorldPass.cpp"
         )
         target_include_directories(_rocisa PRIVATE
             "${_stinkytofu_src_dir}/examples/plugins"
         )
-        target_compile_definitions(_rocisa PRIVATE STINKYTOFU_BUILD_EXAMPLES)
+        target_compile_definitions(_rocisa PRIVATE ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN)
     endif()
 
     if(_stinkytofu_from_subdirectory)

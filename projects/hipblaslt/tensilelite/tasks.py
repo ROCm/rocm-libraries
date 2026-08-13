@@ -190,7 +190,7 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True)
         # Compiles the HelloWorldPass example plugin directly into _rocisa so
         # TestHelloWorldPassIntegrationStatic can exercise the compiled-in
         # plugin path regardless of whether stinkytofu above is shared or static.
-        f" -DROCISA_BUILD_STINKYTOFU_EXAMPLES=ON"
+        f" -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON"
     )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
