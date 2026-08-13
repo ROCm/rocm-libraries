@@ -25,9 +25,12 @@ SOFTWARE.
 #include "hip_tensor_executors.hpp"
 
 // -------------------- Set 0 - Coarse dropout main kernels --------------------
+// srcPtr/srcStridesNH is the pass-through source for pixels outside every anchor box. Pass
+// srcPtr == nullptr when the caller has already placed the correct pass-through pixel in dstPtr
+// (e.g. via a preceding layout-conversion kernel), so this kernel only needs to punch in boxes.
 template <typename T>
-__global__ void coarse_dropout_pkd_hip_tensor(T* dstPtr, uint2 dstStridesNH,
-                                              RpptRoiLtrb* anchorBoxInfoTensor,
+__global__ void coarse_dropout_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr,
+                                              uint2 dstStridesNH, RpptRoiLtrb* anchorBoxInfoTensor,
                                               Rpp32u* numBoxesTensor, RpptROIPtr roiTensorPtrSrc,
                                               int maxBoxesPerImage) {
     int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -50,6 +53,8 @@ __global__ void coarse_dropout_pkd_hip_tensor(T* dstPtr, uint2 dstStridesNH,
     int img_x = id_x + roiX;
     int img_y = id_y + roiY;
 
+    uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x * 3;
+    bool dropped = false;
     for (int i = 0; i < numBoxes; i++) {
         int boxIdx = boxStartOffset + i;
         // Compare against anchor boxes in image space
@@ -57,18 +62,25 @@ __global__ void coarse_dropout_pkd_hip_tensor(T* dstPtr, uint2 dstStridesNH,
             img_x <= anchorBoxInfoTensor[boxIdx].rb.x &&
             img_y >= anchorBoxInfoTensor[boxIdx].lt.y &&
             img_y <= anchorBoxInfoTensor[boxIdx].rb.y) {
-            uint dstIdx = (id_z * dstStridesNH.x) + (id_y * dstStridesNH.y) + id_x * 3;
             dstPtr[dstIdx] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
             dstPtr[dstIdx + 1] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
             dstPtr[dstIdx + 2] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
+            dropped = true;
             break;
         }
+    }
+
+    if (!dropped && srcPtr != nullptr) {
+        uint srcIdx = (id_z * srcStridesNH.x) + (img_y * srcStridesNH.y) + img_x * 3;
+        dstPtr[dstIdx] = srcPtr[srcIdx];
+        dstPtr[dstIdx + 1] = srcPtr[srcIdx + 1];
+        dstPtr[dstIdx + 2] = srcPtr[srcIdx + 2];
     }
 }
 
 template <typename T>
-__global__ void coarse_dropout_pln_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
-                                              RpptRoiLtrb* anchorBoxInfoTensor,
+__global__ void coarse_dropout_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                              uint3 dstStridesNCH, RpptRoiLtrb* anchorBoxInfoTensor,
                                               Rpp32u* numBoxesTensor, RpptROIPtr roiTensorPtrSrc,
                                               int maxBoxesPerImage) {
     int id_x = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -91,6 +103,8 @@ __global__ void coarse_dropout_pln_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
     int img_x = id_x + roiX;
     int img_y = id_y + roiY;
 
+    uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
+    bool dropped = false;
     for (int i = 0; i < numBoxes; i++) {
         int boxIdx = boxStartOffset + i;
         // Compare against anchor boxes in image space
@@ -98,15 +112,21 @@ __global__ void coarse_dropout_pln_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
             img_x <= anchorBoxInfoTensor[boxIdx].rb.x &&
             img_y >= anchorBoxInfoTensor[boxIdx].lt.y &&
             img_y <= anchorBoxInfoTensor[boxIdx].rb.y) {
-            uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
             dstPtr[dstIdx] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
+            dropped = true;
             break;
         }
+    }
+
+    if (!dropped && srcPtr != nullptr) {
+        uint srcIdx = (id_z * srcStridesNCH.x) + (img_y * srcStridesNCH.z) + img_x;
+        dstPtr[dstIdx] = srcPtr[srcIdx];
     }
 }
 
 template <typename T>
-__global__ void coarse_dropout_pln3_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
+__global__ void coarse_dropout_pln3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr,
+                                               uint3 dstStridesNCH,
                                                RpptRoiLtrb* anchorBoxInfoTensor,
                                                Rpp32u* numBoxesTensor, RpptROIPtr roiTensorPtrSrc,
                                                int maxBoxesPerImage) {
@@ -130,6 +150,8 @@ __global__ void coarse_dropout_pln3_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
     int img_x = id_x + roiX;
     int img_y = id_y + roiY;
 
+    uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
+    bool dropped = false;
     for (int i = 0; i < numBoxes; i++) {
         int boxIdx = boxStartOffset + i;
         // Compare against anchor boxes in image space
@@ -137,12 +159,19 @@ __global__ void coarse_dropout_pln3_hip_tensor(T* dstPtr, uint3 dstStridesNCH,
             img_x <= anchorBoxInfoTensor[boxIdx].rb.x &&
             img_y >= anchorBoxInfoTensor[boxIdx].lt.y &&
             img_y <= anchorBoxInfoTensor[boxIdx].rb.y) {
-            uint dstIdx = (id_z * dstStridesNCH.x) + (id_y * dstStridesNCH.z) + id_x;
             dstPtr[dstIdx] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
             dstPtr[dstIdx + dstStridesNCH.y] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
             dstPtr[dstIdx + 2 * dstStridesNCH.y] = (std::is_same<T, Rpp8s>::value) ? -128 : 0;
+            dropped = true;
             break;
         }
+    }
+
+    if (!dropped && srcPtr != nullptr) {
+        uint srcIdx = (id_z * srcStridesNCH.x) + (img_y * srcStridesNCH.z) + img_x;
+        dstPtr[dstIdx] = srcPtr[srcIdx];
+        dstPtr[dstIdx + dstStridesNCH.y] = srcPtr[srcIdx + srcStridesNCH.y];
+        dstPtr[dstIdx + 2 * dstStridesNCH.y] = srcPtr[srcIdx + 2 * srcStridesNCH.y];
     }
 }
 
@@ -165,13 +194,17 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
             return RPP_ERROR_NOT_IMPLEMENTED;
         }
 
-        // if src layout is NHWC, copy src to dst
+        // Pass-through source for pixels outside every anchor box, read at the ROI's absolute
+        // offset. Left null when a preceding conversion kernel already placed the correct
+        // pass-through pixel in dstPtr, so the dropout kernel below only needs to punch in boxes.
+        T* passthroughSrcPtr = nullptr;
+        uint2 passthroughSrcStridesNH = make_uint2(0, 0);
+
+        // if src layout is NHWC, dropout kernel copies src to dst per-pixel (absolute source frame)
         if (srcDescPtr->layout == RpptLayout::NHWC) {
-            RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
-                dstPtr, srcPtr,
-                static_cast<size_t>(srcDescPtr->n * srcDescPtr->strides.nStride * sizeof(T)),
-                hipMemcpyDeviceToDevice, handle.GetStream()));
-            RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
+            passthroughSrcPtr = srcPtr;
+            passthroughSrcStridesNH =
+                make_uint2(srcDescPtr->strides.nStride, srcDescPtr->strides.hStride);
         }
         // if src layout is NCHW, convert src from NCHW to NHWC
         else if (srcDescPtr->layout == RpptLayout::NCHW) {
@@ -196,38 +229,34 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), dstPtr,
+                           handle.GetStream(), passthroughSrcPtr, passthroughSrcStridesNH, dstPtr,
                            make_uint2(dstDescPtr->strides.nStride, dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 1) {
-        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
-            dstPtr, srcPtr,
-            static_cast<size_t>(srcDescPtr->n * srcDescPtr->strides.nStride * sizeof(T)),
-            hipMemcpyDeviceToDevice, handle.GetStream()));
-        RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(coarse_dropout_pln_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), dstPtr,
+                           handle.GetStream(), srcPtr,
+                           make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                      srcDescPtr->strides.hStride),
+                           dstPtr,
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
     } else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                (dstDescPtr->layout == RpptLayout::NCHW) && dstDescPtr->c == 3) {
-        RPP_HIP_RETURN_IF_ERROR(hipMemcpyAsync(
-            dstPtr, srcPtr,
-            static_cast<size_t>(srcDescPtr->n * srcDescPtr->strides.nStride * sizeof(T)),
-            hipMemcpyDeviceToDevice, handle.GetStream()));
-        RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(coarse_dropout_pln3_hip_tensor,
                            dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
                                 ceil((float)globalThreads_y / LOCAL_THREADS_Y),
                                 ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
                            dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                           handle.GetStream(), dstPtr,
+                           handle.GetStream(), srcPtr,
+                           make_uint3(srcDescPtr->strides.nStride, srcDescPtr->strides.cStride,
+                                      srcDescPtr->strides.hStride),
+                           dstPtr,
                            make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
                                       dstDescPtr->strides.hStride),
                            anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
@@ -247,16 +276,19 @@ RppStatus hip_exec_coarse_dropout_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* d
                                roiTensorPtrSrc);
             RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
             globalThreads_x = dstDescPtr->w;
-            hipLaunchKernelGGL(coarse_dropout_pln3_hip_tensor,
-                               dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
-                                    ceil((float)globalThreads_y / LOCAL_THREADS_Y),
-                                    ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
-                               dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0,
-                               handle.GetStream(), dstPtr,
-                               make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
-                                          dstDescPtr->strides.hStride),
-                               anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc,
-                               maxBoxesPerImage);
+            // dstPtr already holds the correct pass-through pixel (written by the convert
+            // kernel above in the absolute-source/packed-destination frame); pass a null
+            // source so this kernel only punches in the dropout boxes.
+            hipLaunchKernelGGL(
+                coarse_dropout_pln3_hip_tensor,
+                dim3(ceil((float)globalThreads_x / LOCAL_THREADS_X),
+                     ceil((float)globalThreads_y / LOCAL_THREADS_Y),
+                     ceil((float)globalThreads_z / LOCAL_THREADS_Z)),
+                dim3(LOCAL_THREADS_X, LOCAL_THREADS_Y, LOCAL_THREADS_Z), 0, handle.GetStream(),
+                static_cast<T*>(nullptr), make_uint3(0, 0, 0), dstPtr,
+                make_uint3(dstDescPtr->strides.nStride, dstDescPtr->strides.cStride,
+                           dstDescPtr->strides.hStride),
+                anchorBoxInfoTensor, numBoxesTensor, roiTensorPtrSrc, maxBoxesPerImage);
         }
     }
 

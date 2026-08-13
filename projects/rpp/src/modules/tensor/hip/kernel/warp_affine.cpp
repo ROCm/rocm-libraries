@@ -70,7 +70,13 @@ __global__ void warp_affine_bilinear_pkd_hip_tensor(T* srcPtr, uint2 srcStridesN
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -97,7 +103,13 @@ __global__ void warp_affine_bilinear_pln_hip_tensor(T* srcPtr, uint3 srcStridesN
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -140,7 +152,13 @@ __global__ void warp_affine_bilinear_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcSt
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -167,7 +185,13 @@ __global__ void warp_affine_bilinear_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcSt
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -197,7 +221,13 @@ __global__ void warp_affine_nearest_neighbor_pkd_hip_tensor(T* srcPtr, uint2 src
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -225,7 +255,13 @@ __global__ void warp_affine_nearest_neighbor_pln_hip_tensor(T* srcPtr, uint3 src
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -269,7 +305,13 @@ __global__ void warp_affine_nearest_neighbor_pkd3_pln3_hip_tensor(T* srcPtr, uin
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
@@ -297,7 +339,13 @@ __global__ void warp_affine_nearest_neighbor_pln3_pkd3_hip_tensor(T* srcPtr, uin
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    // Output is packed at the ROI's own width/height (not the full dst buffer), matching
+    // the golden model's convention: read source at the ROI's absolute offset, write dst
+    // packed at the origin. dstDimsWH (the full dst buffer size) is not the right bound
+    // when the ROI is smaller than the buffer (partial ROI).
+    int roiWidth = roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x + 1;
+    int roiHeight = roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y + 1;
+    if ((id_y >= roiHeight) || (id_x >= roiWidth)) {
         return;
     }
 
