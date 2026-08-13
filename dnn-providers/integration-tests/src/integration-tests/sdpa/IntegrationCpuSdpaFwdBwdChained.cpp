@@ -17,6 +17,22 @@ namespace
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
+// Resolve the UID of a tensor by its name from a GraphWrapper's tensor map.
+// Fails the test if no tensor with the given name is found.
+int64_t uidByName(const std::unordered_map<int64_t, const TensorAttributes*>& tensorMap,
+                  const std::string& name)
+{
+    for(const auto& [uid, tensor] : tensorMap)
+    {
+        if(tensor->name() && tensor->name()->str() == name)
+        {
+            return uid;
+        }
+    }
+    ADD_FAILURE() << "Tensor \"" << name << "\" not found in tensor map";
+    return -1;
+}
+
 // Verify that every element is finite (no NaN/Inf) and that at least one element
 // is non-zero. This is a sanity check — the chained test proves that the forward
 // LSE output feeds into the backward pass without crashing and produces meaningful
@@ -24,7 +40,7 @@ using namespace hipdnn_flatbuffers_sdk::data_objects;
 template <typename T>
 void expectFiniteAndNonZero(hipdnn_data_sdk::utilities::ITensor& tensor, const std::string& name)
 {
-    const auto numElements = tensor.elementCount();
+    const auto numElements = tensor.elementSpace();
     ASSERT_GT(numElements, static_cast<size_t>(0)) << name << " is empty";
 
     const auto* data = static_cast<const T*>(tensor.rawHostData());
@@ -91,14 +107,21 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper fwdGraph(
         fwdBuilder.GetBufferPointer(), fwdBuilder.GetSize());
 
+    // Resolve UIDs by tensor name to avoid fragile hardcoded numbers.
+    const auto& fwdTensorMap = fwdGraph.getTensorMap();
+    const auto fwdQUid = uidByName(fwdTensorMap, "q");
+    const auto fwdKUid = uidByName(fwdTensorMap, "k");
+    const auto fwdVUid = uidByName(fwdTensorMap, "v");
+    const auto fwdOUid = uidByName(fwdTensorMap, "o");
+    const auto fwdStatsUid = uidByName(fwdTensorMap, "stats");
+
     // Allocate tensors and randomize inputs (Q, K, V).
-    hipdnn_test_sdk::utilities::GraphTensorBundle fwdBundle(fwdGraph.getTensorMap());
+    hipdnn_test_sdk::utilities::GraphTensorBundle fwdBundle(fwdTensorMap);
 
     constexpr unsigned int SEED = 42;
-    // UIDs assigned by createValidSdpaFwdGraph: Q=1, K=2, V=3, O=4, Stats=5
-    fwdBundle.randomizeTensor(1, -1.0f, 1.0f, SEED); // Q
-    fwdBundle.randomizeTensor(2, -1.0f, 1.0f, SEED + 1); // K
-    fwdBundle.randomizeTensor(3, -1.0f, 1.0f, SEED + 2); // V
+    fwdBundle.randomizeTensor(fwdQUid, -1.0f, 1.0f, SEED);
+    fwdBundle.randomizeTensor(fwdKUid, -1.0f, 1.0f, SEED + 1);
+    fwdBundle.randomizeTensor(fwdVUid, -1.0f, 1.0f, SEED + 2);
 
     // Execute forward CPU reference.
     auto fwdVariantPack = fwdBundle.toHostVariantPack();
@@ -107,35 +130,47 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
 
     // Validate forward outputs are finite.
     using hipdnn_data_sdk::types::bfloat16;
-    expectFiniteAndNonZero<bfloat16>(fwdBundle.getTensor(4), "O_fwd"); // O (BF16)
-    expectFiniteAndNonZero<float>(fwdBundle.getTensor(5), "LSE_fwd"); // Stats/LSE (FP32)
+    expectFiniteAndNonZero<bfloat16>(fwdBundle.getTensor(fwdOUid), "O_fwd");
+    expectFiniteAndNonZero<float>(fwdBundle.getTensor(fwdStatsUid), "LSE_fwd");
 
     // --- Backward graph ---
-    // createValidSdpaBwdGraph UIDs: Q=1, K=2, V=3, O=4, dO=5, Stats=6, dQ=7, dK=8, dV=9
     auto bwdBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
         _qDims, qStrides, _kDims, kStrides, _vDims, vStrides, _oDims, oStrides, DataType::BFLOAT16);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper bwdGraph(
         bwdBuilder.GetBufferPointer(), bwdBuilder.GetSize());
 
-    hipdnn_test_sdk::utilities::GraphTensorBundle bwdBundle(bwdGraph.getTensorMap());
+    // Resolve backward UIDs by tensor name.
+    const auto& bwdTensorMap = bwdGraph.getTensorMap();
+    const auto bwdQUid = uidByName(bwdTensorMap, "q");
+    const auto bwdKUid = uidByName(bwdTensorMap, "k");
+    const auto bwdVUid = uidByName(bwdTensorMap, "v");
+    const auto bwdOUid = uidByName(bwdTensorMap, "o");
+    const auto bwdDoUid = uidByName(bwdTensorMap, "do");
+    const auto bwdStatsUid = uidByName(bwdTensorMap, "stats");
+    const auto bwdDqUid = uidByName(bwdTensorMap, "dq");
+    const auto bwdDkUid = uidByName(bwdTensorMap, "dk");
+    const auto bwdDvUid = uidByName(bwdTensorMap, "dv");
 
-    // Copy forward inputs (Q, K, V) into backward tensors.
-    // Forward UIDs: Q=1,K=2,V=3,O=4,Stats=5
-    // Backward UIDs: Q=1,K=2,V=3,O=4,dO=5,Stats=6,dQ=7,dK=8,dV=9
-    auto copyTensor = [](hipdnn_data_sdk::utilities::ITensor& dst,
-                         hipdnn_data_sdk::utilities::ITensor& src) {
-        std::memcpy(dst.rawHostData(), src.rawHostData(), src.elementSpace() * src.elementSize());
-    };
+    hipdnn_test_sdk::utilities::GraphTensorBundle bwdBundle(bwdTensorMap);
 
-    copyTensor(bwdBundle.getTensor(1), fwdBundle.getTensor(1)); // Q
-    copyTensor(bwdBundle.getTensor(2), fwdBundle.getTensor(2)); // K
-    copyTensor(bwdBundle.getTensor(3), fwdBundle.getTensor(3)); // V
-    copyTensor(bwdBundle.getTensor(4), fwdBundle.getTensor(4)); // O (from fwd)
-    copyTensor(bwdBundle.getTensor(6), fwdBundle.getTensor(5)); // Stats/LSE (from fwd)
+    // Copy forward tensors into backward bundle with size safety checks.
+    auto copyTensor
+        = [](hipdnn_data_sdk::utilities::ITensor& dst, hipdnn_data_sdk::utilities::ITensor& src) {
+              const auto srcBytes = src.elementSpace() * src.elementSize();
+              const auto dstBytes = dst.elementSpace() * dst.elementSize();
+              ASSERT_EQ(srcBytes, dstBytes) << "Tensor byte size mismatch in copy";
+              std::memcpy(dst.rawHostData(), src.rawHostData(), srcBytes);
+          };
+
+    copyTensor(bwdBundle.getTensor(bwdQUid), fwdBundle.getTensor(fwdQUid));
+    copyTensor(bwdBundle.getTensor(bwdKUid), fwdBundle.getTensor(fwdKUid));
+    copyTensor(bwdBundle.getTensor(bwdVUid), fwdBundle.getTensor(fwdVUid));
+    copyTensor(bwdBundle.getTensor(bwdOUid), fwdBundle.getTensor(fwdOUid));
+    copyTensor(bwdBundle.getTensor(bwdStatsUid), fwdBundle.getTensor(fwdStatsUid));
 
     // Randomize dO (upstream gradient).
-    bwdBundle.randomizeTensor(5, -1.0f, 1.0f, SEED + 3); // dO
+    bwdBundle.randomizeTensor(bwdDoUid, -1.0f, 1.0f, SEED + 3);
 
     // Execute backward CPU reference.
     auto bwdVariantPack = bwdBundle.toHostVariantPack();
@@ -143,9 +178,9 @@ TEST_F(IntegrationCpuSdpaFwdBwdChained, Bf16NoMaskProducesFiniteGradients)
         bwdBuilder.GetBufferPointer(), bwdBuilder.GetSize(), bwdVariantPack);
 
     // Validate backward outputs are finite and non-zero.
-    expectFiniteAndNonZero<bfloat16>(bwdBundle.getTensor(7), "dQ"); // dQ (BF16)
-    expectFiniteAndNonZero<bfloat16>(bwdBundle.getTensor(8), "dK"); // dK (BF16)
-    expectFiniteAndNonZero<bfloat16>(bwdBundle.getTensor(9), "dV"); // dV (BF16)
+    expectFiniteAndNonZero<bfloat16>(bwdBundle.getTensor(bwdDqUid), "dQ");
+    expectFiniteAndNonZero<bfloat16>(bwdBundle.getTensor(bwdDkUid), "dK");
+    expectFiniteAndNonZero<bfloat16>(bwdBundle.getTensor(bwdDvUid), "dV");
 }
 
 } // namespace

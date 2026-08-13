@@ -97,20 +97,12 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
  * Supports all MaskType values and BATCH/GROUP modes.
  *
  * @param config The fmha_v3_fwdConfig containing kernel configuration
+ * @param withStats When true, sets generate_stats=true and marks the stats
+ *                  output tensor as a graph output
  * @return GraphTestCase containing the graph and description
  */
-GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config);
-
-/**
- * @brief Converts a kernel config to a graph with stats (LSE) output enabled.
- *
- * Same as configToCompatibleGraphTestCase but sets generate_stats=true and
- * marks the stats output tensor as a graph output.
- *
- * @param config The fmha_v3_fwdConfig containing kernel configuration
- * @return GraphTestCase containing the graph and description (suffixed with "Stats")
- */
-GraphTestCase configToCompatibleGraphTestCaseWithStats(const fmha_v3_fwdConfig& config);
+GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config,
+                                              bool withStats = false);
 
 /**
  * @brief Generates compatible graph test cases for all configs.
@@ -119,37 +111,19 @@ GraphTestCase configToCompatibleGraphTestCaseWithStats(const fmha_v3_fwdConfig& 
  *
  * @tparam ConfigType The config type
  * @param configMap The map of all configs
+ * @param withStats When true, generates stats-enabled test cases
  * @return Vector of GraphTestCase objects for each config
  */
 template <typename ConfigType>
 std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap)
+    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
+                                bool withStats = false)
 {
     std::vector<GraphTestCase> testCases;
     testCases.reserve(configMap.size());
     for(const auto& [key, config] : configMap)
     {
-        testCases.push_back(configToCompatibleGraphTestCase(config));
-    }
-    return testCases;
-}
-
-/**
- * @brief Generates stats-enabled graph test cases for all configs.
- *
- * @tparam ConfigType The config type
- * @param configMap The map of all configs
- * @return Vector of GraphTestCase objects with stats output enabled
- */
-template <typename ConfigType>
-std::vector<GraphTestCase> getCompatibleGraphTestCasesWithStats(
-    const std::unordered_map<std::string, ConfigType>& configMap)
-{
-    std::vector<GraphTestCase> testCases;
-    testCases.reserve(configMap.size());
-    for(const auto& [key, config] : configMap)
-    {
-        testCases.push_back(configToCompatibleGraphTestCaseWithStats(config));
+        testCases.push_back(configToCompatibleGraphTestCase(config, withStats));
     }
     return testCases;
 }
