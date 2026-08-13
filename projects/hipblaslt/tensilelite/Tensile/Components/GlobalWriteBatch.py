@@ -422,10 +422,11 @@ class GlobalWriteBatchWriter:
       self._emitAdd(module)
       if needsDrain:
         assert not any(self._isLdsMemoryWrite(i) for i in module.flatitems()[storeStart:]), \
-          ("single-DU subtile store region must be LDS-write-free to elide the pre-store "
-           "bias/SAV drain barrier: an LDS memory write (ds_write/ds_store) here would race "
-           "the in-flight bias/SAV LDS column-vector reads. Re-emit the drain+barrier (or "
-           "move the LDS write out of the store region) before removing this invariant.")
+          ("single-DU subtile store region must stay LDS-write-free: an LDS memory write "
+           "(ds_write/ds_store) here would race other waves' in-flight bias/SAV LDS "
+           "column-vector reads. Move the LDS write out of the store region, or add a fence "
+           "that covers it -- note the elided pre-store drain+barrier is not that fence, "
+           "since in single-DU it is emitted after the reads' consumers.")
     self._epilog(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by

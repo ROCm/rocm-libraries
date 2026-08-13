@@ -7,10 +7,12 @@
 #
 # The subtile bias/scaleAlphaVec epilogue stages a per-column vector into LDS and
 # every wave reads it while computing the paired stores. A drain (s_waitcnt
-# lgkmcnt(0)) + workgroup s_barrier orders those LDS reads ahead of the stores.
-# It is required only for multi-DU (the store loop re-stages the LDS vector, so an
-# LDS write can race in-flight reads); single-DU stages the vector once and the
-# store region is LDS-write-free, so the barrier is elided. These tests pin that
+# lgkmcnt(0)) + workgroup s_barrier is emitted for multi-DU only, and which side of
+# _emitAdd it lands on is what decides whether it does anything. Multi-DU emits it
+# first, so it sits between those ds_reads and the v_pk_mul/v_pk_add that consume
+# them and is the only thing retiring them (UseSubtileImpl drops bias/SAV from the
+# interleaved per-element waitcnt). Single-DU emits _emitAdd first, so it would land
+# after its own consumers and retire nothing, and is elided. These tests pin that
 # emit fork so a future refactor cannot silently add/drop the barrier, and pin the
 # derivation of the two predicates (isSubtileMultiDU, needs-bias/SAV-drain) that
 # drive it -- including PGR-invariance and both the useBias and UseScaleAlphaVec
