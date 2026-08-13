@@ -31,6 +31,7 @@
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
 #include "stinkytofu/support/CFGTraversal.hpp"
 #include "stinkytofu/support/LoopDetection.hpp"
@@ -71,7 +72,7 @@ static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGra
 static void scheduleRegionWithMovableSideEffects(
     IRList::iterator regionStart, IRList::iterator regionEnd, IRList::iterator blockBegin,
     std::vector<IRBase*>& scheduled, ReadyQueue& readyQueue,
-    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex) {
+    const std::unordered_map<StinkyInstruction*, unsigned>& wmmaIndex, int& fillerCount) {
     if (regionStart == regionEnd) {
         return;  // Empty region, nothing to schedule.
     }
@@ -334,8 +335,7 @@ static void scheduleRegionWithMovableSideEffects(
     // producer-cost bug this fixed.
     // Same per-arch CDNA5 hazard-rule table the ready queue uses, so the pre-scan's
     // ruleIdx values line up with CDNA5ReadyQueue::hazardGates_ lanes.
-    const CDNA5Config& cdna5Config =
-        cdna5ConfigForArch(readyQueue.getPassContext().getGemmTileConfig().arch);
+    const HWModel& hw = readyQueue.getPassContext().getHWModel();
     for (unsigned i = 0; i < regionSize; ++i) {
         StinkyInstruction* prod = dagNodes[i].inst;
         int bestDeadline = INT_MAX;
@@ -344,8 +344,8 @@ static void scheduleRegionWithMovableSideEffects(
         auto [msbVal, msbHasVgpr] = computeRequiredMsb(prod);
         dagNodes[i].requiredMsb = msbHasVgpr ? msbVal : -1;
 
-        for (int ruleIdx = 0; ruleIdx < cdna5Config.numHazardRules; ++ruleIdx) {
-            const HazardRule& rule = cdna5Config.hazardRules[ruleIdx];
+        for (int ruleIdx = 0; ruleIdx < hw.hazards.numRules; ++ruleIdx) {
+            const HazardRule& rule = hw.hazards.rules[ruleIdx];
             if (!rule.isProducer(*prod)) continue;
 
             std::unordered_map<uint32_t, int> defKey;
@@ -431,6 +431,15 @@ static void scheduleRegionWithMovableSideEffects(
         DAGNode* currentNode = readyQueue.pickOne();
         ++orderInRegion;
 
+        // Filler instructions the queue emits before this pick; detached so the reorder
+        // loop places them in order. The queue owns any arch/opcode knowledge.
+        for (StinkyInstruction* filler : readyQueue.takePendingFillerInsts()) {
+            PASS_DEBUG(std::cerr << "[DAG drain] emitting filler inst before dagId="
+                                 << currentNode->id << "\n");
+            scheduled.push_back(filler);
+            ++fillerCount;
+        }
+
         if (isBarrier(*currentNode->inst)) {
             PASS_DEBUG(std::cerr << "[DAG schedule] bb=\"" << regionBbLabel << "\" orderInRegion="
                                  << orderInRegion << " dagId=" << currentNode->id
@@ -468,6 +477,10 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
 
     std::vector<IRBase*> scheduled;
     scheduled.reserve(bb.size());
+    // Filler instructions the ready queue emits during this block (detached; attached by
+    // the reorder loop). Grows both `scheduled` and the final block, so the size check
+    // adds it to bb.size().
+    int fillerCount = 0;
 
     BasicBlock::iterator beginIt = bb.begin();
     BasicBlock::iterator endIt = bb.end();
@@ -484,7 +497,7 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
             // Non-instruction IR (e.g. AsmDirective): treat as non-movable
             // side-effect boundary so its position is strictly preserved.
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex);
+                                                 wmmaIndex, fillerCount);
             scheduled.push_back(irNode);
             regionStart = std::next(it);
             continue;
@@ -493,7 +506,7 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
         StinkyInstruction& inst = *instPtr;
         if (hasSideEffect(inst)) {
             scheduleRegionWithMovableSideEffects(regionStart, it, beginIt, scheduled, readyQueue,
-                                                 wmmaIndex);
+                                                 wmmaIndex, fillerCount);
 
             scheduled.push_back(&inst);
 
@@ -506,15 +519,17 @@ static void scheduleInDAG(BasicBlock& bb, ReadyQueue& readyQueue,
     }
     // Flush the last region if it has not been flushed yet.
     scheduleRegionWithMovableSideEffects(regionStart, endIt, beginIt, scheduled, readyQueue,
-                                         wmmaIndex);
+                                         wmmaIndex, fillerCount);
 
-    assert(scheduled.size() == bb.size() &&
-           "Scheduled instructions size must match original instructions size");
+    assert(scheduled.size() == bb.size() + static_cast<size_t>(fillerCount) &&
+           "Scheduled instructions size must match original plus filler insts");
 
     // Now we have a scheduled list of instructions.
-    // Reorder the block to reflect the scheduling (move each to end in order).
+    // Reorder the block to reflect the scheduling (move each to end in order). Original
+    // instructions already live in bb (remove+append repositions them); filler
+    // instructions are detached (no parent) and are only appended.
     for (IRBase* ir : scheduled) {
-        bb.removeIR(ir);
+        if (ir->getParent()) bb.removeIR(ir);
         bb.appendIR(ir);
     }
 

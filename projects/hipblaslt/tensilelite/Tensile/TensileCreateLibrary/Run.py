@@ -54,8 +54,8 @@ from Tensile.Common import (
     setVerbosity,
     getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
-from Tensile.Common.Capabilities import makeIsaInfoMap
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, baseArchName, gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates, expandAllArchitectures, gfxToCompilerTarget
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
@@ -875,11 +875,28 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
     )
     for library in parsedLibraries:
-        _, architectureName, _, _, _, newLibrary, typeMismatches = library
+        scheduleName, architectureName, _, _, _, newLibrary, typeMismatches = library
         mergeTypeMismatchSnapshot(typeMismatchAggregate, typeMismatches)
 
         if architectureName == "":
             continue
+
+        # A silicon stepping cannot label a library. This name keys masterLibraries,
+        # while the writes are keyed by the ISA-derived name, so a stepping-named
+        # file is dropped there without a word and the build reports success having
+        # written nothing for it. Honoring the name instead would be no better: the
+        # runtime resolves libraries by the architecture the driver reports, so
+        # library/gfx1250v0/ is a directory nothing ever looks in. Tuned logic
+        # records the architecture; the stepping is a build-time capability
+        # distinction, selected by --architecture.
+        if architectureName in ARCH_COMPILER_TARGET:
+            raise ValueError(
+                f"Library logic '{scheduleName}' declares ArchitectureName "
+                f"'{architectureName}', which names a silicon stepping rather than an "
+                f"architecture. Record it as "
+                f"'{ARCH_COMPILER_TARGET[architectureName]}' and select the stepping "
+                f"at build time with --architecture={architectureName}."
+            )
 
         if architectureName in masterLibraries:
             nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
@@ -993,12 +1010,16 @@ def run():
         archs = arguments["Architecture"].split(";")
     else:
         archs = arguments["Architecture"].split("_")
-    archs = SUPPORTED_GFX if "all" in archs else archs
+    archs = expandAllArchitectures(archs)
     archs, requestedPredicateMap = splitArchsFromPredicates(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
+    applyArchCapOverrides(isaInfoMap, archs)
     assignGlobalParameters(arguments, isaInfoMap)
+
+    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
+    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archs) else ""
 
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
@@ -1088,7 +1109,10 @@ def run():
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
-        archs,
+        # Compiler targets, not the requested names: these drive --offload-arch for
+        # the HIP helper kernels and the library layout, and both must agree with
+        # the ISA-derived names used for the per-architecture writes below.
+        [gfxToCompilerTarget(a) for a in archs],
         arguments["DisableAsmComments"],
         compress=arguments["UseCompression"],
         removeTemporaries=not arguments["KeepBuildTmp"],
