@@ -241,12 +241,20 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
               auto A, rocblas_stride const shiftA, I const lda, rocblas_stride strideA,
 
               auto info, I const batch_count, I const offset_row, auto&& self) -> rocblas_status {
+        int constexpr idebug = 1;
+
         // if the matrix is small, use the unblocked (BLAS-levelII) variant of the
         // algorithm
         {
             I nb = potrf_get_block_size<T>(n);
             if(n <= nb)
             {
+                if(idebug >= 1)
+                {
+                    printf("potf2_run_small: %d\n", int(n));
+                    fflush(stdout);
+                }
+
                 return potf2_run_small<T>(handle, uplo, n,
 
                                           A, shiftA, lda, strideA,
@@ -298,6 +306,12 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
                 if(j + jb < n)
                 {
                     // update trailing submatrix
+                    if(idebug >= 1)
+                    {
+                        printf("trsm_upper: left,transpose,non_unit,%d,%d\n", int(jb),
+                               int(n - j - jb));
+                        fflush(stdout);
+                    }
                     istat = rocsolver_trsm_upper<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_conjugate_transpose,
                         rocblas_diagonal_non_unit, jb, (n - j - jb), A, shiftA + idx2D(j, j, lda),
@@ -309,6 +323,11 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
                         return (istat);
                     }
 
+                    if(idebug >= 1)
+                    {
+                        printf("syrk: upper,transpose,%d,%d\n", int(n - j - jb), int(jb));
+                        fflush(stdout);
+                    }
                     istat = rocblasCall_syrk_herk<BATCHED, T>(
                         handle, uplo, rocblas_operation_conjugate_transpose, n - j - jb, jb,
                         &s_minone, A, shiftA + idx2D(j, j + jb, lda), lda, strideA, &s_one, A,
@@ -341,6 +360,12 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
                 if(j + jb < n)
                 {
                     // update trailing submatrix
+                    if(idebug >= 1)
+                    {
+                        printf("trsm_lower: right,transpose,non_unit,%d,%d\n", int(n - j - jb),
+                               int(jb));
+                        fflush(stdout);
+                    }
                     istat = rocsolver_trsm_lower<BATCHED, STRIDED, T>(
                         handle, rocblas_side_right, rocblas_operation_conjugate_transpose,
                         rocblas_diagonal_non_unit, (n - j - jb), jb, A, shiftA + idx2D(j, j, lda),
@@ -351,6 +376,11 @@ rocblas_status rocsolver_potrf_template(rocblas_handle handle,
                         return (istat);
                     }
 
+                    if(idebug >= 1)
+                    {
+                        printf("syrk: lower,no_transpose,%d,%d\n", int(n - j - jb), int(jb));
+                        fflush(stdout);
+                    }
                     istat = rocblasCall_syrk_herk<BATCHED, T>(
                         handle, uplo, rocblas_operation_none, n - j - jb, jb, &s_minone, A,
                         shiftA + idx2D(j + jb, j, lda), lda, strideA, &s_one, A,
