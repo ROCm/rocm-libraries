@@ -2516,8 +2516,19 @@ class GlobalWriteBatchWriter:
     # `_emitSubtileGuards` for the exec-mask; use it for a ROW-accurate M interior test
     # (block-count SubtileMGuard=ceil(rows/16) can't distinguish a partial last block).
     validMWaveSgpr = self.parentWriter.states.subtileTotalMOffsetSgpr
+    # Never peel inside the PLSIN fused NLL store, for two independent reasons:
+    #   * that arm is only reachable through a front guard proving requireFullTile, so
+    #     every block is already interior and the peel's runtime test is dead weight;
+    #   * weave mode DRAINS codeAccVgprRead destructively (popFirstItem at each store
+    #     site), so a second, runtime-selected copy of the store body would either
+    #     double-drain the queue or emit an interior body with no accvgpr reads at all.
+    # The guard SGPRs are normally None here (the fused arm skips them), which would
+    # already fall out of the test below -- but TENSILE_PLSIN_FULLTILE_NOGUARD=0 re-emits
+    # them for A/B, so gate on the arm itself rather than relying on that side effect.
+    inFusedNllStore = self.parentWriter.states.subtileFusedFullTileStore
     peelInterior = (is16bitSubtile
                     and not self.kernel["CompactLoopStore"]
+                    and not inFusedNllStore
                     and (mGuardSgpr is not None or nGuardSgpr is not None)
                     and (mGuardSgpr is None or validMWaveSgpr is not None)
                     and len(self.batchElements) > 0)
