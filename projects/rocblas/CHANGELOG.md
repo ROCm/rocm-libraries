@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.7.0
 
+### Resolved issues
+
+* Fix incorrect or NaN `gemm` results on gfx12 with a large free (`N`) dimension exceeding 65536 workgroups in the grid Y dimension. The Tensile launch in `rocblas_internal_gemm` is now chunked over `N`, matching the source `gemm` and ILP64 (`_64`) paths.
+
 ## rocBLAS 5.6.0
 
 ### Added
