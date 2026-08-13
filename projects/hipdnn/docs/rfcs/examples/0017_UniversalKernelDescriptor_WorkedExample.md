@@ -7,8 +7,12 @@ it for a real SDPA forward kernel, the mask-mode classifier encoded as criteria 
 and two declines traced end to end, the dispatch geometry for both performance cohorts, and the
 engine, metadata schema, and two kernel packs that bind them.
 
-Descriptor semantics, the criteria operator vocabulary, and the expression language are defined
-in the main RFC; this document only uses them.
+Descriptor semantics are defined in
+[RFC 0017: Universal Kernel Descriptors](../0017_UniversalKernelDescriptor.md), the expression
+language in
+[RFC 0018: The Descriptor Expression Language](../0018_DescriptorExpressionLanguage.md), and the
+criteria vocabulary and the binding environment the `$`-tokens below resolve against in
+[RFC 0019: The Graph Matcher](../0019_UniversalMatchDescriptor.md); this document only uses them.
 
 ## Table of Contents
 
@@ -55,8 +59,9 @@ engine outright, before either pack's criteria are touched. The criteria (§2) r
 symbols that binding published.
 
 Only the second stage repeats. Section 5's `conv.tile_fit` already shows the mechanism: criteria
-can reference `$kernel.*` fields directly (`divisible($y.n*$y.ho*$y.wo, $kernel.MPerBlock)`), so
-the same criteria, evaluated once per UKD in a KDP's kernel vector, do the work a hand-written
+can reference `$kernel.*` fields directly
+(`divisible($y.dims[0]*$y.dims[2]*$y.dims[3], $kernel.MPerBlock)`), so the same criteria,
+evaluated once per UKD in a KDP's kernel vector, do the work a hand-written
 per-kernel selection function would otherwise do. A graph either satisfies some UKD's
 instantiation of the criteria or it does not; there is no third phase.
 
@@ -77,6 +82,9 @@ node's scalar attributes; this descriptor carries the constraints over them.
   "id":   "9c2a9e2e-8a2a-4a52-9d1a-9d9e6e5d9f11",
   "name": "SDPA forward (attention_dense family, gfx950) criteria",
   "criteria": {"and": [
+    // Dims are positional throughout this pack. $q and $o are
+    // (batch, num_heads, seqlen_q, head_size); $k and $v are
+    // (batch, num_kv_heads, seqlen_kv, head_size).
     // --- graph-level: a prebuilt kernel serves one fixed compile-time shape ---
     {"!": ["$graph.is_override_shape_enabled"]},
     {"==": ["$graph.node_count", 1]},
@@ -88,37 +96,47 @@ node's scalar attributes; this descriptor carries the constraints over them.
                      "$descale_s", "$scale_s", "$scale_o", "$stats", "$max", "$sum_exp",
                      "$rng_dump", "$amax_s", "$amax_o"]},
 
-    // --- rank 4, and cross-tensor dim equality by capture reuse: a name repeated across two
-    //     shapes must bind the same value. ---
-    {"shape": ["$q", ["batch", "num_heads",    "seqlen_q",  "head_size"]]},
-    {"shape": ["$k", ["batch", "num_kv_heads", "seqlen_kv", "head_size"]]},
-    {"shape": ["$v", ["batch", "num_kv_heads", "seqlen_kv", "head_size"]]},
-    {"shape": ["$o", ["batch", "num_heads",    "seqlen_q",  "head_size"]]},
+    // --- rank, plus the cross-tensor dim agreements written out one position at a time. Q's
+    //     query-side extents reappear in O; K and V agree with each other on the KV-side ones;
+    //     batch and head size agree across all four. ---
+    {"==": ["$q.rank", 4]}, {"==": ["$k.rank", 4]},
+    {"==": ["$v.rank", 4]}, {"==": ["$o.rank", 4]},
+    {"==": ["$k.dims[0]", "$q.dims[0]"]},   // batch
+    {"==": ["$v.dims[0]", "$q.dims[0]"]},
+    {"==": ["$o.dims[0]", "$q.dims[0]"]},
+    {"==": ["$k.dims[3]", "$q.dims[3]"]},   // head_size
+    {"==": ["$v.dims[3]", "$q.dims[3]"]},
+    {"==": ["$o.dims[3]", "$q.dims[3]"]},
+    {"==": ["$v.dims[1]", "$k.dims[1]"]},   // num_kv_heads
+    {"==": ["$v.dims[2]", "$k.dims[2]"]},   // seqlen_kv
+    {"==": ["$o.dims[1]", "$q.dims[1]"]},   // num_heads
+    {"==": ["$o.dims[2]", "$q.dims[2]"]},   // seqlen_q
 
-    // --- dtype and head_size AttentionDenseSpec accepts at all ---
+    // --- dtype, and the head sizes ($q dim 3) AttentionDenseSpec accepts at all ---
     {"in": ["$q.dtype", ["HALF", "BFLOAT16"]]},
     {"==": ["$k.dtype", "$q.dtype"]}, {"==": ["$v.dtype", "$q.dtype"]}, {"==": ["$o.dtype", "$q.dtype"]},
-    {"in": ["$q.head_size", [64, 128]]},
+    {"in": ["$q.dims[3]", [64, 128]]},
 
     // --- kernel-level pins. This family bakes shape and dtype into the binary, so the gates
     //     above are not sufficient: each candidate must also agree with the graph on every
-    //     quantity it baked, or a d64 fp16 graph launches a d128 bf16 code object. `batch` is
+    //     quantity it baked, or a d64 fp16 graph launches a d128 bf16 code object. Batch is
     //     pinned like the rest because it sizes the K/V buffer bounds and, when persistent, the
-    //     grid-stride trip count. Every name here is a KMD field. ---
-    {"==": ["$q.dtype",     "$kernel.dtype"]},
-    {"==": ["$q.head_size", "$kernel.head_size"]},
-    {"==": ["$q.batch",     "$kernel.batch"]},
-    {"==": ["$q.num_heads", "$kernel.num_heads"]},
-    {"==": ["$k.num_kv_heads", "$kernel.num_kv_heads"]},
-    {"==": ["$q.seqlen_q",  "$kernel.seqlen_q"]},
-    {"==": ["$k.seqlen_kv", "$kernel.seqlen_kv"]},
+    //     grid-stride trip count. Every right-hand name is a KMD field; every left-hand one is a
+    //     graph dim read by position. ---
+    {"==": ["$q.dtype",   "$kernel.dtype"]},
+    {"==": ["$q.dims[3]", "$kernel.head_size"]},     // head_size
+    {"==": ["$q.dims[0]", "$kernel.batch"]},         // batch
+    {"==": ["$q.dims[1]", "$kernel.num_heads"]},     // num_heads
+    {"==": ["$k.dims[1]", "$kernel.num_kv_heads"]},  // num_kv_heads
+    {"==": ["$q.dims[2]", "$kernel.seqlen_q"]},      // seqlen_q
+    {"==": ["$k.dims[2]", "$kernel.seqlen_kv"]},     // seqlen_kv
 
-    // --- GQA: num_heads must be a positive multiple of num_kv_heads ---
-    {"divisible": ["$q.num_heads", "$k.num_kv_heads"]},
+    // --- GQA: num_heads ($q dim 1) must be a positive multiple of num_kv_heads ($k dim 1) ---
+    {"divisible": ["$q.dims[1]", "$k.dims[1]"]},
 
-    // --- layout. The kernel bakes BSHD-contiguous strides at build time (stride_q_tok = Hq * D
+    // --- layout. The kernel bakes packed BSHD strides at build time (stride_q_tok = Hq * D
     //     is a Python int, never read from an argument), so exactly one stride_order is legal:
-    //     [0,2,1,3] over the axis order this pattern names. A family accepting either BHSD or
+    //     [0,2,1,3] over the positional axis order above. A family accepting either BHSD or
     //     BSHD would anchor `{"in": [..., [[0,1,2,3],[0,2,1,3]]]}`; anchor to the literal set
     //     the kernel accepts, whatever its size. ---
     "$q.packed", "$k.packed", "$v.packed", "$o.packed",
@@ -284,19 +302,27 @@ collapses into the predicate. That inversion is the general recipe for porting a
 
 ## 4. One Accept, Two Declines
 
-All three cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, BSHD-contiguous,
-`batch=1`, `num_heads=16`, `num_kv_heads=2` (GQA ratio 8), `head_size=128`, `seqlen_q=seqlen_kv=2048`,
-`compute_data_type=FLOAT`, `mma_core_mode=UNSET`, `implementation=AUTO`, no optional tensors, no
-alibi/padding/dropout, `attn_scale_value=0.08838834764831845` (`1/sqrt(128)`) and no scale tensor.
-They differ only in the field named.
+All three cases share one graph: a single `sdpa_fwd` node, Q/K/V/O rank-4, bf16, packed BSHD. Q
+and O carry dims `[1, 16, 2048, 128]`; K and V carry `[1, 2, 2048, 128]`. Read against the
+positions §2 pins, that is batch 1, 16 query heads over 2 KV heads (GQA ratio 8), query and key
+sequence length 2048 apiece, and head size 128. The node also has `compute_data_type=FLOAT`,
+`mma_core_mode=UNSET`, `implementation=AUTO`, no optional tensors, no alibi/padding/dropout,
+`attn_scale_value=0.08838834764831845` (`1/sqrt(128)`) and no scale tensor. The three cases differ
+only in the field named.
 
-**Case A: accept.** `causal_mask=true`. Every §2 gate passes, `mask_mode` resolves to
-`causal_top_left`, and §6's non-persistent UKD declares exactly that alongside `head_size=128`,
-`batch=1`, and `dtype="BFLOAT16"`, so every `$kernel.*` pin agrees with the graph.
-`nqb = ceil(2048/256) = 8`; `work = nqb * num_heads * batch = 8*16*1 = 128`, below
-`num_persistent`'s default of 256, so the real host-side rule in `_dense_spec` (`persistent = work
->= num_persistent` in `"auto"` mode) would itself pick the non-persistent cohort for this exact
-shape. Applicable.
+**Case A: accept.** `causal_mask=true`. Every §2 gate passes. The four tensors are rank 4; batch
+and head size agree across them (`$q.dims[0]` = `$k.dims[0]` = 1, `$q.dims[3]` = `$k.dims[3]` =
+128); `$o` repeats Q's `dims[1]` = 16 and `dims[2]` = 2048; `$v` repeats K's `dims[1]` = 2 and
+`dims[2]` = 2048; and 16 is divisible by 2. `mask_mode` resolves to `causal_top_left`, and §6's
+non-persistent UKD declares exactly that alongside `head_size=128`, `batch=1`, and
+`dtype="BFLOAT16"`, so every `$kernel.*` pin agrees with the graph: `$q.dims[3]`=128 against
+`$kernel.head_size`, `$q.dims[0]`=1 against `$kernel.batch`, `$q.dims[1]`=16 against
+`$kernel.num_heads`, `$k.dims[1]`=2 against `$kernel.num_kv_heads`, `$q.dims[2]`=2048 against
+`$kernel.seqlen_q`, and `$k.dims[2]`=2048 against `$kernel.seqlen_kv`. `nqb = ceil($q.dims[2] /
+256) = ceil(2048/256) = 8`; `work = nqb * $q.dims[1] * $q.dims[0] = 8*16*1 = 128`, below
+`num_persistent`'s default of 256, so the real host-side rule in `_dense_spec`
+(`persistent = work >= num_persistent` in `"auto"` mode) would itself pick the non-persistent
+cohort for this exact shape. Applicable.
 
 **Case B: criteria decline.** Same graph plus an additive attention bias, so the engine's pattern
 binds `$attn_mask`. The pattern still matches — an optional operand the graph supplies is exactly
@@ -369,9 +395,11 @@ over graph dims instead of a `$kernel.*` constant) and shares the identical `arg
   "schema": "hipdnn.udd/v1",
   "id":   "d5e6c9a4-1f2a-4e3a-9a3b-2f7d0f6c4b21",
   "name": "SDPA forward (attention_dense, default grid) dispatch",
-  // nqb = ceil(seqlen_q / 256). 256 is _BLOCK_M, a module constant this family never varies (the
-  // kernel faults at other values), so it is a literal here rather than $kernel.block_m.
-  "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 256]}, "y": "$q.num_heads", "z": "$q.batch"},
+  // $q dims: 0 = batch, 1 = num_heads, 2 = query sequence length, 3 = head size.
+  // nqb = ceil(query sequence length / 256). 256 is _BLOCK_M, a module constant this family never
+  // varies (the kernel faults at other values), so it is a literal here rather than
+  // $kernel.block_m.
+  "grid":  {"x": {"ceil_div": ["$q.dims[2]", 256]}, "y": "$q.dims[1]", "z": "$q.dims[0]"},
   "block": {"x": 512, "y": 1, "z": 1},
   "shared_mem_bytes": 0,
   "workspace_bytes": 0,
@@ -450,16 +478,17 @@ adapter invocation: the builder, plus the exact build values for that instance.
   "name":   "attention_dense forward selector",
   "kind":   "model",
   "model":  {"framework": "lightgbm", "artifact": "attention_dense/gfx950_fwd.bin"},
+  // $q dims: 0 = batch, 1 = num_heads, 2 = query sequence length, 3 = head size.
   "features_signature": [
     "$device.cu_count",
     "$kernel.persistent",
     "$kernel.num_persistent",
     "$kernel.block_n",
-    "$q.seqlen_q",
-    "$q.num_heads",
-    "$q.batch",
+    "$q.dims[2]",
+    "$q.dims[1]",
+    "$q.dims[0]",
     // the work term the host rule thresholded on, as an ordinary derived feature
-    {"*": [{"ceil_div": ["$q.seqlen_q", 256]}, {"*": ["$q.num_heads", "$q.batch"]}]}
+    {"*": [{"ceil_div": ["$q.dims[2]", 256]}, {"*": ["$q.dims[1]", "$q.dims[0]"]}]}
   ],
   "objective": "max"
 }
@@ -509,8 +538,10 @@ adapter invocation: the builder, plus the exact build values for that instance.
        "amax_o":        "$amax_o?"
      },
      "results": {"o": "$o"}}
-  ],
+  ]
   // A prebuilt kernel serves one fixed compile-time shape, so the pattern is the entire graph and
+  // matching it is all-or-nothing: a graph carrying any other node declines the engine outright,
+  // which is what §2's `node_count` conjunct restates on the criteria side.
 }
 
 // --- KDP 1: default grid ---
@@ -594,10 +625,11 @@ code object from the `build` values and owns its name. The two `kernelDescriptor
 *are* the AOT build list for this pack, so what gets compiled matches what is catalogued.
 
 **The heuristic reads a tensor the engine itself binds.** The UHD is engine-owned and ranks the
-whole catalog, and its `features_signature` reaches `$q.seqlen_q`, `$q.num_heads`, and `$q.batch`
-— dims of `$q`, a tensor this engine's own pattern binds rather than one only a pack's matcher
-introduced. One publisher, three consumers: those feature tokens, §2's criteria, and §5's two UDDs
-all resolve against the symbol set the engine published, and are checked against it at load.
+whole catalog, and its `features_signature` reaches `$q.dims[2]`, `$q.dims[1]`, and `$q.dims[0]`
+— positions of `$q`, a tensor this engine's own pattern binds rather than one only a pack's
+matcher introduced. One publisher, three consumers: those feature tokens, §2's criteria, and §5's
+two UDDs all read the same positions of the same symbol the engine published, and are checked
+against it at load.
 
 The generic launcher runs either KDP's kernel with no SDPA-specific code, and decline is handled
 the same way whether it lands on the engine's pattern, the criteria's graph-only clauses, or their

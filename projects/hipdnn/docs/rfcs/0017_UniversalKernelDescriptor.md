@@ -101,8 +101,8 @@ generalized description covering both AOT and just-in-time (JIT) kernels; AOT is
 here, JIT a future follow-on.
 
 **Scope.** This document frames the system and its direction. Each descriptor format
-(match, dispatch, engine, heuristic) and subsystem (the matcher, expression language,
-packaging, and drop-in loader) is designed in its own follow-up RFC. The first deliverable
+(match, dispatch, engine, heuristic) and subsystem (graph matching, applicability, expression
+language, packaging, and drop-in loader) is designed in its own follow-up RFC. The first deliverable
 is the single-kernel path; multi-kernel launch and composition are separate follow-ups. A
 named escape hatch covers a step needing C++; anything needing a new runtime dependency
 stays a full provider, one per dependency. This complements build-time codegen.
@@ -113,7 +113,7 @@ stays a full provider, one per dependency. This complements build-time codegen.
 |---|---|---|
 | Single-kernel path: UKD + UMD + UDD + UED + UHD + KMD, bound by a KDP | Yes | None |
 | Fusion **matching**: one engine's pattern matches a bounded multi-op subgraph that is the entire graph, run as one kernel | Yes | matching a fused pattern *inside* a larger graph: JIT |
-| Match criteria: opcode, dtype, shape/rank, stride order, packed, divisibility, range, attribute, graph-structure, cross-tensor, per-element `all`, bounded `or` | Yes | None |
+| Match criteria: opcode, dtype, rank, stride order, packed, divisibility, range, attribute, graph-structure, cross-tensor, bounded `or` | Yes | None |
 | General matching: N-ary commutative, unbounded chains, optional/variadic operands | None | JIT |
 | Kernel sources | `kpack`, `hsaco`, and `rocke` (build-only, runs the rocKE AOT build) first; `hip` follows | new authoring adapters, DSLs |
 | Heuristic sources | LightGBM model; custom C-API library | other model formats, static tables |
@@ -413,8 +413,9 @@ every consumer downstream reads, the pack's criteria, its UDD's formulas, and th
 own UHD features, so the engine that owns the heuristic and the metadata schema also owns the
 symbols they are written against. The pattern is engine-wide: a UED carries exactly one `nodes`
 block, so every pack naming that engine matches the same graph shape and constrains it differently.
-[Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria) covers matching, and
-[RFC 0018](0018_UniversalMatchDescriptor.md) specifies the pattern block.
+[Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria) covers matching; the pattern
+block's own format and the matching semantics that bind it are specified in the engine follow-up
+([Section 14.2](#142-follow-up-rfcs)).
 
 **A knob is a KMD field the engine chooses to expose.** It is a name, nothing more: the KMD
 already declares the field's type and default, and every kernel already carries a value for
@@ -478,8 +479,8 @@ solvers to compute a workspace default.
     "$kernel.tile_m",                            // kernel metadata
     "$kernel.split_k",                           // kernel metadata
     "$sdpa_fwd.head_size",                       // graph node attribute
-    "$q.seqlen_q",                               // graph tensor dim
-    {"*": ["$q.batch", "$q.num_heads"]}          // a derived feature (expression)
+    "$q.dims[2]",                                // graph tensor dim (query sequence length)
+    {"*": ["$q.dims[0]", "$q.dims[1]"]}          // a derived feature: batch times head count
   ],
   "objective": "max"          // higher predicted score wins
 }
@@ -642,26 +643,25 @@ bound symbol table, every operand and result tensor with its dims and strides, a
 node's scalar attributes. It runs once per engine per graph, and a graph its pattern does not match
 declines the engine outright, before any pack is consulted. The criteria run second: each UMD a pack
 lists evaluates its single boolean over that table, and a kernel applies only when every matcher in
-its pack passes. [RFC 0018](0018_UniversalMatchDescriptor.md) is the normative home of the criteria
-language ([RFC 0018 §4](0018_UniversalMatchDescriptor.md#4-constraint-vocabulary)) and of what
-matching the pattern binds
-([RFC 0018 §3](0018_UniversalMatchDescriptor.md#3-symbol-binding-what-the-engine-publishes)); the
-`nodes` block itself is the UED's, specified here and in the engine follow-up
-([Section 14.2](#142-follow-up-rfcs)).
+its pack passes. Graph matching and the symbols it binds belong to the engine follow-up, the
+criteria that read those symbols to the match follow-up, and the expression language both are
+written in to its own ([Section 14.2](#142-follow-up-rfcs)); the `nodes` block itself is the UED's,
+sketched here.
 
 **Criteria are expressions, not flat token lists.** A criterion is a nested `{"op": [args]}` tree
-over the symbols the engine's pattern bound. The table below is the complete operator vocabulary a
-criteria or dispatch expression may use; naming an unknown operator fails load validation.
+over the symbols the engine's pattern bound. The expression language is specified in its own
+follow-up ([Section 14.2](#142-follow-up-rfcs)); the table below summarizes the operator
+vocabulary a criteria or dispatch expression may use. The set is closed, so naming an unknown
+operator fails load validation.
 
 | Class | Operators |
 |---|---|
 | Logical | `and`, `or`, `!` |
 | Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in` |
 | Arithmetic | `+`, `-`, `*`, `/`, `%`, `ceil_div`, `min`, `max`, `rsqrt` |
-| Per-element | `all` |
 | Presence | `present`, `not_present` |
-| Short-hands | `divisible`, `value_or_default`, and the pattern-binding `shape`/`rank` |
-| Escape hatch | registry-resolved custom operations, for checks the built-ins cannot express (below) |
+| Short-hands | `divisible`, `value_or_default`, `rank` |
+| Escape hatch | None inside an expression: the set is closed, and a check the operators cannot express becomes a native matcher beside the descriptor |
 
 `ceil_div`, `min`, `max`, and `rsqrt` earn their place in real dispatch code: every grid formula here
 is a `ceil_div` over a sequence or spatial dim, and `min`/`max` size a workspace that depends on a
@@ -689,7 +689,8 @@ root's expected type is the only thing that tells the two uses apart.
 vocabulary up front, and the interpreter fails closed on anything undeclared. The fields fall into
 five namespaces, and every criteria and dispatch expression draws from the same set:
 
-- **Tensor:** a bound operand's fields: `$q.dtype`, `$q.rank`, its named dims (`$q.seqlen_q`, `$w.c`),
+- **Tensor:** a bound operand's fields: `$q.dtype`, `$q.rank`, its dims and strides read by
+  position (`$q.dims[2]`, `$q.strides[2]`),
   evaluated flags (`$q.stride_order`, `$q.packed`), `$q.is_runtime_pass_by_value` (its value arrives
   per execution rather than being baked into the graph, [RFC 0016](0016_RuntimePassByValueTensors.md)),
   the precomputed scalar `$q.value_f32` (explained below), and `$q.virtual` (an internal intermediate
@@ -702,7 +703,7 @@ five namespaces, and every criteria and dispatch expression draws from the same 
 - **Kernel metadata:** `$kernel.<field>`, the values a kernel descriptor (UKD) supplies for the fields
   its engine's metadata schema (KMD) declares, such as tile and vector constants or the dtype it
   targets. These are also the fields the heuristic ranks on. A check binds a kernel to the graph with
-  them, for example `divisible($q.head_size, $kernel.tile_m)`. A `$kernel.*` field a shared matcher
+  them, for example `divisible($q.dims[3], $kernel.tile_m)`. A `$kernel.*` field a shared matcher
   reads must exist in the engine's KMD; the loader checks this.
 - **Device properties:** `$device.<field>` such as `$device.lds_size` or `$device.warp_size`, for a
   check like an LDS budget `<=($kernel.lds_per_block, $device.lds_size)`. The device facts hipDNN
@@ -714,9 +715,10 @@ A bare token used on its own is a truthiness check on a boolean field: a lone `"
 criterion, not a stray element. Asking whether an *optional* operand or field was supplied at all is
 a different question, answered further down by `present`/`not_present`.
 
-New fields are added to the schema and referenced the same way. The full field and operator
-vocabulary, the operand-property set (broadcast, alignment, sparse and ragged kinds), and the
-interpreter profile are in the UMD follow-up.
+New fields are added to the schema and referenced the same way. The full field vocabulary and the
+operand-property set (broadcast, alignment, sparse and ragged kinds) are in the engine follow-up,
+which owns what matching publishes; the operator set and the interpreter profile are in the
+expression-language follow-up ([Section 14.2](#142-follow-up-rfcs)).
 
 **A prebuilt match is exact.** A prebuilt kernel solves one complete graph, so a matcher asserts
 `$graph.node_count` to accept only a graph of exactly that size, marking each intermediate tensor
@@ -765,9 +767,11 @@ metadata):
   "id":   "a541565e-09eb-471b-8507-0e00f5bf75d7",
   "name": "conv.tile_fit",
   "criteria": {"and": [
-    {"divisible": [{"*": ["$y.n", "$y.ho", "$y.wo"]}, "$kernel.MPerBlock"]},  // GEMM M = output positions
-    {"divisible": ["$y.k", "$kernel.NPerBlock"]},                             // GEMM N = output channels
-    {"divisible": [{"*": ["$w.c", "$w.y", "$w.x"]}, "$kernel.KPerBlock"]}     // GEMM K = reduction (C*Y*X)
+    {"==": ["$y.rank", 4]},   // output is (n, out channels, out h, out w)
+    {"==": ["$w.rank", 4]},   // weights are (out channels, in channels, filter h, filter w)
+    {"divisible": [{"*": ["$y.dims[0]", "$y.dims[2]", "$y.dims[3]"]}, "$kernel.MPerBlock"]},  // GEMM M = output positions
+    {"divisible": ["$y.dims[1]", "$kernel.NPerBlock"]},                                       // GEMM N = output channels
+    {"divisible": [{"*": ["$w.dims[1]", "$w.dims[2]", "$w.dims[3]"]}, "$kernel.KPerBlock"]}   // GEMM K = reduction (C*Y*X)
   ]}
 }
 ```
@@ -814,12 +818,19 @@ it constrains them:
   "name": "SDPA forward (d128, bf16) criteria",
   "criteria": {"and": [
     {"in":    ["$q.dtype", ["BFLOAT16"]]},
-    {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // contiguous bhsd
-    {"shape": ["$q", ["batch", "num_heads", "seqlen_q", "head_size"]]},  // binds these dims
+    {"==":    ["$q.rank", 4]},                                  // (batch, heads, query positions, head size)
+    {"==":    ["$q.stride_order", [0, 1, 2, 3]]}, "$q.packed",  // densely packed in that order
     {"in":    ["$k.dtype", ["BFLOAT16"]]},
-    {"shape": ["$k", ["batch", "num_heads", "seqlen_k", "head_size"]]},  // reuses head_size: must equal $q's
+    {"==":    ["$k.rank", 4]},                                  // (batch, heads, key positions, head size)
     {"in":    ["$v.dtype", ["BFLOAT16"]]},
-    {"shape": ["$v", ["batch", "num_heads", "seqlen_k", "head_size"]]},  // same head_size across Q, K, V
+    {"==":    ["$v.rank", 4]},                                  // same axes as K
+    {"==":    ["$k.dims[0]", "$q.dims[0]"]},                    // one batch across Q, K, V
+    {"==":    ["$v.dims[0]", "$q.dims[0]"]},
+    {"==":    ["$k.dims[1]", "$q.dims[1]"]},                    // one head count: no grouped-query attention
+    {"==":    ["$v.dims[1]", "$q.dims[1]"]},
+    {"==":    ["$v.dims[2]", "$k.dims[2]"]},                    // V carries the same key positions as K
+    {"==":    ["$k.dims[3]", "$q.dims[3]"]},                    // one head size across Q, K, V
+    {"==":    ["$v.dims[3]", "$q.dims[3]"]},
     {"==":    ["$sdpa_fwd.head_size", 128]},
     {"in":    ["$sdpa_fwd.mask_mode", ["none"]]},
     {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
@@ -832,37 +843,36 @@ something the engine's pattern published; that is the whole interface between th
 and the loader checks it.
 
 Matching does double duty: it decides the kernel applies, and it binds the fields the launch will
-use. A field is **declared** by the engine's pattern, or named over what that pattern bound (a dim
-named in a `shape`, or an op attribute), **bound** when the graph matches, then **used** in the
-dispatch formulas: `$q.seqlen_q` binds here and feeds `ceil_div($q.seqlen_q, 16)` there
-([Section 6](#6-dispatch-and-workspace)). A formula can only reference fields the match produces. A
-capture name reused across patterns binds once and requires the matches to agree, so `head_size`
-naming a dim in the Q, K, and V shapes expresses equal head dim across the three tensors as
-ordinary data, with no escape hatch needed. Reuse handles the equality case; a cross-tensor
-relation that is not equality is written explicitly as an operator over two bound references, for
-example GQA grouping as `divisible($q.num_heads, $k.num_heads)`, or a derived comparison over a
-product of dims. Both forms are plain data over the fields the match binds.
+use. A field is **declared** by the engine's pattern, **bound** when the graph matches, then
+**used** in the dispatch formulas: `$q.dims[2]` binds here and feeds `ceil_div($q.dims[2], 16)`
+there ([Section 6](#6-dispatch-and-workspace)). A formula can only reference fields the match
+produces. A cross-tensor relation is an ordinary criterion over two bound references, and equality
+gets no special treatment: equal head dim across Q, K, and V is `==($k.dims[3], $q.dims[3])`
+beside its V counterpart, and GQA grouping, which is not an equality, is
+`divisible($q.dims[1], $k.dims[1])`. Both forms are plain data over the fields the match binds.
 
 ![A live graph is matched against a declarative pattern, binding named variables](../images/ukd_criteria_match.svg)
 
-**Variable-rank tensors.** Naming every dim in `shape` pins the rank. When rank varies (NCHW vs
-NCDHW), the pattern names the fixed dims and binds the variable run as a single vector, for example
-`["n", "c", "$spatial"]`, where `$spatial` captures the 2 or 3 spatial dims. One matcher then accepts
-both ranks and still reaches those dims through `all` or a product (`*($spatial)`). Per-dim names
-like `$x.h` are the fixed-rank shorthand; the vector is the general form. This is variable dims
-within one tensor, distinct from variadic *operands*; exact `shape` syntax is in the UMD follow-up.
+**Variable-rank tensors.** Reading a dim by position presumes a rank, so a criterion that does it
+pins one: `{"==": ["$x.rank", 4]}` beside `$x.dims[2]`. When rank varies (NCHW vs NCDHW), a
+matcher either pins each rank it accepts, in its own criteria set, or reasons over `$x.rank` and
+the dims the two ranks share. This is variable dims within one tensor, distinct from variadic
+*operands*; a richer treatment of shape matching, including whether dims may be named at all, is
+left to a future shape-matching RFC.
 
-**Escape hatch.** When the built-ins cannot express a check, a criterion invokes a **custom
-operation**: a native predicate resolved from the provider's registry, for example a probe into a
-backing library's own support query whose logic lives in vendor code and cannot be reduced to schema
-fields. It is carried as a symbol name and typed arguments, never inline code, and is a last resort,
-not a routine tool: the validated catalog of MIOpen CK convolution and rocKE SDPA applicability
-needed none.
+**No escape hatch inside an expression.** The operator set is closed: there is no registry,
+namespace, or provider hook by which a criterion introduces an operation of its own, and an
+unlisted operation key is refused at load. A check the operators cannot express, for example a
+probe into a backing library's own support query whose logic lives in vendor code and cannot be
+reduced to schema fields, is written as a **native matcher** standing beside the descriptor rather
+than inside it: the matcher names a registered native predicate and carries typed arguments, never
+inline code. It is a last resort, not a routine tool: the validated catalog of MIOpen CK
+convolution and rocKE SDPA applicability needed none.
 
-A third mechanism, **precomputed fields**, sits between the built-ins and the escape hatch: values
-the schema layer derives once and exposes as ordinary tokens, so a matcher compares them instead of
+**Precomputed fields** sit between the built-ins and the native matcher: values the schema layer
+derives once and exposes as ordinary tokens, so a matcher compares them instead of
 re-deriving them. `$q.packed` and `$q.stride_order` are the layout examples, standing in for
-`inferLayout`'s contiguous-stride arithmetic. `$q.value_f32` is the other kind: a tensor's
+`inferLayout`'s dense-stride arithmetic. `$q.value_f32` is the other kind: a tensor's
 compile-time `value` is a tagged union over eight differently-typed arms in the schema, and the
 expression language has no discriminator syntax to unwrap one, so the schema layer coerces whichever
 arm is set to `f32` once and publishes it as a single typed token, present only when the tensor
@@ -957,8 +967,9 @@ chain as a single kernel.
     {"==":    ["$x.stride_order", [0, 2, 3, 1]]}, "$x.packed",  // NHWC
     {"in":    ["$y.dtype", ["FLOAT16"]]},
     {"==":    ["$y.stride_order", [0, 2, 3, 1]]}, "$y.packed",  // NHWC
-    {"shape": ["$y", ["batch", "out_h", "out_w", "out_channels"]]},
-    {"shape": ["$bias", ["out_channels"]]},
+    {"==":    ["$y.rank", 4]},                    // (n, out channels, out h, out w)
+    {"==":    ["$bias.rank", 1]},                 // one element per output channel
+    {"==":    ["$bias.dims[0]", "$y.dims[1]"]},
     {"==":  ["$graph.node_count", 3]},  // exactly these three ops
     "$conv_out.virtual",                // internal intermediate, absorbed by the fused kernel
     "$bias_out.virtual"
@@ -981,9 +992,10 @@ launch ABI is written once, so every kernel in the pack inherits it; a kernel ne
 one belongs in a different pack.
 
 **One expression language**, shared with the criteria
-([Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria)),
-describes grid, block, shared memory, and workspace as formulas over the schema's declared
-fields. A UDD formula draws on the same five namespaces as the criteria: tensor fields (a bound
+([Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) and specified in its own
+follow-up ([Section 14.2](#142-follow-up-rfcs)), describes grid, block, shared memory, and
+workspace as formulas over the schema's declared fields. A UDD formula draws on the same five
+namespaces as the criteria: tensor fields (a bound
 operand's dims and attributes, `$q.*`), graph facts (`$graph.*`), node attributes (`$conv.*`,
 `$sdpa_fwd.*`), kernel metadata (`$kernel.*`, the values this UKD supplies for fields its engine's
 KMD declares), and device properties (`$device.*`). A safe interpreter evaluates each formula,
@@ -998,14 +1010,14 @@ UDD referencing a graph field the engine's pattern does not bind is rejected the
 reach a live graph. Plan-time fail-closed is only a backstop.
 
 ```jsonc
-{  // a UDD; every $q.* dim below is a field the pack's matcher bound (Section 5)
+{  // a UDD; every $q.* field below is one the pack's matcher bound (Section 5)
   "schema": "hipdnn.udd/v1",
-  "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 16]},
-            "y": "$q.num_heads", "z": "$q.batch"},
+  "grid":  {"x": {"ceil_div": ["$q.dims[2]", 16]},  // one workgroup per tile of query positions
+            "y": "$q.dims[1]", "z": "$q.dims[0]"},  // then per head, then per batch entry
   "block": {"x": 256, "y": 1, "z": 1},
   "shared_mem_bytes": 32768,                        // dynamic LDS per workgroup: on-chip launch config
-  "workspace_bytes": {"*": [{"*": ["$q.batch", "$q.num_heads"]},  // global scratch (provider-allocated) = batch*num_heads*seqlen_q*4
-                           {"*": ["$q.seqlen_q", 4]}]}
+  "workspace_bytes": {"*": [{"*": ["$q.dims[0]", "$q.dims[1]"]},  // global scratch (provider-allocated):
+                           {"*": ["$q.dims[2]", 4]}]}             // batch * heads * query positions * 4
 }
 ```
 
@@ -1031,8 +1043,8 @@ the generic launcher assembles the call directly from the matched graph:
     {"name": "stride_q",   "kind": "scalar", "type": "i64", "source": {"from": "stride", "ref": "$q", "axis": 2}},
     {"name": "epsilon",    "kind": "scalar", "type": "f32", "source": {"from": "scalar", "ref": "$eps"}},
     {"name": "scale_log2", "kind": "scalar", "type": "f32",
-       "source": {"from": "expr",
-                  "expr": {"*": [{"rsqrt": ["$q.head_size"]}, 1.4426950408889634]}}},
+       "source": {"from": "expr",                  // 1/sqrt(head size), converted to log2 units
+                  "expr": {"*": [{"rsqrt": ["$q.dims[3]"]}, 1.4426950408889634]}}},
     {"name": "__workspace__", "kind": "workspace"}
   ]
 }
@@ -1041,10 +1053,10 @@ the generic launcher assembles the call directly from the matched graph:
 Each argument's `source` is one of a small set: a tensor pointer, a dim or stride read off a
 bound tensor, an attribute, a scalar operand's value, a computed expression, or the
 plan-allocated workspace. These name the same schema fields the criteria use: a `dim` source is
-the field `$q.seqlen_q`, an `expr` source is a formula in the same token language, and together
+the field `$q.dims[2]`, an `expr` source is a formula in the same token language, and together
 they describe the full kernel call as data, letting the launcher assemble it without per-kernel
-code. In `dim` and `stride` sources, `axis` indexes the tensor's logical dimension order (as
-listed in `shape`), independent of its physical `stride_order`.
+code. In `dim` and `stride` sources, `axis` indexes the tensor's logical dimension order,
+independent of its physical `stride_order`.
 
 **A `scalar` source resolves whenever its value exists.** A scalar operand carries its value one
 of two ways ([RFC 0016](0016_RuntimePassByValueTensors.md)): baked into the graph at build time,
@@ -1098,7 +1110,7 @@ a different ABI and belongs in a different pack.
 whole argument slot has a different ABI. The second is **formula shape**: two kernels whose
 `grid`, `block`, or workspace formulas differ in *shape*, not merely in the substituted values,
 also belong in different packs, because a UDD carries one formula per launch quantity and no
-substitution reconciles two different shapes. A grid sized `ceil_div($q.seqlen_q, <tile>)` over
+substitution reconciles two different shapes. A grid sized `ceil_div($q.dims[2], <tile>)` over
 graph dimensions and a fixed one-dimensional grid whose extent is a per-kernel constant with no
 graph dimension are two shapes, not two values, even with identical argument lists. The
 [worked example](./examples/0017_UniversalKernelDescriptor_WorkedExample.md) uses this case: two cohorts
@@ -1126,9 +1138,9 @@ wants a generated pack set rather than hand-written ones.
   "name":   "Example attention forward (tiled) dispatch",
   // num_warps, block_m_per_warp, tile_size are KMD fields this engine declares (Section 4);
   // each child UKD below fixes its own values for them.
-  "grid":  {"x": {"ceil_div": ["$q.seqlen_q",
+  "grid":  {"x": {"ceil_div": ["$q.dims[2]",              // query positions
                                 {"*": ["$kernel.num_warps", "$kernel.block_m_per_warp"]}]},
-            "y": "$q.num_heads", "z": "$q.batch"},
+            "y": "$q.dims[1]", "z": "$q.dims[0]"},        // heads, batch
   "block": {"x": {"*": ["$device.warp_size", "$kernel.num_warps"]}, "y": 1, "z": 1},
   "shared_mem_bytes": {"*": [{"*": ["$kernel.num_warps", "$kernel.tile_size"]}, 4]}
 }
@@ -1154,15 +1166,16 @@ compile flags, a UDD may name a registered custom plan instead of the declarativ
 {"custom_plan": "hipdnn.persistent_gemm", "config": {"compile_flags": ["-mllvm", "..."]}}  // a UDD
 ```
 
-As with the native predicate, the descriptor carries only a symbol name and typed config, never
+As with the native matcher, the descriptor carries only a symbol name and typed config, never
 inline code, and the handler resolves from the provider-internal registry. Because a custom plan
 replaces the UDD's declarative fields, its handler owns everything those fields would have
 provided, including workspace: it must supply a workspace calculation alongside its launch,
 answerable before a kernel is chosen and before any plan is built, because that is when hipDNN
 asks. A handler that can launch but cannot size its scratch is incomplete. The exact shape of that
-entry point is left to the UDD follow-up; matching still happens declaratively through the UMD, so
-only the launch itself becomes C++. On the drop-in path a custom plan must be a built-in
-registered handler, subject to the source-trust rules for drop-in packages.
+entry point is left to the UDD follow-up; matching and applicability still happen declaratively
+through the engine's pattern and the pack's matchers, so only the launch itself becomes C++. On
+the drop-in path a custom plan must be a built-in registered handler, subject to the source-trust
+rules for drop-in packages.
 
 ---
 
@@ -1665,7 +1678,7 @@ and are worth stating here:
 
 - **Decline is expressible.** The kernel's real reject set, not just its happy path, encodes in
   the criteria language of [Section 5](#5-matching-the-ueds-pattern-and-the-umds-criteria) with no
-  custom operation. That is the half that matters for an allowlist: an under-specified decline
+  native matcher. That is the half that matters for an allowlist: an under-specified decline
   accepts a graph the kernel cannot serve, which is a wrong answer rather than a missed
   optimization.
 - **A 5-input precedence classifier needs no escape hatch.** The mask-mode state machine inverts
@@ -1722,14 +1735,17 @@ proceeds against that series, validated against the SDPA path from the rocKE wor
 of [Section 14.1](#141-testing-and-performance).
 
 **Most of the series is a prerequisite, not a menu.** Running one kernel end to end from descriptor
-data requires the metadata schema (KMD), the match descriptor (decides the kernel applies), the
-engine descriptor (to be an engine at all), the dispatch descriptor (to launch it), the kernel pack
-and its packaging (to bind and deliver the above), and the heuristic descriptor (to choose among
-matching kernels): six of the ten follow-ups, forming a dependency chain where nothing runs until
-all six land. The metadata schema comes first, because the matcher's `$kernel.*` references, the
-dispatch descriptor's per-kernel formulas, and the heuristic's feature space are all defined against
-it. The remaining four, runtime drop-in, adapters beyond the first, composition, and JIT, are
-independent and can land later without blocking a running kernel.
+data requires the metadata schema (KMD), the match descriptor (decides fine-grained applicability),
+the engine descriptor (to be an engine at all, and to do high-level graph applicability pattern
+matching), the dispatch descriptor (to launch it), the kernel pack and its packaging (to bind and
+deliver the above), the heuristic descriptor (to choose among matching kernels), and the expression
+language (which the UED, UMD, UDD, and UHD use to express logic and calculations): seven of the
+eleven follow-ups, forming a dependency chain where nothing runs until all seven land. The expression
+language is the base layer, since other formats rely on expressions for dynamic logic and
+calculations; among the descriptor formats the metadata schema comes first, because the matcher's
+`$kernel.*` references, the dispatch descriptor's per-kernel formulas, and the heuristic's feature
+space are all defined against it. The remaining four, runtime drop-in, adapters beyond the first,
+composition, and JIT, are independent and can land later without blocking a running kernel.
 
 No existing engine converts until the system can demonstrate a kernel running end to end from
 descriptor data. Migration then proceeds incrementally and without disruption: a hand-written
@@ -1773,9 +1789,10 @@ a descriptor format with the subsystem it drives. Together they form the planned
 | Follow-up RFC | Covers |
 |---|---|
 | KDP + AOT packaging | The pack format plus the producer, packer, per-architecture manifest, and build-time validation ([§12](#12-packaging-and-delivery)) |
-| UMD + graph matcher | The UED's pattern block and the UMD's criteria-expression model, the two-stage evaluator (bind once per engine, then criteria per pack, with run-once memoization and fail-prune), custom-operation registry, and arbitration ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria), [RFC 0018](0018_UniversalMatchDescriptor.md)) |
-| UED + engine registry | The engine format, whose pattern block is specified in [RFC 0018](0018_UniversalMatchDescriptor.md), plus the registry that populates the generic engine and its plan builder from descriptor data |
-| UDD + expression language | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument language and its safe interpreter |
+| Expression language | The shared dialect every descriptor is written in: its grammar, type system, closed operator set, three-valued semantics, safe bounded interpreter, and conformance suite |
+| UED + graph matching | The engine format and the graph-matching specification: the `nodes` structural pattern, the matching semantics that bind it against a graph, the symbols matching publishes for every other descriptor to read, the op-schema registry that generates those bindings, and the registry that populates the generic engine and its plan builder from descriptor data |
+| UMD + applicability | How the expression language is used to decide applicability: the criteria model over the symbols the engine's pattern published, evaluated per matcher with run-once memoization and fail-prune, the native-matcher escape hatch for a check that needs real C++, and arbitration when several packs match ([§5](#5-matching-the-ueds-pattern-and-the-umds-criteria)) |
+| UDD + dispatch | The dispatch format plus the symbolic grid, block, shared-memory, workspace, and argument descriptions |
 | UHD + kernel selection | The heuristic format plus the generic selector that ranks the kernels matching a graph, the per-kernel scorer interface, the retraining pipeline, the training-set provenance that makes a kernel's dormant-or-ranked state observable, and whether a future selector may reason over the candidate set as a whole |
 | KMD + metadata schema | The metadata format plus the field/type/default declaration and the feature contract the heuristic and matchers consume |
 | Runtime drop-in | Loading custom bundles, compatibility gating, and source-trust rules. Five open questions land here: the enablement and location mechanism; the minimum trust requirement for drop-in source, including whether JIT source is allowed at all; whether a pack may carry its own engine/heuristic pair or must bind an installed one; how an extension provider (a DSL wheel) is bundled and released; and the three removal/deprecation cases |
@@ -1826,9 +1843,9 @@ own sources. The program is ranked as a unit by the engine's heuristic, competin
 whole programs for the same graph rather than against its own Launches, and is selected atomically:
 a caller never picks a subset of its Launches.
 
-The engine's pattern (not shown) matches `sdpa_bwd` and binds the inputs `$q, $k, $v, $o, $do`, the
-gradient outputs `$dq, $dk, $dv`, and the dims `batch, num_heads, seqlen_q, seqlen_k` that the
-Launch formulas and the `$D` intermediate use; the pack's matcher (id
+The engine's pattern (not shown) matches `sdpa_bwd` and binds the inputs `$q, $k, $v, $o, $do` and
+the gradient outputs `$dq, $dk, $dv`; the Launch formulas and the `$D` intermediate read the dims
+they need off those tensors by position. The pack's matcher (id
 `fa32046b-c6e7-4270-8759-8bf879fd5a09`, not shown) constrains them.
 
 ```jsonc
@@ -1838,12 +1855,12 @@ Launch formulas and the `$D` intermediate use; the pack's matcher (id
   "id":   "f2513834-5b17-4084-b09f-f0c3b440588a",
   "name": "SDPA backward (d128) dispatch",
   "intermediates": [        // named scratch shared across the Launches (see 15.3)
-    {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"]}
+    {"name": "$D", "dtype": "FLOAT", "shape": ["$q.dims[0]", "$q.dims[1]", "$q.dims[2]"]}  // batch, heads, query positions
   ],
   "launches": [             // three dispatch steps, run in order; each has a named source slot
     {"name": "preprocess",
-     "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 128]},
-               "y": "$q.num_heads", "z": "$q.batch"},
+     "grid":  {"x": {"ceil_div": ["$q.dims[2]", 128]},  // query positions
+               "y": "$q.dims[1]", "z": "$q.dims[0]"},   // heads, batch
      "block": {"x": 128, "y": 1, "z": 1},
      "args_signature": [
        {"name": "O",  "kind": "pointer", "source": {"from": "tensor",       "ref": "$o"}},
@@ -1851,13 +1868,13 @@ Launch formulas and the `$D` intermediate use; the pack's matcher (id
        {"name": "D",  "kind": "pointer", "source": {"from": "intermediate", "ref": "$D", "access": "write"}}
      ]},
     {"name": "dkdv",
-     "grid":  {"x": {"ceil_div": ["$k.seqlen_k", 64]},
-               "y": "$q.num_heads", "z": "$q.batch"},
+     "grid":  {"x": {"ceil_div": ["$k.dims[2]", 64]},   // key positions
+               "y": "$q.dims[1]", "z": "$q.dims[0]"},
      "block": {"x": 256, "y": 1, "z": 1},
      "args_signature": [ /* $q, $k, $v, $do, $D (read), $dk, $dv */ ]},
     {"name": "dq",
-     "grid":  {"x": {"ceil_div": ["$q.seqlen_q", 64]},
-               "y": "$q.num_heads", "z": "$q.batch"},
+     "grid":  {"x": {"ceil_div": ["$q.dims[2]", 64]},
+               "y": "$q.dims[1]", "z": "$q.dims[0]"},
      "block": {"x": 256, "y": 1, "z": 1},
      "args_signature": [ /* $q, $k, $v, $do, $D (read), $dq */ ]}
   ]
@@ -1954,7 +1971,7 @@ byte alignment:
 
 ```jsonc
 "intermediates": [
-  {"name": "$D", "dtype": "FLOAT", "shape": ["batch", "num_heads", "seqlen_q"], "align": 256}
+  {"name": "$D", "dtype": "FLOAT", "shape": ["$q.dims[0]", "$q.dims[1]", "$q.dims[2]"], "align": 256}
 ]
 ```
 
@@ -2225,8 +2242,7 @@ choices; none is a dependency.
   inherit its one pattern.
 - **Structural pattern:** a UED's `nodes` block, the op nodes and named operand/result edges the
   engine matches against the graph. It runs once per engine per graph, and its binding is what a
-  UMD's criteria, a UDD's formulas, and the UHD's features are all written over
-  ([RFC 0018](0018_UniversalMatchDescriptor.md)).
+  UMD's criteria, a UDD's formulas, and the UHD's features are all written over.
 - **UHD (Universal Heuristic Descriptor):** one kernel-selection model that ranks the kernels fitting
   a graph and picks one. One per engine, named by the UED.
 - **KMD (Kernel Metadata Descriptor):** despite the name, an **engine-wide schema, not a per-kernel
@@ -2315,6 +2331,8 @@ choices; none is a dependency.
   sources and their adapters.
 - **JIT (future):** runtime kernel generation reached through the same descriptors and a JIT-source
   adapter in the provider SDK; deferred to its own follow-up RFC.
-- **Escape hatch:** a named, registry-resolved predicate or binding for logic the declarative model
-  cannot express, carried as a symbol name and typed arguments, never inline code. The two instances
-  are the **native predicate** (match side) and the **custom plan** (dispatch side).
+- **Escape hatch:** a named, registry-resolved handler for logic the declarative model cannot
+  express, carried as a symbol name and typed arguments, never inline code. It stands beside a
+  descriptor, never inside an expression: the operator set is closed and admits no provider hook.
+  The two instances are the **native matcher** (match side) and the **custom plan**
+  (dispatch side).
