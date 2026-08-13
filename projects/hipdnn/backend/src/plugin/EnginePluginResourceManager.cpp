@@ -177,7 +177,28 @@ size_t EnginePluginResourceManager::getEngineCount() const
 
 std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
 {
-    if(_cachedEngineInfos.has_value())
+    return buildEngineIndex();
+}
+
+std::optional<int64_t>
+    EnginePluginResourceManager::findEngineIdByName(std::string_view engineName) const
+{
+    buildEngineIndex();
+
+    const auto it = _cachedEngineIdsByName->find(std::string(engineName));
+    if(it == _cachedEngineIdsByName->end())
+    {
+        return std::nullopt;
+    }
+
+    return it->second;
+}
+
+const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() const
+{
+    // Both memos are filled together on every path, so requiring both here keeps
+    // findEngineIdByName() from ever seeing a half-built index.
+    if(_cachedEngineInfos.has_value() && _cachedEngineIdsByName.has_value())
     {
         return *_cachedEngineInfos;
     }
@@ -185,8 +206,8 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
     std::vector<EngineInfo> infos;
     if(!_pm)
     {
-        _cachedEngineInfos = infos;
-        return infos;
+        _cachedEngineIdsByName.emplace();
+        return _cachedEngineInfos.emplace(std::move(infos));
     }
 
     const auto& plugins = _pm->getPlugins();
@@ -223,8 +244,27 @@ std::vector<EngineInfo> EnginePluginResourceManager::getEngineInfos() const
                < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
-    _cachedEngineInfos = infos;
-    return infos;
+    // The reverse index is built from the sorted vector, so it agrees with the
+    // enumeration by construction. emplace() keeps the first row for a repeated
+    // name, and the sort above is a total order, so the winner is the same on
+    // every run.
+    auto& idsByName = _cachedEngineIdsByName.emplace();
+    idsByName.reserve(infos.size());
+    for(const auto& info : infos)
+    {
+        const auto [it, inserted] = idsByName.emplace(info.engineName, info.engineId);
+        if(!inserted)
+        {
+            HIPDNN_BACKEND_LOG_WARN(
+                "Engines {} and {} are both named '{}'; name lookups will resolve to {}",
+                hipdnn_data_sdk::utilities::formatEngineIdHex(it->second),
+                hipdnn_data_sdk::utilities::formatEngineIdHex(info.engineId),
+                info.engineName,
+                hipdnn_data_sdk::utilities::formatEngineIdHex(it->second));
+        }
+    }
+
+    return _cachedEngineInfos.emplace(std::move(infos));
 }
 
 std::string EnginePluginResourceManager::resolveEngineName(
@@ -419,6 +459,7 @@ EnginePluginResourceManager::EnginePluginResourceManager(
     : _handleToPlugin(std::move(other._handleToPlugin))
     , _engineIdToHandle(std::move(other._engineIdToHandle))
     , _cachedEngineInfos(std::move(other._cachedEngineInfos))
+    , _cachedEngineIdsByName(std::move(other._cachedEngineIdsByName))
 {
     // Move base class member explicitly
     _pm = std::move(other._pm);
@@ -432,6 +473,7 @@ EnginePluginResourceManager&
         _handleToPlugin = std::move(other._handleToPlugin);
         _engineIdToHandle = std::move(other._engineIdToHandle);
         _cachedEngineInfos = std::move(other._cachedEngineInfos);
+        _cachedEngineIdsByName = std::move(other._cachedEngineIdsByName);
         _pm = std::move(other._pm);
     }
     return *this;

@@ -3213,6 +3213,149 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosOrdersEnginesSharingOneResol
 }
 
 // ---------------------------------------------------------------------------
+// Name -> ID resolution
+//
+// findEngineIdByName() inverts the names getEngineInfos() reports. It shares
+// that enumeration's blind spot: no graph means no EngineDetails, so a name that
+// exists only in tier 2 is not indexed.
+// ---------------------------------------------------------------------------
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameResolvesPluginSuppliedEngineName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PLUGIN_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // The whole point of the lookup: this name does not hash to its engine ID,
+        // so engineNameToId() cannot find the engine and only a real index can.
+        ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId("PLUGIN_SUPPLIED_ENGINE"), 100);
+
+        const auto resolved = resourceManager.findEngineIdByName("PLUGIN_SUPPLIED_ENGINE");
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, 100);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameResolvesHexFallbackName)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    // An unnamed engine is enumerated under its hexadecimal ID, so that string has
+    // to resolve too or the index would not be a true inverse of getEngineInfos().
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        const auto resolved = resourceManager.findEngineIdByName("0x0000000000000064");
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, 100);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameInvertsEveryEnumeratedName)
+{
+    const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(300))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("NAMED_ENGINE")));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>()));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        // The invariant that makes the API usable: whatever a caller reads out of
+        // the enumeration can be fed straight back in. Both tiers are present here.
+        for(const auto& info : resourceManager.getEngineInfos())
+        {
+            const auto resolved = resourceManager.findEngineIdByName(info.engineName);
+
+            ASSERT_TRUE(resolved.has_value()) << "unresolved name: " << info.engineName;
+            EXPECT_EQ(*resolved, info.engineId);
+        }
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameRejectsUnknownAndEmptyNames)
+{
+    const SingleEnginePluginHarness harness(100);
+    harness.stubIdentity("test-plugin", "1.0");
+
+    EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("PLUGIN_SUPPLIED_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        EXPECT_FALSE(resourceManager.findEngineIdByName("NO_SUCH_ENGINE").has_value());
+        EXPECT_FALSE(resourceManager.findEngineIdByName("").has_value());
+
+        // Names are matched exactly; no case folding and no partial matches.
+        EXPECT_FALSE(resourceManager.findEngineIdByName("plugin_supplied_engine").has_value());
+        EXPECT_FALSE(resourceManager.findEngineIdByName("PLUGIN_SUPPLIED").has_value());
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameResolvesSharedNameToTheFirstEnumeratedRow)
+{
+    // Names are labels, not keys, so two engines may share one. The winner is the
+    // first row of getEngineInfos(), whose order is a total sort on
+    // (engineName, engineId, pluginName) and therefore identical on every run.
+    const DualEnginePluginHarness harness(200, 100);
+
+    EXPECT_CALL(*harness.firstPlugin, name()).WillRepeatedly(::testing::Return("plugin-alpha"));
+    EXPECT_CALL(*harness.firstPlugin, version()).WillRepeatedly(::testing::Return("2.0"));
+    EXPECT_CALL(*harness.firstPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.firstPlugin, getEngineName(200))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("SHARED_ENGINE_NAME")));
+
+    EXPECT_CALL(*harness.secondPlugin, name()).WillRepeatedly(::testing::Return("plugin-beta"));
+    EXPECT_CALL(*harness.secondPlugin, version()).WillRepeatedly(::testing::Return("3.0"));
+    EXPECT_CALL(*harness.secondPlugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*harness.secondPlugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("SHARED_ENGINE_NAME")));
+
+    {
+        const EnginePluginResourceManager resourceManager(harness.pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+        ASSERT_EQ(infos.size(), 2);
+
+        const auto resolved = resourceManager.findEngineIdByName("SHARED_ENGINE_NAME");
+
+        ASSERT_TRUE(resolved.has_value());
+        EXPECT_EQ(*resolved, infos[0].engineId);
+        EXPECT_EQ(*resolved, 100);
+    }
+}
+
+TEST(TestEnginePluginResourceManager, FindEngineIdByNameReturnsNulloptWhenNoEnginesAreLoaded)
+{
+    const std::vector<std::shared_ptr<EnginePlugin>> plugins;
+    const std::shared_ptr<MockEnginePluginManager> pluginManager
+        = std::make_shared<MockEnginePluginManager>();
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+
+    const EnginePluginResourceManager resourceManager(pluginManager);
+
+    EXPECT_TRUE(resourceManager.getEngineInfos().empty());
+    EXPECT_FALSE(resourceManager.findEngineIdByName("ANY_ENGINE").has_value());
+}
+
+// ---------------------------------------------------------------------------
 // Tier 2, the EngineDetails.name candidate
 //
 // getEngineInfos() cannot reach tier 2: it has no graph and so always passes

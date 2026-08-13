@@ -200,11 +200,20 @@ When your plugin supplies no name for an engine, hipDNN names it from the built-
 
 The full order depends on whether a graph is in hand. Resolving against a graph — the engine-descriptor path behind ``HIPDNN_ATTR_ENGINE_NAME_EXT`` and the frontend's per-engine reporting — tries ``hipdnnEnginePluginGetEngineName``, then the ``name`` field of the engine's ``EngineDetails`` payload, then the registry, then the hexadecimal ID. Enumeration — ``hipdnnGetEngineInfo_ext`` and the APIs built on it — has no graph and therefore no ``EngineDetails``, so it tries only the entry point, the registry, and the hexadecimal ID.
 
-Implementing ``hipdnnEnginePluginGetEngineName`` is therefore what makes a name visible on every surface; a name supplied only through ``EngineDetails.name`` is absent from the enumeration APIs.
+Implementing ``hipdnnEnginePluginGetEngineName`` is therefore what makes a name visible on every surface; a name supplied only through ``EngineDetails.name`` is absent from the enumeration APIs and from ``hipdnnGetEngineIdByName_ext``.
 
 If a plugin reports a name through both ``hipdnnEnginePluginGetEngineName`` and the ``name`` field of its ``EngineDetails`` payload and the two disagree, hipDNN uses the entry point's name and logs a warning naming the plugin, the engine ID, and both strings.
 
 hipDNN also hashes the reported name and compares the result against the engine ID the plugin reported. A mismatch is logged as a warning only: the plugin isn't rejected, and the plugin-reported ID stays canonical for routing and serialization.
+
+Addressing an engine by name
+----------------------------
+
+Name lookup doesn't go through that hash. ``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under. Either way your engine is addressable by the name you report whatever engine ID you chose for it.
+
+Where several engines share a name, the backend lookup returns the first in enumeration order, ``deselect_engines`` bars all of them, and ``set_preferred_engine_id_ext`` prefers whichever the heuristics ranked highest. A name matching no candidate engine changes nothing and is reported once as a warning when the plans are built.
+
+The heuristic policy surfaces are the exception. A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so it can't reach the resolver: the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable is hashed inside the policy, and the engine override rules in the heuristic config file resolve their names when the config loads, before any handle exists. Derive your engine IDs the way ``HIPDNN_REGISTER_ENGINE`` does if you want them addressable from those surfaces.
 
 Create a kernel engine plugin
 =============================

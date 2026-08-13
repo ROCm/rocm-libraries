@@ -261,6 +261,17 @@ protected:
         // Set by deselect_engines().
         // Accumulates across calls.
 
+    // Engine name exclusion set, matched against the display name of each
+    // candidate engine rather than against a hash of the name. This is what
+    // reaches a plugin engine whose engine ID is not the hash of the name it
+    // reports. Populated alongside _barredEngineIds by the string overload of
+    // deselect_engines(), and cleared with it.
+    std::unordered_set<std::string> _barredEngineNames;
+
+    // Barred names that have already been reported as matching no candidate
+    // engine, so the warning is emitted once per name per filter generation.
+    mutable std::unordered_set<std::string> _warnedUnmatchedBarredNames;
+
     void resetActivePlanState()
     {
         _activePlanIndex = 0;
@@ -509,6 +520,11 @@ protected:
 
 private:
     std::optional<int64_t> _preferredEngineId;
+
+    // Preferred engine expressed as a display name, matched against the name of
+    // each candidate engine. Takes precedence over _preferredEngineId when it
+    // matches a candidate; on no match the engine ID search runs unchanged.
+    std::optional<std::string> _preferredEngineName;
 
     bool _isOverrideShapeEnabled = false;
 
@@ -909,6 +925,87 @@ private:
         _engineNameCache.insert_or_assign(engineId, engineName);
     }
 
+    /// Whether an engine is excluded, by ID or by the name it displays under.
+    ///
+    /// Name matching resolves the candidate's name and compares it, rather than
+    /// hashing the barred name and comparing IDs. That is what reaches an engine
+    /// whose ID is not the hash of its name, which a plugin is free to report.
+    /// Every barred name that matches is honoured, so a name shared by several
+    /// engines bars all of them.
+    ///
+    /// Graphs that never bar by name take the ID-only path and never resolve a
+    /// name, which on a cache miss costs a throwaway engine descriptor build.
+    bool isEngineBarred(int64_t engineId) const
+    {
+        if(_barredEngineIds.count(engineId) > 0)
+        {
+            return true;
+        }
+        if(_barredEngineNames.empty())
+        {
+            return false;
+        }
+        const std::string engineName = engineNameFor(engineId);
+        if(_barredEngineNames.count(engineName) == 0)
+        {
+            return false;
+        }
+        HIPDNN_FE_LOG_INFO("Engine " << engineId << " barred by name '" << engineName << "'");
+        return true;
+    }
+
+    /// Report each barred name that matched none of the engines considered, once
+    /// per name. A name that reaches nothing is indistinguishable from a typo at
+    /// the point it is supplied, because the candidate engines are not known yet.
+    void warnOnUnmatchedBarredEngineNames(const std::vector<int64_t>& consideredEngineIds) const
+    {
+        if(_barredEngineNames.empty())
+        {
+            return;
+        }
+
+        std::unordered_set<std::string> consideredNames;
+        consideredNames.reserve(consideredEngineIds.size());
+        for(const int64_t engineId : consideredEngineIds)
+        {
+            consideredNames.insert(engineNameFor(engineId));
+        }
+
+        for(const auto& barredName : _barredEngineNames)
+        {
+            if(consideredNames.count(barredName) > 0)
+            {
+                continue;
+            }
+            if(!_warnedUnmatchedBarredNames.insert(barredName).second)
+            {
+                continue;
+            }
+            HIPDNN_FE_LOG_WARN("deselect_engines(): '"
+                               << barredName << "' matched no available engine and barred nothing");
+        }
+    }
+
+    /// Index into @p engineIds of the first engine whose display name matches the
+    /// preferred name, or nullopt when no name is preferred or none matches.
+    /// First match wins, so a name shared by several engines selects the one the
+    /// heuristics ranked highest.
+    std::optional<size_t> findPreferredEngineByName(const std::vector<int64_t>& engineIds) const
+    {
+        if(!_preferredEngineName.has_value())
+        {
+            return std::nullopt;
+        }
+        for(size_t i = 0; i < engineIds.size(); ++i)
+        {
+            if(engineNameFor(engineIds[i]) == _preferredEngineName.value())
+            {
+                return i;
+            }
+        }
+        return std::nullopt;
+    }
+
     void assignUnsetTensorUids()
     {
         std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
@@ -1030,14 +1127,24 @@ private:
         // The explicit Graph.preferred_engine_id setter is honored here as a
         // post-hoc reorder: if the user pinned an engine and it appears in
         // the ranked list, prefer it over index 0; otherwise log and fall
-        // back to the heuristic's choice.
+        // back to the heuristic's choice. A preference given as a name is
+        // matched against the names the ranked engines display under, and the
+        // engine ID search runs only when that finds nothing.
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
         HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
             engineConfigs, engineIds, engineHeuristicDesc, /*getAll=*/true));
 
         size_t selectedIndex = 0;
-        if(_preferredEngineId.has_value())
+        const std::optional<size_t> nameMatch = findPreferredEngineByName(engineIds);
+        if(nameMatch.has_value())
+        {
+            selectedIndex = nameMatch.value();
+            HIPDNN_FE_LOG_INFO("Preferred engine name '"
+                               << _preferredEngineName.value() << "' matched engine id "
+                               << engineIds[selectedIndex] << ", using it for execution plan.");
+        }
+        else if(_preferredEngineId.has_value())
         {
             const int64_t preferredId = _preferredEngineId.value();
             auto it = std::find(engineIds.begin(), engineIds.end(), preferredId);
@@ -1392,7 +1499,7 @@ private:
                     ++filteredCount;
                     continue;
                 }
-                if(_barredEngineIds.count(spec.engineId) > 0)
+                if(isEngineBarred(spec.engineId))
                 {
                     nonBenchmarkedResults.push_back(
                         autotune::detail::makeBarredResult(spec.engineId,
@@ -1408,6 +1515,16 @@ private:
                     continue;
                 }
                 filteredSpecs.push_back(spec);
+            }
+
+            {
+                std::vector<int64_t> consideredEngineIds;
+                consideredEngineIds.reserve(_planSpecs.size());
+                for(const auto& spec : _planSpecs)
+                {
+                    consideredEngineIds.push_back(spec.engineId);
+                }
+                warnOnUnmatchedBarredEngineNames(consideredEngineIds);
             }
 
             if(filteredSpecs.empty())
@@ -2358,6 +2475,9 @@ protected:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        // The serialized graph carries only the engine ID, so any preference
+        // expressed as a name belongs to the state just replaced.
+        _preferredEngineName.reset();
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
 
         // The frontend state has been fully replaced from the backend descriptor.
@@ -2563,6 +2683,8 @@ public:
 
         _maxWorkspaceAllowed = -1;
         _barredEngineIds.clear();
+        _barredEngineNames.clear();
+        _warnedUnmatchedBarredNames.clear();
 
         if(!hasReadyGraphDesc())
         {
@@ -2625,6 +2747,8 @@ public:
 
         _maxWorkspaceAllowed = -1;
         _barredEngineIds.clear();
+        _barredEngineNames.clear();
+        _warnedUnmatchedBarredNames.clear();
 
         if(!hasReadyGraphDesc())
         {
@@ -2809,6 +2933,9 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        // The serialized graph carries only the engine ID, so any preference
+        // expressed as a name belongs to the state just replaced.
+        _preferredEngineName.reset();
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         resetCompiledPlanState();
@@ -3086,6 +3213,9 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
+        // The serialized graph carries only the engine ID, so any preference
+        // expressed as a name belongs to the state just replaced.
+        _preferredEngineName.reset();
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         resetCompiledPlanState();
@@ -3213,12 +3343,11 @@ public:
                     continue;
                 }
 
-                if(_barredEngineIds.count(plan.engineId) > 0)
+                if(isEngineBarred(plan.engineId))
                 {
                     plan.barred = true;
-                    HIPDNN_FE_LOG_INFO("Plan index "
-                                       << i << " (engine " << plan.engineId
-                                       << ") marked barred: matched barred engine ID");
+                    HIPDNN_FE_LOG_INFO("Plan index " << i << " (engine " << plan.engineId
+                                                     << ") marked barred by deselect_engines()");
                     continue;
                 }
 
@@ -3250,6 +3379,16 @@ public:
                 }
             }
 
+            {
+                std::vector<int64_t> consideredEngineIds;
+                consideredEngineIds.reserve(_compiledPlans.size());
+                for(const auto& plan : _compiledPlans)
+                {
+                    consideredEngineIds.push_back(plan.engineId);
+                }
+                warnOnUnmatchedBarredEngineNames(consideredEngineIds);
+            }
+
             if(!anySucceeded)
             {
                 return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -3269,7 +3408,7 @@ public:
                         + ") is already barred."};
         }
 
-        if(_barredEngineIds.count(activePlan.engineId) > 0)
+        if(isEngineBarred(activePlan.engineId))
         {
             activePlan.barred = true;
             return {ErrorCode::INVALID_VALUE,
@@ -4231,12 +4370,11 @@ public:
                     "Plan at index " + std::to_string(index) + " is already barred."};
         }
 
-        if(_barredEngineIds.count(plan.engineId) > 0)
+        if(isEngineBarred(plan.engineId))
         {
             plan.barred = true;
             return {ErrorCode::INVALID_VALUE,
-                    "Plan at index " + std::to_string(index)
-                        + " is barred: matched barred engine ID."};
+                    "Plan at index " + std::to_string(index) + " is barred by deselect_engines()."};
         }
 
         // If workspace size is still -1, the plan has not been finalized yet.
@@ -4289,20 +4427,22 @@ public:
     /**
      * @brief Store engine names for deferred plan barring
      *
-     * Resolves each engine name to an engine ID and adds it to the
-     * barred engine ID set. Plans matching barred engine IDs are barred
-     * during @c build_plans() and @c autotuneImpl(). Accumulates across
-     * calls (set union).
+     * Stores each engine name for matching against the candidate engines. Plans
+     * whose engine matches are barred during @c build_plans() and
+     * @c autotuneImpl(). Accumulates across calls (set union), and is cleared
+     * along with the rest of the filter state by @c create_execution_plans().
      *
-     * Names are hashed to engine IDs without consulting the built-in registry,
-     * so plugin-supplied engines can be deselected by name too. Hashing is the
-     * whole of the matching, though, so this reaches an engine only when its ID
-     * is the hash of its name. A plugin that reports a name
-     * unrelated to its engine ID is not deselectable by that name, even though
-     * that name is what tool and autotune output display for it.
+     * Matching happens at plan-build time against the name each candidate engine
+     * displays under, so this reaches a plugin engine whose engine ID is not the
+     * hash of the name it reports. Every engine carrying the name is barred, so a
+     * name shared by several engines bars all of them.
      *
-     * A name that matches no engine bars nothing, and nothing at call time
-     * distinguishes that from a typo.
+     * Each name is also hashed to an engine ID and added to the barred engine ID
+     * set, which keeps built-in and hex-form names working before any candidate
+     * engine is known.
+     *
+     * A name that matches no candidate bars nothing and is reported once as a
+     * warning when the plans are built.
      *
      * @param engine_names Engine names to deselect (e.g. {"MIOPEN_ENGINE"})
      * @return Reference to @c *this for method chaining
@@ -4318,6 +4458,8 @@ public:
             const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
             HIPDNN_FE_LOG_INFO("deselect_engines(): '" << name << "' -> engine ID " << engineId);
             _barredEngineIds.insert(engineId);
+            _barredEngineNames.insert(name);
+            _warnedUnmatchedBarredNames.erase(name);
         }
         HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
                                                                         << " engine(s))");
@@ -4677,6 +4819,9 @@ public:
     }
 
     /// @brief Get the preferred engine ID, if set
+    ///
+    /// When the preference was set by name this is the hash of that name, which is
+    /// the fallback rather than the engine a candidate name match would select.
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<int64_t> get_preferred_engine_id_ext() const
     // NOLINTEND(readability-identifier-naming)
@@ -6142,6 +6287,9 @@ public:
 
     /**
      * @brief Set the preferred engine ID for execution plan selection
+     *
+     * Replaces any preference previously set by name.
+     *
      * @param engineId Engine ID to prefer, or std::nullopt to clear
      * @return Reference to this Graph for method chaining
      */
@@ -6150,11 +6298,24 @@ public:
     // NOLINTEND(readability-identifier-naming)
     {
         _preferredEngineId = engineId;
+        _preferredEngineName.reset();
         return *this;
     }
 
     /**
      * @brief Set the preferred engine by name
+     *
+     * The name is matched at plan-build time against the name each candidate
+     * engine displays under, so this reaches a plugin engine whose engine ID is
+     * not the hash of the name it reports. The first candidate carrying the name
+     * wins, which for a name shared by several engines is the one the heuristics
+     * ranked highest. If no candidate carries the name, selection falls back to
+     * the engine whose ID is the hash of the name, and then to the heuristics'
+     * own top choice.
+     *
+     * The hashed ID is also stored, so @c get_preferred_engine_id_ext() returns a
+     * value as soon as this returns.
+     *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining
      */
@@ -6165,12 +6326,14 @@ public:
         if(engineName.empty())
         {
             _preferredEngineId = std::nullopt;
+            _preferredEngineName.reset();
             HIPDNN_FE_LOG_INFO("Cleared preferred engine ID (empty string)");
             return *this;
         }
 
         auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
         _preferredEngineId = engineId;
+        _preferredEngineName = engineName;
 
         HIPDNN_FE_LOG_INFO("Engine name '" << engineName << "' mapped to ID: " << engineId);
         return *this;

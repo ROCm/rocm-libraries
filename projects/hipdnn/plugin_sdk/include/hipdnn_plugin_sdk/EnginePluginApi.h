@@ -402,6 +402,22 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * and a plugin may report the same name for more than one of its engines. The
  * engine ID remains the only identifier the host dispatches on.
  *
+ * Name-based lookup does not depend on that mismatch check passing.
+ * hipdnnGetEngineIdByName_ext inverts the enumeration, and
+ * hipdnn_frontend::graph::Graph matches a requested name against the names its
+ * candidate engines display under, so an engine is addressable by the name it
+ * reports whatever its engine ID. On a name shared by several engines the
+ * backend lookup returns the first in enumeration order, while Graph deselects
+ * every one of them and prefers whichever the heuristics ranked highest.
+ *
+ * The heuristic policy surfaces are the exception. A policy receives bare engine
+ * IDs through hipdnnHeuristicPolicySetEngineIds and no handle, so it cannot
+ * reach the resolver: HIPDNN_HEUR_FALLBACK_ENGINE_ORDER is hashed inside the
+ * policy, and the heuristic config file resolves its engine names when the
+ * config loads, before any handle exists. A plugin that wants its engines
+ * addressable from those surfaces should derive its engine IDs the way
+ * HIPDNN_REGISTER_ENGINE does.
+ *
  * @param[in] engine_id Engine ID (must come from hipdnnEnginePluginGetAllEngineIds).
  * @param[out] name Receives a NUL-terminated string owned by the plugin. Must
  *                  remain valid for the lifetime of the loaded library. On any

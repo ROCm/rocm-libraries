@@ -5,7 +5,6 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_frontend.hpp>
@@ -504,15 +503,14 @@ bool run(F&& f)
 // ENGINE SELECTION
 
 // Applies the engine preference from `config` (--engine-id or --engine-name) to `graph`.
-// The name is hashed to an engine ID unconditionally, because an engine supplied by an
-// engine plugin is never in the built-in name registry and gating on it would leave every
-// such engine unaddressable by name. The preference is soft: one that matches no engine
-// config is discarded when the graph is built and the heuristic's pick runs instead, so
-// nothing here can tell a plugin engine apart from a typo. The name-to-ID mapping is
-// echoed to leave a trace, but a preference that went unused is only detectable after the
-// graph is built, by comparing get_preferred_engine_id_ext() against the plan's actual
-// engine. Centralized here so every sample selects engines the same way instead of
-// duplicating this logic.
+// The name is handed to the graph as a string rather than resolved here, so that it is
+// matched against the names the candidate engines actually display under. That is what
+// reaches an engine supplied by an engine plugin, whose engine ID need not be the hash of
+// the name it reports. The preference is soft: one that matches no engine config is
+// discarded when the graph is built and the heuristic's pick runs instead, so a typo is
+// only detectable after the fact, by comparing getEngineName() on the plan's engine against
+// what was asked for. Centralized here so every sample selects engines the same way instead
+// of duplicating this logic.
 inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Config& config)
 {
     if(config.engineId != -1)
@@ -521,12 +519,9 @@ inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Confi
     }
     else if(!config.engineName.empty())
     {
-        const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(config.engineName);
+        std::cout << "  preferring engine name '" << config.engineName << "'\n";
 
-        std::cout << "  engine name '" << config.engineName << "' maps to engine ID "
-                  << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId) << '\n';
-
-        graph.set_preferred_engine_id_ext(engineId);
+        graph.set_preferred_engine_id_ext(config.engineName);
     }
 }
 

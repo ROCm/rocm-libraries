@@ -827,6 +827,35 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
     });
 }
 
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t handle,
+                                                                 const char* engineName,
+                                                                 int64_t* engineId)
+{
+    LOG_API_ENTRY("handle={:p}, engineName_ptr={:p}, engineId_ptr={:p}",
+                  static_cast<void*>(handle),
+                  static_cast<const void*>(engineName),
+                  static_cast<void*>(engineId));
+
+    return hipdnn_backend::tryCatch([&, apiName = __func__] {
+        throwIfNull(handle);
+        throwIfNull(engineName);
+        throwIfNull(engineId);
+
+        const auto resolved = handle->findEngineIdByName(engineName);
+        if(!resolved.has_value())
+        {
+            // Well-formed request, nothing satisfies it: no loaded engine carries
+            // this name. BAD_PARAM is reserved for malformed arguments.
+            throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
+                                  std::string("No loaded engine is named '") + engineName + "'.");
+        }
+
+        *engineId = *resolved;
+
+        LOG_API_SUCCESS(apiName, "engineName={}, engineId={}", engineName, *engineId);
+    });
+}
+
 HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetHeuristicPolicyCount_ext(hipdnnHandle_t handle,
                                                                        size_t* numPolicies)
 {

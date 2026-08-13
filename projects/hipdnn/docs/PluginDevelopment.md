@@ -101,6 +101,7 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
 2. **Hash Function**: The `hipdnn_data_sdk::utilities::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
 3. **Registration**: Engine names built into the hipDNN tree are registered in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp` for discoverability
+4. **Lookup**: `hipdnnGetEngineIdByName_ext` resolves a loaded engine's displayed name back to its ID without hashing, so a plugin engine remains addressable by name even when its ID isn't the hash of that name
 
 ### Using Engine IDs
 

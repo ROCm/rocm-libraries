@@ -247,33 +247,16 @@ The static registry described below is therefore a compatibility fallback for en
 
 ### Frontend Implementation
 
-The frontend accepts both names and IDs:
+`Graph::set_preferred_engine_id_ext` and `Graph::deselect_engines` each accept an `int64_t` or a
+`std::string`.  The string forms match against the names the graph's candidate engines display
+under, falling back to the hash when no candidate carries the name.
 
-```cpp
-// Frontend API extension
-namespace hipdnn_frontend::graph {
+### Backend Name Lookup
 
-class Graph : public INode
-{
-public:
-    // Existing API - accepts int64_t
-    void set_preferred_engine_id_ext(std::optional<int64_t> engineId)
-
-    // New overload - accepts string name
-    void set_preferred_engine_id_ext(const std::optional<std::string> engineName) {
-        int64_t engineId = hipdnn::engineNameToId(engineName);
-
-        // Log for debugging
-        HIPDNN_LOG_DEBUG("Engine name '{}' mapped to ID: 0x{:016X}",
-                        engineName, engineId);
-
-        // Forward to the int64_t version
-        setPreferredEngine(engineId);
-    }
-};
-
-} // namespace hipdnn_frontend::graph
-```
+`hipdnnGetEngineIdByName_ext` inverts the enumeration: any name `hipdnnGetEngineInfo_ext` reports
+resolves back to its engine ID, including a plugin-supplied name that does not hash to it.  Names
+are display labels, not keys, so a name carried by several engines resolves to the first in
+enumeration order.
 
 ### Backend Duplicate Detection
 
@@ -302,8 +285,14 @@ against this repository.
 3. **Derive the Engine ID From the Name**: Hashing the name to produce the engine ID is a
    convention, not a requirement.  The host checks `engineNameToId(name) == engine_id` and logs a
    warning on mismatch, but the plugin is not rejected and its reported ID stays canonical for
-   routing and serialization.  Following the convention is what lets a user address the engine by
-   name through `deselect_engines` and `set_preferred_engine_id_ext`.
+   routing and serialization.
+
+   `hipdnnGetEngineIdByName_ext`, `deselect_engines` and `set_preferred_engine_id_ext` do not
+   depend on the convention: they resolve a name against the names engines actually display under,
+   so an engine is addressable by the name it reports whatever ID it carries.  The heuristic policy
+   surfaces do depend on it, because they are handed bare engine IDs and no handle to reach the
+   resolver with — `HIPDNN_HEUR_FALLBACK_ENGINE_ORDER` is hashed inside the policy, and the
+   heuristic config file's override rules resolve their names when the config loads.
 
 4. **Document Capabilities**: Include documentation per the standards below
 

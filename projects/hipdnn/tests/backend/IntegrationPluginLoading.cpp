@@ -543,6 +543,81 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameIsReportedByGetEngineIn
         << describeReportedEngines(engines);
 }
 
+// The reverse of the query above: a name read out of hipdnnGetEngineInfo_ext must resolve back to
+// its engine through hipdnnGetEngineIdByName_ext. The plugin-supplied name deliberately does not
+// hash to the plugin's engine id, so a hash of the name cannot produce this answer.
+TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameResolvesToItsEngineId)
+{
+    const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
+    ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto expectedId = hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>();
+    const auto* engineName = hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME;
+
+    ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId(engineName), expectedId)
+        << "This test only proves anything while the name does not hash to the engine id.";
+
+    auto resolvedId = int64_t{0};
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, engineName, &resolvedId), HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(resolvedId, expectedId);
+}
+
+// Whatever the enumeration reports can be fed straight back in. This covers the hexadecimal
+// fallback alongside plugin-supplied names, since both appear in the same listing.
+TEST_F(IntegrationPluginLoading, EveryReportedEngineNameResolvesToItsEngineId)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testGoodPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engines = queryReportedEngines(_handle);
+    ASSERT_FALSE(engines.empty());
+
+    for(const auto& engine : engines)
+    {
+        auto resolvedId = int64_t{0};
+        EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, engine.engineName.c_str(), &resolvedId),
+                  HIPDNN_STATUS_SUCCESS)
+            << "Unresolved name '" << engine.engineName << "'. Reported engines:\n"
+            << describeReportedEngines(engines);
+        EXPECT_EQ(resolvedId, engine.engineId);
+    }
+}
+
+TEST_F(IntegrationPluginLoading, UnknownEngineNameIsNotSupported)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testGoodPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    auto resolvedId = int64_t{0};
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, "NO_SUCH_ENGINE_NAME", &resolvedId),
+              HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, "", &resolvedId), HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(IntegrationPluginLoading, GetEngineIdByNameRejectsNullArguments)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testGoodPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    auto resolvedId = int64_t{0};
+    const auto* engineName = "0xFFFFFFFFFFFFFFFE";
+
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(nullptr, engineName, &resolvedId),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, nullptr, &resolvedId),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, engineName, nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
 // A plugin that exports neither hipdnnEnginePluginGetEngineName nor an EngineDetails.name, and
 // whose id is absent from the static registry, falls through to the zero-padded uppercase
 // hexadecimal rendering of its engine id.
