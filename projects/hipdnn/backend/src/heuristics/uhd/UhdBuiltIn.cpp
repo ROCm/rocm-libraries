@@ -28,6 +28,8 @@
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/uhd_generated.h>
+
+#include <nlohmann/json.hpp>
 #include <hipdnn_plugin_sdk/HeuristicValidation.hpp>
 #include <hipdnn_plugin_sdk/HeuristicsPluginApi.h>
 #include <hipdnn_plugin_sdk/heuristic_api_version.h>
@@ -83,6 +85,10 @@ struct PolicyDescriptor
     std::vector<uint8_t> serializedGraph;
     std::vector<int64_t> sortedEngineIds;
     bool finalized = false;
+
+    // RFC 0019 §13: Selection traces per engine for observability
+    std::unordered_map<int64_t, SelectionTrace> traces;
+    std::unordered_map<int64_t, std::string> traceJsonCache; // Serialized JSON per engine
 
     explicit PolicyDescriptor(Handle* h)
         : handle(h)
@@ -417,6 +423,9 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
 
             auto result = SelectionEngine::select(engineId, deviceVars, queryVars);
 
+            // Store trace for retrieval (RFC 0019 §13)
+            d->traces[engineId] = result.trace;
+
             // RFC 0019 §6 step 6 requires failing *open*. hasOrdering() distinguishes
             // "selection produced a kernel ranking" from "selection produced nothing";
             // neither outcome may affect the engine's presence above.
@@ -534,6 +543,92 @@ hipdnnPluginStatus_t policyGetSortedEngineIds(hipdnnHeuristicPolicyDescriptor_t 
     }
 }
 
+hipdnnPluginStatus_t policyGetTrace(hipdnnHeuristicPolicyDescriptor_t desc,
+                                    int64_t engineId,
+                                    const char** traceJson)
+{
+    HIPDNN_PLUGIN_REQUIRE_NOT_NULL(desc, UHD_LOG, "policyGetTrace: null descriptor");
+    HIPDNN_PLUGIN_REQUIRE_NOT_NULL(traceJson, UHD_LOG, "policyGetTrace: null output pointer");
+    try
+    {
+        auto* d = reinterpret_cast<PolicyDescriptor*>(desc);
+        if(!d->finalized)
+        {
+            UHD_LOG(HIPDNN_SEV_ERROR, "policyGetTrace: descriptor not finalized");
+            return HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED;
+        }
+
+        // Check if trace exists for this engine
+        auto traceIt = d->traces.find(engineId);
+        if(traceIt == d->traces.end())
+        {
+            UHD_LOG(HIPDNN_SEV_WARN,
+                    "policyGetTrace: no trace available for engine %lld",
+                    static_cast<long long>(engineId));
+            return HIPDNN_PLUGIN_STATUS_NOT_SUPPORTED;
+        }
+
+        const SelectionTrace& trace = traceIt->second;
+
+        // Check if JSON is already cached
+        auto jsonIt = d->traceJsonCache.find(engineId);
+        if(jsonIt != d->traceJsonCache.end())
+        {
+            *traceJson = jsonIt->second.c_str();
+            return HIPDNN_PLUGIN_STATUS_SUCCESS;
+        }
+
+        // Build JSON representation
+        nlohmann::json j;
+        if(!trace.uhdId.empty())
+        {
+            j["uhd_id"] = trace.uhdId;
+        }
+        if(!trace.modelVersion.empty())
+        {
+            j["model_version"] = trace.modelVersion;
+        }
+        if(!trace.trainingArches.empty())
+        {
+            j["training_arches"] = trace.trainingArches;
+        }
+        if(!trace.adapterType.empty())
+        {
+            j["adapter_type"] = trace.adapterType;
+        }
+        j["used_model"] = trace.usedModel;
+        if(!trace.fallbackReason.empty())
+        {
+            j["fallback_reason"] = trace.fallbackReason;
+        }
+        j["arch_was_trained"] = trace.archWasTrained;
+        if(!trace.deviceArch.empty())
+        {
+            j["device_arch"] = trace.deviceArch;
+        }
+        if(!trace.featuresHashModel.empty())
+        {
+            j["features_hash_model"] = trace.featuresHashModel;
+        }
+        if(!trace.featuresHashConfig.empty())
+        {
+            j["features_hash_config"] = trace.featuresHashConfig;
+        }
+        j["features_hash_match"] = trace.featuresHashMatch;
+
+        // Cache the JSON string
+        d->traceJsonCache[engineId] = j.dump();
+        *traceJson                  = d->traceJsonCache[engineId].c_str();
+
+        return HIPDNN_PLUGIN_STATUS_SUCCESS;
+    }
+    catch(const std::exception& e)
+    {
+        UHD_LOG(HIPDNN_SEV_ERROR, "policyGetTrace failed: %s", e.what());
+        return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
+    }
+}
+
 } // namespace
 
 hipdnn_backend::plugin::HeuristicPluginFunctionTable populateFunctionTable()
@@ -557,6 +652,7 @@ hipdnn_backend::plugin::HeuristicPluginFunctionTable populateFunctionTable()
     funcs.policySetSerializedGraph = &policySetSerializedGraph;
     funcs.policyFinalize = &policyFinalize;
     funcs.policyGetSortedEngineIds = &policyGetSortedEngineIds;
+    funcs.policyGetTrace = &policyGetTrace;
     return funcs;
 }
 
