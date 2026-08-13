@@ -375,17 +375,60 @@ honest full-model performance comparisons.
 - Everything else (build steps, the one-backend rule, the catalog-tree gotcha) applies
   unchanged.
 
-### Native Windows
-> [!NOTE]
-> **Placeholder — not yet validated.** Windows bring-up is planned; notes will be added
-> here as it's worked through. Expected deltas from the WSL/Linux runbook, to confirm:
-> - Use `scripts/windows/wheel_build_setup.ps1` for the ROCm SDK/toolchain (see
->   `projects/hipdnn/CLAUDE.md`), and the `CMAKE_PREFIX_PATH`/`CMAKE_PROGRAM_PATH` it prints.
-> - The backend is a `.dll` on `PATH`, not a `.so` on `LD_LIBRARY_PATH`; the one-backend
->   rule (§4) still applies but the swap/preload mechanics differ (DLL search order).
-> - No `librocdxg` shim (that's WSL-specific).
-> - Confirm the `STABLE_ABI` extension name/loader behavior and whether the frontend
->   wheel install path resolves the sibling backend DLL via `$ORIGIN`-equivalent RPATH.
+### Native Windows (validated — gfx1151 Strix Halo, 2026-08-13)
+
+Validated on a TheRock nightly (`torch 2.9.1+rocm7.15.0a20260715`, driver `32.0.31016.2`),
+Python **3.12** venv. The build steps of §3 apply unchanged except for the path/naming
+deltas below; the runtime DLL and plugin-shadowing hazards are handled automatically by
+`bootstrap.py` — you do not set them by hand.
+
+**Probe the GPU first.** Nightly × driver pairing is not portable: pull your candidate
+nightly and run one op before building —
+`python -c "import torch; assert torch.cuda.is_available(); (torch.randn(8,8,device='cuda')@torch.randn(8,8,device='cuda')).sum().item()"`.
+If it faults (`kpack_load_code_object` / `hipErrorInvalidImage`), try another nightly
+before touching the driver. Record the pair that loads.
+
+**Build-product naming/location deltas (vs the `.so`/`lib/` paths in §3):**
+- Backend is `hipdnn_backend.dll`; provider plugins are `hip_kernel_provider.dll` (etc.),
+  **not** `lib*.so`.
+- Plugins land under **`build\bin\hipdnn_plugins\engines\`**, not `build/lib/...`. The
+  7-family catalog is at `build\bin\hipdnn_plugins\engines\arch_content\aot_catalog\gfx1151`.
+- The frontend binding is **`hipdnn_frontend_python.pyd`**, not `.abi3.so`.
+- Build the engine with `-DROCKE_COMGR_LIB=<sdk>/bin/amd_comgr.dll` so rocKE can JIT.
+
+**Split-SDK DLL search (handled by `bootstrap.py`, Windows-only `_add_dll_search_dirs`).**
+The nightly splits its runtime SDK into two wheels: `_rocm_sdk_core\bin` (amdhip64,
+amd_comgr, hiprtc, hiprtc-builtins — `hip_kernel_provider` links hiprtc for rocKE JIT) and
+`_rocm_sdk_libraries\bin` (hipdnn_backend + math libs). Windows `ctypes`/`LoadLibrary` use
+the *secure* DLL search, which **ignores `PATH`**, and `RTLD_GLOBAL` is a POSIX no-op here.
+`bootstrap.py` `os.add_dll_directory`s the backend dir, the provider dirs, and **every**
+sibling `_rocm_sdk_*\bin` before dlopening the backend. Override the set with
+`HIPDNN_TORCH_DLL_DIRS` if your layout differs.
+
+**Plugin-loading mode = `absolute` (handled by `bootstrap.py`; cross-platform fix that
+Windows exposes).** The nightly ships a **prebuilt** `hip_kernel_provider.dll` beside
+`hipdnn_backend.dll` in `_rocm_sdk_libraries\bin\hipdnn_plugins\engines\` **with no
+`arch_content/` catalog next to it** (empty/old catalog). In the default `additive` load
+mode the backend unions that prebuilt with your local build, and because cross-plugin
+engine-id ownership is plain last-writer-wins (no de-dup — verified in the backend loader),
+the stale copy can **shadow** `AOT_CATALOG_ENGINE` and silently decline every graph:
+`provider_ready()` still returns `True`, but census shows `aot=0` and there is no
+`[hipdnn aot-catalog]` trace. `bootstrap.py` now calls
+`set_engine_plugin_paths(providers, ABSOLUTE)` by default, so your named provider(s)
+**replace** the auto-discovered set and the outcome no longer depends on load order. This
+is not Windows-specific code — the loader is platform-identical; Windows merely ships the
+colliding prebuilt. Set `HIPDNN_TORCH_PLUGIN_MODE=additive` to opt back into unioning.
+
+**Backend glob.** `bootstrap.py`'s default glob targets the Linux `lib/libhipdnn_backend.so`
+layout, which misses on Windows three ways (non-suffixed dir, `bin` not `lib`, `.dll`).
+Point `HIPDNN_TORCH_BACKEND_GLOB` at the exact
+`...\_rocm_sdk_libraries\bin\hipdnn_backend.dll`.
+
+**No `librocdxg` shim** (that's WSL-only).
+
+**Capturing python stdout/stderr from PowerShell 5.1.** PS 5.1 mangles native-command file
+redirection; use `Start-Process -RedirectStandardOutput/-RedirectStandardError` to capture
+a run reliably.
 
 ## 10. Quick caveat index
 
@@ -399,4 +442,6 @@ honest full-model performance comparisons.
 | `spirv-expand-step registered more than once` | tried to `LD_PRELOAD` a 2nd backend | swap the file instead | 4 |
 | new adapter added but op still falls back | reusing a stale provider `.so` | relink; verify with `nm -C` | 3a |
 | device enumeration fails on WSL | `librocdxg` shim not on `LD_LIBRARY_PATH` | prepend the shim dir | 9 |
+| `provider_ready()==True` but census `aot=0`, no `[hipdnn aot-catalog]` trace (esp. Windows) | a prebuilt `hip_kernel_provider` shipped beside the backend shadows your local build (last-writer-wins engine-id) | use `absolute` plugin mode (`bootstrap.py` default; `HIPDNN_TORCH_PLUGIN_MODE`) so your provider replaces the auto-discovered set | 9 |
+| backend/provider `.dll` fails to load on Windows despite being on `PATH` | secure DLL search ignores `PATH`; split SDK (`_rocm_sdk_core` vs `_rocm_sdk_libraries`) | `bootstrap.py` `add_dll_directory`s all sibling `_rocm_sdk_*\bin`; override with `HIPDNN_TORCH_DLL_DIRS` | 9 |
 | exact-erf `F.gelu` falls back | submitted, but no loaded engine serves it yet (hipDNN-origin decline, not a pre-gate) | use `approximate="tanh"`, or accept the fallback until a builder lands | 6 |
