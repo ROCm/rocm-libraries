@@ -72,6 +72,11 @@ configuration, strict kill semantics, and restoration across reruns.
     raw results, the conserved ledger, and verifier artifacts. Keep native
     mutmut statuses separate from triage dispositions and never inflate a score
     by dropping inconclusive outcomes or pragma-removed mutants.
+13. **Compare with a baseline only when artifacts are compatible.** Read
+    [references/regression-comparison.md](references/regression-comparison.md).
+    Reject empty or duplicate identities, require explicit absent-mutant and
+    rebaseline decisions, and do not claim a CI gate exists until a canonical
+    producer and CI consumer are both implemented.
 
 ## Guardrails
 
