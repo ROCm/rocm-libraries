@@ -1835,11 +1835,18 @@ class GlobalWriteBatchWriter:
       # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
       if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
         blockIdxN = element[0]
+        # The N-group skip label is an M-guard cbranch target and MUST land in the
+        # same module as the stores. For the 16bit paired-subtile path the stores are
+        # collected into storeCode (emitted at the end); routing the label + deferred
+        # SrdD increment into `module` here would place them before all of storeCode,
+        # so a ragged-M guard branch jumps backwards past the stores -> hang. Co-locate
+        # the label + increment with the stores (Stage-14 peel ragged-M hang fix).
+        _ngTarget = storeCode if is16bitSubtile else module
         if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
-          module.add(self._subtileNGroupSkipLabel)
+          _ngTarget.add(self._subtileNGroupSkipLabel)
           self._subtileNGroupSkipLabel = None
           if self._subtilePendingSrdDInc is not None:
-            module.add(self._subtilePendingSrdDInc)
+            _ngTarget.add(self._subtilePendingSrdDInc)
             self._subtilePendingSrdDInc = None
 
       # apply in-bounds exec mask
