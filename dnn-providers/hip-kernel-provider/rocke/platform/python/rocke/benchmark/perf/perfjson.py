@@ -28,7 +28,6 @@ from typing import IO, Any
 PREFIX = "PerfJSON:"
 
 
-
 def payload(
     *,
     ms: float | None = None,

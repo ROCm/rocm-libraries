@@ -31,7 +31,9 @@ class TestResourcesSourceTag(unittest.TestCase):
         occupancy.parse_notes = lambda b: {"vgpr": 111, "target": "gfx1201"}
         res = occupancy.resources(b"fake", "gfx950")
         self.assertEqual(res["target_arch"], "gfx1201")
-        self.assertEqual(res["occupancy"], occupancy._occupancy_estimate(111, "gfx1201"))
+        self.assertEqual(
+            res["occupancy"], occupancy._occupancy_estimate(111, "gfx1201")
+        )
         self.assertNotEqual(
             res["occupancy"], occupancy._occupancy_estimate(111, "gfx950")
         )

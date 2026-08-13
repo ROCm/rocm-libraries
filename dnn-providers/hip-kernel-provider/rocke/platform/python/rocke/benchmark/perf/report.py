@@ -122,11 +122,7 @@ def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
     elif b_wall is not None and c_wall is not None:
         b_val, c_val = float(b_wall), float(c_wall)
         b_which = c_which = _schema.FALLBACK_METRIC
-    elif (
-        b_prof is not None
-        and c_prof is not None
-        and b_prof_source == c_prof_source
-    ):
+    elif b_prof is not None and c_prof is not None and b_prof_source == c_prof_source:
         # Wall timing is unavailable in one or both records, but both profiled
         # measurements carry the same class of profiler overhead and are comparable.
         b_val, c_val = float(b_prof), float(c_prof)

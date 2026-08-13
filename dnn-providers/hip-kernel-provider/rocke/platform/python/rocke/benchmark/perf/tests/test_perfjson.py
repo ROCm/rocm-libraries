@@ -16,10 +16,14 @@ class TestPayload(unittest.TestCase):
         # json.dumps would emit bare NaN/Infinity, which is not valid JSON and would
         # make the whole line unparseable rather than one field missing.
         line = perfjson.format_line(ms=float("nan"), tflops=float("inf"), gbps=500.0)
-        self.assertEqual(json.loads(line.removeprefix(perfjson.PREFIX)), {"gbps": 500.0})
+        self.assertEqual(
+            json.loads(line.removeprefix(perfjson.PREFIX)), {"gbps": 500.0}
+        )
 
     def test_extra_fields_pass_through(self):
-        self.assertEqual(perfjson.payload(ms=1.0, variant="tile128")["variant"], "tile128")
+        self.assertEqual(
+            perfjson.payload(ms=1.0, variant="tile128")["variant"], "tile128"
+        )
 
 
 class TestEmit(unittest.TestCase):

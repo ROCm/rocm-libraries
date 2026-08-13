@@ -147,7 +147,9 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
         raise ValueError(f"records span multiple identities: {sorted(ids)}")
     timing_sources = {str(r.get("timing_source") or "legacy") for r in records}
     if len(timing_sources) != 1:
-        raise ValueError(f"records span multiple timing sources: {sorted(timing_sources)}")
+        raise ValueError(
+            f"records span multiple timing sources: {sorted(timing_sources)}"
+        )
 
     base = records[0]
     counters = _median_counters(records)
