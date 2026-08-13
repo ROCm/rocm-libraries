@@ -11,6 +11,9 @@ Documentation for rocSPARSE is available at
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_merge_path`.
 
+### Optimized
+* Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
+
 ### Resolved issues
 * Fixed an integer overflow in `rocsparse_prune_dense2csr_by_percentage` and `rocsparse_prune_csr2csr_by_percentage`, which computed the matrix element count in 32-bit arithmetic. For matrices with more than `INT32_MAX` (~2.1 billion) elements the count overflowed to a negative value, resulting in out-of-bounds pointer construction and an invalid kernel launch grid. The element count is now computed in 64-bit arithmetic.
 * Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
