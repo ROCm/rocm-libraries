@@ -4,7 +4,7 @@
 # TensileLite Python Build Implementation Plan: TheRock
 
 Status: Current implementation plan
-Decision record: `PythonBuildGrillingDecisions.md` Q115–Q127
+Decision record: `PythonBuildGrillingDecisions.md` Q115–Q129
 
 ## Final artifact flow
 
@@ -18,9 +18,10 @@ TheRock build
         └── fresh-venv artifact test execution
 ```
 
-The client is test-only. Windows does not build, stage, bind, or test it, while
-Windows device generation continues through the canonical wheel and build-tree
-rocisa.
+The client is test-only for now. Windows does not build, stage, bind, or test it,
+while Windows device generation continues through the canonical wheel and
+build-tree rocisa. Q129 records the eventual `rocm[libraries]` destination but
+does not change this current artifact flow.
 
 ## Implementation
 

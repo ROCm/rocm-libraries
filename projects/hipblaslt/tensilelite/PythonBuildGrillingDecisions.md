@@ -956,10 +956,11 @@ THEROCK_PACKAGE_VERSION      = package/build publication identity
 ```
 
 TensileLite's `+rocm...` compatibility tag should match the base value in
-`.info/version` unless a different runtime compatibility policy is explicitly
-adopted.
+`.info/version` for a native ROCm root. An active Python `rocm-sdk-core`
+installation instead supplies its full `__version__` publication identity; see
+Q128 for the accepted temporary authority split and its limitation.
 
-**Decision: Accepted — use the base `.info/version` value for ROCm compatibility.**
+**Decision: Superseded in part by Q128.**
 
 ### Q066 — Should non-release source builds include the TensileLite git revision?
 
@@ -2273,6 +2274,65 @@ wheel and `_rocisa`, not on `tensilelite-client`. Remove its client-binding
 wrapper from that path. This preserves canonical-wheel code generation while
 removing the client dependency.
 
+### Q128 — Must the Python package runtime depend on `rocm[devel]`?
+
+**Decision: Accepted — no.**
+
+For a TheRock wheel installation, TensileLite must not install or expand
+`rocm[devel]` merely to validate that the Python wheel and ROCm release match.
+The compatibility check uses `rocm_sdk_core.__version__` as the authoritative
+full Python publication identity and `rocm_sdk_core.get_core_root()` to locate
+the matching core payload. It does not resolve a devel root solely to read its
+version file.
+
+When no active Python core SDK is installed, the selected native ROCm root's
+`.info/version` is temporarily authoritative. It contains only the base
+compatibility value, so this fallback cannot distinguish different nightly, RC,
+or CI publications on the same base release line. Keep that limitation visible
+until native ROCm roots expose an equivalent full publication identity.
+
+This changes only the Python package runtime dependency. It does not change the
+separate standalone `ROCM_PATH` contract, the build-time TheRock toolchain root,
+or the client-free generation boundary in Q115.
+
+**Rationale:** `rocm-sdk-core` is already installed by `rocm` and
+`rocm[libraries]`. Pulling the large devel archive solely for a version comparison
+adds an unrelated package dependency. The compiler/bundler payload is core-owned;
+the native client is resolved only when benchmark/retune execution needs it.
+
+### Q129 — Where will `tensilelite-client` eventually be delivered?
+
+**Decision: Accepted — eventually through the production BLAS runtime artifact
+(`blas_lib`) and `rocm[libraries]`; not now.**
+
+Q117 remains the current implementation policy: until the Python package and
+client meet the agreed promotion threshold, the non-Windows client stays in
+`blas_test`. This decision does not change current CMake installation,
+TheRock artifact selection, or test-artifact ownership.
+
+When promoted, install the client at:
+
+```text
+<ROCm root>/libexec/hipblaslt/tensilelite/tensilelite-client[.exe]
+```
+
+in `blas_lib`, which delivers it through `rocm-sdk-libraries` and
+`rocm[libraries]`.
+
+**Why not `rocm-sdk-core`:** the client is built by hipBLASLt and has a
+BLAS-side runtime closure. Making mandatory core own it would invert the
+dependency direction by making core depend on the optional BLAS layer.
+
+**Why not `rocm[devel]`:** devel is a complete SDK view for headers, CMake
+metadata, static libraries, and development tooling. The client is a native
+runtime benchmark/validation executable; it does not need devel-only files to
+run, and devel must not own a second copy.
+
+**Capability boundary:** Q115 remains unchanged. Import, logic validation,
+`TensileCreateLibrary`, and hipBLASLt device-library generation do not require
+or validate the client. Benchmark and retune execution resolve and validate the
+client only when they actually launch it.
+
 ## Confirmed TheRock build/test facts
 
 ### Build
@@ -2293,10 +2353,10 @@ removing the client dependency.
 - The test job creates a fresh venv and installs `requirements-test.txt`.
 - It sets `ROCM_PATH=./build` and matching `PATH`/`LD_LIBRARY_PATH` values.
 - `blas_lib` currently carries hipBLASLt runtime/device libraries but not
-  `tensilelite-client`; Q098 requires adding the client.
+  `tensilelite-client`; Q117 retains that current ownership split.
 - `blas_test` currently carries test binaries/data, Python test artifacts, and
-  `tensilelite-client`; Q098 requires removing duplicate client ownership and
-  receiving it through the production runtime artifact.
+  `tensilelite-client`; Q129 records the eventual promotion into the production
+  runtime artifact.
 
 ### Current test-runner mismatch
 

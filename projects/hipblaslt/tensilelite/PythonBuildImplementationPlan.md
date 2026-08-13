@@ -4,7 +4,7 @@
 # TensileLite Python Build Implementation Plan: rocm-libraries
 
 Status: Current implementation plan
-Decision record: `PythonBuildGrillingDecisions.md` Q115–Q127
+Decision record: `PythonBuildGrillingDecisions.md` Q115–Q129
 
 ## Final contract
 
@@ -37,7 +37,8 @@ benchmark/validation executable used only by explicit client workflows.
 - Preserve `invoke install` as the full editable-development workflow, including
   client build and binding.
 - Install the client only through the non-Windows TensileLite test-artifact
-  workflow and CMake `tests` component.
+  workflow and CMake `tests` component. Q129 records the eventual promotion to
+  `rocm[libraries]`; it is not current implementation work.
 
 ## Validation
 
