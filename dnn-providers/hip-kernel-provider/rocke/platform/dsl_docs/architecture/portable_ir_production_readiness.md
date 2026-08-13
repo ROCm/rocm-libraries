@@ -195,24 +195,98 @@ detects a wrong-spec replay.
 
 ### 5. Compile-time characteristics
 
-Median over 5 iterations at three axis points each, front end only plus the
-common comgr stage:
+Re-measured after the VM learned to validate what it admits, since the earlier
+figures timed a replay path with no wire-ABI check, no recipe schema check and
+no guard enforcement in front of it. Same node and same toolchain (ROCm 7.2,
+`llvm22`), so the two are comparable; `drivers/bench_jit_validation.py` at
+`--n 21` produces everything below.
+
+**Front end** here means the whole `CBOR -> .ll` step: decode, every admission
+check, VM expand, and the C lowerer. Medians at three axis points per family,
+against the shipping artifact form (ABI-stamped, guard attached).
 
 | Family | Python front end | Recipe VM front end | Speedup | comgr (common) | Cold JIT, Python | Cold JIT, recipe |
 |---|---|---|---|---|---|---|
-| GEMM | 1.38 ms | 0.32 ms | 4.3x | 1.8 ms | 3.2 ms | 2.1 ms |
-| Attention (dense) | 20.25 ms | 5.74 ms | 3.5x | 3.2 ms | 23.5 ms | 9.0 ms |
+| GEMM | 1.34 ms | 0.32 ms | 4.2x | 1.64 ms | 2.99 ms | **1.96 ms** |
+| Convolution (implicit GEMM) | 2.37 ms | 0.75 ms | 3.2x | 1.51 ms | 3.88 ms | **2.26 ms** |
+| Attention (dense) | 19.05 ms | 7.05 ms | 2.7x | 2.36 ms | 21.41 ms | **9.41 ms** |
 
-The VM front end is 3.5–4.3x faster than the Python front end, but comgr is
+Convolution is new to this table. GEMM reproduces its earlier numbers closely
+(1.38 → 1.34 Python, 0.32 → 0.32 VM). Attention's earlier 5.74 ms VM front end
+corresponds to today's **expand step alone** (5.71 ms) rather than expand plus
+lower (7.05 ms), so that row was measuring a slightly narrower step than the
+GEMM row beside it; the definition above is applied uniformly here.
+
+comgr is the noisy term — GEMM's stage varied between 1.5 and 2.3 ms across
+runs — so the cold-JIT totals carry that variance while the front-end columns
+were stable to about 1%.
+
+The VM front end is 2.7–4.2x faster than the Python front end, but comgr is
 common to both paths and dominates for small kernels, so end-to-end cold JIT
-improves by a more modest 1.5–2.6x. These figures exclude CPython interpreter
+improves by a more modest 1.5–2.3x. These figures exclude CPython interpreter
 startup and module import, which the C path avoids entirely — that, rather than
 front-end microseconds, is the larger practical argument for the replay path in
 a deployed provider.
 
-Artifact sizes favor the parametric form: attention is 506 KiB as one recipe
-versus 1518 KiB as three concrete traces; GEMM is 16.2 KiB versus 162.8 KiB
-across four shapes.
+**The admission checks are free on this path.** Timing the same recipe as a bare
+artifact and as the shipping form isolates what they cost:
+
+| Family | Bare front end | ABI + guard | Delta |
+|---|---|---|---|
+| GEMM | 0.324 ms | 0.321 ms | −1.0% |
+| Convolution | 0.750 ms | 0.748 ms | −0.3% |
+| Attention (dense) | 7.088 ms | 7.048 ms | −0.6% |
+
+One run shown; repeating it moves each delta by a few tenths of a percent and
+does not settle on a sign — the stamped form measures faster as often as slower.
+Read this as "under 1%, indistinguishable from zero", not as a speedup. That is a
+measurement of a
+path that genuinely does the work, not of a check being skipped: a recipe
+stamped `min_reader=99` is refused, a bogus `schema` is refused, and a guard
+rejects an out-of-domain axis value, while a recipe with no `abi` block at all
+still replays. Guard evaluation is cheap because the derived guards are small —
+one rule and 412–455 B for each of these three families — and it scales gently.
+Padding a guard with tautological rules, far past anything derivation produces,
+costs almost nothing:
+
+| Rules | Guard size | Check |
+|---|---|---|
+| 1 | 0.40 KiB | 0.078 ms |
+| 16 | 0.77 KiB | 0.080 ms |
+| 64 | 1.94 KiB | 0.088 ms |
+| 256 | 6.63 KiB | 0.122 ms |
+
+255 extra rules add 0.044 ms, and even that is mostly the extra 6.2 KiB of guard
+bytes being parsed rather than rules being evaluated — the same effect the next
+table isolates.
+
+**The cost that is not free is pre-flight.** Asking whether a shipped artifact
+serves a shape, without lowering it, costs this per candidate:
+
+| Family | Bundle size | Guard check | `bundle_contains` |
+|---|---|---|---|
+| GEMM | 18.1 KiB | 0.077 ms | 0.075 ms |
+| Convolution | 58.9 KiB | 0.271 ms | 0.268 ms |
+| Attention (dense) | 548.7 KiB | 2.575 ms | 2.564 ms |
+
+Two readings of that table, and both point the same way. Across families, the
+bundle grows 18.1 → 58.9 → 548.7 KiB and the check grows 0.077 → 0.271 → 2.575
+ms, in step. Within a family, `bundle_contains` evaluates no rules at all yet
+costs the same as the full guard check. So the time is `rocke_cbor_parse` walking
+the whole artifact, not guard work: everything the guard feature adds on top of
+"does this key exist" is 2–11 µs.
+
+For attention, a single admission check therefore costs more than an entire GEMM
+cold JIT, and filtering a 200-candidate catalog would spend most of a second
+re-parsing — which would defeat the whole "filter cheaply, lower once" ordering.
+Each of these calls parses from scratch and destroys its arena on the way out, so
+nothing is retained between them. The fix is a parse-once bundle handle — open
+the artifact once, query it many times — tracked as item 4 in
+`hipdnn_jit_integration.md`, and this is the quantitative argument for it.
+
+Artifact sizes favor the parametric form: attention is 548 KiB as one recipe
+versus 1644 KiB as three concrete traces; GEMM is 17.5 KiB versus 175.5 KiB, and
+convolution 58.2 KiB versus 174.3 KiB, across three shapes each.
 
 ## What does not work
 
@@ -452,10 +526,12 @@ one process stops at the first bad one and loses every result after it.
 
 ### No HSACO cache — P1
 
-The JIT path recompiles from CBOR on every request. comgr is 1.8–3.2 ms and
-dominates the small-kernel budget, so a persistent cache keyed by
-`(family, spec values, arch)` is the single highest-leverage runtime
-optimization and is currently absent.
+The JIT path recompiles from CBOR on every request. comgr is 1.5–2.4 ms and
+dominates the small-kernel budget — 84% of a GEMM cold JIT — so a persistent
+cache keyed by `(family, spec values, arch)` is the single highest-leverage
+runtime optimization and is currently absent. Note that a cache hit does not
+remove the pre-flight parse cost measured in §5, which is a separate artifact
+and a separate fix.
 
 ### Bundle key hygiene — P2
 
@@ -475,7 +551,7 @@ the stable family key and the varying spec values.
 | 5 | Tile/warp geometry rolls for 1 of 4 families | P1 | 7 rolled axes, 1 geometric; 8 refusals | Extend roller; accept per-geometry recipe families where non-affine |
 | 5b | `.ll` gate hides uncompilable kernels | P1 | **Closed as a CI gap**: gates 2 and 3 end at HSACO, and the kernels that cannot compile are pinned by name in `hsaco_baseline.json` with the LLVM error that explains each one, so a new one fails CI. The 14 gfx942 kernel defects themselves are untouched and remain P1 | Fix the kernels: gfx950-only MFMA intrinsics used unguarded |
 | 5c | `moe_fused_mega_fp8` exhausts host memory in LLVM | P1 | **Contained**: each compile runs in a forked child under an `RLIMIT_AS` cap sized to half of physical memory, so this kernel is reported and stepped over. Verified all 45 good kernels still compile under a 4 GiB cap, which also cuts the gfx950 sweep from 65 s to 7 s | Pre-existing kernel defect; containment is in place |
-| 6 | No HSACO cache | P1 | comgr 1.8–3.2 ms per compile, unavoidable today | Cache on `(family, spec, arch)` |
+| 6 | No HSACO cache | P1 | comgr 1.5–2.4 ms per compile, unavoidable today | Cache on `(family, spec, arch)` |
 | 7 | Provider `ArtifactStore` path not integrated | P1 | Marked "pending integration" in the plan | Wire recipe expansion behind a C-JIT flag |
 | 8 | Bundle key hygiene unenforced | P2 | Names embed parametrized spec values | Enforce family key vs spec separation |
 | 9 | Non-linear axes unsupported | P2 | **Largely closed**: conv `C` rolls via `magic_multiplier`/`magic_shift`; reciprocal and cross-term candidates added. `block_n`'s remainder is structural, not modelling | Close by finding the 967-op period in run detection (gap 12) |

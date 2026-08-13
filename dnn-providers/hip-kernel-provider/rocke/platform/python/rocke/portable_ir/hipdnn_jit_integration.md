@@ -67,7 +67,7 @@ refusal messages are written in; below is only what this document leans on.
 | **gate** / **admission predicate** | The function that answers "is this spec buildable at all", returning `(ok, reason)`. Spelled `is_valid_spec(spec, arch)` in `instances/`, `supports_*(...)` in `library/kernels/`. This is the thing hipDNN wants callable from C++. |
 | **build** / **emit** | Running the Python kernel author's function to produce the kernel's instruction list. The code that does this is the **emitter** or **builder**. |
 | **`.ll`** | LLVM IR as text — the instruction list serialized, one step before machine code. |
-| **comgr** | AMD's Code Object Manager: compiles `.ll` into a GPU binary. The slow step in a JIT, 1.8–3.2 ms here. |
+| **comgr** | AMD's Code Object Manager: compiles `.ll` into a GPU binary. The slow step in a JIT, 1.5–2.4 ms here. |
 | **HSACO** | The compiled GPU binary that actually gets loaded and launched. |
 | **byte-identity** | The correctness standard used throughout: two paths must produce *the same bytes*, not merely equivalent kernels. It is what makes the C replay path trustworthy, and what CI enforces. |
 | **recipe** | A recorded log of what the emitter did, replayable without Python. **Concrete** = covers exactly one spec, every number baked in. **Parametric** (or **rolled**) = declares some values free and carries formulas, so one recipe covers many specs. |
@@ -389,18 +389,54 @@ the hipDNN runtime.
 
 ### 2.4 Measured costs
 
-From the readiness assessment (medians over 5 iterations):
+Re-measured after guards, the ABI check and the launch planner landed, so these
+are the paths as they now ship rather than as they were assessed. Medians at
+three axis points per family, `drivers/bench_jit_validation.py --n 21`, gfx950
+on ROCm 7.2. Front end means the whole `CBOR -> .ll` step: decode, admission
+checks, VM expand, C lower.
 
 
-|                   | Python front end | Recipe VM front end | comgr  | Cold JIT via recipe |
-| ----------------- | ---------------- | ------------------- | ------ | ------------------- |
-| GEMM              | 1.38 ms          | 0.32 ms             | 1.8 ms | **2.1 ms**          |
-| Attention (dense) | 20.25 ms         | 5.74 ms             | 3.2 ms | **9.0 ms**          |
+|                              | Python front end | Recipe VM front end | comgr   | Cold JIT via recipe |
+| ---------------------------- | ---------------- | ------------------- | ------- | ------------------- |
+| GEMM                         | 1.34 ms          | 0.32 ms             | 1.64 ms | **1.96 ms**         |
+| Convolution (implicit GEMM)  | 2.37 ms          | 0.75 ms             | 1.51 ms | **2.26 ms**         |
+| Attention (dense)            | 19.05 ms         | 7.05 ms             | 2.36 ms | **9.41 ms**         |
 
 
-Artifact size favours the parametric form: attention is 506 KiB as one recipe
-versus 1518 KiB as three concrete traces; GEMM is 16.2 KiB versus 162.8 KiB
-across four shapes.
+The admission checks do not show up here: timing the same recipe bare and in its
+shipping form (ABI-stamped, guard attached) differs by under 1% for all three,
+and repeated runs do not settle on a sign, so the difference is indistinguishable
+from zero rather than a speedup. Guards are one rule and 412–455 B for
+each of these families, and padding one to 256 tautological rules — far past
+anything derivation produces — adds only 0.044 ms, most of it the extra guard
+bytes to parse rather than rules to evaluate.
+
+**The check that is not free is the one made without lowering** — §3.3a's
+standalone query, the one this section's cost asymmetry argument depends on:
+
+| | Bundle size | Guard check | `bundle_contains` |
+|---|---|---|---|
+| GEMM | 18.1 KiB | 0.077 ms | 0.075 ms |
+| Convolution | 58.9 KiB | 0.271 ms | 0.268 ms |
+| Attention (dense) | 548.7 KiB | 2.575 ms | 2.564 ms |
+
+The time tracks the bundle size — 18.1 → 58.9 → 548.7 KiB against 0.077 → 0.271
+→ 2.575 ms — and `bundle_contains` evaluates no rules yet costs the same as the
+full check. So this is CBOR parsing rather than guard work. Rule evaluation is
+nanoseconds; *reaching* the rules is not, because every call re-parses the whole
+artifact and frees its arena on return.
+
+This qualifies §9's ordering rather than overturning it. A guard check is not
+free per candidate: against a 549 KiB bundle it costs 2.6 ms, more than an entire
+GEMM cold JIT, and guard-checking 200 candidates would spend ~0.5 s re-parsing
+the same bytes. Lowering those 200 instead would cost 0.4–1.9 s, so filtering
+first still wins — but only if you filter on the cheap key lookup and check
+guards on the surviving winner, not on all 200. Sweeping a catalog properly needs
+item 4's parse-once handle, an argument that until now rested on general grounds.
+
+Artifact size favours the parametric form: attention is 548 KiB as one recipe
+versus 1644 KiB as three concrete traces; GEMM is 17.5 KiB versus 175.5 KiB and
+convolution 58.2 KiB versus 174.3 KiB, across three shapes each.
 
 Measured domain sizes, from the kernels' own gating rather than assumption:
 `num_query_heads` 128 legal values, `seqlen_kv` 32, `block_n` 5 (it must divide
@@ -728,18 +764,26 @@ constructor plus `supports_*`):
 |---|---|
 | Derivation, per recipe | under 10 ms; 0.11 s for the hardest coupled pair |
 | Guard size | 368–809 B of CBOR |
-| Enforcement at JIT time | 0.55 ms per call on a 107 KiB bundle |
+| Enforcement at JIT time | 0.077 ms on an 18.1 KiB bundle … 2.575 ms on a 548.7 KiB one |
 
 Adding the build probe to the gate changes the first row by orders of magnitude
 — it compiles a kernel per gate call — which is why it is off by default and why
 `pool_cap`/`pool_scan` are tunable. The other two rows are unaffected.
 
-The 0.55 ms is worth reading correctly: the rules themselves are a few integer
-comparisons, and essentially all of that time is parsing the whole bundle to
-reach them. Against ~1.7 ms to replay and lower the same recipe, and far more to
-finish a compile, checking first is clearly worth it — but it scales with bundle
-size, not with guard complexity, so a caller that wants to check thousands of
-shapes needs a parse-once handle rather than a faster evaluator.
+That last row is worth reading correctly, because it scales with **bundle size,
+not guard complexity**, and §2.4 now measures the split directly.
+`rocke_bundle_contains` evaluates no rules at all and costs the same as the full
+guard check — 0.075 against 0.077 ms on the small bundle, 2.564 against 2.575 ms
+on the large one. So the cost is `rocke_cbor_parse` walking the artifact, and
+everything guards add on top of "does this key exist" is 2–11 µs. Rule
+evaluation is genuinely a few integer comparisons; reaching the rules is the
+expense, because every call parses from scratch and frees its arena on return.
+
+Checking before compiling is still clearly right for a small bundle — 0.077 ms
+against ~2 ms to finish a GEMM. For a large one it is much closer than the
+ordering argument in §9 assumes: 2.6 ms to check an attention candidate exceeds
+a whole GEMM cold JIT. A caller filtering hundreds of candidates needs the
+parse-once handle (item 4), not a faster evaluator.
 
 #### Limits worth stating plainly
 
@@ -1460,12 +1504,14 @@ RUNTIME (hipDNN, no CPython)
   |     pick winner
   |
   |-- check_guard(winner, free params from problem)         [EXISTS: recipe_guard.h]
-  |     rejects couplings only visible once the problem is    ~ns per candidate
-  |     known; no IR built, no allocation
+  |     rejects couplings only visible once the problem is   0.08 ms (18 KiB) ..
+  |     known; no IR built                                   2.6 ms (549 KiB)
+  |     cost is the bundle parse, not the rules -- so check  per call; see §2.4
+  |     the winner, not all 200 candidates
   |     too-new bundle -> ERR_VALUE, not REFUSED (§3.3d)
   |
   |-- replay -> .ll -> comgr -> HSACO                       [.ll EXISTS, gated
-  |     2.1 ms (GEMM) .. 9.0 ms (attention dense)            byte-identical;
+  |     1.96 ms (GEMM) .. 9.41 ms (attention dense)          byte-identical;
   |                                                          comgr: see below]
   |
   |-- plan_launch(winner) -> name, args, grid, block, lds   [EXISTS: recipe_launch.h]
@@ -1479,15 +1525,20 @@ validity decision was made at build time by the real Python predicate, and its
 result is carried by two things — the existence of a recipe under the key, and
 the guard on that recipe.
 
-The cost asymmetry justifies the ordering decisively: filtering is nanoseconds
-to microseconds per candidate, lowering is milliseconds. A 200-candidate catalog
-lowered exhaustively costs 0.4–1.8 s; filtered first and lowered once, it costs
-a few milliseconds plus the filter. Lower only the winner.
+The cost asymmetry still justifies the ordering, but by less than first assumed,
+and §2.4 says why: a *key lookup* is microseconds, while a *guard check* costs a
+full bundle parse — 0.08 ms for GEMM but 2.6 ms for attention, which is more than
+a GEMM cold JIT. Lowering 200 candidates exhaustively costs 0.4–1.9 s, so
+filtering first is still the right order by a wide margin; the caveat is that the
+filter itself is not free at scale, and guard-checking all 200 against a large
+bundle would cost ~0.5 s on its own. Two things follow: check keys first and
+guards only on the surviving winner, and prefer item 4's parse-once handle if the
+catalog is ever swept. Lower only the winner.
 
 Two refinements worth considering. First, cache on `(family, baked, free, arch)`
 — gap 6, currently unimplemented, and comgr dominates the JIT path for small
-kernels (1.8–3.2 ms of a 2.1–9.0 ms cold JIT), so a hit removes most of the
-remaining cost. Second, "no recipe shipped" is a signal worth recording: if
+kernels (1.5–2.4 ms of a 1.96–9.41 ms cold JIT, 84% of a GEMM), so a hit removes
+most of the remaining cost. Second, "no recipe shipped" is a signal worth recording: if
 hipDNN's heuristics repeatedly select instances with no recipe, that is direct
 feedback on what the build-time generator should record next.
 

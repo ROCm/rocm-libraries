@@ -1204,7 +1204,7 @@ The archive is small *because of* cross-file back-references, which is exactly w
 makes its members non-independent. Require per-recipe access, as any kernel cache
 does, and compression costs 420.6 KiB — 16x worse than the rolled recipe. It reaches
 parity only in the form where fetching one kernel inflates 8.6 MiB at 3.0 ms, in
-front of a comgr compile that is itself only 1.8–3.2 ms.
+front of a comgr compile that is itself only 1.5–2.4 ms.
 
 Compression is therefore the right answer for the [first refusal
 class](#which-axes-did-not-and-why) — the axis that barely exists, where `head_size`
