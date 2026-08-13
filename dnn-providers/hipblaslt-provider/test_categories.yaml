@@ -81,7 +81,6 @@ test_categories:
     test_patterns:
       - "*"
     exclude:
-      - "*DISABLED*"
       - "Full*"
     labels:
       - "ffm-quick"
