@@ -82,6 +82,38 @@ public:
         }
     }
 
+    /**
+     * @brief Inserts @p key only if it is absent, marking it most-recently-used and
+     *        evicting as put() does. An existing entry is left untouched.
+     *
+     * @return true if the value was inserted.
+     *
+     * For callers whose value is one of several equally-valid states for a key, where
+     * a concurrently-installed entry may be strictly better than the one about to be
+     * written. The test-and-insert is atomic under this cache's lock, which a get()
+     * followed by a put() would not be.
+     */
+    bool putIfAbsent(const Key& key, Value value)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+
+        if(auto it = _index.find(key); it != _index.end())
+        {
+            _order.splice(_order.begin(), _order, it->second);
+            return false;
+        }
+
+        _order.emplace_front(key, std::move(value));
+        _index[key] = _order.begin();
+
+        if(_index.size() > _capacity)
+        {
+            _index.erase(_order.back().first);
+            _order.pop_back();
+        }
+        return true;
+    }
+
     size_t size() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);

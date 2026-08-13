@@ -342,6 +342,28 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
     EXPECT_EQ(counters().graphCalls, 2);
 }
 
+TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
+{
+    // The single-threaded half of D3: once a key is ranked, neither accessor rematches
+    // or re-ranks it. The concurrent half -- an unsorted write clobbering a sorted
+    // entry installed by another thread -- cannot be reached from one thread, because
+    // catalogFor() returns on the cache hit and never reaches its write. It is covered
+    // by ARankingSurvivesAConcurrentUnsortedAccess in the concurrency suite.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x5D));
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    ASSERT_TRUE(manager->sortedCatalog(context).isSorted);
+
+    static_cast<void>(manager->unsortedCatalog(context));
+
+    EXPECT_TRUE(manager->sortedCatalog(context).isSorted);
+    // One match total: everything after the first call was a cache hit.
+    EXPECT_EQ(counters().graphCalls, 1);
+}
+
 TEST(TestKernelIngestorStateManager, DistinctGraphsCarryingANilUuidDoNotShareACatalogEntry)
 {
     // Two graphs sharing the nil id must not share a cache entry, or the second would
@@ -529,12 +551,17 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
 
 // ---------------------------------------------------------------------------
 // Construction-time validation (TEST_P): each case must fail construction with
-// std::invalid_argument.
+// std::invalid_argument, carrying a message that identifies what to fix.
 // ---------------------------------------------------------------------------
 
 struct StateManagerConstructionThrowCase
 {
     std::string name;
+    /// Substring the failure must contain. Asserting the type alone cannot tell a
+    /// rejected descriptor apart from an unrelated bug that happens to throw the same
+    /// type -- and after ALMIOPEN-2401 these messages are what an operator gets
+    /// instead of a compiler error, so they are part of the contract.
+    std::string expectedMessageSubstring;
     std::function<std::unique_ptr<StateManager>()> construct;
 };
 
@@ -550,7 +577,17 @@ TEST_P(TestKernelIngestorStateManagerConstructionThrows, RejectsAtConstruction)
     // unresolved symbol before reaching the invalid_argument it exists to assert.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    EXPECT_THROW(GetParam().construct(), std::invalid_argument);
+    try
+    {
+        GetParam().construct();
+        FAIL() << "expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& error)
+    {
+        EXPECT_NE(std::string(error.what()).find(GetParam().expectedMessageSubstring),
+                  std::string::npos)
+            << "message did not explain the rejection: " << error.what();
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -559,6 +596,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         StateManagerConstructionThrowCase{
             "RejectsAKernelOmittingAFieldWithNoDefault",
+            "which declares no default",
             [] {
                 // dtype has no schema default, so every kernel must state it explicitly.
                 KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
@@ -576,6 +614,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsAKernelSupplyingAFieldTheSchemaDoesNotDeclare",
+            "does not declare",
             [] {
                 // An undeclared field (e.g. a misspelling) silently takes its default
                 // while the stray value joins the catalog key unread.
@@ -596,6 +635,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsAKernelSupplyingAFieldOfTheWrongType",
+            "a value of the wrong type",
             [] {
                 // A wrong-typed field would otherwise surface as a bad_variant_access far
                 // away, inside a matcher or scorer.
@@ -615,6 +655,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsAPackNamingAnUnknownMatcher",
+            "names unknown matcher",
             [] {
                 // A dangling matcher reference is caught at construction, not when a
                 // graph first arrives.
@@ -627,6 +668,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsAPackNamingAnUnknownDispatchDescriptor",
+            "names unknown dispatch descriptor",
             [] {
                 return std::make_unique<StateManager>(
                     makeSchema(),
@@ -637,6 +679,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsTwoKernelsSharingAMetadataTuple",
+            "duplicates the metadata tuple",
             [] {
                 // Same completed tuple as kernel_64_float: selection would have two
                 // indistinguishable candidates and no basis to prefer either.
@@ -651,6 +694,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsADuplicateMatchDescriptorId",
+            "duplicate match descriptor id",
             [] {
                 // Silent first-wins under a duplicate id would run whichever matcher
                 // loaded first.
@@ -668,6 +712,7 @@ INSTANTIATE_TEST_SUITE_P(
             }},
         StateManagerConstructionThrowCase{
             "RejectsADuplicateDispatchDescriptorId",
+            "duplicate dispatch descriptor id",
             [] {
                 std::vector<DispatchDescriptor> dispatches = makeTestDispatches();
                 dispatches.push_back(
@@ -680,6 +725,7 @@ INSTANTIATE_TEST_SUITE_P(
                     std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
             }},
         StateManagerConstructionThrowCase{"RejectsAMissingHeuristic",
+                                          "requires a heuristic",
                                           [] {
                                               return std::make_unique<StateManager>(
                                                   makeSchema(),

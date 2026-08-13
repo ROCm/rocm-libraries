@@ -215,6 +215,9 @@ public:
 
         if(const auto key = cacheKey(context); key.has_value())
         {
+            // put, not putIfAbsent: a sorted catalog is strictly better than whatever
+            // is there, since an unsorted entry costs the next reader a rank() and a
+            // sorted one is equivalent to this.
             _catalogCache.put(*key, catalog);
         }
 
@@ -386,7 +389,13 @@ private:
 
         if(key.has_value())
         {
-            _catalogCache.put(*key, catalog);
+            // putIfAbsent, not put: two threads can miss this key together, and while
+            // they matched, one of them may have ranked and installed a *sorted*
+            // catalog. Overwriting that with this unsorted one is never a wrong answer
+            // -- both describe the same kernels -- but it throws away the ranking, so a
+            // hot key can thrash between sorted and unsorted and never converge. The
+            // loser of the race keeps its own copy and discards only the write.
+            _catalogCache.putIfAbsent(*key, catalog);
         }
 
         return catalog;

@@ -121,6 +121,64 @@ TEST(TestIngestorLruCache, OverwritingAKeyDoesNotGrowTheCache)
     EXPECT_EQ(cache.size(), 1U);
 }
 
+// ---------------------------------------------------------------------------
+// putIfAbsent: for callers whose write may be worse than what is already there
+// ---------------------------------------------------------------------------
+
+TEST(TestIngestorLruCache, PutIfAbsentInsertsWhenTheKeyIsMissing)
+{
+    LruCache<int, std::string> cache(2);
+
+    EXPECT_TRUE(cache.putIfAbsent(1, "one"));
+
+    const auto found = cache.get(1);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(*found, "one");
+}
+
+TEST(TestIngestorLruCache, PutIfAbsentLeavesAnExistingValueAlone)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+
+    EXPECT_FALSE(cache.putIfAbsent(1, "uno"));
+
+    const auto found = cache.get(1);
+    ASSERT_TRUE(found.has_value());
+    // The distinction the state manager relies on: the existing entry may be strictly
+    // better than the one being offered, so a no-op must not silently overwrite.
+    EXPECT_EQ(*found, "one");
+    EXPECT_EQ(cache.size(), 1U);
+}
+
+TEST(TestIngestorLruCache, PutIfAbsentEvictsTheLeastRecentlyUsedWhenItInserts)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+    cache.put(2, "two");
+
+    EXPECT_TRUE(cache.putIfAbsent(3, "three"));
+
+    EXPECT_EQ(cache.size(), 2U);
+    EXPECT_FALSE(cache.get(1).has_value());
+    EXPECT_TRUE(cache.get(3).has_value());
+}
+
+TEST(TestIngestorLruCache, PutIfAbsentRefreshesRecencyOnAKeyItDidNotWrite)
+{
+    LruCache<int, std::string> cache(2);
+    cache.put(1, "one");
+    cache.put(2, "two");
+
+    // Declining to write still counts as touching the key: the caller wanted this
+    // entry, so it is not the one to evict next.
+    EXPECT_FALSE(cache.putIfAbsent(1, "uno"));
+    cache.put(3, "three");
+
+    EXPECT_TRUE(cache.get(1).has_value());
+    EXPECT_FALSE(cache.get(2).has_value());
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
