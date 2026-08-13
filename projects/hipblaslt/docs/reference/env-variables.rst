@@ -84,6 +84,64 @@ For more information, see :doc:`Use hipBLASLt offline tuning <../how-to/how-to-u
       - | Integer value in bytes (default: 128 * 1024 * 1024)
         | Limits workspace size for solution selection
 
+Runtime tuning cache
+====================
+
+Runtime tuning is opt-in. ``HIPBLASLT_TUNING_MODE`` and
+``HIPBLASLT_TUNING_CACHE_PATH`` are read when tuning is first used in a process;
+set them before the first hipBLASLt call. The scratch cap is read on the first
+scratch allocation. For more information, see
+:doc:`Use hipBLASLt offline tuning <../how-to/how-to-use-hipblaslt-offline-tuning>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``HIPBLASLT_TUNING_MODE``
+        | Selects runtime tuning behavior.
+      - | ``off``: Disable runtime tuning (default)
+        | ``cache``: Replay valid cache entries only
+        | ``tune``: Benchmark uncached supported problems and append winners
+
+    * - | ``HIPBLASLT_TUNING_CACHE_PATH``
+        | Specifies the runtime cache file.
+      - | Path to a tuning file
+        | Required for ``cache`` and ``tune`` modes
+
+    * - | ``HIPBLASLT_TUNING_ALL_KERNELS``
+        | Selects exhaustive or ranked-prefix candidate enumeration.
+      - | 1: Enumerate every candidate (default)
+        | 0: Use a ranked prefix
+
+    * - | ``HIPBLASLT_TUNING_MAX_CANDIDATES``
+        | Limits the ranked prefix when exhaustive enumeration is disabled.
+      - | Positive integer (default: 128)
+
+    * - | ``HIPBLASLT_TUNING_COLD_ITERS``
+        | Sets untimed warm-up launches per candidate.
+      - | Positive integer (default: 1000)
+
+    * - | ``HIPBLASLT_TUNING_HOT_ITERS``
+        | Sets timed launches per candidate.
+      - | Positive integer (default: 1000)
+
+    * - | ``HIPBLASLT_TUNING_ROTATING_MB``
+        | Sets the target rotating-buffer footprint.
+      - | MiB (default: 512)
+        | 0 disables rotation
+
+    * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
+        | Sets a soft wall-clock limit checked between candidates.
+      - | Milliseconds (default: 0, unlimited)
+        | A single candidate can overrun the limit
+
+    * - | ``HIPBLASLT_TUNING_SCRATCH_MAX_BYTES``
+        | Caps library-owned tuning scratch per device.
+      - | Bytes (default: 1 GiB)
+
 Origami with Stream-K configuration
 ===================================
 

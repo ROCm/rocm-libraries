@@ -6167,6 +6167,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                             solutionName = groupedGemmVec[0].getSolutionName();
                             kernelName   = groupedGemmVec[0].getKernelName();
                         }
+
+                        // The ext accessor names every kernel the solution
+                        // launches, joined by "; ", which is useful to read but
+                        // is not an identifier. A solution with a separate
+                        // beta-scale or Stream-K cleanup kernel therefore
+                        // records a name the library can never reproduce, since
+                        // replay compares against getKernelNameFromAlgoIndex and
+                        // gets the single main kernel. Such an entry is rejected
+                        // on its first use and the shape looks permanently
+                        // untuned, so anything destined for the tuning file goes
+                        // through the algo accessor instead.
+                        if(tuningEnv)
+                            kernelName = hipblaslt_ext::getKernelNameFromAlgo(
+                                handle, heuristicResult[sol].algo);
                     }
                     else
                     {

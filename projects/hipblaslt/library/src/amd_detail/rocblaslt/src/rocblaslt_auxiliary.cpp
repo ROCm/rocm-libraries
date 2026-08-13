@@ -191,14 +191,33 @@ namespace
                                       const TensileLite::TunedEntry&           entry,
                                       const rocblaslt_matmul_heuristic_result& resolved)
     {
-        if(!entry.solutionName.has_value())
-            return true;
+        // Each name is checked against the accessor it was written from.
+        // kernel_name is what new rows carry; solution_name is only still read
+        // so files written before the switch keep validating rather than all
+        // failing at once.
+        //
+        // Both accessors give the bare name. getSolutionNameFromData decorates
+        // with GSU/WGM suffixes when they differ from the solution defaults,
+        // which would never round-trip against what the writer stored.
+        std::string recorded;
+        std::string currentName;
 
-        // Deliberately the bare name. getSolutionNameFromData decorates with
-        // GSU/WGM suffixes when they differ from the solution defaults, which
-        // would never round-trip against what the writer stored.
-        const std::string currentName = getSolutionNameFromAlgoIndex(handle, resolved.algo);
-        if(currentName == *entry.solutionName)
+        if(entry.kernelName.has_value())
+        {
+            recorded    = *entry.kernelName;
+            currentName = getKernelNameFromAlgoIndex(handle, resolved.algo);
+        }
+        else if(entry.solutionName.has_value())
+        {
+            recorded    = *entry.solutionName;
+            currentName = getSolutionNameFromAlgoIndex(handle, resolved.algo);
+        }
+        else
+        {
+            return true;
+        }
+
+        if(currentName == recorded)
             return true;
 
         auto& counters = TensileLite::TuningCounters::instance();
@@ -208,8 +227,8 @@ namespace
         {
             std::ostringstream msg;
             msg << "tuning-cache: entry invalid, index " << entry.solutionIndex
-                << " now resolves to '" << currentName << "', recorded '" << *entry.solutionName
-                << "' [" << counters.summary() << "]";
+                << " now resolves to '" << currentName << "', recorded '" << recorded << "' ["
+                << counters.summary() << "]";
             log_info(__func__, msg.str());
         }
 
@@ -331,6 +350,8 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 // whether a key still has a usable entry rather than merely any entry.
 bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
+                                  const RocblasltContractionProblem&   problem,
+                                  std::shared_ptr<void>                gemmData,
                                   size_t                              max_workspace_bytes)
 {
     TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
@@ -354,8 +375,39 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                != getSolutionsFromIndex(handle, index, resolved, max_workspace_bytes)
            || resolved.empty())
             continue;
-        if(tuned_entry_identity_matches(handle, entry, resolved[0]))
+        if(!tuned_entry_identity_matches(handle, entry, resolved[0]))
+            continue;
+
+        // Identity says the index still names the recorded kernel; usability
+        // also requires that kernel to support this concrete call. The cache key
+        // deliberately omits values such as beta and C/D aliasing, so a valid
+        // identity can still fail predicates here. Replay performs this support
+        // check, and the tune-mode gate must perform the same one or it can
+        // suppress retuning forever while replay falls back every time.
+        RocblasltContractionProblem supportProblem = problem;
+        size_t                      required        = 0;
+        auto                        algo            = resolved[0].algo;
+        if(rocblaslt_status_success
+               == isSolutionSupportedNoMutation(
+                   handle, supportProblem, gemmData, &algo, &required)
+           && required <= max_workspace_bytes)
             return true;
+
+        // Mirror replay's XF32 fallback, but keep this a pure probe. The
+        // algorithm passed to runContractionProblem is not necessarily this
+        // cached entry (a caller can supply an explicit algorithm), so leaving
+        // gemmData in fallback mode here can launch an unrelated XF32 algorithm
+        // against an FP32 problem.
+        if(problem.compute_type == rocblaslt_compute_f32_fast_xf32)
+        {
+            supportProblem.compute_type = rocblaslt_compute_f32;
+            required                    = 0;
+            if(rocblaslt_status_success
+                   == isSolutionSupportedNoMutation(
+                       handle, supportProblem, gemmData, &algo, &required)
+               && required <= max_workspace_bytes)
+                return true;
+        }
     }
 
     return false;
@@ -450,6 +502,15 @@ bool problem_override_from_file_cpp(
                         {
                             success = true;
                             log_info(__func__, "Use the fallback fp32 solution");
+                        }
+                        else
+                        {
+                            // This entry failed in both modes. Restore XF32
+                            // before trying the next cached entry or falling
+                            // back to normal selection; otherwise every
+                            // subsequent check is accidentally performed as
+                            // FP32.
+                            problem->setF32XdlMathOp(rocisa::DataType::XFloat32);
                         }
                     }
                 }

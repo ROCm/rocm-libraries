@@ -31,6 +31,8 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <limits>
+#include <optional>
 #include <shared_mutex>
 #include <sstream>
 #include <utility>
@@ -133,6 +135,13 @@ namespace TensileLite
             return out;
         }
 
+        bool isHeaderRow(const std::string& line)
+        {
+            const auto cells = splitCsv(line);
+            return std::find(cells.begin(), cells.end(), kHeaderSentinel) != cells.end()
+                   && std::find(cells.begin(), cells.end(), "solution_index") != cells.end();
+        }
+
         /**
          * Zip a header row and a value row into a name-keyed row.
          *
@@ -221,25 +230,160 @@ namespace TensileLite
             return num(row, name, fallback ? 1 : 0) != 0;
         }
 
-        rocisa::DataType dataType(const std::map<std::string, std::string>& row,
-                                  const char*                               name)
+        std::optional<rocisa::DataType>
+            dataType(const std::map<std::string, std::string>& row, const char* name)
         {
             auto it = row.find(name);
             if(it == row.end() || it->second.empty())
-                return rocisa::DataType::None;
-            return hipDataType_to_tensile_type(string_to_hip_datatype(it->second));
+                return std::nullopt;
+
+            const hipDataType type = string_to_hip_datatype(it->second);
+            if(type == HIPBLASLT_DATATYPE_INVALID)
+                return std::nullopt;
+
+            // hipDataType_to_tensile_type asserts on unsupported enum values.
+            // The public string parser also recognizes scale-only/newer types
+            // such as e8_r and e5m3_r which that converter does not support as
+            // GEMM tensor types, so whitelist before calling it.
+            switch(type)
+            {
+            case HIP_R_16F:
+            case HIP_R_32F:
+            case HIP_R_64F:
+            case HIP_R_16BF:
+            case HIP_R_8F_E4M3_FNUZ:
+            case HIP_R_8F_E5M2_FNUZ:
+            case HIP_R_8F_E4M3:
+            case HIP_R_8F_E5M2:
+            case HIP_R_8I:
+            case HIP_R_32I:
+            case HIP_C_32F:
+            case HIP_C_64F:
+            case HIP_R_6F_E2M3:
+            case HIP_R_6F_E3M2:
+            case HIP_R_4F_E2M1:
+                return hipDataType_to_tensile_type(type);
+            default:
+                return std::nullopt;
+            }
         }
 
-        // Columns that a current-schema row must carry. These are the fields
-        // with no safe default, so a row lacking any of them cannot be treated
-        // as current no matter what schema_version claims.
+        /**
+         * A cell that is a number and nothing else, or nothing.
+         *
+         * num() above folds "absent", "empty" and "not a number" all into the
+         * caller's default, which is right for optional fields and wrong for
+         * ones being validated: an empty lda would validate as the perfectly
+         * plausible leading dimension 0. splitCsv has already trimmed the cell,
+         * so any leftover character means the cell is not a number.
+         */
+        std::optional<int64_t> exactNum(const std::map<std::string, std::string>& row,
+                                        const char*                               name)
+        {
+            auto it = row.find(name);
+            if(it == row.end() || it->second.empty())
+                return std::nullopt;
+            try
+            {
+                size_t        consumed = 0;
+                const int64_t value    = std::stoll(it->second, &consumed);
+                if(consumed != it->second.size())
+                    return std::nullopt;
+                return value;
+            }
+            catch(...)
+            {
+                return std::nullopt;
+            }
+        }
+
+        bool isInt32(const std::map<std::string, std::string>& row, const char* name)
+        {
+            const auto value = exactNum(row, name);
+            return value && *value >= std::numeric_limits<int32_t>::min()
+                   && *value <= std::numeric_limits<int32_t>::max();
+        }
+
+        // Every field in a current row's semantic key is mandatory and strict.
+        // Permissive defaults remain solely for schema-less v0 rows.
         bool hasRequiredCurrentColumns(const std::map<std::string, std::string>& row)
         {
-            static const char* const required[]
-                = {"lda", "ldb", "ldc", "ldd", "stride_a", "stride_b", "stride_c", "stride_d"};
-            for(const char* name : required)
-                if(!has(row, name))
+            if((str(row, "transA") != "N" && str(row, "transA") != "T")
+               || (str(row, "transB") != "N" && str(row, "transB") != "T"))
+                return false;
+
+            static const char* const requiredText[] = {"a_type",
+                                                       "b_type",
+                                                       "c_type",
+                                                       "d_type",
+                                                       "compute_type",
+                                                       "gcnArchName"};
+            for(const char* name : requiredText)
+                if(!has(row, name) || str(row, name).empty())
                     return false;
+
+            static const char* const nonNegative[] = {"m",
+                                                      "n",
+                                                      "k",
+                                                      "batch_count",
+                                                      "lda",
+                                                      "ldb",
+                                                      "ldc",
+                                                      "ldd",
+                                                      "stride_a",
+                                                      "stride_b",
+                                                      "stride_c",
+                                                      "stride_d",
+                                                      "required_workspace"};
+            for(const char* name : nonNegative)
+            {
+                const auto value = exactNum(row, name);
+                if(!value || *value < 0)
+                    return false;
+            }
+            if(*exactNum(row, "batch_count") == 0)
+                return false;
+
+            static const char* const int32Fields[] = {"compute_input_type_a",
+                                                       "compute_input_type_b",
+                                                       "batch_mode",
+                                                       "epilogue",
+                                                       "bias_type",
+                                                       "bias_stride",
+                                                       "aux_type",
+                                                       "scaleA_format",
+                                                       "scaleB_format",
+                                                       "streamk_tile_scheduling",
+                                                       "sm_count_target",
+                                                       "CUs"};
+            for(const char* name : int32Fields)
+                if(!isInt32(row, name))
+                    return false;
+
+            static const char* const boolFields[] = {"gradient",
+                                                     "bias_vector",
+                                                     "scaleA",
+                                                     "scaleB",
+                                                     "scaleC",
+                                                     "scaleD",
+                                                     "scaleE",
+                                                     "scaleAlphaVec",
+                                                     "amaxD",
+                                                     "swizzle_a",
+                                                     "swizzle_b"};
+            for(const char* name : boolFields)
+            {
+                const auto value = exactNum(row, name);
+                if(!value || (*value != 0 && *value != 1))
+                    return false;
+            }
+
+            const bool hasName
+                = (has(row, "kernel_name") && !str(row, "kernel_name").empty())
+                  || (has(row, "solution_name") && !str(row, "solution_name").empty());
+            if(!hasName)
+                return false;
+
             return true;
         }
     } // namespace
@@ -247,15 +391,30 @@ namespace TensileLite
     std::optional<std::pair<ProblemOverride, TunedEntry>>
         problemFromEntries(const std::map<std::string, std::string>& row)
     {
+        // Reject a malformed or unknown schema before interpreting any other
+        // cell. A newer schema can introduce datatype spellings this build does
+        // not know; parsing those first reaches assert-based enum converters and
+        // aborts a debug build before the version check gets a chance to reject
+        // the row.
+        TuningSchemaVersion schemaVersion = TuningSchemaVersion::Legacy;
+        if(has(row, "schema_version"))
+        {
+            const auto version = exactNum(row, "schema_version");
+            if(!version || *version != static_cast<int64_t>(TuningSchemaVersion::Current)
+               || !hasRequiredCurrentColumns(row))
+                return std::nullopt;
+            schemaVersion = TuningSchemaVersion::Current;
+        }
+
         // A solution index of 0 is legitimate: getSolutionsFromIndex accepts it
         // and the shipped logic YAML contains SolutionIndex: 0. The previous
         // parser required > 0 and silently dropped those rows.
-        if(!has(row, "solution_index"))
+        const auto solutionIndexValue = exactNum(row, "solution_index");
+        if(!solutionIndexValue || *solutionIndexValue < 0
+           || *solutionIndexValue > std::numeric_limits<int32_t>::max())
             return std::nullopt;
 
-        const int64_t solutionIndex = num(row, "solution_index", -1);
-        if(solutionIndex < 0)
-            return std::nullopt;
+        const int32_t solutionIndex = static_cast<int32_t>(*solutionIndexValue);
 
         ProblemOverride po;
 
@@ -267,19 +426,40 @@ namespace TensileLite
         po.k         = static_cast<size_t>(num(row, "k"));
         po.batchSize = static_cast<size_t>(num(row, "batch_count", 1));
 
-        po.inputTypeA  = dataType(row, "a_type");
-        po.inputTypeB  = dataType(row, "b_type");
-        po.outputTypeC = dataType(row, "c_type");
+        const auto inputTypeA  = dataType(row, "a_type");
+        const auto inputTypeB  = dataType(row, "b_type");
+        const auto outputTypeC = dataType(row, "c_type");
+        if(!inputTypeA || !inputTypeB || !outputTypeC)
+            return std::nullopt;
+
+        po.inputTypeA  = *inputTypeA;
+        po.inputTypeB  = *inputTypeB;
+        po.outputTypeC = *outputTypeC;
         // Historical rows key only c_type; treat d as equal to c when absent so
         // such a row matches the non-mixed-precision problems it described.
-        po.outputTypeD = has(row, "d_type") ? dataType(row, "d_type") : po.outputTypeC;
+        if(has(row, "d_type"))
+        {
+            const auto outputTypeD = dataType(row, "d_type");
+            if(!outputTypeD)
+                return std::nullopt;
+            po.outputTypeD = *outputTypeD;
+        }
+        else
+        {
+            po.outputTypeD = po.outputTypeC;
+        }
 
         {
             const std::string ct = str(row, "compute_type");
-            po.computeType
-                = ct.empty() ? rocisa::DataType::None
-                             : rocComputeType_to_tensile_type(static_cast<rocblaslt_compute_type>(
-                                   string_to_hipblas_computetype(ct)));
+            if(ct.empty())
+                return std::nullopt;
+
+            const auto computeType = string_to_hipblas_computetype(ct);
+            if(computeType == HIPBLASLT_COMPUTE_TYPE_INVALID)
+                return std::nullopt;
+
+            po.computeType = rocComputeType_to_tensile_type(
+                static_cast<rocblaslt_compute_type>(computeType));
         }
         po.computeInputTypeA = static_cast<int32_t>(num(row, "compute_input_type_a"));
         po.computeInputTypeB = static_cast<int32_t>(num(row, "compute_input_type_b"));
@@ -324,21 +504,22 @@ namespace TensileLite
         po.cuCount  = static_cast<int32_t>(num(row, "CUs"));
 
         TunedEntry entry;
-        entry.solutionIndex = static_cast<int32_t>(solutionIndex);
+        entry.solutionIndex = solutionIndex;
 
+        if(has(row, "kernel_name") && !str(row, "kernel_name").empty())
+            entry.kernelName = str(row, "kernel_name");
         if(has(row, "solution_name") && !str(row, "solution_name").empty())
             entry.solutionName = str(row, "solution_name");
 
-        const bool claimsCurrent = has(row, "schema_version")
-                                   && num(row, "schema_version")
-                                          >= static_cast<int64_t>(TuningSchemaVersion::Current);
-
-        entry.schemaVersion = (claimsCurrent && hasRequiredCurrentColumns(row))
-                                  ? TuningSchemaVersion::Current
-                                  : TuningSchemaVersion::Legacy;
+        entry.schemaVersion = schemaVersion;
 
         entry.buildStamp             = str(row, "git_version");
-        entry.requiredWorkspaceBytes = static_cast<size_t>(num(row, "required_workspace"));
+        if(schemaVersion == TuningSchemaVersion::Current)
+            entry.requiredWorkspaceBytes
+                = static_cast<size_t>(*exactNum(row, "required_workspace"));
+        else
+            entry.requiredWorkspaceBytes = static_cast<size_t>(
+                std::max<int64_t>(0, num(row, "required_workspace")));
         entry.winnerTimeUs           = real(row, "us");
         entry.baselineIndex          = static_cast<int32_t>(num(row, "baseline_index", -1));
         entry.baselineTimeUs         = real(row, "baseline_us");
@@ -354,6 +535,31 @@ namespace TensileLite
          * rocblaslt_compute_type_to_string produces "COMPUTE_32F" style names,
          * which the parser does not recognise.
          */
+        /**
+         * The spelling string_to_hip_datatype parses back to the type it was
+         * written from.
+         *
+         * hipDataType_to_bench_string collapses each FP8 pair onto one spelling,
+         * so both HIP_R_8F_E4M3_FNUZ and HIP_R_8F_E4M3 emit "f8_r", and the
+         * parser resolves that to the OCP type. gfx942 FP8 is FNUZ, so on that
+         * architecture every FP8 row came back describing a different type than
+         * the one measured, never matched its own key, and made the shape retune
+         * and append another row on every process start. Only the two FNUZ types
+         * are ambiguous; everything else already round-trips.
+         */
+        const char* tuningDataTypeToString(hipDataType type)
+        {
+            switch(type)
+            {
+            case HIP_R_8F_E4M3_FNUZ:
+                return "f8_fnuz_r";
+            case HIP_R_8F_E5M2_FNUZ:
+                return "bf8_fnuz_r";
+            default:
+                return hipDataType_to_bench_string(type);
+            }
+        }
+
         const char* computeTypeToBenchString(rocblaslt_compute_type type)
         {
             switch(type)
@@ -431,10 +637,10 @@ namespace TensileLite
         column("k", problem.k);
         column("batch_count", problem.batch_count);
 
-        column("a_type", hipDataType_to_bench_string(problem.a_type));
-        column("b_type", hipDataType_to_bench_string(problem.b_type));
-        column("c_type", hipDataType_to_bench_string(problem.c_type));
-        column("d_type", hipDataType_to_bench_string(problem.d_type));
+        column("a_type", tuningDataTypeToString(problem.a_type));
+        column("b_type", tuningDataTypeToString(problem.b_type));
+        column("c_type", tuningDataTypeToString(problem.c_type));
+        column("d_type", tuningDataTypeToString(problem.d_type));
         column("compute_type", computeTypeToBenchString(problem.compute_type));
         column("compute_input_type_a", key.computeInputTypeA);
         column("compute_input_type_b", key.computeInputTypeB);
@@ -477,7 +683,7 @@ namespace TensileLite
         column("CUs", key.cuCount);
 
         column("solution_index", entry.solutionIndex);
-        column("solution_name", entry.solutionName.value_or(std::string{}));
+        column("kernel_name", entry.kernelName.value_or(std::string{}));
         column("required_workspace", entry.requiredWorkspaceBytes);
         column("us", entry.winnerTimeUs);
 
@@ -503,12 +709,19 @@ namespace TensileLite
 
         OverrideMap& m_override = OverrideMap::getMap();
 
-        // Each path is parsed at most once. The previous gate was
-        // m_override.size() == 0, which re-read the file on every heuristic call
-        // whenever it yielded no usable rows, and which would also have blocked
-        // loading once online tuning had inserted anything.
+        // Claimed before the file is opened. Opening first meant every lookup on
+        // an already-loaded path paid a filesystem open just to discover the
+        // load latch was already set, on the replay hot path.
         if(!m_override.claimLoad(path))
             return;
+
+        struct LoadClaim
+        {
+            OverrideMap& map;
+            std::string  path;
+            bool         success = false;
+            ~LoadClaim() { map.finishLoad(path, success); }
+        } claim{m_override, path};
 
         std::ifstream file_read(path);
         if(!file_read)
@@ -520,9 +733,20 @@ namespace TensileLite
 
         std::string fileBuildStamp;
         std::string line;
+        std::string pendingHeader;
 
-        while(std::getline(file_read, line))
+        while(true)
         {
+            if(!pendingHeader.empty())
+            {
+                line = std::move(pendingHeader);
+                pendingHeader.clear();
+            }
+            else if(!std::getline(file_read, line))
+            {
+                break;
+            }
+
             const std::string header = trimmed(line);
             if(header.empty())
                 continue;
@@ -537,14 +761,24 @@ namespace TensileLite
                 }
             }
 
-            if(header.find(kHeaderSentinel) == std::string::npos)
+            if(!isHeaderRow(header))
                 continue;
 
             std::string valueLine;
             if(!std::getline(file_read, valueLine))
                 break;
 
-            auto parsed = problemFromEntries(zipRow(splitCsv(header), splitCsv(trimmed(valueLine))));
+            const std::string value = trimmed(valueLine);
+            if(isHeaderRow(value))
+            {
+                // A crashed/torn append can leave only its header. Do not
+                // consume the next valid header as that record's values; put it
+                // back through the loop so its following value row survives.
+                pendingHeader = value;
+                continue;
+            }
+
+            auto parsed = problemFromEntries(zipRow(splitCsv(header), splitCsv(value)));
             if(!parsed)
                 continue;
 
@@ -556,11 +790,12 @@ namespace TensileLite
             if(entry.buildStamp.empty())
                 entry.buildStamp = fileBuildStamp;
 
-            // A row carrying a solution name validates itself at replay: the
-            // recorded index is resolved in the current library and the name
-            // must still match. A row without one has no such check, so the
-            // build stamp is the only trust signal it has.
-            if(!entry.solutionName.has_value() && entry.buildStamp != currentBuildStamp())
+            // A row carrying a name validates itself at replay: the recorded
+            // index is resolved in the current library and the name must still
+            // match. A row without one has no such check, so the build stamp is
+            // the only trust signal it has.
+            if(!entry.kernelName.has_value() && !entry.solutionName.has_value()
+               && entry.buildStamp != currentBuildStamp())
                 continue;
 
             // v0 rows go into the narrow map. They cannot populate the widened
@@ -572,5 +807,10 @@ namespace TensileLite
             if(inserted)
                 TuningCounters::instance().entriesLoaded++;
         }
+
+        // Only a clean read counts as loaded. A read that stopped on badbit,
+        // such as an I/O error partway through, would otherwise latch a
+        // partially populated map as complete and never be retried.
+        claim.success = !file_read.bad();
     }
 } // namespace TensileLite

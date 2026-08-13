@@ -33,6 +33,7 @@
 #include <shared_mutex>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -405,8 +406,18 @@ namespace TensileLite
     {
         int32_t solutionIndex = -1;
 
-        // Absent for legacy rows. When present, replay resolves the index in the
-        // current library and requires the name to still match before using it.
+        // Kernel identity. When either is present, replay resolves the index in
+        // the current library and requires the name to still match before using
+        // the entry; both absent means a legacy row with nothing to check but
+        // the build stamp.
+        //
+        // kernelName is what new rows carry. It names the compiled kernel and
+        // leaves out the solution-level defaults (GSU, staggerU, WGM) that
+        // solutionName also encodes, so it is both shorter and stable across a
+        // build that only retunes those defaults. solutionName is still read so
+        // files written before the switch keep validating, against the field
+        // they were actually written from.
+        std::optional<std::string> kernelName;
         std::optional<std::string> solutionName;
 
         TuningSchemaVersion schemaVersion = TuningSchemaVersion::Legacy;
@@ -545,6 +556,23 @@ namespace TensileLite
             return found;
         }
 
+        /**
+         * Two rows are the same entry only when the index and *both* identity
+         * fields agree.
+         *
+         * Comparing the index and solutionName alone silently treated every
+         * new-format row as identical to every other row with that index, since
+         * new rows leave solutionName empty and carry kernelName instead. A
+         * stale row then suppressed the fresh replacement written beside it,
+         * which is the same append-only retune failure the index-only compare
+         * caused before.
+         */
+        static bool sameEntry(const TunedEntry& a, const TunedEntry& b)
+        {
+            return a.solutionIndex == b.solutionIndex && a.kernelName == b.kernelName
+                   && a.solutionName == b.solutionName;
+        }
+
         bool addLegacyIfAbsent(const ProblemOverride& key, const TunedEntry& entry)
         {
             std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
@@ -552,9 +580,17 @@ namespace TensileLite
             const ProblemOverride narrow = key.legacyKey();
             auto                  range  = m_legacy.equal_range(narrow);
             for(auto it = range.first; it != range.second; ++it)
-                if(it->second.solutionIndex == entry.solutionIndex
-                   && it->second.solutionName == entry.solutionName)
+                if(sameEntry(it->second, entry))
+                {
+                    // The file is append-only, so the later row is the newer
+                    // observation. Refresh metadata even when its kernel
+                    // identity did not change: workspace requirements and build
+                    // stamps can change, and keeping the older values makes the
+                    // validity gate reject the row on every process start and
+                    // append the same replacement forever.
+                    it->second = entry;
                     return false;
+                }
 
             m_legacy.emplace(narrow, entry);
             return true;
@@ -582,7 +618,8 @@ namespace TensileLite
 
         /**
          * Insert unless an identical entry already exists for this key, so
-         * re-reading a file does not stack duplicates. Returns true if the
+         * re-reading a file does not stack duplicates. An identical later row
+         * refreshes the earlier row's metadata. Returns true only if a distinct
          * entry was inserted.
          *
          * Identity is the index *and* the recorded name, not the index alone.
@@ -598,26 +635,49 @@ namespace TensileLite
 
             auto range = m_override.equal_range(key);
             for(auto it = range.first; it != range.second; ++it)
-                if(it->second.solutionIndex == entry.solutionIndex
-                   && it->second.solutionName == entry.solutionName)
+                if(sameEntry(it->second, entry))
+                {
+                    // Same append-order rule as the legacy map: identical
+                    // identity means replace its metadata, not discard the
+                    // newer row.
+                    it->second = entry;
                     return false;
+                }
 
             m_override.emplace(key, entry);
             return true;
         }
 
         /**
-         * Record that a path has been parsed.
+         * Claim a path for parsing.
          *
-         * Load used to be gated on size() == 0, which meant a file that yielded
-         * no valid rows was re-read on every heuristic call, and which would
-         * additionally block a second file once online tuning had inserted
-         * anything. Returns true if this call claimed the load.
+         * A concurrent caller for the same path waits for the active parser
+         * rather than observing a partially populated map and retuning an entry
+         * that is still later in the file.
          */
         bool claimLoad(const std::string& path)
         {
-            std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
-            return m_loadedPaths.insert(path).second;
+            std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
+            m_loadCv.wait(lock, [&] { return m_loadingPaths.count(path) == 0; });
+            if(m_loadedPaths.count(path) != 0)
+                return false;
+            m_loadingPaths.insert(path);
+            return true;
+        }
+
+        /**
+         * Publish a completed load, or release a failed claim so a later call
+         * can retry (for example after a transient open failure).
+         */
+        void finishLoad(const std::string& path, bool success)
+        {
+            {
+                std::lock_guard<std::shared_timed_mutex> lock(m_mutex);
+                m_loadingPaths.erase(path);
+                if(success)
+                    m_loadedPaths.insert(path);
+            }
+            m_loadCv.notify_all();
         }
 
         /**
@@ -631,6 +691,8 @@ namespace TensileLite
             m_override.clear();
             m_legacy.clear();
             m_loadedPaths.clear();
+            m_loadingPaths.clear();
+            m_loadCv.notify_all();
         }
 
         bool isLoaded(const std::string& path) const
@@ -643,6 +705,8 @@ namespace TensileLite
         std::multimap<ProblemOverride, TunedEntry> m_override;
         std::multimap<ProblemOverride, TunedEntry> m_legacy;
         std::set<std::string>                      m_loadedPaths;
+        std::set<std::string>                      m_loadingPaths;
+        std::condition_variable_any                m_loadCv;
         mutable std::shared_timed_mutex            m_mutex;
     };
 } // namespace TensileLite
