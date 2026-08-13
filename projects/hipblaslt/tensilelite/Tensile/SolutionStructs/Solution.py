@@ -58,7 +58,7 @@ from Tensile.Components.CustomSchedule import hasCustomSchedule
 
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
-from .Utilities import reject, roundupRatio, pvar
+from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -725,7 +725,7 @@ class Solution(collections.abc.Mapping):
                "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
                "use Auto(-1) or Relative(1)")
         return
-      if state["ISA"] != (12, 5, 0):
+      if tuple(state["ISA"]) != (12, 5, 0):
         reject(state, printRejectionReason,
                f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
                "use Auto(-1) or Off(0)")
@@ -1083,7 +1083,9 @@ class Solution(collections.abc.Mapping):
     # each WG's tile per iteration, so the broadcast would target the wrong partner.
     # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K.
     if state["ClusterDim"] != [1, 1] and state["StreamK"] == 0:
-      state["Multicast"] = True
+      # gfx1250 v0 silicon has no TDM-multicast (an arch fact, in archCaps); clustering
+      # and ClusterBarrier are separate features it keeps, so only multicast is gated.
+      state["Multicast"] = isaInfoMap[state["ISA"]].archCaps.get("HasTDMMulticast", True)
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
@@ -1991,6 +1993,16 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["DataType"].isDouble() and not (isaInfoMap[isa].asmCaps["HasMFMA_f64"] or isaInfoMap[isa].asmCaps["HasWMMA_V3_f64"]):
         reject(state, printRejectionReason, f"isa {isa} doesn't support matrix instruction with type f64")
         return
+      # Complex on WMMA (K>1) de-interleaves operands into temps just before each
+      # matrix op; SIA3 flat-schedules the mac items individually, separating the
+      # de-interleave moves from their consuming WMMA and recycling the temps early
+      # -> wrong results. Reject SIA3 only (gfx1250 uses SIA4).
+      if state["ProblemType"]["DataType"].isComplex() \
+         and isaInfoMap[isa].asmCaps["HasWMMA_V3"] \
+         and state["MatrixInstK"] > 1 \
+         and state["_ScheduleIterAlg"] == 3:
+        reject(state, printRejectionReason, "Complex WMMA de-interleave does not support ScheduleIterAlg=3")
+        return
       if state["InterleaveAlpha"]:
         reject(state, printRejectionReason, "Matrix instruction doesn't support InterleaveAlpha")
         return
@@ -2607,6 +2619,10 @@ class Solution(collections.abc.Mapping):
       if not isaInfoMap[isa].asmCaps["HasTDM"]:
         reject(state, printRejectionReason, "This arch does not support TDM")
         return
+      # TDM data_size is a 2-bit field (max element 8B); f64-complex is 16B.
+      if state["ProblemType"]["DataType"].isDoubleComplex():
+        reject(state, printRejectionReason, "TDM does not support f64-complex (16B exceeds data_size field)")
+        return
 
     if state["CompactLoopStore"]:
       if not isaInfoMap[isa].asmCaps["HasMovRelsD2B32"]:
@@ -2738,9 +2754,6 @@ class Solution(collections.abc.Mapping):
         return
       if state["PrefetchGlobalRead"] == 0:
         reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
-        return
-      if state["LoopIters"] == 1:
-        reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
         return
       if not (state["enableTDMA"] and state["enableTDMB"]):
         reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
@@ -2926,6 +2939,18 @@ class Solution(collections.abc.Mapping):
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
     isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
+      # gfx1250 v0 silicon lacks the fp4 32x16 WMMA opcode. Gate on the *physical* opcode dims
+      # MIBlock[0]/[1], not the effective MatrixInstM/N: under SourceSwap the effective extents
+      # transpose (32x16 -> 16x32) while the physical opcode is unchanged. Real 32x16 fp4 configs
+      # ship with SourceSwap both ways (true in mxf4_gfx1250.yaml, false in
+      # streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml), so only the physical dims identify the opcode.
+      if isFloat4 and not isaInfoMap[isa].asmCaps.get("HasWMMA_f4_32x16", True) \
+          and len(state.get("MIBlock", [])) >= 2 \
+          and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
+        reject(state, printRejectionReason,
+               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
+               "use a 16x16 MatrixInstruction or build for gfx1250")
+        return
       if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
         if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
@@ -3328,7 +3353,8 @@ class Solution(collections.abc.Mapping):
             # A/B in iterate-mode bypass the pad_interval encoding; skip their
             # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
             # must still satisfy the pad_interval constraints.
-            if tc in ("A", "B") and state.get("_TDMIterateMode%s" % tc, False):
+            if tc in ("A", "B") and (state.get("_TDMIterateMode%s" % tc, False)
+                                      or isSubtileIterateMode(state, tc)):
               if val == 0:
                 reject(state, printRejectionReason,
                        f"TDMIterateMode set for {tc} but LdsBlockSizePerPad{tc}=0; "
@@ -4139,17 +4165,8 @@ class Solution(collections.abc.Mapping):
                 validDepthU = False
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
 
-          # TDM pad_interval (padIntervalBytes = DepthU * bpeGR) max allowed value is
-          # 1024 bytes (256 DWORDs).
-          if state["UseSubtileImpl"]:
-            for tc in ["A", "B"]:
-              if not state["enableTDM%s" % tc]:
-                continue
-              padIntervalBytes = depthU * state["ProblemType"]["DataType%s" % tc].numBytes()
-              if padIntervalBytes > 1024:
-                validDepthU = False
-                extraComment = ": DepthU(%u)*bpeGR%s = %u exceeds TDM pad_interval limit of 1024 bytes" \
-                               % (depthU, tc, padIntervalBytes)
+          # Subtile bypasses the 1024B pad_interval limit via iterate mode;
+          # non-subtile TDM handles it earlier via _TDMIterateMode + VW halving.
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
@@ -5070,15 +5087,14 @@ class Solution(collections.abc.Mapping):
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
-    # Resolve the -1/0/1 knob to the applied 0/1 (LDSSI1 always means "applied"; identical
-    # variants dedup). Defer the one case whose applicability isn't known yet: an unresolved
-    # 1LDSBuffer (-1) whose only blocker is "needs 1LDSBuffer==0" -- re-decided after it resolves.
+    # Defer resolving if the oracle only blocked on an unresolved 1LDSBuffer(-1) (resolved later, then re-evaluated).
     _segRequested = state["LDSSegmentInterleave"]
     _segDeferForBuf = _oneLdsBufAtEval == -1 and _segReason == "needs 1LDSBuffer==0"
     if not _segDeferForBuf:
+      # 1 = applied, 0 = not; split vs bcontig is read from the offsets, not this value.
       state["LDSSegmentInterleave"] = 1 if _segApplicable else 0
       if _segRequested == 1 and not _segApplicable:
-        reject(state, printRejectionReason, "LDSSegmentInterleave=1 requested but not applicable: %s" % _segReason)
+        reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason))
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
@@ -5119,7 +5135,7 @@ class Solution(collections.abc.Mapping):
         if _segRequested == 1:
           _segReason2 = "aligned needs LDS reserved before 1LDSBuffer resolution" \
             if _segRes2["applicable"] else _segRes2["reason"]
-          reject(state, printRejectionReason, "LDSSegmentInterleave=1 requested but not applicable: %s" % _segReason2)
+          reject(state, printRejectionReason, "LDSSegmentInterleave=%d requested but not applicable: %s" % (_segRequested, _segReason2))
 
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:
@@ -5474,6 +5490,9 @@ class Solution(collections.abc.Mapping):
 
     if state["LoopIters"] < 1:
       reject(state, printRejectionReason, "LoopIters need to greater than 0")
+      return
+    if state["HalfPLR"] and state["LoopIters"] == 1:
+      reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
       return
 
     # Reject SIA3 + PLR>0 + PGR2 + BufferLoad=0 when LoopIters <= 1.
