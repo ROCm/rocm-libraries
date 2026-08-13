@@ -2684,6 +2684,64 @@ namespace rocisa
         int xcnt;
     };
 
+    // s_wait_asynccnt N waits for in-flight async (LDS direct-DMA) operations
+    // issued by instructions such as global_load_async_to_lds. Only available
+    // on architectures that support async LDS loads (e.g. gfx1250+). The
+    // default asynccnt = 0 drains all pending async ops; unlike the _SWait*cnt
+    // composites, there is no sentinel -1 concept here since this is a
+    // standalone wait.
+    struct SWaitAsynccnt : public Instruction
+    {
+        SWaitAsynccnt(int asynccnt = 0, const std::string& comment = "")
+            : Instruction(InstType::INST_SWAIT, comment)
+            , asynccnt(asynccnt)
+        {
+        }
+
+        SWaitAsynccnt(const SWaitAsynccnt& other)
+            : Instruction(other)
+            , asynccnt(other.asynccnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SWaitAsynccnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {asynccnt};
+        }
+
+        int getAsynccnt() const
+        {
+            return asynccnt;
+        }
+
+        std::string toString() const override
+        {
+            const auto caps       = getAsmCaps();
+            const auto it         = caps.find("MaxAsynccnt");
+            const int  maxAsynccnt = (it != caps.end()) ? it->second : 63;
+            return formatWithComment("s_wait_asynccnt "
+                                     + std::to_string(std::min(asynccnt, maxAsynccnt)));
+        }
+
+    private:
+        int asynccnt;
+    };
+
     struct SWaitCnt : public CompositeInstruction
     {
         /*

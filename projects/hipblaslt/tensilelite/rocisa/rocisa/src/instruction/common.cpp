@@ -909,6 +909,14 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SWaitXCnt& self, nb::dict&) { return new rocisa::SWaitXCnt(self); });
 
+    nb::class_<rocisa::SWaitAsynccnt, rocisa::Instruction>(m_common, "SWaitAsynccnt")
+        .def(nb::init<int, const std::string&>(), nb::arg("asynccnt") = 0, nb::arg("comment") = "")
+        .def("getParams", &rocisa::SWaitAsynccnt::getParams)
+        .def("__str__", &rocisa::SWaitAsynccnt::toString)
+        .def("__deepcopy__", [](const rocisa::SWaitAsynccnt& self, nb::dict&) {
+            return new rocisa::SWaitAsynccnt(self);
+        });
+
     nb::class_<rocisa::SWaitCnt, rocisa::CompositeInstruction>(m_common, "SWaitCnt")
         .def(nb::init<int, int, int, int, const std::string&, bool>(),
              nb::arg("vlcnt")    = -1,

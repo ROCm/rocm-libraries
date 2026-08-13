@@ -180,6 +180,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"GlobalPrefetchB8", "global_prefetch_b8"},
         {"GlobalLoadTR8B64", "global_load_tr_b64"},
         {"GlobalLoadTR16B128", "global_load_tr_b128"},
+        {"GlobalLoadAsyncToLdsB128", "global_load_async_to_lds_b128"},
         /* common.hpp */
         {"SAddF32", "s_add_f32"},
         {"SCvtF32U32", "s_cvt_f32_u32"},
@@ -245,6 +246,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"SWaitCnt", "s_waitcnt"},
         {"SWaitTensorcnt", "s_wait_tensorcnt"},
         {"SWaitXCnt", "s_wait_xcnt"},
+        {"SWaitAsynccnt", "s_wait_asynccnt"},
         {"GlobalWb", "global_wb"},
         {"GlobalInv", "global_inv"},
         {"SDelayAlu", "s_delay_alu"},
