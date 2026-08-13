@@ -94,6 +94,14 @@ class UnifiedAttentionProblem:
     use_qq_bias: bool = False
     use_fp8: bool = False
     num_sms: int = 120
+    # Direct device-subscription target override (concurrent workgroups / CTAs).
+    # 0 => auto: derive as ``num_sms * 4``. When > 0, this takes precedence over
+    # ``num_sms`` for 2D<->3D routing (``select_path``) and 3D segmentation
+    # (``select_3d``), so tuners/benchmarks can pin the target without knowing
+    # the device CU count. Honoured on the Python dispatch path; like ``num_sms``,
+    # the C++ C-ABI engine (attention_unified_entry.cpp) does not yet read it, so
+    # a companion change is needed for it to take effect in production.
+    target_ctas: int = 0
     # AMDGPU occupancy hint ("amdgpu-waves-per-eu"). The 2D-tiled and
     # 3D-tiled specs both honour this knob; the scalar paths ignore it
     # because they already fit at 1 wave per workgroup. ``None`` keeps
@@ -136,8 +144,17 @@ class UnifiedAttentionProblem:
         block_q = block_m // self.num_queries_per_kv
         return self.total_q // block_q + self.num_seqs
 
+    @property
+    def _effective_target_ctas(self) -> int:
+        """Device-subscription target: the number of concurrent workgroups that
+        "fills" the device. Single source of truth for 2D<->3D routing
+        (``select_path``) and the 3D segment count (``select_3d``). Uses the
+        explicit ``target_ctas`` override when set (> 0); otherwise derives it
+        as ``num_sms * 4`` (4 CTAs/CU)."""
+        return self.target_ctas if self.target_ctas > 0 else self.num_sms * 4
+
     def select_path(self) -> str:
-        target = self.num_sms * 4
+        target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return (
             "2d"
@@ -167,7 +184,7 @@ class UnifiedAttentionProblem:
         )
 
     def select_3d(self) -> Tuple[Attention3DConfig, Attention3DConfig]:
-        target = self.num_sms * 4
+        target = self._effective_target_ctas
         num_2d = self.total_num_q_blocks_upper_bound * self.num_kv_heads
         return select_3d_config(
             head_size=self.head_size,
@@ -363,6 +380,29 @@ def _tiled_3d_impl(arch: str):
     )
 
 
+# --- Declared coverage of the unified backend -------------------------------
+#
+# The shape and dtype coverage below is DATA rather than literals inside the
+# predicate, because the dispatcher has to state the same coverage as a
+# ``Capability`` and must not restate it from memory. A capability that
+# disagrees with this predicate fails in one direction silently: the prefilter
+# rejects a problem the kernel would in fact have run, so new coverage added
+# here would simply never become reachable. Exporting the sets makes that
+# impossible by construction.
+UNIFIED_HEAD_SIZES: Tuple[int, ...] = (64, 128, 256)
+"""Head sizes the scalar 2D backend covers.
+
+The kernel loops over head_size with ``b.unroll(p.head_size)``, so any head
+size that divides cleanly through the online-softmax accumulator works; this
+tuple is the set that has actually been exercised.
+"""
+
+UNIFIED_BLOCK_SIZES: Tuple[int, ...] = (16, 32, 64)
+"""Paged-KV block sizes, used only as the modulus in PagedKvDescriptor."""
+
+UNIFIED_DTYPES: Tuple[str, ...] = ("fp16", "bf16")
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
 ) -> Tuple[bool, str]:
@@ -383,11 +423,11 @@ def supports_native_unified_attention(
     - sliding_window: yes
     - softcap: yes
     """
-    if problem.head_size not in (64, 128, 256):
+    if problem.head_size not in UNIFIED_HEAD_SIZES:
         return False, f"unsupported head_size {problem.head_size}"
-    if problem.block_size not in (16, 32, 64):
+    if problem.block_size not in UNIFIED_BLOCK_SIZES:
         return False, f"unsupported block_size {problem.block_size}"
-    if problem.dtype not in ("fp16", "bf16"):
+    if problem.dtype not in UNIFIED_DTYPES:
         return False, f"unsupported dtype {problem.dtype}"
     if problem.use_fp8:
         if problem.q_dtype is not None and problem.q_dtype not in ("fp16", "bf16"):
@@ -434,6 +474,12 @@ def supports_native_unified_attention_tiled(
             use_transposed_qk_32x32=True,
             use_k_single_buffer=single_k,
             use_conflict_free_v_store=use_cfvst,
+            # This branch reaches gfx942's gate too, so it needs the same ring
+            # parameters as the general path below, or the estimate here sizes a
+            # different kernel than _tiled_spec_from_problem builds. Reachable
+            # by definition: _enable_gfx942_bf16_flash implies gfx942.
+            ring_depth=_select_gfx942_flash_ring_depth(problem),
+            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
         )
     gfx942_flash = _enable_gfx942_fp16_flash(problem)
     num_warps = (
@@ -461,6 +507,26 @@ def supports_native_unified_attention_tiled(
         use_conflict_free_v_store=gfx942_flash and _gfx942_flash_use_cfvst(problem),
         use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
         use_d256_fast=_d256_gfx942_fast(problem),
+        # The LDS-budget gate sizes the ring's K staging from these, so they have
+        # to be the same values _tiled_spec_from_problem will put on the spec or
+        # the admission check measures a kernel we never build.
+        #
+        # Passed only for gfx942: they are sliced-K ring parameters with no meaning
+        # on the other arch gates, whose supports_tiled_2d does not declare them.
+        # Gating the call site keeps four other arches free of accept-and-ignore
+        # parameters, and avoids the failure mode where this shared caller passes a
+        # kwarg that only one arch accepts -- the failure mode #10126 fixed for
+        # use_d256_fast. Omitting them leaves the gate on its defaults, which
+        # over-count and therefore only ever over-reject -- never admit an
+        # unbuildable combo.
+        **(
+            {
+                "ring_depth": _select_gfx942_flash_ring_depth(problem),
+                "k_slice_hd": _select_gfx942_flash_k_slice_hd(problem),
+            }
+            if arch == "gfx942"
+            else {}
+        ),
     )
 
 
@@ -575,15 +641,20 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     single-buffer on (no ring, no grouped_kv2, no FP8, V single-buffer). The
     cohort already satisfies these; the spec __post_init__ re-validates loudly.
 
-    GEOMETRY GUARD: K-single needs Q to fit the lone K slot, i.e.
-    ``block_m <= tile_size``. The cohort runs num_warps=2 / block_m_per_warp=32
-    -> block_m=64, with tile_size = 2*block_size, so this only holds for
-    ``block_size >= 32`` (T>=64). At block_size=16 (T=32) Q (64 rows) cannot fit
-    the single 32-token K slot and the __post_init__ validator rejects it
-    (use_q_direct_reg would lift this but is not wired on this path). Fall back
-    to the no-K-single small-tile config there.
+    GEOMETRY GUARD: K-single aliases Q into the lone K slot, so the spec
+    validator requires ``block_m <= tile_size``. Derive that from the geometry
+    selectors rather than proxying it as ``block_size >= 32`` -- that proxy
+    assumed num_warps=2 (block_m=64) and went stale when
+    ``_enable_softmax_mfma_interleave`` widened this same cohort to num_warps=4
+    (block_m=128 > T=64 at block_size=32 -> uncaught ValueError at launch;
+    block_size=64 survived only by coincidence, T=2*64=128==block_m).
     """
-    return _enable_d128_small_tile(problem) and problem.block_size >= 32
+    if not _enable_d128_small_tile(problem):
+        return False
+    # block_m <= tile_size, asked of the selectors that actually set the geometry
+    # (no recursion: none of these consult _enable_k_single_buffer).
+    block_m = _select_2d_num_warps(problem) * _select_2d_block_m_per_warp(problem)
+    return block_m <= _select_2d_tile_size(problem)
 
 
 def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
@@ -1273,6 +1344,16 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
             if _enable_gfx942_flash_k_sliced_ring(problem)
             else None
         ),
+        # K slice width, for the same reason as the depth above: it changes
+        # k_groups, the K_lds extents and the barrier count, so two widths are
+        # different kernels and must not share a cached launcher. Also keeps the
+        # HIPDNN_GFX942_K_SLICE_HD override from being masked by a launcher cached
+        # under a previous width in the same process.
+        (
+            _select_gfx942_flash_k_slice_hd(problem)
+            if _enable_gfx942_flash_k_sliced_ring(problem)
+            else None
+        ),
         _enable_gfx942_flash_k_sliced_ldsseq(problem),
         # bf16-wide non-ring geometry knobs: cfvst (HIPDNN_GFX942_BF16_CFVST) and
         # small-tile double-K (HIPDNN_GFX942_D128_SMALLTILE_DK) affect num_warps,
@@ -1803,7 +1884,14 @@ def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, b
         # (C-twin parity GREEN); only the selector routing changes.
         if _enable_gfx942_d128_smalltile_doublek(problem):
             return 2, False
-        return 2, True
+        # K-single requires block_m <= tile_size (Q aliases the lone K slot).
+        # Derive block_m from the nw this branch returns so a later nw bump can't
+        # silently stale the guard (the exact hazard this fix addresses); mw=32 is
+        # the 32x32x8 transposed MFMA's fixed M-per-warp, pinned at the
+        # supports_tiled_2d / _tiled_spec_from_problem call sites.
+        nw = 2
+        block_m = nw * 32
+        return nw, block_m <= _gfx942_bf16_wide_tile_size(problem)
     return 4, False
 
 
@@ -1980,6 +2068,51 @@ def _select_gfx942_flash_ring_depth(problem: UnifiedAttentionProblem) -> int:
     ):
         return 2
     return 3
+
+
+# Widths the ring schedule can legally take: they must divide both head size in
+# use (64 and 128) and the 8-element QK k-step. 8 is the floor -- below it
+# ``k_steps_per_group`` floors to zero and a slice emits no MFMA.
+_GFX942_K_SLICE_HD_CHOICES = (8, 16, 32, 64)
+
+
+def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
+    """K slice width (head-dim elements) for the gfx942 sliced-K ring.
+
+    The width sets ``k_groups = head_size // width`` and the K_lds row stride,
+    which is what the QK read's LDS bank spread follows -- see the ``k_slice_hd``
+    spec field. It is a genuine tuning axis: narrowing cuts the bank-conflict
+    degree but doubles the per-tile barrier and partial-wait count, so the best
+    width is a knee rather than the smallest legal value.
+
+    Returns the shipped 32 for every problem: this makes the width expressible
+    without changing any kernel. Selecting a narrower width is a separate change,
+    and one that has to mirror the width into the C++ engine first -- the C++ twin
+    of this builder hardcodes ``K_SLICE_HD`` (and ``K_SLICE_SLOTS``), so a Python
+    selector that returned anything else would make the two engines disagree for
+    ring specs. The parity corpus enumerates no ring config, so the byte-identity
+    gate would not catch it.
+
+    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. It is a
+    diagnostic knob and carries that same engine-divergence caveat, which is why
+    the default path does not use it. Only meaningful when the ring is active."""
+    env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICE_HD", "").strip()
+    # isdecimal rather than isdigit: isdigit accepts characters such as
+    # superscripts that int() then rejects, turning a typo into a ValueError on
+    # the dispatch path.
+    if env.isdecimal() and int(env) in _GFX942_K_SLICE_HD_CHOICES:
+        width = int(env)
+        # Mirror the validator's shape rules, or the env var can turn a supported
+        # problem into a hard failure: the feasibility gate answers "supported"
+        # before the spec is built, so a rule enforced only in ``__post_init__``
+        # surfaces as a late ValueError on the dispatch path rather than as a
+        # clean decline back to the default width. The width must divide the head
+        # size, and must leave at least two slices. The remaining rule -- a
+        # multiple of the QK k-step -- holds for every member of
+        # ``_GFX942_K_SLICE_HD_CHOICES``, so it cannot fail here.
+        if problem.head_size % width == 0 and problem.head_size // width >= 2:
+            return width
+    return 32
 
 
 def _enable_gfx942_flash_k_sliced_ldsseq(problem: UnifiedAttentionProblem) -> bool:
@@ -2460,28 +2593,53 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     return 16
 
 
+# Reference CU count for the split-KV segment clamp below. This is NOT the device
+# count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
+# baseline -- the segment count the formula produced at the historical num_sms=120
+# -- used only as the safe ceiling so raising num_sms cannot over-split 3D shapes.
+_PRE_BUMP_SMS = 120
+
+
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
-    # AITER's Triton path scales decode splits with the full MI300X CU count
-    # (typically 128 segments here). The gfx942 rocke segment+reduce kernels
-    # are not the same implementation; after host-overhead cleanup, 128-way
-    # split regresses these q=1/kv=2048 shapes while 64 segments is stable.
-    if (
-        _resolve_attention_arch() == "gfx942"
-        and problem.max_seqlen_q == 1
-        and problem.max_seqlen_k <= 2048
-        and problem.sliding_window == 0
-    ):
-        if problem.head_size == 64:
-            return min(segments, 32)
-        if problem.head_size == 128:
-            return min(segments, 16)
-        # D256: sweep (decode_shapes_perf gfx942) shows seg128 wins or ties at
-        # every kv_len — do not cap below the formula value.
-        if problem.head_size != 256:
-            return min(segments, 64)
+    # Routing uses the device CU count (num_sms*4) so under-filled grids flip
+    # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
+    # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
+    # formula produced at the reference num_sms=120 -> target=480) is the
+    # universally-safe ceiling: clamping to it can never do worse than shipped.
+    if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
+        num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
+        min_seg = 16 if problem.block_size <= 16 else 8
+        pre_bump = max(
+            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
+            min_seg,
+        )
+        if problem.max_seqlen_q == 1:
+            # DECODE: boundaries measured on gfx942 (Level 1, fp32-gated).
+            if problem.max_seqlen_k <= 2048:
+                if problem.head_size == 64:
+                    return min(segments, 32)
+                if problem.head_size == 128:
+                    return min(segments, 16)
+                # D256: sweep shows seg128 wins/ties at every kv_len -- no cap.
+                if problem.head_size != 256:
+                    return min(segments, 64)
+            elif problem.head_size == 128 and problem.max_seqlen_k < 32768:
+                # D128 moderate kv: 128-way over-splits (down to 0.50x); clamp to
+                # the per-shape pre-bump split (num_2d=8 -> 64, num_2d=16 -> 32).
+                # Covers all kv<32768 (incl. non-power-of-2 runtime lengths); only
+                # kv>=32768 is left uncapped, where 128-way is measured to win.
+                return min(segments, pre_bump)
+            # D128 kv>=32768, D64 (any kv), D256: uncapped -- finer split measured
+            # to win (405b kv32768 1.18x, decode D64 1.26x).
+        else:
+            # q>1 PREFILL / SPEC-DECODE / MTP: the same bump inflates segments here
+            # (spec-decode q=2-8, small batch route 3D with num_2d small). This path
+            # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
+            # never over-split prefill (identical to the shipped num_sms=120 split).
+            return min(segments, pre_bump)
     return segments
 
 

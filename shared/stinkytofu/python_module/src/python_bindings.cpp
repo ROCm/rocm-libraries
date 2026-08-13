@@ -482,7 +482,11 @@ NB_MODULE(_stinkytofu, m) {
     // ========================================================================
     // Architecture IDs
     // ========================================================================
-    nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
+    // Only the architectures this library was built for exist in GfxArchID, so the enum is
+    // exposed from the same list rather than hand-maintained.
+    auto gfxArch = nb::enum_<GfxArchID>(m, "GfxArch");
+#define STINKYTOFU_ARCH(archName) gfxArch.value(#archName, GfxArchID::archName);
+#include "Config/Archs.def"
 
     // ========================================================================
     // Toolchain capability probing (via comgr)

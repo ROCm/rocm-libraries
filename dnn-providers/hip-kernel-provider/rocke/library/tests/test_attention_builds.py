@@ -746,6 +746,49 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("supported", reason)
 
+    def test_gfx950_d128_ksingle_buffer_geometry_guard(self):
+        """gfx950 d128 single-seq prefill: ``_enable_k_single_buffer`` must
+        derive ``block_m <= tile_size`` from the geometry selectors, not proxy
+        it as ``block_size >= 32``.
+
+        The stale proxy assumed num_warps=2; ``_enable_softmax_mfma_interleave``
+        later widened this cohort to num_warps=4 (block_m=128), so block_size=32
+        (T=64) tripped the ``block_m <= tile_size`` validator with an uncaught
+        ValueError at spec build (no sliding window needed). block_size=64
+        survived only by coincidence (T=128 == block_m). Pin: bs32 builds with
+        K-single OFF; bs64 keeps K-single ON (golden parity case 53) -- both
+        dtypes, no SW.
+        """
+        import kernels.common.attention_unified as au
+
+        def _p(block_size, dtype):
+            return UnifiedAttentionProblem(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                block_size=block_size,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype=dtype,
+                sliding_window=0,
+            )
+
+        with _patch_resolved_arch("gfx950"):
+            for dtype in ("fp16", "bf16"):
+                # bs32 was an uncaught ValueError at spec build; must now build.
+                p32 = _p(32, dtype)
+                self.assertEqual(p32.select_path(), "2d")
+                self.assertFalse(au._enable_k_single_buffer(p32))
+                spec32 = au._tiled_spec_from_problem(p32)  # must NOT raise
+                self.assertFalse(spec32.use_k_single_buffer)
+                # bs64 still satisfies block_m <= tile_size -> K-single stays on.
+                p64 = _p(64, dtype)
+                self.assertTrue(au._enable_k_single_buffer(p64))
+                spec64 = au._tiled_spec_from_problem(p64)
+                self.assertTrue(spec64.use_k_single_buffer)
+
     def test_unified_attention_scalar_kernels_compile(self):
         p = UnifiedAttentionProblem(
             total_q=3,
@@ -815,11 +858,15 @@ class TestAttentionHelpers(unittest.TestCase):
 
         gfx942 2D built the fp8 chunk-count assert unconditionally. A bf16
         SWA/decode small-tile config (T=16, HD=64, THREADS=256) gives
-        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError. The fp8
+        fp8_total_chunks=128; 128 % 256 != 0 raised AssertionError.         The fp8
         loader is never used for bf16, so the guard (``if KV_FP8:``, matching
-        the 3D builder) is load-bearing: gfx942 *does* support fp8 K/V via
-        ``kv_storage_dtype='fp8e4m3'`` (the 2D gate admits it), so the assert
-        must fire for fp8 and stay dormant for bf16.
+        the 3D builder) is load-bearing.
+
+        gfx942 has since stopped accepting the fp8 K/V cache altogether -- its
+        PV path needs ``ds_read_tr_b8``, a gfx950-only transpose read -- so the
+        chunk-count assert is now unreachable here and the guarantee worth
+        pinning is the stronger one: the spec refuses fp8 K/V up front rather
+        than emitting IR comgr cannot select.
         """
         from kernels.gfx942.attention_tiled_2d import (
             UnifiedAttention2DTiledSpec,
@@ -852,13 +899,14 @@ class TestAttentionHelpers(unittest.TestCase):
         # The bf16 kernel must emit no fp8 dequant path.
         self.assertNotIn("@llvm.amdgcn.cvt.f32.fp8", ll)
 
-        # The guard must not neuter fp8 validation: the same geometry with
-        # fp8 K/V still trips the chunk-count assert (128 % 256 != 0).
+        # Asking gfx942 for fp8 K/V is refused at construction, naming the
+        # gfx950-only instruction that makes it impossible. Pinned because the
+        # failure it replaces -- emitting IR that comgr then cannot select --
+        # surfaces far from its cause.
         import dataclasses
 
-        fp8_spec = dataclasses.replace(spec, kv_storage_dtype="fp8e4m3")
-        with self.assertRaisesRegex(AssertionError, "fp8 loader"):
-            build_unified_attention_2d_tiled(fp8_spec, arch="gfx942")
+        with self.assertRaisesRegex(ValueError, "fp8 K/V cache"):
+            dataclasses.replace(spec, kv_storage_dtype="fp8e4m3")
 
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
