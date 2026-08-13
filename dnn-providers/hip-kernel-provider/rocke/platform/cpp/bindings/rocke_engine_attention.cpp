@@ -1236,7 +1236,7 @@ static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& 
     p.use_alibi = a_bool(d, "use_alibi", false);
     p.use_qq_bias = a_bool(d, "use_qq_bias", false);
     p.use_fp8 = a_bool(d, "use_fp8", false);
-    p.num_sms = a_int(d, "num_sms", 120);
+    p.num_cus = a_int(d, "num_cus", 120);
     p.num_kv_blocks = a_int(d, "num_kv_blocks", 0);
     std::string v;
     if(a_str(d, "dtype", v))

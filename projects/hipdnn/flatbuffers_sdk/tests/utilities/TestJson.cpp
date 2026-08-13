@@ -6,15 +6,19 @@
 #include <flatbuffers/flatbuffer_builder.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Common.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/TensorAttributes.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <string>
+#include <vector>
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -39,6 +43,61 @@ void toJsonAndBackTestSuite(const hipdnn_flatbuffers_sdk::data_objects::Graph* g
 }
 
 } // namespace
+
+TEST(TestJson, GraphUuidRoundTripsAsCanonicalString)
+{
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    const auto id
+        = hipdnn_flatbuffers_sdk::utilities::parseUuid("01234567-89AB-4DEF-8123-456789ABCDEF");
+    const auto uuid = hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(id);
+
+    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    graphT->id = std::make_unique<Uuid>(uuid);
+    flatbuffers::FlatBufferBuilder identifiedBuilder;
+    identifiedBuilder.Finish(Graph::Pack(identifiedBuilder, graphT.get()));
+    const auto* identifiedGraph = GetGraph(identifiedBuilder.GetBufferPointer());
+
+    const nlohmann::json graphJson = *identifiedGraph;
+    ASSERT_TRUE(graphJson.contains("id"));
+    EXPECT_EQ(graphJson.at("id"), "01234567-89ab-4def-8123-456789abcdef");
+
+    flatbuffers::FlatBufferBuilder roundTripBuilder;
+    roundTripBuilder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(roundTripBuilder, graphJson));
+    const auto* roundTripped = GetGraph(roundTripBuilder.GetBufferPointer());
+    ASSERT_NE(roundTripped->id(), nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*roundTripped->id()), id);
+}
+
+TEST(TestJson, LegacyGraphOmitsUuidAndStillRoundTrips)
+{
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    EXPECT_FALSE(graphJson.contains("id"));
+
+    flatbuffers::FlatBufferBuilder roundTripBuilder;
+    roundTripBuilder.Finish(hipdnn_flatbuffers_sdk::json::to<Graph>(roundTripBuilder, graphJson));
+    EXPECT_EQ(GetGraph(roundTripBuilder.GetBufferPointer())->id(), nullptr);
+}
+
+TEST(TestJson, RejectsInvalidGraphUuid)
+{
+    auto builder = hipdnn_test_sdk::utilities::createEmptyValidGraph();
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    auto graphJson = nlohmann::json(*graph);
+
+    // A non-string id fails the type check; a malformed string fails parsing.
+    graphJson["id"] = 42;
+    flatbuffers::FlatBufferBuilder nonStringBuilder;
+    EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(nonStringBuilder, graphJson),
+                 std::runtime_error);
+
+    graphJson["id"] = "not-a-uuid";
+    flatbuffers::FlatBufferBuilder malformedBuilder;
+    EXPECT_THROW((void)hipdnn_flatbuffers_sdk::json::to<Graph>(malformedBuilder, graphJson),
+                 std::invalid_argument);
+}
 
 TEST(TestJson, GraphToJsonAndBack)
 {
@@ -170,6 +229,11 @@ TEST(TestJson, GraphToJsonAndBack)
             graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
             context = "(valid MoE grouped matmul graph)";
             break;
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+            graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulBwdGraph();
+            graph = hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuilder.GetBufferPointer());
+            context = "(valid MoE grouped matmul backward graph)";
+            break;
         default:
             FAIL() << "Unhandled NodeAttributes enum value";
             break;
@@ -265,6 +329,24 @@ TEST(TestJson, MoeGroupedMatmulDefaultsRoundTrip)
     EXPECT_FALSE(inputs.contains("token_ks_tensor_uid"));
 
     toJsonAndBackTestSuite(graph, "(MoE grouped matmul defaults)");
+}
+
+TEST(TestJson, MoeGroupedMatmulBwdRoundTrip)
+{
+    auto graphBuilder = hipdnn_test_sdk::utilities::createValidMoeGroupedMatmulBwdGraph();
+    const auto* graph = GetGraph(graphBuilder.GetBufferPointer());
+    const nlohmann::json graphJson = *graph;
+    const auto& nodeJson = graphJson.at("nodes").at(0);
+    const auto& inputs = nodeJson.at("inputs");
+    const auto& outputs = nodeJson.at("outputs");
+
+    EXPECT_EQ(nodeJson.at("type").get<std::string>(), "MoeGroupedMatmulBwdAttributes");
+    EXPECT_EQ(inputs.at("doutput_tensor_uid").get<int64_t>(), 1);
+    EXPECT_EQ(inputs.at("token_tensor_uid").get<int64_t>(), 2);
+    EXPECT_EQ(inputs.at("first_token_offset_tensor_uid").get<int64_t>(), 3);
+    EXPECT_EQ(outputs.at("dweight_tensor_uid").get<int64_t>(), 4);
+
+    toJsonAndBackTestSuite(graph, "(MoE grouped matmul backward)");
 }
 
 namespace
