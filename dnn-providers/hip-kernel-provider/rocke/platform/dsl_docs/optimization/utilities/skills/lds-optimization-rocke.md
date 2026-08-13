@@ -16,6 +16,11 @@ tools: Read,Edit,Bash,Grep,Glob,Agent
 Diagnose and fix LDS (shared memory) performance issues in CK DSL kernels
 on AMD CDNA GPUs (MI300X/MI308/MI350).
 
+The conflict periods and tuning advice below are CDNA-specific. The
+`rocke.benchmark.perf.tool` commands are architecture-generic: set `ARCH` to the
+GPU being profiled. `occupancy` reads the final ISA from the HSACO itself, while
+`profile` uses the named live architecture's counter map.
+
 ---
 
 ## When To Use
@@ -90,15 +95,32 @@ CK DSL provides built-in swizzle patterns via tile descriptor transforms:
 
 ## Diagnosing LDS Bottlenecks
 
-### Step 1: Capture rocprof Stats
+### Step 1: Record a Baseline and Read LDS Usage
 
 ```bash
-rocprofv3 --stats --kernel-trace -f csv -o stats -- python my_gemm.py
+export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
+export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library   # library: for your launcher
+: "${ARCH:?set ARCH to the GPU being profiled (for example gfx950 or gfx1201)}"
+
+# LDS bytes + register pressure + occupancy, straight from the ELF notes.
+# No GPU and no profiler needed.
+python -m rocke.benchmark.perf.tool occupancy my_gemm.hsaco --arch "$ARCH"
+
+# Baseline the kernel so the post-optimization run has something to pair with.
+python -m rocke.benchmark.perf.tool profile \
+    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
+    --kernel-name my_gemm --repeats 3 -- python my_gemm.py
 ```
 
-Check `stats_kernel_stats.csv` for LDS usage:
-- `LDS_Block_Size`: Total LDS bytes per workgroup
-- Compare against limits (64KB gfx942, 160KB gfx950)
+Check LDS usage against the limits: 64 KB per CU on gfx942, 160 KB on gfx950.
+`occupancy` takes the ISA from the code object itself (reported as `target_arch`)
+and warns if `--arch` disagrees, so the wave count is right either way. The first
+`profile` of a new kernel name prints `[no baseline]`; that is the baseline being
+recorded, not a failure.
+
+This step *verifies* size and speed. Diagnosing *why* LDS is slow (bank conflicts,
+exposed write latency) is the ATT/PMC work in Steps 2-3 - the perf tool does not
+capture `LDSBankConflict`.
 
 ### Step 2: Analyze ATT Trace
 
@@ -227,7 +249,8 @@ The swizzle XORs row index bits into column index to distribute accesses across 
 Check ISA for XOR operations in LDS address computation:
 
 ```bash
-python src/stage3_extract_isa/count_instructions.py kernel.s | grep -A5 "LDS"
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py \
+    kernel.s | grep -A5 "LDS"
 ```
 
 Look for patterns like:
@@ -348,12 +371,21 @@ assert summary.max_abs_diff < 1e-2, f"Verification failed: {summary.max_abs_diff
 ### 2. Re-profile
 
 ```bash
-rocprofv3 --stats --kernel-trace -f csv -o stats_after -- python my_gemm.py
+# Same command as the baseline in Step 1: the tool pairs this run against it.
+python -m rocke.benchmark.perf.tool profile \
+    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
+    --kernel-name my_gemm --repeats 3 -- python my_gemm.py
 ```
 
-Compare before/after:
-- `LDS_Block_Size`: Should increase if padding added
-- Kernel latency: Should decrease if optimization successful
+Read the verdict, not the raw numbers: it compares `busy_cycles` (clock-invariant)
+against the stored baseline and only calls a change real once it clears the noise
+floor. TF/s and ms move with the GPU clock, so a bare before/after of those numbers
+cannot tell an optimization from a boost-clock difference.
+
+- `[improved]` / `[REGRESSED]` / `[within noise]` - the answer (`--json` reports the
+  same verdict as lowercase `improved` / `regressed` / `within_noise`)
+- `lds_bytes` in the panel: should increase if padding was added
+- exit status 1 on `[REGRESSED]`, so a script can gate on it
 
 ### 3. Re-analyze ATT Trace
 
@@ -369,16 +401,13 @@ Check:
 
 ### 4. LDS Budget
 
-Verify LDS usage from rocprof `*_kernel_stats.csv`:
-
 ```bash
-# Check LDS_Block_Size column
-grep "LDS_Block_Size" stats_after_kernel_stats.csv
+python -m rocke.benchmark.perf.tool occupancy my_gemm.hsaco --arch "$ARCH"
 ```
 
-Ensure:
-- gfx942: LDS_Block_Size ≤ 65536 bytes (64 KB)
-- gfx950: LDS_Block_Size ≤ 163840 bytes (160 KB)
+Ensure the reported `lds_bytes` fits the per-CU budget:
+- gfx942: ≤ 65536 bytes (64 KB)
+- gfx950: ≤ 163840 bytes (160 KB)
 
 ---
 
@@ -555,4 +584,8 @@ From empirical measurements (ResNet50 conv3_1, gfx950):
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis
 - `/gemm-optimization-rocke` - GEMM-specific LDS usage patterns
-- `src/stage5_compare/compare_rocprof_stats.py` - Compare LDS_Block_Size before/after
+- `dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py` -
+  compare TWO DIFFERENT kernels' rocprof stats (e.g. rocKE vs CK Tile); for one
+  kernel before/after a change use `rocke.benchmark.perf.tool profile` / `compare`
+- `rocke/platform/python/rocke/benchmark/perf/README.md` - the `profile` /
+  `occupancy` / `compare` tool used in Step 1 and the verification checklist

@@ -18,6 +18,12 @@ CK DSL on AMD CDNA GPUs (MI300X gfx942, MI350 gfx950).
 
 Based on the CK DSL `instances/gemm.py` framework.
 
+The optimization recipes (MFMA atoms, LDS budgets, async-copy knobs) are CDNA-
+specific. The `rocke.benchmark.perf.tool` measurement commands in §10.2 are not:
+set `ARCH` to the GPU being profiled (`gfx942`, `gfx950`, `gfx1201`, etc.). On RDNA,
+interpret matrix instructions as WMMA and expect the documented reduced counter
+coverage; `busy_cycles` comparison and ELF-note occupancy still work.
+
 ---
 
 ## 1. CK DSL GEMM Architecture Overview
@@ -505,22 +511,49 @@ if tile_n >= 128 and LDS_budget_allows:
 
 ### 10.2 Profiling Checkpoints
 
-After each change:
+**Discovery vs verification.** Use the raw `rocprofv3` / ATT tools below (§11) to
+*discover* which bottleneck you have. Use `rocke.benchmark.perf.tool` to *verify*
+that a change helped: it compares a kernel against its own stored baseline on the
+clock-invariant cycle metric and only reports a change that clears the run-to-run
+noise floor. Do not eyeball TF/s or ms deltas - both move with the GPU clock.
+
 
 ```bash
-# 1. Benchmark performance
-python benchmark_rocke_gemm.py --config my_spec.json
+# The library path is only needed by your own launch command, not by the tool.
+export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
+export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library
+: "${ARCH:?set ARCH to the GPU being profiled (for example gfx950 or gfx1201)}"
 
-# 2. Extract ISA
-python src/stage3_extract_isa/extract_isa.py --rocke my_gemm.py
+# 1. Benchmark performance, compared against the previous stored run.
+#    Any launch command works; one that prints a `PerfJSON:` line
+#    (rocke.benchmark.perf.perfjson.emit) also contributes wall time and TFLOPS.
+python -m rocke.benchmark.perf.tool profile \
+    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
+    --kernel-name my_gemm --repeats 3 \
+    -- python my_gemm.py
 
+# 2. Disassemble the compiled rocKE HSACO
+/opt/rocm/llvm/bin/llvm-objdump -d --mcpu="$ARCH" kernel.hsaco > kernel.s
 # 3. Count instructions
-python src/stage3_extract_isa/count_instructions.py kernel.s
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py \
+    kernel.s
 
-# 4. Check occupancy from rocprof
-rocprofv3 --stats --kernel-trace -- python my_gemm.py
-# Look at VGPR_Count, SGPR_Count, LDS_Block_Size in *_kernel_stats.csv
+# 4. Check occupancy + register/LDS pressure (no GPU, no profiler: ELF notes)
+python -m rocke.benchmark.perf.tool occupancy kernel.hsaco --arch "$ARCH"
 ```
+
+`profile` prints a bracketed verdict - `[improved]`, `[REGRESSED]`, `[within noise]`,
+or `[no baseline]` on the very first run of an identity - plus the counter panel that
+explains it, and stores the run in `~/.cache/rocke-perf` so the next run pairs
+against it. It exits 1 on `[REGRESSED]`, so a script can gate on it.
+`python -m rocke.benchmark.perf.tool compare --all` reviews the history later;
+`--json` gives an agent the record instead of the text, with the verdict as a
+lowercase `improved` / `regressed` / `within_noise` string.
+
+`occupancy` reads the target ISA out of the code object, so it reports the right
+wave count even if `--arch` is stale; it prints the binary's `target_arch` and warns
+when the two disagree. `--arch` is only the fallback for a binary with no target
+note.
 
 ---
 
@@ -563,7 +596,8 @@ Look for:
 
 ```bash
 # Count instructions in compiled kernel
-python src/stage3_extract_isa/count_instructions.py kernel.s
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage3_extract_isa/count_instructions.py \
+    kernel.s
 ```
 
 **Expected ratios for good GEMM**:
@@ -613,7 +647,7 @@ spec = GemmSpec(
 
 Compare using:
 ```bash
-python src/stage5_compare/compare_rocprof_stats.py \
+python $ROCKE/platform/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py \
     rocke_stats.csv cktile_stats.csv
 ```
 
@@ -792,5 +826,8 @@ bandwidth = 100.7 MB / 0.264 ms = 381 GB/s (7% of 5.2 TB/s peak)
 - `/empirical-case-studies` - Real-world performance data
 - `/capture-kernel-trace-rocke` - Profiling with rocprofv3
 - `/kernel-trace-analysis` - ATT trace bottleneck analysis
-- `src/stage1_benchmark/benchmark_rocke.py` - Benchmarking framework
-- `src/stage5_compare/compare_rocprof_stats.py` - Hardware metrics comparison
+- `dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py` -
+  compare TWO DIFFERENT kernels' rocprof stats (e.g. rocKE vs CK Tile). For a kernel
+  against its OWN baseline use `rocke.benchmark.perf.tool compare` instead.
+- `rocke/platform/python/rocke/benchmark/perf/README.md` - the perf primitives and
+  the `profile` / `occupancy` / `compare` tool used in §10.2

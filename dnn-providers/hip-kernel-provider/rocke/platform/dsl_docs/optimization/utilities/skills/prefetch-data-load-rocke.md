@@ -16,6 +16,11 @@ Apply pipeline-based prefetch to overlap async data loads with compute in CK DSL
 GPU kernels. Unlike FlyDSL's manual loop-carried values, CK DSL uses **pipeline
 configuration parameters** to control prefetch depth and staging.
 
+The worked knobs focus on CDNA/gfx950. The verification commands are
+architecture-generic: set `ARCH` to the GPU being profiled (`gfx942`, `gfx950`,
+`gfx1201`, etc.). On RDNA, interpret MFMA-specific diagnosis as the corresponding
+WMMA behavior and expect reduced PMU counter coverage.
+
 ## Core Principle
 
 GPU global memory loads are asynchronous — the load instruction returns
@@ -213,14 +218,15 @@ vgpr_prefetch = vgpr_per_tile * prefetch_stages
 
 **How to check current VGPR usage:**
 ```bash
-# Extract kernel metadata from compiled .so
+: "${ARCH:?set ARCH to the GPU/HSACO target (for example gfx950 or gfx1201)}"
+# vgpr / agpr / sgpr / lds_bytes / occupancy from the HSACO's ELF notes.
+# No GPU, no profiler, no disassembly.
+python -m rocke.benchmark.perf.tool occupancy my_kernel.hsaco --arch "$ARCH"
+
+# Only if you need the full disassembly context (e.g. reading the spill code):
 roc-obj-ls libdispatcher_*.so
 roc-obj-extract libdispatcher_*.so
-llvm-objdump -d --mcpu=gfx950 *.co | grep -A5 '.amdhsa_kernel'
-# Look for: .vgpr_count, .agpr_count
-
-# Or from rocprof trace CSV:
-grep 'arch_vgpr\|accum_vgpr' rocprof_kernel_stats.csv
+llvm-objdump -d --mcpu="$ARCH" *.co | grep -A5 '.amdhsa_kernel'
 ```
 
 ## Worked Example: Grouped Conv Optimization
@@ -348,23 +354,38 @@ This optimization applies when you see these signals in profiling:
 After applying prefetch optimization:
 
 1. **Correctness**: Run `run_manifest(verify=True)` to check against reference
-2. **Performance**: Profile with `rocprofv3 --kernel-trace --stats`:
-   - Check MFMA utilization increased
-   - Check VMEM stall cycles decreased
-   - Check overall kernel duration decreased
-3. **Register pressure**: Verify `arch_vgpr <= 256` (no spills)
-4. **Occupancy**: Verify `waves_per_simd >= 1` (minimum acceptable)
+2. **Performance**: `rocke.benchmark.perf.tool profile` before and after, same
+   command both times - it pairs them by `(arch, op, kernel-name, shape)` and prints
+   `[improved]` / `[REGRESSED]` / `[within noise]` on the clock-invariant cycle
+   metric (`[no baseline]` on the first run, which just records the baseline)
+3. **Register pressure**: Verify `vgpr <= 256` (no spills) from
+   `rocke.benchmark.perf.tool occupancy`
+4. **Occupancy**: Verify the same command's `occupancy >= 1` wave/SIMD
+5. **Bottleneck moved as predicted** (MFMA utilization up, VMEM stalls down):
+   `rocprofv3` PMC or ATT, via `/capture-kernel-trace-rocke` - those metrics are not
+   in the perf tool's counter set
 
 ```bash
-# Profile before/after
-rocprofv3 --stats --kernel-trace -o before -- python run_kernel.py
-# (Apply prefetch optimization)
-rocprofv3 --stats --kernel-trace -o after -- python run_kernel.py
+export ROCKE=<repo>/dnn-providers/hip-kernel-provider/rocke
+export PYTHONPATH=$ROCKE/platform/python:$ROCKE/library   # library: for your launcher
+: "${ARCH:?set ARCH to the GPU being profiled (for example gfx950 or gfx1201)}"
 
-# Compare metrics
-python dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py \
-  before_kernel_stats.csv after_kernel_stats.csv
+# Baseline, then apply the optimization, then re-run the SAME command.
+python -m rocke.benchmark.perf.tool profile \
+    --arch "$ARCH" --op gemm --shape '{"M":4096,"N":4096,"K":4096}' \
+    --kernel-name my_kernel --repeats 3 -- python run_kernel.py
+
+# Registers / LDS / occupancy - ELF notes, so no GPU and no profiler.
+python -m rocke.benchmark.perf.tool occupancy my_kernel.hsaco --arch "$ARCH"
+
+# Review the whole history later.
+python -m rocke.benchmark.perf.tool compare --all
 ```
+
+Do not compare raw TF/s or ms across runs: both scale with the GPU clock, so a
+boost-vs-sustained difference reads as an optimization. `compare_rocprof_stats.py`
+is for a DIFFERENT comparison - two distinct kernels (e.g. rocKE vs CK Tile), not a
+kernel against its own baseline.
 
 ## When NOT To Use
 

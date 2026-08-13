@@ -44,14 +44,28 @@ python -m rocke.benchmark.perf.examples.profile_gemm_sweep --arch gfx950 --shape
 python -m rocke.benchmark.perf.tool compare --all
 ```
 
-4) Profile **your own kernel** - hand the tool any launch command that prints a
-   `PerfJSON:` line (rocKE's `run_manifest` does):
+4) Profile **your own kernel** - hand the tool any launch command:
 
 ```
 python -m rocke.benchmark.perf.tool profile --arch gfx950 --op gemm \
     --shape '{"M":512,"N":512,"K":512}' --repeats 3 --kernel-name mygemm \
     -- python -m rocke.run_manifest <hsaco> <manifest> --shape 512,512,512 --verify
 ```
+
+   The command needs no special support: counters and kernel-level timing come from
+   the profiler. A launcher that additionally prints a `PerfJSON:` line contributes
+   real-world (un-profiled) wall time and TFLOPS/GB/s, which the profiler cannot
+   supply - `rocke.run_manifest` does, and any script can with one call:
+
+```python
+from rocke.benchmark.perf import perfjson
+perfjson.emit(ms=ms, tflops=tflops, gbps=gbps)
+```
+
+   Each record's `timing_source` says which was used (`perfjson` or
+   `rocprofv3_duration`), so a record never overstates what it measured. With
+   neither a profiler nor a `PerfJSON:` line there is nothing to measure and the
+   command fails rather than storing an empty record.
 
 Records land in `~/.cache/rocke-perf/` (override with `$ROCKE_PERF_CACHE`). On a
 SLURM cluster where the login and compute nodes don't share a home, do the
@@ -75,22 +89,27 @@ Import and compose them; every consumer uses these same pieces.
   (`rocprofv3 --list-avail`) and normalize the arch-specific raw names (RDNA
   wave32/`GL2C_*` vs CDNA wave64/`TCC_*`) to stable names.
 - `occupancy` - VGPR/AGPR/SGPR/LDS + a coarse occupancy estimate from an HSACO's
-  ELF notes. No GPU required.
+  ELF notes. No GPU required. The occupancy model follows the ISA recorded in the
+  code object (returned as `target_arch`); the `arch` argument is only the fallback
+  when the notes carry no target.
+- `perfjson` - emit/parse the `PerfJSON:` launcher line. Optional for the launcher,
+  but the only way to contribute wall time and throughput to a record.
 - `harness` - profile a kernel-launch command under `rocprofv3` and **return** a
-  record: counters + resources + `profiled` timing (from the profiled run) + a
-  separate un-profiled `wall` run. Options: `warmup=N` drops the launcher's cold
-  warmup dispatches from the counter medians; `per_dispatch=True` also emits raw
-  per-dispatch counters and `duration_ns` (`counter_samples`) for downstream
-  profiling.
+  record: counters + resources + `profiled` timing (the profiled run's own kernel
+  duration, or its `PerfJSON:` timing when the launcher emits one) + a separate
+  un-profiled `wall` run when the launcher can be timed that way. Options:
+  `warmup=N` drops the launcher's cold warmup dispatches from the counter medians
+  (and from the duration); `per_dispatch=True` also emits raw per-dispatch counters
+  and `duration_ns` (`counter_samples`) for downstream profiling.
 - `aggregate` - reduce K repeated runs to a median + spread (noise bound).
 - `report` - serialize a record, extract the diagnostic panel, and diff two records.
 
 ## 2. The local benchmarking tool (`tool/`)
 
 A thin layer that *uses* the primitives so a developer can keep a local history and
-see whether a change improved or regressed a workload. It is the **only**
-part that writes, and it writes **outside the repo** (a user cache dir), as **simple
-JSON Lines** - nothing more.
+see whether a change improved or regressed a workload. It is the **only** part that
+persists records, and it writes them **outside the repo** (a user cache dir), as
+**simple JSON Lines** - nothing more.
 
 - `store` - append/read records in a user cache dir (`~/.cache/rocke-perf`;
   override with `$ROCKE_PERF_CACHE`). Append-only `history.jsonl`.
@@ -122,7 +141,7 @@ Needs `PYTHONPATH` pointing at `platform/python`. Live counters need a GPU +
 to a wall-only record and warns. A failed kernel command still fails the measurement.
 
 ```
-# measure a kernel-launch command (must print a `PerfJSON:` line for wall metrics)
+# measure a kernel-launch command (a `PerfJSON:` line adds wall metrics; optional)
 #   --warmup N     drop the launcher's N warmup dispatches from the counter medians
 #   --per-dispatch also emit raw per-dispatch counters (counter_samples)
 python -m rocke.benchmark.perf.tool profile --arch gfx950 --op gemm \
