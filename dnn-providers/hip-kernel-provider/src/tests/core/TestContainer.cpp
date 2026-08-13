@@ -95,7 +95,7 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
     // engine from an extra native one, and it cannot see the failure this is really
     // guarding: the pack table being dropped from a binary that links the provider as a
     // static archive, which leaves the engine absent and every other assertion happy.
-    const auto sets = discoverDescriptorSets();
+    const auto& sets = discoverDescriptorSets();
 
     // Reading the expectation from the function under test reintroduces the blindness
     // this test exists to remove: with an empty result the loop below is vacuous and

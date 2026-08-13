@@ -33,6 +33,9 @@ struct PackSymbols
 {
     std::string_view engineName;
     std::string_view graphMatcher;
+    /// The graph-scoped matcher that admits only this pack's operation, empty for a
+    /// single-pack engine whose graph matcher checks the operation itself.
+    std::string_view operationMatcher;
     std::string_view kernelMatcher;
     std::string_view score;
     std::string_view dispatch;
@@ -41,17 +44,32 @@ struct PackSymbols
     std::string_view outputToken;
 };
 
-inline constexpr PackSymbols POINTWISE_ADD{"hipkernel:PointwiseAdd",
-                                           "hipkernel.pointwise_add.graph_match",
-                                           "hipkernel.pointwise_add.kernel_match",
-                                           "hipkernel.pointwise_add.score",
-                                           "hipkernel.pointwise_add.dispatch",
-                                           "pointwise_add.input_a.uid",
-                                           "pointwise_add.input_b.uid",
-                                           "pointwise_add.output.uid"};
+/// The two packs of the multi-pack engine. Everything but `operationMatcher` is
+/// deliberately identical: sharing by id is what the two-pack topology exists to show.
+inline constexpr PackSymbols POINTWISE_ADD{"hipkernel:Pointwise",
+                                           "hipkernel.pointwise.graph_match",
+                                           "hipkernel.pointwise.add_match",
+                                           "hipkernel.pointwise.kernel_match",
+                                           "hipkernel.pointwise.score",
+                                           "hipkernel.pointwise.dispatch",
+                                           "pointwise.input_a.uid",
+                                           "pointwise.input_b.uid",
+                                           "pointwise.output.uid"};
 
+inline constexpr PackSymbols POINTWISE_MUL{"hipkernel:Pointwise",
+                                           "hipkernel.pointwise.graph_match",
+                                           "hipkernel.pointwise.mul_match",
+                                           "hipkernel.pointwise.kernel_match",
+                                           "hipkernel.pointwise.score",
+                                           "hipkernel.pointwise.dispatch",
+                                           "pointwise.input_a.uid",
+                                           "pointwise.input_b.uid",
+                                           "pointwise.output.uid"};
+
+/// The single-pack engine, whose graph matcher checks its own operation.
 inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:PointwiseSub",
                                            "hipkernel.pointwise_sub.graph_match",
+                                           "",
                                            "hipkernel.pointwise_sub.kernel_match",
                                            "hipkernel.pointwise_sub.score",
                                            "hipkernel.pointwise_sub.dispatch",
@@ -59,7 +77,27 @@ inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:PointwiseSub",
                                            "pointwise_sub.input_b.uid",
                                            "pointwise_sub.output.uid"};
 
-/// KMD fields both reference packs vary along.
+/// The descriptor set this provider ships for @p engineName, read from the same files
+/// the provider reads. Asserting on a loaded set rather than a hand-written twin is
+/// what makes these tests fail if the descriptors stop being installed.
+inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_view engineName)
+{
+    const auto& sets = discoverDescriptorSets();
+    const auto match = std::find_if(sets.begin(), sets.end(), [engineName](const auto& set) {
+        return set.engine.name == engineName;
+    });
+
+    // Fatal rather than a returned optional: every caller would only dereference it.
+    if(match == sets.end())
+    {
+        throw std::runtime_error("no descriptor set loaded for engine '" + std::string(engineName)
+                                 + "'");
+    }
+    return *match;
+}
+
+/// KMD fields both reference packs vary along. Shared because the *schema* shape is
+/// what a pack author copies, unlike the symbol names, which must differ per pack.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 
@@ -102,6 +140,21 @@ inline bool matchesGraph(const PackSymbols& pack,
     return graphMatcher(pack)(context, bound);
 }
 
+/// Runs the graph-scoped matcher that admits only @p pack's operation.
+///
+/// Separate from matchesGraph() because the split is the contract: the shared matcher
+/// says "this engine could serve this graph", this one says "this pack is the one".
+/// A pack passes only if both do.
+inline bool matchesOperation(const PackSymbols& pack,
+                             const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                             hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
+{
+    registerNativeIngestorSymbols();
+    return hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry::resolve(
+        std::string(pack.operationMatcher))(context, bound);
+}
+
+/// Runs a pack's kernel-scoped matcher against one candidate.
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)

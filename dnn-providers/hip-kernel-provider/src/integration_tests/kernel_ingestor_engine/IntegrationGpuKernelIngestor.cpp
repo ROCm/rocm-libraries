@@ -47,7 +47,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::integration
 namespace
 {
 
-constexpr const char* ENGINE_NAME = "hipkernel:PointwiseAdd";
+constexpr const char* ENGINE_NAME = "hipkernel:Pointwise";
 constexpr const char* SUB_ENGINE_NAME = "hipkernel:PointwiseSub";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
@@ -87,6 +87,11 @@ std::shared_ptr<Graph> buildPointwiseGraph(PointwiseMode mode)
 std::shared_ptr<Graph> buildPointwiseAddGraph()
 {
     return buildPointwiseGraph(PointwiseMode::ADD);
+}
+
+std::shared_ptr<Graph> buildPointwiseMulGraph()
+{
+    return buildPointwiseGraph(PointwiseMode::MUL);
 }
 
 std::shared_ptr<Graph> buildPointwiseSubGraph()
@@ -351,6 +356,11 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
     std::vector<int64_t> addEngines;
     ASSERT_EQ(addGraph->get_ranked_engine_ids(addEngines).code, ErrorCode::OK);
 
+    auto mulGraph = buildPointwiseMulGraph();
+    ASSERT_EQ(mulGraph->build_operation_graph(_handle).code, ErrorCode::OK);
+    std::vector<int64_t> mulEngines;
+    ASSERT_EQ(mulGraph->get_ranked_engine_ids(mulEngines).code, ErrorCode::OK);
+
     auto subGraph = buildPointwiseSubGraph();
     ASSERT_EQ(subGraph->build_operation_graph(_handle).code, ErrorCode::OK);
     std::vector<int64_t> subEngines;
@@ -360,10 +370,15 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
         return std::find(engines.begin(), engines.end(), id) != engines.end();
     };
 
+    // The multi-pack engine claims both of its operations under one id...
     EXPECT_TRUE(offers(addEngines, engineId()));
+    EXPECT_TRUE(offers(mulEngines, engineId()));
+    // ...the single-pack engine claims its own...
     EXPECT_TRUE(offers(subEngines, subEngineId()));
-    // Declines the other's op, or selection between packs would be arbitrary.
+    // ...and neither claims the other's. Without this every engine would match every
+    // pointwise graph and selection between them would be arbitrary.
     EXPECT_FALSE(offers(addEngines, subEngineId()));
+    EXPECT_FALSE(offers(mulEngines, subEngineId()));
     EXPECT_FALSE(offers(subEngines, engineId()));
 }
 
@@ -379,6 +394,35 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
     executeAndVerify(*graph, workspace.get(), 0);
 }
 
+// The two-pack half of the topology, on device: one engine id, two operations, two
+// kernels. Numeric because a+b and a*b are both plausible for the same operands, so
+// only the CPU reference catches the engine reaching the wrong pack's kernel.
+TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDifferentPacks)
+{
+    auto addGraph = buildPointwiseAddGraph();
+    buildAndCompile(*addGraph, engineId());
+    int64_t addWorkspaceSize = 0;
+    ASSERT_EQ(addGraph->get_workspace_size(addWorkspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace addWorkspace(static_cast<size_t>(addWorkspaceSize));
+    executeAndVerify(*addGraph, addWorkspace.get(), 0);
+
+    // Same engine id: the pack is chosen by the operation matcher, not by the caller.
+    auto mulGraph = buildPointwiseMulGraph();
+    buildAndCompile(*mulGraph, engineId());
+    int64_t mulWorkspaceSize = 0;
+    ASSERT_EQ(mulGraph->get_workspace_size(mulWorkspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace mulWorkspace(static_cast<size_t>(mulWorkspaceSize));
+    executeAndVerify(*mulGraph, mulWorkspace.get(), 1);
+
+    // The engine's catalog is keyed per graph, so the add graph still answers after a
+    // second pack of the same engine has run and cached its own.
+    executeAndVerify(*addGraph, addWorkspace.get(), 2);
+}
+
+// Both packs' catalogs are cached under (graph, device) keys in per-engine state
+// managers. Executing one after the other proves neither engine's catalog or bound
+// token state reaches the other, a failure mode that only exists once a provider
+// serves more than one descriptor set.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
 {
     auto addGraph = buildPointwiseAddGraph();

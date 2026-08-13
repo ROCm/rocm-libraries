@@ -1,0 +1,16 @@
+{
+  "schema": "hipdnn.kmd/v1",
+  "id": "7859ec6c-b65f-44e6-9732-b95bdadedb77",
+  "name": "pointwise sub variant fields",
+  "fields": [
+    {
+      "name": "block_size",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

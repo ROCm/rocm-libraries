@@ -149,6 +149,13 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(HIPDNN_DESCRIPTOR_BUILD_DIR
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors"
+    )
+    message(STATUS "Kernel ingestor enabled: descriptors staged in ${HIPDNN_DESCRIPTOR_BUILD_DIR}")
+endif()
+
 # ============================================================================
 # YAML-based CTest categorization detection
 # ============================================================================
@@ -302,4 +309,18 @@ if(ENABLE_ASM_SDPA_ENGINE)
     install(DIRECTORY src/engines/asm_sdpa_engine/asm/asm_kernels/
             DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels
             FILES_MATCHING PATTERN "*.co")
+endif()
+
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # Staged into the build tree so the tests and a run-from-build-dir read the same
+    # files the install ships, and installed alongside the plugin so a deployed provider
+    # finds them. discoverDescriptorSets() prefers the build copy and falls back to the
+    # installed one.
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors/
+         DESTINATION ${HIPDNN_DESCRIPTOR_BUILD_DIR}
+         FILES_MATCHING PATTERN "*.json")
+
+    install(DIRECTORY src/descriptors/
+            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors
+            FILES_MATCHING PATTERN "*.json")
 endif()

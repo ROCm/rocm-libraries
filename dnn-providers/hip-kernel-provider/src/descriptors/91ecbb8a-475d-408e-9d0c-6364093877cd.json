@@ -1,0 +1,7 @@
+{
+  "schema": "hipdnn.umd/v1",
+  "id": "91ecbb8a-475d-408e-9d0c-6364093877cd",
+  "name": "graph operation is mul",
+  "scope": "graph",
+  "match_symbol": "hipkernel.pointwise.mul_match"
+}

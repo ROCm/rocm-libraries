@@ -70,13 +70,18 @@ TEST(TestPointwiseSubMatcher, RefusesTheAddGraphItsSiblingPackServes)
     EXPECT_FALSE(matches(fixture.context()));
 }
 
-TEST(TestPointwiseAddMatcher, RefusesTheSubGraphItsSiblingPackServes)
+TEST(TestPointwiseAddMatcher, RefusesTheSubGraphItsSiblingEngineServes)
 {
-    // The converse of the case above.
+    // The converse, and it lands on the operation matcher rather than the shared one:
+    // a subtraction is a perfectly servable *shape*, so the shared matcher admits it and
+    // both of this engine's packs then decline it on operation. Neither pack passing is
+    // how the engine as a whole declines a graph its sibling owns.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
 
     BoundTokens bound;
-    EXPECT_FALSE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
+    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, fixture.context(), bound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, fixture.context(), bound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, fixture.context(), bound));
 }
 
 // Refusals this pack must have inherited, not merely been assumed to
@@ -222,7 +227,7 @@ TEST(TestPointwiseSubBinding, BindsUnderItsOwnTokenNamesNotItsSiblings)
 
 TEST(TestPointwiseSubPack, EveryKernelNamesThisPacksOwnSource)
 {
-    const auto set = buildPointwiseSubDescriptorSet();
+    const auto set = loadedSet("hipkernel:PointwiseSub");
 
     ASSERT_EQ(set.packs.size(), 1U);
     for(const auto& kernel : set.packs.front().kernels)
@@ -236,7 +241,7 @@ TEST(TestPointwiseSubPack, EveryKernelNamesThisPacksOwnSource)
 
 TEST(TestPointwiseSubPack, PackCrossReferencesResolveWithinTheDescriptorSet)
 {
-    const auto set = buildPointwiseSubDescriptorSet();
+    const auto set = loadedSet("hipkernel:PointwiseSub");
     const auto& pack = set.packs.front();
 
     EXPECT_EQ(pack.engineId, set.engine.id);
@@ -260,9 +265,11 @@ TEST(TestPointwiseSubPack, PackCrossReferencesResolveWithinTheDescriptorSet)
 
 TEST(TestPointwiseSubPack, SharesNoDescriptorIdWithTheAddPack)
 {
-    // Loaded into one provider; a collision would silently merge two engines into one.
-    const auto add = buildPointwiseAddDescriptorSet();
-    const auto sub = buildPointwiseSubDescriptorSet();
+    // Both sets load into one provider and descriptors reference each other by id, so a
+    // collision would silently make two engines one. This is the check a loader will
+    // need across installed files, exercised here while there are only two.
+    const auto add = loadedSet("hipkernel:Pointwise");
+    const auto sub = loadedSet("hipkernel:PointwiseSub");
 
     ASSERT_TRUE(add.heuristic.has_value());
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> addIds{

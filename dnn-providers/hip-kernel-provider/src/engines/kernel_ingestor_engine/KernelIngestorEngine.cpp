@@ -5,14 +5,15 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <deque>
+#include <filesystem>
 #include <mutex>
 #include <string>
-#include <unordered_set>
-#include <utility>
+#include <vector>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
@@ -21,18 +22,29 @@
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
+std::filesystem::path descriptorSearchDirectory()
+{
+    // The install tree is the only path compiled in. A build-tree default would be an
+    // absolute path from this machine baked into the shipped plugin, preferred over the
+    // installed copy on any host where it happens to exist, and it would mean nothing
+    // ever exercises the installed one. Tests and run-from-build-dir set the variable
+    // instead, the same way the ASM engine takes HIPDNN_AITER_ASM_DIR.
+    if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
+       !override.empty())
+    {
+        return override;
+    }
+
+    return HIPDNN_DESCRIPTOR_INSTALL_DIR;
+}
+
 namespace
 {
 
-/// Labels of packs whose registration failed; discoverDescriptorSets() excludes them.
-std::unordered_set<std::string>& failedPackLabels()
-{
-    static std::unordered_set<std::string> s_failed;
-    return s_failed;
-}
-
-/// Registers every pack's native symbols. A pack that throws is rolled back and
-/// skipped. Runs under call_once: at static-init a throw would terminate the process.
+/// Registers every pack's native symbols, one SymbolScope per pack. A pack that throws is
+/// rolled back and skipped, because one pack's duplicate symbol must not unregister every
+/// other pack's. Runs under call_once, where a throw is catchable; at static-init it would
+/// terminate the process during dlopen().
 void registerNativeIngestorSymbolsOnce()
 {
     for(const auto& pack : ingestorPacks())
@@ -45,7 +57,6 @@ void registerNativeIngestorSymbolsOnce()
         }
         catch(const std::exception& error)
         {
-            failedPackLabels().emplace(pack.label);
             HIPDNN_PLUGIN_LOG_ERROR("ingestor: pack '"
                                     << pack.label
                                     << "' failed to register its native symbols and is excluded: "
@@ -68,48 +79,23 @@ void registerNativeIngestorSymbols()
     std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
-std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> discoverDescriptorSets()
+const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
 {
-    // Must run first: the backend's first call arrives via the static engine-id path,
-    // before any Container exists to trigger registration otherwise.
-    registerNativeIngestorSymbols();
-
-    // C++ stand-in for a descriptor-file scan. Memoized: read has a happens-before
-    // edge on the sweep's write.
+    // Memoized because two callers read it at different times: Container's static
+    // engine-id enumeration and Container's constructor. "Read once at startup" has to
+    // mean once, not once per caller, so the two can never disagree about what shipped.
     static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
-        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
-        for(const auto& pack : ingestorPacks())
-        {
-            if(failedPackLabels().count(std::string(pack.label)) != 0)
-            {
-                continue;
-            }
-            sets.push_back(pack.buildDescriptorSet());
-        }
-        return sets;
+        // Before the scan, not after: validation asks the registry whether each
+        // descriptor's symbol exists, so an unregistered pack drops its descriptors here
+        // rather than throwing later at first use.
+        registerNativeIngestorSymbols();
+        return hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
+            descriptorSearchDirectory());
     }();
 
     return s_sets;
 }
 
-int64_t registerEngineName(const std::string& name)
-{
-    // Not namespace-scope: a throw during dlopen() there terminates the process.
-    static std::mutex s_mutex;
-    const std::lock_guard<std::mutex> lock(s_mutex);
-
-    if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(name))
-    {
-        // A run-time name must be interned somewhere outliving the registry: it keeps a
-        // string_view, and every other caller registers a literal through the macro.
-        // deque, not vector: reallocation would move a registered view's string.
-        static std::deque<std::string> s_names;
-        // The registrar is a constructor, not an object: it writes into the process-wide
-        // registry and carries no state, so nothing needs to hold it.
-        hipdnn_data_sdk::utilities::EngineRegistrar{s_names.emplace_back(name)};
-    }
-    return hipdnn_data_sdk::utilities::engineNameToId(name);
-}
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

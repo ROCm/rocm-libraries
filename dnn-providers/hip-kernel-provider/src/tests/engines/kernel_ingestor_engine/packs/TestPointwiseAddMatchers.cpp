@@ -85,8 +85,6 @@ INSTANTIATE_TEST_SUITE_P(
     ,
     TestPointwiseAddGraphMatcherRefusal,
     ::testing::ValuesIn(std::vector<GraphMatcherRefusalCase>{
-        {"AnotherPointwiseOperation",
-         []() { return buildPointwiseGraph(data_objects::PointwiseMode::MUL); }},
         {"MultiElementTensors",
          // The kernel writes only element 0; a larger tensor leaves the rest unwritten.
          []() {
@@ -220,6 +218,51 @@ INSTANTIATE_TEST_SUITE_P(
     }),
     [](const ::testing::TestParamInfo<GraphMatcherRefusalCase>& info) { return info.param.name; });
 
+// ---------------------------------------------------------------------------
+// Graph-scoped operation matchers: the one fact separating this engine's packs
+// ---------------------------------------------------------------------------
+
+/// The shared matcher above deliberately admits any operation, so these are what stop a
+/// multiplication reaching an add kernel. Asserted for both packs against both graphs,
+/// because "each accepts its own" and "each refuses the other's" are separate claims and
+/// a matcher that returned true unconditionally would satisfy only the first.
+TEST(TestPointwiseOperationMatchers, EachPackAdmitsOnlyItsOwnOperation)
+{
+    const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
+    const GraphFixture mul(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
+
+    BoundTokens bound;
+    EXPECT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), bound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, mul.context(), bound));
+
+    EXPECT_TRUE(matchesOperation(POINTWISE_MUL, mul.context(), bound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), bound));
+}
+
+/// The shared matcher has already bound every token the dispatch reads; a second writer
+/// of the same token would be a silent last-one-wins.
+TEST(TestPointwiseOperationMatchers, BindNothingOfTheirOwn)
+{
+    const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
+
+    BoundTokens bound;
+    ASSERT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), bound));
+    EXPECT_TRUE(bound.empty());
+}
+
+/// The shared half of the split, stated as its own claim: the expensive checks do not
+/// re-run per pack, so they must not encode an operation.
+TEST(TestPointwiseGraphMatcher, AdmitsEveryOperationItsPacksBetweenThemServe)
+{
+    const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
+    const GraphFixture mul(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
+
+    BoundTokens bound;
+    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, add.context(), bound));
+    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, mul.context(), bound));
+}
+
+// ---------------------------------------------------------------------------
 // Kernel-scoped matcher
 
 TEST(TestPointwiseAddKernelMatcher, AcceptsAKernelWhoseDtypeMatchesTheGraph)

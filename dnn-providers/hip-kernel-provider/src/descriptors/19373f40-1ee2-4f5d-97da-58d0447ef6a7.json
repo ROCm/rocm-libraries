@@ -1,0 +1,59 @@
+{
+  "schema": "hipdnn.kdp/v1",
+  "id": "19373f40-1ee2-4f5d-97da-58d0447ef6a7",
+  "name": "hipkernel:pointwise_mul",
+  "matcher_ids": [
+    "e5d38a04-9c71-4b2f-83a6-7f14b0d29e58",
+    "91ecbb8a-475d-408e-9d0c-6364093877cd",
+    "1a7f52c8-b036-4e91-95d2-6c83af407b14"
+  ],
+  "engine_id": "8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911",
+  "dispatch_id": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
+  "kernels": [
+    {
+      "id": "3acc760d-6286-438a-9e51-40561a127aab",
+      "name": "pointwise_mul.f32_block64",
+      "source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseMul.cpp",
+        "entry_point": "PointwiseMul"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT",
+        "operation": "MUL"
+      },
+      "priority": 0
+    },
+    {
+      "id": "f8e91362-ebe9-4d58-9a47-c51345c89ead",
+      "name": "pointwise_mul.f32_block256",
+      "source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseMul.cpp",
+        "entry_point": "PointwiseMul"
+      },
+      "metadata": {
+        "block_size": 256,
+        "dtype": "FLOAT",
+        "operation": "MUL"
+      },
+      "priority": 0
+    },
+    {
+      "id": "02045f2e-f42b-47f3-a44c-a9abed808ea6",
+      "name": "pointwise_mul.f16_block64",
+      "source": {
+        "kind": "embedded_source",
+        "source_file": "PointwiseMul.cpp",
+        "entry_point": "PointwiseMul"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "HALF",
+        "operation": "MUL"
+      },
+      "priority": 0
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "schema": "hipdnn.uhd/v1",
+  "id": "4c9b0e72-16a5-4d38-b6f4-8e20a7c15d63",
+  "name": "pointwise selector",
+  "kind": "native",
+  "payload": "hipkernel.pointwise.score"
+}

@@ -48,6 +48,12 @@ endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+    # Where discoverDescriptorSets() looks: the staged build copy first, the installed
+    # copy second. Both are absolute, so neither depends on the caller's working dir.
+    target_compile_definitions(hip_kernel_provider_impl PRIVATE
+        HIPDNN_DESCRIPTOR_BUILD_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}"
+        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors"
+    )
 endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)

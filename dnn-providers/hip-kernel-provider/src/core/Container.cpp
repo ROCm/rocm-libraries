@@ -76,9 +76,9 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         };
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-        // One ingestor engine per discovered descriptor set. A loop rather than a row
-        // per engine, so adding one costs no edit here.
-        for(auto& set : kernel_ingestor_engine::discoverDescriptorSets())
+        // One ingestor engine per discovered descriptor set, and a set is now a file on
+        // disk: adding an engine is an install, not an edit here.
+        for(const auto& set : kernel_ingestor_engine::discoverDescriptorSets())
         {
             try
             {
