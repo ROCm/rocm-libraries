@@ -666,12 +666,10 @@ def build_attention_dense(
     v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
     if spec.paged:
-        assert (
-            ROWS_PER_WAVE <= spec.block_size and spec.block_size % ROWS_PER_WAVE == 0
-        ), (
-            f"per-wave block_tables hoist needs ROWS_PER_WAVE ({ROWS_PER_WAVE}) <= "
-            f"block_size ({spec.block_size}) and dividing it evenly"
-        )
+        # ROWS_PER_WAVE <= block_size and block_size % ROWS_PER_WAVE == 0 is
+        # enforced at spec construction (__post_init__ paged validation), so every
+        # wave's K/V rows fall within one page -- the per-wave block_tables hoist
+        # below relies on that.
         # Single-seq: seq_base folds to 0; the bt*bt_stride form keeps bt_stride
         # live and generalizes to multi-seq. kv_lens[bt] bounds the page index.
         _pg_seq_base = b.mul(bt, bt_stride)
