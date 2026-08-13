@@ -124,7 +124,6 @@ namespace rocsparse
         }
         }
     }
-
 }
 
 #define LAUNCH_CSRMMNN_NNZ_SPLIT_MAIN_KERNEL(CSRMMNT_DIM, WF_SIZE)        \

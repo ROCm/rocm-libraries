@@ -106,13 +106,17 @@ template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename
 static csrsv_analysis_kernel_t find_mode(rocsparse_fill_mode mode, rocsparse_operation operation)
 {
 
-    return (operation == rocsparse_operation_none)
-               ? ((mode == rocsparse_fill_mode_lower)
-                      ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
-                      : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>)
-               : ((mode == rocsparse_fill_mode_lower)
-                      ? launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
-                      : launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>);
+    const bool transpose = (operation != rocsparse_operation_none);
+    switch(mode)
+    {
+    case rocsparse_fill_mode_lower:
+        return transpose ? launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
+                         : launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+    case rocsparse_fill_mode_upper:
+        return transpose ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
+                         : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+    }
+    return nullptr;
 }
 
 template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename... P>

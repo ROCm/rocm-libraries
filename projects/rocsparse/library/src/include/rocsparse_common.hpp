@@ -60,9 +60,6 @@
 
 namespace rocsparse
 {
-    // Clamp the batch dimension of the kernel grid to the hardware limit on the
-    // grid's y-dimension. Batches beyond this limit are handled by the kernels
-    // via a grid-stride loop over hipBlockIdx_y.
     template <typename J>
     static uint16_t get_batch_grid_size(J batch_count)
     {

@@ -161,7 +161,12 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     repo_config_path = Path(SCRIPT_DIR / ".." / "repos-config.json")
     config = load_repo_config(str(repo_config_path))
-    valid_prefixes = get_valid_prefixes(config)
+    # repos-config.json only registers subtrees that sync with a standalone
+    # upstream repo, so in-tree-only projects never appear there. The build
+    # matrix is the authoritative list of what CI knows how to build, so union
+    # the two. Without this, a matrix project missing from repos-config.json is
+    # reachable only through a `test:` label and its file changes run no CI.
+    valid_prefixes = get_valid_prefixes(config) | set(subtree_to_project_map)
     matched_subtrees = find_matched_subtrees(paths, valid_prefixes)
     return matched_subtrees
 
