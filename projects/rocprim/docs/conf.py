@@ -43,7 +43,16 @@ external_toc_path = "./sphinx/_toc.yml"
 
 extensions = ["rocm_docs", "rocm_docs.doxygen", "sphinxcontrib.datatemplates"]
 
+# Theme-related settings
 html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "flavor": "rocm",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/rocprim/docs",
+    "use_repository_button": True,
+    "use_issues_button": True,
+    "use_download_button": True,
+}
 
 doxygen_root = "doxygen"
 doxygen_project = {

@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.7.0
 
+### Added
+
+* Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
+
 ## rocBLAS 5.6.0
 
 ### Added
