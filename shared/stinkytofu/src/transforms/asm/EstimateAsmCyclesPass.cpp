@@ -34,6 +34,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -249,6 +250,17 @@ class EstimateAsmCyclesPassImpl : public Pass {
     /// Get the total cycles calculated by this pass
     unsigned int getTotalCycles() const {
         return totalCycles_;
+    }
+
+    /// Per-instruction cumulative cycle positions recorded during the last run.
+    const std::unordered_map<const StinkyInstruction*, uint32_t>& getPerInstructionCycles() const {
+        return perInstCycles_;
+    }
+
+    /// When false, suppress the `<This is N-cycle>` comment annotations so the
+    /// pass can be used purely as a cycle-position query by other passes.
+    void setAnnotateComments(bool annotate) {
+        annotateComments_ = annotate;
     }
 
    private:
@@ -750,17 +762,22 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
+        const HWModel& hw = passCtx.getHWModel();
+        const int barrierSignalToWait = hw.barrier.signalToWaitLatency;
+
         // Estimate cycles for each instruction
         // initial values
         int cycles = 0;
         int hwMFMA = -99;
-        int jumpOverhead = 6;
+        int jumpOverhead = hw.barrier.jumpOverheadCycles;
         int previousLW = 0;
         std::queue<int> hwLRFIFO;
         std::queue<int> lgkmLRFIFO;
         std::deque<int> hwGRFIFO;
         int numPreviousLRs = 0;
-        int previousBarrierSignal = -11;  // gfx1250 barrier signal latency is 11 cycles
+        // Seeded to -latency so that before any signal is seen, the wait clamp
+        // (previousBarrierSignal + latency) is 0 and therefore never binding.
+        int previousBarrierSignal = -barrierSignalToWait;
         int activeWmmaStartCycle = -1;
         int activeWmmaCoExecAdvance = 0;
         std::vector<bool> activeWmmaValuSlots;
@@ -794,7 +811,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (opcode.find("s_barrier_signal") != std::string::npos)
                     previousBarrierSignal = cycles;
                 if (opcode.find("s_barrier_wait") != std::string::npos)
-                    cycles = std::max(cycles + inst->issueCycles, previousBarrierSignal + 11);
+                    cycles = std::max(cycles + inst->issueCycles,
+                                      previousBarrierSignal + barrierSignalToWait);
                 else
                     cycles += inst->issueCycles;
             } else if (isDSRead(*inst)) {
@@ -938,8 +956,13 @@ class EstimateAsmCyclesPassImpl : public Pass {
             // Accumulate issue cycles from each instruction
             // totalCycles += estimateInstructionCycles(inst, passCtx);
 
+            // Record the cumulative cycle position of every processed
+            // instruction so other passes can query it (see
+            // computeEstimatedCyclesPerInstruction).
+            perInstCycles_[inst] = static_cast<uint32_t>(cycles < 0 ? 0 : cycles);
+
             // Update total cycles
-            if (!isLabel(*inst)) {
+            if (annotateComments_ && !isLabel(*inst)) {
                 // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
                 appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
             }
@@ -960,6 +983,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
     }
 
     GfxArchID arch_ = GfxArchID::Gfx1250;
+
+    bool annotateComments_ = true;
+    std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;
 
     unsigned int totalCycles_ = 0;
 
@@ -992,5 +1018,14 @@ unsigned int calculateEstimateAsmCycles(Function& func, PassContext& passCtx) {
     AnalysisManager AM;
     (void)pass.run(func, passCtx, AM);
     return pass.getTotalCycles();
+}
+
+std::unordered_map<const StinkyInstruction*, uint32_t> computeEstimatedCyclesPerInstruction(
+    Function& func, PassContext& passCtx) {
+    EstimateAsmCyclesPassImpl pass;
+    pass.setAnnotateComments(false);
+    AnalysisManager AM;
+    (void)pass.run(func, passCtx, AM);
+    return pass.getPerInstructionCycles();
 }
 }  // namespace stinkytofu

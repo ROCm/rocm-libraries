@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -75,7 +76,8 @@ inline std::shared_ptr<DebugOutputStreams> createDebugOutputStreams(
 /// DebugPass is global and does not need per-PM setup.
 inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleOptions& opts,
                                  const std::string& label,
-                                 const std::shared_ptr<DebugOutputStreams>& debugStreams) {
+                                 const std::shared_ptr<DebugOutputStreams>& debugStreams,
+                                 const StinkyAsmModule* module = nullptr) {
     auto forEachName = [](const std::string& csv, auto cb) {
         std::istringstream stream(csv);
         std::string name;
@@ -121,11 +123,82 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
 
     if (opts.DebugLevel == 1) pm.getAnalysisManager().setDebugLogging(true);
 
-    pm.addInstrumentation(std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig)));
+    pm.addInstrumentation(
+        std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig), module));
 
     if (!opts.DebugPass.empty()) {
         forEachName(opts.DebugPass,
                     [](const std::string& n) { PassManagerDebugConfig::addDebugOnly(n); });
+    }
+}
+
+/// Build a DebugPrintInstrumentation from the module debug options, or nullptr
+/// when no debug output is requested. Shared by the function- and module-level
+/// configurators so both dump with identical settings.
+inline std::shared_ptr<DebugPrintInstrumentation> makeDebugPrintInstrumentation(
+    const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
+    const std::shared_ptr<DebugOutputStreams>& debugStreams,
+    const StinkyAsmModule* module = nullptr) {
+    bool needsDebugConfig =
+        (opts.DebugLevel >= 1) || !opts.PrintBeforePass.empty() || !opts.PrintAfterPass.empty();
+    if (!needsDebugConfig) return nullptr;
+
+    auto forEachName = [](const std::string& csv, auto cb) {
+        std::istringstream stream(csv);
+        std::string name;
+        while (std::getline(stream, name, ',')) {
+            auto s = name.find_first_not_of(' ');
+            auto e = name.find_last_not_of(' ');
+            if (s != std::string::npos) cb(name.substr(s, e - s + 1));
+        }
+    };
+
+    auto debugConfig = std::make_unique<PassManagerDebugConfig>();
+    if (opts.DebugLevel == 1) debugConfig->setPrintPassNames(true);
+    if (opts.DebugLevel == 2) {
+        debugConfig->setDumpInitialIR(true);
+        debugConfig->setPrintAfterAll(true);
+        if (debugStreams) {
+            debugConfig->setDumpStreamBefore(
+                debugStreams->getOrCreate(label + "-before_passes.txt"));
+            debugConfig->setDumpStreamAfter(debugStreams->getOrCreate(label + "-after_passes.txt"));
+        }
+    }
+    if (!opts.PrintBeforePass.empty()) {
+        if (debugStreams)
+            debugConfig->setDumpStreamBefore(
+                debugStreams->getOrCreate(label + "-before_passes.txt"));
+        forEachName(opts.PrintBeforePass,
+                    [&](const std::string& n) { debugConfig->addOnlyPrintBefore(n); });
+    }
+    if (!opts.PrintAfterPass.empty()) {
+        if (debugStreams)
+            debugConfig->setDumpStreamAfter(debugStreams->getOrCreate(label + "-after_passes.txt"));
+        forEachName(opts.PrintAfterPass,
+                    [&](const std::string& n) { debugConfig->addOnlyPrintAfter(n); });
+    }
+    return std::make_shared<DebugPrintInstrumentation>(std::move(debugConfig), module);
+}
+
+/// Configure module-level instrumentation (before/after IR dump for every
+/// ModulePass) on a ModulePassManager, sharing files with the function-level
+/// dumps via \p debugStreams so both interleave in program order.
+inline void configureModuleInstrumentations(ModulePassManager& mpm,
+                                            const StinkyAsmModule::ModuleOptions& opts,
+                                            const std::string& label,
+                                            const std::shared_ptr<DebugOutputStreams>& debugStreams,
+                                            const StinkyAsmModule* module = nullptr) {
+    if (auto inst = makeDebugPrintInstrumentation(opts, label, debugStreams, module))
+        mpm.addInstrumentation(std::move(inst));
+    if (!opts.DebugPass.empty()) {
+        std::istringstream stream(opts.DebugPass);
+        std::string name;
+        while (std::getline(stream, name, ',')) {
+            auto s = name.find_first_not_of(' ');
+            auto e = name.find_last_not_of(' ');
+            if (s != std::string::npos)
+                PassManagerDebugConfig::addDebugOnly(name.substr(s, e - s + 1));
+        }
     }
 }
 
@@ -136,8 +209,9 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
 /// individually.
 inline void configureStandardInstrumentations(
     PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
-    const std::shared_ptr<DebugOutputStreams>& debugStreams) {
-    configureDebugOutput(pm, opts, label, debugStreams);
+    const std::shared_ptr<DebugOutputStreams>& debugStreams,
+    const StinkyAsmModule* module = nullptr) {
+    configureDebugOutput(pm, opts, label, debugStreams, module);
     if (opts.VerifyEach) {
         pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }

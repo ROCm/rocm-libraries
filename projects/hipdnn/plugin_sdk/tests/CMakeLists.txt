@@ -14,6 +14,7 @@ find_package(Threads REQUIRED)
 
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
+    TestArchMatch.cpp
     TestPluginDataTypeHelpers.cpp
     TestPluginException.cpp
     TestPluginHelpers.cpp
@@ -24,6 +25,8 @@ add_executable(hipdnn_plugin_sdk_tests
     TestKnobSettingFactory.cpp
     TestSdkLogging.cpp
     TestVersion.cpp
+    TestPluginDeviceBuffers.cpp
+    TestRuntimePassByValue.cpp
 )
 
 target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})

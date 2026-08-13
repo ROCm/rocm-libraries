@@ -300,7 +300,7 @@ struct reference_fft_data_t
         if(!input_is_set.valid())
             throw std::logic_error("The input data of reference FFT results needs to be "
                                    "initialized before it may be copied");
-        wait_if_needed_for<fft_io::fft_io_in>();
+        input_is_set.get();
         const std::vector<hostbuf>* input_to_copy = &cpu_input;
         std::vector<hostbuf>        temp_host_buffers;
         const auto                  ibuffer_sizes = test_params.ibuffer_sizes();
@@ -391,7 +391,7 @@ struct reference_fft_data_t
         // Avoid corruption of output data by concurrently-executing threads
         wait_if_needed_for<fft_io::fft_io_out>();
         output_is_set = std::async(std::launch::async, [&]() {
-            wait_if_needed_for<fft_io::fft_io_in>();
+            input_is_set.get();
             switch(params.precision)
             {
             case(fft_precision_double):
@@ -439,7 +439,7 @@ struct reference_fft_data_t
         if(!flag.valid())
             throw std::logic_error(
                 "The desired reference data cannot be printed since it was not set");
-        flag.wait();
+        flag.get();
         if constexpr(io == fft_io::fft_io_in)
         {
             std::cout << "CPU input:\n";
@@ -472,7 +472,7 @@ struct reference_fft_data_t
                 "Desired norm cannot be computed since corresponding data was not set");
         }
         return std::async(std::launch::async, [&, relevant_batch_size]() {
-            io_is_set.wait();
+            io_is_set.get();
             return norm(io == fft_io::fft_io_in ? cpu_input : cpu_output,
                         io == fft_io::fft_io_in ? params.ilength() : params.olength(),
                         std::min(params.nbatch, relevant_batch_size),
@@ -500,7 +500,7 @@ struct reference_fft_data_t
             throw std::logic_error("Desired reference FFT results' input/output buffers cannot be "
                                    "queried since corresponding data was not set");
         }
-        io_is_set.wait();
+        io_is_set.get();
         return io == fft_io::fft_io_in ? cpu_input : cpu_output;
     }
     const fft_params& get_params() const
@@ -511,6 +511,17 @@ struct reference_fft_data_t
     static void clear_cache()
     {
         cached_data.clear();
+    }
+
+    reference_fft_data_t(reference_fft_data_t&& other) noexcept
+    {
+        swap(other);
+    }
+    reference_fft_data_t& operator=(reference_fft_data_t&& other) noexcept
+    {
+        if(this != &other)
+            swap(other);
+        return *this;
     }
 
 private:
@@ -575,9 +586,9 @@ private:
             throw std::logic_error("Precision of reference results cannot be narrowed if input or "
                                    "output data were not set prior.");
         // Avoid data corruption by concurrent threads
-        input_is_set.wait();
+        input_is_set.get();
         if(fftw_compare)
-            output_is_set.wait();
+            output_is_set.get();
         const auto invalid_ref_prec_excpt = std::logic_error(
             "Invalid precision encountered for reference results to be narrowed");
         switch(narrower_prec)

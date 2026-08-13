@@ -83,8 +83,9 @@ public:
         auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-            _params.epsilonTensor, "Epsilon");
+        const double epsilon
+            = hipdnn_flatbuffers_sdk::utilities::resolveDoubleScalarFromVariantPack(
+                _params.epsilonTensor, variantPack, "Epsilon");
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>> shallowBiasTensor;
         if(_params.biasTensor.has_value())
@@ -168,6 +169,8 @@ public:
             CHECK_TENSOR_TYPE(
                 tensorMap, nodeAttributes->inv_rms_tensor_uid().value(), ComputeDataTypeEnum);
         }
+
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
 
         return true;
     }

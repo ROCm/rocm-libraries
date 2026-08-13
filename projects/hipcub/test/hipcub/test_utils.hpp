@@ -40,6 +40,7 @@
     #include <cuda/std/array>
     #include <cuda/std/mdspan>
     #include <hipcub/hipcub.hpp>
+    #include <hipcub/config.hpp>
 #endif
 
 #include <hipcub/util_type.hpp>

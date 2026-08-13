@@ -183,11 +183,10 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
- * @brief StreamK=5 hybrid sub-path selector.
+ * @brief The tile-scheduling mode a kernel launches in.
  *
  * Picks between the SK3 static work-assignment sub-path and the SK4
- * dynamic per-XCD work-queue sub-path inside a single SK5 kernel
- * launch. Used by ::origami::streamk::select_hybrid_mode().
+ * dynamic per-XCD work-queue sub-path inside a single SK5 kernel launch.
  */
 enum class hybrid_mode_t : std::uint32_t {
   static_ = 0,        ///< SK3 static work-assignment sub-path
@@ -195,6 +194,14 @@ enum class hybrid_mode_t : std::uint32_t {
   count,              ///< Count of hybrid modes
   none = 0xFFFFFFFFu  ///< Explicitly invalid
 };
+
+/**
+ * @brief Convert hybrid_mode_t to string.
+ *
+ * @param mode Tile-scheduling mode
+ * @return std::string String representation of the mode
+ */
+ORIGAMI_EXPORT std::string hybrid_mode_to_string(hybrid_mode_t mode);
 
 /**
  * @brief Prediction mode types for latency estimation.
@@ -338,6 +345,10 @@ struct ORIGAMI_EXPORT runtime_options {
   /// Heuristics variance threshold (reads from ANALYTICAL_GEMM_HEURISTICS_VARIANCE env var)
   double heuristics_variance;
 
+  /// Force a specific MT size for solution selection (reads from ANALYTICAL_GEMM_PICK env var).
+  /// Format: "MxNxK" e.g. "128x128x64". When set, non-matching configs get max latency.
+  dim3_t gemm_pick{0, 0, 0};
+
   /**
    * @brief Constructor with explicit values (does not read from environment).
    */
@@ -371,6 +382,12 @@ struct ORIGAMI_EXPORT runtime_options {
    * @return double Variance value from ANALYTICAL_GEMM_HEURISTICS_VARIANCE, or 0.01 if not set
    */
   static double read_heuristics_variance_from_env();
+
+  /**
+   * @brief Read GEMM pick MT size from environment variable.
+   * @return dim3_t MT size from ANALYTICAL_GEMM_PICK, or {0,0,0} if not set
+   */
+  static dim3_t read_gemm_pick_from_env();
 
   /**
    * @brief Update runtime options from environment variables.
@@ -641,6 +658,14 @@ struct problem_t {
   /// Batch size.
   std::size_t batch = 1;
 
+  /// Number of compute units the caller intends to use for this GEMM.
+  /// 0 (default) means "use all CUs" and preserves the legacy behaviour of
+  /// modelling against the full hardware CU count. When set to a non-zero
+  /// value, solution selection models the problem as if only this many CUs
+  /// were available (e.g. CU masking / partitioned execution), which changes
+  /// grid launch, timesteps, occupancy, and the ranked config.
+  std::size_t num_cus = 0;
+
   /// Number of query heads (for attention workloads).
   std::size_t q_heads = 32;
 
@@ -668,6 +693,9 @@ struct problem_t {
  * Contains all the parameters needed to describe various workgroup mapping parameters.
  */
 struct workgroup_mapping_t {
+  /// Split-K factor for K-Coherent reorder (0 or 1 = disabled).
+  std::size_t wgmxccsplitk = 0;
+
   /// Workgroup mapping chunk size.
   std::size_t wgmxccchunk = 0;
 

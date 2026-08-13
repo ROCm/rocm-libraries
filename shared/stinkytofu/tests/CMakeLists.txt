@@ -53,9 +53,13 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
+    unit/asm/ModuleAdaptorsTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
-    unit/asm/SwPrefetchInsertionPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchRelDynamicPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsStaticPassTest.cpp
+    unit/asm/SwInstructionPrefetchAbsDynamicPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/StinkyModifiersTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
@@ -73,16 +77,22 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/SetpcSwappcCfgTest.cpp
     unit/asm/LongBranchLoweringTest.cpp
     unit/asm/MemTokenConsistencyCheckPassTest.cpp
+    unit/asm/InsertClusterBarrierPassTest.cpp
     unit/asm/VerifyInstrumentationTest.cpp
+    unit/asm/DebugPrintInstrumentation_test.cpp
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
+    unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/Gfx1250HazardProfileTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
     unit/asm/RederiveExpertScopePassTest.cpp
+    unit/asm/HWModelTest.cpp
 )
 
 # High-Level IR Tests
@@ -196,6 +206,9 @@ if(BUILD_SHARED_LIBS)
     add_executable(api_tests
         ${TEST_MAIN}
         ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
+        # Address identity of the per-arch HWModel objects. Meaningful only against
+        # the shared lib; the unit_tests copy links statically and cannot fail.
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/HWModelIdentityTest.cpp
     )
     target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
     target_link_libraries(api_tests PUBLIC
