@@ -331,6 +331,23 @@ set_property(
     "${PROJECT_VERSION}"
 )
 
+# Verify that generic numerical targets do not depend on the AMD-specific leaf.
+function(roc_host_validation_assert_generic_target_boundary target_name)
+    if(NOT TARGET "${target_name}")
+        return()
+    endif()
+    foreach(property_name LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(link_libraries "${target_name}" "${property_name}")
+        if(link_libraries
+           AND link_libraries MATCHES "host-validation-amd-gpu-layout")
+            message(FATAL_ERROR
+                "Generic host-validation target ${target_name} depends on "
+                "the AMD GPU layout module through ${property_name}."
+            )
+        endif()
+    endforeach()
+endfunction()
+
 # Finalize package metadata after parent projects may enable optional backends.
 function(roc_host_validation_finalize_package)
     get_property(
@@ -382,6 +399,15 @@ function(roc_host_validation_finalize_package)
         set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
     endif()
 
+    foreach(generic_target
+            host-validation-core
+            host-validation
+            host-validation-tiled
+            host-validation-blas
+            host-validation-mx)
+        roc_host_validation_assert_generic_target_boundary("${generic_target}")
+    endforeach()
+
     configure_package_config_file(
         "${_host_validation_source_dir}/cmake/ROCHostValidationConfig.cmake.in"
         "${_host_validation_binary_dir}/ROCHostValidationConfig.cmake"
@@ -414,6 +440,6 @@ install(
 )
 install(
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
-    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/ROCHostValidation"
     COMPONENT docs
 )
