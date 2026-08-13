@@ -18,29 +18,63 @@ A distillation of the union of the production GridBased pool and a StreamK=3 poo
 > This is the single most common way to convert a catalog to Origami selection and get no
 > Origami at all.
 
-## Measured
+## Measured — and the number depends on how you benchmark
 
-19 benchmark arms, 1,500 evaluation shapes × 3 reps each, 122,248 timed measurements, zero
-failed rows. Baseline **G0** is the shipped `GridBased` selector (298 solutions, 9,680
-reference points).
+**Read this before quoting a figure.** v6's standing against the shipped selector (G0)
+changes by 5 points depending on the benchmark's iteration count, because G0 carries a much
+larger library (298 solutions, 9,680 reference points) and therefore a larger **one-time
+initialisation cost**. Benchmarks that run few iterations per shape leave that cost
+unamortised and charge it to G0.
 
-| | vs G0 (all) | <0.1 ms | 0.1–1 ms | 1–5 ms | ≥5 ms |
-|---|---|---|---|---|---|
-| v6, tuned Origami | 100.05% | 95.77% | 102.91% | **117.34%** | 94.29% |
-| v6, stock Origami | 99.59% | 95.68% | 102.03% | 116.13% | 94.13% |
+Three libraries, one session, interleaved, ratios paired within (shape, rep). Only the
+iteration counts differ:
 
-A full pass over all 1,500 shapes takes **627 ms under v6 against 660 ms under G0** — 5.3%
-less GPU time from a catalog 5× smaller. The advantage is concentrated, not diffuse: it is
-almost entirely the 1–5 ms band, which carries 45.6% of total GPU time.
+| | tiered iterations | amortised (floor 60) |
+|---|---|---|
+| **v6 / G0** | **99.95%** [99.1, 100.8] | **94.86%** [94.2, 95.5] |
+| **hybrid / G0** | **100.63%** [100.3, 101.0] | **100.20%** [99.9, 100.5] |
 
-`tuned` here means the Origami heuristics in `fd85b319a36` on this branch; `stock` is
-`origin/develop`. **v6 works well under either** — the tuned selector is worth ~0.5% overall
-and ~1% in the 1–5 ms band, so shipping against a stock runtime is viable.
+The mechanism is clearest per band. `v6 / G0` in the 1–5 ms band is **119.73%** under tiered
+and **99.93%** under amortised — that entire 20-point advantage is G0 paying init on shapes
+the harness gives very few iterations, and it disappears when the cost is amortised.
 
-Report numbers in **kernel-duration bands**, not as a single geomean: 92% of this evaluation
-set runs a kernel shorter than 1 ms, and an aggregate is therefore a report about short
-kernels. On the full set, selector tuning looks worthless on distilled catalogs; restricted
-to shapes ≥1 ms it wins on every catalog tested (+0.75% to +2.74%).
+| band | v6/G0 tiered | v6/G0 amortised |
+|---|---|---|
+| <0.1 ms | 95.08% | 94.30% |
+| 0.1–1 ms | 103.09% | 94.37% |
+| 1–5 ms | **119.73%** | **99.93%** |
+| ≥5 ms | 96.55% | 99.77% |
+
+**What to conclude.** A long-running application initialises the library once, so the
+amortised column is the deployment-relevant one — and there **v6 is ~5% slower than the
+shipped selector.** Under the tiered protocol, which is what the original 19-arm campaign
+used throughout, v6 is at parity. Neither number is wrong; they answer different questions.
+
+**Ship v6 only if you have measured your own workload's iteration behaviour.** If your calls
+are short and frequent with a warm library, expect the amortised column.
+
+**A hybrid configuration is robust to the choice** — see below.
+
+`tuned` above means the Origami heuristics in `fd85b319a36` on this branch; `stock` is
+`origin/develop`. v6 works under either: the tuned selector is worth ~0.5% overall.
+
+Report in **kernel-duration bands**, not a single geomean. 92% of this evaluation set runs a
+kernel shorter than 1 ms, so an aggregate is really a report about short kernels — and on the
+full set selector tuning looks worthless on distilled catalogs while on shapes ≥1 ms it wins
+on every catalog tested (+0.75% to +2.74%).
+
+## The configuration that holds up under both protocols
+
+Gating by problem size — nearest-neighbour matching for low-parallelism shapes, Origami
+prediction for the rest — measures **100.63% / 100.20%** of G0 (tiered / amortised), the only
+configuration tested that is at or above parity under both. It also beats v6 below 0.1 ms by
+7–8 points, the only thing in the campaign to beat G0 in that band across 802 shapes.
+
+It is not shipped here because it is not expressible as a single logic file: it requires
+merging a Prediction logic and a Matching logic and then setting the row predicates, which
+the current tooling does by patching the serialized library post-build. The recipe, the
+scripts and the measurements are in the `tensile-tuning` skill runbook
+(`references/wiki/05_workflow/catalog_campaign_runbook.md`, §10).
 
 ## Caveats
 
@@ -58,12 +92,16 @@ to shapes ≥1 ms it wins on every catalog tested (+0.75% to +2.74%).
   every arm loses to G0 at ≥5 ms. Both are selector-quality limits, not catalog coverage: an
   oracle over the pool shows coverage flat at 0.92–0.96 while selection collapses from 0.96
   (large) to 0.74 (tiny).
-- **One open question.** A gated prediction/matching hybrid measured badly and was written
-  off, then the loss was traced to *one-time library initialisation* amortised over the
-  benchmark's iteration count — at 1000 iterations the penalty is exactly 1.000. Re-measured
-  with amortising iterations the hybrid is slightly *faster* than v6, and it is the only
-  configuration that beat G0 below 0.1 ms (102.16%). **Not confirmed by a full-set run**, so
-  v6 remains the recommendation, but do not treat "hybrid not viable" as settled.
+- **How the init cost was pinned down.** Same shape, same kernel, forced solution index,
+  varying only iterations: at 5 the ratio is 0.868, at 50 it is 0.995, at 1000 it is exactly
+  1.000. A one-time cost divided by a small iteration count is indistinguishable from a
+  per-call cost, and that is what a tiered harness produces on large shapes. This was
+  initially mis-diagnosed three times — as library size, as selection overhead, and as a
+  two-row structural cost — before the iteration sweep settled it.
+- **Provenance of the G0 comparison.** The G0 device library built for these numbers hashes
+  byte-identical to the baseline recorded in the original campaign
+  (`5b5bdc3bc6fc8b90…`), so the two protocols are compared against the same artifact, not a
+  rebuild.
 
 ## Companion artifact
 
