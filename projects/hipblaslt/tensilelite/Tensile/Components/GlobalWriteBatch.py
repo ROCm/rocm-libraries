@@ -370,13 +370,19 @@ class GlobalWriteBatchWriter:
   def _emitBiasSavDrainBarrier(module: Module, isMultiDU: bool, needsDrain: bool) -> bool:
     """Emit the pre-store bias/SAV LDS-read drain + workgroup barrier, multi-DU only.
 
-    The barrier orders the shared bias/SAV LDS column vector (read by every wave)
-    ahead of the paired subtile stores. It is needed only in multi-DU, where the
-    store loop re-stages that LDS vector across sub-iterations, so one wave's next
-    staging (an LDS write) can race another wave's in-flight reads of it. Single-DU
-    stages the vector once and never writes LDS again in the store region, so the
-    ordering is redundant there and the barrier is elided (see emit()). Returns
-    True iff the barrier was emitted.
+    Multi-DU emits this pair before _emitAdd, which makes its s_waitcnt lgkmcnt(0) the
+    load-to-use wait for the shared bias/scaleAlphaVec LDS column vector: it retires
+    those ds_reads before the v_pk_mul/v_pk_add that consume them. It must not be removed
+    there -- those reads have no other wait, because UseSubtileImpl excludes bias/SAV from
+    the interleaved per-element waitcnt (see globalStoreWait).
+
+    Single-DU emits _emitAdd first, so the pair would land after its own consumers and
+    cover nothing; it is elided (see emit()). This is *not* justified by the store region
+    being LDS-write-free -- that holds in multi-DU too, so it cannot distinguish the two
+    cases. The LDS-write-free invariant asserted in emit() guards a different hazard: an
+    LDS write in the store region racing other waves' in-flight reads.
+
+    Returns True iff the barrier was emitted.
     """
     if isMultiDU and needsDrain:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
@@ -390,20 +396,22 @@ class GlobalWriteBatchWriter:
     self._prolog(module)
     # Pre-store bias/SAV LDS-read drain + workgroup barrier ordering.
     #
-    # A subtile bias/scaleAlphaVec epilogue stages a per-column vector into LDS once,
-    # then every wave reads that shared LDS vector while computing the paired stores.
-    # The stores themselves route through the ds_permute/ds_bpermute crossbar, which is
-    # a register-lane shuffle and writes no LDS memory -- so the store region issues no
-    # LDS writes. The drain+barrier only matters when a later LDS *write* could race
-    # those in-flight LDS reads:
-    #   * multi-DU: the store loop re-stages the LDS vector across sub-iterations, so one
-    #     wave's next staging (an LDS write) can overtake another wave's reads -> the
-    #     drain+barrier is required, and it pairs with the multi-DU epilogue-vector
+    # A subtile bias/scaleAlphaVec epilogue stages a per-column vector into LDS once, then
+    # every wave reads that shared LDS vector while computing the paired stores. What makes
+    # the drain+barrier necessary or redundant is *which side of _emitAdd it lands on*, not
+    # whether the store region writes LDS -- the store region routes through the
+    # ds_permute/ds_bpermute crossbar, a register-lane shuffle that writes no LDS memory, in
+    # both DU modes:
+    #   * multi-DU: the pair is emitted BEFORE _emitAdd, so it sits between the ds_reads and
+    #     the v_pk_mul/v_pk_add that consume them, and its s_waitcnt lgkmcnt(0) is the only
+    #     thing retiring those reads -- UseSubtileImpl drops bias/SAV from the interleaved
+    #     per-element waitcnt. Required. It also pairs with the multi-DU epilogue-vector
     #     barrier in KernelWriterAssembly.
-    #   * single-DU: the vector is staged exactly once and the store region is
-    #     LDS-write-free, so nothing can write the LDS the reads depend on -> the ordering
-    #     is redundant and the barrier is elided. The assert below fails loud if a future
-    #     change reintroduces an LDS write into the single-DU store region.
+    #   * single-DU: _emitAdd is emitted FIRST, so the pair would land after its own
+    #     consumers, where it can retire nothing. Elided.
+    # The assert below is a separate guard, for a hazard neither case currently has: an LDS
+    # write reintroduced into the single-DU store region, racing other waves' in-flight
+    # reads. It is not the justification for the elision.
     isMultiDU = isSubtileMultiDU(self.kernel)
     needsDrain = self._needsBiasSavDrain(self.kernel, self.parentWriter.states.useBias)
     if isMultiDU:
