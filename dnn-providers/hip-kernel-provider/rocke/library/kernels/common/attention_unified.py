@@ -93,12 +93,12 @@ class UnifiedAttentionProblem:
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_fp8: bool = False
-    num_sms: int = 120
+    num_cus: int = 120
     # Direct device-subscription target override (concurrent workgroups / CTAs).
-    # 0 => auto: derive as ``num_sms * 4``. When > 0, this takes precedence over
-    # ``num_sms`` for 2D<->3D routing (``select_path``) and 3D segmentation
+    # 0 => auto: derive as ``num_cus * 4``. When > 0, this takes precedence over
+    # ``num_cus`` for 2D<->3D routing (``select_path``) and 3D segmentation
     # (``select_3d``), so tuners/benchmarks can pin the target without knowing
-    # the device CU count. Honoured on the Python dispatch path; like ``num_sms``,
+    # the device CU count. Honoured on the Python dispatch path; like ``num_cus``,
     # the C++ C-ABI engine (attention_unified_entry.cpp) does not yet read it, so
     # a companion change is needed for it to take effect in production.
     target_ctas: int = 0
@@ -150,8 +150,8 @@ class UnifiedAttentionProblem:
         "fills" the device. Single source of truth for 2D<->3D routing
         (``select_path``) and the 3D segment count (``select_3d``). Uses the
         explicit ``target_ctas`` override when set (> 0); otherwise derives it
-        as ``num_sms * 4`` (4 CTAs/CU)."""
-        return self.target_ctas if self.target_ctas > 0 else self.num_sms * 4
+        as ``num_cus * 4`` (4 CTAs/CU)."""
+        return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
     def select_path(self) -> str:
         target = self._effective_target_ctas
@@ -641,15 +641,20 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     single-buffer on (no ring, no grouped_kv2, no FP8, V single-buffer). The
     cohort already satisfies these; the spec __post_init__ re-validates loudly.
 
-    GEOMETRY GUARD: K-single needs Q to fit the lone K slot, i.e.
-    ``block_m <= tile_size``. The cohort runs num_warps=2 / block_m_per_warp=32
-    -> block_m=64, with tile_size = 2*block_size, so this only holds for
-    ``block_size >= 32`` (T>=64). At block_size=16 (T=32) Q (64 rows) cannot fit
-    the single 32-token K slot and the __post_init__ validator rejects it
-    (use_q_direct_reg would lift this but is not wired on this path). Fall back
-    to the no-K-single small-tile config there.
+    GEOMETRY GUARD: K-single aliases Q into the lone K slot, so the spec
+    validator requires ``block_m <= tile_size``. Derive that from the geometry
+    selectors rather than proxying it as ``block_size >= 32`` -- that proxy
+    assumed num_warps=2 (block_m=64) and went stale when
+    ``_enable_softmax_mfma_interleave`` widened this same cohort to num_warps=4
+    (block_m=128 > T=64 at block_size=32 -> uncaught ValueError at launch;
+    block_size=64 survived only by coincidence, T=2*64=128==block_m).
     """
-    return _enable_d128_small_tile(problem) and problem.block_size >= 32
+    if not _enable_d128_small_tile(problem):
+        return False
+    # block_m <= tile_size, asked of the selectors that actually set the geometry
+    # (no recursion: none of these consult _enable_k_single_buffer).
+    block_m = _select_2d_num_warps(problem) * _select_2d_block_m_per_warp(problem)
+    return block_m <= _select_2d_tile_size(problem)
 
 
 def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
@@ -1879,7 +1884,14 @@ def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, b
         # (C-twin parity GREEN); only the selector routing changes.
         if _enable_gfx942_d128_smalltile_doublek(problem):
             return 2, False
-        return 2, True
+        # K-single requires block_m <= tile_size (Q aliases the lone K slot).
+        # Derive block_m from the nw this branch returns so a later nw bump can't
+        # silently stale the guard (the exact hazard this fix addresses); mw=32 is
+        # the 32x32x8 transposed MFMA's fixed M-per-warp, pinned at the
+        # supports_tiled_2d / _tiled_spec_from_problem call sites.
+        nw = 2
+        block_m = nw * 32
+        return nw, block_m <= _gfx942_bf16_wide_tile_size(problem)
     return 4, False
 
 
@@ -2583,25 +2595,25 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 
 # Reference CU count for the split-KV segment clamp below. This is NOT the device
 # count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
-# baseline -- the segment count the formula produced at the historical num_sms=120
-# -- used only as the safe ceiling so raising num_sms cannot over-split 3D shapes.
-_PRE_BUMP_SMS = 120
+# baseline -- the segment count the formula produced at the historical num_cus=120
+# -- used only as the safe ceiling so raising num_cus cannot over-split 3D shapes.
+_PRE_BUMP_CUS = 120
 
 
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
-    # Routing uses the device CU count (num_sms*4) so under-filled grids flip
+    # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
-    # formula produced at the reference num_sms=120 -> target=480) is the
+    # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
     if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
         num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
         min_seg = 16 if problem.block_size <= 16 else 8
         pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
+            min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
             min_seg,
         )
         if problem.max_seqlen_q == 1:
@@ -2626,7 +2638,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # q>1 PREFILL / SPEC-DECODE / MTP: the same bump inflates segments here
             # (spec-decode q=2-8, small batch route 3D with num_2d small). This path
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
-            # never over-split prefill (identical to the shipped num_sms=120 split).
+            # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
     return segments
 

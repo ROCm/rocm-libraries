@@ -23,7 +23,7 @@
 #include "stinkytofu/pipeline/Backend.hpp"
 
 #include "stinkytofu/bindings/python/Module.hpp"
-#include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
@@ -39,15 +39,15 @@ bool Backend::runOptimization() {
     auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
     if (!pipeline || !pipeline->builder) return true;
 
-    PassManager pm;
-    if (!pipeline->builder(pm, module, module.getPassBuilder())) return true;
+    ModulePassManager mpm;
+    if (!pipeline->builder(mpm, module, module.getPassBuilder())) return true;
 
-    configurePassManager(pm);
-    pm.run(module.getFunction());
+    configurePassManager(mpm);
+    mpm.run(module);
     return true;
 }
 
-void Backend::configurePassManager(PassManager& pm) {
+void Backend::configurePassManager(ModulePassManager& pm) {
     const auto& opts = module.getModuleOptions();
 
     GemmTileConfig gemmTileConfig;
@@ -73,6 +73,9 @@ void Backend::configurePassManager(PassManager& pm) {
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
         asmCapsConfig = ToolchainCaps::probe(archId);
     }
+
+    // After the probe above, which replaces the whole struct.
+    asmCapsConfig.requiresXCntForVolatileVMEM = opts.RequiresXCntForVolatileVMEM;
 
     pm.setAsmCapsConfig(asmCapsConfig);
 

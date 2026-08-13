@@ -269,8 +269,8 @@ accumulator + log-sum-exp to a scratch buffer.  A second reduction pass merges
 the partials.  This exposes parallelism across both the head dimension and the
 sequence dimension.
 
-**Optimization — `num_sms` sweep**:
-The number of CTAs (`num_sms`) trading parallelism against merge overhead.
+**Optimization — `num_cus` sweep**:
+The number of CTAs (`num_cus`) trading parallelism against merge overhead.
 The script sweeps `{30, 60, 80, 120, 152, 304}` and picks the fastest.
 Too few → compute stranded on unused CUs; too many → merge kernel dominates.
 
@@ -282,7 +282,7 @@ and Triton achieve ~95% parity at all tested `kv_len` values.
 
 **Results** (batch=2, nhead_q=32, nhead_k=4, head_dim=64):
 ```
-  kv_len   AITER Triton   DSL 3D (best sms)   speedup
+  kv_len   AITER Triton   DSL 3D (best CUs)   speedup
      512       51.4 µs         52.6 µs          0.977×
     1024       51.9 µs         53.3 µs          0.973×
     2048       66.3 µs         67.5 µs          0.982×
@@ -625,7 +625,7 @@ def paged_attention_dsl(self, query, key_cache, value_cache,
         max_seqlen_q=1,
         max_seqlen_k=int(seqused_k.max()),
         dtype="bf16",
-        num_sms=60,
+        num_cus=60,
     )
     run_unified_attention_torch(
         problem=prob, q=query, k=key_cache, v=value_cache, out=output,
