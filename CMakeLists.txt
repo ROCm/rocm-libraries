@@ -58,6 +58,7 @@ set(AVAILABLE_COMPONENTS
     hipblaslt-provider
     hip-kernel-provider
     hipdnn-samples
+    hipdnn-python
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -206,6 +207,14 @@ if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT hipdnn
         PREFIX_PATH projects
         EXPECT_TARGET hipdnn_backend
+    )
+endif()
+
+if("hipdnn-python" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT frontend_bindings
+        PREFIX_PATH projects/hipdnn/python
+        EXPECT_TARGET hipdnn_frontend_bindings
     )
 endif()
 

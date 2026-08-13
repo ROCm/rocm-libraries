@@ -39,14 +39,22 @@ if(NOT COMMAND nanobind_add_module)
     FetchContent_MakeAvailable(nanobind)
 endif()
 
-find_package(hipdnn_frontend CONFIG)
-if(NOT hipdnn_frontend_FOUND)
-    message(FATAL_ERROR "hipdnn_frontendConfig.cmake not found. Set CMAKE_PREFIX_PATH to the ROCm/hipDNN nightly artifact prefix. Searched CMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'")
+# When add_subdirectory'd from the rocm-libraries superbuild (the "hipdnn-python"
+# component), hipdnn_frontend/hipdnn_backend already exist as in-tree targets;
+# only fall back to find_package for a standalone build against an installed
+# hipDNN prefix (e.g. a ROCm/hipDNN nightly artifact).
+if(NOT TARGET hipdnn_frontend)
+    find_package(hipdnn_frontend CONFIG)
+    if(NOT hipdnn_frontend_FOUND)
+        message(FATAL_ERROR "hipdnn_frontendConfig.cmake not found. Set CMAKE_PREFIX_PATH to the ROCm/hipDNN nightly artifact prefix. Searched CMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'")
+    endif()
 endif()
 
-find_package(hipdnn_backend CONFIG)
-if(NOT hipdnn_backend_FOUND)
-    message(FATAL_ERROR "hipdnn_backendConfig.cmake not found. Set CMAKE_PREFIX_PATH to the ROCm/hipDNN nightly artifact prefix. Searched CMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'")
+if(NOT TARGET hipdnn_backend)
+    find_package(hipdnn_backend CONFIG)
+    if(NOT hipdnn_backend_FOUND)
+        message(FATAL_ERROR "hipdnn_backendConfig.cmake not found. Set CMAKE_PREFIX_PATH to the ROCm/hipDNN nightly artifact prefix. Searched CMAKE_PREFIX_PATH='${CMAKE_PREFIX_PATH}'")
+    endif()
 endif()
 
 find_package(hip CONFIG)
@@ -55,10 +63,10 @@ if(NOT hip_FOUND)
 endif()
 
 if(NOT TARGET hipdnn_frontend)
-    message(FATAL_ERROR "hipdnn_frontend target is required for prebuilt hipDNN Python bindings; update the nightly frontend artifact.")
+    message(FATAL_ERROR "hipdnn_frontend target is required for hipDNN Python bindings; update the nightly frontend artifact.")
 endif()
 if(NOT TARGET hipdnn_backend)
-    message(FATAL_ERROR "hipdnn_backend target is required for prebuilt hipDNN Python bindings; update the nightly backend artifact.")
+    message(FATAL_ERROR "hipdnn_backend target is required for hipDNN Python bindings; update the nightly backend artifact.")
 endif()
 
 nanobind_add_module(
