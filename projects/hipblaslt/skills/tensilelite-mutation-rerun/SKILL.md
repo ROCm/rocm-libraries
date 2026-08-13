@@ -67,10 +67,11 @@ configuration, strict kill semantics, and restoration across reruns.
 11. **Restore in all outcomes.** Run `pyproject-mutmut.sh restore` and
     `assert-clean`, then confirm no tracked source mutation remains. Restoration
     is required after success, failure, or interruption.
-12. **Write the handoff.** Report the target, exact test selection, source and
-    environment provenance, baseline status, total/killed/survived/no-test/
-    timeout/inconclusive/equivalent counts, tests added, residual risks, and
-    artifact paths. Never inflate a score by dropping inconclusive outcomes.
+12. **Write the report and handoff.** Read
+    [references/reporting.md](references/reporting.md). Derive the report from
+    raw results, the conserved ledger, and verifier artifacts. Keep native
+    mutmut statuses separate from triage dispositions and never inflate a score
+    by dropping inconclusive outcomes or pragma-removed mutants.
 
 ## Guardrails
 
