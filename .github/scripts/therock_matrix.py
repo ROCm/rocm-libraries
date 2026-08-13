@@ -214,6 +214,7 @@ SUBTREE_EXTRA_MATRIX_PROJECTS = {
     # generator copy lives there too), so a TensileLite-only change must
     # activate "sparselt" the same way a hipblaslt-proper change does.
     "projects/hipblaslt/tensilelite": "sparselt",
+    "shared/host-validation": "rocroller",
 }
 
 
