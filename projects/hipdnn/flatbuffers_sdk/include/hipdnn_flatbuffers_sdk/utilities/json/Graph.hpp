@@ -21,6 +21,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/json/LayernormBackwardAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulAttributes.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/json/MoeGroupedMatmulBwdAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/PointwiseAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormAttributes.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/RMSNormBackwardAttributes.hpp>
@@ -59,6 +60,7 @@ NLOHMANN_JSON_SERIALIZE_ENUM(
      {NodeAttributes::ResampleFwdAttributes, "ResampleFwdAttributes"},
      {NodeAttributes::ResampleBwdAttributes, "ResampleBwdAttributes"},
      {NodeAttributes::MoeGroupedMatmulAttributes, "MoeGroupedMatmulAttributes"},
+     {NodeAttributes::MoeGroupedMatmulBwdAttributes, "MoeGroupedMatmulBwdAttributes"},
      {NodeAttributes::NONE, ""}})
 
 NLOHMANN_JSON_SERIALIZE_ENUM(ConvMode,
@@ -137,6 +139,9 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         nodeJson = *node.attributes_as_ResampleBwdAttributes();
     case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
         nodeJson = *node.attributes_as_MoeGroupedMatmulAttributes();
+        break;
+    case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+        nodeJson = *node.attributes_as_MoeGroupedMatmulBwdAttributes();
         break;
     default:
         throw std::runtime_error(
@@ -232,6 +237,8 @@ inline auto to<data_objects::Node>(flatbuffers::FlatBufferBuilder& builder,
             return to<data_objects::ResampleBwdAttributes>(builder, entry).Union();
         case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
             return to<data_objects::MoeGroupedMatmulAttributes>(builder, entry).Union();
+        case data_objects::NodeAttributes::MoeGroupedMatmulBwdAttributes:
+            return to<data_objects::MoeGroupedMatmulBwdAttributes>(builder, entry).Union();
         default:
             throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<data_objects::Node>(): "
                                      "Unsupported NodeAttributes type: "
