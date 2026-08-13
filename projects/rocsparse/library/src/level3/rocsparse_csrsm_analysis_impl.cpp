@@ -83,6 +83,26 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
 
     auto csrsm_info = p_csrsm_info[0];
 
+    // The diagonal solve has no inter-row dependencies, hence requires no
+    // dependency analysis. Make sure a csrsm info object exists so the solve
+    // stage has a valid handle and return early.
+    if(descr->fill_mode == rocsparse_fill_mode_diagonal)
+    {
+        // A diagonal solve divides by the diagonal entry; a unit diagonal would
+        // reduce it to an identity scaling and is therefore not supported.
+        if(descr->diag_type == rocsparse_diag_type_unit)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+
+        if(csrsm_info == nullptr)
+        {
+            csrsm_info      = new _rocsparse_csrsm_info();
+            p_csrsm_info[0] = csrsm_info;
+        }
+        return rocsparse_status_success;
+    }
+
     // Differentiate the analysis policies
     if(analysis == rocsparse_analysis_policy_reuse)
     {
@@ -217,12 +237,6 @@ namespace rocsparse
                            descr,
                            (descr->type != rocsparse_matrix_type_general),
                            rocsparse_status_not_implemented);
-#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
-        ROCSPARSE_CHECKARG(7,
-                           descr,
-                           (descr->fill_mode == rocsparse_fill_mode_diagonal),
-                           rocsparse_status_not_implemented);
-#endif
         ROCSPARSE_CHECKARG(7,
                            descr,
                            (descr->storage_mode != rocsparse_storage_mode_sorted),

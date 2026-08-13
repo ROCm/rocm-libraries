@@ -96,6 +96,20 @@ void testing_spsm_csr_bad_arg(const Arguments& arg)
         select_bad_arg_analysis(rocsparse_spsm, nargs_to_exclude, args_to_exclude, PARAMS_SOLVE);
     }
 
+    // The diagonal fill mode requires a non-unit diagonal. Combining it with a
+    // unit diagonal must return rocsparse_status_not_implemented.
+    {
+        const rocsparse_fill_mode diagonal = rocsparse_fill_mode_diagonal;
+        const rocsparse_diag_type unit     = rocsparse_diag_type_unit;
+        CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(
+            matA, rocsparse_spmat_fill_mode, &diagonal, sizeof(diagonal)));
+        CHECK_ROCSPARSE_ERROR(
+            rocsparse_spmat_set_attribute(matA, rocsparse_spmat_diag_type, &unit, sizeof(unit)));
+        const rocsparse_spsm_stage stage = rocsparse_spsm_stage_buffer_size;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spsm(PARAMS_BUFFER_SIZE),
+                                rocsparse_status_not_implemented);
+    }
+
 #undef PARAMS_BUFFER_SIZE
 #undef PARAMS_ANALYSIS
 #undef PARAMS_SOLVE

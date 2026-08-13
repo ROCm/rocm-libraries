@@ -96,13 +96,6 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
-        if(descr->fill_mode == rocsparse_fill_mode_diagonal)
-        {
-            return rocsparse_status_not_implemented;
-        }
-#endif
-
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -148,7 +141,28 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
-        const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
+        // The diagonal solve has no inter-row dependencies and therefore needs
+        // neither a row map nor a transposed structure.
+        const bool is_diagonal = (descr->fill_mode == rocsparse_fill_mode_diagonal);
+
+        // A diagonal solve divides by the diagonal entry; a unit diagonal would
+        // reduce it to an identity scaling and is therefore not supported.
+        if(is_diagonal && descr->diag_type == rocsparse_diag_type_unit)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        }
+
+        const rocsparse::trm_info_t* trm_info
+            = is_diagonal ? nullptr : csrsm_info->get(trans_A, descr->fill_mode);
+        const J* row_map = is_diagonal ? nullptr : (const J*)trm_info->get_row_map();
+
+        // For the diagonal solve, analysis is skipped, so make sure the zero
+        // pivot position exists (it is sentinel-initialized on creation).
+        if(is_diagonal)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                csrsm_info->create_zero_pivot_async(rocsparse::get_indextype<J>(), stream));
+        }
 
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
@@ -178,9 +192,11 @@ namespace rocsparse
         rocsparse_fill_mode fill_mode = descr->fill_mode;
 
         // When computing transposed triangular solve, we first need to update the
-        // transposed matrix values
-        if(trans_A == rocsparse_operation_transpose
-           || trans_A == rocsparse_operation_conjugate_transpose)
+        // transposed matrix values. The diagonal solve is skipped here: a diagonal
+        // matrix is its own transpose, so its structure is reused unchanged.
+        if(!is_diagonal
+           && (trans_A == rocsparse_operation_transpose
+               || trans_A == rocsparse_operation_conjugate_transpose))
         {
             T* csrt_val = At;
 
@@ -211,16 +227,18 @@ namespace rocsparse
             case rocsparse_fill_mode_upper:
                 fill_mode = rocsparse_fill_mode_lower;
                 break;
-#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
             case rocsparse_fill_mode_diagonal:
-                return rocsparse_status_not_implemented;
-#endif
+                // Unreachable: the diagonal case is excluded by is_diagonal above.
+                break;
             }
         }
-        else if(force_conj)
+        else if(force_conj || (is_diagonal && trans_A == rocsparse_operation_conjugate_transpose))
         {
-            // CSC conjugate_transpose case: values are already in A^T layout (CSC as CSR),
-            // so we only need to conjugate them
+            // CSC conjugate_transpose case (values already in A^T layout as CSR), or
+            // the diagonal conjugate-transpose case (a diagonal matrix is its own
+            // transpose): in both, only the values need to be conjugated. The
+            // diagonal positions are unchanged, so the original row pointers and
+            // column indices are reused.
             RETURN_IF_HIP_ERROR(
                 hipMemcpyAsync(At, csr_val, sizeof(T) * nnz, hipMemcpyDeviceToDevice, stream));
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, At));
@@ -257,7 +275,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -282,7 +300,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -310,7 +328,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -335,7 +353,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -363,7 +381,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -388,7 +406,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -416,7 +434,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -441,7 +459,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -469,7 +487,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
@@ -494,7 +512,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)trm_info->get_row_map(),
+                        row_map,
                         (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,

@@ -3879,6 +3879,78 @@ static inline void host_ussolve(J                    M,
 }
 
 template <typename I, typename J, typename T>
+static inline void host_dssolve(J                    M,
+                                J                    nrhs,
+                                rocsparse_operation  transB,
+                                bool                 conjA,
+                                T                    alpha,
+                                const I*             csr_row_ptr,
+                                const J*             csr_col_ind,
+                                const T*             csr_val,
+                                T*                   B,
+                                int64_t              ldb,
+                                rocsparse_order      order_B,
+                                rocsparse_diag_type  diag_type,
+                                rocsparse_index_base base,
+                                J*                   struct_pivot,
+                                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // Diagonal-only solve: B_{row,i} = alpha * B_{row,i} / a_{row,row}. A diagonal
+    // matrix is its own transpose; only the conjugate transpose conjugates it.
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+    for(J i = 0; i < nrhs; ++i)
+    {
+        for(J row = 0; row < M; ++row)
+        {
+            const int64_t idx_B
+                = (transB == rocsparse_operation_none && order_B == rocsparse_order_column)
+                      ? i * ldb + row
+                      : row * ldb + i;
+
+            T sum = (transB == rocsparse_operation_conjugate_transpose)
+                        ? alpha * rocsparse_conj(B[idx_B])
+                        : alpha * B[idx_B];
+
+            const I row_begin = csr_row_ptr[row] - base;
+            const I row_end   = csr_row_ptr[row + 1] - base;
+
+            I diag     = -1;
+            T diag_val = static_cast<T>(0);
+            for(I j = row_begin; j < row_end; ++j)
+            {
+                if(csr_col_ind[j] - base == row)
+                {
+                    diag     = j;
+                    diag_val = csr_val[j];
+                    break;
+                }
+            }
+
+            if(diag_type == rocsparse_diag_type_non_unit)
+            {
+                if(diag == -1)
+                {
+                    *struct_pivot = std::min(*struct_pivot, row + base);
+                }
+                else if(diag_val == static_cast<T>(0))
+                {
+                    *numeric_pivot = std::min(*numeric_pivot, row + base);
+                    diag_val       = static_cast<T>(1);
+                }
+
+                sum = sum / (conjA ? rocsparse_conj(diag_val) : diag_val);
+            }
+
+            B[idx_B] = sum;
+        }
+    }
+}
+
+template <typename I, typename J, typename T>
 void host_csrsm(J                    M,
                 J                    nrhs,
                 I                    nnz,
@@ -3967,7 +4039,27 @@ void host_csrsm(J                    M,
         *struct_pivot  = M + 1;
         *numeric_pivot = M + 1;
 
-        if(transA == rocsparse_operation_none)
+        if(fill_mode == rocsparse_fill_mode_diagonal)
+        {
+            // A diagonal matrix is its own transpose, so its structure is reused
+            // unchanged; only the conjugate transpose conjugates the diagonal.
+            host_dssolve(M,
+                         nrhs,
+                         transB,
+                         transA == rocsparse_operation_conjugate_transpose,
+                         alpha,
+                         csr_row_ptr,
+                         csr_col_ind,
+                         csr_val,
+                         B,
+                         ldb,
+                         order_B,
+                         diag_type,
+                         base,
+                         struct_pivot,
+                         numeric_pivot);
+        }
+        else if(transA == rocsparse_operation_none)
         {
             switch(fill_mode)
             {

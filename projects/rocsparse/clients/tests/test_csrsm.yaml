@@ -94,6 +94,22 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
+- name: csrsm_diagonal
+  category: quick
+  function: csrsm
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_range_quick
+  K: [1, 65, 280]
+  alpha_alphai: *alpha_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_diagonal]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
 - name: csrsm_file
   category: quick
   function: csrsm
