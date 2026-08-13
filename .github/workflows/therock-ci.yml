@@ -5,13 +5,14 @@ on:
     branches:
       - develop
       - release/therock-*
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
+  # TEST: Disable presubmit for testing in-progress artifact reuse (using multi-arch instead)
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
+  #     - labeled
+  #     - unlabeled
   workflow_dispatch:
     inputs:
       projects:
