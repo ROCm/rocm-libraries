@@ -22,6 +22,11 @@
  * RowColQuant which uses per-row A scales and per-column B scales.
  *
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
+ *
+ * Intended use: correctness testing and TileEngine parity validation only.
+ * Each call performs host→device copies of A, B, AQ, BQ and device→host copy of C.
+ * This per-call transfer overhead makes this path unsuitable for production workloads
+ * where the caller should own device memory across multiple kernel launches.
  */
 
 #include <hip/hip_runtime.h>

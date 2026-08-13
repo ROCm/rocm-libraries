@@ -21,6 +21,11 @@
  * Memory model: host-pointer (this library owns hipMalloc/hipMemcpy/hipFree).
  * For grouped GEMM, all problem groups share A, B, AQ, BQ, C in a flat host buffer;
  * the caller specifies per-group M/N/K and the library packs them into the device.
+ *
+ * Intended use: correctness testing and TileEngine parity validation only.
+ * Each call performs host→device copies of A, B, AQ, BQ and device→host copy of C.
+ * This per-call transfer overhead makes this path unsuitable for production workloads
+ * where the caller should own device memory across multiple kernel launches.
  */
 
 #include <hip/hip_runtime.h>
