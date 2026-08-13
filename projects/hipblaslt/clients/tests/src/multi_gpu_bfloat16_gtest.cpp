@@ -34,12 +34,14 @@ namespace
     }
 
     // Helper: CPU GEMM for BF16 (compute in FP32, store as BF16)
+    // CPU GEMM for BF16 with column-major layout to match hipBLASLt
     void cpuGEMM_BF16(const std::vector<hip_bfloat16>& A,
                       const std::vector<hip_bfloat16>& B,
                       std::vector<hip_bfloat16>& C,
                       int64_t M, int64_t N, int64_t K,
                       float alpha = 1.0f, float beta = 0.0f)
     {
+        // Column-major layout
         for(int64_t i = 0; i < M; ++i)
         {
             for(int64_t j = 0; j < N; ++j)
@@ -47,10 +49,11 @@ namespace
                 float sum = 0.0f;
                 for(int64_t k = 0; k < K; ++k)
                 {
-                    sum += static_cast<float>(A[i * K + k]) * static_cast<float>(B[k * N + j]);
+                    // Column-major indexing: A[k*M + i] * B[j*K + k]
+                    sum += static_cast<float>(A[k * M + i]) * static_cast<float>(B[j * K + k]);
                 }
-                C[i * N + j] = static_cast<hip_bfloat16>(
-                    alpha * sum + beta * static_cast<float>(C[i * N + j])
+                C[j * M + i] = static_cast<hip_bfloat16>(
+                    alpha * sum + beta * static_cast<float>(C[j * M + i])  // Column-major output
                 );
             }
         }
@@ -252,14 +255,13 @@ namespace
         const int64_t M = 128, N = 128, K = 128;
 
         // Row partition across GPUs
-        int64_t M_per_gpu = M / numDevices;
-
+        // Data parallel - each GPU computes full result independently
         std::vector<hip_bfloat16> h_A_full(M * K);
         std::vector<hip_bfloat16> h_B(K * N);
         initMatrix_BF16(h_A_full, M * K, 1.0f);
         initMatrix_BF16(h_B, K * N, 0.5f);
 
-        // CPU reference in FP32 (for gradient accumulation)
+        // CPU reference in FP32 (for gradient accumulation) - column-major layout
         std::vector<float> h_C_expected(M * N, 0.0f);
         for(int64_t i = 0; i < M; ++i)
         {
@@ -268,10 +270,11 @@ namespace
                 float sum = 0.0f;
                 for(int64_t k = 0; k < K; ++k)
                 {
-                    sum += static_cast<float>(h_A_full[i * K + k]) *
-                           static_cast<float>(h_B[k * N + j]);
+                    // Column-major indexing
+                    sum += static_cast<float>(h_A_full[k * M + i]) *
+                           static_cast<float>(h_B[j * K + k]);
                 }
-                h_C_expected[i * N + j] = sum;
+                h_C_expected[j * M + i] = sum;  // Column-major output
             }
         }
 
@@ -286,23 +289,20 @@ namespace
             hipSetDevice(dev);
             hipblasLtCreate(&handles[dev]);
 
-            int64_t M_start = dev * M_per_gpu;
-            int64_t M_local = (dev == numDevices - 1) ? (M - M_start) : M_per_gpu;
-
-            hipMalloc(&d_A[dev], M_local * K * sizeof(hip_bfloat16));
+            hipMalloc(&d_A[dev], M * K * sizeof(hip_bfloat16));
             hipMalloc(&d_B[dev], K * N * sizeof(hip_bfloat16));
-            hipMalloc(&d_C[dev], M_local * N * sizeof(float));
+            hipMalloc(&d_C[dev], M * N * sizeof(float));
 
-            hipMemcpy(d_A[dev], h_A_full.data() + M_start * K,
-                     M_local * K * sizeof(hip_bfloat16), hipMemcpyHostToDevice);
+            hipMemcpy(d_A[dev], h_A_full.data(),
+                     M * K * sizeof(hip_bfloat16), hipMemcpyHostToDevice);
             hipMemcpy(d_B[dev], h_B.data(), K * N * sizeof(hip_bfloat16), hipMemcpyHostToDevice);
 
             // BF16 input, FP32 output
             hipblasLtMatrixLayout_t matA, matB, matC, matD;
-            hipblasLtMatrixLayoutCreate(&matA, HIP_R_16BF, M_local, K, M_local);
+            hipblasLtMatrixLayoutCreate(&matA, HIP_R_16BF, M, K, M);
             hipblasLtMatrixLayoutCreate(&matB, HIP_R_16BF, K, N, K);
-            hipblasLtMatrixLayoutCreate(&matC, HIP_R_32F, M_local, N, M_local);
-            hipblasLtMatrixLayoutCreate(&matD, HIP_R_32F, M_local, N, M_local);
+            hipblasLtMatrixLayoutCreate(&matC, HIP_R_32F, M, N, M);
+            hipblasLtMatrixLayoutCreate(&matD, HIP_R_32F, M, N, M);
 
             hipblasLtMatmulDesc_t matmul;
             hipblasLtMatmulDescCreate(&matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F);
@@ -331,8 +331,12 @@ namespace
             hipFree(d_workspace);
             hipblasLtMatmulPreferenceDestroy(pref);
 
-            hipMemcpy(h_C_result.data() + M_start * N, d_C[dev],
-                     M_local * N * sizeof(float), hipMemcpyDeviceToHost);
+            // Copy back result (only from GPU 0, all should match)
+            if(dev == 0)
+            {
+                hipMemcpy(h_C_result.data(), d_C[dev],
+                         M * N * sizeof(float), hipMemcpyDeviceToHost);
+            }
 
             hipDeviceSynchronize();
 

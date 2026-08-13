@@ -193,9 +193,9 @@ namespace
     TEST(MultiGPUCoreGEMM, TranspositionVariations)
     {
         int numDevices = getNumGPUs();
-        if(numDevices < 4)
+        if(numDevices < 2)
         {
-            GTEST_SKIP() << "Test requires at least 4 GPUs for all transposition combos";
+            GTEST_SKIP() << "Test requires at least 2 GPUs";
         }
 
         hipblaslt_cout << "Testing transposition variations across GPUs" << std::endl;

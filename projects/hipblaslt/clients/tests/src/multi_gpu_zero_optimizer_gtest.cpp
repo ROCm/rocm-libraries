@@ -34,9 +34,9 @@ namespace
     TEST(MultiGPUZeRO, ZeRO1_OptimizerPartitioning)
     {
         int numDevices = getNumGPUs();
-        if(numDevices < 4)
+        if(numDevices < 2)
         {
-            GTEST_SKIP() << "Test requires at least 4 GPUs for meaningful partitioning";
+            GTEST_SKIP() << "Test requires at least 2 GPUs";
         }
 
         hipblaslt_cout << "Testing ZeRO-1: Optimizer state partitioning across "
@@ -142,9 +142,9 @@ namespace
     TEST(MultiGPUZeRO, ZeRO2_GradientPartitioning)
     {
         int numDevices = getNumGPUs();
-        if(numDevices < 4)
+        if(numDevices < 2)
         {
-            GTEST_SKIP() << "Test requires at least 4 GPUs";
+            GTEST_SKIP() << "Test requires at least 2 GPUs";
         }
 
         hipblaslt_cout << "\nTesting ZeRO-2: Gradient + optimizer state partitioning across "
@@ -244,9 +244,9 @@ namespace
     TEST(MultiGPUZeRO, ZeRO3_ParameterPartitioning)
     {
         int numDevices = getNumGPUs();
-        if(numDevices < 4)
+        if(numDevices < 2)
         {
-            GTEST_SKIP() << "Test requires at least 4 GPUs";
+            GTEST_SKIP() << "Test requires at least 2 GPUs";
         }
 
         hipblaslt_cout << "\nTesting ZeRO-3: Full partitioning (params + grads + states) across "

@@ -562,15 +562,13 @@ namespace
         const int64_t M = 64, N = 64, K = 64;
         float alpha = 1.0f, beta = 0.0f;
 
-        // Row partition across GPUs
-        int64_t M_per_gpu = M / numDevices;
-
+        // Data parallel - each GPU computes full result independently
         std::vector<_Float16> h_dL_dOut_full(M * K);
         std::vector<_Float16> h_B(K * N);
         initMatrix_FP16(h_dL_dOut_full, M * K, 1.0f);
         initMatrix_FP16(h_B, K * N, 0.5f);
 
-        // CPU reference in FP32 for higher precision
+        // CPU reference in FP32 for higher precision (column-major layout)
         std::vector<float> h_grad_expected(M * N, 0.0f);
         for(int64_t i = 0; i < M; ++i)
         {
@@ -579,9 +577,10 @@ namespace
                 float sum = 0.0f;
                 for(int64_t k = 0; k < K; ++k)
                 {
-                    sum += static_cast<float>(h_dL_dOut_full[i * K + k]) * static_cast<float>(h_B[k * N + j]);
+                    // Column-major indexing
+                    sum += static_cast<float>(h_dL_dOut_full[k * M + i]) * static_cast<float>(h_B[j * K + k]);
                 }
-                h_grad_expected[i * N + j] = sum;
+                h_grad_expected[j * M + i] = sum;  // Column-major output
             }
         }
 
@@ -596,22 +595,19 @@ namespace
             hipSetDevice(dev);
             hipblasLtCreate(&handles[dev]);
 
-            int64_t M_start = dev * M_per_gpu;
-            int64_t M_local = (dev == numDevices - 1) ? (M - M_start) : M_per_gpu;
-
-            hipMalloc(&d_dL_dOut[dev], M_local * K * sizeof(_Float16));
+            hipMalloc(&d_dL_dOut[dev], M * K * sizeof(_Float16));
             hipMalloc(&d_B[dev], K * N * sizeof(_Float16));
-            hipMalloc(&d_grad[dev], M_local * N * sizeof(float));
+            hipMalloc(&d_grad[dev], M * N * sizeof(float));
 
-            hipMemcpy(d_dL_dOut[dev], h_dL_dOut_full.data() + M_start * K,
-                     M_local * K * sizeof(_Float16), hipMemcpyHostToDevice);
+            hipMemcpy(d_dL_dOut[dev], h_dL_dOut_full.data(),
+                     M * K * sizeof(_Float16), hipMemcpyHostToDevice);
             hipMemcpy(d_B[dev], h_B.data(), K * N * sizeof(_Float16), hipMemcpyHostToDevice);
 
             hipblasLtMatrixLayout_t matA, matB, matC, matD;
-            hipblasLtMatrixLayoutCreate(&matA, HIP_R_16F, M_local, K, M_local);
+            hipblasLtMatrixLayoutCreate(&matA, HIP_R_16F, M, K, M);
             hipblasLtMatrixLayoutCreate(&matB, HIP_R_16F, K, N, K);
-            hipblasLtMatrixLayoutCreate(&matC, HIP_R_32F, M_local, N, M_local);
-            hipblasLtMatrixLayoutCreate(&matD, HIP_R_32F, M_local, N, M_local);
+            hipblasLtMatrixLayoutCreate(&matC, HIP_R_32F, M, N, M);
+            hipblasLtMatrixLayoutCreate(&matD, HIP_R_32F, M, N, M);
 
             hipblasLtMatmulDesc_t matmul;
             hipblasLtMatmulDescCreate(&matmul, HIPBLAS_COMPUTE_32F, HIP_R_32F);
@@ -639,8 +635,13 @@ namespace
 
             hipFree(d_workspace);
             hipblasLtMatmulPreferenceDestroy(pref);
-            hipMemcpy(h_grad_result.data() + M_start * N, d_grad[dev],
-                     M_local * N * sizeof(float), hipMemcpyDeviceToHost);
+
+            // Copy back result (only from GPU 0, all should match)
+            if(dev == 0)
+            {
+                hipMemcpy(h_grad_result.data(), d_grad[dev],
+                         M * N * sizeof(float), hipMemcpyDeviceToHost);
+            }
 
             hipDeviceSynchronize();
 

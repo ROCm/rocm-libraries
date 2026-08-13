@@ -34,16 +34,16 @@ namespace
     TEST(MultiGPUSpecDec, DisaggregatedDraftTarget)
     {
         int numDevices = getNumGPUs();
-        if(numDevices < 4)
+        if(numDevices < 2)
         {
-            GTEST_SKIP() << "Test requires at least 4 GPUs (2 draft + 2 target)";
+            GTEST_SKIP() << "Test requires at least 2 GPUs (1 draft + 1 target)";
         }
 
-        hipblaslt_cout << "Testing disaggregated speculative decoding (draft on GPU 0-1, target on GPU 2-3)" << std::endl;
-        hipblaslt_cout << "Production Use: vLLM speculative decoding, 3× throughput improvement" << std::endl;
+        const int num_draft_gpus = 1;
+        const int num_target_gpus = 1;
 
-        const int num_draft_gpus = 2;
-        const int num_target_gpus = std::min(numDevices - num_draft_gpus, 2);
+        hipblaslt_cout << "Testing disaggregated speculative decoding (draft on GPU 0, target on GPU 1)" << std::endl;
+        hipblaslt_cout << "Production Use: vLLM speculative decoding, 3× throughput improvement" << std::endl;
         const int batch_size = 8;
         const int draft_seq_len = 4;   // Draft model generates 4 candidates
         const int hidden_dim = 2048;
