@@ -196,14 +196,27 @@ jobs:
           echo "===== SINGLE FPROFILE ENTRY DEBUG ====="
           CC_FILE="TheRock/build-coverage/math-libs/hipRAND/build/compile_commands.json"
           if [ -f "$CC_FILE" ]; then
-            echo "Entries with -fprofile-instr-generate:"
-            grep -B5 -A5 "fprofile-instr-generate" "$CC_FILE"
+            echo "All source files in compile_commands.json:"
+            grep -o '"file": "[^"]*"' "$CC_FILE" | sed 's/"file": "\([^"]*\)"/\1/' | while read -r srcfile; do
+              basename "$srcfile"
+            done
             echo ""
-            echo "Total compile entries in $CC_FILE:"
-            jq '. | length' "$CC_FILE" 2>/dev/null || echo "jq not available"
+            echo "Files WITH -fprofile-instr-generate:"
+            grep "fprofile-instr-generate" "$CC_FILE" | grep -o '"file": "[^"]*"' | sed 's/"file": "\([^"]*\)"/\1/' | while read -r srcfile; do
+              echo "  + $(basename "$srcfile")"
+            done
             echo ""
-            echo "Sample of first 3 entries (checking for coverage flags):"
-            jq '.[0:3] | .[] | {file: .file, command: .command}' "$CC_FILE" 2>/dev/null | head -50
+            echo "Files WITHOUT -fprofile-instr-generate (first 10):"
+            python3 -c "
+import json
+with open('$CC_FILE') as f:
+    entries = json.load(f)
+    no_profile = [e for e in entries if '-fprofile-instr-generate' not in e['command']]
+    for e in no_profile[:10]:
+        import os
+        print(f\"  - {os.path.basename(e['file'])}\")
+    print(f'Total without coverage: {len(no_profile)}/{len(entries)}')
+" 2>/dev/null || echo "Python check failed"
           fi
           echo "===== END SINGLE FPROFILE DEBUG ====="
 
