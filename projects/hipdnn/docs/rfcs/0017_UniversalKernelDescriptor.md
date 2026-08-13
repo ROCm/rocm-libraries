@@ -478,7 +478,7 @@ solvers to compute a workspace default.
     "$device.lds_size",                          // device property
     "$kernel.tile_m",                            // kernel metadata
     "$kernel.split_k",                           // kernel metadata
-    "$sdpa_fwd.head_size",                       // graph node attribute
+    "$q.dims[3]",                                // graph tensor dim (head size)
     "$q.dims[2]",                                // graph tensor dim (query sequence length)
     {"*": ["$q.dims[0]", "$q.dims[1]"]}          // a derived feature: batch times head count
   ],
@@ -650,9 +650,15 @@ sketched here.
 
 **Criteria are expressions, not flat token lists.** A criterion is a nested `{"op": [args]}` tree
 over the symbols the engine's pattern bound. The expression language is specified in its own
-follow-up ([Section 14.2](#142-follow-up-rfcs)); the table below summarizes the operator
-vocabulary a criteria or dispatch expression may use. The set is closed, so naming an unknown
-operator fails load validation.
+follow-up ([Section 14.2](#142-follow-up-rfcs)); the table below is the operator vocabulary a
+criteria or dispatch expression may use at this revision. The set is closed in the sense that binds
+a descriptor author: there is no registry, namespace, dotted key, or provider hook by which a
+descriptor introduces an operator of its own, and an operation key outside the published set is
+refused at load validation. Closed does not mean frozen across spec revisions. The expression-language
+follow-up owns the normative enumeration and grows it additively as consumers motivate operators;
+what never changes is that an unlisted key fails closed at whatever revision is in force.
+
+The table is a representative vocabulary for reading this RFC, not the normative enumeration:
 
 | Class | Operators |
 |---|---|
@@ -667,7 +673,8 @@ operator fails load validation.
 is a `ceil_div` over a sequence or spatial dim, and `min`/`max` size a workspace that depends on a
 knob, such as a split-K GEMM whose scratch is the larger of its partials and its reduction, or one
 floored at a minimum. `rsqrt` expresses the SDPA convention's implicit default scale
-(`1/sqrt(head_size)`), which two kernel families in this repository compute today.
+(`1/sqrt` of the head extent, read positionally as `$q.dims[3]`), which two kernel families in this
+repository compute today.
 `value_or_default(["$field", <fallback>])` reads a possibly-absent optional field and substitutes
 the fallback when unset, so a matcher treats an unset field like an explicitly-defaulted one, the way
 hand-written applicability code already does. The fallback is usually a literal, but it may be any
@@ -699,7 +706,9 @@ five namespaces, and every criteria and dispatch expression draws from the same 
   exact match (the graph has exactly this many nodes), and `$graph.is_override_shape_enabled` is the
   graph's opt-in to execute-time override shapes.
 - **Attributes:** a matched op node's attributes, named by the node's pattern `id`: an SDPA node
-  `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.head_size`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
+  `{"id": "sdpa_fwd"}` exposes `$sdpa_fwd.attn_scale_value`, a conv node `{"id": "conv"}` exposes `$conv.dilation`.
+  Only what the operation's schema declares an attribute is here: head size, batch, and head count
+  are tensor extents, read positionally from the Tensor namespace, not attributes.
 - **Kernel metadata:** `$kernel.<field>`, the values a kernel descriptor (UKD) supplies for the fields
   its engine's metadata schema (KMD) declares, such as tile and vector constants or the dtype it
   targets. These are also the fields the heuristic ranks on. A check binds a kernel to the graph with
@@ -831,16 +840,20 @@ it constrains them:
     {"==":    ["$v.dims[2]", "$k.dims[2]"]},                    // V carries the same key positions as K
     {"==":    ["$k.dims[3]", "$q.dims[3]"]},                    // one head size across Q, K, V
     {"==":    ["$v.dims[3]", "$q.dims[3]"]},
-    {"==":    ["$sdpa_fwd.head_size", 128]},
-    {"in":    ["$sdpa_fwd.mask_mode", ["none"]]},
+    {"==":    ["$q.dims[3]", 128]},                             // head size is a tensor extent, not an attribute
+    {"!":     ["$sdpa_fwd.causal_mask"]},                       // an unmasked graph, served by a
+    {"!":     ["$sdpa_fwd.causal_mask_bottom_right"]},          // kernel built for no mask mode
+    {"==":    ["$kernel.mask_mode", "none"]},
     {"==":    ["$graph.node_count", 1]}  // exact: this kernel is the whole graph
   ]}
 }
 ```
 
-Every `$`-token the criteria read, the tensors `$q`, `$k`, `$v` and the node `$sdpa_fwd`, is
+Every graph `$`-token the criteria read, the tensors `$q`, `$k`, `$v` and the node `$sdpa_fwd`, is
 something the engine's pattern published; that is the whole interface between the two descriptors,
-and the loader checks it.
+and the loader checks it. `$kernel.mask_mode` is the other kind of token, a field the engine's KMD
+declares and each UKD supplies, so this matcher is re-evaluated once per distinct `mask_mode` in
+the catalog and pins the graph's mask state against the kernel's.
 
 Matching does double duty: it decides the kernel applies, and it binds the fields the launch will
 use. A field is **declared** by the engine's pattern, **bound** when the graph matches, then
@@ -866,8 +879,8 @@ unlisted operation key is refused at load. A check the operators cannot express,
 probe into a backing library's own support query whose logic lives in vendor code and cannot be
 reduced to schema fields, is written as a **native matcher** standing beside the descriptor rather
 than inside it: the matcher names a registered native predicate and carries typed arguments, never
-inline code. It is a last resort, not a routine tool: the validated catalog of MIOpen CK
-convolution and rocKE SDPA applicability needed none.
+inline code. It is a last resort, not a routine tool: across the two families whose applicability
+was validated for this design, MIOpen CK convolution and rocKE SDPA, none needed one.
 
 **Precomputed fields** sit between the built-ins and the native matcher: values the schema layer
 derives once and exposes as ordinary tokens, so a matcher compares them instead of
@@ -908,11 +921,16 @@ better. When the decision falls to `id`, the provider logs the conflict to the w
 suffix, `"bias": "$bias?"`, binding it only when the graph supplies it. Whether something optional
 was supplied is asked directly: `{"present": ["$bias"]}` and `{"not_present": ["$bias"]}`. Both
 apply to an optional operand or an optional schema field alike, and both always evaluate, since
-answering "was this supplied?" is their whole job.
+answering "was this supplied?" is their whole job. Both are n-ary over **one or more** references:
+`{"present": ["$a", "$b"]}` asks that every listed reference was supplied, and the one-argument
+form is the ordinary case, not a special case.
 
-A criterion over an optional operand's *fields* works differently: it runs only when that operand is
-bound. A dtype or layout check on an absent `$bias` neither passes nor fails, it simply does not run,
-which lets presence checks and field checks compose. A pack that cannot serve a bias at all writes
+A criterion over an optional operand's *fields* behaves differently, and the level matters. A dtype
+or layout check on an absent `$bias` yields *unknown* for that operand: the field reference has no
+value to read. Unknown propagates through the enclosing expression rather than short-circuiting the
+criterion, so an `or` with a definite-true arm is still true. What fails closed is the **root**: a
+criteria expression whose root still holds unknown declines the match. That is what lets presence
+checks and field checks compose. A pack that cannot serve a bias at all writes
 `{"not_present": ["$bias"]}`. A pack that serves one only in a particular form writes the pair it
 means:
 ```jsonc
@@ -923,9 +941,11 @@ means:
 ]}
 ```
 
-Without a presence operator that second form cannot be written: a bare field check is skipped when
-the operand is absent, so "absent, or present and constrained" collapses into "present and
-constrained, or nothing at all", and the pack silently accepts graphs it cannot serve. Presence is
+This is the `or` table doing the work: on a graph with no bias the second arm is unknown, the first
+is definitely true, so the root is true and no unknown reaches it. Without a presence operator that
+first arm cannot be written at all: a bare field check on an absent operand is unknown, the root
+inherits it, and the criterion declines every graph that omits the bias. "Absent, or present and
+constrained" collapses into "present and constrained". Presence is
 also how a pack refuses a feature outright. The worked example later uses exactly this to decline 23
 of the 24 optional operands its kernel does not implement, admitting only the 24th.
 
@@ -2187,8 +2207,8 @@ follow-up RFCs.
    descriptor distinguish the two, so an operator can see a kernel's true LDS footprint, or is the
    launch value the only thing dispatch needs?
 6. **Deriving a conventional default versus requiring it explicitly:** where an operation defines a
-   conventional default for an attribute, such as SDPA's `1/sqrt(head_size)` scale, a pack may either
-   derive it or require the graph to supply it
+   conventional default for an attribute, such as SDPA's implicit `1/sqrt` scale over the head
+   extent, a pack may either derive it or require the graph to supply it
    ([the worked example's criteria](./examples/0017_UniversalKernelDescriptor_WorkedExample.md#2-the-criteria)). Deriving accepts
    more graphs; requiring keeps the pack's contract narrow and its dispatch free of derived values.
    Should this be an author's choice per pack, as it is today, or a convention the schema settles
