@@ -25,9 +25,9 @@ struct PixelateParams {
 
 // pixelate is a bilinear downscale followed by a nearest-neighbour upscale. NN copies a texel
 // verbatim, so all the numeric error comes from the single bilinear pass -- these are the resize
-// bilinear tolerances. They are NOT loosened to cover the trailing-edge and partial-ROI defects
-// this test surfaces (.notes/issues/geometric-bilinear-last-texel-short.md,
-// .notes/issues/pixelate-intermediate-roi-offset.md); those cases stay red.
+// bilinear tolerances. They are NOT loosened to cover the two defects this test surfaces -- the
+// resize-family trailing-edge short read, and the intermediate downscale ignoring the ROI offset --
+// so those cases stay red.
 double pixelate_tolerance(DType dt) {
     switch (dt) {
         case DType::U8: return 1.0;

@@ -28,8 +28,8 @@ struct EmbossParams {
 
 // A linear KxK convolution rounded to nearest, so the only legitimate error is float-vs-double
 // accumulation -- the same tolerances box_filter uses. Not loosened to cover the shared
-// spatial-filter partial-ROI neighbour bleed
-// (.notes/issues/morphology-host-partial-roi-neighbor-bleed.md), which stays red.
+// spatial-filter defect where a partial ROI reads neighbours from outside the ROI rectangle
+// instead of treating its edge as the border, which stays red.
 double emboss_tolerance(DType dt) {
     switch (dt) {
         case DType::U8: return 1.0;
@@ -91,8 +91,8 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     dst.read(actual.data(), imageBytes);
 
     // (3) Compare the ROI-sized region written at the destination origin. The comparison uses the
-    // test's own ROI copy, not the tensor handed to the op: HIP rewrites that in place
-    // (.notes/issues/hip-clobbers-caller-roi-tensor.md).
+    // test's own ROI copy, not the tensor handed to the op: HIP rewrites the caller's XYWH tensor
+    // to LTRB in place, so reusing it here would walk the wrong rectangle.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, roiVec.data(), XYWH,
                                emboss_tolerance(cfg.dtype)));
 }

@@ -62,9 +62,8 @@ void fill_distortion(Rpp32f* d, LensKind kind) {
 }
 
 // The map is resolved with bilinear sampling, so only genuine fp rounding is allowed. These are the
-// suite's shared warp/remap bilinear tolerances; they are NOT loosened to cover the trailing-edge
-// bilinear defect (.notes/issues/geometric-bilinear-last-texel-short.md) or any partial-ROI
-// placement divergence, which stay red.
+// suite's shared warp/remap bilinear tolerances; they are NOT loosened to cover the resize-family
+// trailing-edge bilinear defect or any partial-ROI placement divergence, which stay red.
 double lens_correction_tolerance(DType dt) {
     switch (dt) {
         case DType::U8: return 1.0;
@@ -144,7 +143,6 @@ void run_lens_correction(const TestConfig& cfg, const LensParams& op) {
     // caller's own copy of the ROI, not the tensor handed to the op: HIP rewrites that tensor from
     // XYWH to LTRB in place (roiWidth/roiHeight come back as rb.x/rb.y), which would otherwise make
     // the comparison walk a different region than the golden wrote.
-    // See .notes/issues/hip-clobbers-caller-roi-tensor.md.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH,
                                lens_correction_tolerance(cfg.dtype)));
 }

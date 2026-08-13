@@ -86,13 +86,12 @@ class FlipVoxelTest : public ::testing::TestWithParam<VoxelWithParams<FlipVoxelP
 TEST_P(FlipVoxelTest, Correctness) {
     const auto& p = GetParam();
     // A horizontal flip on a partial ROI reads a mis-sized AVX vector backward from the ROI's left
-    // edge on HOST U8 and segfaults the whole process -- see
-    // .notes/jira-tickets/flip-voxel-host-u8-avx-reads-past-buffer.md. The fault is a hard crash,
-    // not a gtest failure, so these cases are skipped rather than left red.
+    // edge on HOST U8, past the start of the buffer, and segfaults the whole process. The fault is
+    // a hard crash, not a gtest failure, so these cases are skipped rather than left red.
     if (p.cfg.backend == RPP_HOST_BACKEND && p.cfg.dtype == DType::U8 && p.op.horizontal &&
         p.cfg.roi == Roi::Partial)
-        GTEST_SKIP() << "HOST U8 flip_voxel segfaults on a horizontal flip with a partial ROI -- "
-                        "see .notes/jira-tickets/flip-voxel-host-u8-avx-reads-past-buffer.md";
+        GTEST_SKIP() << "HOST U8 flip_voxel reads past the start of the buffer and segfaults on a "
+                        "horizontal flip with a partial ROI";
 
     switch (p.cfg.dtype) {
         case DType::U8:

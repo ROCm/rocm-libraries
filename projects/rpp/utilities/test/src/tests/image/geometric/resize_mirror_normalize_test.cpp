@@ -106,8 +106,7 @@ void run_resize_mirror_normalize(const TestConfig& cfg, const RmnParams& op) {
 
     // (3) Compare the whole destination image (packed at the origin). A full-frame ROI over the
     // destination descriptor walks exactly the written kDstW x kDstH region. The ROI handed to the
-    // op is not reused here: HIP rewrites that tensor in place
-    // (.notes/issues/hip-clobbers-caller-roi-tensor.md).
+    // op is not reused here: HIP rewrites that tensor from XYWH to LTRB in place.
     const std::vector<RpptROI> dstRoiVec = make_roi(dstDesc, Roi::Full);
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), dstDesc, dstRoiVec.data(), XYWH,
                                rmn_tolerance(cfg.dtype, cfg, op)));
@@ -142,9 +141,9 @@ TEST_P(ResizeMirrorNormalizeTest, Correctness) {
 // Four sets, each isolating one more stage: the plain resize, the mirror, the mean subtraction, and
 // finally the stdDev divide on top of the mirror. IdentityNN is expected red on the ASSERT: the op
 // returns RPP_ERROR_NOT_IMPLEMENTED (-6) for nearest-neighbour on both backends, exactly as
-// resize_crop_mirror does (.notes/issues/resize-crop-mirror-nn-not-implemented.md). MirrorOnly is
-// the exact control instead -- under the partial ROI the destination size equals the ROI, so the
-// resize is scale 1, every source coordinate is an integer and bilinear is exact.
+// resize_crop_mirror does. MirrorOnly is the exact control instead -- under the partial ROI the
+// destination size equals the ROI, so the resize is scale 1, every source coordinate is an integer
+// and bilinear is exact.
 INSTANTIATE_TEST_SUITE_P(
     Image_Geometric, ResizeMirrorNormalizeTest,
     ::testing::ValuesIn(with_params<RmnParams>(

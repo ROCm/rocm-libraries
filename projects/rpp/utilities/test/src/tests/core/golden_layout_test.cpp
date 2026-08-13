@@ -26,9 +26,9 @@ using namespace rpptest;
 // The ND goldens must address every tensor through its descriptor's strides, never by walking the
 // buffer flat, so the same logical case produces the same logical answer whether the descriptor is
 // densely packed or carries row padding. That property is what lets a test choose the stride
-// convention an op actually documents (slice needs padding, the other ND ops need dense -- see
-// .notes/issues/generic-tensor-ops-disagree-on-stride-padding.md) without the golden silently
-// following the buffer layout instead of the descriptor.
+// convention an op actually documents -- the generic-tensor ops disagree on this, slice expecting
+// row padding where the others expect dense strides -- without the golden silently following the
+// buffer layout instead of the descriptor.
 //
 // Each case below computes a golden twice from identical logical input -- once dense, once padded --
 // and requires the logical results to be bit-identical. No RPP op is called: this guards the

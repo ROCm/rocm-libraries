@@ -21,8 +21,8 @@ struct ColorToGreyscaleParams {
 };
 
 // A single 3-term dot product, so the only legitimate error is float-vs-double accumulation.
-// Note this leaves a <= 1 LSB integer round-vs-truncate difference unsurfaced
-// (.notes/issues/i8-round-vs-truncate.md); the integer tolerances are not loosened past 1 LSB.
+// Note this leaves the systemic integer round-vs-truncate difference (the kernels truncate where
+// the goldens round) unsurfaced at <= 1 LSB; the integer tolerances are not loosened past 1 LSB.
 double color_to_greyscale_tolerance(DType dt) {
     switch (dt) {
         case DType::U8: return 1.0;

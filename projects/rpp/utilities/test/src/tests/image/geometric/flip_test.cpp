@@ -68,8 +68,7 @@ void run_flip(const TestConfig& cfg, const FlipParams& op) {
     dst.read(actual.data(), bytes);
 
     // (4) Compare over the written region, bounded by the pre-call ROI copy: the HIP path
-    // rewrites the caller's XYWH tensor to LTRB in place
-    // (.notes/issues/hip-clobbers-caller-roi-tensor.md), so reusing roi[] here would walk the
+    // rewrites the caller's XYWH tensor to LTRB in place, so reusing roi[] here would walk the
     // wrong rectangle. flip only permutes source elements -- it computes nothing -- so every
     // dtype must be bit-exact and the tolerance is zero.
     EXPECT_TRUE(compare_roi<T>(actual.data(), golden.data(), desc, roiVec.data(), XYWH, 0.0));
@@ -84,14 +83,13 @@ class FlipTest : public ::testing::TestWithParam<WithParams<FlipParams>> {};
 TEST_P(FlipTest, Correctness) {
     const auto& p = GetParam();
     // The HIP vertical flip reads before the start of the image plane whenever the ROI does not
-    // reach the image's bottom row, faulting the device
-    // (.notes/issues/flip-hip-vertical-partial-roi-out-of-bounds.md). The fault poisons the HIP
-    // context for the rest of the process, so these cases are enumerated but skipped rather than
-    // left red -- running them takes ~1400 unrelated HIP cases down with them. Remove this guard
-    // once the kernel is fixed.
+    // reach the image's bottom row, faulting the device. The fault poisons the HIP context for the
+    // rest of the process, so these cases are enumerated but skipped rather than left red --
+    // running them takes ~1400 unrelated HIP cases down with them. Remove this guard once the
+    // kernel is fixed.
     if (p.cfg.backend == RPP_HIP_BACKEND && p.cfg.roi == Roi::Partial && p.op.vertical)
-        GTEST_SKIP() << "HIP flip faults on a vertical flip with a partial ROI -- see "
-                        ".notes/issues/flip-hip-vertical-partial-roi-out-of-bounds.md";
+        GTEST_SKIP() << "HIP flip reads out of bounds on a vertical flip with a partial ROI and "
+                        "faults the device";
 
     switch (p.cfg.dtype) {
         case DType::U8:

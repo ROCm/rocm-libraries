@@ -124,7 +124,7 @@ TEST_P(RicapTest, Correctness) {
 //
 // quad and bound are RED on HIP and green on HOST; quad8 and single are green on both. The only
 // difference between bound and single is w0 (20 vs 24), which pins the HIP defect to a vertical
-// split that is not a multiple of 8 -- see .notes/issues/ricap-hip-unaligned-vertical-split.md.
+// split that is not a multiple of 8.
 INSTANTIATE_TEST_SUITE_P(
     Image_Effects, RicapTest,
     ::testing::ValuesIn(with_params<RicapParams>(
