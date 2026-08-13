@@ -120,6 +120,30 @@ INSTANTIATE_TEST_SUITE_P(
              return buildPointwiseGraph(
                  data_objects::PointwiseMode::SUB, data_objects::DataType::FLOAT, {1, 1, 2, 2});
          }},
+        {"ATensorWithNoStrides",
+         // Same refusal the add pack owes: the layout classifier dereferences strides(),
+         // and applicability runs before anything has validated the graph.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::SUB,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/false,
+                                        /*danglingInputBUid=*/std::nullopt,
+                                        /*inputAVirtual=*/false,
+                                        /*inputAIsRuntimePassByValue=*/false,
+                                        /*outputVirtual=*/false,
+                                        /*omitStrides=*/true);
+         }},
+        {"DimsWhoseProductIsOneButAreNotAllOne",
+         // {-1,-1,1,1} multiplies to 1; the kernel indexes element 0 only.
+         []() {
+             return buildPointwiseGraph(
+                 data_objects::PointwiseMode::SUB, data_objects::DataType::FLOAT, {-1, -1, 1, 1});
+         }},
         {"ARankTheDispatchPathCannotServe",
          []() {
              return buildPointwiseGraph(

@@ -108,6 +108,33 @@ INSTANTIATE_TEST_SUITE_P(
              return buildPointwiseGraph(
                  data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2});
          }},
+        {"ATensorWithNoStrides",
+         // The layout classifier dereferences strides(). A refusal predicate runs on a
+         // graph nothing has validated, so a caller that omits strides must be declined,
+         // not crashed on. Without the null guard this segfaults rather than failing.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/false,
+                                        /*danglingInputBUid=*/std::nullopt,
+                                        /*inputAVirtual=*/false,
+                                        /*inputAIsRuntimePassByValue=*/false,
+                                        /*outputVirtual=*/false,
+                                        /*omitStrides=*/true);
+         }},
+        {"DimsWhoseProductIsOneButAreNotAllOne",
+         // {-1,-1,1,1} multiplies to 1. The kernel indexes element 0 only, so the claim
+         // is about extent, not product; a product check accepts this and the pack then
+         // owns a graph it cannot serve.
+         []() {
+             return buildPointwiseGraph(
+                 data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {-1, -1, 1, 1});
+         }},
         {"ARankTheDispatchPathCannotServe",
          // The provider derives layout from tensor rank and rejects anything below rank 4.
          []() {

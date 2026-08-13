@@ -181,6 +181,9 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
  *        `INPUT_B_UID`, and no tensor is inserted for it.
  * @param inputAVirtual Marks input A virtual.
  * @param inputAIsRuntimePassByValue Marks input A runtime-pass-by-value.
+ * @param omitStrides Builds every tensor with no strides vector at all. A frontend-built
+ *        graph always carries strides, but a plugin-ABI caller or a deserialized graph
+ *        need not, and an applicability check runs before anything has validated that.
  */
 inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation
@@ -196,7 +199,8 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     std::optional<int64_t> danglingInputBUid = std::nullopt,
     bool inputAVirtual = false,
     bool inputAIsRuntimePassByValue = false,
-    bool outputVirtual = false)
+    bool outputVirtual = false,
+    bool omitStrides = false)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -204,6 +208,8 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     // Packed strides by default; an explicit set describes a view into a larger buffer.
     const std::vector<int64_t> strides
         = explicitStrides.has_value() ? *explicitStrides : std::vector<int64_t>(dims.size(), 1);
+    // Null, not empty: the field is omitted entirely, so strides() returns nullptr.
+    const std::vector<int64_t>* const stridesPtr = omitStrides ? nullptr : &strides;
     const auto resolvedInputBDataType = inputBDataType.value_or(dataType);
 
     std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
@@ -211,20 +217,20 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
                                                                  INPUT_A_UID,
                                                                  nullptr,
                                                                  dataType,
-                                                                 &strides,
+                                                                 stridesPtr,
                                                                  &dims,
                                                                  inputAVirtual,
                                                                  data_objects::TensorValue::NONE,
                                                                  0,
                                                                  inputAIsRuntimePassByValue));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, INPUT_B_UID, nullptr, resolvedInputBDataType, &strides, &dims, false));
+        builder, INPUT_B_UID, nullptr, resolvedInputBDataType, stridesPtr, &dims, false));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, OUTPUT_UID, nullptr, dataType, &strides, &dims, outputVirtual));
+        builder, OUTPUT_UID, nullptr, dataType, stridesPtr, &dims, outputVirtual));
     if(includeThirdOperand)
     {
         tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, INPUT_C_UID, nullptr, dataType, &strides, &dims, false));
+            builder, INPUT_C_UID, nullptr, dataType, stridesPtr, &dims, false));
     }
 
     data_objects::PointwiseAttributesBuilder attributesBuilder(builder);
