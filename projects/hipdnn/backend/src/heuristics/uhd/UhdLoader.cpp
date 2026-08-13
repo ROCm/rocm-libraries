@@ -173,6 +173,12 @@ std::optional<UhdConfig>
         }
     }
 
+    // Custom library symbol
+    if(uhd->custom_library_symbol() != nullptr)
+    {
+        config.customLibrarySymbol = uhd->custom_library_symbol()->str();
+    }
+
     // Validate adapter-specific requirements
     if(config.adapterType == "tree_data" || config.adapterType == "onnx" ||
        config.adapterType == "custom_library")
@@ -190,6 +196,12 @@ std::optional<UhdConfig>
         HIPDNN_SDK_LOG_WARN("UHD static_order adapter has no static_order_fields, "
                             << "defaulting to ['priority', 'id']");
         config.staticOrderFields = {"priority", "id"};
+    }
+
+    if(config.adapterType == "custom_library" && config.customLibrarySymbol.empty())
+    {
+        HIPDNN_SDK_LOG_ERROR("UHD custom_library adapter requires custom_library_symbol");
+        return std::nullopt;
     }
 
     return config;

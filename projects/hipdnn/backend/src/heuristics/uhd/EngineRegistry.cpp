@@ -7,6 +7,7 @@
 #include "ScoreTransform.hpp"
 #include "adapters/TreeDataAdapter.hpp"
 #include "adapters/TableAdapter.hpp"
+#include "adapters/CustomLibraryAdapter.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
@@ -247,7 +248,19 @@ std::shared_ptr<IUhdAdapter>
             entry->cachedAdapter = std::move(adapter);
         }
     }
-    // TODO: Add onnx, custom_library adapters when implemented
+    else if(cfg.adapterType == "custom_library")
+    {
+        // CustomLibraryAdapter loads from .so
+        if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
+        {
+            auto adapter = CustomLibraryAdapter::load(cfg.modelArtifactPath,
+                                                       cfg.customLibrarySymbol,
+                                                       cfg.featuresSignature.size(),
+                                                       cfg.featuresHash);
+            entry->cachedAdapter = std::move(adapter);
+        }
+    }
+    // TODO: Add onnx adapter when implemented
 
     return entry->cachedAdapter;
 }

@@ -127,6 +127,7 @@ add_executable(
     heuristics/TestFeatureExtractor.cpp
     heuristics/TestTreeDataAdapter.cpp
     heuristics/TestTableAdapter.cpp
+    heuristics/TestCustomLibraryAdapter.cpp
     heuristics/TestUhdBuiltIn.cpp
     heuristics/TestUhdSelectionFlow.cpp
     heuristics/uhd/TestUhdLoader.cpp
@@ -162,6 +163,7 @@ target_compile_definitions(
             TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME="${TEST_EMPTY_NAME_HEURISTIC_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_A_PLUGIN_NAME}"
             TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME="${TEST_DUPLICATE_POLICY_ID_B_PLUGIN_NAME}"
+            HIPDNN_TEST_PLUGIN_DIR="${HIPDNN_TEST_PLUGIN_DIR}"
 )
 target_compile_options(hipdnn_backend_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
 clang_tidy_check(hipdnn_backend_tests)
@@ -230,6 +232,25 @@ set_target_properties(
 )
 
 install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+        RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
+)
+
+# libhipdnn_test_scorer_lib.so or hipdnn_test_scorer_lib.dll (used by TestCustomLibraryAdapter.cpp)
+add_library(hipdnn_test_scorer_lib SHARED heuristics/test_scorer_lib.cpp)
+set_target_properties(hipdnn_test_scorer_lib PROPERTIES CXX_VISIBILITY_PRESET hidden)
+target_compile_options(hipdnn_test_scorer_lib PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+add_dependencies(hipdnn_backend_tests hipdnn_test_scorer_lib)
+
+set_target_properties(
+    hipdnn_test_scorer_lib
+    PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_TEST_PLUGIN_DIR}"
+        THEROCK_INSTALL_RPATH_ORIGIN "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}"
+)
+
+install(TARGETS hipdnn_test_scorer_lib LIBRARY DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 

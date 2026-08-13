@@ -52,6 +52,7 @@ struct UhdConfig
     std::string modelArtifactPath; // for tree_data/onnx/custom_library
     std::string modelHash; // checksum of model artifact for integrity validation
     std::vector<std::string> staticOrderFields = {"priority", "id"}; // for static_order
+    std::string customLibrarySymbol; // for custom_library: symbol name in .so
 };
 
 /// @brief Engine registration entry (mock for UED).

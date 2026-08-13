@@ -70,6 +70,7 @@ add_library(
     heuristics/uhd/UhdLoader.cpp
     heuristics/uhd/adapters/TreeDataAdapter.cpp
     heuristics/uhd/adapters/TableAdapter.cpp
+    heuristics/uhd/adapters/CustomLibraryAdapter.cpp
     plugin/EnginePlugin.cpp
     plugin/EnginePluginResourceManager.cpp
     plugin/HeuristicPlugin.cpp
