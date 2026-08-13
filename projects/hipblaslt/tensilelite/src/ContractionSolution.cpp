@@ -4314,6 +4314,12 @@ namespace TensileLite
         if(!problem.getParams().uniformSummationOrder())
             return true;
 
+        // Conservative simplification: a custom kernel is hand-written assembly
+        // whose summation order is not described by sizeMapping, so none are
+        // admitted. Admitting provably-safe custom kernels is planned separately.
+        if(!sizeMapping.customKernelName.empty())
+            return false;
+
         // Atomic fixup of partial tiles accumulates in arrival order.
         if(sizeMapping.streamK != 0 && sizeMapping.streamKAtomic != 0)
             return false;
@@ -4356,6 +4362,13 @@ namespace TensileLite
                 "hipBLASLt Error: solution '" + this->kernelName
                 + "' cannot guarantee uniform summation order for this launch: " + reason);
         };
+
+        // Conservative simplification: a custom kernel is hand-written assembly
+        // whose summation order is not described by sizeMapping, so none are
+        // admitted. Admitting provably-safe custom kernels is planned separately.
+        if(!sizeMapping.customKernelName.empty())
+            reject("custom kernel " + sizeMapping.customKernelName
+                   + " is not supported under uniform summation order");
 
         if(sizeMapping.streamK != 0)
         {
