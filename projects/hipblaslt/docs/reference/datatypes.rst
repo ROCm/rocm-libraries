@@ -38,10 +38,6 @@ hipblasLtMatmulDescAttributes_t
 -------------------------------
 .. doxygenenum:: hipblasLtMatmulDescAttributes_t
 
-hipblasLtStreamKTileSchedulingMode_t
-------------------------------------
-.. doxygenenum:: hipblasLtStreamKTileSchedulingMode_t
-
 hipblasLtMatmulHeuristicResult_t
 --------------------------------
 .. doxygenstruct:: hipblasLtMatmulHeuristicResult_t
