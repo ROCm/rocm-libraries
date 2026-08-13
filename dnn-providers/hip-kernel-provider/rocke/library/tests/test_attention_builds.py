@@ -1362,15 +1362,17 @@ class TestAttentionHelpers(unittest.TestCase):
             )
 
     def test_gfx942_d64_decode_num_warps(self):
-        """gfx942 D64 decode picks num_warps=1; prefill keeps num_warps=4.
+        """gfx942 D64 decode picks num_warps=1.
 
         Decode (max_seqlen_q == 1) is memory-bound and wins at nw=1 (BLOCK_M=32,
-        4x the CTAs of nw=4). Prefill is compute-bound and stays at nw=4. fp8
-        decode is excluded from the nw=1 lever (dequant-bound, wants more warps),
-        so it also stays at nw=4. This branch is the production geometry change;
-        pin it so a refactor can't silently revert it. The C++ selector mirrors
-        this exactly (see attention_unified_selectors.cpp); the run_all.py
-        byte-identity gate enforces the two agree.
+        4x the CTAs of nw=4). fp8 decode is excluded from the nw=1 lever
+        (dequant-bound, wants more warps), so it stays at nw=4. bf16 full-causal
+        sink prefill is intercepted earlier by the tuned cohort (nw=2, see
+        test_gfx942_sink_prefill_tuned_cohort). This branch is the production
+        geometry change; pin it so a refactor can't silently revert it. The
+        Python selectors are authoritative for production geometry; the C++
+        selectors in attention_unified_selectors.cpp are a hand-maintained mirror
+        kept in sync for parity (not exercised by production dispatch).
         """
         import kernels.common.attention_unified as au
 
@@ -1391,11 +1393,109 @@ class TestAttentionHelpers(unittest.TestCase):
 
         with _patch_resolved_arch("gfx942"):
             self.assertEqual(au._select_2d_num_warps(_p(1)), 1)  # decode
-            self.assertEqual(au._select_2d_num_warps(_p(512)), 4)  # prefill
-            self.assertEqual(au._select_2d_num_warps(_p(2048)), 4)  # prefill
+            # prefill: intercepted by the tuned sink-prefill cohort -> nw2
+            self.assertEqual(au._select_2d_num_warps(_p(512)), 2)
+            self.assertEqual(au._select_2d_num_warps(_p(2048)), 2)
             self.assertEqual(
                 au._select_2d_num_warps(_p(1, use_fp8=True)), 4
             )  # fp8 decode excluded
+
+    def test_gfx942_sink_prefill_tuned_cohort(self):
+        """gfx942 full-causal bf16 sink prefill selects nw2/mw16/T32 + register_pv,
+        and near-miss shapes stay on the shipped nw4/mw32/no-regpv config.
+        """
+        import kernels.common.attention_unified as au
+
+        def _make_problem(**overrides):
+            base = dict(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+            )
+            base.update(overrides)
+            return UnifiedAttentionProblem(**base)
+
+        with _patch_resolved_arch("gfx942"):
+            cohort = _make_problem()
+            self.assertTrue(au._enable_gfx942_sink_prefill_tuned(cohort))
+            spec = au._tiled_spec_from_problem(cohort)
+            self.assertEqual(spec.num_warps, 2)
+            self.assertEqual(spec.block_m_per_warp, 16)
+            self.assertEqual(spec.tile_size, 2 * cohort.block_size)
+            self.assertTrue(spec.use_register_pv)
+
+            # Near-miss shapes on the 2D path must NOT hit the tuned cohort and
+            # must keep the shipped D64 config (nw4 / mw32 / no register_pv).
+            for label, p in (
+                ("swa", _make_problem(sliding_window=128)),
+                ("no_sinks", _make_problem(use_sinks=False)),
+                ("bs32", _make_problem(block_size=32)),
+            ):
+                with self.subTest(near_miss=label):
+                    self.assertFalse(au._enable_gfx942_sink_prefill_tuned(p))
+                    s = au._tiled_spec_from_problem(p)
+                    self.assertEqual(s.num_warps, 4)
+                    self.assertEqual(s.block_m_per_warp, 32)
+                    self.assertFalse(s.use_register_pv)
+
+            # Decode (q==1) routes to the 3D path, not the 2D spec builder; the
+            # cohort gate must still exclude it.
+            self.assertFalse(
+                au._enable_gfx942_sink_prefill_tuned(_make_problem(max_seqlen_q=1))
+            )
+
+    def test_gfx950_sink_prefill_wpe3_cohort(self):
+        """gfx950 full-causal bf16 sink prefill selects waves_per_eu=3 (occupancy
+        hint only, output-preserving); SWA, non-sink, decode, and other shapes
+        keep the shipped waves_per_eu=2.
+        """
+        import kernels.common.attention_unified as au
+
+        def _make_problem(**overrides):
+            base = dict(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=64,
+                num_kv_heads=8,
+                head_size=64,
+                block_size=16,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype="bf16",
+                use_sinks=True,
+                sliding_window=0,
+            )
+            base.update(overrides)
+            return UnifiedAttentionProblem(**base)
+
+        with _patch_resolved_arch("gfx950"):
+            cohort = _make_problem()
+            self.assertTrue(au._enable_gfx950_sink_prefill_wpe3(cohort))
+            self.assertEqual(au._select_2d_waves_per_eu(cohort), 3)
+
+            # Near-miss shapes must NOT hit the wpe=3 cohort.
+            for label, p in (
+                ("swa", _make_problem(sliding_window=128)),
+                ("no_sinks", _make_problem(use_sinks=False)),
+                ("bs32", _make_problem(block_size=32)),
+            ):
+                with self.subTest(near_miss=label):
+                    self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(p))
+            # Decode (q==1) routes to 3D; gate must still exclude it.
+            self.assertFalse(
+                au._enable_gfx950_sink_prefill_wpe3(_make_problem(max_seqlen_q=1))
+            )
+            # gfx942 must not hit the gfx950 gate.
+            with _patch_resolved_arch("gfx942"):
+                self.assertFalse(au._enable_gfx950_sink_prefill_wpe3(_make_problem()))
 
     def test_tiled_3d_dispatch_gate_accepts_kwargs_per_arch(self):
         """Regression: the shared dispatch entry
