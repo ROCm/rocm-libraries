@@ -39,8 +39,10 @@ ordinary TensileLite builds and tests do not depend on them.
 2. Record the source and container state with `scripts/slice-preflight.sh`.
 3. Use `scripts/pyproject-mutmut.sh backup` and `set` to configure the bounded
    campaign.
-4. Run mutmut with an explicit worker limit. Inspect every result that was not
-   killed with `mutmut show <id>` before deciding whether it exposes a gap.
+4. Run mutmut with an explicit worker limit. Review every result that was not
+   killed, following [references/survivor-triage.md](references/survivor-triage.md).
+   Save the complete set of mutant IDs before grouping work, inspect each one
+   with `mutmut show <id>`, and keep exactly one review row per ID.
 5. Restore `pyproject.toml` and require `assert-clean` before survivor
    verification.
 6. For a meaningful survivor, add a focused characterization test that passes
