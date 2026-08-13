@@ -4,6 +4,6 @@
 if(BUILD_CPP_GRAPH_TESTS)
     target_sources(${INTEGRATION_TESTS_EXE}
         PRIVATE
-            IntegrationGpuPointwiseReluForward.cpp
+            IntegrationGpuActivationForward.cpp
     )
 endif()
