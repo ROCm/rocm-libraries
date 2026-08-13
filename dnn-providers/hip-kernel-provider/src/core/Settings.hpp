@@ -24,9 +24,8 @@ struct Settings
     std::optional<asm_sdpa_engine::AccumulatorType> accumulatorType;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    /// The kernel ingestor's per-call knob filter (RFC 0017 §4's catalog -> filter ->
-    /// rank ordering). Populated by initializeExecutionSettings(); getMaxWorkspaceSize()
-    /// reads it from here since it receives only this Settings object.
+    /// Per-call knob filter. Populated by initializeExecutionSettings();
+    /// getMaxWorkspaceSize() reads it here since it receives only this Settings object.
     hipdnn_plugin_sdk::ingestor::KnobFilter ingestorKnobFilter;
 #endif
 };

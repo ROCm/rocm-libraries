@@ -76,13 +76,8 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         };
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-        // The kernel ingestor's engines (RFC 0017), one per discovered descriptor set.
-        //
-        // This block is the stand-in for runtime descriptor-file loading: ALMIOPEN-2401
-        // replaces discoverDescriptorSets()'s body with a per-UED directory scan and
-        // this loop keeps working unchanged. It is the last hand-maintained engine
-        // inventory, and it is a loop rather than a row per engine, so adding one costs
-        // no edit here.
+        // One ingestor engine per discovered descriptor set. A loop rather than a row
+        // per engine, so adding one costs no edit here.
         for(auto& set : kernel_ingestor_engine::discoverDescriptorSets())
         {
             // Registered at enumeration, where a collision is catchable and can name the
