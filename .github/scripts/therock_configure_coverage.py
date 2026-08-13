@@ -105,9 +105,10 @@ def main():
             # Ensure fetch_artifact_args is set so the test downloads the correct artifacts.
             # Use artifact_stage with -coverage suffix (e.g., "rand-coverage") since coverage
             # artifacts are renamed before upload to avoid conflicts with non-coverage artifacts
-            # in the same run. Coverage artifacts: rand-coverage_lib_gfx950-dcgpu.tar.zst
+            # in the same run. Coverage artifacts: rand-coverage_lib_gfx950-dcgpu.tar.zst,
+            # rand-coverage_test_gfx950-dcgpu.tar.zst (stage name has -coverage, components don't)
             if "fetch_artifact_args" not in entry or not entry["fetch_artifact_args"]:
-                entry["fetch_artifact_args"] = f"--{artifact_stage}-coverage --tests-coverage"
+                entry["fetch_artifact_args"] = f"--{artifact_stage}-coverage --tests"
             coverage_projects.append(entry)
 
     # Output for GitHub Actions
