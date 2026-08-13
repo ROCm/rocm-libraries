@@ -1754,29 +1754,6 @@ class GlobalWriteBatchWriter:
 
     storeCode = Module("GroupLoadStore")
 
-    # Lever 2 (SubtileBf16EpilogueOpt Stage3): activation-none peel.
-    # With ActivationFuncCall=True (default for hipblaslt_all) every store element pays
-    # copyData + s_swappc + s_setpc to jump to a runtime-selected activation callee -- which is EMPTY
-    # for ActivationArgs=none, the dominant production case (call term = 6,292 cyc / 165 calls). Collect
-    # the per-element activation-call modules into `activationCode` and skip the whole block at runtime
-    # when ActivationType==none (enum index 0). Scoped to the 16bit subtile path, where activation
-    # round-trips ValuC (packModule empty; the store reads ValuC), so skipping is a pure identity.
-    # `mergeActFuncCall` is forced off below so bias lands in ValuC (not fused into vgprActCopy) and the
-    # entire activation module -- copyData-in + swappc + copyData-out -- is a skippable identity for none.
-    isActInsertAfterACF = (self.kernel["ActivationFuncCall"]
-        and (activationCDataType == self.kernel["ProblemType"]["DestDataType"])
-        and (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"])
-        and ((not self.kernel["ProblemType"]["UseScaleCD"]) or (not self.kernel["ProblemType"]["UseScaleAlphaVec"])))
-    actNonePeel = (is16bitSubtile
-        and self.kernel["ActivationFuncCall"]
-        and self.kernel["ProblemType"]["ActivationType"] in ('all', 'hipblaslt_all')
-        and not self.kernel["ProblemType"]["Gradient"]
-        and not self.kernel["ProblemType"]["UseE"]
-        and not self.kernel["ProblemType"]["UseScaleCD"]
-        and self.storeBiasD != 1
-        and not isActInsertAfterACF)
-    activationCode = Module("subtileActivationCalls")
-
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
@@ -1959,9 +1936,6 @@ class GlobalWriteBatchWriter:
         if activationCDataType == self.kernel["ProblemType"]["ComputeDataType"] and self.kernel["ActivationFuncCall"]:
           mergeActFuncCall = True
         if (self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["UseE"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-          mergeActFuncCall = False
-        if actNonePeel:
-          # Lever 2: keep bias in ValuC so the whole activation module is a skippable identity for none.
           mergeActFuncCall = False
 
         if self.factorDim and self.gwvw > 1:
@@ -2278,11 +2252,7 @@ class GlobalWriteBatchWriter:
         module.add(activationModule)
       else:
         module.add(gradientCvtModule)
-        if actNonePeel:
-          # Lever 2: defer the activation call to the collected `activationCode` (peeled below).
-          activationCode.add(activationModule)
-        else:
-          module.add(activationModule)
+        module.add(activationModule)
         module.add(scaleDModule)
         module.add(biasReductionModule)
         module.add(gateModule)
@@ -2484,20 +2454,6 @@ class GlobalWriteBatchWriter:
     self._finalizeSubtileOobGuards(storeCode if (self.kernel["GroupLoadStore"] or is16bitSubtile) else module)
     if self.kernel["ProblemType"]["StochasticRounding"]:
       self.parentWriter.vgprPool.checkIn(vgprRND)
-
-    # Lever 2 (SubtileBf16EpilogueOpt Stage3): activation-none peel emit.
-    # Skip the collected per-element activation calls at runtime when ActivationType==none (enum 0).
-    # Emitted BEFORE the store peel: the calls write the (identity) activation result into ValuC, which
-    # the stores then read. When peeled, ValuC already holds the bias result (mergeActFuncCall forced off).
-    if actNonePeel and activationCode.count():
-      actNoneSkipLabel = Label(self.parentWriter.labels.getNameInc("subtile_act_none_skip"),
-                               "skip per-element activation calls when ActivationType==none")
-      module.add(self.parentWriter.getSCMPKInstruction("EQU32", "ActivationType", 0,
-                                                       comment="ActivationType == none (enum 0)?"))
-      module.add(SCBranchSCC1(labelName=actNoneSkipLabel.getLabelName(),
-                              comment="none -> skip all per-element activation calls"))
-      module.add(activationCode)
-      module.add(actNoneSkipLabel)
 
     # Lever 1 (SubtileBf16EpilogueOpt Stage2): interior fast-path peel.
     #
