@@ -8,7 +8,7 @@ Public API::
 
     import hipdnn_torch
     hipdnn_torch.enable_logging()          # optional: see each native fallback
-    hipdnn_torch.install()                 # patch linear/rmsnorm/sdpa/layernorm/silu/gelu/conv2d
+    hipdnn_torch.install()                 # patch linear/rmsnorm/sdpa/layernorm/silu/gelu/conv2d/conv3d
     ...                                    # run your model
     print(hipdnn_torch.report())           # per-shape census + why calls fell back
     hipdnn_torch.uninstall()
@@ -26,7 +26,7 @@ import logging
 
 from .activation import GeluOverride, SiluOverride
 from .bootstrap import BootstrapError, bootstrap, is_bootstrapped
-from .conv import Conv2dFpropOverride
+from .conv import Conv2dFpropOverride, Conv3dFpropOverride
 from .layernorm import LayerNormOverride
 from .linear import LinearOverride
 from .rmsnorm import RmsNormOverride
@@ -44,6 +44,7 @@ _OVERRIDES = {
     "silu": SiluOverride(),
     "gelu": GeluOverride(),
     "conv2d": Conv2dFpropOverride(),
+    "conv3d": Conv3dFpropOverride(),
 }
 
 _ALL = tuple(_OVERRIDES)
@@ -74,7 +75,7 @@ def _selected(ops):
 
 def install(ops=_ALL) -> None:
     """Patch the selected functionals (default: all of ``linear``, ``rmsnorm``,
-    ``sdpa``, ``layernorm``, ``silu``, ``gelu``, ``conv2d``). Triggers the one-time
+    ``sdpa``, ``layernorm``, ``silu``, ``gelu``, ``conv2d``, ``conv3d``). Triggers the one-time
     bootstrap; raises :class:`BootstrapError` if the provider/backend/frontend
     cannot be discovered."""
     for name in _selected(ops):

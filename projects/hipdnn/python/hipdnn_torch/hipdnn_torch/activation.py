@@ -11,10 +11,12 @@ Both are unary pointwise ops; the tensor is flattened to a single contiguous run
 
   * ``F.silu`` -> ``PointwiseMode.SWISH_FWD`` (SiLU is Swish with beta == 1).
   * ``F.gelu(approximate="tanh")`` -> ``PointwiseMode.GELU_APPROX_TANH_FWD``.
-    The default exact-erf ``F.gelu`` has no rocKE builder op yet, so it falls back
-    to native and is logged (reason ``erf-gelu unsupported``).
+  * ``F.gelu()`` (exact erf) -> ``PointwiseMode.GELU_FWD``.
 
-Constraint: cuda f16/bf16 only; anything else falls back to native and is logged.
+Both GELU flavours are representable, so neither is gated -- the graph is built and
+hipDNN decides whether a loaded engine serves the mode (an engine with no builder
+for it declines -> native). The only structural precondition is a graph-mappable
+dtype on cuda; anything else falls back to native and is logged.
 """
 
 import logging
@@ -34,11 +36,12 @@ class _ActivationOverride(OpOverride):
         raise NotImplementedError
 
     def _gate(self, input):
-        torch = self.state.torch
+        # Structural preconditions only: a device pointer to execute against and a
+        # dtype the graph builder can map. No shape/size gating -- build and submit.
         if not input.is_cuda:
             return False, "input not on cuda"
-        if input.dtype not in (torch.float16, torch.bfloat16):
-            return False, f"dtype {self._tok(input.dtype)} (need f16/bf16)"
+        if input.dtype not in self.state.dtype_map:
+            return False, f"dtype {self._tok(input.dtype)} not graph-mappable"
         return True, ""
 
     def _graph(self, numel, mode, dtype):
@@ -64,6 +67,7 @@ class _ActivationOverride(OpOverride):
         c_t.set_stride([1])
         c_t.set_data_type(hf)
         c_t.set_uid(self._C_UID)
+        c_t.set_output(True)  # terminal output must be non-virtual (MIOpen requires it)
         return g
 
     def _run(self, real, input, native, **mode_kwargs):
@@ -125,10 +129,11 @@ class GeluOverride(_ActivationOverride):
     op_name = "gelu"
 
     def _mode(self, approximate="none"):
+        pm = self.state.hipdnn.PointwiseMode
+        # Both flavours are representable; hipDNN decides if an engine serves them.
         if approximate == "tanh":
-            return self.state.hipdnn.PointwiseMode.GELU_APPROX_TANH_FWD
-        # Exact erf GELU has no rocKE builder op yet -> native fallback.
-        return "erf-gelu unsupported"
+            return pm.GELU_APPROX_TANH_FWD
+        return pm.GELU_FWD  # exact erf GELU
 
     def _call(self, real, input, approximate="none"):
         return self._run(

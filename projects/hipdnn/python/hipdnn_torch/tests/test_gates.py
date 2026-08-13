@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from hipdnn_torch.activation import GeluOverride, SiluOverride
-from hipdnn_torch.conv import Conv2dFpropOverride, _pair
+from hipdnn_torch.conv import Conv2dFpropOverride, _ntuple
 from hipdnn_torch.layernorm import LayerNormOverride
 
 
@@ -29,11 +29,14 @@ class _FakeDtype:
         return f"<dtype {self.name}>"
 
 
-# The three dtypes the gates care about. Identity is all that matters (the gates and
-# _tok compare against state.torch.float16 etc.), so distinct objects suffice.
+# The dtypes the gates care about. Identity is all that matters (the gates and _tok
+# compare against state.torch.float16 etc.), so distinct objects suffice. F16/BF16/F32
+# are all graph-mappable (present in state.dtype_map); INT8 stands in for a dtype the
+# graph builder cannot map, so the dtype gate declines it.
 F16 = _FakeDtype("f16")
 BF16 = _FakeDtype("bf16")
 F32 = _FakeDtype("f32")
+INT8 = _FakeDtype("int8")  # not in dtype_map -> "not graph-mappable"
 
 
 class _FakeTensor:
@@ -57,14 +60,19 @@ def _fake_torch():
 
 
 def _make(cls):
-    """Construct an override and give it just enough fake ``state`` for the gate."""
+    """Construct an override and give it just enough fake ``state`` for the gate.
+    ``dtype_map`` mirrors bootstrap's (f16/bf16/f32 are graph-mappable); its values
+    are irrelevant to the gate, only membership is checked."""
     ov = cls()
-    ov.state = SimpleNamespace(torch=_fake_torch())
+    ov.state = SimpleNamespace(
+        torch=_fake_torch(),
+        dtype_map={F16: "HALF", BF16: "BFLOAT16", F32: "FLOAT"},
+    )
     return ov
 
 
 # --------------------------------------------------------------------------- #
-# conv._pair helper                                                            #
+# conv._ntuple helper (rank-generic; n=2 for conv2d)                           #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "value, expected",
@@ -79,8 +87,8 @@ def _make(cls):
         ((1, 2, 3), None),  # rank-3 is not a 2D conv hyperparam
     ],
 )
-def test_pair_normalisation(value, expected):
-    assert _pair(value) == expected
+def test_ntuple_normalisation(value, expected):
+    assert _ntuple(value, 2) == expected
 
 
 # --------------------------------------------------------------------------- #
@@ -100,12 +108,21 @@ def test_layernorm_gate_accepts_bf16():
     assert ok, reason
 
 
-def test_layernorm_gate_rejects_f32():
+def test_layernorm_gate_accepts_f32():
+    # f32 is graph-mappable now (in dtype_map): no dtype pre-filter, the graph is
+    # built and hipDNN decides. The gate must not decline on dtype alone.
     ov = _make(LayerNormOverride)
     x = _FakeTensor((8, 128), F32)
     ok, reason = ov._gate(x, weight=None, bias=None, ns=(128,), n=128)
+    assert ok, reason
+
+
+def test_layernorm_gate_rejects_unmapped_dtype():
+    ov = _make(LayerNormOverride)
+    x = _FakeTensor((8, 128), INT8)
+    ok, reason = ov._gate(x, weight=None, bias=None, ns=(128,), n=128)
     assert not ok
-    assert "f32" in reason
+    assert "not graph-mappable" in reason
 
 
 def test_layernorm_gate_rejects_multi_axis():
@@ -154,11 +171,19 @@ def test_activation_gate_accepts_f16_bf16(cls):
 
 
 @pytest.mark.parametrize("cls", [SiluOverride, GeluOverride])
-def test_activation_gate_rejects_f32(cls):
+def test_activation_gate_accepts_f32(cls):
+    # f32 is graph-mappable -> the gate passes it through to hipDNN.
     ov = _make(cls)
     ok, reason = ov._gate(_FakeTensor((32, 64), F32))
+    assert ok, reason
+
+
+@pytest.mark.parametrize("cls", [SiluOverride, GeluOverride])
+def test_activation_gate_rejects_unmapped_dtype(cls):
+    ov = _make(cls)
+    ok, reason = ov._gate(_FakeTensor((32, 64), INT8))
     assert not ok
-    assert "f32" in reason
+    assert "not graph-mappable" in reason
 
 
 @pytest.mark.parametrize("cls", [SiluOverride, GeluOverride])
@@ -171,14 +196,15 @@ def test_activation_gate_rejects_non_cuda(cls):
 
 def test_gelu_mode_tanh_vs_erf():
     ov = _make(GeluOverride)
-    # tanh approximation needs hipdnn.PointwiseMode; give it a fake enum sentinel.
+    # both flavours are representable now; give fake enum sentinels for each.
     tanh_mode = object()
+    erf_mode = object()
     ov.state.hipdnn = SimpleNamespace(
-        PointwiseMode=SimpleNamespace(GELU_APPROX_TANH_FWD=tanh_mode)
+        PointwiseMode=SimpleNamespace(GELU_APPROX_TANH_FWD=tanh_mode, GELU_FWD=erf_mode)
     )
     assert ov._mode(approximate="tanh") is tanh_mode
-    # exact erf gelu is unsupported -> a reason string (routes to native fallback).
-    assert ov._mode(approximate="none") == "erf-gelu unsupported"
+    # exact erf gelu -> GELU_FWD (built into the graph; hipDNN decides support).
+    assert ov._mode(approximate="none") is erf_mode
 
 
 def test_silu_mode():
@@ -201,15 +227,26 @@ def test_conv_gate_accepts_f16_groups1():
     assert ok, reason
 
 
-def test_conv_gate_rejects_f32():
+def test_conv_gate_accepts_f32():
+    # f32 is graph-mappable -> no dtype pre-filter; hipDNN decides.
     ov = _make(Conv2dFpropOverride)
     x = _FakeTensor((1, 16, 32, 32), F32)
     w = _FakeTensor((32, 16, 3, 3), F32)
     ok, reason = ov._gate(
         x, w, groups=1, stride=(1, 1), padding=(1, 1), dilation=(1, 1)
     )
+    assert ok, reason
+
+
+def test_conv_gate_rejects_unmapped_dtype():
+    ov = _make(Conv2dFpropOverride)
+    x = _FakeTensor((1, 16, 32, 32), INT8)
+    w = _FakeTensor((32, 16, 3, 3), INT8)
+    ok, reason = ov._gate(
+        x, w, groups=1, stride=(1, 1), padding=(1, 1), dilation=(1, 1)
+    )
     assert not ok
-    assert "f32" in reason
+    assert "not graph-mappable" in reason
 
 
 def test_conv_gate_rejects_grouped():
@@ -227,9 +264,9 @@ def test_conv_gate_rejects_string_padding():
     ov = _make(Conv2dFpropOverride)
     x = _FakeTensor((1, 16, 32, 32), F16)
     w = _FakeTensor((32, 16, 3, 3), F16)
-    # _pair('same') -> None, and the gate declines non-integer padding.
+    # _ntuple('same', 2) -> None, and the gate declines non-integer padding.
     ok, reason = ov._gate(
-        x, w, groups=1, stride=(1, 1), padding=_pair("same"), dilation=(1, 1)
+        x, w, groups=1, stride=(1, 1), padding=_ntuple("same", 2), dilation=(1, 1)
     )
     assert not ok
     assert "stride/padding/dilation" in reason

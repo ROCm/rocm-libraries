@@ -15,8 +15,12 @@ touches make it catch the norms real models actually emit:
   * **eps=None** is resolved the way torch does (``torch.finfo(dtype).eps``) so the
     baked epsilon matches native output exactly.
 
-Constraint: single-axis (last-dim) norms on cuda f16/bf16 only; anything else falls
-back to native and is logged.
+Shape is not pre-filtered (any M, any N): the override builds the graph and lets
+hipDNN decide. The only things it catches are what the 2-D RMSNorm graph cannot
+represent -- a multi-axis or non-last-axis ``normalized_shape``, and a weight dtype
+differing from the input (its raw pointer would be reinterpreted byte-for-byte). A
+graph-mappable dtype on cuda is the sole structural precondition; anything else
+falls back to native and is logged.
 """
 
 import logging
@@ -40,24 +44,29 @@ class RmsNormOverride(OpOverride):
         return w
 
     def _gate(self, input, weight, ns, n):
-        torch = self.state.torch
+        # Structural facts + what the 2-D RMSNorm graph cannot represent. No
+        # shape/size pre-filter (any M, any N): build and let hipDNN decide.
         if not input.is_cuda:
-            return False, "input not on cuda"
-        if input.dtype not in (torch.float16, torch.bfloat16):
-            return False, f"dtype {self._tok(input.dtype)} (need f16/bf16)"
+            return False, "input not on cuda"  # execute() needs a device pointer
+        if input.dtype not in self.state.dtype_map:
+            return False, f"dtype {self._tok(input.dtype)} not graph-mappable"
+        # --- not representable in the graph -> catch here ---
         if weight is not None and weight.dtype != input.dtype:
             # The graph declares the weight tensor as the input dtype and
             # execute() passes its raw pointer, so a differing weight dtype
             # (e.g. an fp32 norm scale) would be reinterpreted byte-for-byte ->
             # silently wrong. Decline instead. (weight=None synthesises a
             # matching-dtype ones-weight, so it is always fine.)
-            return False, f"weight dtype {self._tok(weight.dtype)} != input {self._tok(input.dtype)}"
-        if input.dim() < 2:
-            return False, "input rank < 2"
+            return (
+                False,
+                f"weight dtype {self._tok(weight.dtype)} != input {self._tok(input.dtype)}",
+            )
         if len(ns) != 1:
-            return False, f"normalized_shape rank {len(ns)} (need 1)"
+            # 2-D graph normalizes the flattened last axis only; a multi-axis
+            # normalized_shape cannot be expressed as a [M,N] reduction.
+            return False, f"normalized_shape rank {len(ns)} (need 1, last axis)"
         if int(ns[0]) != n:
-            return False, "normalized_shape != last dim"
+            return False, "normalized_shape != last dim (non-last-axis norm)"
         return True, ""
 
     def _graph(self, m, n, eps, dtype):
@@ -69,16 +78,29 @@ class RmsNormOverride(OpOverride):
         g.set_compute_data_type(hipdnn.DataType.FLOAT)
 
         x_t = g.tensor(
-            hipdnn.Tensor().set_name("x").set_dim([m, n]).set_stride([n, 1])
-            .set_data_type(hf).set_uid(1)
+            hipdnn.Tensor()
+            .set_name("x")
+            .set_dim([m, n])
+            .set_stride([n, 1])
+            .set_data_type(hf)
+            .set_uid(1)
         )
         w_t = g.tensor(
-            hipdnn.Tensor().set_name("weight").set_dim([1, n]).set_stride([n, 1])
-            .set_data_type(hf).set_uid(2)
+            hipdnn.Tensor()
+            .set_name("weight")
+            .set_dim([1, n])
+            .set_stride([n, 1])
+            .set_data_type(hf)
+            .set_uid(2)
         )
         eps_t = g.tensor(
-            hipdnn.Tensor().set_name("eps").set_dim([1]).set_stride([1])
-            .set_data_type(hipdnn.DataType.FLOAT).set_uid(3).set_value(float(eps))
+            hipdnn.Tensor()
+            .set_name("eps")
+            .set_dim([1])
+            .set_stride([1])
+            .set_data_type(hipdnn.DataType.FLOAT)
+            .set_uid(3)
+            .set_value(float(eps))
         )
         attrs = hipdnn.RMSNormAttributes()
         attrs.set_forward_phase(hipdnn.NormFwdPhase.INFERENCE)
@@ -89,6 +111,7 @@ class RmsNormOverride(OpOverride):
         y_t.set_stride([n, 1])
         y_t.set_data_type(hf)
         y_t.set_uid(4)
+        y_t.set_output(True)  # terminal output must be non-virtual (MIOpen requires it)
         return g
 
     def _call(self, real, input, normalized_shape, weight=None, eps=None):
@@ -120,14 +143,20 @@ class RmsNormOverride(OpOverride):
                 f"[{m},{n}] {dtype}",
             )
             y = torch.empty_like(x2d)
-            self._execute(entry, {1: x2d.data_ptr(), 2: w2d.data_ptr(), 4: y.data_ptr()},
-                          input.device)
+            self._execute(
+                entry,
+                {1: x2d.data_ptr(), 2: w2d.data_ptr(), 4: y.data_ptr()},
+                input.device,
+            )
             self.note_aot(key, weightless=1 if weightless else 0)
             return y.reshape(input.shape)
         except NotApplicable as na:  # engine can't serve this shape -> native
             self.note_native(key, str(na))
             return real(input, normalized_shape, weight, eps)
-        except Exception as ex:  # noqa: BLE001 -- any failure -> native, never break the model
-            self.note_native(key, f"exception: {type(ex).__name__}: {ex}",
-                             level=logging.WARNING)
+        except (
+            Exception
+        ) as ex:  # noqa: BLE001 -- any failure -> native, never break the model
+            self.note_native(
+                key, f"exception: {type(ex).__name__}: {ex}", level=logging.WARNING
+            )
             return real(input, normalized_shape, weight, eps)

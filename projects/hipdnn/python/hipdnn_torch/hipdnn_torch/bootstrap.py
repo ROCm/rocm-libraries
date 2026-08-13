@@ -23,10 +23,23 @@ lives in one place):
 Everything discoverable is parametrised by environment variable so nothing here is
 tied to one machine:
 
-  * ``HIPDNN_TORCH_PROVIDER_SO``  (REQUIRED) -- path to the built provider plugin,
-    e.g. ``<build>/lib/hipdnn_plugins/engines/libhip_kernel_provider.so``.
-  * ``HIPDNN_TORCH_ENGINE``       -- engine name to pin (default
-    ``AOT_CATALOG_ENGINE``).
+  * ``HIPDNN_TORCH_PROVIDER_SO``  (REQUIRED unless ``..._SOS`` is set) -- path to a
+    single built provider plugin, e.g.
+    ``<build>/lib/hipdnn_plugins/engines/libhip_kernel_provider.so``.
+  * ``HIPDNN_TORCH_PROVIDER_SOS`` -- ``os.pathsep``/comma-separated list of provider
+    plugin ``.so``s to co-load (multi-provider "enable everything" mode), e.g.
+    ``libhip_kernel_provider.so:libhipblaslt_plugin.so:libmiopen_plugin.so``. Takes
+    precedence over the single-path var. Duplicate engine ids across .so's are
+    rejected by the backend, so load each provider at most once.
+  * ``HIPDNN_TORCH_ENGINE``       -- engine name to pin in ``force-rocke`` select
+    mode (default ``AOT_CATALOG_ENGINE``).
+  * ``HIPDNN_TORCH_SELECT``       -- engine-selection policy (default ``force-rocke``):
+      - ``force-rocke``: pin ``HIPDNN_TORCH_ENGINE`` via ``create_execution_plan_ext``
+        (bypasses ranking -- kernel-validation semantics; census ``aot`` means "that
+        one engine served it").
+      - ``pick-best``: let hipDNN rank+select across all loaded engines
+        (``create_execution_plans([FALLBACK])``); honors ``HIPDNN_HEUR_CONFIG_PATH``
+        for rule-file replay. Census records the *winning* engine name per shape.
   * ``HIPDNN_TORCH_FRONTEND_DIR`` -- fallback path to a raw
     ``frontend_bindings/build`` dir, used only when the ``hipdnn-frontend`` wheel
     is not importable.
@@ -46,6 +59,7 @@ import os
 import sys
 
 _ENGINE_NAME = os.environ.get("HIPDNN_TORCH_ENGINE", "AOT_CATALOG_ENGINE")
+_SELECT_MODE = os.environ.get("HIPDNN_TORCH_SELECT", "force-rocke")
 
 
 def _fnv1a64(s: str) -> int:
@@ -69,32 +83,52 @@ class State:
     """Everything the overrides need after a successful bootstrap. Treat as
     read-only."""
 
-    __slots__ = ("torch", "hipdnn", "handle", "engine_id", "engine_name", "dtype_map")
+    __slots__ = (
+        "torch",
+        "hipdnn",
+        "handle",
+        "engine_id",
+        "engine_name",
+        "dtype_map",
+        "select_mode",
+    )
 
-    def __init__(self, torch, hipdnn, handle, engine_id, engine_name, dtype_map):
+    def __init__(
+        self, torch, hipdnn, handle, engine_id, engine_name, dtype_map, select_mode
+    ):
         self.torch = torch
         self.hipdnn = hipdnn
         self.handle = handle
         self.engine_id = engine_id
         self.engine_name = engine_name
         self.dtype_map = dtype_map
+        self.select_mode = select_mode
 
 
 _state = None  # cached State after the first successful bootstrap()
 
 
-def _provider_so() -> str:
-    so = os.environ.get("HIPDNN_TORCH_PROVIDER_SO")
-    if not so:
-        raise BootstrapError(
-            "HIPDNN_TORCH_PROVIDER_SO is not set. Point it at the built "
-            "hip-kernel-provider plugin, e.g. "
-            "<build>/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
-        )
-    so = os.path.expanduser(so)
-    if not os.path.isfile(so):
-        raise BootstrapError(f"HIPDNN_TORCH_PROVIDER_SO does not exist: {so}")
-    return so
+def _provider_sos() -> list:
+    """Resolve the provider plugin ``.so`` list. ``HIPDNN_TORCH_PROVIDER_SOS``
+    (os.pathsep/comma separated) wins if set; else the single
+    ``HIPDNN_TORCH_PROVIDER_SO``. Every path must exist."""
+    multi = os.environ.get("HIPDNN_TORCH_PROVIDER_SOS")
+    if multi:
+        raw = [p for chunk in multi.split(os.pathsep) for p in chunk.split(",")]
+        sos = [os.path.expanduser(p.strip()) for p in raw if p.strip()]
+    else:
+        one = os.environ.get("HIPDNN_TORCH_PROVIDER_SO")
+        if not one:
+            raise BootstrapError(
+                "Neither HIPDNN_TORCH_PROVIDER_SOS nor HIPDNN_TORCH_PROVIDER_SO is "
+                "set. Point one at the built provider plugin(s), e.g. "
+                "<build>/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
+            )
+        sos = [os.path.expanduser(one)]
+    for so in sos:
+        if not os.path.isfile(so):
+            raise BootstrapError(f"provider plugin does not exist: {so}")
+    return sos
 
 
 def _torch_backend_path(torch) -> str:
@@ -149,7 +183,7 @@ def bootstrap() -> State:
     if _state is not None:
         return _state
 
-    provider = _provider_so()  # validate the cheap, most-common miss first
+    providers = _provider_sos()  # validate the cheap, most-common miss first
 
     import torch  # deferred: importing this module must not require torch
 
@@ -164,7 +198,7 @@ def bootstrap() -> State:
 
     # (3) Frontend bindings -> provider plugin -> handle.
     hipdnn = _import_frontend()
-    hipdnn.set_engine_plugin_paths([provider])
+    hipdnn.set_engine_plugin_paths(providers)
     handle = hipdnn.Handle()
 
     dtype_map = {
@@ -180,6 +214,7 @@ def bootstrap() -> State:
         engine_id=_fnv1a64(_ENGINE_NAME),
         engine_name=_ENGINE_NAME,
         dtype_map=dtype_map,
+        select_mode=_SELECT_MODE,
     )
     return _state
 

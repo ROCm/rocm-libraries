@@ -38,6 +38,34 @@ from . import bootstrap as _bootstrap
 
 log = logging.getLogger("hipdnn_torch")
 
+# Reverse id->name for the engines we co-load. The shipped bindings'
+# engine_id_to_name() registry can predate a plugin engine and return '' for it,
+# so we resolve the pick-best winner's id through this local table first.
+_KNOWN_ENGINES = (
+    "AOT_CATALOG_ENGINE",
+    "ASM_SDPA_ENGINE",
+    "HIPBLASLT_ENGINE",
+    "HIP_MLOPS_ENGINE",
+    "MIOPEN_ENGINE",
+    "MIOPEN_ENGINE_DETERMINISTIC",
+)
+_ID_TO_NAME = {_bootstrap._fnv1a64(n): n for n in _KNOWN_ENGINES}
+
+
+def _engine_name(hipdnn, engine_id) -> str:
+    """Best-effort id -> engine name: local table, then the bindings' registry,
+    then the raw hex id."""
+    name = _ID_TO_NAME.get(engine_id)
+    if name:
+        return name
+    try:
+        got = hipdnn.engine_id_to_name(engine_id)
+        if got:
+            return got
+    except Exception:  # noqa: BLE001 -- registry lookup is best-effort
+        pass
+    return hex(engine_id & 0xFFFFFFFFFFFFFFFF)
+
 
 class NotApplicable(RuntimeError):
     """Internal: the engine cannot serve this graph/shape. Always caught and
@@ -57,9 +85,10 @@ class OpOverride:
         # but a very-many-shapes, long-running process would accumulate memory.
         self._graph_cache = {}
         self._nope_cache = {}  # graph-key -> reason, for shapes the engine rejects
-        self._census = {}      # census-key -> {"aot": int, "native": int, **extras}
-        self._fallbacks = {}   # reason -> count (the "gaps" tally)
-        self.state = None      # bootstrap.State, set on install()
+        self._census = {}  # census-key -> {"aot": int, "native": int, **extras}
+        self._fallbacks = {}  # reason -> count (the "gaps" tally)
+        self._last_engine = None  # winning engine name from the last _cached_graph
+        self.state = None  # bootstrap.State, set on install()
 
     # -- convenience --------------------------------------------------------
     @property
@@ -89,6 +118,7 @@ class OpOverride:
         each such shape probes once and then falls back cheaply."""
         entry = self._graph_cache.get(key)
         if entry is not None:
+            self._last_engine = entry["engine"]
             return entry
         nope = self._nope_cache.get(key)
         if nope is not None:
@@ -103,24 +133,46 @@ class OpOverride:
                 raise NotApplicable(f"build_operation_graph: {err.get_message()}")
 
             ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
-            if st.engine_id not in ranked:
-                raise NotApplicable(f"{st.engine_name} not applicable for {describe}")
+            if not ranked:
+                raise NotApplicable(f"no engine applicable for {describe}")
 
-            err = g.create_execution_plan_ext(st.engine_id)
-            if err.is_bad():
-                raise NotApplicable(f"create_execution_plan_ext: {err.get_message()}")
+            if st.select_mode == "pick-best":
+                # Let hipDNN rank + select across every loaded engine. The backend
+                # Config policy (HIPDNN_HEUR_CONFIG_PATH) participates here, so a
+                # rule file reorders the choice without any code change.
+                err = g.create_execution_plans([st.hipdnn.HeuristicMode.FALLBACK])
+                if err.is_bad():
+                    raise NotApplicable(f"create_execution_plans: {err.get_message()}")
+            else:  # force-rocke: pin the configured engine, bypassing ranking
+                if st.engine_id not in ranked:
+                    raise NotApplicable(
+                        f"{st.engine_name} not applicable for {describe}"
+                    )
+                err = g.create_execution_plan_ext(st.engine_id)
+                if err.is_bad():
+                    raise NotApplicable(
+                        f"create_execution_plan_ext: {err.get_message()}"
+                    )
+
             err = g.check_support()
             if err.is_bad():
                 raise NotApplicable(f"check_support: {err.get_message()}")
             err = g.build_plans()
             if err.is_bad():
                 raise NotApplicable(f"build_plans: {err.get_message()}")
+
+            # Ground-truth winner of the (built) plan -- the engine that will run.
+            try:
+                engine = _engine_name(st.hipdnn, g.get_execution_plan_engine_id())
+            except Exception:  # noqa: BLE001 -- fall back to the pinned name
+                engine = st.engine_name if st.select_mode != "pick-best" else "?"
         except NotApplicable as na:
             self._nope_cache[key] = str(na)
             raise
 
-        entry = {"graph": g, "ws": g.get_workspace_size()}
+        entry = {"graph": g, "ws": g.get_workspace_size(), "engine": engine}
         self._graph_cache[key] = entry
+        self._last_engine = engine
         return entry
 
     def _execute(self, entry, variant_pack, device) -> None:
@@ -142,9 +194,14 @@ class OpOverride:
 
     def note_aot(self, key, **extras) -> None:
         """Count a call served by the engine. ``extras`` are extra integer
-        counters folded into the row (e.g. ``biased=1``, ``weightless=1``)."""
+        counters folded into the row (e.g. ``biased=1``, ``weightless=1``). The
+        winning engine name from the just-run :meth:`_cached_graph` is recorded in
+        the row's ``engines`` set so ``pick-best`` runs show *which* engine served
+        each shape."""
         row = self._row(key)
         row["aot"] += 1
+        if self._last_engine:
+            row.setdefault("engines", set()).add(self._last_engine)
         for name, val in extras.items():
             row[name] = row.get(name, 0) + int(val)
 
@@ -203,12 +260,20 @@ class OpOverride:
 
         aot, native = self.totals()
         extras = sorted(
-            {k for r in self._census.values() for k in r if k not in ("aot", "native")}
+            {
+                k
+                for r in self._census.values()
+                for k in r
+                if k not in ("aot", "native", "engines")
+            }
         )
         lines = [f"{self.op_name} intercept census (shape -> aot / native):"]
         for key in sorted(self._census):
             row = self._census[key]
             tail = "".join(f"  {e}={row[e]}" for e in extras if row.get(e))
+            engines = row.get("engines")
+            if engines:
+                tail += "  engine=" + ",".join(sorted(engines))
             lines.append(
                 f"  {key:34s}  aot={row['aot']:5d}  native={row['native']:5d}{tail}"
             )

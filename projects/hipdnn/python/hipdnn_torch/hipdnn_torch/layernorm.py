@@ -14,8 +14,12 @@ override, two model-friendly touches make it catch the norms real models emit:
   * **eps** defaults to torch's ``1e-5`` and is baked into the graph so the output
     matches native exactly.
 
-Constraint: single-axis (last-dim) norms on cuda f16/bf16 only; anything else falls
-back to native and is logged.
+Shape is not pre-filtered (any M, any N): the override builds the graph and lets
+hipDNN decide. The only things it catches are what the 2-D LayerNorm graph cannot
+represent -- a multi-axis or non-last-axis ``normalized_shape``, and a weight/bias
+dtype differing from the input (raw pointers would be reinterpreted byte-for-byte).
+A graph-mappable dtype on cuda is the sole structural precondition; anything else
+falls back to native and is logged.
 """
 
 import logging
@@ -48,11 +52,13 @@ class LayerNormOverride(OpOverride):
         return b
 
     def _gate(self, input, weight, bias, ns, n):
-        torch = self.state.torch
+        # Structural facts + what the 2-D LayerNorm graph cannot represent. No
+        # shape/size pre-filter (any M, any N): build and let hipDNN decide.
         if not input.is_cuda:
-            return False, "input not on cuda"
-        if input.dtype not in (torch.float16, torch.bfloat16):
-            return False, f"dtype {self._tok(input.dtype)} (need f16/bf16)"
+            return False, "input not on cuda"  # execute() needs a device pointer
+        if input.dtype not in self.state.dtype_map:
+            return False, f"dtype {self._tok(input.dtype)} not graph-mappable"
+        # --- not representable in the graph -> catch here ---
         # The graph declares weight/bias as the input dtype and execute() passes
         # their raw pointers, so a differing dtype (e.g. an fp32 norm scale) would
         # be reinterpreted byte-for-byte -> silently wrong. Decline instead.
@@ -67,12 +73,12 @@ class LayerNormOverride(OpOverride):
                 False,
                 f"bias dtype {self._tok(bias.dtype)} != input {self._tok(input.dtype)}",
             )
-        if input.dim() < 2:
-            return False, "input rank < 2"
         if len(ns) != 1:
-            return False, f"normalized_shape rank {len(ns)} (need 1)"
+            # The graph normalizes the flattened last axis only; a multi-axis
+            # normalized_shape cannot be expressed as a 2-D [M,N] reduction.
+            return False, f"normalized_shape rank {len(ns)} (need 1, last axis)"
         if int(ns[0]) != n:
-            return False, "normalized_shape != last dim"
+            return False, "normalized_shape != last dim (non-last-axis norm)"
         return True, ""
 
     def _graph(self, m, n, eps, dtype):
@@ -125,6 +131,7 @@ class LayerNormOverride(OpOverride):
         y_t.set_stride([n, 1])
         y_t.set_data_type(hf)
         y_t.set_uid(5)
+        y_t.set_output(True)  # terminal output must be non-virtual (MIOpen requires it)
         return g
 
     def _call(self, real, input, normalized_shape, weight=None, bias=None, eps=1e-5):
