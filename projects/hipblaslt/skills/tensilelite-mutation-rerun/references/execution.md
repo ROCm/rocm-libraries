@@ -333,37 +333,3 @@ recovery without contacting a Docker daemon or running a mutation campaign:
 ```bash
 bash projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/tests/run-selftests.sh
 ```
-
-## 7. Plan a Solution.py sub-slice
-
-`solution-subslice.py` validates the committed Solution.py region model and
-emits configuration for one region. It does not edit source or run mutmut.
-
-Validate all regions:
-
-```bash
-python3 projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/solution-subslice.py \
-  validate \
-  --regions projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/tests/fixtures/solution-regions.json
-```
-
-Expected output:
-
-```text
-OK: <count> region(s) valid
-```
-
-Emit one planner configuration:
-
-```bash
-python3 projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/solution-subslice.py \
-  emit-config \
-  --regions projects/hipblaslt/skills/tensilelite-mutation-rerun/scripts/tests/fixtures/solution-regions.json \
-  --region r01 \
-  --out work/mutation/solution-r01.json
-```
-
-The emitted JSON keeps `only_mutate` at whole-file granularity and records the
-selected region, covering tests, fence-safety requirements, and mandatory
-source backup/restore checks. A live run must remain serial and must dry-parse
-temporary mutation fences before invoking mutmut.
