@@ -209,9 +209,14 @@ BUILD="$CAT/build"
 PROV="$BUILD/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
 
 export HIPDNN_TORCH_PROVIDER_SO="$PROV"
-# Pin the rocKE catalog engine. This runbook FORCES rocKE on purpose -- we're validating
-# rocKE kernels, so we want every routed op served by rocKE, not "whatever hipDNN picks."
-# For real-model perf later you'd NOT pin this (see §8). See also reference on engine selection.
+# Pin the AOT catalog engine. The default policy hands selection to hipDNN across all
+# loaded engines; this runbook overrides it to FORCE a single engine on purpose -- we're
+# validating the AOT catalog kernels, so we want every routed op served by that one engine
+# for deterministic census attribution, not "whatever hipDNN picks." (Forcing the AOT
+# engine pins a hipDNN engine, not a kernel source: it serves whatever AOT kernels are in
+# its catalog -- from rocKE today, but the engine is source-agnostic.) For real-model perf
+# later you'd drop both of these and stay on the default policy (see §8).
+export HIPDNN_TORCH_SELECT=force
 export HIPDNN_TORCH_ENGINE=AOT_CATALOG_ENGINE
 export HIPDNN_TORCH_FRONTEND_DIR="$FE/projects/hipdnn/python/frontend_bindings/build"
 # Point at torch's bundled backend (swapped-in develop backend per §4, or a new-enough nightly):
@@ -247,11 +252,15 @@ python -c "import hipdnn_torch; print(hipdnn_torch.provider_ready())"   # -> Tru
 cd "$INJ/projects/hipdnn/python/hipdnn_torch"
 python -m pytest tests/ -q
 ```
-`tests/test_gates.py` runs on CPU (no GPU/provider needed) and asserts each override
-*declines* what it can't serve (f32, grouped conv, erf-gelu, multi-axis norm).
+`tests/test_gates.py` runs on CPU (no GPU/provider needed) and pins the two legitimate
+native-routing stops (non-CUDA tensor, unmappable dtype) plus the pure translation
+helpers (`_ntuple`/`_resolve_pads` padding math, the `[1,…,1,*ns]` scale-view builder,
+the N-D matmul operand builder, the gelu/silu `_mode` map) — it asserts **no** capability
+declines, because there are none under the pure-passthrough contract.
 `tests/test_parity.py` (auto-skipped unless `provider_ready()`) asserts, for every op,
 that the census shows **`aot>0`** (it routed, not fell back) *and* the result matches
-native within the dtype tolerance. Validated: **41 passed** on gfx1151.
+native within the dtype tolerance, across the newly translated paths (N-D linear, grouped
+conv, `'same'` padding, causal SDPA on permuted views, multi-axis LayerNorm/RMSNorm).
 
 **(c) The census is the proof-of-hipDNN + the fallback ledger.** Every routed call
 increments an `aot` counter keyed by shape; every fallback increments `native` **with a
@@ -260,8 +269,10 @@ reason**. `native=0` across the board means nothing silently reverted to PyTorch
 python samples/minimal_block.py     # prints per-op "aot=N native=0" + parity OK
 python samples/microbench_ab.py     # per-op A/B: parity, timing, routed-or-fell-back
 ```
-Expect one *deliberate* fallback in the mix — exact-erf `F.gelu` has no catalog builder
-and is counted as `erf-gelu unsupported`. That's the ledger working, not a bug.
+Expect exact-erf `F.gelu` to show up as a fallback when no loaded engine serves it —
+it is built and submitted like every other op (no pre-decline), so the reason is a
+hipDNN-origin decline from `check_support`, not a gate string. That's the ledger working,
+not a bug; the day a builder for it lands, the same call routes with no injection change.
 
 **(d) Engine-level trace — irrefutable proof the catalog served the op.** Set
 `HIPDNN_AOT_DEBUG=1` and the AOT catalog engine narrates catalog resolution, family
@@ -305,33 +316,49 @@ injection with a per-op **device-time** census (needs a ComfyUI checkout via
 > routing on real tensor shapes. Full-model perf numbers need a real checkpoint; op
 > *routing* can be verified on the VAE path alone.
 
-## 8. Engine selection: force rocKE now, pick-best later
+## 8. Engine selection: `default` vs `force` (and a future tuning run)
 
-hipDNN does **not** yet have automatic engine-selection heuristics. Which engine serves a
-problem comes from a **static ordering plus rules files** — not a cost model. It also has
-an **auto-tuning mode**: it runs every engine that claims it can do the work, measures
-them, and emits rules capturing the winners, which you can replay to enforce the same
-selection later without re-tuning.
+`hipdnn_torch` exposes two selection policies via `HIPDNN_TORCH_SELECT`, and the choice is
+independent of any specific engine:
+
+- **`default` (the default).** Hand the graph to hipDNN and let it select across every
+  loaded engine; the census reports the *winning* engine per shape. No engine is named. This
+  is the engine-agnostic behavior, and the right one for honest full-model performance. This
+  selection can be pointed at a **rules file** (via the backend's `HIPDNN_HEUR_CONFIG_PATH`)
+  that decides the engine per graph/shape — the injection consumes such a file with no code
+  change.
+- **`force`.** Pin exactly one engine, named by `HIPDNN_TORCH_ENGINE`; a shape it can't
+  serve falls back to native. This gives **deterministic attribution** — every routed op is
+  served by that one engine — which is what you want to validate or bench a single engine in
+  isolation.
 
 That gives two very different intents, and this runbook is squarely in the first:
 
-- **Validating rocKE kernels (what this runbook does).** We *force* rocKE by pinning
-  `HIPDNN_TORCH_ENGINE=AOT_CATALOG_ENGINE` (+ `HIPDNN_AOT_CATALOG_DIR`). Every routed op is
-  then served by rocKE, which is exactly what we want when the goal is to exercise and
-  prove those kernels. Read the census accordingly: **`aot>0` / `native=0` means "rocKE
-  served it, didn't fall back to native PyTorch" — it is NOT a claim that rocKE is the
-  fastest hipDNN engine for that shape.** The microbench speedups in §6 are rocKE-vs-native
-  under a forced engine, not a cross-engine best.
+- **Validating the AOT catalog kernels (what this runbook does).** We force a single engine
+  with `HIPDNN_TORCH_SELECT=force` + `HIPDNN_TORCH_ENGINE=AOT_CATALOG_ENGINE`
+  (+ `HIPDNN_AOT_CATALOG_DIR`). Note this pins a *hipDNN engine*, not a kernel source: the
+  AOT catalog engine serves whatever ahead-of-time kernels are in its catalog — from rocKE
+  today, but the engine is source-agnostic and could serve AOT kernels from anywhere. Every
+  routed op is then served by that one engine, which is exactly what we want when the goal
+  is to exercise and prove those kernels. Read the census accordingly: **`aot>0` /
+  `native=0` means "the pinned engine served it, didn't fall back to native PyTorch" — it is
+  NOT a claim that engine is the fastest hipDNN engine for that shape.** The microbench
+  speedups in §6 are forced-engine-vs-native, not a cross-engine best.
 
-- **Real-workload model perf (later).** Do **not** pin the engine. Let hipDNN pick the best
-  engine it has for each problem — rocKE will increasingly compete with the HIP kernel
-  provider, MIOpen, and the AITER ASM SDPA kernels. Use auto-tuning to generate rules for
-  the target box, then run with those rules; the endgame is selection heuristics that get
-  close to auto-tuned results automatically. On this axis the interesting number is
-  best-engine-vs-native (and rocKE-vs-best-other-engine), not forced-rocKE-vs-native.
+- **Real-workload model perf (later).** Do **not** force an engine — stay on the `default`
+  policy. Let hipDNN select the best engine it has for each problem; the AOT catalog engine
+  will increasingly compete with the HIP kernel provider, MIOpen, and the AITER ASM SDPA
+  kernels. On this axis the interesting number is best-engine-vs-native, not forced-vs-native.
 
-Practically: keep the pin for the validation/parity work here; drop it (and lean on
-auto-tuned rules) when you move to honest full-model performance comparisons.
+> **Future: a persistent tuning run (planned injection feature).** A natural third mode would
+> have the injection measure the loaded engines on a real model's actual shapes and record the
+> winner per graph/shape into a rules file, so a second run replays the tuned selection with no
+> re-measurement. hipDNN itself already has C++ auto-tuning that emits such rules, but it is not
+> yet exposed in the Python bindings. Either binding that, or recreating the measure-and-record
+> loop in the injection, is a separate feature to be developed — it does not exist today.
+
+Practically: keep the pin for the validation/parity work here; drop it when you move to
+honest full-model performance comparisons.
 
 ## 9. Platform notes
 
@@ -372,4 +399,4 @@ auto-tuned rules) when you move to honest full-model performance comparisons.
 | `spirv-expand-step registered more than once` | tried to `LD_PRELOAD` a 2nd backend | swap the file instead | 4 |
 | new adapter added but op still falls back | reusing a stale provider `.so` | relink; verify with `nm -C` | 3a |
 | device enumeration fails on WSL | `librocdxg` shim not on `LD_LIBRARY_PATH` | prepend the shim dir | 9 |
-| `erf-gelu unsupported` fallback | expected — no catalog builder for exact GELU | use `approximate="tanh"`, or accept the fallback | 6 |
+| exact-erf `F.gelu` falls back | submitted, but no loaded engine serves it yet (hipDNN-origin decline, not a pre-gate) | use `approximate="tanh"`, or accept the fallback until a builder lands | 6 |

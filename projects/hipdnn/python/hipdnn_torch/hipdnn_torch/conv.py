@@ -3,22 +3,32 @@
 
 """
 hipdnn_torch.conv -- route ``F.conv2d``/``F.conv3d`` (every ``nn.Conv2d`` /
-``nn.Conv3d``) onto a hipDNN forward-convolution engine.
+``nn.Conv3d``) onto a hipDNN forward-convolution graph.
 
-The graph is addressed channels-last on every operand: input NHWC/NDHWC, weight
-KRSC/KTRSC, output NHWK/NDHWK. torch defaults to contiguous NCHW/NCDHW, so the
-override converts input/weight to ``channels_last`` (2-D) or ``channels_last_3d``
-(3-D) and allocates a matching output; the graph carries the canonical NCHW(D)
-logical dims with those channels-last strides. Symmetric padding is required (the
-runtime ABI carries one pad per spatial axis). Bias is added natively after the
-conv (the kernel ABI has no epilogue), so a bias is just counted.
+**Pure passthrough.** The override builds the conv graph from the input's and
+weight's *actual* dims + strides -- whatever layout they arrive in -- and submits it.
+It imposes no layout (no ``channels_last`` conversion, no ``.contiguous()``) and
+pre-judges nothing about what any engine can serve; hipDNN's ``check_support`` /
+``execute`` decides, and a shape no loaded engine claims falls back to native and is
+counted. The output is allocated to mirror the input's layout (channels-last in →
+channels-last out, contiguous in → contiguous out), matching native's contract, and
+its actual strides are fed to the graph.
 
-Shape is not pre-filtered beyond genuine correctness constraints (cuda f16/bf16,
-correct rank, ``groups==1``, integer symmetric hyperparameters): the override
-builds the graph and lets hipDNN rank the loaded engines. rocKE's WMMA
-implicit-GEMM conv serves 2-D only, while MIOpen serves both 2-D and 3-D -- so a
-conv3d graph routes to MIOpen under pick-best, and only a shape no loaded engine
-claims falls back to native.
+Every torch conv parameter is translated into the graph:
+
+  * **groups** need no attribute -- the graph infers them from the weight's own
+    ``Cin/groups`` channel count (weight dims ``[K, Cin/groups, *kernel]``).
+  * **padding** ``int``/tuple is symmetric (``pre == post``); ``'valid'`` → 0;
+    ``'same'`` → per-axis total ``dilation*(k-1)`` split ``pre = total//2``,
+    ``post = total - pre`` (torch pads the trailing side at least as much;
+    ``'same'`` requires stride 1). Expressed via ``set_pre_padding`` /
+    ``set_post_padding``.
+  * **stride** / **dilation** pass straight through.
+  * **dtype** is set per tensor, so a mixed-dtype conv is described faithfully and
+    left for hipDNN to accept or reject.
+
+Bias is added as a native epilogue after the conv (a same-graph bias fusion is a
+possible future enhancement) and is simply counted.
 """
 
 import logging
@@ -45,6 +55,27 @@ def _ntuple(v, n):
     return None
 
 
+def _resolve_pads(padding, dil_t, ksp, n):
+    """Translate torch's ``padding`` argument to ``(pre, post)`` ``n``-int tuples.
+
+    Numeric padding is symmetric (``pre == post``). ``'valid'`` → all-zero.
+    ``'same'`` → per-axis total ``dilation*(k-1)``, split ``pre = total//2``,
+    ``post = total - pre``. Returns ``None`` if the argument is unrecognised."""
+    if isinstance(padding, str):
+        if padding == "valid":
+            z = (0,) * n
+            return z, z
+        if padding == "same":
+            pre = tuple(dil_t[i] * (ksp[i] - 1) // 2 for i in range(n))
+            post = tuple(dil_t[i] * (ksp[i] - 1) - pre[i] for i in range(n))
+            return pre, post
+        return None
+    p = _ntuple(padding, n)
+    if p is None:
+        return None
+    return p, p
+
+
 class _ConvFpropOverride(OpOverride):
     """Rank-generic conv forward. Concrete subclasses set :attr:`op_name`
     (``conv2d``/``conv3d``) and :attr:`spatial_rank` (2/3)."""
@@ -52,83 +83,91 @@ class _ConvFpropOverride(OpOverride):
     #: number of spatial axes (2 for conv2d, 3 for conv3d)
     spatial_rank = None
 
-    def _mem_fmt(self):
+    def _out_mem_fmt(self, input):
+        """Pick the output memory format to mirror the input's layout (native's
+        contract): channels-last in → channels-last out, else contiguous."""
         torch = self.state.torch
-        return torch.channels_last if self.spatial_rank == 2 else torch.channels_last_3d
+        cl = torch.channels_last if self.spatial_rank == 2 else torch.channels_last_3d
+        if input.is_contiguous(memory_format=cl):
+            return cl
+        return torch.contiguous_format
 
-    def _gate(self, input, weight, groups, stride, padding, dilation):
-        # Structural facts (needed to build the graph) + features the conv graph
-        # cannot represent. No shape/size gating: build and let hipDNN decide.
-        rank = self.spatial_rank + 2
+    def _gate(self, input, weight):
+        # The only two legitimate stops: we need a device pointer to execute
+        # against, and a dtype the graph builder can express. Everything else --
+        # groups, padding mode, mixed dtype, size, rank -- is built (or, if it
+        # cannot be constructed, cleanly declined in _call) and left to hipDNN.
         if not input.is_cuda:
             return False, "input not on cuda"  # execute() needs a device pointer
         if input.dtype not in self.state.dtype_map:
             return False, f"dtype {self._tok(input.dtype)} not graph-mappable"
-        if input.dim() != rank or weight.dim() != rank:
-            return False, f"input/weight not rank-{rank}"  # builder unpacks NCHW(D)
-        # --- not representable in the conv-fprop graph -> catch here ---
-        if weight.dtype != input.dtype:
-            # The graph declares one io dtype and execute() passes raw pointers, so a
-            # differing weight dtype would be reinterpreted byte-for-byte. A per-tensor
-            # mixed-dtype conv is a builder extension, not something hipDNN can rescue.
-            return (
-                False,
-                f"weight dtype {self._tok(weight.dtype)} != input {self._tok(input.dtype)}",
-            )
-        if groups != 1:
-            # ConvFpropAttributes has no group setter -> grouped/depthwise conv
-            # cannot be expressed in the graph.
-            return False, f"groups={groups} not representable (no group attr)"
-        if stride is None or padding is None or dilation is None:
-            # 'same'/'valid' string padding has no symmetric-int ABI representation.
-            return False, "non-integer stride/padding/dilation (e.g. 'same'/'valid')"
         return True, ""
 
     def _graph(
         self,
         x_dims,
         x_strides,
+        x_dtype,
         w_dims,
         w_strides,
+        w_dtype,
         y_dims,
         y_strides,
+        y_dtype,
         stride,
-        padding,
+        pre_pad,
+        post_pad,
         dilation,
-        dtype,
     ):
         st = self.state
         hipdnn = st.hipdnn
-        hf = st.dtype_map[dtype]
+        hx = st.dtype_map[x_dtype]
+        hw = st.dtype_map[w_dtype]
+        hy = st.dtype_map[y_dtype]
         g = hipdnn.Graph()
-        g.set_io_data_type(hf)
+        g.set_io_data_type(hx)
         g.set_compute_data_type(hipdnn.DataType.FLOAT)
 
         x_t = g.tensor(
             hipdnn.Tensor()
             .set_name("x")
-            .set_dim(x_dims)
-            .set_stride(x_strides)
-            .set_data_type(hf)
+            .set_dim(list(x_dims))
+            .set_stride(list(x_strides))
+            .set_data_type(hx)
             .set_uid(_X_UID)
         )
         w_t = g.tensor(
             hipdnn.Tensor()
             .set_name("w")
-            .set_dim(w_dims)
-            .set_stride(w_strides)
-            .set_data_type(hf)
+            .set_dim(list(w_dims))
+            .set_stride(list(w_strides))
+            .set_data_type(hw)
             .set_uid(_W_UID)
         )
         attrs = hipdnn.ConvFpropAttributes()
-        attrs.set_padding(list(padding))
+        # Padding API differs across frontend versions: newer builds bind the
+        # asymmetric ``set_pre_padding``/``set_post_padding`` pair (needed for torch
+        # ``'same'``), older ones bind only the symmetric ``set_padding(seq)``. Use
+        # whichever this build exposes. If only the symmetric API exists but the
+        # requested padding is asymmetric, it genuinely cannot be expressed -- decline
+        # cleanly to native. Version skew, not a capability pre-judgement.
+        if hasattr(attrs, "set_pre_padding"):
+            attrs.set_pre_padding(list(pre_pad))
+            attrs.set_post_padding(list(post_pad))
+        elif list(pre_pad) == list(post_pad):
+            attrs.set_padding(list(pre_pad))
+        else:
+            raise NotApplicable(
+                "asymmetric conv padding needs set_pre_padding/set_post_padding, "
+                "absent in this frontend build"
+            )
         attrs.set_stride(list(stride))
         attrs.set_dilation(list(dilation))
 
         y_t = g.conv_fprop(x_t, w_t, attrs)
-        y_t.set_dim(y_dims)
-        y_t.set_stride(y_strides)
-        y_t.set_data_type(hf)
+        y_t.set_dim(list(y_dims))
+        y_t.set_stride(list(y_strides))
+        y_t.set_data_type(hy)
         y_t.set_uid(_Y_UID)
         y_t.set_output(True)  # terminal output must be non-virtual (MIOpen requires it)
         return g
@@ -138,75 +177,110 @@ class _ConvFpropOverride(OpOverride):
     ):
         torch = self.state.torch
         sr = self.spatial_rank
+        rank = sr + 2
 
         def _native():
             return real(input, weight, bias, stride, padding, dilation, groups)
 
-        st_t = _ntuple(stride, sr)
-        pad_t = _ntuple(padding, sr)
-        dil_t = _ntuple(dilation, sr)
+        # -- translate params + derive shapes (all guarded: a call we cannot even
+        #    describe falls back cleanly, never crashes the model) --------------
+        try:
+            st_t = _ntuple(stride, sr)
+            dil_t = _ntuple(dilation, sr)
+            rank_ok = input.dim() == rank and weight.dim() == rank
+            ksp = tuple(int(weight.shape[2 + i]) for i in range(sr)) if rank_ok else ()
+            k = int(weight.shape[0]) if rank_ok else -1
+            cpg = int(weight.shape[1]) if rank_ok else -1  # Cin / groups
+            pads = (
+                _resolve_pads(padding, dil_t, ksp, sr)
+                if (rank_ok and dil_t is not None)
+                else None
+            )
+            ksp_str = "x".join(str(x) for x in ksp) if ksp else "?"
+            key = f"Cpg={cpg},K={k},ksp={ksp_str},dtype={self._tok(input.dtype)}"
+        except Exception:  # noqa: BLE001 -- unparseable call site -> native
+            self.note_native(f"conv{sr}d", "unparseable conv args")
+            return _native()
 
-        rank_ok = weight.dim() == sr + 2
-        c = int(weight.shape[1]) if rank_ok else -1
-        k = int(weight.shape[0]) if rank_ok else -1
-        ksp = tuple(int(weight.shape[2 + i]) for i in range(sr)) if rank_ok else ()
-        ksp_str = "x".join(str(x) for x in ksp) if ksp else "?"
-        key = f"C={c},K={k},ksp={ksp_str},dtype={self._tok(input.dtype)}"
-
-        ok, reason = self._gate(input, weight, groups, st_t, pad_t, dil_t)
+        ok, reason = self._gate(input, weight)
         if not ok:
             self.note_native(key, reason)
             return _native()
 
-        mem_fmt = self._mem_fmt()
+        # A wrong-rank input or an unrecognised padding string cannot be turned
+        # into conv tensors at all -- a construction failure, not a capability
+        # judgement -- so it falls back cleanly.
+        if not rank_ok or st_t is None or dil_t is None or pads is None:
+            self.note_native(key, "conv args not expressible as a graph -> native")
+            return _native()
+
+        pre_t, post_t = pads
         try:
-            # channels-last packed on all three operands: canonical NCHW(D) logical
-            # dims, channels-last strides -- exactly what the adapters address.
-            x = input.contiguous(memory_format=mem_fmt)
-            w = weight.contiguous(memory_format=mem_fmt)
-            n = int(x.shape[0])
-            cin = int(x.shape[1])
-            in_sp = [int(x.shape[2 + i]) for i in range(sr)]
+            n = int(input.shape[0])
+            cin = int(input.shape[1])
+            in_sp = [int(input.shape[2 + i]) for i in range(sr)]
             out_sp = [
-                (in_sp[i] + 2 * pad_t[i] - dil_t[i] * (ksp[i] - 1) - 1) // st_t[i] + 1
+                (in_sp[i] + pre_t[i] + post_t[i] - dil_t[i] * (ksp[i] - 1) - 1)
+                // st_t[i]
+                + 1
                 for i in range(sr)
             ]
+            # Output mirrors the input's layout; we own it, so its strides are known.
             y = torch.empty(
                 (n, k, *out_sp),
                 dtype=input.dtype,
                 device=input.device,
-                memory_format=mem_fmt,
+                memory_format=self._out_mem_fmt(input),
             )
 
             entry = self._cached_graph(
-                (n, cin, tuple(in_sp), k, ksp, st_t, pad_t, dil_t, input.dtype),
+                (
+                    tuple(input.shape),
+                    tuple(input.stride()),
+                    tuple(weight.shape),
+                    tuple(weight.stride()),
+                    tuple(y.stride()),
+                    input.dtype,
+                    weight.dtype,
+                    st_t,
+                    pre_t,
+                    post_t,
+                    dil_t,
+                ),
                 lambda: self._graph(
                     [n, cin, *in_sp],
-                    list(x.stride()),
-                    [k, cin, *ksp],
-                    list(w.stride()),
+                    list(input.stride()),
+                    input.dtype,
+                    [k, cpg, *ksp],
+                    list(weight.stride()),
+                    weight.dtype,
                     [n, k, *out_sp],
                     list(y.stride()),
-                    st_t,
-                    pad_t,
-                    dil_t,
                     input.dtype,
+                    st_t,
+                    pre_t,
+                    post_t,
+                    dil_t,
                 ),
-                f"[{n},{cin},{in_sp}]*[{k},{cin},{list(ksp)}] {input.dtype}",
+                f"[{n},{cin},{in_sp}]*[{k},{cpg},{list(ksp)}] {input.dtype}",
             )
             self._execute(
                 entry,
-                {_X_UID: x.data_ptr(), _W_UID: w.data_ptr(), _Y_UID: y.data_ptr()},
+                {
+                    _X_UID: input.data_ptr(),
+                    _W_UID: weight.data_ptr(),
+                    _Y_UID: y.data_ptr(),
+                },
                 input.device,
             )
             extras = {}
             if bias is not None:
-                # native epilogue; kernel ABI has no bias. reshape to [1,K,1,...].
+                # native epilogue; reshape to [1,K,1,...] to broadcast over spatial.
                 y = y + bias.reshape(1, k, *([1] * sr))
                 extras["biased"] = 1
             self.note_aot(key, **extras)
             return y
-        except NotApplicable as na:  # engine can't serve this shape -> native
+        except NotApplicable as na:  # hipDNN could not serve this shape -> native
             self.note_native(key, str(na))
             return _native()
         except (

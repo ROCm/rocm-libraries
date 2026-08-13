@@ -31,15 +31,24 @@ tied to one machine:
     ``libhip_kernel_provider.so:libhipblaslt_plugin.so:libmiopen_plugin.so``. Takes
     precedence over the single-path var. Duplicate engine ids across .so's are
     rejected by the backend, so load each provider at most once.
-  * ``HIPDNN_TORCH_ENGINE``       -- engine name to pin in ``force-rocke`` select
-    mode (default ``AOT_CATALOG_ENGINE``).
-  * ``HIPDNN_TORCH_SELECT``       -- engine-selection policy (default ``force-rocke``):
-      - ``force-rocke``: pin ``HIPDNN_TORCH_ENGINE`` via ``create_execution_plan_ext``
-        (bypasses ranking -- kernel-validation semantics; census ``aot`` means "that
-        one engine served it").
-      - ``pick-best``: let hipDNN rank+select across all loaded engines
-        (``create_execution_plans([FALLBACK])``); honors ``HIPDNN_HEUR_CONFIG_PATH``
-        for rule-file replay. Census records the *winning* engine name per shape.
+  * ``HIPDNN_TORCH_SELECT``       -- engine-selection policy (default ``default``):
+      - ``default``: hand the graph to hipDNN and let it select across all loaded
+        engines (``create_execution_plans([FALLBACK])``). This is hipDNN's own
+        engine selection; it can be pointed at a rules file (via the backend's
+        ``HIPDNN_HEUR_CONFIG_PATH``) that decides the engine per graph/shape/params.
+        Census records the *winning* engine name per shape. No engine is named --
+        this is the engine-agnostic default.
+      - ``force``: pin ``HIPDNN_TORCH_ENGINE`` via ``create_execution_plan_ext``
+        (bypasses selection). Deterministic attribution: census ``aot`` means "*that
+        one* engine served it", which is what you want to validate or bench a single
+        engine in isolation. Requires ``HIPDNN_TORCH_ENGINE`` (no default) and stops
+        with a clear error if it is unset.
+  * ``HIPDNN_TORCH_ENGINE``       -- engine name to pin, used only in ``force`` mode
+    (no default; ignored under ``default``). Note this pins a *hipDNN engine*, not
+    a kernel source: e.g. ``AOT_CATALOG_ENGINE`` serves whatever ahead-of-time
+    kernels have been added to that engine's catalog -- today those happen to come
+    from rocKE, but the engine is source-agnostic and could serve AOT kernels from
+    anywhere. "Force the AOT engine" is not "force rocKE".
   * ``HIPDNN_TORCH_FRONTEND_DIR`` -- fallback path to a raw
     ``frontend_bindings/build`` dir, used only when the ``hipdnn-frontend`` wheel
     is not importable.
@@ -58,8 +67,39 @@ import glob
 import os
 import sys
 
-_ENGINE_NAME = os.environ.get("HIPDNN_TORCH_ENGINE", "AOT_CATALOG_ENGINE")
-_SELECT_MODE = os.environ.get("HIPDNN_TORCH_SELECT", "force-rocke")
+# torch dtype name -> hipDNN DataType enum name, by *exact* format correspondence
+# (the torch name states the format). Resolved defensively at bootstrap() time with
+# getattr on both sides, so an entry is added only when both the torch dtype and the
+# hipDNN enum exist -- forward-compatible across torch/frontend versions. A dtype not
+# in the resulting map is simply never passed through; a mapped-but-unserved dtype
+# "just works" the day a kernel for it appears, with no injection change.
+_DTYPE_NAME_MAP = {
+    "float32": "FLOAT",
+    "float64": "DOUBLE",
+    "float16": "HALF",
+    "bfloat16": "BFLOAT16",
+    "float8_e4m3fn": "FP8_E4M3",
+    "float8_e5m2": "FP8_E5M2",
+    "float8_e4m3fnuz": "FP8_E4M3_FNUZ",
+    "float8_e5m2fnuz": "FP8_E5M2_FNUZ",
+    "uint8": "UINT8",
+    "int8": "INT8",
+    "int32": "INT32",
+    "int64": "INT64",
+    "bool": "BOOLEAN",
+}
+
+
+def _build_dtype_map(torch, hipdnn) -> dict:
+    """Every torch dtype that has a hipDNN ``DataType`` counterpart, mapped by exact
+    name correspondence. Only pairs where *both* sides exist are included."""
+    out = {}
+    for torch_name, hipdnn_name in _DTYPE_NAME_MAP.items():
+        tdt = getattr(torch, torch_name, None)
+        hdt = getattr(hipdnn.DataType, hipdnn_name, None)
+        if tdt is not None and hdt is not None:
+            out[tdt] = hdt
+    return out
 
 
 def _fnv1a64(s: str) -> int:
@@ -183,6 +223,23 @@ def bootstrap() -> State:
     if _state is not None:
         return _state
 
+    # Read the engine/select env vars *here*, not at import, so setting them after
+    # ``import hipdnn_torch`` (but before the first intercepted call) is honored.
+    select_mode = os.environ.get("HIPDNN_TORCH_SELECT", "default")
+    if select_mode not in ("default", "force"):
+        raise BootstrapError(
+            f"HIPDNN_TORCH_SELECT={select_mode!r} is not a valid policy; use "
+            "'default' (hipDNN selects across all loaded engines) or "
+            "'force' (pin HIPDNN_TORCH_ENGINE)."
+        )
+    engine_name = os.environ.get("HIPDNN_TORCH_ENGINE")  # no default; force mode only
+    if select_mode == "force" and not engine_name:
+        raise BootstrapError(
+            "HIPDNN_TORCH_SELECT=force requires HIPDNN_TORCH_ENGINE to name the "
+            "engine to pin (there is no default). Set it, or use the 'default' "
+            "policy to let hipDNN select across all loaded engines."
+        )
+
     providers = _provider_sos()  # validate the cheap, most-common miss first
 
     import torch  # deferred: importing this module must not require torch
@@ -201,20 +258,16 @@ def bootstrap() -> State:
     hipdnn.set_engine_plugin_paths(providers)
     handle = hipdnn.Handle()
 
-    dtype_map = {
-        torch.float32: hipdnn.DataType.FLOAT,
-        torch.bfloat16: hipdnn.DataType.BFLOAT16,
-        torch.float16: hipdnn.DataType.HALF,
-    }
+    dtype_map = _build_dtype_map(torch, hipdnn)
 
     _state = State(
         torch=torch,
         hipdnn=hipdnn,
         handle=handle,
-        engine_id=_fnv1a64(_ENGINE_NAME),
-        engine_name=_ENGINE_NAME,
+        engine_id=_fnv1a64(engine_name) if engine_name else None,
+        engine_name=engine_name,
         dtype_map=dtype_map,
-        select_mode=_SELECT_MODE,
+        select_mode=select_mode,
     )
     return _state
 

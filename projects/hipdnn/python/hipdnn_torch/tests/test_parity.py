@@ -106,18 +106,118 @@ def test_gelu_tanh_parity(torch, dtype_name):
     _assert_parity(torch, got, want, dtype)
 
 
-def test_gelu_erf_falls_back(torch):
-    """Exact (erf) GELU has no catalog builder -> must fall back to native, not error,
-    and be counted as a native fallback with the documented reason."""
+def test_gelu_erf_parity(torch):
+    """Exact (erf) GELU is built and submitted like any other mode -- whether a
+    loaded engine serves it or it falls back to native, the result must match native
+    and must never raise. (Pure passthrough: no pre-judgement of the mode's support,
+    so this asserts parity + no-exception, not a specific aot/native split.)"""
     import torch.nn.functional as F
 
     x = torch.randn(64, 512, device="cuda", dtype=torch.float16)
     want = F.gelu(x)  # approximate="none" (default)
     got, aot, native = _run_routed("gelu", lambda: F.gelu(x))
-    assert (
-        aot == 0 and native > 0
-    ), f"erf-gelu should fall back (aot={aot}, native={native})"
+    assert aot + native > 0, "erf-gelu was not intercepted at all"
     _assert_parity(torch, got, want, torch.float16)
+
+
+@pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
+def test_linear_nd_parity(torch, dtype_name):
+    """N-D activation routed at true rank (no flatten): [B, T, K] @ W^T + b."""
+    import torch.nn.functional as F
+
+    dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
+    x = torch.randn(4, 16, 128, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(256, 128, device="cuda", dtype=dtype) * 0.1
+    b = torch.randn(256, device="cuda", dtype=dtype) * 0.1
+    want = F.linear(x, w, b)
+    got, aot, native = _run_routed("linear", lambda: F.linear(x, w, b))
+    assert aot > 0, f"N-D linear did not route (aot={aot}, native={native})"
+    assert tuple(got.shape) == (4, 16, 256)
+    _assert_parity(torch, got, want, dtype)
+
+
+@pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
+def test_conv2d_grouped_parity(torch, dtype_name):
+    """Grouped conv: groups inferred from the weight's own Cin/groups channel count,
+    no group attribute, no pre-decline."""
+    import torch.nn.functional as F
+
+    dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
+    x = torch.randn(1, 32, 28, 28, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(64, 16, 3, 3, device="cuda", dtype=dtype) * 0.1  # groups=2
+    want = F.conv2d(x, w, None, stride=1, padding=1, groups=2)
+    got, aot, native = _run_routed(
+        "conv2d", lambda: F.conv2d(x, w, None, stride=1, padding=1, groups=2)
+    )
+    assert aot > 0, f"grouped conv did not route (aot={aot}, native={native})"
+    _assert_parity(torch, got, want, dtype)
+
+
+@pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
+def test_conv2d_same_padding_parity(torch, dtype_name):
+    """``padding='same'`` translated to pre/post padding (stride 1)."""
+    import torch.nn.functional as F
+
+    dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
+    x = torch.randn(1, 32, 28, 28, device="cuda", dtype=dtype) * 0.1
+    w = torch.randn(64, 32, 3, 3, device="cuda", dtype=dtype) * 0.1
+    want = F.conv2d(x, w, None, stride=1, padding="same")
+    got, aot, native = _run_routed(
+        "conv2d", lambda: F.conv2d(x, w, None, stride=1, padding="same")
+    )
+    assert aot > 0, f"'same'-padding conv did not route (aot={aot}, native={native})"
+    assert tuple(got.shape[-2:]) == (28, 28)  # 'same' preserves spatial size
+    _assert_parity(torch, got, want, dtype)
+
+
+@pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
+def test_sdpa_causal_parity(torch, dtype_name):
+    """Causal SDPA on permuted (non-contiguous) Q/K/V, built from actual strides."""
+    import torch.nn.functional as F
+
+    dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
+    # [B, S, H, D] -> transpose to [B, H, S, D] views (the usual permuted layout).
+    q = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    k = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    v = torch.randn(2, 128, 8, 64, device="cuda", dtype=dtype).transpose(1, 2)
+    want = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+    got, aot, native = _run_routed(
+        "sdpa",
+        lambda: F.scaled_dot_product_attention(q, k, v, is_causal=True),
+    )
+    assert aot > 0, f"causal SDPA did not route (aot={aot}, native={native})"
+    _assert_parity(torch, got, want, dtype)
+
+
+@pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
+def test_layernorm_multi_axis_parity(torch, dtype_name):
+    """Multi-axis normalized_shape built at true rank (no 2-D collapse)."""
+    import torch.nn.functional as F
+
+    dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
+    x = torch.randn(4, 8, 16, 32, device="cuda", dtype=dtype)
+    w = torch.randn(16, 32, device="cuda", dtype=dtype)
+    b = torch.randn(16, 32, device="cuda", dtype=dtype)
+    want = F.layer_norm(x, (16, 32), w, b, 1e-5)
+    got, aot, native = _run_routed(
+        "layernorm", lambda: F.layer_norm(x, (16, 32), w, b, 1e-5)
+    )
+    assert aot > 0, f"multi-axis layernorm did not route (aot={aot}, native={native})"
+    _assert_parity(torch, got, want, dtype)
+
+
+@pytest.mark.parametrize("dtype_name", ["f16", "bf16"])
+def test_rmsnorm_parity(torch, dtype_name):
+    """RMSNorm at true rank (no flatten), weighted."""
+    import torch.nn.functional as F
+
+    dtype = {"f16": torch.float16, "bf16": torch.bfloat16}[dtype_name]
+    x = torch.randn(4, 8, 256, device="cuda", dtype=dtype)
+    w = torch.randn(256, device="cuda", dtype=dtype)
+    want = F.rms_norm(x, (256,), w)
+    got, aot, native = _run_routed("rmsnorm", lambda: F.rms_norm(x, (256,), w))
+    assert aot > 0, f"rmsnorm did not route (aot={aot}, native={native})"
+    _assert_parity(torch, got, want, dtype)
 
 
 @pytest.mark.parametrize("dtype_name", ["f16", "bf16"])

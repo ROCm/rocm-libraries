@@ -9,17 +9,17 @@
 
 `hipdnn_torch` routes a handful of `torch.nn.functional` calls — `F.linear`,
 `F.rms_norm`, `F.scaled_dot_product_attention`, `F.layer_norm`, `F.silu`, `F.gelu`,
-and `F.conv2d` — onto a hipDNN engine, and falls back to stock PyTorch (transparently,
-and logged) for anything the engine can't serve. It exists so you can run a **real**
-model end-to-end on hipDNN kernels, measure them, and get a ranked list of the
-ops/shapes hipDNN still needs.
+`F.conv2d`, and `F.conv3d` — onto a hipDNN engine, and falls back to stock PyTorch
+(transparently, and logged) for anything hipDNN doesn't serve. It exists so you can run
+a **real** model end-to-end on hipDNN kernels, measure them, and get a ranked list of
+the ops/shapes hipDNN still needs.
 
 ```python
 import hipdnn_torch
 
 hipdnn_torch.enable_logging()   # optional: print each native fallback as it happens
 hipdnn_torch.install()          # patch F.linear / F.rms_norm / F.scaled_dot_product_attention /
-                                #       F.layer_norm / F.silu / F.gelu / F.conv2d
+                                #       F.layer_norm / F.silu / F.gelu / F.conv2d / F.conv3d
 
 model(inputs)                   # your unmodified model — matched calls route to hipDNN
 
@@ -28,11 +28,48 @@ hipdnn_torch.uninstall()
 ```
 
 No model code changes. `install()` patches the functional entry points, so every
-`nn.Linear`, `nn.RMSNorm`, `nn.LayerNorm`, `nn.SiLU`/`nn.GELU`, `nn.Conv2d`, and
-`F.scaled_dot_product_attention` that resolves through `torch.nn.functional` at call
-time is intercepted. Calls that don't meet the engine's gate (wrong dtype, unsupported
-shape, masked/causal attention, grouped conv, exact-erf GELU, …) run on native PyTorch
-exactly as before — nothing breaks, it's just counted and logged.
+`nn.Linear`, `nn.RMSNorm`, `nn.LayerNorm`, `nn.SiLU`/`nn.GELU`, `nn.Conv2d`/`nn.Conv3d`,
+and `F.scaled_dot_product_attention` that resolves through `torch.nn.functional` at call
+time is intercepted. Anything hipDNN doesn't serve — because no loaded engine claims that
+op/shape/dtype — runs on native PyTorch exactly as before; nothing breaks, it's just
+counted and logged.
+
+## Pure-passthrough design contract
+
+The census is only honest if a fallback means **hipDNN itself could not serve the
+problem** — a real coverage gap — not that the injection took a shortcut and never asked.
+So each override does exactly one thing: **wrap the torch op faithfully and hand it to
+hipDNN.** Concretely:
+
+- **Build from the tensor's *actual* dims + strides, at its true rank.** No
+  `.contiguous()`, no forced `channels_last`, no flatten to 2-D. Layout is expressed only
+  as per-tensor strides (the graph nodes are N-D and stride-driven), so a permuted view is
+  submitted with **no Python-side copy**. Outputs are allocated to preserve the input's
+  layout.
+- **Translate *every* torch-op parameter into the graph** — conv `groups` (via the
+  weight's own channel count), `'same'`/`'valid'` padding, SDPA `attn_mask` (→ additive
+  bias), `dropout_p`, `is_causal`, mixed per-tensor dtypes — rather than declining it.
+- **Make no capability *or* correctness pre-judgement.** The injection does not decide
+  what an engine can do, and does not pre-validate shapes: a malformed or unsupported
+  request is still built and submitted, and it is hipDNN's job (`check_support` /
+  `execute`) to reject it. Every rejection becomes a clean, logged native fallback.
+- **The only two things that stop a submission** are the mechanical preconditions for
+  reaching the FFI at all: a **non-CUDA tensor** (`execute()` needs a device pointer) and a
+  **dtype with no `DataType` enum** (nothing to describe the tensor with). Neither is a
+  capability judgement.
+
+A corollary worth stating: when a new kernel is later added to hipDNN (say an fp8 GEMM), a
+call that falls back today starts being served with **zero injection changes** — the
+faithful description was already being submitted. The injection references no specific
+engine or provider and is architecture-agnostic.
+
+> [!NOTE]
+> **Build dependency:** the injection builds against the frontend bindings from PR
+> [ROCm/rocm-libraries#10600](https://github.com/ROCm/rocm-libraries/pull/10600), which
+> binds the graph surface it uses (`graph.sdpa`/`layernorm`/`rmsnorm`; SDPA
+> `set_attn_scale`/`set_causal_mask`/`set_bias`/`set_dropout_probability`; conv
+> `set_pre_padding`/`set_post_padding`; per-tensor `set_data_type`). This is a build-time
+> dependency, not a runtime gate.
 
 ## Contents
 
@@ -43,12 +80,12 @@ hipdnn_torch/
 │   ├── __init__.py            # public API: install / uninstall / report / reset / enable_logging
 │   ├── bootstrap.py           # one-time, env-parametrized backend+frontend+provider init
 │   ├── base.py                # OpOverride: patch, graph cache, execute, census + fallback logging
-│   ├── linear.py              # F.linear            -> hipDNN RCR matmul
-│   ├── rmsnorm.py             # F.rms_norm          -> hipDNN 2-D RMSNorm
+│   ├── linear.py              # F.linear            -> hipDNN N-D matmul (+ optional fused bias)
+│   ├── rmsnorm.py             # F.rms_norm          -> hipDNN N-D RMSNorm
 │   ├── sdpa.py                # F.scaled_dot_product_attention -> hipDNN fused attention
-│   ├── layernorm.py           # F.layer_norm        -> hipDNN 2-D LayerNorm
+│   ├── layernorm.py           # F.layer_norm        -> hipDNN N-D LayerNorm
 │   ├── activation.py          # F.silu / F.gelu     -> hipDNN pointwise activation
-│   └── conv.py                # F.conv2d            -> hipDNN WMMA implicit-GEMM conv
+│   └── conv.py                # F.conv2d / F.conv3d -> hipDNN conv (fprop)
 ├── samples/
 │   ├── minimal_block.py       # 5-minute "try it": a self-contained block, no external repo
 │   ├── microbench_ab.py       # per-op A/B (hipDNN vs native) over a shape sweep
@@ -56,7 +93,7 @@ hipdnn_torch/
 │   └── ltx_video_ab.py        # ADVANCED: a real diffusion transformer (needs ComfyUI)
 └── tests/
     ├── conftest.py            # gpu marker + auto-skip when provider_ready() is False
-    ├── test_gates.py          # pure-CPU: each override's gate declines what it can't serve
+    ├── test_gates.py          # pure-CPU: native-routing stops + the pure translation helpers
     └── test_parity.py         # gpu: each op routes (aot>0) and matches native within tol
 ```
 
@@ -97,7 +134,7 @@ yourself — the package attaches only a `NullHandler` by default).
 
 | Call | Purpose |
 |------|---------|
-| `install(ops=("linear","rmsnorm","sdpa","layernorm","silu","gelu","conv2d"))` | Patch the selected functionals. Triggers the one-time bootstrap. |
+| `install(ops=("linear","rmsnorm","sdpa","layernorm","silu","gelu","conv2d","conv3d"))` | Patch the selected functionals. Triggers the one-time bootstrap. |
 | `uninstall(ops=None)` | Restore the real functionals (default: all installed). |
 | `reset(ops=None)` | Clear the census + fallback tally. |
 | `report(ops=None) -> str` | Per-op census + ranked fallback reasons. |
@@ -142,7 +179,8 @@ before launching Python. (Native Linux and Windows don't need this.)
 | Variable | Required | Meaning |
 |----------|----------|---------|
 | `HIPDNN_TORCH_PROVIDER_SO` | **yes** | Path to the built engine plugin, e.g. `<build>/lib/hipdnn_plugins/engines/libhip_kernel_provider.so`. |
-| `HIPDNN_TORCH_ENGINE` | no | Engine name to pin (default `AOT_CATALOG_ENGINE`). |
+| `HIPDNN_TORCH_SELECT` | no | Engine-selection policy. `default` (the default): hand the graph to hipDNN and let it select across all loaded engines; the census reports the *winning* engine per shape. This selection can be pointed at a rules file (via the backend's `HIPDNN_HEUR_CONFIG_PATH`) that decides the engine per graph/shape. `force`: pin one engine for deterministic attribution (validating/benching a single engine); requires `HIPDNN_TORCH_ENGINE`. |
+| `HIPDNN_TORCH_ENGINE` | only for `force` | Engine name to pin in `force` mode (no default; ignored under `default`). |
 | `HIPDNN_TORCH_FRONTEND_DIR` | no | Fallback path to a raw `frontend_bindings/build` dir, used only if the `hipdnn-frontend` wheel isn't importable. |
 | `HIPDNN_TORCH_BACKEND_GLOB` | no | Override the glob used to find torch's bundled `libhipdnn_backend.so` (rarely needed). |
 
@@ -190,29 +228,34 @@ you point `HIPDNN_TORCH_PROVIDER_SO` at.
 
 **2. The engine that provides these ops is gated inside the provider.** Which engine
 serves matmul / RMSNorm / SDPA — and whether it's compiled at all — is controlled by its
-own CMake option, documented alongside that engine. `hipdnn_torch` selects the engine by
-name through `HIPDNN_TORCH_ENGINE` (default `AOT_CATALOG_ENGINE`); set it to match the
-engine your build actually registers.
+own CMake option, documented alongside that engine. By default `hipdnn_torch` hands the
+graph to hipDNN and lets it select across every loaded engine
+(`HIPDNN_TORCH_SELECT=default`), so you don't name an engine at all. To validate or bench
+one engine in isolation, set
+`HIPDNN_TORCH_SELECT=force` and name it with `HIPDNN_TORCH_ENGINE` — that pins a *hipDNN
+engine*, not a kernel source (e.g. `AOT_CATALOG_ENGINE` serves whatever ahead-of-time
+kernels are in its catalog; those come from rocKE today but the engine is source-agnostic,
+so "force the AOT engine" is not "force rocKE").
 
 > [!NOTE]
-> The default engine name above, `AOT_CATALOG_ENGINE`, is **not yet on `develop`** — it
+> The `AOT_CATALOG_ENGINE` used in the examples below is **not yet on `develop`** — it
 > currently lives in the draft PR
 > [ROCm/rocm-libraries#10556](https://github.com/ROCm/rocm-libraries/pull/10556), which
 > adds the matmul / RMSNorm / SDPA op coverage this layer was built against. That PR's own
 > `README.md` is the authoritative source for its build option and setup (including which
 > flags to pass and which are *not* needed). To exercise that coverage today, build
-> `hip-kernel-provider` from that branch following its README, point
-> `HIPDNN_TORCH_PROVIDER_SO` at the resulting plugin, and leave `HIPDNN_TORCH_ENGINE` at
-> its default. That PR is also a good worked example of **how additional operation
-> coverage is added to hipDNN** — the same pattern (a new engine / kernel family behind a
-> build option) is how future ops will land and become routable here.
+> `hip-kernel-provider` from that branch following its README and point
+> `HIPDNN_TORCH_PROVIDER_SO` at the resulting plugin. That PR is also a good worked example
+> of **how additional operation coverage is added to hipDNN** — the same pattern (a new
+> engine / kernel family behind a build option) is how future ops will land and become
+> routable here.
 
 ## Applicability & known limitations
 
 **This only intercepts calls that go through `torch.nn.functional`.** That covers a lot
-— every `nn.Linear`, `nn.RMSNorm`, `nn.LayerNorm`, `nn.SiLU`/`nn.GELU`, `nn.Conv2d`,
-and most attention written against `F.scaled_dot_product_attention` — but there are
-real ways a model bypasses it:
+— every `nn.Linear`, `nn.RMSNorm`, `nn.LayerNorm`, `nn.SiLU`/`nn.GELU`, `nn.Conv2d`/
+`nn.Conv3d`, and most attention written against `F.scaled_dot_product_attention` — but
+there are real ways a model bypasses it:
 
 - **`torch.compile` / TorchInductor.** A compiled graph is lowered ahead of time and may
   never re-enter the Python `F.*` functions at run time. Install *before* compiling, and
@@ -223,27 +266,28 @@ real ways a model bypasses it:
   section for how to make a model use `F.SDPA` so the injection can see it.)
 - **Direct `torch.ops.aten.*` or C++ module calls.** Anything that reaches the ATen
   dispatcher without going through the Python functional is not patched.
-- **Quantized / low-bit paths.** Only f16/bf16 are gated in; quantized ops fall back.
+- **Quantized / low-bit paths.** Any dtype with a hipDNN `DataType` counterpart is passed
+  through (f16/bf16/f32/f64, the fp8 variants, the int types); a dtype with *no* enum (e.g.
+  complex) is the one dtype-related native stop. Whether a *kernel* exists for a given dtype
+  is hipDNN's call — an unserved-but-mappable dtype falls back today and routes the day a
+  kernel lands, with no injection change.
 - **Non-PyTorch frameworks** (JAX, TensorFlow, ONNX Runtime): out of scope entirely.
 
-**Current engine coverage and shape constraints** (anything outside these gates falls
-back to native and is counted with a reason):
+**What each override submits to hipDNN.** Per the pure-passthrough contract above, the
+override does *not* pre-judge shape, rank, layout, or param support — it builds the faithful
+graph and submits; the "Falls back when" column lists only the two structural stops (which
+are identical for every op) plus intrinsic materializations, **not** engine capability.
+Whether any given shape is actually *served* is reported by the census at run time.
 
-| Op | Serves | Constraints |
-|----|--------|-------------|
-| `F.linear` | RCR matmul (`y = x @ Wᵀ + b`) | cuda, f16/bf16, weight 2-D, **M, N, K all multiples of 16**. Bias added natively after the matmul (no longer forces a fallback). |
-| `F.rms_norm` | 2-D last-axis RMSNorm | cuda, f16/bf16, single-axis (last-dim) norm. Weightless norms (`weight=None`) are served via a synthesized ones-weight; `eps=None` resolves to `torch.finfo(dtype).eps` to match native exactly. |
-| `F.scaled_dot_product_attention` | Dense, non-causal, unmasked fused attention | cuda, f16/bf16, rank-4 BHSD, `attn_mask=None`, `dropout_p=0`, not causal, no GQA, **B=1**, **H=32**, **D=64**, `S_q`/`S_kv` multiples of 16. |
-| `F.layer_norm` | 2-D last-axis LayerNorm | cuda, f16/bf16, single-axis (last-dim) norm, `normalized_shape` == last dim. Weightless/biasless norms are served via synthesized ones-weight and zeros-bias; `eps` defaults to `1e-5`. |
-| `F.silu` | Pointwise SiLU (Swish, β=1) | cuda, f16/bf16. Flattened to a contiguous `numel` run. |
-| `F.gelu` | Pointwise tanh-GELU | cuda, f16/bf16, **`approximate="tanh"` only** — the default exact-erf GELU has no catalog builder yet and falls back (reason `erf-gelu unsupported`). |
-| `F.conv2d` | WMMA implicit-GEMM forward conv | cuda, f16/bf16, rank-4, **`groups==1`**, integer stride/padding/dilation (`'same'`/`'valid'` strings fall back). Operands are converted to channels-last; bias is added natively after the conv. |
-
-> [!NOTE]
-> The SDPA head count (32), head dim (64), and tile (16) are **baked into the shipped
-> kernel family** and are named constants in `sdpa.py`. They must match the plugin you
-> load. Driving these from catalog metadata (so a differently-baked family is picked up
-> automatically) is a documented follow-up.
+| Op | Submits to hipDNN | Falls back when |
+|----|-------------------|-----------------|
+| `F.linear` | N-D matmul at the input's true rank (`A=[batch…,M,K]`, `B` described as `[1,…,1,K,N]`), with `bias` as a fused `ADD` node when present (matmul-only + native bias-add on decline). | non-CUDA / unmappable dtype. |
+| `F.rms_norm` | N-D RMSNorm at true rank; scale described as `[1,…,1,*normalized_shape]`. Weightless norms synthesize a cached ones-scale; `eps=None` → `torch.finfo(dtype).eps` to match native. | non-CUDA / unmappable dtype. |
+| `F.scaled_dot_product_attention` | Fused attention from Q/K/V's *actual* dims+strides (permuted views submitted with no copy); `is_causal`→`set_causal_mask`, `attn_mask`→additive `set_bias` (bool masks materialized to 0/−inf), `dropout_p`→`set_dropout_probability` (parity defined only at `p=0`), `scale`→`set_attn_scale`. | non-CUDA / unmappable dtype. |
+| `F.layer_norm` | N-D LayerNorm at true rank (multi-axis `normalized_shape` supported); scale/bias described as `[1,…,1,*normalized_shape]`. Weightless/biasless synthesize cached ones/zeros; `eps` defaults to `1e-5`. | non-CUDA / unmappable dtype. |
+| `F.silu` | Pointwise SiLU (Swish, β=1) at the input's actual dims/strides. | non-CUDA / unmappable dtype. |
+| `F.gelu` | Pointwise GELU — `approximate="tanh"`→`GELU_APPROX_TANH_FWD`, default exact-erf→`GELU_FWD` (both built and submitted; hipDNN decides). | non-CUDA / unmappable dtype. |
+| `F.conv2d` / `F.conv3d` | Conv fprop at the input's actual layout (no forced channels-last; output preserves input layout); `groups` inferred from the weight's own channel count; `'valid'`→0 and `'same'`→per-axis `set_pre_padding`/`set_post_padding`; `bias` added natively after the conv. | non-CUDA / unmappable dtype, or a padding string other than `'same'`/`'valid'`. |
 
 ## Per-framework notes
 

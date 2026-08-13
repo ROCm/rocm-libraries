@@ -2,21 +2,23 @@
 # SPDX-License-Identifier:  MIT
 
 """
-hipdnn_torch.activation -- route ``F.silu`` and ``F.gelu`` onto the hipDNN engine's
-elementwise activation kernels.
+hipdnn_torch.activation -- route ``F.silu`` and ``F.gelu`` onto hipDNN's elementwise
+activation graph.
 
-Both are unary pointwise ops; the tensor is flattened to a single contiguous run of
-``numel`` elements (the kernel walks a flat buffer), so the graph carries just
-``A[numel] -> C[numel]`` with the activation mode on a ``PointwiseAttributes``:
+**Pure passthrough.** Both are unary pointwise ops. The override builds the graph
+from the input's *actual* dims + strides -- whatever layout it arrives in, no
+flatten, no ``.contiguous()`` -- so the graph carries ``A[dims] -> C[dims]`` with the
+activation mode on a ``PointwiseAttributes``:
 
   * ``F.silu`` -> ``PointwiseMode.SWISH_FWD`` (SiLU is Swish with beta == 1).
   * ``F.gelu(approximate="tanh")`` -> ``PointwiseMode.GELU_APPROX_TANH_FWD``.
   * ``F.gelu()`` (exact erf) -> ``PointwiseMode.GELU_FWD``.
 
-Both GELU flavours are representable, so neither is gated -- the graph is built and
-hipDNN decides whether a loaded engine serves the mode (an engine with no builder
-for it declines -> native). The only structural precondition is a graph-mappable
-dtype on cuda; anything else falls back to native and is logged.
+Both GELU flavours are built and submitted; hipDNN decides whether a loaded engine
+serves the mode (an engine with no builder for it declines -> native). The output is
+``torch.empty_like(input)`` (preserving layout). The only two stops are a device
+pointer to execute against and a graph-mappable dtype; anything else falls back to
+native and is counted.
 """
 
 import logging
@@ -44,7 +46,7 @@ class _ActivationOverride(OpOverride):
             return False, f"dtype {self._tok(input.dtype)} not graph-mappable"
         return True, ""
 
-    def _graph(self, numel, mode, dtype):
+    def _graph(self, dims, strides, mode, dtype):
         st = self.state
         hipdnn = st.hipdnn
         hf = st.dtype_map[dtype]
@@ -55,16 +57,16 @@ class _ActivationOverride(OpOverride):
         a_t = g.tensor(
             hipdnn.Tensor()
             .set_name("A")
-            .set_dim([numel])
-            .set_stride([1])
+            .set_dim(list(dims))
+            .set_stride(list(strides))
             .set_data_type(hf)
             .set_uid(self._A_UID)
         )
         attrs = hipdnn.PointwiseAttributes()
         attrs.set_mode(mode)
         c_t = g.pointwise(a_t, attrs)
-        c_t.set_dim([numel])
-        c_t.set_stride([1])
+        c_t.set_dim(list(dims))
+        c_t.set_stride(list(strides))
         c_t.set_data_type(hf)
         c_t.set_uid(self._C_UID)
         c_t.set_output(True)  # terminal output must be non-virtual (MIOpen requires it)
@@ -73,7 +75,10 @@ class _ActivationOverride(OpOverride):
     def _run(self, real, input, native, **mode_kwargs):
         torch = self.state.torch
         dtype = input.dtype
-        numel = int(input.numel())
+        try:
+            numel = int(input.numel())
+        except Exception:  # noqa: BLE001
+            return native()
         key = f"numel={numel},dtype={self._tok(dtype)}"
 
         ok, reason = self._gate(input)
@@ -87,22 +92,24 @@ class _ActivationOverride(OpOverride):
             return native()
 
         try:
-            x1d = input.reshape(-1).contiguous()
+            # Build at the input's actual dims/strides; output mirrors its layout.
+            y = torch.empty_like(input)
             entry = self._cached_graph(
                 # str(mode), not int(mode): the bound PointwiseMode enum isn't
                 # int-convertible, and its repr is a stable per-value key.
-                (numel, str(mode), dtype),
-                lambda: self._graph(numel, mode, dtype),
-                f"[{numel}] {dtype}",
+                (tuple(input.shape), tuple(input.stride()), str(mode), dtype),
+                lambda: self._graph(
+                    list(input.shape), list(input.stride()), mode, dtype
+                ),
+                f"{list(input.shape)} {dtype}",
             )
-            y = torch.empty_like(x1d)
             self._execute(
                 entry,
-                {self._A_UID: x1d.data_ptr(), self._C_UID: y.data_ptr()},
+                {self._A_UID: input.data_ptr(), self._C_UID: y.data_ptr()},
                 input.device,
             )
             self.note_aot(key)
-            return y.reshape(input.shape)
+            return y
         except NotApplicable as na:  # engine can't serve this shape -> native
             self.note_native(key, str(na))
             return native()

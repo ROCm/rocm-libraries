@@ -40,7 +40,7 @@ log = logging.getLogger("hipdnn_torch")
 
 # Reverse id->name for the engines we co-load. The shipped bindings'
 # engine_id_to_name() registry can predate a plugin engine and return '' for it,
-# so we resolve the pick-best winner's id through this local table first.
+# so we resolve the selected engine's id through this local table first.
 _KNOWN_ENGINES = (
     "AOT_CATALOG_ENGINE",
     "ASM_SDPA_ENGINE",
@@ -96,12 +96,16 @@ class OpOverride:
         return self._installed
 
     def _tok(self, dtype) -> str:
-        torch = self.state.torch
-        return {
-            torch.float16: "f16",
-            torch.bfloat16: "bf16",
-            torch.float32: "f32",
-        }.get(dtype, str(dtype))
+        """Short, stable census token for a dtype. Derived generically from the
+        dtype's name (``torch.bfloat16`` -> ``bf16``, ``torch.float8_e4m3fn`` ->
+        ``f8_e4m3fn``) so any dtype -- including ones added later -- renders sensibly
+        without a hardcoded table."""
+        name = getattr(dtype, "__name__", None) or str(dtype)
+        if name.startswith("torch."):
+            name = name[len("torch.") :]
+        # float32->f32, float16->f16, bfloat16->bf16, float8_e4m3fn->f8_e4m3fn
+        name = name.replace("bfloat", "bf").replace("float", "f")
+        return name
 
     # -- graph build / execute (shared across every op) ---------------------
     def _cached_graph(self, key, build, describe):
@@ -109,6 +113,13 @@ class OpOverride:
         ``build()`` (subclass returns a wired-but-unbuilt ``Graph``), run the
         shared finalise sequence, and cache it. ``describe`` is a short shape
         string for the not-applicable message.
+
+        **Cache-key invariant:** since the overrides build from each tensor's actual
+        dims + strides + per-tensor dtype (no forced layout/dtype), the ``key`` a
+        subclass passes *must* encode all three -- dim tuples, stride tuples, and
+        dtypes (plus any op params baked into the graph). Two calls with identical
+        dims but different layout/dtype build *different* graphs; a coarser key would
+        collide and run the first graph against the second's mismatched pointers.
 
         A shape the engine rejects is remembered too (:attr:`_nope_cache`): the
         Python gate is coarse, so a key can pass the gate yet fail here, and
@@ -136,14 +147,15 @@ class OpOverride:
             if not ranked:
                 raise NotApplicable(f"no engine applicable for {describe}")
 
-            if st.select_mode == "pick-best":
-                # Let hipDNN rank + select across every loaded engine. The backend
-                # Config policy (HIPDNN_HEUR_CONFIG_PATH) participates here, so a
-                # rule file reorders the choice without any code change.
+            if st.select_mode == "default":
+                # Hand the graph to hipDNN and let it select across every loaded
+                # engine. The backend Config policy (HIPDNN_HEUR_CONFIG_PATH)
+                # participates here, so a rule file can decide the engine per
+                # graph/shape without any code change.
                 err = g.create_execution_plans([st.hipdnn.HeuristicMode.FALLBACK])
                 if err.is_bad():
                     raise NotApplicable(f"create_execution_plans: {err.get_message()}")
-            else:  # force-rocke: pin the configured engine, bypassing ranking
+            else:  # force: pin the configured engine, bypassing ranking
                 if st.engine_id not in ranked:
                     raise NotApplicable(
                         f"{st.engine_name} not applicable for {describe}"
@@ -165,7 +177,7 @@ class OpOverride:
             try:
                 engine = _engine_name(st.hipdnn, g.get_execution_plan_engine_id())
             except Exception:  # noqa: BLE001 -- fall back to the pinned name
-                engine = st.engine_name if st.select_mode != "pick-best" else "?"
+                engine = st.engine_name if st.select_mode == "force" else "?"
         except NotApplicable as na:
             self._nope_cache[key] = str(na)
             raise
@@ -196,7 +208,7 @@ class OpOverride:
         """Count a call served by the engine. ``extras`` are extra integer
         counters folded into the row (e.g. ``biased=1``, ``weightless=1``). The
         winning engine name from the just-run :meth:`_cached_graph` is recorded in
-        the row's ``engines`` set so ``pick-best`` runs show *which* engine served
+        the row's ``engines`` set so ``default`` runs show *which* engine served
         each shape."""
         row = self._row(key)
         row["aot"] += 1
