@@ -1,6 +1,20 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+find_package(GTest 1.12.1 QUIET)
+if(NOT GTest_FOUND)
+    if(HOST_VALIDATION_ENABLE_FETCH)
+        include(FetchContent)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
+        )
+        FetchContent_MakeAvailable(googletest)
+    else()
+        message(FATAL_ERROR "Host-validation tests require GTest 1.12.1 or newer.")
+    endif()
+endif()
+
 add_executable(host-validation-tests host_validation_test.cpp)
 target_link_libraries(host-validation-tests PRIVATE roc::host-validation)
 if(TARGET OpenMP::OpenMP_CXX)
@@ -52,6 +66,29 @@ if(TARGET host-validation-mx)
     add_test(NAME host-validation-mx-tests COMMAND host-validation-mx-tests)
 endif()
 
+add_executable(host-validation-amd-gpu-layout-tests amd_gpu_layout_test.cpp)
+target_link_libraries(
+    host-validation-amd-gpu-layout-tests
+    PRIVATE
+        GTest::gtest_main
+        roc::host-validation-amd-gpu-layout
+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(
+        host-validation-amd-gpu-layout-tests
+        PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+    )
+endif()
+include(GoogleTest)
+gtest_discover_tests(
+    host-validation-amd-gpu-layout-tests
+    DISCOVERY_MODE PRE_TEST
+)
+
 add_test(
     NAME host-validation-core-boundary
     COMMAND
@@ -66,6 +103,27 @@ add_test(
         "${CMAKE_COMMAND}"
         -DHOST_VALIDATION_SOURCE_DIR=${PROJECT_SOURCE_DIR}
         -P "${CMAKE_CURRENT_SOURCE_DIR}/check_component_boundary.cmake"
+)
+
+add_test(
+    NAME host-validation-amd-gpu-layout-boundary
+    COMMAND
+        "${CMAKE_COMMAND}"
+        -DHOST_VALIDATION_SOURCE_DIR=${PROJECT_SOURCE_DIR}
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/check_amd_gpu_layout_boundary.cmake"
+)
+
+add_test(
+    NAME host-validation-amd-gpu-layout-package
+    COMMAND
+        "${CMAKE_COMMAND}"
+        "-DCOMPONENT_BINARY_DIR=${PROJECT_BINARY_DIR}"
+        "-DPACKAGE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/package"
+        "-DPACKAGE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/amd-gpu-layout-package-test"
+        "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+        "-DTEST_CONFIG=$<CONFIG>"
+        "-DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_amd_gpu_layout_package_test.cmake"
 )
 
 if(HOST_VALIDATION_BUILD_BENCHMARKS)

@@ -79,7 +79,6 @@
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
-/shared/mx-layout-transforms/                       @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
@@ -97,9 +96,6 @@
 
 /projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 /projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
-
-/shared/mx-layout-transforms/**/*.cmake             @ROCm/rocm-math-lib-build-infra
-/shared/mx-layout-transforms/**/CMakeLists.txt      @ROCm/rocm-math-lib-build-infra
 
 /shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra

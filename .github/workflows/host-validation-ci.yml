@@ -90,6 +90,10 @@ jobs:
             "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail"
           test -e \
             "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/typed_comparison.hpp"
+          test -e \
+            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/amd_gpu_layout/mx.hpp"
+          test -e \
+            "${RUNNER_TEMP}/host-validation-install/share/doc/ROCHostValidation/LICENSE.md"
           cmake -S shared/host-validation/tests/package \
             -B "${RUNNER_TEMP}/host-validation-package-test" \
             -G Ninja \
@@ -110,9 +114,28 @@ jobs:
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-tiled-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-blas-package-test"
           "${RUNNER_TEMP}/host-validation-package-test/host-validation-mx-package-test"
+          "${RUNNER_TEMP}/host-validation-package-test/host-validation-amd-gpu-layout-package-test"
           PYTHONPATH="$(find "${RUNNER_TEMP}/host-validation-install" \
             -type d -path '*/site-packages' -print -quit)" \
             python -c "import roc_host_validation"
+
+      - name: Test AMD GPU layout module without OpenMP
+        run: |
+          cmake -S shared/host-validation \
+            -B "${RUNNER_TEMP}/host-validation-no-layout-openmp" \
+            -G Ninja \
+            -DHOST_VALIDATION_BUILD_TESTING=ON \
+            -DHOST_VALIDATION_BUILD_PYTHON=OFF \
+            -DHOST_VALIDATION_BUILD_MX_BACKEND=OFF \
+            -DHOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build "${RUNNER_TEMP}/host-validation-no-layout-openmp" \
+            --target host-validation-amd-gpu-layout-tests \
+            --parallel 2
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-validation-no-layout-openmp" \
+            --tests-regex "^(PreSwizzle|host-validation-amd-gpu-layout-boundary)" \
+            --output-on-failure
 
   sanitizers:
     runs-on: ubuntu-24.04

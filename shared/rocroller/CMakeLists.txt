@@ -318,6 +318,13 @@ if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-mx)
     endif()
 endif()
 
+if(_rocroller_needs_host_numerics
+   AND NOT TARGET roc::host-validation-amd-gpu-layout)
+    message(FATAL_ERROR
+        "rocRoller clients require the roc::host-validation-amd-gpu-layout target."
+    )
+endif()
+
 if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation-blas)
     if(COMMAND roc_host_validation_enable_blas_backend)
         roc_host_validation_enable_blas_backend()
@@ -331,22 +338,6 @@ endif()
 
 if(_rocroller_needs_host_numerics)
     add_subdirectory(host)
-endif()
-
-if((ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
-   AND NOT TARGET roc::mx-layout-transforms)
-    set(_rocroller_mx_layout_transforms_source
-        "${CMAKE_CURRENT_SOURCE_DIR}/../mx-layout-transforms"
-    )
-    if(EXISTS "${_rocroller_mx_layout_transforms_source}/CMakeLists.txt")
-        add_subdirectory(
-            "${_rocroller_mx_layout_transforms_source}"
-            "${CMAKE_CURRENT_BINARY_DIR}/mx-layout-transforms"
-            EXCLUDE_FROM_ALL
-        )
-    else()
-        find_package(ROCMxLayoutTransforms REQUIRED CONFIG)
-    endif()
 endif()
 
 if(ROCROLLER_BUILD_TESTING)

@@ -13,7 +13,7 @@
 #include "GPUContextFixture.hpp"
 
 #include <common/GEMMProblem.hpp>
-#include <roc/mx_layout_transforms/pre_swizzle.hpp>
+#include <roc/host_validation/amd_gpu_layout/mx.hpp>
 
 namespace GEMMTests
 {
@@ -329,7 +329,7 @@ namespace GEMMTests
                 // The preSwizzle helper assumes column-major; so we swap sizes here.
                 std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
                 std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-                hostAForKernel                         = roc::mx_layout_transforms::preSwizzle(
+                hostAForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
                     hostA, swappedSizes, {}, swappedPreTileSize);
             }
 
@@ -361,8 +361,8 @@ namespace GEMMTests
                     sizes[0] /= packing;
                     preTileSize[0] /= packing;
                 }
-                hostBForKernel
-                    = roc::mx_layout_transforms::preSwizzle(hostB, sizes, {}, preTileSize);
+                hostBForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
+                    hostB, sizes, {}, preTileSize);
             }
 
             auto deviceA = make_shared_device<TA>(hostAForKernel);
@@ -397,7 +397,7 @@ namespace GEMMTests
                                     "Can only pre-tile scale A if A is TransposeType::T");
                         preTileSize = {gemm.scalePretileA[1], gemm.scalePretileA[0]};
                     }
-                    auto tmpScaleA = roc::mx_layout_transforms::preSwizzle(
+                    auto tmpScaleA = roc::host_validation::amd_gpu_layout::preSwizzle(
                         hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                     deviceScaleA = make_shared_device(tmpScaleA);
                 }
@@ -430,7 +430,7 @@ namespace GEMMTests
                                     "Can only pre-tile scale B if B is TransposeType::N");
                         preTileSize = {gemm.scalePretileB[0], gemm.scalePretileB[1]};
                     }
-                    auto tmpScaleB = roc::mx_layout_transforms::preSwizzle(
+                    auto tmpScaleB = roc::host_validation::amd_gpu_layout::preSwizzle(
                         hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                     deviceScaleB = make_shared_device(tmpScaleB);
                 }

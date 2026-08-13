@@ -8,7 +8,7 @@
 #   add_subdirectory_with_message(COMPONENT <component> PREFIX_PATH <prefix> [EXPECT_TARGET <target>])
 #
 # Arguments:
-#   COMPONENT <component>  - Component name (e.g., "mx-layout-transforms").
+#   COMPONENT <component>  - Component name (e.g., "host-validation").
 #   PREFIX_PATH <prefix>   - Path prefix (e.g., "shared", "projects").
 #   EXPECT_TARGET <target> - Optional target name produced by the subdirectory.
 function(add_subdirectory_with_message)

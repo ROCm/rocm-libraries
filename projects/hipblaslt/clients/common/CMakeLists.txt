@@ -19,26 +19,8 @@
 #     headers (the source pulls in `<hipblaslt/hipblaslt-export.h>` and
 #     `<hipblaslt/hipblaslt-types.h>`).
 #
-# The helper privately consumes `roc::mx-layout-transforms`; that dependency
-# is not exposed to its downstream targets.
-
-if(NOT TARGET roc::mx-layout-transforms AND NOT ROCM_LIBS_SUPERBUILD)
-    set(_hipblaslt_mx_layout_transforms_source
-        "${PROJECT_SOURCE_DIR}/../../shared/mx-layout-transforms"
-    )
-    if(NOT HIPBLASLT_ENABLE_THEROCK
-       AND EXISTS "${_hipblaslt_mx_layout_transforms_source}/CMakeLists.txt")
-        # The binary
-        # dir is anchored under the hipblaslt project's build tree to match
-        # the other in-tree shared dependencies.
-        add_subdirectory(
-            "${_hipblaslt_mx_layout_transforms_source}"
-            "${PROJECT_BINARY_DIR}/mx-layout-transforms"
-        )
-    else()
-        find_package(ROCMxLayoutTransforms REQUIRED CONFIG)
-    endif()
-endif()
+# The helper privately consumes the AMD GPU physical-layout module from
+# ROCHostValidation; that dependency is not exposed to downstream targets.
 
 add_library(hipblaslt-mxdatagen STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/host_validation/mxDataGen.cpp"
@@ -55,7 +37,7 @@ target_link_libraries(hipblaslt-mxdatagen
         hipblaslt::headers
         roc::host-validation-mx
     PRIVATE
-        roc::mx-layout-transforms
+        roc::host-validation-amd-gpu-layout
         # `-x hip` (via hip::device's INTERFACE_COMPILE_OPTIONS) makes the
         # translation unit compile through hipcc/clang. mxDataGen.cpp itself
         # does not launch kernels, but the modern ROCm bf16 header it pulls
