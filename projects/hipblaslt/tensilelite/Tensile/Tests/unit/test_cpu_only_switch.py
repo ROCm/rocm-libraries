@@ -453,7 +453,7 @@ _E2E_CONFIG = Path(__file__).parent / "test_data" / "cpu_only.yaml"
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx90a"])
 def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, arch):
     """T9: drive the full benchmark flow GPU-less via
-    Tensile.Tensile([cfg, out, "--cpu-only", "--gpu-targets", arch, *tensile_args]).
+    Tensile.Tensile([cfg, out, *tensile_args, "--cpu-only", "--gpu-targets", arch]).
 
     Mirrors test_keep_build_tmp.py, but exercises the BENCHMARK path (no --build-only):
     codegen -> cross-compile -> stubbed client launch -> deterministic synthetic results
@@ -471,13 +471,17 @@ def test_cpu_only_end_to_end(tensile_args, tmp_path, monkeypatch, _restore_gp, a
     monkeypatch.setenv("CU", "304")
 
     output_dir = tmp_path / "output"
+    # This test pins per-arch behavior, so its explicit --gpu-targets must win over
+    # any global default forwarded through tensile_args (e.g. tox forwards
+    # --gpu-targets gfx1250v0 on a gfx1250 v0 host). argparse resolves --gpu-targets
+    # last-wins, so keep the explicit target AFTER *tensile_args.
     args = [
         str(_E2E_CONFIG),
         str(output_dir),
+        *tensile_args,
         "--cpu-only",
         "--gpu-targets",
         arch,
-        *tensile_args,
     ]
 
     Tensile.Tensile(args)

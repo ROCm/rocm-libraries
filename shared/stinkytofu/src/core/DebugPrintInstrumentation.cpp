@@ -74,4 +74,33 @@ void DebugPrintInstrumentation::afterPass(const std::string& passName, Function&
     }
 }
 
+void DebugPrintInstrumentation::dumpModule(StinkyAsmModule& M, std::ostream& out) const {
+    for (const Function* fn : M.getFunctions()) {
+        if (fn == nullptr) continue;
+        if (fn->getIsCallable()) out << "\n; --- callee Function: " << fn->getName() << " ---\n";
+        fn->dump(out);
+    }
+}
+
+void DebugPrintInstrumentation::beforeModulePass(const std::string& passName, StinkyAsmModule& M,
+                                                 PassContext& /*ctx*/) {
+    if (dbgCfg->shouldPrintPassName())
+        std::cerr << "[StinkyTofu] Running module pass: " << passName << "\n";
+
+    if (dbgCfg->shouldPrintBefore(passName)) {
+        dbgCfg->getOutputStreamInBefore() << "\n*** Before Pass: " << passName << " ***\n";
+        dumpModule(M, dbgCfg->getOutputStreamInBefore());
+        dbgCfg->getOutputStreamInBefore().flush();
+    }
+}
+
+void DebugPrintInstrumentation::afterModulePass(const std::string& passName, StinkyAsmModule& M,
+                                                PassContext& /*ctx*/) {
+    if (dbgCfg->shouldPrintAfter(passName)) {
+        dbgCfg->getOutputStreamInAfter() << "\n*** After Pass: " << passName << " ***\n";
+        dumpModule(M, dbgCfg->getOutputStreamInAfter());
+        dbgCfg->getOutputStreamInAfter().flush();
+    }
+}
+
 }  // namespace stinkytofu

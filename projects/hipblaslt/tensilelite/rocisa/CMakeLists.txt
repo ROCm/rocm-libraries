@@ -273,6 +273,7 @@ if(HIPBLASLT_BUNDLE_PYTHON_DEPS OR ROCISA_STANDALONE)
             "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/__init__.py"
             COPYONLY
         )
+        # The staged _build_info.py drives the standalone _stinkytofu.so guard.
         configure_file(
             "${_stinkytofu_src_dir}/python_module/stinkytofu/_build_info.py.in"
             "${CMAKE_CURRENT_BINARY_DIR}/stinkytofu/_build_info.py"

@@ -164,7 +164,9 @@ fixture would finish it.
 
 ## D12 — TensileBenchmarkCluster: pin the `--results-only` constraint crash rather than asserting clean workflow steps
 
-**ADR:** [`adr/0001-pin-results-only-boolop-crash.md`](adr/0001-pin-results-only-boolop-crash.md) — the per-decision record (with defect link) for this pinned bug.
+**ADR:** [`adr/0001-pin-results-only-boolop-crash.md`](adr/0001-pin-results-only-boolop-crash.md) — the per-decision record for this pinned bug.
+
+**Defect:** [`AIHPBLAS-4298`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4298).
 
 **Context:** While characterizing `TensileBenchmarkCluster`, the `--results-only`
 flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep
@@ -369,13 +371,32 @@ selected steps.
 
 **M4 — widened mutation slice.** The `only_mutate` set in `[tool.mutmut]` was
 extended past the original five files to add `Common/DataType.py`,
-`Common/Types.py`, and `Common/ValidParameters.py`, with the matching
-characterization directories (`DataType`, `CommonTypes`, `ValidParameters`)
-added to `pytest_add_cli_args_test_selection`. Source-path mapping for the
-widened slice (recorded here because the shorthand names differ from the file
-paths): DataType → `Tensile/Common/DataType.py`; CommonTypes →
-`Tensile/Common/Types.py`; ValidParameters → `Tensile/Common/ValidParameters.py`
-(there is no `Tensile/SolutionStructs/ValidParameters.py`).
+`Common/Types.py`, `Common/ValidParameters.py`, `SolutionStructs/Naming.py`, and
+`SolutionStructs/Utilities.py`, with matching characterization directories added
+to `pytest_add_cli_args_test_selection`. Source-path mapping for the widened slice:
+DataType → `Tensile/Common/DataType.py`; CommonTypes → `Tensile/Common/Types.py`;
+ValidParameters → `Tensile/Common/ValidParameters.py`; Naming →
+`Tensile/SolutionStructs/Naming.py`; SolutionStructsUtils →
+`Tensile/SolutionStructs/Utilities.py`.
+
+**M5 — SolutionStructs Naming/Utilities mutation outcome.** `Naming.py`: 455
+generated, 453 killed, 2 accepted equivalents, 0 no-test mutants → 100% covered
+non-equivalent score (99.56% raw). `Utilities.py`: 131 generated, 131 killed, 0
+survivors, 0 no-test mutants → 100% covered score. The full run had 30 no-test
+mutants outside these two modules. Because `mutate_only_covered_lines = false`,
+mutmut enumerates every source-line mutation; these scores exclude only the
+explicit no-test entries and accepted equivalents.
+
+**Pinned equivalent (Naming).**
+`Tensile.SolutionStructs.Naming.x__getName__mutmut_{70,71}` changes the masked
+`state["GlobalSplitU"] = "M"` expression at `Naming.py:172`; every string form
+reaches the same pinned string-versus-integer `TypeError` before it can affect a
+name. [`AIHPBLAS-4297`](https://amd-hub.atlassian.net/browse/AIHPBLAS-4297)
+tracks this pinned defect.
+
+The former WGMXCC and unreachable-abbreviation equivalents were removed as
+redundant/dead source instead of being fenced, unlike M2's documented pragmas.
+No new `# pragma: no mutate` fences are accepted in this round.
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
