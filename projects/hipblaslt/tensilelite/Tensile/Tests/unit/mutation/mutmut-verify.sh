@@ -67,7 +67,7 @@ classify_verdict() {
     fi
   else
     # expected-pass mode (rare; expect_mutant_rc_nonzero=false): NOT a kill.
-    # KILLED is reserved strictly for mut_rc==1 (Issue-1 DoD), so an expected
+    # KILLED is reserved strictly for mut_rc==1, so an expected
     # pass gets a distinct non-kill success token (OK), never KILLED.
     if [[ "$mut_rc" -eq 0 ]]; then
       printf 'OK\tbase_rc=%s mut_rc=0 (expected pass; not a kill)' "$base_rc"
