@@ -64,30 +64,6 @@ However, you can choose how many workgroups to launch a GEMM kernel with using t
    "``TENSILE_STREAMK_FIXED_GRID``","This variable overrides the default grid size and launches Stream-K GEMM kernels using the specified number of workgroups."
    "``TENSILE_STREAMK_MAX_CUS``","This variable sets the maximum number of compute units to use for Stream-K kernels. By default, Stream-K kernels are allowed to use all compute units on the device, but this setting lets you limit the number of units that can be used."
 
-Configuring tile scheduling per matmul
-=========================================
-
-The environment variables above apply to every GEMM in an application. To select the Stream-K tile
-scheduling sub-path for a single matmul instead, set the
-``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT`` matmul-descriptor attribute. It stores an
-``int32_t`` holding one of the ``hipblasLtStreamKTileSchedulingMode_t`` values: ``OFF`` (``0``, the
-default static SK3 sub-path), ``ON`` (``1``, the dynamic SK4 work-queue sub-path), or ``AUTO``
-(``2``, always run the origami heuristic). Values outside ``{0, 1, 2}`` are rejected with
-``HIPBLAS_STATUS_INVALID_VALUE``.
-
-.. code-block:: c++
-
-   int32_t mode = HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO;
-   CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
-       matmul, HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT, &mode, sizeof(mode)));
-
-The C++ extension API exposes the same control through
-``hipblaslt_ext::GemmPreference::setStreamKTileSchedulingMode`` and
-``getStreamKTileSchedulingMode``. With the mode left at ``OFF``, setting
-``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` to a positive value still lets the library heuristic pick
-the dynamic sub-path per launch. To experiment from the benchmark client, use
-``--streamk_tile_scheduling``.
-
 Recommendations for using Stream-K
 =========================================
 
