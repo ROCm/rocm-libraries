@@ -606,9 +606,7 @@ struct RocblasltContractionProblem
     int32_t sm_count_target = 0;
     // Mirrors HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. Forwarded into
     // ContractionProblemParameters::setUniformSummationOrder by tensile_host.cpp.
-    // 0 = off (default), 1 = on. When on, every row of D is reduced in an
-    // identical summation order; StaggerU is clamped to 0 and the resolved
-    // launch configuration is checked against a fail-closed whitelist.
+    // 0 = off (default), 1 = on.
     int32_t uniform_summation_order = 0;
 
     // gemm_ex

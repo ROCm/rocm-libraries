@@ -99,8 +99,6 @@ namespace hipblaslt_ext
         return pimpl->streamk_tile_scheduling_mode;
     }
 
-    // Takes bool rather than int32_t so that the out-of-range case the C API
-    // rejects with HIPBLAS_STATUS_INVALID_VALUE is unrepresentable here.
     void GemmPreference::setUniformSummationOrder(bool value)
     {
         pimpl->uniform_summation_order = value;

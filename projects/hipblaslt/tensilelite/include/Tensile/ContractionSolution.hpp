@@ -217,11 +217,10 @@ namespace TensileLite
     };
 
     /**
-     * Thrown when a launch requests uniform summation order (see
-     * ContractionProblemParameters::uniformSummationOrder) but the resolved
-     * kernel configuration is not on the known row-uniform whitelist. This is a
-     * distinct type so the rocblaslt host layer can map it to
-     * rocblaslt_status_invalid_value rather than to a generic internal error.
+     * Thrown when a launch requests uniform summation order but the resolved
+     * kernel configuration is not row-uniform. A distinct type so the rocblaslt
+     * host layer can map it to rocblaslt_status_invalid_value; a generic
+     * exception would be swallowed and reported as an internal error.
      */
     class UniformSummationOrderError : public std::runtime_error
     {
@@ -412,16 +411,13 @@ namespace TensileLite
         bool                 streamKDynamicQueueSupported(Problem const&  problem,
                                                           Hardware const& hardware) const;
         // Selection-time predicate for uniform summation order. Returns true
-        // when the mode is off, and otherwise false for solutions that can
-        // never produce row-uniform output regardless of how the launch
-        // resolves. Only statically-knowable facts are tested here: the
-        // resolved StreamK grid/reduction and the Synchronizer pointer do not
-        // exist until solve(), so this predicate is deliberately PERMISSIVE
-        // about them and the fail-closed launch gate
-        // (checkUniformSummationOrder) remains authoritative. Reject-and-
-        // continue, like streamKDynamicQueueSupported(): selection simply falls
-        // through to another solution. Wired into softwarePredicate()
-        // (SolutionLibrary.hpp).
+        // when the mode is off, and otherwise false for solutions that can never
+        // produce row-uniform output. Only statically-knowable facts are tested:
+        // the resolved StreamK grid/reduction and the Synchronizer pointer do
+        // not exist until solve(), so this predicate is deliberately permissive
+        // about them and checkUniformSummationOrder() stays authoritative.
+        // Reject-and-continue, like streamKDynamicQueueSupported(). Wired into
+        // softwarePredicate() (SolutionLibrary.hpp).
         bool                 uniformSummationOrderSupported(Problem const&  problem,
                                                             Hardware const& hardware) const;
         size_t               partialTileSize(size_t skGrid) const;
@@ -751,27 +747,21 @@ namespace TensileLite
 
     private:
         /**
-         * Authoritative fail-closed launch gate for uniform summation order.
-         * No-op unless problem.getParams().uniformSummationOrder() is set;
-         * otherwise it validates the fully-resolved launch configuration
-         * against a whitelist of empirically row-uniform values and throws
-         * UniformSummationOrderError naming the offending condition. New
-         * reduction modes or scheduling variants are therefore REJECTED by
-         * default instead of being silently accepted.
+         * Authoritative launch gate for uniform summation order. No-op unless
+         * problem.getParams().uniformSummationOrder() is set; otherwise it
+         * validates the fully-resolved launch configuration and throws
+         * UniformSummationOrderError naming the offending condition. The
+         * validation is an allow-list rather than a deny-list, so a future
+         * scheduling variant or reduction mode is refused by default instead of
+         * being silently admitted.
          *
-         * Must be called only once every value it inspects is final: in
-         * particular after all mutation of @p sk (the workspace-shortfall
-         * fallback in solve() rewrites both grid and reduction) and after
-         * @p resolvedGlobalAccumulation has been produced by
-         * ContractionProblemGemm::getAccumulation(), which is the value the
-         * kernel actually sees.
+         * Call only once @p sk and @p resolvedGlobalAccumulation are final; see
+         * the call site in solve().
          *
-         * @param gsu          The effective GSU for this launch (the user
-         *                     override when set, otherwise calculateAutoGSU()).
-         *                     GlobalAccumulation 0 and 1 only accumulate
-         *                     atomically when this exceeds 1.
-         * @param synchronizer The Synchronizer/Flags pointer that will be
-         *                     packed for this launch. The device reads a null
+         * @param gsu          Effective GSU for this launch (the user override
+         *                     when set, otherwise calculateAutoGSU()).
+         * @param synchronizer The Synchronizer/Flags pointer that will be packed
+         *                     for this launch. The device reads a null
          *                     AddressFlags as a request for the parallel
          *                     reduction path.
          */

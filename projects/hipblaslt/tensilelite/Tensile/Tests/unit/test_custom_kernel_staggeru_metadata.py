@@ -3,42 +3,30 @@
 """Disassembly-backed checks that custom-kernel StaggerU metadata is truthful.
 
 The host-side launch gate for uniform summation order (``checkUniformSummationOrder``
-in ``ContractionSolution.cpp``) reasons entirely from a solution's declared
-metadata.  It clamps StaggerU by writing zero into a bitfield of a packed kernel
-argument, and refuses any solution that declares ``SupportCustomStaggerU: False``
-together with a non-zero ``StaggerU``, on the grounds that such a kernel would
-stagger with a compiled-in value the clamp cannot reach.  Every admitted solution
-therefore rests on one of two claims about the shipped machine code:
+in ``ContractionSolution.cpp``) reasons entirely from declared metadata.  It clamps
+StaggerU by writing zero into a bitfield of a packed kernel argument, and refuses
+any solution declaring ``SupportCustomStaggerU: False`` with a non-zero
+``StaggerU``.  Every admitted solution therefore claims either that it derives
+StaggerU from the packed argument, so writing zero really does stop the
+staggering, or that it declares ``StaggerU: 0`` and does not stagger at all.
+These tests check both claims against the instructions the kernels execute.
 
-* ``SupportCustomStaggerU: True`` -- the kernel derives StaggerU from the packed
-  argument, so writing zero into it really does stop the staggering; or
-* ``SupportCustomStaggerU: False`` with ``StaggerU: 0`` -- the kernel contains no
-  staggering at all, so no clamp is needed.
+Reading the ``.s`` files cannot do it: 98 of the 119 shipped custom kernels are
+pre-assembled ``.long`` blobs with no readable mnemonics, and every kernel that
+declares a non-zero StaggerU -- exactly the set the gate's safety argument turns
+on -- is among them.  So each kernel is assembled for its own ``.amdgcn_target``
+and disassembled, which also sees through the macros and ``.set`` aliases the
+readable kernels are written in.
 
-These tests check those claims against the instructions the kernels actually
-execute.  Reading the ``.s`` files cannot do it: 98 of the 119 shipped custom
-kernels are pre-assembled ``.long`` machine-code blobs with no readable
-mnemonics, and every kernel that declares a non-zero StaggerU -- exactly the set
-the gate's safety argument turns on -- is among them.  So each kernel is
-assembled for its own ``.amdgcn_target`` architecture and disassembled, and the
-checks run on the decoded instruction stream.  That also sees through the
-macros and ``.set`` symbol aliases the readable kernels are written in.
-
-What counts as staggering.  ``KernelWriterAssembly.declareStaggerParms`` and
-``calculateStagger`` give the mechanism two halves, and both must be present for
-summation order to vary: the A/B buffer descriptors are advanced by
-``StaggerUIter * GlobalReadIncs`` before the unroll loop, and inside the loop the
-iteration whose counter equals ``StaggerUIter`` swaps the normal forward
-increment for a large negative wrap delta.  Only the second half is decisive and
-recognisable without symbols -- a compare, a pair of ``s_cselect_b32`` picking
-either ``WrapU`` or ``GlobalReadIncs`` into a 64-bit temporary, and that
-temporary added onto a buffer-descriptor base.  A kernel with no such site
-cannot rotate its K-loop start position, whatever its metadata says.
+Of the two halves the mechanism has (``KernelWriterAssembly.declareStaggerParms``
+and ``calculateStagger``), only the in-loop conditional wrap of a buffer
+descriptor -- shaped as in ``_findStaggerWrapSites`` below -- is decisive and
+recognisable without symbols.  A kernel with no such site cannot rotate its
+K-loop start position, whatever its metadata says.
 
 Scope note: these checks establish that the canonical packed decode is present
 in a kernel that staggers, not that the decoded value reaches every individual
-wrap site; proving the latter would need a full dataflow analysis of the
-disassembly.
+wrap site; proving the latter would need a full dataflow analysis.
 """
 
 import os
@@ -53,6 +41,7 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 import pytest
 
+from Tensile import CUSTOM_KERNEL_PATH
 from Tensile.Common.GlobalParameters import (
     defaultBenchmarkCommonParameters,
     defaultInternalSupportParams,
@@ -84,9 +73,8 @@ MAX_WORKERS = min(32, (os.cpu_count() or 4) * 2)
 
 _TARGET = re.compile(r'^\.amdgcn_target\s+"amdgcn-amd-amdhsa--([a-z0-9]+)', re.MULTILINE)
 
-# One decoded instruction: a mnemonic, its operands, and the address/encoding
-# comment llvm-objdump appends.  Anything without that comment is a label,
-# a section header or blank, and is skipped.
+# One decoded instruction, recognised by the address/encoding comment
+# llvm-objdump appends; labels, section headers and blank lines lack it.
 _DISASM_LINE = re.compile(r"^\t([a-z][a-z0-9_]*)(?:\s+(.*?))?\s*//\s*[0-9A-F]{12}:")
 
 # llvm-objdump falls back to raw data directives when it cannot decode a word.
@@ -107,38 +95,17 @@ _CARRY_WINDOW = 32
 _COMPARE_WINDOW = 48
 
 
-def _defaultStaggerU() -> int:
-    """StaggerU applied when a custom kernel omits the key.
+# StaggerU applied when a kernel omits the key.  Read rather than hard-coded:
+# the default is 32 (stagger on), not 0, so treating an absent key as "no
+# stagger" would silently exempt a quarter of the kernels from these checks.
+DEFAULT_STAGGERU = next(
+    (e["StaggerU"][0] for e in defaultBenchmarkCommonParameters if "StaggerU" in e), None
+)
+assert DEFAULT_STAGGERU is not None, "StaggerU missing from defaultBenchmarkCommonParameters"
 
-    Read from defaultBenchmarkCommonParameters rather than hard-coded: the
-    default is 32 (stagger on), not 0, so treating an absent key as "no
-    stagger" would silently exempt a quarter of the kernels from these checks.
-    """
-    for entry in defaultBenchmarkCommonParameters:
-        if "StaggerU" in entry:
-            return entry["StaggerU"][0]
-    raise AssertionError("StaggerU missing from defaultBenchmarkCommonParameters")
-
-
-DEFAULT_STAGGERU = _defaultStaggerU()
 DEFAULT_SUPPORT_CUSTOM_STAGGERU = defaultInternalSupportParams["SupportCustomStaggerU"]
 
 Instruction = Tuple[str, Tuple[str, ...]]
-
-
-@dataclass(frozen=True)
-class WrapSite:
-    """An in-loop conditional wrap of a buffer descriptor.
-
-    ``low``/``high`` index the two ``s_cselect_b32`` instructions, ``add``
-    indexes the ``s_add_u32`` that applies the chosen delta, and ``srdBase`` is
-    the first register of the buffer descriptor being advanced.
-    """
-
-    low: int
-    high: int
-    add: int
-    srdBase: int
 
 
 @dataclass(frozen=True)
@@ -146,7 +113,7 @@ class KernelCode:
     name: str
     arch: str
     numInstructions: int
-    wrapSites: Tuple[WrapSite, ...]
+    wrapSites: Tuple[int, ...]  # buffer-descriptor base of each in-loop wrap
     packedDecodeRegisters: FrozenSet[int]
 
     @property
@@ -160,7 +127,6 @@ class KernelCode:
 
 @dataclass(frozen=True)
 class KernelMetadata:
-    name: str
     declaredStaggerU: Optional[int]  # None when the key is absent
     supportsCustomStaggerU: bool
 
@@ -171,15 +137,10 @@ class KernelMetadata:
         return self.declaredStaggerU
 
 
-def _readMetadata(name: str, directory: Optional[str] = None) -> KernelMetadata:
-    config = (
-        readCustomKernelConfig(name)
-        if directory is None
-        else readCustomKernelConfig(name, directory)
-    )
+def _readMetadata(name: str, directory: str = CUSTOM_KERNEL_PATH) -> KernelMetadata:
+    config = readCustomKernelConfig(name, directory)
     internal = config.get("InternalSupportParams", {})
     return KernelMetadata(
-        name=name,
         declaredStaggerU=config.get("StaggerU"),
         supportsCustomStaggerU=internal.get(
             "SupportCustomStaggerU", DEFAULT_SUPPORT_CUSTOM_STAGGERU
@@ -212,20 +173,15 @@ def _disassemble(source: str, arch: str, workDir: str, stem: str) -> str:
     undecoded = _UNDECODED.search(disassemble.stdout)
     if undecoded is not None:
         raise AssertionError(
-            f"{stem}: llvm-objdump could not decode part of the kernel "
-            f"({undecoded.group(0).strip()}); the stagger checks would be inspecting "
-            f"an incomplete instruction stream"
+            f"{stem}: llvm-objdump could not decode {undecoded.group(0).strip()}; the "
+            f"stagger checks would be inspecting an incomplete instruction stream"
         )
     return disassemble.stdout
 
 
 def _toolchainHandlesAmdgcn() -> bool:
-    """Whether the tools that were found can actually round-trip AMDGCN assembly.
-
-    A clang picked up off PATH is not necessarily one with the AMDGPU backend,
-    and skipping is the right answer there rather than reporting every shipped
-    kernel as broken.
-    """
+    # A clang picked up off PATH need not have the AMDGPU backend, and skipping
+    # is the right answer there rather than reporting every kernel as broken.
     if CLANG is None or OBJDUMP is None:
         return False
     try:
@@ -294,18 +250,8 @@ def _findPackedDecodeRegisters(instructions: Sequence[Instruction]) -> FrozenSet
     return frozenset(r for r, masks in masksByRegister.items() if masks >= _PACKED_MASKS)
 
 
-def _nearestPrecedingCompare(
-    instructions: Sequence[Instruction], index: int
-) -> Optional[str]:
-    for k in range(index - 1, max(-1, index - _COMPARE_WINDOW), -1):
-        mnemonic = instructions[k][0]
-        if mnemonic.startswith("s_cmp"):
-            return mnemonic
-    return None
-
-
-def _findStaggerWrapSites(instructions: Sequence[Instruction]) -> Tuple[WrapSite, ...]:
-    """Locate every in-loop conditional wrap of a buffer descriptor.
+def _findStaggerWrapSites(instructions: Sequence[Instruction]) -> Tuple[int, ...]:
+    """Buffer-descriptor base of every in-loop conditional wrap, one per site.
 
     The shape being matched, from ``globalReadIncrement``:
 
@@ -317,8 +263,7 @@ def _findStaggerWrapSites(instructions: Sequence[Instruction]) -> Tuple[WrapSite
 
     The unconditional pre-loop stagger offset is deliberately not matched: on
     its own it shifts where a workgroup starts but not the order in which the
-    same K range is summed, and it is the conditional negative increment that
-    makes the rotation observable.
+    same K range is summed.
     """
     bases = _bufferDescriptorBases(instructions)
     sites = []
@@ -330,7 +275,8 @@ def _findStaggerWrapSites(instructions: Sequence[Instruction]) -> Tuple[WrapSite
         low = _sgpr(operands[0])
         if low is None:
             continue
-        if _nearestPrecedingCompare(instructions, i) != "s_cmp_eq_u32":
+        preceding = (instructions[k][0] for k in range(i - 1, max(-1, i - _COMPARE_WINDOW), -1))
+        if next((m for m in preceding if m.startswith("s_cmp")), None) != "s_cmp_eq_u32":
             continue
 
         # High half: same conditional, next register up, zero when not wrapping.
@@ -376,7 +322,7 @@ def _findStaggerWrapSites(instructions: Sequence[Instruction]) -> Tuple[WrapSite
                 and _sgpr(operandsJ[1]) == srdBase + 1
                 and _sgpr(operandsJ[2]) == low + 1
             ):
-                sites.append(WrapSite(low=i, high=highIndex, add=addIndex, srdBase=srdBase))
+                sites.append(srdBase)
                 break
 
     return tuple(sites)
@@ -401,12 +347,7 @@ def _analyzeSource(name: str, source: str, workDir: str) -> KernelCode:
 
 @lru_cache(maxsize=None)
 def analyzeAllKernels() -> Dict[str, KernelCode]:
-    """Disassemble and analyze every shipped custom kernel, once per session.
-
-    The kernels are assembled unmodified, straight from the shipped ``.s``
-    files, into a temp directory that is discarded once the instruction streams
-    have been reduced to facts.
-    """
+    """Disassemble and analyze every shipped custom kernel, once per session."""
     with tempfile.TemporaryDirectory(prefix="staggeru-disasm-") as workDir:
 
         def analyze(name: str) -> KernelCode:
@@ -424,9 +365,8 @@ def readAllMetadata() -> Dict[str, KernelMetadata]:
 def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str]:
     """Why the host clamp fails to stop this kernel staggering, or None.
 
-    This is the property the launch gate depends on, expressed over a single
-    kernel so it can be run against a mutated declaration as easily as against
-    a shipped one.
+    Per-kernel so it can be run against a mutated declaration as easily as
+    against a shipped one.
     """
     if not code.staggers:
         return None
@@ -434,37 +374,27 @@ def clampCannotReach(code: KernelCode, metadata: KernelMetadata) -> Optional[str
     if metadata.supportsCustomStaggerU:
         if not code.decodesPackedArgument:
             return (
-                f"{code.name} declares SupportCustomStaggerU: True, so the launch gate "
-                f"admits it and relies on the host clamp, but its {len(code.wrapSites)} "
-                f"in-loop wrap site(s) run without the canonical unpack of the packed "
-                f"StaggerU argument (s_and_b32 against "
-                f"{', '.join(sorted(_PACKED_MASKS))}).  Writing zero into the argument "
-                f"cannot reach a StaggerU the kernel never reads, so the kernel would "
-                f"keep staggering and must declare SupportCustomStaggerU: False"
+                f"{code.name} declares SupportCustomStaggerU: True, so the gate admits it "
+                f"and relies on the clamp, but its {len(code.wrapSites)} wrap site(s) run "
+                f"without the canonical unpack (s_and_b32 against "
+                f"{', '.join(sorted(_PACKED_MASKS))}): the clamp cannot reach a StaggerU "
+                f"the kernel never reads"
             )
         return None
 
     if metadata.effectiveStaggerU == 0:
         return (
-            f"{code.name} declares SupportCustomStaggerU: False with StaggerU: 0, which "
-            f"the launch gate reads as 'this kernel does not stagger' and admits without "
-            f"a clamp, but the disassembly contains {len(code.wrapSites)} in-loop "
-            f"conditional wrap site(s) at buffer descriptor(s) "
-            f"{sorted({site.srdBase for site in code.wrapSites})}.  Nothing can stop this "
-            f"kernel rotating its K-loop start position, so uniform summation order would "
-            f"be silently violated"
+            f"{code.name} declares SupportCustomStaggerU: False with StaggerU: 0, so the "
+            f"gate reads it as 'this kernel does not stagger' and admits it unclamped, but "
+            f"the disassembly has {len(code.wrapSites)} wrap site(s) at buffer "
+            f"descriptor(s) {sorted(set(code.wrapSites))}"
         )
     return None
 
 
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_every_custom_kernel_disassembles(name):
-    """Coverage guard: no kernel may quietly drop out of the checks below.
-
-    The tests this replaces skipped 98 of 119 kernels because their bodies are
-    pre-assembled ``.long`` blobs.  If assembling or disassembling one ever
-    starts failing, that must be a failure rather than a silent gap.
-    """
+    """Coverage guard: no kernel may quietly drop out of the checks below."""
     code = analyzeAllKernels()[name]
     assert code.numInstructions > 0
     assert code.arch.startswith("gfx"), f"{name}: unexpected target {code.arch}"
@@ -472,12 +402,11 @@ def test_every_custom_kernel_disassembles(name):
 
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_declared_stagger_is_present_in_the_machine_code(name):
-    """A non-zero declared StaggerU must correspond to real staggering.
+    """Direction one: a non-zero declared StaggerU must be real staggering.
 
-    Direction one of the invariant.  A kernel whose metadata claims it staggers
-    but whose code does not is not a safety hole, but it is metadata drift: the
-    gate would refuse solutions it never needed to refuse, and the declaration
-    can no longer be trusted in the other direction either.
+    Metadata claiming a stagger the code does not have is not a safety hole,
+    but the gate would refuse solutions it never needed to, and the
+    declaration can no longer be trusted in the other direction either.
     """
     code = analyzeAllKernels()[name]
     metadata = readAllMetadata()[name]
@@ -490,35 +419,28 @@ def test_declared_stagger_is_present_in_the_machine_code(name):
         else f"no StaggerU key, so the default of {DEFAULT_STAGGERU}"
     )
     assert code.staggers, (
-        f"{name} declares {declaration}, but its disassembly contains no in-loop "
-        f"conditional wrap: no s_cselect_b32 pair feeding a buffer-descriptor add. "
-        f"The kernel cannot rotate its K-loop start position, so the declared "
+        f"{name} declares {declaration}, but its disassembly has no in-loop conditional "
+        f"wrap: no s_cselect_b32 pair feeding a buffer-descriptor add, so the declared "
         f"StaggerU no longer describes the shipped code"
     )
 
 
 @pytest.mark.parametrize("name", KERNEL_NAMES)
 def test_compiled_stagger_stays_reachable_by_the_host_clamp(name):
-    """A kernel that staggers must be one the launch gate can stop.
-
-    Direction two, and the one the gate's correctness rests on: either the
-    kernel reads StaggerU from the packed argument the host clamps, or it
-    declares a non-zero StaggerU so the gate refuses it outright.
-    """
+    """Direction two, the one the gate's correctness rests on: a kernel that
+    staggers either reads StaggerU from the packed argument the host clamps, or
+    declares a non-zero StaggerU so the gate refuses it outright."""
     code = analyzeAllKernels()[name]
     metadata = readAllMetadata()[name]
     unreachable = clampCannotReach(code, metadata)
     assert unreachable is None, unreachable
 
 
-# Kernels that declare StaggerU: 0 and stagger anyway.  Their assembly was
-# generated with staggering enabled and the declaration edited down afterwards,
-# so the declared value understates the code.  They are safe today only because
-# each one inherits SupportCustomStaggerU: True and does unpack the runtime
-# argument, which is what test_compiled_stagger_stays_reachable_by_the_host_clamp
-# verifies; the gate admits them and the host clamp really does zero their
-# StaggerU.  Pinned here so a new one has to be looked at by a human rather than
-# joining the exception quietly.
+# Kernels that declare StaggerU: 0 and stagger anyway: their assembly was
+# generated with staggering enabled and the declaration edited down afterwards.
+# Each is safe only because it also inherits SupportCustomStaggerU: True and does
+# unpack the runtime argument.  Pinned so a new one has to be looked at by a
+# human rather than joining the exception quietly.
 STAGGERS_DESPITE_DECLARING_ZERO = frozenset(
     {
         "Custom_Cijk_Ailk_Bjlk_S_MX_B_BIAS_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x32_MI16x16x1_shortname0_gfx950",
@@ -595,30 +517,10 @@ def test_kernels_that_stagger_despite_declaring_zero_are_the_known_ones():
     )
 
 
-def test_the_sibling_control_pair_is_told_apart():
-    """Two kernels that differ in little but their StaggerU.
-
-    ``shortname0`` declares 8 and ``shortname12`` declares 0, so a detector that
-    fired on ambient buffer-descriptor arithmetic rather than on the wrap itself
-    would light up both.
-    """
-    codes = analyzeAllKernels()
-    staggering = "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname0_gfx942"
-    plain = "Custom_Cijk_Ailk_Bljk_HHS_BH_Bias_GG_AS_SAV_UserArgs_shortname12_gfx942"
-    assert codes[staggering].staggers, f"{staggering} declares StaggerU: 8 and does wrap"
-    assert not codes[plain].staggers, (
-        f"{plain} declares StaggerU: 0 and has no wrap, so a detector reporting one is "
-        f"matching ordinary buffer-descriptor arithmetic"
-    )
-
-
 def _ablate(source: str) -> Tuple[str, int]:
-    """Turn a kernel's wrap selects into unconditional increments.
-
-    Replaces ``s_cselect_b32 dst, wrap, inc`` with ``s_mov_b32 dst, inc`` at the
+    """Rewrite ``s_cselect_b32 dst, wrap, inc`` into ``s_mov_b32 dst, inc`` at the
     wrap sites only, keeping the instruction count identical, so the kernel
-    always takes the forward increment and never rotates.
-    """
+    always takes the forward increment and never rotates."""
     pattern = re.compile(
         r"^s_cselect_b32\s+(?P<dst>[^,]+),\s*[^,]+,\s*(?P<inc>[^/\n]+?)\s*"
         r"(?P<comment>//\s*inc(?:Lower|Upper) <- \?.*)$",
@@ -631,13 +533,9 @@ def _ablate(source: str) -> Tuple[str, int]:
 
 
 def test_wrap_detector_goes_quiet_when_the_wrap_is_ablated():
-    """Negative control: the detector tracks the conditional wrap, not the kernel.
+    """Ablation control: the detector tracks the conditional wrap, not the kernel.
 
-    A detector that fired on everything would pass every check above.  This
-    takes a kernel that does wrap, rewrites only its wrap selects into
-    unconditional moves in a temp copy of the source, reassembles, and requires
-    the site count to fall to zero with the rest of the instruction stream
-    untouched.
+    A detector that fired on everything would pass every check above.
     """
     codes = analyzeAllKernels()
     candidates = [
@@ -649,8 +547,6 @@ def test_wrap_detector_goes_quiet_when_the_wrap_is_ablated():
         "no shipped kernel has both a detected wrap and readable wrap selects to "
         "ablate; the negative control can no longer run"
     )
-    # One source line can be several sites: the readable kernels emit the wrap
-    # from a macro instantiated per tensor, so the counts are not equal.
     name = candidates[0]
     ablated, _ = _ablate(getCustomKernelContents(name))
 
@@ -691,36 +587,28 @@ s_addc_u32 s49, s49, s83
 """
 
 
+# Hand-written near misses: (what it is, line of WRAP_SNIPPET, its replacement).
+NEAR_MISSES = [
+    ("unconditional forward increment", "s_cselect_b32 s82, s60, s47", "s_mov_b32 s82, s47"),
+    ("not selected on the wrap iteration", "s_cmp_eq_u32 s11, s15", "s_cmp_lt_u32 s11, s15"),
+    ("delta never reaches a descriptor", "s_add_u32 s48, s48, s82", "s_add_u32 s70, s70, s82"),
+    (
+        "target pair is not a buffer descriptor",
+        "buffer_load_dword v0, v1, s[48:51], 0 offen",
+        "s_nop 0",
+    ),
+    ("only the low half is conditional", "s_cselect_b32 s83, s61, 0", "s_mov_b32 s83, 0"),
+]
+
+
 def test_wrap_detector_needs_every_part_of_the_signature():
-    """Each half of the mechanism is load-bearing for a match."""
+    """Negative controls: every part of the mechanism is load-bearing."""
     assert len(_findStaggerWrapSites(_snippet(WRAP_SNIPPET))) == 1
-
-    # Unconditional increment: the forward step every iteration takes.
-    assert not _findStaggerWrapSites(
-        _snippet(WRAP_SNIPPET.replace("s_cselect_b32 s82, s60, s47", "s_mov_b32 s82, s47"))
-    )
-    # Selected on something other than "is this the wrap iteration?".
-    assert not _findStaggerWrapSites(
-        _snippet(WRAP_SNIPPET.replace("s_cmp_eq_u32 s11, s15", "s_cmp_lt_u32 s11, s15"))
-    )
-    # A conditional 64-bit value that never reaches a buffer descriptor.
-    assert not _findStaggerWrapSites(
-        _snippet(WRAP_SNIPPET.replace("s_add_u32 s48, s48, s82", "s_add_u32 s70, s70, s82"))
-    )
-    # The register pair is not a buffer descriptor at all.
-    assert not _findStaggerWrapSites(
-        _snippet(WRAP_SNIPPET.replace("buffer_load_dword v0, v1, s[48:51], 0 offen", "s_nop 0"))
-    )
-    # Only the low half is conditional, so no 64-bit delta is selected.
-    assert not _findStaggerWrapSites(
-        _snippet(WRAP_SNIPPET.replace("s_cselect_b32 s83, s61, 0", "s_mov_b32 s83, 0"))
-    )
-
-
-def _writeKernelCopy(source: str, name: str, directory) -> str:
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / (name + ".s")).write_text(source)
-    return str(directory)
+    for description, line, replacement in NEAR_MISSES:
+        variant = WRAP_SNIPPET.replace(line, replacement)
+        assert not _findStaggerWrapSites(_snippet(variant)), (
+            f"the detector reported a wrap for a near miss with {description}"
+        )
 
 
 def test_a_lying_declaration_is_caught(tmp_path):
@@ -731,6 +619,7 @@ def test_a_lying_declaration_is_caught(tmp_path):
     admit it without a working clamp.  Both must be reported, and the shipped
     declaration must not be.
     """
+
     codes = analyzeAllKernels()
     metadata = readAllMetadata()
     name = next(
@@ -746,32 +635,37 @@ def test_a_lying_declaration_is_caught(tmp_path):
 
     source = getCustomKernelContents(name)
 
-    claimsNoStagger, replaced = re.subn(
-        r"^(\s*StaggerU:\s*)\d+\s*$", r"\g<1>0", source, count=1, flags=re.MULTILINE
-    )
-    assert replaced == 1, f"{name}: no StaggerU declaration to flip"
-    mutated = _readMetadata(name, _writeKernelCopy(claimsNoStagger, name, tmp_path / "zeroed"))
-    assert mutated.declaredStaggerU == 0 and not mutated.supportsCustomStaggerU
-    reason = clampCannotReach(code, mutated)
-    assert reason is not None and "does not stagger" in reason, (
-        "a kernel that staggers with a compiled-in StaggerU was accepted after its "
-        "declaration was flipped to zero"
-    )
+    lies = [
+        # (key flipped, pattern, replacement, what the flip must parse as, the
+        #  part of the refusal it must draw)
+        (
+            "StaggerU",
+            r"^(\s*StaggerU:\s*)\d+\s*$",
+            r"\g<1>0",
+            lambda m: m.declaredStaggerU == 0 and not m.supportsCustomStaggerU,
+            "does not stagger",
+        ),
+        (
+            "SupportCustomStaggerU",
+            r"^(\s*SupportCustomStaggerU:\s*)False\s*$",
+            r"\g<1>True",
+            lambda m: m.supportsCustomStaggerU,
+            "cannot reach a StaggerU the kernel never reads",
+        ),
+    ]
 
-    claimsRuntimeControl, replaced = re.subn(
-        r"^(\s*SupportCustomStaggerU:\s*)False\s*$",
-        r"\g<1>True",
-        source,
-        count=1,
-        flags=re.MULTILINE,
-    )
-    assert replaced == 1, f"{name}: no SupportCustomStaggerU declaration to flip"
-    mutated = _readMetadata(
-        name, _writeKernelCopy(claimsRuntimeControl, name, tmp_path / "runtime")
-    )
-    assert mutated.supportsCustomStaggerU
-    reason = clampCannotReach(code, mutated)
-    assert reason is not None and "cannot reach a StaggerU the kernel never reads" in reason, (
-        "a kernel that bakes StaggerU in as a literal was accepted after claiming the "
-        "host clamp could configure it"
-    )
+    for key, pattern, replacement, tookEffect, expected in lies:
+        lie, replaced = re.subn(pattern, replacement, source, count=1, flags=re.MULTILINE)
+        assert replaced == 1, f"{name}: no {key} declaration to flip"
+
+        directory = tmp_path / key
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / (name + ".s")).write_text(lie)
+        mutated = _readMetadata(name, str(directory))
+        assert tookEffect(mutated), f"{name}: the flipped {key} did not reach the metadata"
+
+        reason = clampCannotReach(code, mutated)
+        assert reason is not None and expected in reason, (
+            f"{name}: flipping {key} made the declaration a lie, but the check accepted "
+            f"it instead of refusing with '{expected}'"
+        )

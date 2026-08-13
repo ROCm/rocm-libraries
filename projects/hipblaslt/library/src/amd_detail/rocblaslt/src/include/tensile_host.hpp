@@ -307,9 +307,7 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode);
 
-// Push the GemmPreference-supplied uniform-summation-order request onto every
-// contraction problem currently carried by gemmData. Defined in
-// tensile_host.cpp for the same reason as applyStreamKTileSchedulingMode.
+// Likewise for the GemmPreference-supplied uniform-summation-order request.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 bool                   value);

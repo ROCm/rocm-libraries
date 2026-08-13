@@ -2470,8 +2470,6 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
-    // Likewise for the uniform-summation-order request, so the selection-time
-    // filter sees it during ranking.
     applyUniformSummationOrder(gemmData, gemmType, uniformSummationOrder);
     rocblaslt_status status = rocblaslt_status_success;
     try

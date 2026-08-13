@@ -220,11 +220,8 @@ struct _rocblaslt_matmul_desc
     int32_t streamk_tile_scheduling_ext = 0;
 
     // Uniform summation order request (HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT).
-    // 0 = off (default), 1 = on. When on, every row of D is reduced in an
-    // identical summation order, so an A whose rows are all the same vector
-    // yields a bitwise-identical D row for every M index. This is uniformity
-    // across M within one run, not run-to-run determinism. Values outside
-    // {0, 1} are rejected by the setter.
+    // 0 = off (default), 1 = on; values outside {0, 1} are rejected by the
+    // setter. See hipblaslt.h for the guarantee this offers the caller.
     int32_t uniform_summation_order = 0;
 
     // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 

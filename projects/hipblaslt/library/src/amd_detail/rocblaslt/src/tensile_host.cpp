@@ -2074,9 +2074,8 @@ namespace
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
-        // Forward HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. Consumed by
-        // ContractionSolution's StaggerU clamp, its selection-time filter and its
-        // fail-closed launch gate.
+        // Consumed by ContractionSolution's StaggerU clamp, its selection-time
+        // filter and its launch gate.
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
         // set AmaxD
@@ -2338,8 +2337,6 @@ namespace
         tensileProblem.setParams().setStreamKTileSchedulingMode(prob.streamk_tile_scheduling_ext);
         tensileProblem.setParams().setSmCountTarget(prob.sm_count_target);
 
-        // Forward HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. See companion
-        // block in ConstructTensileProblem for details.
         tensileProblem.setParams().setUniformSummationOrder(prob.uniform_summation_order != 0);
 
         // set E
@@ -3207,13 +3204,9 @@ void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
     }
 }
 
-// Apply the GemmPreference-supplied uniform-summation-order request onto every
-// contraction problem currently carried by gemmData. Called from
-// rocblaslt_algo_get_heuristic_cpp before solution ranking, and again before
-// each isAlgoSupported query, so the selection-time filter and the launch gate
-// both see the same request. Defined here for the same reason as
-// applyStreamKTileSchedulingMode: gemmData's concrete type only exists in this
-// translation unit.
+// Likewise for the uniform-summation-order request, applied before solution
+// ranking and before each isAlgoSupported query so the selection-time filter
+// and the launch gate see the same value.
 void applyUniformSummationOrder(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 bool                   value)
@@ -3540,8 +3533,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 rocblaslt::Debug::Instance().logMarkerStop();
         }
     }
-    // The uniform-summation-order launch gate is a user-input rejection, not an
-    // internal failure, so it must not be folded into the generic handler below.
+    // Must precede the generic handler: a user-input rejection, not an internal
+    // failure.
     catch(const TensileLite::UniformSummationOrderError& e)
     {
         log_error(__func__, e.what());
@@ -3723,17 +3716,16 @@ rocblaslt_status groupedGemmCreate(std::vector<RocblasltContractionProblem>& pro
 
 // An explicit solution index skips softwarePredicate entirely, and the ext
 // GemmTuning splitK/wgm overrides reshape the launch after selection, so neither
-// is covered by the uniform-summation-order selection filter. The launch-time
-// gate still runs and remains authoritative; warn rather than reject so a caller
-// who deliberately overrides the heuristic is not blocked.
+// is covered by the uniform-summation-order selection filter. Warn rather than
+// reject: the launch gate still runs, and a caller deliberately overriding the
+// heuristic should not be blocked.
 static void warnUniformSummationOrderBypass(const char* caller, bool hasTuning)
 {
     std::ostringstream msg;
     msg << "uniform summation order is enabled but this solution was selected by explicit index";
     if(hasTuning)
         msg << " with GemmTuning splitK/wgm overrides";
-    msg << "; the override bypasses the uniform-summation-order selection filter and may violate "
-           "the uniform summation order guarantee";
+    msg << "; the selection filter was bypassed";
     log_error(caller, msg.str());
 }
 
@@ -3920,7 +3912,6 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
         }
         status = rocblaslt_status_success;
     }
-    // See companion handler in runContractionProblem.
     catch(const TensileLite::UniformSummationOrderError& e)
     {
         log_error(__func__, e.what());

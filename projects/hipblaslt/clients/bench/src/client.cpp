@@ -712,12 +712,9 @@ try
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
-         "Request a uniform summation order across the M dimension via the "
-         "HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
-         "When on, identical rows of A produce bitwise identical rows of D within a "
-         "single run; this is not run-to-run determinism and it can cost performance. "
-         "The matmul fails with HIPBLAS_STATUS_INVALID_VALUE if no uniform-safe "
-         "configuration exists for the problem. Accepts off|0, on|1 (case-insensitive). "
+         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
+         "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
          "When omitted the bench leaves the attribute unset so the library default (off) applies.")
 
         ("help,h", "produces this help message")
@@ -914,9 +911,8 @@ try
         hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
     }
 
-    // Resolve --uniform_summation_order (off|0, on|1) into the value forwarded to
-    // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT. A negative result means
-    // "unset": leave the attribute untouched so the library default applies.
+    // Resolve --uniform_summation_order (off|0, on|1) the same way, for
+    // HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
     {
         std::string mode = hipblaslt_bench_options::uniform_summation_order_str();
         std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
