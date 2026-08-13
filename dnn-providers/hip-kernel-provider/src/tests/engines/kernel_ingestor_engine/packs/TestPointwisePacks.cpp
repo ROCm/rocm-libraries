@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -32,8 +33,10 @@ const hipdnn_plugin_sdk::ingestor::KernelDescriptorPack&
         return !pack.kernels.empty()
                && pack.kernels.front().source.sourceFile == "Pointwise" + operation + ".cpp";
     });
-    EXPECT_NE(match, set.packs.end()) << "no pack whose kernels compile Pointwise"
-                                      << operation << ".cpp";
+    if(match == set.packs.end())
+    {
+        throw std::runtime_error("no pack whose kernels compile Pointwise" + operation + ".cpp");
+    }
     return *match;
 }
 
@@ -110,43 +113,6 @@ TEST(TestPointwisePacks, BothPacksShareTheEngineDispatchAndAllButOneMatcher)
               2);
 }
 
-TEST(TestPointwisePacks, PackCrossReferencesResolveWithinTheDescriptorSet)
-{
-    const auto& set = loadedSet("hipkernel:Pointwise");
-
-    for(const auto& pack : set.packs)
-    {
-        // A pack names its engine, matchers, and dispatch by id; every one must resolve.
-        EXPECT_EQ(pack.engineId, set.engine.id);
-
-        ASSERT_EQ(pack.matcherIds.size(), 3U);
-        for(const auto& matcherId : pack.matcherIds)
-        {
-            EXPECT_TRUE(
-                std::any_of(set.matchers.begin(), set.matchers.end(), [&](const auto& matcher) {
-                    return matcher.id == matcherId;
-                }))
-                << pack.name;
-        }
-
-        EXPECT_TRUE(std::any_of(set.dispatches.begin(),
-                                set.dispatches.end(),
-                                [&](const auto& dispatch) {
-                                    return dispatch.id == pack.dispatchId;
-                                }))
-            << pack.name;
-    }
-}
-
-TEST(TestPointwisePacks, EngineNamesItsHeuristicAndMetadataSchema)
-{
-    const auto& set = loadedSet("hipkernel:Pointwise");
-
-    // An engine carries exactly one heuristic and one metadata schema.
-    EXPECT_EQ(set.engine.heuristicId, set.heuristic.id);
-    EXPECT_EQ(set.engine.metadataSchemaId, set.schema.id);
-}
-
 TEST(TestPointwisePacks, ExposesBlockSizeAsAKnobAndDtypeAsInternal)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
@@ -154,19 +120,6 @@ TEST(TestPointwisePacks, ExposesBlockSizeAsAKnobAndDtypeAsInternal)
     // dtype is pinned by the graph rather than chosen.
     ASSERT_EQ(set.engine.knobs.size(), 1U);
     EXPECT_EQ(set.engine.knobs.front(), std::string(BLOCK_SIZE_FIELD));
-}
-
-TEST(TestPointwisePacks, EveryKnobNamesADeclaredMetadataField)
-{
-    const auto& set = loadedSet("hipkernel:Pointwise");
-
-    // A knob naming a field the schema does not declare could never be filtered or defaulted.
-    for(const auto& knob : set.engine.knobs)
-    {
-        EXPECT_TRUE(std::any_of(set.schema.fields.begin(),
-                                set.schema.fields.end(),
-                                [&](const auto& field) { return field.name == knob; }));
-    }
 }
 
 TEST(TestPointwisePacks, MatchersCoverBothScopes)

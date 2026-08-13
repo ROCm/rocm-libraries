@@ -96,7 +96,7 @@ clang_tidy_check(hip_kernel_provider_integration_tests)
 # can forward it to whichever suites actually exist.
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}
     LABELS slow
-    ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
+    ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV} ${HIP_KERNEL_PROVIDER_DESCRIPTOR_ENV})
 
 # Forward the merged raw-test environment (published by add_integration_test_target)
 # to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can

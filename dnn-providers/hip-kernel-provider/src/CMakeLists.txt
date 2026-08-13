@@ -48,11 +48,12 @@ endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
-    # Where discoverDescriptorSets() looks: the staged build copy first, the installed
-    # copy second. Both are absolute, so neither depends on the caller's working dir.
+    # Only the install path is compiled in. Baking the build tree in as well would ship an
+    # absolute path from this machine inside the plugin and prefer it on any host where it
+    # happened to exist, which also means nothing would ever exercise the installed copy.
+    # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
-        HIPDNN_DESCRIPTOR_BUILD_DIR="${HIPDNN_DESCRIPTOR_BUILD_DIR}"
-        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors"
+        HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
 endif()
 
@@ -123,12 +124,15 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         # TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE, set by
         # dnn-providers/cmake/Sanitizers.cmake / _build_test_environment_list_internal) to
         # every generated suite; without it those suites run unsanitized/uninstrumented.
+        # The per-target published variable is that same ambient set merged with anything
+        # passed to add_unit_test_target() -- HIPDNN_DESCRIPTOR_DIR, without which the
+        # descriptor-backed engines are absent and every test that reads one fails.
         apply_test_category_labels(
             hip_kernel_provider_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            ENVIRONMENT ${TEST_ENVIRONMENT}
+            ENVIRONMENT ${hip_kernel_provider_tests_TEST_ENVIRONMENT}
         )
         # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
         # merged with any per-target ENVIRONMENT passed to add_integration_test_target()

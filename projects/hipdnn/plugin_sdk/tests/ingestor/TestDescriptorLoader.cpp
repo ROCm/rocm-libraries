@@ -3,7 +3,9 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -332,6 +334,34 @@ TEST(TestDescriptorLoader, MalformedJsonDoesNotCostTheOtherEngine)
     EXPECT_EQ(sets.front().engine.name, "test:intact");
 }
 
+TEST(TestDescriptorLoader, IgnoresANonJsonFile)
+{
+    // The extension check, not the parser, is what skips this -- it never even opens.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_json"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "README.txt", std::ios::binary) << "not a descriptor";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+TEST(TestDescriptorLoader, RejectsADescriptorWhoseRootIsNotAnObject)
+{
+    // Valid JSON, so this reaches requireObject rather than nlohmann::json::parse --
+    // a different rejection path than MalformedJsonDoesNotCostTheOtherEngine above.
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_object_root"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "not-an-object.json", std::ios::binary)
+        << nlohmann::json::array({1, 2, 3}).dump();
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
 namespace
 {
 
@@ -433,6 +463,45 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackIsUnresolvable)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackDeclaresNoKernels)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:empty_pack");
+    documentWithSchema(broken, "hipdnn.kdp/v1")["kernels"] = nlohmann::json::array();
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+}
+
+TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("orphan_pack"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    // Reached by no per-engine scan at all, since nothing in the catalog claims this id --
+    // the one place resolveDescriptorSets logs a pack rather than losing it with no trace.
+    // test:orphaned's own UED is left with no pack of its own and is dropped along with it.
+    auto orphaned = makeSetDocuments('2', "test:orphaned");
+    documentWithSchema(orphaned, "hipdnn.kdp/v1")["engine_id"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), orphaned);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    for(const auto& set : sets)
+    {
+        EXPECT_TRUE(std::none_of(set.packs.begin(), set.packs.end(), [](const auto& pack) {
+            return toString(pack.id) == testUuid('2', ROLE_PACK);
+        }));
+    }
 }
 
 TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsMissing)
@@ -676,7 +745,7 @@ class DisabledEngineIdentifier : public ::testing::TestWithParam<std::string>
 TEST_P(DisabledEngineIdentifier, SkipsTheEngineBeforeItIsRegistered)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("disabled"));
-    writeDocuments(dir.path(), makeSetDocuments('1', DISABLED_ENGINE_NAME));
+    writeDocuments(dir.path(), makeSetDocuments('a', DISABLED_ENGINE_NAME));
 
     // Surrounded by an unmatched entry and stray whitespace: one list is meant to span
     // providers, so entries naming someone else's engine are skipped, not errors.
@@ -688,15 +757,34 @@ TEST_P(DisabledEngineIdentifier, SkipsTheEngineBeforeItIsRegistered)
 
 // Declared out here because the preprocessor splits macro arguments on every comma it
 // sees, including the ones inside a braced initializer.
-const std::array<std::string, 4> DISABLED_SPELLINGS{"ByName", "ByUuid", "ByHexId", "ByDecimalId"};
+const std::array<std::string, 6> DISABLED_SPELLINGS{
+    "ByName", "ByUuid", "ByHexId", "ByDecimalId", "ByLowercaseHexId", "ByUppercaseUuid"};
 
 INSTANTIATE_TEST_SUITE_P(
     Spelling,
     DisabledEngineIdentifier,
-    ::testing::Values(DISABLED_ENGINE_NAME,
-                      testUuid('1', ROLE_ENGINE),
-                      hipdnn_data_sdk::utilities::formatEngineIdHex(DISABLED_ENGINE_ID),
-                      std::to_string(DISABLED_ENGINE_ID)),
+    ::testing::Values(
+        DISABLED_ENGINE_NAME,
+        testUuid('a', ROLE_ENGINE),
+        hipdnn_data_sdk::utilities::formatEngineIdHex(DISABLED_ENGINE_ID),
+        std::to_string(DISABLED_ENGINE_ID),
+        // formatEngineIdHex's canonical spelling is uppercase; only equalsIgnoringCase,
+        // not ==, accepts this one.
+        [] {
+            auto hex = hipdnn_data_sdk::utilities::formatEngineIdHex(DISABLED_ENGINE_ID);
+            std::transform(hex.begin(), hex.end(), hex.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            return hex;
+        }(),
+        // testUuid's canonical spelling is lowercase; same reason in the other direction.
+        [] {
+            auto uuid = testUuid('a', ROLE_ENGINE);
+            std::transform(uuid.begin(), uuid.end(), uuid.begin(), [](unsigned char c) {
+                return static_cast<char>(std::toupper(c));
+            });
+            return uuid;
+        }()),
     [](const ::testing::TestParamInfo<std::string>& info) {
         return DISABLED_SPELLINGS.at(info.index);
     });

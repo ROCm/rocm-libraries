@@ -561,10 +561,13 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     requireOnlyKeys(root, {"kind", "source_file", "entry_point"}, where);
 
     KernelSource source;
-    source.kind = kernelSourceKindFromString(requireString(root, "kind", where), where);
-    // Only an embedded-source kernel is compiled from a file at an entry point; every
-    // other kind leaves both empty per Descriptors.hpp, so requiring them there would
-    // mean authoring values the runtime never reads.
+    const std::string kindText = requireString(root, "kind", where);
+    source.kind = kernelSourceKindFromString(kindText, where);
+    // Only EMBEDDED_SOURCE has an implementation the dispatch handler can call, and that
+    // handler never inspects source.kind -- it always calls getKernelSrc(sourceFile,
+    // entryPoint), so accepting another kind here would leave applicability advertising
+    // a kernel that throws inside getKernelSrc("") at plan-build time instead of one this
+    // loader's own fail(...) path rejects at load, where the pack still drops cleanly.
     if(source.kind == KernelSourceKind::EMBEDDED_SOURCE)
     {
         source.sourceFile = requireString(root, "source_file", where);
@@ -572,7 +575,8 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     }
     else
     {
-        requireOnlyKeys(root, {"kind"}, where);
+        fail("kernel source kind '" + kindText + "' in " + where
+             + " has no implementation yet; only 'embedded_source' can be dispatched");
     }
     return source;
 }
@@ -682,12 +686,17 @@ inline void insertCatalogEntry(DescriptorMap<T>& map,
                                                             << " name='" << name << "'");
         return;
     }
-    // Byte-identical content under one id is the same descriptor reached twice by the
-    // walk -- a per-arch layout shipping one shared UED is the case -- so it collapses to
-    // one rather than tripping the drop-all rule. RFC 0020 §10.2.1 says drop every UED in
-    // an id collision, but its reason is that keep-the-first leaves which definition won
-    // up to load order; with identical bytes there is no second definition to choose
-    // between. Differing content under one id is a real collision and drops both, below.
+    // Parsed-JSON equality, not byte equality: `source` is the already-parsed
+    // nlohmann::json document, so two files differing only in whitespace, key order, or
+    // an int-vs-float spelling of the same number still compare equal here. That is the
+    // right comparison -- those differences never survive into the parsed descriptor
+    // either, so treating them as a real collision would fail a duplicate shard over a
+    // formatting choice. A per-arch layout shipping one shared UED is the case this
+    // collapses to one rather than tripping the drop-all rule. RFC 0020 §10.2.1 says
+    // drop every UED in an id collision, but its reason is that keep-the-first leaves
+    // which definition won up to load order; with semantically identical content there
+    // is no second definition to choose between. Differing content under one id is a
+    // real collision and drops both, below.
     if(it->second.source == source)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
@@ -992,9 +1001,16 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
     // the first. Load order is filesystem order, so keep-the-first would leave which
     // definition won up to the directory walk. Keyed by hash rather than by the name
     // itself because the hash is what the engine-id space collides in.
+    // Conflicted entries are dropped on their own below and must not count toward a
+    // name's claim total -- an engine already doomed by disagreeing files would
+    // otherwise take a healthy same-named engine down with it via the > 1 rule below.
     std::map<int64_t, int> nameClaims;
     for(const auto* engineEntry : engineEntries)
     {
+        if(engineEntry->conflicted)
+        {
+            continue;
+        }
         ++nameClaims[hipdnn_data_sdk::utilities::engineNameToId(engineEntry->descriptor.name)];
     }
 
@@ -1157,6 +1173,23 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         }
 
         sets.push_back(std::move(set));
+    }
+
+    // Packs are only ever reached through the per-engine scan above (entry.descriptor.
+    // engineId == engine.id), so a pack naming an id no UED descriptor defines is never
+    // visited by any loop and would otherwise vanish with no diagnostic -- the one silent
+    // failure in a loader where every other rejection is logged. Diagnostics only: this
+    // never changes what gets loaded.
+    for(const auto& [id, entry] : catalog.packs)
+    {
+        if(!entry.conflicted && catalog.engines.find(entry.descriptor.engineId) == catalog.engines.end())
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: pack '"
+                                    << entry.descriptor.name
+                                    << "' id=" << toString(entry.descriptor.id)
+                                    << " names engine " << toString(entry.descriptor.engineId)
+                                    << ", which no descriptor defines; dropping it");
+        }
     }
 
     return sets;

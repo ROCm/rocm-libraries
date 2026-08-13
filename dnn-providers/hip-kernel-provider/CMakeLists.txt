@@ -150,9 +150,17 @@ message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    # One spelling of the arch_content layout, shared by the staging rule, the install
+    # DESTINATION and the path compiled into the provider. A typo in a second copy would
+    # yield a provider that finds no descriptors, with no build error to say so.
+    set(HIPDNN_DESCRIPTOR_SUBDIR "arch_content/hip-kernel-provider/descriptors")
     set(HIPDNN_DESCRIPTOR_BUILD_DIR
-        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors"
+        "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
+    # Handed to the test targets' ctest ENVIRONMENT: the provider itself only knows the
+    # install path, so this is what makes a build-tree run read the staged copy.
+    set(HIP_KERNEL_PROVIDER_DESCRIPTOR_ENV
+        "HIPDNN_DESCRIPTOR_DIR=${HIPDNN_DESCRIPTOR_BUILD_DIR}")
     message(STATUS "Kernel ingestor enabled: descriptors staged in ${HIPDNN_DESCRIPTOR_BUILD_DIR}")
 endif()
 
@@ -312,15 +320,21 @@ if(ENABLE_ASM_SDPA_ENGINE)
 endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # Staged into the build tree so the tests and a run-from-build-dir read the same
-    # files the install ships, and installed alongside the plugin so a deployed provider
-    # finds them. discoverDescriptorSets() prefers the build copy and falls back to the
-    # installed one.
-    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors/
-         DESTINATION ${HIPDNN_DESCRIPTOR_BUILD_DIR}
-         FILES_MATCHING PATTERN "*.json")
+    # Re-staged on every build, not once at configure time. file(COPY) does not re-copy
+    # an edited descriptor, does not see a new one until someone reconfigures, and never
+    # removes one deleted from the source tree -- so the build copy would keep serving an
+    # engine the sources no longer define. Cleared and re-copied whole, so a deletion
+    # propagates as reliably as an addition.
+    add_custom_target(
+        hip_kernel_provider_descriptors ALL
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors"
+                "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
+        COMMENT "Staging hip-kernel-provider descriptors"
+        VERBATIM
+    )
 
     install(DIRECTORY src/descriptors/
-            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/hip-kernel-provider/descriptors
+            DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}
             FILES_MATCHING PATTERN "*.json")
 endif()

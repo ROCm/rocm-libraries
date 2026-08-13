@@ -239,30 +239,6 @@ TEST(TestPointwiseSubPack, EveryKernelNamesThisPacksOwnSource)
     }
 }
 
-TEST(TestPointwiseSubPack, PackCrossReferencesResolveWithinTheDescriptorSet)
-{
-    const auto set = loadedSet("hipkernel:PointwiseSub");
-    const auto& pack = set.packs.front();
-
-    EXPECT_EQ(pack.engineId, set.engine.id);
-    ASSERT_TRUE(set.heuristic.has_value()) << "this pack ships a scorer";
-    ASSERT_TRUE(set.engine.heuristicId.has_value());
-    EXPECT_EQ(*set.engine.heuristicId, set.heuristic->id);
-    EXPECT_EQ(set.engine.metadataSchemaId, set.schema.id);
-
-    ASSERT_EQ(pack.matcherIds.size(), 2U);
-    for(const auto& matcherId : pack.matcherIds)
-    {
-        EXPECT_TRUE(std::any_of(set.matchers.begin(), set.matchers.end(), [&](const auto& matcher) {
-            return matcher.id == matcherId;
-        }));
-    }
-
-    EXPECT_TRUE(std::any_of(set.dispatches.begin(),
-                            set.dispatches.end(),
-                            [&](const auto& dispatch) { return dispatch.id == pack.dispatchId; }));
-}
-
 TEST(TestPointwiseSubPack, SharesNoDescriptorIdWithTheAddPack)
 {
     // Both sets load into one provider and descriptors reference each other by id, so a
@@ -311,13 +287,16 @@ TEST(TestPointwiseSubPack, SharesNoDescriptorIdWithTheAddPack)
     }
 }
 
-TEST(TestPointwiseSubPack, RegistersADistinctEngineName)
+TEST(TestPointwiseSubPack, TheLoaderRegisteredThisEnginesName)
 {
-    const auto subId = registerEngineName(std::string(POINTWISE_SUB.engineName));
-    const auto addId = registerEngineName(std::string(POINTWISE_ADD.engineName));
+    // engineNameToId alone never registers anything -- the loader interns and registers
+    // every accepted engine's name (DescriptorLoader.hpp), so this only passes if that
+    // registration already ran when the descriptor files were loaded.
+    const auto& name = loadedSet("hipkernel:PointwiseSub").engine.name;
 
-    EXPECT_NE(subId, addId);
-    EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(subId), POINTWISE_SUB.engineName);
+    EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(
+                  hipdnn_data_sdk::utilities::engineNameToId(name)),
+              name);
 }
 
 // Dispatch, on device

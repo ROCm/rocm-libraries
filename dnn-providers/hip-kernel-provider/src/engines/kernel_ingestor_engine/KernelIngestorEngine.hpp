@@ -21,10 +21,12 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 /// once for the process. A pack that fails to register is logged and excluded.
 void registerNativeIngestorSymbols();
 
-/// The directory discoverDescriptorSets() reads descriptor files from: the build-tree copy
-/// if it exists, the installed copy otherwise, with HIPDNN_DESCRIPTOR_DIR overriding both.
-/// Declared here so a test loads exactly what the provider loads -- restating the fallback
-/// order in a test is how the two silently drift apart.
+/// The directory discoverDescriptorSets() reads descriptor files from: HIPDNN_DESCRIPTOR_DIR
+/// if set, the installed copy otherwise. Only the install path is compiled in -- a baked
+/// build-tree path would ship inside the plugin and win over the installed files on any host
+/// where it happened to exist, so nothing would ever exercise the installed ones. Tests and
+/// run-from-build-dir set the variable. Declared here so a test loads exactly what the
+/// provider loads: restating the order in a test is how the two silently drift apart.
 std::filesystem::path descriptorSearchDirectory();
 
 /// Every descriptor set this provider serves, read from installed files. Registers symbols
@@ -35,11 +37,8 @@ std::filesystem::path descriptorSearchDirectory();
 /// two scans can never disagree.
 const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets();
 
-/// Hashes @p name into hipDNN's engine-id space, registering it on first call.
-/// Never call at static-init: the registrar's throw would be fatal.
-int64_t registerEngineName(const std::string& name);
-
 /// The device resolver every descriptor-backed engine in this provider shares.
+/// Process-lifetime: a device-property cache with no engine-specific state.
 const HandleDeviceResolver& deviceResolver();
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

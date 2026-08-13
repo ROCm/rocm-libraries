@@ -80,33 +80,34 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // disk: adding an engine is an install, not an edit here.
         for(const auto& set : kernel_ingestor_engine::discoverDescriptorSets())
         {
-            try
-            {
-                // Registered at enumeration, where a collision is catchable and can name
-                // the engine; the id is what hipDNN identifies it by.
-                const auto engineId = kernel_ingestor_engine::registerEngineName(set.engine.name);
-                definitions.push_back(
-                    {engineId,
-                     [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
-                         -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+            // engineNameToId, not a provider-side registration: the loader already
+            // interned this name and registered it, and a second registry behind one
+            // process-wide string_view map is how a dangling view gets created.
+            const auto engineId = engineNameToId(set.engine.name);
+            definitions.push_back(
+                {engineId,
+                 [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                     -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+                     try
+                     {
                          // Device facts are resolved per call from the handle, not from
                          // the construction-time provider.
                          return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
                              set, kernel_ingestor_engine::deviceResolver());
-                     }});
-            }
-            catch(const std::exception& error)
-            {
-                // Per set, not around the loop. This list is a function-local static's
-                // initializer: an escaping throw costs HIP_MLOPS and ASM_SDPA their rows
-                // and leaves the static uninitialized, so the next call rebuilds the
-                // whole vector and throws again. One bad set costs only itself.
-                HIPDNN_PLUGIN_LOG_ERROR("ingestor: descriptor set '"
-                                        << set.engine.name
-                                        << "' failed to register its engine name and is "
-                                           "excluded: "
-                                        << error.what());
-            }
+                     }
+                     catch(const std::exception& error)
+                     {
+                         // The loader validates every set it returns, but its probe and
+                         // this construction are two different objects, so that is a
+                         // convention rather than a guarantee. Returning null costs this
+                         // engine; throwing would cost HIP_MLOPS and ASM_SDPA too.
+                         HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
+                                                 << set.engine.name
+                                                 << "' failed to construct and is excluded: "
+                                                 << error.what());
+                         return nullptr;
+                     }
+                 }});
         }
 #endif
 
@@ -156,7 +157,13 @@ Container::Container()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        _engineManager->addEngine(engineDefinition.createEngine(*_devicePropertyProvider));
+        // Null only from a descriptor-backed engine that failed to construct, which has
+        // already logged why. Its id stays advertised and simply never claims a graph --
+        // indistinguishable, to a caller, from an engine that declines everything.
+        if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
+        {
+            _engineManager->addEngine(std::move(engine));
+        }
     }
 }
 

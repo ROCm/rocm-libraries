@@ -94,4 +94,17 @@ endif()
 
 clang_tidy_check(hip_kernel_provider_tests)
 
-add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+# The provider compiles in only the install path, so a build-tree run has to be told
+# where the staged descriptors are -- the same way the ASM engine takes its kernel dir.
+add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR}
+    ENVIRONMENT ${HIP_KERNEL_PROVIDER_DESCRIPTOR_ENV})
+
+# Published one scope up for the same reason the integration tests do it: under YAML
+# categorization the raw test name is never registered, so the tiered suites created by
+# apply_test_category_labels() in ../CMakeLists.txt are the only place this environment
+# can land. Without the hop, HIPDNN_DESCRIPTOR_DIR is silently dropped in exactly the
+# configuration CI uses, and every descriptor-backed test fails there and nowhere else.
+if(DEFINED hip_kernel_provider_tests_TEST_ENVIRONMENT)
+    set(hip_kernel_provider_tests_TEST_ENVIRONMENT
+        "${hip_kernel_provider_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
+endif()

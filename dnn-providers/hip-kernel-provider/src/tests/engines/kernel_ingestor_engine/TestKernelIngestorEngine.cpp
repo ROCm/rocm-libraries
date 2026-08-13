@@ -230,6 +230,10 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
 
 TEST(TestKernelIngestorEngine, ServesBothItsPacksOperationsUnderOneEngineId)
 {
+    // Matchers decline outright with no device resolved, so an accept is only
+    // meaningful where there is one.
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     Handle handle;

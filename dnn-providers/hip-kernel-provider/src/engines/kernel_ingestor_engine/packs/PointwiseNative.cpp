@@ -85,7 +85,7 @@ constexpr uint32_t MAX_SUPPORTED_RANK = 5;
 // Matching
 // ---------------------------------------------------------------------------
 
-/// The tensor uids a matched pointwise-add graph binds, in argument order.
+/// The tensor uids a matched pointwise graph binds, in argument order.
 struct PointwiseBinding
 {
     int64_t inputA = 0;
@@ -314,7 +314,7 @@ PointwiseBinding pointwiseBinding(const BoundTokens& bound)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "pointwise add dispatch is missing bound token '" + std::string(token)
+                "pointwise dispatch is missing bound token '" + std::string(token)
                     + "', or it does not hold a tensor uid");
         }
         return *value;
@@ -385,13 +385,16 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "matched pointwise add has no tensor for uid " + std::to_string(binding.inputA));
+            "matched pointwise graph has no tensor for uid " + std::to_string(binding.inputA));
     }
     return *it->second;
 }
 
 /**
- * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise add.
+ * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise kernel.
+ *
+ * Shared by every pack of this engine: which operation runs is the selected kernel's
+ * entry point, not anything this handler decides.
  *
  * Splits per RFC 0017 §8.5: everything derived from the graph and chosen kernel
  * resolves once at plan build; execute only resolves device pointers by uid and
