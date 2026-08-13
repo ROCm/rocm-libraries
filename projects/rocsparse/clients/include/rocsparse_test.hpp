@@ -360,14 +360,26 @@ struct rocsparse_test_invalid
     }
 
     // If this specialization is actually called, print fatal error message
-    void operator()(const Arguments&)
+    void operator()(const Arguments& arg)
     {
-        static constexpr char msg[] = "Internal error: Test called with invalid types\n";
+        std::ostringstream msg;
+        msg << "Test '" << arg.function
+            << "' was requested with a type combination that is not supported by its dispatch "
+               "(no matching instantiation): "
+            << "index_type_I=" << rocsparse_indextype2string(arg.index_type_I)
+            << ", index_type_J=" << rocsparse_indextype2string(arg.index_type_J)
+            << ", a_type=" << rocsparse_datatype2string(arg.a_type)
+            << ", b_type=" << rocsparse_datatype2string(arg.b_type)
+            << ", c_type=" << rocsparse_datatype2string(arg.c_type)
+            << ", x_type=" << rocsparse_datatype2string(arg.x_type)
+            << ", y_type=" << rocsparse_datatype2string(arg.y_type)
+            << ", compute_type=" << rocsparse_datatype2string(arg.compute_type);
 
 #ifdef GOOGLE_TEST
-        FAIL() << msg;
+        FAIL() << msg.str();
 #else
-        fputs(msg, stderr);
+        fputs(msg.str().c_str(), stderr);
+        fputc('\n', stderr);
         exit(EXIT_FAILURE);
 #endif
     }

@@ -1,25 +1,5 @@
-/* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 // StinkyWaitCntInsertionPass
 //
@@ -67,6 +47,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
    public:
     static char ID;
 
+    explicit StinkyWaitCntInsertionPass(WaitCntInsertionOptions options) : options(options) {}
+
     const char* getName() const override {
         return "StinkyWaitCntInsertionPass";
     }
@@ -87,6 +69,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         // its in-flight state to successors. PassContext gating only applies
         // to IR mutation below.
         WaitDataflow df(func, domInfo, rpo);
+        df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
         // Tensor counter drains only at barriers or when there is a single wave.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
@@ -109,6 +92,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     }
 
    private:
+    WaitCntInsertionOptions options;
+
     void emitWaits(Function& func, PassContext& passCtx, GfxArchID arch,
                    const WaitInsertionPlan& plan) {
         // Anchor waits: walk blocks/instructions in program order so the
@@ -192,7 +177,7 @@ char StinkyWaitCntInsertionPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createStinkyWaitCntInsertionPass() {
-    return std::make_unique<StinkyWaitCntInsertionPass>();
+std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(WaitCntInsertionOptions options) {
+    return std::make_unique<StinkyWaitCntInsertionPass>(options);
 }
 }  // namespace stinkytofu

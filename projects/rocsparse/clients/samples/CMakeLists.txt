@@ -119,6 +119,9 @@ add_rocsparse_example(example_spgemm.cpp)
 add_rocsparse_example(example_spgeam.cpp)
 add_rocsparse_example(example_spgeam_2.cpp)
 add_rocsparse_example(example_spgeam_3.cpp)
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  add_rocsparse_example(example_spmat_scale.cpp)
+endif()
 
 # Managed
 add_rocsparse_example(example_csrmv_managed.cpp)
@@ -178,6 +181,10 @@ endif()
 
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
+
+if(NOT BUILD_WITH_ILDLT0)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX ".*example_rocsparse_spildlt0\\.cpp$")
+endif()
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
     add_rocsparse_example(${file})

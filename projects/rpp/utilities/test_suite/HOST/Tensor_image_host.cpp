@@ -386,10 +386,8 @@ int main(int argc, char** argv) {
         vector<string>::const_iterator imagesPathEnd = imagesPathStart + batchSize;
         vector<string>::const_iterator imageNamesStart =
             imageNames.begin() + (iterCount * batchSize);
-        vector<string>::const_iterator imageNamesEnd = imageNamesStart + batchSize;
         vector<string>::const_iterator imagesPathSecondStart =
             imageNamesPathSecond.begin() + (iterCount * batchSize);
-        vector<string>::const_iterator imagesPathSecondEnd = imagesPathSecondStart + batchSize;
 
         // Set ROIs for src/dst
         set_src_and_dst_roi(imagesPathStart, imagesPathEnd, roiTensorPtrSrc, roiTensorPtrDst,

@@ -171,6 +171,9 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataType)
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::HALF), HIP_R_16F);
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::BFLOAT16), HIP_R_16BF);
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::INT8), HIP_R_8I);
+    EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::FP8_E4M3), HIP_R_8F_E4M3);
+    EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::FP8_E5M2), HIP_R_8F_E5M2);
+    EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::FP4_E2M1), HIP_R_4F_E2M1);
 }
 
 TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
@@ -179,29 +182,6 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
     EXPECT_THROW(hipblaslt_utils::tensorDataTypeToHipDataType(
                      static_cast<hipdnn_flatbuffers_sdk::data_objects::DataType>(-1)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-// ============================================================================
-// FindDeviceBuffer
-// ============================================================================
-
-TEST(TestHipblasltUtils, FindDeviceBufferReturnsCorrectBuffer)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers
-        = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
-
-    auto result = hipblaslt_utils::findDeviceBuffer(99, buffers.data(), 2);
-    EXPECT_EQ(result.uid, 99);
-    EXPECT_EQ(result.ptr, reinterpret_cast<void*>(0x5678));
-}
-
-TEST(TestHipblasltUtils, FindDeviceBufferThrowsIfNotFound)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, reinterpret_cast<void*>(0x1111)}};
-
-    EXPECT_THROW(
-        hipblaslt_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
-        hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 // ============================================================================
@@ -242,4 +222,40 @@ TEST(TestHipblasltUtils, FindTensorAttributesThrowsIfNotFound)
 
     EXPECT_THROW(hipblaslt_utils::findTensorAttributes(attrMap, 1),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// IsTypeFp8Ocp
+// ============================================================================
+
+TEST(TestHipblasltUtils, IsTypeFp8Ocp)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    EXPECT_TRUE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP8_E4M3));
+    EXPECT_TRUE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP8_E5M2));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP8_E8M0));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::FLOAT));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::HALF));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::BFLOAT16));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP4_E2M1));
+}
+
+// ============================================================================
+// IsTypeMxOcp
+// ============================================================================
+
+TEST(TestHipblasltUtils, IsTypeMxOcp)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    EXPECT_TRUE(hipblaslt_utils::isTypeMxOcp(DataType::FP8_E4M3));
+    EXPECT_TRUE(hipblaslt_utils::isTypeMxOcp(DataType::FP8_E5M2));
+    EXPECT_TRUE(hipblaslt_utils::isTypeMxOcp(DataType::FP4_E2M1));
+
+    EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::FP8_E8M0));
+    EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::FLOAT));
+    EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::HALF));
+    EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::BFLOAT16));
+    EXPECT_FALSE(hipblaslt_utils::isTypeMxOcp(DataType::INT8));
 }

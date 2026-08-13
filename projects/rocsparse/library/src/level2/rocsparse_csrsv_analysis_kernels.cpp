@@ -39,7 +39,7 @@ rocsparse_status launch_csrsv_analysis_upper_kernel(rocsparse_handle    handle,
                                                     void* __restrict__ diag_ind,
                                                     int32_t* __restrict__ done_array,
                                                     void* __restrict__ max_nnz,
-                                                    void* __restrict__ zero_pivot,
+                                                    void*                zero_pivot,
                                                     rocsparse_index_base idx_base,
                                                     rocsparse_diag_type  diag_type)
 {
@@ -74,7 +74,7 @@ rocsparse_status launch_csrsv_analysis_lower_kernel(rocsparse_handle    handle,
                                                     void* __restrict__ diag_ind,
                                                     int32_t* __restrict__ done_array,
                                                     void* __restrict__ max_nnz,
-                                                    void* __restrict__ zero_pivot,
+                                                    void*                zero_pivot,
                                                     rocsparse_index_base idx_base,
                                                     rocsparse_diag_type  diag_type)
 {
@@ -106,13 +106,17 @@ template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename
 static csrsv_analysis_kernel_t find_mode(rocsparse_fill_mode mode, rocsparse_operation operation)
 {
 
-    return (operation == rocsparse_operation_none)
-               ? ((mode == rocsparse_fill_mode_lower)
-                      ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
-                      : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>)
-               : ((mode == rocsparse_fill_mode_lower)
-                      ? launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
-                      : launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>);
+    const bool transpose = (operation != rocsparse_operation_none);
+    switch(mode)
+    {
+    case rocsparse_fill_mode_lower:
+        return transpose ? launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
+                         : launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+    case rocsparse_fill_mode_upper:
+        return transpose ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
+                         : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+    }
+    return nullptr;
 }
 
 template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename... P>
@@ -168,7 +172,7 @@ rocsparse_status rocsparse::launch_csrsv_analysis_kernel(rocsparse_handle    han
                                                          void* __restrict__ diag_ind,
                                                          int32_t* __restrict__ done_array,
                                                          void* __restrict__ max_nnz,
-                                                         void* __restrict__ zero_pivot,
+                                                         void*                zero_pivot,
                                                          rocsparse_index_base idx_base,
                                                          rocsparse_diag_type  diag_type,
                                                          rocsparse_fill_mode  fill_mode)

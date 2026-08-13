@@ -109,6 +109,14 @@ class EstimateAsmCyclesTest : public ::testing::Test {
         return inst;
     }
 
+    // Helper to create an operand-less instruction (barriers, branches)
+    StinkyInstruction* createNoOperandInst(GFX op, int issueCycles = 1) {
+        auto builder = getIRBuilder();
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(op, arch));
+        inst->issueCycles = issueCycles;
+        return inst;
+    }
+
     // Helper to run the pass and get the result
     unsigned int runPassAndGetResult() {
         func->setGemmTileConfig(gemmConfig);
@@ -155,6 +163,37 @@ TEST_F(EstimateAsmCyclesTest, OnlyProcessLabelLoopBeginL) {
     unsigned int cycles = runPassAndGetResult();
     // Should only count cycles after label_LoopBeginL.
     EXPECT_EQ(cycles, 5);
+}
+
+// Pins the barrier signal->wait latency (HWModel::Barrier::signalToWaitLatency).
+//
+// This path had no behavioral coverage before: Gfx1250LoopBodyFromLoop450 does
+// contain s_barrier_signal/s_barrier_wait, but they land inside an active WMMA
+// co-issue window, where canCoExecAtCurrentCycle() returns true for any non-VALU
+// op, so they are absorbed as co-issued and never reach the clamp. Perturbing the
+// latency therefore did not move that test's cycle count at all.
+//
+// A bare signal/wait pair with no WMMA in flight exercises the clamp directly:
+//   signal: previousBarrierSignal = 0, then cycles -> 1
+//   wait:   cycles = max(1 + 1, 0 + latency) = latency
+// The expected value is written out rather than read back from the model, so
+// that changing the model's latency fails this test instead of moving with it.
+TEST_F(EstimateAsmCyclesTest, BarrierSignalToWaitLatencyClamp) {
+    createNoOperandInst(GFX::s_barrier_signal);
+    createNoOperandInst(GFX::s_barrier_wait);
+
+    EXPECT_EQ(runPassAndGetResult(), 11u);
+}
+
+// Pins the branch overhead (HWModel::Barrier::jumpOverheadCycles), which was
+// likewise uncovered. A branch costs max(cycles + jumpOverhead, hwMFMA + 4); with
+// no matrix instruction seen, hwMFMA is still its -99 sentinel, so the first term
+// wins and a lone branch costs exactly jumpOverhead. Expected value written out
+// rather than read from the model, for the same reason as above.
+TEST_F(EstimateAsmCyclesTest, BranchCostsJumpOverhead) {
+    createNoOperandInst(GFX::s_branch);
+
+    EXPECT_EQ(runPassAndGetResult(), 6u);
 }
 
 // Test with many instructions

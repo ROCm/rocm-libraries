@@ -31,11 +31,113 @@
 // Handle Tests
 // =============================================================================
 
+// =============================================================================
+// rocsparse_handle_create / rocsparse_handle_destroy Tests
+// =============================================================================
+
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamCreateDestroy)
+{
+    hipStream_t      stream;
+    rocsparse_handle handle;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    ASSERT_EQ(rocsparse_handle_create(&handle, stream, nullptr), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+    ASSERT_EQ(rocsparse_handle_destroy(handle, nullptr), rocsparse_status_success);
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamNullHandle)
+{
+    hipStream_t stream;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    ASSERT_EQ(rocsparse_handle_create(nullptr, stream, nullptr), rocsparse_status_invalid_pointer);
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+}
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamDefaultStream)
+{
+    // Passing stream=0 (default stream) should also work
+    rocsparse_handle handle;
+    ASSERT_EQ(rocsparse_handle_create(&handle, 0, nullptr), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+    ASSERT_EQ(rocsparse_handle_destroy(handle, nullptr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, HandleDestroyWithNullHandle)
+{
+    // rocsparse_handle_destroy accepts a null handle as a no-op (matching
+    // free/delete semantics) and returns success rather than an error.
+    ASSERT_EQ(rocsparse_handle_destroy(nullptr, nullptr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, HandleCreateWithStreamSetStream)
+{
+    // Verify that the handle can be re-targeted to a different stream after creation
+    hipStream_t      stream_create, stream_use;
+    rocsparse_handle handle;
+    ASSERT_EQ(hipStreamCreate(&stream_create), hipSuccess);
+    ASSERT_EQ(hipStreamCreate(&stream_use), hipSuccess);
+    ASSERT_EQ(rocsparse_handle_create(&handle, stream_create, nullptr), rocsparse_status_success);
+    // Synchronize creation stream before switching
+    ASSERT_EQ(hipStreamSynchronize(stream_create), hipSuccess);
+    ASSERT_EQ(rocsparse_set_stream(handle, stream_use), rocsparse_status_success);
+    ASSERT_EQ(rocsparse_handle_destroy(handle, nullptr), rocsparse_status_success);
+    ASSERT_EQ(hipStreamDestroy(stream_create), hipSuccess);
+    ASSERT_EQ(hipStreamDestroy(stream_use), hipSuccess);
+}
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
+
 TEST(auxiliary_pre_checkin, HandleCreateDestroy)
 {
     rocsparse_handle handle;
     ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
     ASSERT_NE(handle, nullptr);
+    ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
+}
+
+// A handle created via rocsparse_create_handle must be immediately usable for
+// computation without the caller allocating or synchronizing a stream. This
+// exercises the handle's internally-managed stream and device workspace
+// (rocsparse_?doti uses handle->buffer on handle->stream).
+TEST(auxiliary_pre_checkin, HandleCreateComputeReady)
+{
+    rocsparse_handle handle;
+    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+    ASSERT_NE(handle, nullptr);
+
+    ASSERT_EQ(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host),
+              rocsparse_status_success);
+
+    constexpr rocsparse_int nnz         = 3;
+    constexpr rocsparse_int y_size      = 5;
+    const float             hx_val[nnz] = {1.0f, 2.0f, 3.0f};
+    const rocsparse_int     hx_ind[nnz] = {0, 2, 4};
+    const float             hy[y_size]  = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
+
+    float*         dx_val = nullptr;
+    rocsparse_int* dx_ind = nullptr;
+    float*         dy     = nullptr;
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dx_val), sizeof(float) * nnz), hipSuccess);
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dx_ind), sizeof(rocsparse_int) * nnz),
+              hipSuccess);
+    ASSERT_EQ(hipMalloc(reinterpret_cast<void**>(&dy), sizeof(float) * y_size), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dx_val, hx_val, sizeof(float) * nnz, hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(dx_ind, hx_ind, sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_EQ(hipMemcpy(dy, hy, sizeof(float) * y_size, hipMemcpyHostToDevice), hipSuccess);
+
+    float result = -1.0f;
+    ASSERT_EQ(rocsparse_sdoti(handle, nnz, dx_val, dx_ind, dy, &result, rocsparse_index_base_zero),
+              rocsparse_status_success);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    // x = {1@0, 2@2, 3@4}, y = {1,2,3,4,5} => 1*1 + 2*3 + 3*5 = 22
+    ASSERT_FLOAT_EQ(result, 22.0f);
+
+    ASSERT_EQ(hipFree(dx_val), hipSuccess);
+    ASSERT_EQ(hipFree(dx_ind), hipSuccess);
+    ASSERT_EQ(hipFree(dy), hipSuccess);
     ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
 }
 
@@ -3424,6 +3526,38 @@ TEST(auxiliary_pre_checkin, ConstBellGet)
     EXPECT_EQ(rows_out, rows);
     EXPECT_EQ(cols_out, cols);
     EXPECT_EQ(block_dim_out, block_dim);
+
+    ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
+}
+
+TEST(auxiliary_pre_checkin, BellSetPointers)
+{
+    rocsparse_spmat_descr descr;
+    int64_t               rows           = 10;
+    int64_t               cols           = 10;
+    int64_t               ell_block_size = 2;
+    int64_t               ell_cols       = 4;
+    void*                 col_indices = reinterpret_cast<void*>(0x2000); // Non-null dummy pointer
+    void*                 values      = reinterpret_cast<void*>(0x3000); // Non-null dummy pointer
+
+    ASSERT_EQ(rocsparse_create_bell_descr(&descr,
+                                          rows,
+                                          cols,
+                                          rocsparse_direction_row,
+                                          ell_block_size,
+                                          ell_cols,
+                                          col_indices,
+                                          values,
+                                          rocsparse_indextype_i32,
+                                          rocsparse_index_base_zero,
+                                          rocsparse_datatype_f32_r),
+              rocsparse_status_success);
+
+    void* new_col_indices = reinterpret_cast<void*>(0x4000);
+    void* new_values      = reinterpret_cast<void*>(0x5000);
+
+    ASSERT_EQ(rocsparse_bell_set_pointers(descr, new_col_indices, new_values),
+              rocsparse_status_success);
 
     ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
 }

@@ -64,7 +64,7 @@ endif()
 
 # RPP Version
 # NOTE: package version and rpp_version.h is generated with this version
-set(VERSION "3.1.2")
+set(VERSION "3.2.0")
 
 # Set Project Version and Language
 project(rpp VERSION ${VERSION} LANGUAGES CXX)
@@ -90,8 +90,11 @@ endif(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 # RPP Default Options
 set(DEFAULT_BUILD_TYPE "Release")
 
-### RPP_AUDIO_SUPPORT - default = ON, NOTE: support currently only on Ubuntu - user to set to OFF otherwise
-option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         ON)
+### RPP_AUDIO_SUPPORT - default = OFF, NOTE: enabled automatically when FFTS is found
+option(RPP_AUDIO_SUPPORT      "Build RPP with Audio Support"         OFF)
+
+### CODE_COVERAGE - default = OFF, instruments librpp.so for LLVM coverage
+option(CODE_COVERAGE          "Build RPP with code coverage instrumentation (LLVM)"  OFF)
 
 # Set message options
 if(NOT WIN32)
@@ -144,9 +147,8 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
 else()
     # -O3 -- Optimize output file
-    # TBD:Verify Requirement -Ofast - Optimize for speed disregarding exact standards compliance
     # -DNDEBUG -- turn off asserts
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Ofast -DNDEBUG")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
 endif()
 
 # Enable -Wall warnings for both release and debug builds
@@ -177,24 +179,26 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 # Half (HALF::half carries INTERFACE include dirs for transitive use via rpp::rpp)
 find_package(HALF REQUIRED)
 
-if (RPP_AUDIO_SUPPORT)
-    find_package(FFTS QUIET)
-    if(FFTS_FOUND)
-        add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
-        set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
-        message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
+# Check for FFTS and enable audio support if found
+find_package(FFTS QUIET)
+if(FFTS_FOUND)
+    set(RPP_AUDIO_SUPPORT ON)
+    add_definitions(-DAUDIO_SUPPORT)        # For compile flags in RPP
+    set(RPP_AUDIO_AUGMENTATIONS_SUPPORT 1)  # For cmakedefine01 in rpp_audio_augmentations_support.h.in
+    message("-- ${Green}${PROJECT_NAME} set to build with RPP_AUDIO_SUPPORT${ColourReset}")
+else()
+    if(RPP_AUDIO_SUPPORT)
+        message(FATAL_ERROR "${Red}RPP_AUDIO_SUPPORT=ON but FFTS was not found. Please ensure FFTS is available or set -DRPP_AUDIO_SUPPORT=OFF${ColourReset}")
     else()
-        set(RPP_AUDIO_SUPPORT OFF)              # Disable audio support if FFTS not found
         message("-- ${Yellow}FFTS not found. ${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
     endif()
-else()
-    message("-- ${Yellow}${PROJECT_NAME} set to build without RPP_AUDIO_SUPPORT${ColourReset}")
 endif()
 
 message("-- ${Cyan}RPP Developer Options${ColourReset}")
 message("-- ${Cyan}     -D BACKEND=${BACKEND} [Select RPP Backend [options:CPU/HIP](default:HIP)]${ColourReset}")
 message("-- ${Cyan}     -D CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} [Select RPP build type [options:Debug/Release](default:Release)]${ColourReset}")
 message("-- ${Cyan}     -D RPP_AUDIO_SUPPORT=${RPP_AUDIO_SUPPORT} [Select RPP audio support [options:ON/OFF](default:ON)]${ColourReset}")
+message("-- ${Cyan}     -D CODE_COVERAGE=${CODE_COVERAGE} [Select RPP code coverage instrumentation [options:ON/OFF](default:OFF)]${ColourReset}")
 
 # OpenMP
 find_package(OpenMP COMPONENTS CXX REQUIRED)
@@ -326,6 +330,20 @@ if(NOT DEFINED SIMD_ENABLE)
 endif()
 
 add_library(${PROJECT_NAME} SHARED api/rpp.h $<TARGET_OBJECTS:modules>)
+# Enable fast-math to replace Ofast
+target_compile_options(${PROJECT_NAME} PRIVATE -ffast-math)
+
+# LLVM source-based coverage. Compile flags go on `modules` since ${PROJECT_NAME} builds
+# from its objects and has no sources of its own. -Xarch_host keeps instrumentation off the
+# HIP device passes, which otherwise fail to link on __llvm_profile_instrument_gpu.
+# COMPILE_FLAGS avoids COMPILE_OPTIONS de-duplicating the repeated -Xarch_host.
+if(CODE_COVERAGE)
+    set_property(TARGET modules APPEND_STRING PROPERTY COMPILE_FLAGS
+                 " -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping")
+    set_property(TARGET ${PROJECT_NAME} APPEND_STRING PROPERTY LINK_FLAGS " -fprofile-instr-generate")
+    message("-- ${Green}${PROJECT_NAME} set to build with CODE_COVERAGE${ColourReset}")
+endif()
+
 if("${SIMD_ENABLE}" STREQUAL "1")
     target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_SIMD_INTRINSICS=1)
     message("-- ${Green}${PROJECT_NAME} set to build with ENABLE_SIMD_INTRINSICS${ColourReset}")
@@ -386,6 +404,7 @@ endif()
 # Test suite
 enable_testing()
 include(CTest)
+add_subdirectory(test)
 add_subdirectory(utilities/test_suite)
 
 # Installation
