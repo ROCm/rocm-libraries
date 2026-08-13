@@ -104,20 +104,23 @@ thousands of symbol spellings:
 - Public `rocblas_datatype` for input, output, scale, and compute types.
 - Public `rocblas_operation`, fill, side, and diagonal enums.
 - Explicit 32- or 64-bit index width.
-- Single, pointer-array, strided, or grouped batching.
+- Single, pointer-array, and strided batching; grouped batching remains bridge-only until the protocol carries per-group descriptors.
 - Host- or device-resident scalar values.
 - Vector length/increment/stride.
 - Matrix rows, columns, leading dimension, and batch stride.
 - Effective stream and workspace policy from the edge context.
 
 There are now two executable protocol levels. The generated compatibility bridge has one
-typed slot for every one of the 1,213 current rocBLAS callables and is suitable for the NFC
+typed slot for every one of the 1,219 current rocBLAS callables and is suitable for the NFC
 implementation migration. The earlier vector/matmul table remains a small vertical test.
 The proposed destination is the experimental v2 table with ten semantic calls described in
-`rocblas-provider-clusters.md`. A generated shadow facade now translates all 1,156 compute
-callables into those typed requests and a recording provider implements only that narrow
-table. This proves structural closure, not numerical or behavioral equivalence, so the table
-is intentionally not yet the adopted provider ABI.
+`rocblas-provider-clusters.md`. The public inventory contains 1,162 compute callables; a
+generated shadow facade translates 1,156 into those typed requests, and a recording provider
+implements only that narrow table. The six grouped-GEMM callables remain `bridge_only`
+because the narrow matmul request cannot represent per-group shapes, operations, leading
+dimensions, and scalars; the narrow edge returns `rocblas_status_not_implemented` for a
+valid handle. This proves structural closure, not numerical or behavioral equivalence, so
+the table is intentionally not yet the adopted provider ABI.
 
 ### Operation clusters
 

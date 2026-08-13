@@ -13,10 +13,12 @@ The working vertical slice contains:
 
 - A versioned common provider bootstrap and a cross-platform module-load primitive (dlopen/LoadLibrary); the ABI-versioning hardening it wraps is Linux/ELF only.
 - Narrow BLAS, solver, and RAND protocol headers.
-- A generated `librocblas-loader.so.5` shadow DSO implementing all 1,213 declarations in the
+- A generated `librocblas-loader.so.5` shadow DSO implementing all 1,219 callables in the
   current rocBLAS C header through a typed brute-force compatibility table.
-- A checked 1,213-row categorization ledger and an experimental ten-call narrow BLAS provider
-  with a generated all-symbol facade mapping all 1,156 compute spellings to typed requests.
+- A checked 1,219-row categorization ledger and an experimental ten-call narrow BLAS provider
+  with a generated all-symbol facade mapping 1,156 of 1,162 compute spellings to typed
+  requests. The six grouped-GEMM callables remain typed bridge-only entries because the
+  narrow request has no audited per-group descriptor.
 - A combined replacement BLAS recording provider plus separate legacy-shaped rocBLAS and
   hipBLASLt provider DSOs in one compatibility cohort.
 - Loadable solver and RAND recording providers.
@@ -46,8 +48,13 @@ The snapshot target parses ten C and C++ entry profiles. Function metadata inclu
 target linkage name, C linkage, visibility, inline marker, and templated kind; record metadata
 includes layout where Clang can form one. `hipblaslt-ext` and the rocRAND/hipRAND C++ headers
 are deliberately separate profiles so C++ ABI does not disappear inside a C-only inventory.
-The check target regenerates all profiles and byte-compares them with `api/snapshots`; it is
-the intended presubmit hook for draft-to-launch header drift, run manually today (it is not yet wired into an automated presubmit).
+The check target regenerates all profiles, byte-compares them with `api/snapshots`, and also
+checks the rocBLAS categorization ledger. With `BUILD_TESTING=ON`, it is registered in CTest as
+`rocm_interfaces.api_snapshot_drift` by default because `ROCM_INTERFACES_CHECK_API_DRIFT`
+defaults to `ON`; set that option to `OFF` to opt out explicitly. `BUILD_TESTING=OFF`
+registers no CTest. The check is not part of the default build (`ALL`) or an automatically
+wired presubmit, and it remains directly runnable with
+`cmake --build build/interfaces --target rocm-interfaces-check-api-snapshots`.
 
 This tree temporarily stages the public rocBLAS and rocRAND headers directly from their
 projects. This is deliberate migration scaffolding: those headers are in scope to move

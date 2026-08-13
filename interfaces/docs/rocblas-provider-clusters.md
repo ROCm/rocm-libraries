@@ -28,7 +28,7 @@ itself a valid blocker.
 
 ## Closed inventory
 
-`api/rocblas-categorization.json` classifies all 1,213 parser-visible C callables. Generation
+`api/rocblas-categorization.json` classifies all 1,219 parser-visible C callables. Generation
 fails on an unknown spelling; there is no catch-all category. The current closure is:
 
 This closes the current header surface, not the adoption binary audit. Release Linux and
@@ -47,23 +47,28 @@ immutable launch snapshot.
 | Vector rotation | 90 | `vector_rotate` |
 | Matrix-vector | 148 | `matrix_vector` |
 | Rank update | 168 | `rank_update` |
-| General matmul | 60 | `matmul_query` plus `matmul` |
+| General matmul | 66 | `matmul_query` plus `matmul`; six grouped-GEMM callables remain bridge-only |
 | Structured matrix | 146 | `structured_matrix` |
 | Matrix transform | 49 | `matrix_transform` |
 | Triangular matrix | 63 | `triangular_matrix` |
 | Triangular matrix-vector | 144 | `matrix_vector` with triangular semantics |
 
-The 1,156 compute spellings therefore narrow to nine execution callbacks plus matmul
+The 1,162 compute spellings split into 1,156 semantic adapters and six grouped-GEMM
+bridge-only callables. The 1,156 adapters narrow to nine execution callbacks plus matmul
 enumeration. Precision prefixes, explicit-datatype variants, 32/64-bit indices, ordinary,
-pointer-array, and strided batching become request fields. This is a 99.1% reduction in
-operation entry points without pretending semantically different algorithms are identical.
+pointer-array, and strided batching become request fields. This is a 99.1% reduction in the
+adapted operation entry points without pretending semantically different algorithms are
+identical.
 
 The concrete proposal is
 `protocols/include/rocm/interfaces/experimental/blas_narrow_v2.h`. The generated
 `librocblas-loader-narrow-v2` facade constructs one of these typed requests for every one of
-the 1,156 compute callables and dispatches through the reduced table. Generation asserts the
-exact count and fails on an unknown primitive. The separate brute-force bridge remains the
-NFC reference, not an escape hatch in the narrow table.
+the 1,156 semantically adapted compute callables and dispatches through the reduced table.
+Generation asserts the exact adapter count and fails on an unknown primitive. The six
+grouped-GEMM callables retain typed slots in the separate brute-force compatibility bridge;
+the narrow facade validates the handle and returns `rocblas_status_not_implemented` rather
+than fabricating a lossy request. The brute-force bridge remains the NFC reference, not an
+escape hatch in the narrow table.
 
 ## Recommended boundary
 
@@ -114,16 +119,18 @@ The proposed table has these calls:
 The spike has three deliberately coexisting artifacts:
 
 - `librocblas-loader.so` and `librocblas-provider-bruteforce-recording.so` prove the complete
-  1,213-symbol compatibility-table baseline.
-- `librocblas-loader-narrow-v2.so` exports the same 1,213 symbols but translates all 1,156
-  compute spellings to the semantic protocol. There is no generic `void**`, vararg argument
-  packet, public-function ordinal, or fallback provider slot in this path.
+  1,219-symbol compatibility-table baseline.
+- `librocblas-loader-narrow-v2.so` exports the same 1,219 symbols but translates 1,156 of the
+  1,162 compute spellings to the semantic protocol. Its six grouped-GEMM exports return
+  `rocblas_status_not_implemented` for a valid handle. There is no generic `void**`, vararg
+  argument packet, public-function ordinal, or fallback provider slot in this path.
 - `librocblas-provider-narrow-v2-recording.so` exports only the bootstrap query and implements
   the 12-pointer table: lifecycle, nine execution callbacks, and matmul enumeration.
 
 The all-symbol link test runs against both facades. A second test executes representative
-AXPY, DOT, ROT, GEMV, GER, GEMM, SYMM, TRSM, and GEAM calls through the narrow provider.
-This establishes structural closure, not numerical equivalence.
+AXPY, DOT, ROT, GEMV, GER, GEMM, SYMM, TRSM, and GEAM calls through the narrow provider and
+checks that grouped GEMM with a valid handle returns `rocblas_status_not_implemented`. This
+establishes structural closure, not numerical equivalence.
 
 Before adopting the request structs as ABI, peers must settle these named gaps:
 
@@ -139,10 +146,13 @@ Before adopting the request structs as ABI, peers must settle these named gaps:
 4. Classic GEMM-to-LT eligibility, no-solution fallback, solution-index observability, memory
    query sizing, and numerics/logging hooks remain policy work. The request has fields for the
    data; the spike does not claim behavioral equivalence.
-5. `matmul_query` is exercised as a provider contract, but current classic public spellings in
+5. The six grouped-GEMM callables carry arrays of shapes, operations, leading dimensions, and
+   scalars. The current homogeneous matmul request cannot preserve those per-group semantics,
+   so they remain bridge-only until an audited grouped descriptor exists.
+6. `matmul_query` is exercised as a provider contract, but current classic public spellings in
    this inventory execute matmul directly. The hipBLASLt facade will be the primary client of
    enumeration and must validate token lifetime and cohort rules.
-6. The generated translation is source-derived. Accidental release-binary exports still need
+7. The generated translation is source-derived. Accidental release-binary exports still need
    the Linux/Windows audit already called out above.
 
 These are implementation and validation gaps, not unclassified public operations. If review
@@ -181,10 +191,17 @@ nor defensible. The accidental `rocblas_device_malloc_base` family remains typed
 brute-force bridge until solver/hipBLAS consumers are migrated, then should be hidden before
 the adoption snapshot if release policy permits.
 
+Six compute callables are also explicitly `bridge_only`:
+`rocblas_{s,d}gemm_grouped_batched{,_64}` and
+`rocblas_gemm_grouped_batched_ex{,_64}`. Grouped GEMM is not ordinary pointer-array batching:
+each group has its own shape, operations, leading dimensions, scalars, and group size. The
+homogeneous narrow matmul request cannot encode those arrays, so the compatibility bridge
+retains the typed calls while the narrow facade reports `rocblas_status_not_implemented`.
+
 ## Migration recommendation
 
 Use the complete generated bridge as the NFC starting point, and the executable narrow v2
-facade as the proposed endpoint, but do not publish the 1,213-slot table as the provider SDK.
+facade as the proposed endpoint, but do not publish the 1,219-slot table as the provider SDK.
 Convert and differentially validate clusters in this order:
 
 1. context/policy and edge-local helpers;

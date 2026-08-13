@@ -27,34 +27,28 @@ which optional linkers and sanitizers are present, so cite names rather than a c
 | GCC-LTO-plus-lld build refused at configure | `lto_linker_guard_rejects_gnu_lld` + 3 accepts | `3e56e73` |
 | Loader/registry concurrency under TSan | `ops04_concurrency` | `df8512b` |
 | Table-ABI negotiation: `abi_minor` floor (provider older than the runtime minor rejected) on top of the `dispatch_table_size` prefix floor, with a larger-table/newer-minor (optional tail) accept and one-field-at-a-time discrimination | `table_abi_negotiation` | `fcb7ac7` |
+| Default-on API snapshot and rocBLAS-categorization drift gate | `rocm_interfaces.api_snapshot_drift` | `dc2aa30947a` |
 | Linked-consumer interposition proof: a consumer whose relocation carries a versioned undefined reference (`rocblas_sgemm@ROCBLAS_ABI_7`, recorded as a `Verneed` on `libprovB.so.7`) binds to that major even though an ABI_6 provider is `NEEDED` first and earlier in scope; the plain control shares the identical link line and differs only by the single `.symver` directive, and is interposed to ABI_6 - so one directive flips the bound major 7/6 | `abi03_linked_consumer_versioned_binds`, `abi03_linked_consumer_plain_interposed` | `3396f66` |
 | Boundary of the node defense (stated, not overclaimed): with genuine version nodes present, `dlvsym` reaches `ROCBLAS_ABI_7`, yet a bare unversioned `dlsym(RTLD_DEFAULT, ...)` still takes the first-loaded `ABI_6` - the defense is scoped to versioned relocations and `dlvsym`, not bare global lookups. Discriminates from `abi03_interpose_hazard` (nodeless DSOs) on lookup form alone | `abi03_versioned_bare_lookup_uncovered` | `8235b3c` |
 
 Foundational, from the POC base (`9bd0d26`): the loader/runtime/protocols architecture, the
 recording providers and rocBLAS bridge, and the narrow-v2 facade are each exercised by named
 ctests (`rocm_interfaces.unit`, `rocm_interfaces.rocblas_shadow`, `rocm_interfaces.rocblas_narrow_v2`),
-and the install-consumer path by `rocm_interfaces.install_consumer`. The 1,213-row
-categorization ledger is a checked-in data artifact, not a test. The Clang-LibTooling API
-extraction and the snapshot/policy tooling exist as build targets
-(`rocm-interfaces-api-snapshots`, `rocm-interfaces-check-api-snapshots`). The drift check is
-wired into `ctest` as an opt-in gate (`rocm_interfaces.api_snapshot_drift`, behind
-`ROCM_INTERFACES_CHECK_API_DRIFT`, default OFF); it is not on the default test path because a
-sound default-on gate requires the build's ROCm headers to match the frozen `api/snapshots`
-baseline (see COMMITTED-NEXT). The `check_api_policy.py` policy check is still unwired.
+and the install-consumer path by `rocm_interfaces.install_consumer`. The 1,219-row
+categorization ledger is checked in, and its regeneration check is a dependency of the API
+snapshot drift gate. The Clang-LibTooling extraction and snapshot tooling exist as build
+targets (`rocm-interfaces-api-snapshots`, `rocm-interfaces-check-api-snapshots`). With
+`BUILD_TESTING=ON`, `rocm_interfaces.api_snapshot_drift` is registered by default because
+`ROCM_INTERFACES_CHECK_API_DRIFT` defaults to `ON`; `BUILD_TESTING=OFF` registers no CTest.
+The check is not part of the default build (`ALL`) or an automatically wired presubmit, and
+the build target remains directly runnable. The reconciled snapshots and ledger are a
+pre-adoption prototype baseline, not a claim of append-only ABI evolution for a launched
+provider table. The `check_api_policy.py` policy check is still unwired.
 
 ## COMMITTED-NEXT (the immediate plan)
 
 - Push and merge mechanics (rebase, merge-tree re-verify, attaching to PR #10272) are tracked
   in the PR/handoff, not here.
-- **API snapshot drift gate: default-on hardening.** The drift check is now wired into
-  `ctest` as an opt-in gate (`rocm_interfaces.api_snapshot_drift`, `ROCM_INTERFACES_CHECK_API_DRIFT`,
-  default OFF; commit `9af1e47`). Promoting it to a default-on hard gate is deferred: the frozen
-  `api/snapshots/rocblas.json` is also a codegen input (consumed by `generate_rocblas_bridge`,
-  `generate_rocblas_narrow_v2`, `categorize_rocblas_api`), so it cannot simply be regenerated to
-  a newer image without changing codegen and breaking the build, and a frozen baseline is red
-  against any image whose rocBLAS is newer. A sound default gate needs the build's ROCm pinned to
-  the frozen snapshot (a reconciliation that ripples through the generators) - see
-  [05-extending.md](05-extending.md).
 
 ## ASPIRATIONAL (direction, not commitment)
 

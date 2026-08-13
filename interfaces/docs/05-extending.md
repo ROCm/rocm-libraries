@@ -157,17 +157,21 @@ major indirects through edge allocation.
 
 During rollout, header drift is caught by the `rocm-interfaces-check-api-snapshots` build
 target, which extracts the current source headers and byte-compares them with the draft
-snapshots. It is wired into CTest as an opt-in gate (`rocm_interfaces.api_snapshot_drift`,
-behind `ROCM_INTERFACES_CHECK_API_DRIFT`, default OFF) and can still be run directly
-(`cmake --build <build> --target rocm-interfaces-check-api-snapshots`). It is not on by
-default because the frozen `api/snapshots/rocblas.json` is also a codegen input, so a sound
-default-on gate requires the build's ROCm headers to match that baseline; promoting it to a
-default hard gate is tracked as COMMITTED-NEXT in
-[07-status-and-roadmap.md](07-status-and-roadmap.md), and wiring `check_api_policy.py` (which
-still has no build or test invocation) remains ASPIRATIONAL. A drift failure is resolved by
-updating both the current-major mapping and any already-created compatibility major.
-Immediately before cutover, regenerate against the exact release branch, audit exports from
-the built binaries, and archive those snapshots as the immutable baseline for that major.
+snapshots and checks the rocBLAS categorization ledger. With `BUILD_TESTING=ON`, it is wired
+into CTest as `rocm_interfaces.api_snapshot_drift` by default because
+`ROCM_INTERFACES_CHECK_API_DRIFT` defaults to `ON`; setting that option to `OFF` is an
+explicit opt-out. `BUILD_TESTING=OFF` registers no CTest. The target is not part of the
+default build (`ALL`) or an automatically wired presubmit, and it can still be run directly
+(`cmake --build <build> --target rocm-interfaces-check-api-snapshots`). Wiring
+`check_api_policy.py` (which still has no build or test invocation) remains ASPIRATIONAL.
+
+The checked-in snapshots and categorization ledger are code-generation inputs as well as the
+draft baseline. Resolve a drift failure by reconciling the snapshot, current-major mapping,
+categorization, generators, and any already-created compatibility major together. The current
+reconciliation is a pre-adoption prototype rebaseline; it does not claim append-only ABI
+evolution for a launched provider table. Immediately before cutover, regenerate against the
+exact release branch, audit exports from the built binaries, and archive those snapshots as
+the immutable baseline for that major.
 
 No header is "migrated" merely because it lives in a directory named `internal`. Installed,
 included, or exported declarations are public until an explicit compatibility decision says

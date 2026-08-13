@@ -49,8 +49,9 @@ source of truth; the chapters link into them where the detail matters and do not
 them here.
 
 - [rocblas-provider-clusters.md](rocblas-provider-clusters.md) - the rocBLAS narrowing map:
-  how 1,213 public declarations classify into provider primitives. It is directional input,
-  not an adopted provider ABI (see its own opening note).
+  how 1,219 public callables classify into provider primitives, including six grouped-GEMM
+  callables that remain bridge-only. It is directional input, not an adopted provider ABI
+  (see its own opening note).
 - [audit-findings.md](audit-findings.md) - the initial ABI audit (hipSOLVER facade,
   enum coupling, RAND visibility, the rocRAND header defect). It is a findings record from
   that audit, not a contract.
