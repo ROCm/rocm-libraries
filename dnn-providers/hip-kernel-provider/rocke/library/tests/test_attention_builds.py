@@ -233,6 +233,14 @@ _TILED_2D_BUDGET_GEOMETRIES = [
         "gfx942",
         dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="fp16"),
     ),
+    # Both D64 dtypes ride the narrowed (width-16) ring, and bf16 reaches the
+    # selector through the bf16-wide spec branch rather than the fp16 one, so the
+    # fp16 row above does not cover it.
+    (
+        "bf16_d64_gqa64x8",
+        "gfx942",
+        dict(head_size=64, num_query_heads=64, num_kv_heads=8, dtype="bf16"),
+    ),
     # Sliding-window D128 takes a SEPARATE non-ring geometry (the flash/ring
     # paths gate on ``sliding_window == 0``; SW picks its own tile), so LDS/reg
     # pressure changes there are not covered by the plain-causal rows above.

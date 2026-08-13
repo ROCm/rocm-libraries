@@ -2078,10 +2078,13 @@ def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool:
-    # The sliced-K ring (32-wide K slices -> k_groups = HD/32) is correctness-
-    # verified only for D64 (k_groups=2): measured T=64+ring+cfvst+mask-limit (nw4)
-    # is 13-17% faster than the prior D64 best (beats Torch at S2048, ~parity
-    # elsewhere).
+    # The sliced-K ring stages K in k_slice_hd-wide slices, so
+    # k_groups = HD/k_slice_hd and the width is routed per head size (see
+    # _select_gfx942_flash_k_slice_hd). D64 is correctness-verified: measured
+    # T=64+ring+cfvst+mask-limit (nw4) is 13-17% faster than the prior D64 best
+    # (beats Torch at S2048, ~parity elsewhere). That measurement was taken at the
+    # 32-wide slice (k_groups=2); D64 now routes to 16 (k_groups=4), which was
+    # re-verified bitwise-identical on device.
     #
     # D128 (k_groups=4) ring history: the default depth-3 kg%3 slot map reuses
     # slot 0 for slice 3, and the reusing DMA was unfenced -> numerically wrong at
@@ -2149,17 +2152,20 @@ def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
     degree but doubles the per-tile barrier and partial-wait count, so the best
     width is a knee rather than the smallest legal value.
 
-    Returns the shipped 32 for every problem: this makes the width expressible
-    without changing any kernel. Selecting a narrower width is a separate change,
-    and one that has to mirror the width into the C++ engine first -- the C++ twin
-    of this builder hardcodes ``K_SLICE_HD`` (and ``K_SLICE_SLOTS``), so a Python
-    selector that returned anything else would make the two engines disagree for
-    ring specs. The parity corpus enumerates no ring config, so the byte-identity
-    gate would not catch it.
+    D64 takes 16 (k_groups=4) and D128 keeps the shipped 32 (k_groups=4). The two
+    head sizes land on opposite sides of the trade because the barrier count the
+    narrower width buys follows k_groups, not the width: at D64 width 16 reaches
+    the same k_groups D128 already runs at, so it halves the conflict degree at a
+    group count the schedule is known to carry, while the same step at D128 would
+    double it again. Slot reuse and the drain-on-reuse fence are width-independent
+    by *derivation* (see the ``k_slice_hd`` field docstring) but not by
+    *reachability*, and that distinction is the one schedule change this routing
+    makes: at width 32 D64 has ``k_groups=2 < ring_depth=3``, so the slot map never
+    wraps and the fence is never emitted at all, while at width 16 ``k_groups=4``,
+    slice 3 reuses slot 0 and it fires. ``test_attn_k_slice_hd.py`` pins that.
 
-    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. It is a
-    diagnostic knob and carries that same engine-divergence caveat, which is why
-    the default path does not use it. Only meaningful when the ring is active."""
+    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. Only
+    meaningful when the ring is active."""
     env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICE_HD", "").strip()
     # isdecimal rather than isdigit: isdigit accepts characters such as
     # superscripts that int() then rejects, turning a typo into a ValueError on
@@ -2176,6 +2182,8 @@ def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
         # ``_GFX942_K_SLICE_HD_CHOICES``, so it cannot fail here.
         if problem.head_size % width == 0 and problem.head_size // width >= 2:
             return width
+    if problem.head_size == 64:
+        return 16
     return 32
 
 
