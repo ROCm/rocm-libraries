@@ -53,10 +53,12 @@ from Tensile.CustomKernels import (
 )
 
 
+_ROCM_LLVM_BIN = os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm", "bin")
+
+
 def _findTool(name: str) -> Optional[str]:
     """Prefer the ROCm LLVM toolchain, fall back to whatever is on PATH."""
-    rocmBin = os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "llvm", "bin")
-    return shutil.which(name, path=rocmBin) or shutil.which(name)
+    return shutil.which(name, path=_ROCM_LLVM_BIN) or shutil.which(name)
 
 
 CLANG = _findTool("clang")
@@ -191,10 +193,45 @@ def _toolchainHandlesAmdgcn() -> bool:
         return False
 
 
+def _whyDisassemblyRequired() -> Optional[str]:
+    """Why an unusable toolchain is an error here rather than a reason to skip.
+
+    These checks are the only thing holding the gate's metadata to the shipped
+    code, so skipping them where they were meant to run is the worst outcome
+    available: a green suite that verified nothing.  A machine carrying ROCm's
+    own LLVM is taken to be such a place.  ``TENSILE_REQUIRE_AMDGCN_DISASM``
+    overrides the inference in both directions, so CI can demand the checks
+    whatever its layout, and a deliberately toolchain-less run can opt out.
+    """
+    forced = os.environ.get("TENSILE_REQUIRE_AMDGCN_DISASM")
+    if forced:
+        return None if forced == "0" else f"TENSILE_REQUIRE_AMDGCN_DISASM={forced} is set"
+    if all(
+        shutil.which(tool, path=_ROCM_LLVM_BIN) is not None
+        for tool in ("clang", "llvm-objdump")
+    ):
+        return f"ROCm's own LLVM is installed at {_ROCM_LLVM_BIN}"
+    return None
+
+
+_TOOLCHAIN_USABLE = _toolchainHandlesAmdgcn()
+_REQUIRED_BECAUSE = None if _TOOLCHAIN_USABLE else _whyDisassemblyRequired()
+
+if _REQUIRED_BECAUSE is not None:
+    raise RuntimeError(
+        f"the custom-kernel StaggerU checks cannot run, and {_REQUIRED_BECAUSE}, so "
+        f"this is an environment where they are expected to: assembling a probe "
+        f"kernel for gfx942 with clang={CLANG} and objdump={OBJDUMP} did not produce "
+        f"readable AMDGCN. Failing rather than skipping, because the uniform "
+        f"summation order launch gate admits custom kernels on the strength of the "
+        f"StaggerU metadata these tests validate, and a silent skip would leave that "
+        f"unchecked. Set TENSILE_REQUIRE_AMDGCN_DISASM=0 to skip deliberately."
+    )
+
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(
-        not _toolchainHandlesAmdgcn(),
+        not _TOOLCHAIN_USABLE,
         reason="needs an AMDGCN-capable LLVM assembler and llvm-objdump to disassemble "
         "the shipped custom kernels; set ROCM_PATH or put ROCm's clang and llvm-objdump "
         "on PATH",
