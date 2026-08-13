@@ -9,11 +9,14 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
+#include "PlatformUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
+#include <logging/Logging.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
@@ -33,10 +36,33 @@ void GraphDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::finalize: no operations set");
 
-    invalidateCache();
-    buildSerializedGraph();
+    const bool needsId = !_graphId.has_value();
+    if(needsId)
+    {
+        _graphId = platform_utilities::generateUuidV4();
+    }
+
+    try
+    {
+        invalidateCache();
+        buildSerializedGraph();
+    }
+    catch(...)
+    {
+        // Uncovered by tests: reaching here needs buildSerializedGraph() to fail on operations
+        // that already validated, which no input can force through the public API.
+        if(needsId)
+        {
+            _graphId.reset();
+        }
+        throw;
+    }
 
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
+
+    HIPDNN_BACKEND_LOG_INFO("Finalized graph \"{}\" with id {}",
+                            _name,
+                            hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
 
     if(logging::GraphLogger::isEnabled())
     {
@@ -58,6 +84,11 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->preferred_engine_id = _preferredEngineId;
     graph->is_override_shape_enabled = _isOverrideShapeEnabled;
     graph->name = _name;
+    if(_graphId.has_value())
+    {
+        graph->id = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::Uuid>(
+            hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*_graphId));
+    }
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
@@ -378,21 +409,30 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     // Non-mutating attributes (e.g., HANDLE) set invalidate = false.
     if(invalidate)
     {
+        if(_graphId.has_value())
+        {
+            HIPDNN_BACKEND_LOG_DEBUG(
+                "Discarding id {} for graph \"{}\": its contents changed, so finalizing again "
+                "generates a new id",
+                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId),
+                _name);
+        }
         invalidateCache();
+        _graphId.reset();
     }
 }
 
 void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t graphByteSize)
 {
+    THROW_IF_TRUE(isFinalized(),
+                  HIPDNN_STATUS_NOT_INITIALIZED,
+                  "GraphDescriptor::deserializeGraph() failed: Already finalized.");
     THROW_IF_NULL(serializedGraph,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "GraphDescriptor::deserializeGraph: serializedGraph is null");
     THROW_IF_TRUE(graphByteSize == 0,
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::deserializeGraph: graphByteSize is 0");
-
-    invalidateCache();
-
     // Parse FlatBuffer and eagerly unpack into _operations
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
@@ -405,7 +445,22 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
         HIPDNN_STATUS_NOT_SUPPORTED,
         "Serialized graph requires a newer engine plugin API version than this build supports.");
 
-    // Extract graph-level attributes
+    std::optional<std::array<uint8_t, 16>> graphId;
+    if(graph->id)
+    {
+        graphId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
+    }
+
+    auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
+    std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
+    unpacked.reserve(graph->nodes.size());
+    for(const auto& nodeT : graph->nodes)
+    {
+        unpacked.push_back(NodeFactory::createOperationFromNode(*nodeT, tensorMap));
+    }
+
+    // Commit only after every validation and conversion succeeds.
+    invalidateCache();
     _computeDataType = graph->compute_data_type;
     _intermediateDataType = graph->intermediate_data_type;
     _ioDataType = graph->io_data_type;
@@ -416,14 +471,12 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
         graph->tensors, [](const auto& tensor) { return tensor.get(); });
     _name = graph->name;
-
-    // Populate _operations from the deserialized graph nodes
-    auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
-    std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
-    unpacked.reserve(graph->nodes.size());
-    for(const auto& nodeT : graph->nodes)
+    _graphId = graphId;
+    if(_graphId.has_value())
     {
-        unpacked.push_back(NodeFactory::createOperationFromNode(*nodeT, tensorMap));
+        HIPDNN_BACKEND_LOG_DEBUG("Deserialized graph \"{}\" with inherited id {}",
+                                 _name,
+                                 hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
     }
     _operations = std::move(unpacked);
 }
@@ -578,6 +631,9 @@ std::string GraphDescriptor::toString() const
     std::string str = "GraphDescriptor: {handle=";
     str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
     str += ", name=" + (_name.empty() ? std::string("(empty)") : _name);
+    str += ", id="
+           + (_graphId.has_value() ? hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId)
+                                   : std::string("(none)"));
     str += ", serializedGraphSize=" + std::to_string(_graphSerializedBuffer.size());
     str += '}';
     return str;

@@ -64,7 +64,7 @@ test_categories:
     test_patterns:
       - "Smoke/IntegrationGpuConvFwd2dFp32.Correctness/0"
       - "Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
-      - "Smoke/IntegrationGpuPointwiseReluFwdNchwFp32.Correctness/0"
+      - "Smoke/IntegrationGpuActivationForwardFp32.Correctness/0"
       - "Smoke/IntegrationGpuReductionFp32.Correctness/0"
       - "Smoke/IntegrationGpuRMSNormFp32.Correctness/0"
       - "Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/mha"

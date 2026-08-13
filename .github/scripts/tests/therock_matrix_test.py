@@ -111,6 +111,26 @@ class TheRockMatrixTest(unittest.TestCase):
         self.assertIn("-DTHEROCK_ENABLE_RAND=ON", options)
         self.assertNotIn("-DTHEROCK_ENABLE_ROCPROFV3=ON", options)
 
+    def test_collect_projects_to_run_rpp_linux(self):
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            project_to_run = therock_matrix.collect_projects_to_run(["projects/rpp"])
+        self.assertEqual(len(project_to_run), 1)
+        rpp_entry = project_to_run[0]
+        options = rpp_entry["cmake_options"].split(" ")
+        self.assertEqual(rpp_entry["projects_to_test"], "rpp")
+        self.assertIn("-DTHEROCK_ENABLE_RPP=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_ALL=OFF", options)
+        # The platform restriction is a matrix-selection detail and must not
+        # leak into the row consumed by the workflow.
+        self.assertNotIn("platforms", rpp_entry)
+
+    def test_collect_projects_to_run_rpp_windows(self):
+        # RPP is experimental on Windows in TheRock and its test job is
+        # Linux-only, so the Windows matrix must not carry an rpp row at all.
+        with mock.patch.dict(os.environ, {"PLATFORM": "windows"}):
+            project_to_run = therock_matrix.collect_projects_to_run(["projects/rpp"])
+        self.assertEqual(project_to_run, [])
+
     def test_collect_projects_to_run_dependency_graph(self):
         subtrees = ["projects/miopen", "projects/hipblaslt"]
 
@@ -143,6 +163,8 @@ class TheRockMatrixTest(unittest.TestCase):
             ["projects/miopen", "projects/hipblaslt"]
         )
         therock_matrix.collect_projects_to_run(["projects/miopen", "projects/rocwmma"])
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            therock_matrix.collect_projects_to_run(["projects/rpp"])
 
         self.assertEqual(therock_matrix.project_map, project_map_before)
         self.assertEqual(therock_matrix.additional_options, additional_options_before)
