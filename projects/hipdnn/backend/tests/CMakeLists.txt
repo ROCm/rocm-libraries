@@ -125,6 +125,7 @@ add_executable(
     heuristics/TestStaticOrderingBuiltIn.cpp
     heuristics/TestJsonLogicEvaluator.cpp
     heuristics/TestFeatureExtractor.cpp
+    heuristics/TestDerivedValues.cpp
     heuristics/TestTreeDataAdapter.cpp
     heuristics/TestTableAdapter.cpp
     heuristics/TestOnnxAdapter.cpp
