@@ -50,7 +50,6 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 
 ### Testing
 - **[Testing Strategy](./docs/TESTING.md)** - Validation model, testing layers, CI signals, release procedures, and known gaps
-- **[Testing Commands](./docs/Testing.md)** - Local build, CTest, check-target, and test-authoring reference
 
 ---
 

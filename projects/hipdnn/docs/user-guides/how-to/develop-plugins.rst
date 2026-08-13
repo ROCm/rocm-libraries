@@ -467,7 +467,7 @@ For a comprehensive example of an integration test, see `IntegrationGpuBatchnorm
 
 .. note::
 
-  See `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/Testing.md#testing-requirements>`_.
+  See `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/TESTING.md#testing-requirements>`_.
 
 Example: MIOpen provider plugin
 ================================

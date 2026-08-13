@@ -282,7 +282,7 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any enabled tier should run without ASAN findings. `standard` is the recommended standalone check. See [Testing § Test Categories](./Testing.md#test-categories) for current tier contents.
+> Any enabled tier should run without ASAN findings. `standard` is the recommended standalone check. See [Testing § CTest Categories](./TESTING.md#ctest-categories) for current tier contents.
 
 Sanitizer exclusions are not passing evidence. The backend logging shutdown test is not registered under standalone ASAN, TheRock ASAN, or HOST_ASAN because it intentionally performs an unclean threaded shutdown. Standalone `BUILD_ADDRESS_SANITIZER` disables four sample tests on Windows and seven on Linux; the three additional Linux exclusions are fused-convolution tests. These exclusions do not currently cover every TheRock sanitizer mode. See [Testing Strategy § ASAN, TSAN, and Sanitizer Coverage](TESTING.md#asan-tsan-and-sanitizer-coverage) for the complete current-state matrix and known gaps.
 
@@ -353,7 +353,7 @@ The `hipdnn-`prefixed target names below work in both the standalone and superbu
 | Target | Description |
 |--------|-------------|
 | \<no target\> | Build all components |
-| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./Testing.md)) |
+| `hipdnn-check` / `hipdnn-check-verbose` | Build and run all tests (see [Testing](./TESTING.md#developer-testing-commands-and-authoring-reference)) |
 | `hipdnn-<category>-check` / `hipdnn-<category>-check-verbose` | Build and run tests for a category from `test_categories.yaml`: `quick`, `standard`, `comprehensive`, `full`, `unit`, `integration` |
 | `hipdnn-format` | Auto-format all C++ source files |
 | `hipdnn-check-format` | Check code formatting compliance |
@@ -400,10 +400,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For test category targets and other details, see [Testing](./Testing.md#superbuild-root-cmakepresetsjson).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For test category targets and other details, see [Testing](./TESTING.md#superbuild-root-cmakepresetsjson).
 
 > [!NOTE]
-> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [ctest vs. check targets](./Testing.md#ctest-vs-check-targets) for the available test targets.
+> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [ctest vs. check targets](./TESTING.md#ctest-vs-check-targets) for the available test targets.
 
 To build only hipDNN core from the superbuild (the same components as the [standalone build](#2-build-hipdnn), without the providers), use the `hipdnn` preset:
 
