@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <hipdnn_frontend.hpp>
@@ -58,6 +59,7 @@ protected:
         attrs.set_dilation(toVec(K_DGRAD_CONV_DILATION));
 
         auto dx = graph->conv_dgrad(dy, w, attrs);
+        dx->set_dim(toVec(K_DGRAD_TENSOR_DX_DIMS));
         dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
         return graph;
@@ -162,7 +164,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdTensorSharingPr
 
 // Builds a ConvolutionBwd graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend C API serialization path.
 TEST_F(IntegrationConvolutionBwdDescriptorLifting, ConvolutionBwdLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
@@ -220,6 +222,8 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
     constexpr std::array<int64_t, 4> K_AUTO_DY_STRIDES = {65536, 1024, 32, 1};
     constexpr std::array<int64_t, 4> K_AUTO_W_DIMS = {64, 3, 3, 3};
     constexpr std::array<int64_t, 4> K_AUTO_W_STRIDES = {27, 9, 3, 1};
+    constexpr std::array<int64_t, 4> K_AUTO_DX_DIMS = {1, 3, 32, 32};
+    constexpr std::array<int64_t, 4> K_AUTO_DX_STRIDES = {3072, 1024, 32, 1};
 
     auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AutoUidDgradLiftTest")
@@ -244,6 +248,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    dx->set_dim(toVec(K_AUTO_DX_DIMS));
     dx->set_output(true).set_name("dx");
 
     auto liftedGraph = liftGraph(*graph, _handle);
@@ -282,6 +287,8 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AutoAssignedUidsPreservedInLi
 
     EXPECT_EQ(tensorMap[dyUid]->get_dim(), toVec(K_AUTO_DY_DIMS));
     EXPECT_EQ(tensorMap[wUid]->get_dim(), toVec(K_AUTO_W_DIMS));
+    EXPECT_EQ(tensorMap[dxUid]->get_dim(), toVec(K_AUTO_DX_DIMS));
+    EXPECT_EQ(tensorMap[dxUid]->get_stride(), toVec(K_AUTO_DX_STRIDES));
 }
 
 // Builds a conv dgrad graph with asymmetric padding (pre_padding={1,0},
@@ -291,6 +298,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
 {
     constexpr std::array<int64_t, 2> K_ASYM_PRE_PADDING = {1, 0};
     constexpr std::array<int64_t, 2> K_ASYM_POST_PADDING = {0, 1};
+    constexpr std::array<int64_t, 4> K_ASYM_DX_DIMS = {1, 3, 33, 33};
 
     auto graph = std::make_shared<TestableGraphLifting>();
     graph->set_name("AsymPaddingDgradLiftTest")
@@ -315,6 +323,7 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
     convAttrs.set_convolution_mode(ConvolutionMode::CONVOLUTION);
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    dx->set_dim(toVec(K_ASYM_DX_DIMS));
     dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("dx");
 
     auto liftedGraph = liftGraph(*graph, _handle);
@@ -331,6 +340,71 @@ TEST_F(IntegrationConvolutionBwdDescriptorLifting, AsymmetricPaddingPreservedInL
     EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_ASYM_POST_PADDING));
     EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
     EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for a conv backward data graph.
+TEST_F(IntegrationConvolutionBwdDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraphLifting>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "ConvolutionBwdLiftingTestGraph");
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u) << "Expected 3 tensors (dy, w, dx)";
+
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_DGRAD_TENSOR_DY_UID,
+                                      "dy",
+                                      toVec(K_DGRAD_TENSOR_DY_DIMS),
+                                      toVec(K_DGRAD_TENSOR_DY_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_DGRAD_TENSOR_W_UID,
+                                      "w",
+                                      toVec(K_DGRAD_TENSOR_W_DIMS),
+                                      toVec(K_DGRAD_TENSOR_W_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_DGRAD_TENSOR_DX_UID,
+                                      "dx",
+                                      toVec(K_DGRAD_TENSOR_DX_DIMS),
+                                      toVec(K_DGRAD_TENSOR_DX_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<ConvolutionDgradNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a ConvolutionDgradNode";
+
+    // Verify convolution parameters
+    EXPECT_EQ(opNode->attributes.get_convolution_mode(), ConvolutionMode::CONVOLUTION);
+    EXPECT_EQ(opNode->attributes.get_pre_padding(), toVec(K_DGRAD_CONV_PADDING));
+    EXPECT_EQ(opNode->attributes.get_post_padding(), toVec(K_DGRAD_CONV_PADDING));
+    EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_DGRAD_CONV_STRIDE));
+    EXPECT_EQ(opNode->attributes.get_dilation(), toVec(K_DGRAD_CONV_DILATION));
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
 }
 
 } // namespace

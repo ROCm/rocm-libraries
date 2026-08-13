@@ -31,16 +31,16 @@ For instance, hipBLASLt is used as the default backend for problems on the gfx12
 allow rocBLAS to be built without Tensile or hipBLASLt.
 They can potentially be used as fallbacks for problems that are not supported by the Tensile or hipBLASLt backends.
 
-The environment variables ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are provided to manually control which GEMM backend is used. ``ROCBLAS_USE_HIPBLASLT`` is for non-batched, _strided_batched and _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` only affects _batched GEMM. These provide the following settings:
+The environment variables ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are provided to manually control which GEMM backend is used. ``ROCBLAS_USE_HIPBLASLT`` is for non-batched, _strided_batched and _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` only affects _batched GEMM. ``ROCBLAS_USE_HIPBLASLT_BATCHED`` is deprecated, should no longer be required, and is planned for removal in a future release. These provide the following settings:
 
 *  ``ROCBLAS_USE_HIPBLASLT`` and ``ROCBLAS_USE_HIPBLASLT_BATCHED`` are not set: the GEMM backend is automatically selected.
 *  ``ROCBLAS_USE_HIPBLASLT=0``: Tensile is always used as the GEMM backend.
-*  ``ROCBLAS_USE_HIPBLASLT_BATCHED=0``: Tensile is always used as the GEMM _batched backend.
+*  ``ROCBLAS_USE_HIPBLASLT_BATCHED=0``: Tensile is always used as the GEMM _batched backend. This setting is deprecated.
 *  ``ROCBLAS_USE_HIPBLASLT=1``: hipBLASLt is preferred as the GEMM backend, but the backend will fall back to Tensile for problems for which hipBLASLt does not provide a solution or if errors are encountered using the hipBLASLt backend.
 
 .. note::
 
-   The hipBLASLt backend for rocBLAS is currently not supported on Windows builds or static builds,
+   The hipBLASLt backend for rocBLAS is currently not supported on static builds,
    and is not included if building without Tensile.
 
 rocBLAS API and legacy BLAS functions

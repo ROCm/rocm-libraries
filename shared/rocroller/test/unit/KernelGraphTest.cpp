@@ -2717,8 +2717,8 @@ namespace KernelGraphTest
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(0)});
         kgraph.control.addElement(Body(), {kernel}, {beforeConditionalAssign});
 
-        auto conditional
-            = kgraph.control.addElement(ConditionalOp{test < unit, "Test Conditional"});
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{test < unit, ConditionalMode::Branch, "Test Conditional"});
 
         kgraph.control.addElement(Sequence(), {beforeConditionalAssign}, {conditional});
 
@@ -2738,18 +2738,23 @@ namespace KernelGraphTest
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
+        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
+
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasVGPRIndexing))
         {
-            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s2, 1"));
+            int idx = Register::RegisterAllocatorDetail::ReservedRegionSize();
+            EXPECT_THAT(output(),
+                        testing::HasSubstr(fmt::format("v_mov_b32 v{}, 1", idx))); //True Body
+            EXPECT_THAT(output(),
+                        testing::HasSubstr(fmt::format("v_mov_b32 v{}, 0", idx))); //False Body
         }
         else
         {
-            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+            EXPECT_THAT(output(), testing::HasSubstr(fmt::format("v_mov_b32 v1, 1"))); //True Body
+            EXPECT_THAT(output(), testing::HasSubstr(fmt::format("v_mov_b32 v1, 0"))); //False Body
         }
-        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
-        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 1")); //True Body
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 0")); //False Body
     }
 
     TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)
@@ -2796,11 +2801,13 @@ namespace KernelGraphTest
             Assign{Register::Type::Vector, Expression::literal(testValues[1])});
         kgraph.mapper.connect(assignFalseBranch, dstVGPR, NaryArgument::DEST);
 
-        auto workgroupExpr = k->workgroupIndex().at(0)->expression();
-        auto firstConditional
-            = kgraph.control.addElement(ConditionalOp{workgroupExpr < one, "First Conditional"});
+        auto workgroupExpr    = k->workgroupIndex().at(0)->expression();
+        auto firstConditional = kgraph.control.addElement(
+            ConditionalOp{workgroupExpr < one, ConditionalMode::Branch, "First Conditional"});
         auto secondConditional = kgraph.control.addElement(
-            ConditionalOp{(workgroupExpr > one) && (workgroupExpr <= two), "Second Conditional"});
+            ConditionalOp{(workgroupExpr > one) && (workgroupExpr <= two),
+                          ConditionalMode::Branch,
+                          "Second Conditional"});
 
         auto storeIndex = kgraph.control.addElement(StoreVGPR());
         kgraph.mapper.connect<User>(storeIndex, user);
@@ -2985,7 +2992,8 @@ namespace KernelGraphTest
 
         auto exprA = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{vgprA, Register::Type::Scalar, DataType::Int32});
-        auto conditional = kgraph.control.addElement(ConditionalOp{exprA > unit, "conditional"});
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{exprA > unit, ConditionalMode::Branch, "conditional"});
         kgraph.control.addElement(Sequence(), {loadA}, {conditional});
 
         auto loadB = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));

@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 /**
@@ -13,10 +13,10 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/{{ op.fbs_generated_header }}>
 {% if op.has_mode_fields or op.has_enum_fields %}
 #include <hipdnn_frontend/Types.hpp>
 {% endif %}
+#include <cstdint>
 #include <memory>
 {% set ns = namespace(has_optional=false) %}
 {% for df in op.data_fields %}
@@ -80,6 +80,12 @@ public:
 {% else %}
     float {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = 0.0f{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
 {% endif %}
+{% elif df.type == "scalar_int32" %}
+{% if df.is_optional_scalar %}
+    std::optional<int32_t> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
+{% else %}
+    int32_t {{ df.name }}{% if df.default_value %} = {{ df.default_value }}{% else %} = 0{% endif %}; ///< {{ df.name | replace('_', ' ') | title }}
+{% endif %}
 {% elif df.type == "scalar_int64" %}
 {% if df.is_optional_scalar %}
     std::optional<int64_t> {{ df.name }} = std::nullopt; ///< {{ df.name | replace('_', ' ') | title }}
@@ -97,6 +103,7 @@ public:
     // NOLINTEND(readability-identifier-naming)
 
 {% endif %}
+    // NOLINTBEGIN(readability-identifier-naming)
 {% for tensor in op.frontend.inputs %}
     /// @brief Get the {{ tensor.name }} input tensor
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -142,7 +149,9 @@ public:
         return setOutput(OutputNames::{{ tensor.effective_enum_name }}, value);
     }
 {% endfor %}
+    // NOLINTEND(readability-identifier-naming)
 {% for df in op.data_fields %}
+{% if not df.frontend_uses_member_access %}
 {% if df.is_vector %}
 
     /**
@@ -229,6 +238,24 @@ public:
     {
         return {{ df.name }};
     }
+{% elif df.type == "scalar_int32" %}
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    {{ op.frontend.attributes_class }}& {{ df.frontend_setter_name }}(int32_t value)
+    {
+        {{ df.name }} = value;
+        return *this;
+    }
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+{% if df.is_optional_scalar %}
+    std::optional<int32_t> {{ df.frontend_getter | replace('()', '') }}() const
+{% else %}
+    int32_t {{ df.frontend_getter | replace('()', '') }}() const
+{% endif %}
+    {
+        return {{ df.name }};
+    }
 {% elif df.type == "scalar_int64" %}
 
     // NOLINTNEXTLINE(readability-identifier-naming)
@@ -266,83 +293,8 @@ public:
         return {{ df.name }};
     }
 {% endif %}
-{% endfor %}
-
-    flatbuffers::Offset<{{ op.fbs_namespace }}::{{ op.fbs_table }}>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        return {{ op.fbs_namespace }}::Create{{ op.fbs_table }}Direct(
-            builder
-{%- for tf in op.tensor_fields %}
-{%- set ft = op.tensor_field_frontend_map.get(tf.name) %}
-{%- if ft %},
-{%- if tf.required %}
-            {{ ft.effective_getter_name }}()->get_uid()
-{%- else %}
-            {{ ft.effective_getter_name }}() ? flatbuffers::Optional<int64_t>({{ ft.effective_getter_name }}()->get_uid()) : flatbuffers::nullopt
-{%- endif %}
-{%- else %},
-            0
-{%- endif %}
-{%- endfor %}
-{%- for df in op.data_fields %}
-{% if df.is_vector %},
-            &{{ df.name }}
-{%- elif df.is_mode %},
-            toSdkType({{ df.name }})
-{%- elif df.is_enum %},
-            {{ df.name }}
-{%- elif df.is_optional_scalar %},
-            {{ df.name }}
-{%- else %},
-            {{ df.name }}
-{%- endif %}
-{%- endfor %});
-    }
-
-    static {{ op.frontend.attributes_class }} fromFlatBuffer(
-        const {{ op.fbs_namespace }}::{{ op.fbs_table }}* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        {{ op.frontend.attributes_class }} attr;
-
-{% for tf in op.tensor_fields %}
-{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
-{% if ft %}
-{% if tf.required %}
-        attr.{{ ft.effective_setter_name }}(tensorMap.at(fb->{{ tf.fbs_field }}()));
-{% else %}
-        if(fb->{{ tf.fbs_field }}() != 0)
-        {
-            attr.{{ ft.effective_setter_name }}(tensorMap.at(fb->{{ tf.fbs_field }}()));
-        }
-{% endif %}
 {% endif %}
 {% endfor %}
-
-{% for df in op.data_fields %}
-{% if df.is_vector %}
-        if(fb->{{ df.fbs_field }}() != nullptr)
-        {
-            std::vector<int64_t> {{ df.camel_name }}(fb->{{ df.fbs_field }}()->begin(), fb->{{ df.fbs_field }}()->end());
-            attr.{{ df.frontend_setter_name }}(std::move({{ df.camel_name }}));
-        }
-{% elif df.is_mode %}
-        attr.{{ df.frontend_setter_name }}(fromSdkType(fb->{{ df.fbs_field }}()));
-{% elif df.is_enum %}
-        attr.{{ df.frontend_setter_name }}(fb->{{ df.fbs_field }}());
-{% elif df.is_optional_scalar %}
-        if(fb->{{ df.fbs_field }}().has_value())
-        {
-            attr.{{ df.frontend_setter_name }}(fb->{{ df.fbs_field }}().value());
-        }
-{% else %}
-        attr.{{ df.frontend_setter_name }}(fb->{{ df.fbs_field }}());
-{% endif %}
-{% endfor %}
-
-        return attr;
-    }
 };
 {% if op.frontend.compatibility_typedef %}
 typedef {{ op.frontend.attributes_class }} {{ op.frontend.compatibility_typedef }}; ///< @brief Compatibility alias

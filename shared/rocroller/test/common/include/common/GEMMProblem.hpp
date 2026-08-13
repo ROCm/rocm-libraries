@@ -5,10 +5,12 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
 #include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
+
 #include <string>
 #include <vector>
 
@@ -86,6 +88,10 @@ struct GEMMProblem
     int  workgroupMappingValue = -1;
     bool workgroupRemapXCC     = false;
 
+    uint workgroupClusterSizeX = 0;
+    uint workgroupClusterSizeY = 0;
+    uint workgroupClusterSizeZ = 0;
+
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
 
@@ -93,6 +99,9 @@ struct GEMMProblem
     rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
+
+    // LDS bank conflict swizzle
+    rocRoller::LDSBankSwizzleMode ldsSwizzleMode = rocRoller::LDSBankSwizzleMode::None;
 
     // Scale pretile / swizzle (mirrors client TypeParameters)
     rocRoller::ScaleSkipPermlaneMode scaleSkipPermlane = rocRoller::ScaleSkipPermlaneMode::None;

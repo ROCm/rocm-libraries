@@ -3,7 +3,6 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -28,6 +27,10 @@ public:
 
     Error pre_validate_node() const override
     {
+        HIPDNN_RETURN_IF_TRUE(attributes.hasUnsupportedUsage(),
+                              ErrorCode::INVALID_VALUE,
+                              attributes.getUnsupportedReason());
+
         const auto q = attributes.get_q();
         const auto k = attributes.get_k();
         const auto v = attributes.get_v();
@@ -149,8 +152,14 @@ public:
             }
         }
 
-        // Rule 6: Optional scale must be a scalar tensor (volume == 1)
+        // Rule 6: attn_scale may be given as a tensor or a baked value, not both
         const auto scale = attributes.get_attn_scale();
+        HIPDNN_RETURN_IF_TRUE(
+            scale && attributes.attn_scale_value.has_value(),
+            ErrorCode::INVALID_VALUE,
+            "SdpaFwdNode: attn_scale tensor and attn_scale_value cannot both be set");
+
+        // Rule 6b: Optional scale must be a scalar tensor (volume == 1)
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
@@ -259,17 +268,6 @@ public:
         std::vector<detail::ScopedHipdnnBackendDescriptor>& operations) const override
     {
         return detail::createSdpaFwdOperation(attributes, tensorDescs, operations);
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::SdpaAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 };
 } // namespace hipdnn_frontend::graph

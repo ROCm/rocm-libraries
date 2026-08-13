@@ -319,6 +319,14 @@ typedef enum
     = 0x10 /**< enumerator rocblas_gemm_flags_fp16_alt_impl_rnz */
 } hipblasGemmFlags_t;
 
+/*! \brief Library property types for querying version components. */
+typedef enum
+{
+    HIPBLAS_MAJOR_VERSION = 0, /**< Major version number */
+    HIPBLAS_MINOR_VERSION = 1, /**< Minor version number */
+    HIPBLAS_PATCH_LEVEL   = 2 /**< Patch level */
+} hipblasLibraryProperty_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -328,6 +336,32 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasCreate(hipblasHandle_t* handle);
 
 /*! \brief Destroys the library context created using hipblasCreate(). */
 HIPBLAS_EXPORT hipblasStatus_t hipblasDestroy(hipblasHandle_t handle);
+
+/*! \brief Gets the hipBLAS library version number.
+    \details
+    Returns version as integer: major * 10000 + minor * 100 + patch.
+    Example: version 3.5.1 returns 30501.
+
+    Handle parameter can be NULL.
+
+    @param[in]  handle    Handle to library context (can be NULL)
+    @param[out] version   Pointer to integer for version number
+
+    @return HIPBLAS_STATUS_SUCCESS or HIPBLAS_STATUS_INVALID_VALUE if version is NULL
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetVersion(hipblasHandle_t handle, int* version);
+
+/*! \brief Gets a specific property of the hipBLAS library.
+    \details
+    Returns requested property value (major, minor, or patch).
+    Does not require a handle.
+
+    @param[in]  type     Property type to query
+    @param[out] value    Pointer to integer for property value
+
+    @return HIPBLAS_STATUS_SUCCESS or HIPBLAS_STATUS_INVALID_VALUE
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetProperty(hipblasLibraryProperty_t type, int* value);
 
 /*! \brief Sets the stream for the handle */
 HIPBLAS_EXPORT hipblasStatus_t hipblasSetStream(hipblasHandle_t handle, hipStream_t streamId);
@@ -571,6 +605,34 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasSetAtomicsMode(hipblasHandle_t      handle
 /*! \brief Gets hipblasSetAtomicsMode*/
 HIPBLAS_EXPORT hipblasStatus_t hipblasGetAtomicsMode(hipblasHandle_t       handle,
                                                      hipblasAtomicsMode_t* atomics_mode);
+
+/*! \brief Set alpha stride for a limited set of batched and strided_batched functions to specify the stride for alpha between successive batch elements.
+    Only applies to hipblasPointerModeDevice and thus device side allocations.
+    It enables interpretation of the alpha pointer for both batched and strided_batched functions as a pointer to a vector of values.
+    Default value is 0 which treats it as a pointer to a single scalar. Support is denoted with specific function documentation.
+    Warning this is a modal like state in the handle. Restore to value 0 if no longer applicable to later function calls.
+    - Supported in rocBLAS backend only.
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasSetBatchAlphaStride(hipblasHandle_t handle,
+                                                          hipblasStride   alpha_stride);
+
+/*! \brief Get batch alpha stride from the handle. */
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchAlphaStride(hipblasHandle_t handle,
+                                                          hipblasStride*  alpha_stride);
+
+/*! \brief Set beta stride for a limited set of batched and strided_batched functions to specify the stride for beta between successive batch elements.
+    Only applies to hipblasPointerModeDevice and thus device side allocations.
+    It enables interpretation of the beta pointer for both batched and strided_batched functions as a pointer to a vector of values.
+    Default value is 0 which treats it as a pointer to a single scalar. Support is denoted with specific function documentation.
+    Warning this is a modal like state in the handle. Restore to value 0 if no longer applicable to later function calls.
+    - Supported in rocBLAS backend only.
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasSetBatchBetaStride(hipblasHandle_t handle,
+                                                         hipblasStride   beta_stride);
+
+/*! \brief Get batch beta stride from the handle. */
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle,
+                                                         hipblasStride*  beta_stride);
 
 /*
  * ===========================================================================

@@ -18,8 +18,14 @@ inline void to_json(nlohmann::json& tensorAttrJson,
     tensorAttrJson["data_type"] = tensorAttr.data_type();
     tensorAttrJson["dims"] = tensorAttr.dims();
     tensorAttrJson["strides"] = tensorAttr.strides();
-    tensorAttrJson["name"] = tensorAttr.name();
+    tensorAttrJson["name"] = flatbuffers::safeStr(tensorAttr.name());
     tensorAttrJson["virtual"] = tensorAttr.virtual_();
+    tensorAttrJson["alignment"] = tensorAttr.alignment();
+    tensorAttrJson["is_runtime_pass_by_value"] = tensorAttr.is_runtime_pass_by_value();
+    if(tensorAttr.ragged_offset_tensor_uid().has_value())
+    {
+        tensorAttrJson["ragged_offset_tensor_uid"] = tensorAttr.ragged_offset_tensor_uid().value();
+    }
 
     // Serialize TensorValue union if present
     auto valueType = tensorAttr.value_type();
@@ -49,6 +55,9 @@ inline void to_json(nlohmann::json& tensorAttrJson,
         case data_objects::TensorValue::Float64Value:
             tensorAttrJson["value"] = tensorAttr.value_as_Float64Value()->value();
             break;
+        case data_objects::TensorValue::BoolValue:
+            tensorAttrJson["value"] = tensorAttr.value_as_BoolValue()->value();
+            break;
         default:
             break;
         }
@@ -69,6 +78,13 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
     auto dims = entry.at("dims").get<std::vector<int64_t>>();
     auto strides = entry.at("strides").get<std::vector<int64_t>>();
     const bool isVirtual = entry.at("virtual").get<bool>();
+    const bool isRuntimePassByValue = entry.value("is_runtime_pass_by_value", false);
+    const int64_t alignment = entry.value("alignment", INT64_C(16));
+    flatbuffers::Optional<int64_t> raggedOffsetTensorUid = flatbuffers::nullopt;
+    if(entry.contains("ragged_offset_tensor_uid"))
+    {
+        raggedOffsetTensorUid = entry.at("ragged_offset_tensor_uid").get<int64_t>();
+    }
 
     // Check if TensorValue union is present
     if(entry.contains("value_type"))
@@ -128,6 +144,13 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
             valueOffset = builder.CreateStruct(doubleVal).Union();
             break;
         }
+        case data_objects::TensorValue::BoolValue:
+        {
+            auto val = entry.at("value").get<bool>();
+            const data_objects::BoolValue boolVal(val);
+            valueOffset = builder.CreateStruct(boolVal).Union();
+            break;
+        }
         default:
             throw std::runtime_error("hipdnn_flatbuffers_sdk::json::to<TensorAttributes>(): "
                                      "Unsupported TensorValue type");
@@ -141,12 +164,25 @@ inline auto to<data_objects::TensorAttributes>(flatbuffers::FlatBufferBuilder& b
                                                     builder.CreateVector(dims),
                                                     isVirtual,
                                                     valueType,
-                                                    valueOffset);
+                                                    valueOffset,
+                                                    isRuntimePassByValue,
+                                                    raggedOffsetTensorUid,
+                                                    alignment);
     }
 
     // No TensorValue, use the Direct version
-    return data_objects::CreateTensorAttributesDirect(
-        builder, uid, name.c_str(), dataType, &strides, &dims, isVirtual);
+    return data_objects::CreateTensorAttributesDirect(builder,
+                                                      uid,
+                                                      name.c_str(),
+                                                      dataType,
+                                                      &strides,
+                                                      &dims,
+                                                      isVirtual,
+                                                      data_objects::TensorValue::NONE,
+                                                      0,
+                                                      isRuntimePassByValue,
+                                                      raggedOffsetTensorUid,
+                                                      alignment);
 }
 }
 

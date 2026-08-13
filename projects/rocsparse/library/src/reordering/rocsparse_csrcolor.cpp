@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -140,11 +140,6 @@ namespace rocsparse
                 //
                 const uint64_t count_previous_uncolored = __popcll(wavefront_mask & filter);
 
-                //
-                // Synchronize for cache considerations.
-                //
-                __syncthreads();
-
                 if(predicate)
                 {
                     //
@@ -193,7 +188,7 @@ namespace rocsparse
         //
         // Set to 0.
         //
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(seq_ptr, 0, sizeof(J) * (n + 1), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(seq_ptr, 0, sizeof(J) * (n + 1), stream));
 
         //
         // Count uncolored values.
@@ -344,7 +339,7 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
     //
     // Initialize colors
     //
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(colors, -1, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(colors, -1, sizeof(J) * m, stream));
 
     //
     // Iterate until the desired fraction of colored vertices is reached
@@ -395,9 +390,9 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
         //
         // Copy colored max vertices for current iteration to host
         //
-        RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(&num_uncolored, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            &num_uncolored, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
     }
 
     //
@@ -424,8 +419,8 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
             workspace);
 
         RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(ncolors, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            rocsparse_hipMemcpyAsync(ncolors, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
         *ncolors += 1;
     }
     //

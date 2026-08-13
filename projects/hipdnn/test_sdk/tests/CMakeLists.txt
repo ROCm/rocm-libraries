@@ -17,22 +17,29 @@ add_executable(
     main.cpp
     utilities/TestCpuFpReferenceBatchnorm.cpp
     utilities/TestCpuFpReferenceBatchnormWithVariance.cpp
+    utilities/TestCpuFpReferenceBlockScaleDequantize.cpp
     utilities/TestCpuFpReferenceRMSNorm.cpp
+    utilities/TestCpuFpReferenceResampleFwd.cpp
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
+    utilities/TestCpuFpReferenceLayernormBackward.cpp
     utilities/TestCpuFpReferenceMatmul.cpp
     utilities/TestCpuFpReferenceReduction.cpp
     utilities/TestCpuFpReferenceMiopenRmsValidation.cpp
     utilities/TestCpuFpReferenceUtilities.cpp
     utilities/TestCpuFpReferenceValidation.cpp
     utilities/TestCpuTypeUtilities.cpp
+    utilities/TestSdkFrontendTypeConversions.cpp
     utilities/TestCpuReferencePointwise.cpp
+    utilities/TestDynamicTolerancesBatchNorm.cpp
     utilities/TestDynamicTolerancesCommon.cpp
     utilities/TestDynamicTolerancesConv.cpp
+    utilities/TestDynamicTolerancesLayerNorm.cpp
     utilities/TestDynamicTolerancesMatmul.cpp
     utilities/TestDynamicTolerancesPointwise.cpp
     utilities/TestDynamicTolerancesRMSNorm.cpp
+    utilities/TestDynamicTolerancesSdpa.cpp
     utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
@@ -44,6 +51,8 @@ add_executable(
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
     utilities/TestVectorLoggingUtils.cpp
+    utilities/cpu_graph_executor/TestBlockScaleDequantizePlan.cpp
+    utilities/cpu_graph_executor/TestBlockScaleDequantizeSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdPlan.cpp
     utilities/cpu_graph_executor/TestBatchnormBwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestBatchnormFwdInferencePlan.cpp
@@ -58,7 +67,10 @@ add_executable(
     utilities/cpu_graph_executor/TestConvolutionFwdPlan.cpp
     utilities/cpu_graph_executor/TestConvolutionFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestCpuReferenceGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestCpuReferenceRaggedRejection.cpp
     utilities/cpu_graph_executor/TestFusedOperationsCpuGraphExecutor.cpp
+    utilities/cpu_graph_executor/TestLayernormBpropPlan.cpp
+    utilities/cpu_graph_executor/TestLayernormBpropSignatureKey.cpp
     utilities/cpu_graph_executor/TestLayernormFpropPlan.cpp
     utilities/cpu_graph_executor/TestLayernormFpropSignatureKey.cpp
     utilities/cpu_graph_executor/TestMatmulPlan.cpp
@@ -70,10 +82,15 @@ add_executable(
     utilities/cpu_graph_executor/TestPointwiseSignatureKey.cpp
     utilities/cpu_graph_executor/TestReductionPlan.cpp
     utilities/cpu_graph_executor/TestReductionSignatureKey.cpp
+    utilities/cpu_graph_executor/TestResampleFwdPlan.cpp
+    utilities/cpu_graph_executor/TestResampleFwdSignatureKey.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormFwdSignatureKey.cpp
-    utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp
-    utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp
+    utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp
+    utilities/cpu_graph_executor/TestRMSNormBwdSignatureKey.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdPlan.cpp>
     TestVersion.cpp
 )
 
@@ -84,4 +101,4 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_test_sdk_tests)
-add_unit_test_target(hipdnn_test_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_test_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

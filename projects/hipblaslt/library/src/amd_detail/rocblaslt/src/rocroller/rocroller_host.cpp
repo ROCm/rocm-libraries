@@ -20,6 +20,11 @@
 
 using namespace rocRoller;
 
+std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolutionIndex)
+{
+    return shortRocRollerKernelNameFromSolutionIndex(indexToParameters(encodedSolutionIndex));
+}
+
 /**
  * @brief RocRollerHandle
  *
@@ -298,15 +303,15 @@ rocRoller::DataType hipDataType_to_rocRoller_type(hipDataType type)
 {
     // Older versions of ROCm do not have these types defined,
     // so they need to be handled specially.
-    if(static_cast<int>(type) == HIP_R_6F_E2M3_EXT)
+    if(static_cast<int>(type) == HIP_R_6F_E2M3)
     {
         return rocRoller::DataType::FP6;
     }
-    if(static_cast<int>(type) == HIP_R_6F_E3M2_EXT)
+    if(static_cast<int>(type) == HIP_R_6F_E3M2)
     {
         return rocRoller::DataType::BF6;
     }
-    if(static_cast<int>(type) == HIP_R_4F_E2M1_EXT)
+    if(static_cast<int>(type) == HIP_R_4F_E2M1)
     {
         return rocRoller::DataType::FP4;
     }
@@ -514,19 +519,6 @@ rocblaslt_status
             break;
 
         index = parametersToIndex(solutionIndexParameter);
-        
-        // Validate problem dimensions match kernel tile requirements before generating kernel
-        // to avoid ocRoller expression evaluation with invalid dimensions
-        if(solutionIndexParameter.workgroupTile.m > 0 && solutionIndexParameter.workgroupTile.n > 0
-           && solutionIndexParameter.workgroupTile.k > 0)
-        {
-            if(prob.m % solutionIndexParameter.workgroupTile.m != 0
-               || prob.n % solutionIndexParameter.workgroupTile.n != 0
-               || prob.k % solutionIndexParameter.workgroupTile.k != 0)
-            {
-                continue;  // Skip this solution entirely
-            }
-        }
 
         auto existingSolution = rocroller_handle->cache.getKernel(
             kernelType, solutionIndexParameter, ProblemDims{prob.m, prob.n, prob.k});
@@ -534,6 +526,19 @@ rocblaslt_status
         // If kernel doesn't already exist, generate it
         if(!existingSolution)
         {
+            // Validate problem dimensions match kernel tile requirements before generating kernel
+            // to avoid rocRoller expression evaluation with invalid dimensions
+            if(solutionIndexParameter.workgroupTile.m > 0 && solutionIndexParameter.workgroupTile.n > 0
+                && solutionIndexParameter.workgroupTile.k > 0)
+            {
+                if(prob.m % solutionIndexParameter.workgroupTile.m != 0
+                    || prob.n % solutionIndexParameter.workgroupTile.n != 0
+                    || prob.k % solutionIndexParameter.workgroupTile.k != 0)
+                {
+                    continue;  // Skip this solution entirely
+                }
+            }
+
             auto status = genKernelFromSolutionIndexParameters(
                 rocroller_handle, kernelType, solutionIndexParameter, index, kernel);
             if(status != rocblaslt_status_success)
@@ -542,6 +547,11 @@ rocblaslt_status
         else
         {
             kernel = *existingSolution;
+        }
+
+        if (!kernel->isSupportedProblem(prob))
+        {
+            continue;
         }
 
         // Fill out heuristicResultsArray

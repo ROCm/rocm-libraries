@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -11,7 +12,9 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
+#include <hipdnn_test_sdk/utilities/LiftingTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -24,20 +27,7 @@ using hipdnn_tests::toVec;
 namespace
 {
 
-// Exposes protected Graph methods for lifting integration tests
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph;
-    using Graph::deserialize_via_backend;
-    using Graph::fromBackendDescriptor;
-    using Graph::get_raw_graph_descriptor;
-
-    const std::vector<std::shared_ptr<INode>>& getSubNodes() const
-    {
-        return _sub_nodes;
-    }
-};
+using TestableGraph = hipdnn_tests::TestableGraphLifting;
 
 // Use SDK constants from SdpaFwdConstants.hpp:
 // K_SDPA_TENSOR_Q_UID, K_SDPA_TENSOR_K_UID, K_SDPA_TENSOR_V_UID, K_SDPA_TENSOR_O_UID,
@@ -186,6 +176,16 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
 {
     auto originalGraph = buildGraph();
 
+    auto& originalNodes = originalGraph->getSubNodes();
+    ASSERT_EQ(originalNodes.size(), 1u);
+    auto* originalNode = dynamic_cast<SdpaFwdNode*>(originalNodes[0].get());
+    ASSERT_NE(originalNode, nullptr);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_value(0.125f);
+    originalNode->attributes.set_attn_scale(scale);
+
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -200,6 +200,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 5u);
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_SCALE_UID), 0u);
 
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u);
@@ -207,6 +209,11 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
     auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(opNode, nullptr);
 
+    // Verify the tensor scale is restored and shared with the tensor map.
+    ASSERT_NE(opNode->attributes.get_attn_scale(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_attn_scale()->get_uid(), K_SDPA_TENSOR_SCALE_UID);
+    EXPECT_EQ(tensorMap[K_SDPA_TENSOR_SCALE_UID].get(), opNode->attributes.get_attn_scale().get());
+    EXPECT_FALSE(opNode->attributes.attn_scale_value.has_value());
     // Verify q tensor sharing
     EXPECT_EQ(opNode->attributes.get_q()->get_uid(), K_SDPA_TENSOR_Q_UID);
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_Q_UID].get(), opNode->attributes.get_q().get());
@@ -223,7 +230,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdTensorSharingPreserved)
 
 // Builds a SdpaFwd graph, serializes to binary, creates a backend descriptor
 // from bytes (no handle, no finalize), calls fromBackendDescriptor(), and verifies
-// all fields survive the FlatBuffer-direct path.
+// all fields survive the backend binary serialization path.
 TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
 {
     auto originalGraph = buildGraph();
@@ -232,7 +239,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Serialize to binary via the frontend
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     // Create a backend graph descriptor from serialized bytes (no handle, no finalize)
@@ -280,10 +288,10 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdLiftWithoutFinalization)
     EXPECT_EQ(tensorMap[K_SDPA_TENSOR_O_UID]->get_stride(), toVec(K_SDPA_TENSOR_O_STRIDES));
 }
 
-// Builds an SDPA fprop graph with all optional boolean flags, scalar parameters,
+// Builds an SDPA fprop graph with all compatible optional boolean flags, scalar parameters,
 // and optional tensors set, lowers via the C-API, lifts back, and verifies
 // every attribute survives.
-TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaCApi)
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithCompatibleOptionalAttributesViaCApi)
 {
     auto originalGraph = buildGraph();
 
@@ -292,10 +300,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
     auto* sdpaNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
     ASSERT_NE(sdpaNode, nullptr);
 
-    // Optional input tensors
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
-    scale->set_value(0.125f);
+    // Compatible optional input tensors; attention scale is set as a scalar below.
 
     auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_TENSOR_ATTN_MASK_UID)
@@ -336,8 +341,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
     dropoutScale->set_uid(K_SDPA_TENSOR_DROPOUT_SCALE_UID).set_name("DROPOUT_SCALE");
     dropoutScale->set_value(1.0f / (1.0f - 0.1f));
 
-    sdpaNode->attributes.set_attn_scale(scale)
-        .set_bias(attnMask)
+    sdpaNode->attributes.set_bias(attnMask)
         .set_seq_len_q(seqLenQ)
         .set_seq_len_kv(seqLenKv)
         .set_dropout(0.1f, seed, offset)
@@ -348,7 +352,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
         .set_causal_mask(true)
         .set_causal_mask_bottom_right(true)
         .set_generate_stats(true)
-        .set_attn_scale_value(0.125f)
+        .set_attn_scale(0.125f)
         .set_diagonal_band_left_bound(-1)
         .set_diagonal_band_right_bound(1)
         .set_paged_attention_max_seq_len_kv(256)
@@ -376,14 +380,9 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdWithAllOptionalAttributesViaC
 
     const auto& attrs = liftedNode->attributes;
 
-    // Optional tensor UIDs and field verification on the node
-    // Value tensors (created via set_value()) are stored as rank-1 scalars: dim={1}, stride={1}.
-    ASSERT_NE(attrs.get_attn_scale(), nullptr);
-    EXPECT_EQ(attrs.get_attn_scale()->get_uid(), K_SDPA_TENSOR_SCALE_UID);
-    EXPECT_EQ(attrs.get_attn_scale()->get_name(), "SCALE");
-    EXPECT_EQ(attrs.get_attn_scale()->get_data_type(), DataType::FLOAT);
-    EXPECT_EQ(attrs.get_attn_scale()->get_dim(), (std::vector<int64_t>{1}));
-    EXPECT_EQ(attrs.get_attn_scale()->get_stride(), (std::vector<int64_t>{1}));
+    // Compatible optional tensor UIDs and field verification on the node.
+    // Attention scale is represented by the scalar attribute below.
+    EXPECT_EQ(attrs.get_attn_scale(), nullptr);
 
     ASSERT_NE(attrs.get_bias(), nullptr);
     EXPECT_EQ(attrs.get_bias()->get_uid(), K_SDPA_TENSOR_ATTN_MASK_UID);
@@ -536,11 +535,12 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHand
     auto result = originalGraph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
-    auto data = originalGraph->toBinary();
+    auto [data, serErr] = originalGraph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     ASSERT_FALSE(data.empty());
 
     auto liftedGraph = std::make_shared<TestableGraph>();
-    result = liftedGraph->deserialize_via_backend(_handle, data);
+    result = liftedGraph->deserialize(_handle, data);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
     // Verify graph-level data types and name
@@ -570,6 +570,156 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdDeserializeViaBackendWithHand
     EXPECT_EQ(sdpaNode->attributes.get_name(), "test_op");
     EXPECT_EQ(sdpaNode->attributes.get_q()->get_uid(), K_SDPA_TENSOR_Q_UID);
     EXPECT_EQ(sdpaNode->attributes.get_o()->get_uid(), K_SDPA_TENSOR_O_UID);
+}
+
+// Exercises the JSON serialize/deserialize path with a handle (full finalization)
+// for an SDPA forward graph.
+TEST_F(IntegrationSdpaFwdDescriptorLifting, JsonRoundTripWithHandle)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Serialize to JSON (auto-lowers internally)
+    std::string jsonData;
+    result = originalGraph->serialize(jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    ASSERT_FALSE(jsonData.empty());
+
+    // Deserialize from JSON with handle
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->deserialize(_handle, jsonData);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    // Verify graph-level attributes
+    EXPECT_EQ(liftedGraph->get_name(), "SdpaFwdLiftingTestGraph");
+    EXPECT_EQ(liftedGraph->get_compute_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_intermediate_data_type(), DataType::FLOAT);
+    EXPECT_EQ(liftedGraph->get_io_data_type(), DataType::FLOAT);
+
+    // Verify tensors by UID
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 4u);
+
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_Q_UID,
+                                      "q",
+                                      toVec(K_SDPA_TENSOR_Q_DIMS),
+                                      toVec(K_SDPA_TENSOR_Q_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_K_UID,
+                                      "k",
+                                      toVec(K_SDPA_TENSOR_K_DIMS),
+                                      toVec(K_SDPA_TENSOR_K_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_V_UID,
+                                      "v",
+                                      toVec(K_SDPA_TENSOR_V_DIMS),
+                                      toVec(K_SDPA_TENSOR_V_STRIDES),
+                                      DataType::FLOAT);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_O_UID,
+                                      "o",
+                                      toVec(K_SDPA_TENSOR_O_DIMS),
+                                      toVec(K_SDPA_TENSOR_O_STRIDES),
+                                      DataType::FLOAT);
+
+    // Verify sub-node count and type
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
+
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr) << "Expected a SdpaFwdNode";
+
+    // Verify diagonal alignment
+    EXPECT_EQ(opNode->attributes.diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+
+    // Verify operation name
+    EXPECT_EQ(opNode->attributes.get_name(), "test_op");
+}
+
+// Direct regression guard: when the source graph leaves mma_core_mode UNSET,
+// the lifted graph must round-trip with mma_core_mode == NOT_SET (no error).
+// Earlier behavior threw "Unsupported SDK DataType" on the UNSET sentinel.
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeUnsetRoundTrip)
+{
+    auto originalGraph = buildGraph();
+
+    auto result = originalGraph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = originalGraph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = originalGraph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+
+    EXPECT_EQ(opNode->attributes.mma_core_mode, DataType::NOT_SET);
+}
+
+// Companion to the UNSET case: when mma_core_mode is explicitly set on the
+// source graph, the lifted graph must round-trip the value.
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeSetRoundTrip)
+{
+    auto graph = std::make_shared<TestableGraph>();
+    graph->set_name("SdpaFwdMmaCoreModeSet")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto q = std::make_shared<TensorAttributes>();
+    q->set_uid(K_SDPA_TENSOR_Q_UID).set_name("q").set_data_type(DataType::FLOAT);
+    q->set_dim(toVec(K_SDPA_TENSOR_Q_DIMS)).set_stride(toVec(K_SDPA_TENSOR_Q_STRIDES));
+
+    auto k = std::make_shared<TensorAttributes>();
+    k->set_uid(K_SDPA_TENSOR_K_UID).set_name("k").set_data_type(DataType::FLOAT);
+    k->set_dim(toVec(K_SDPA_TENSOR_K_DIMS)).set_stride(toVec(K_SDPA_TENSOR_K_STRIDES));
+
+    auto v = std::make_shared<TensorAttributes>();
+    v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
+    v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
+
+    SdpaAttributes attrs;
+    attrs.set_name("test_op")
+        .set_diagonal_alignment(DiagonalAlignment::TOP_LEFT)
+        .set_mma_core_mode(DataType::HALF);
+
+    auto results = graph->sdpa(q, k, v, attrs);
+    results[0]->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("o");
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+
+    EXPECT_EQ(opNode->attributes.mma_core_mode, DataType::HALF);
 }
 
 } // namespace

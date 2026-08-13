@@ -28,7 +28,12 @@ enum class NodeType
     BLOCK_SCALE_QUANTIZE = 14,
     BLOCK_SCALE_DEQUANTIZE = 15,
     CUSTOM_OP = 16,
-    REDUCTION = 17
+    REDUCTION = 17,
+    RESAMPLE_FWD = 18,
+    RMS_NORM_BACKWARD = 19,
+    LAYERNORM_BACKWARD = 20,
+    RESAMPLE_BWD = 21,
+    MOE_GROUPED_MATMUL = 22
 };
 
 } // namespace hipdnn_frontend::graph

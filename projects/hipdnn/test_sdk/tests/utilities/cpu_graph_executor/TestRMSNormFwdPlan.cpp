@@ -5,9 +5,9 @@
 
 #include "RMSNormGraphUtils.hpp"
 #include "RMSNormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerances.hpp>
@@ -17,9 +17,9 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 namespace rmsnorm = hipdnn_test_sdk::utilities::rmsnorm;
@@ -30,13 +30,15 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     RMSNormFwdTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     RMSNormFwdTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
-    const auto& attributes = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
+    const auto& attributes
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
     const auto* invRmsPtr = attributes.inv_rms_tensor_uid().has_value()
@@ -50,8 +52,8 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
 
     const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
 
-    const double epsilon
-        = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
+    const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        params.epsilonTensor, "Epsilon");
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -75,13 +77,86 @@ TEST(TestRMSNormFwdPlan, ExecutePlan)
         *planTensorBundle.tensors[attributes.y_tensor_uid()].get()));
 }
 
+TEST(TestRMSNormFwdPlan, ExecutePlanWithRuntimeEpsilonFromPack)
+{
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const unsigned int seed = getGlobalTestSeed();
+
+    // Runtime pass-by-value epsilon graph: epsilon carries no baked value; the
+    // host value is delivered through the variant pack at execute.
+    auto runtimeGraph = buildRMSNormFwdGraph(DataType::FLOAT,
+                                             DataType::FLOAT,
+                                             DataType::FLOAT,
+                                             dims,
+                                             TensorLayout::NHWC,
+                                             /*runtimeEpsilon=*/true);
+    auto [runtimeSerialized, runtimeErr] = runtimeGraph->to_binary();
+    ASSERT_TRUE(runtimeErr.is_good()) << runtimeErr.get_message();
+    const GraphWrapper runtimeWrapper(runtimeSerialized.data(), runtimeSerialized.size());
+    const INodeWrapper& runtimeNode = runtimeWrapper.getNodeWrapper(0);
+    RMSNormFwdTensorBundle runtimeBundle(runtimeNode, runtimeWrapper.getTensorMap(), seed);
+
+    const auto& runtimeAttrs
+        = runtimeNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes>();
+    const auto& runtimeMap = runtimeWrapper.getTensorMap();
+
+    // Deliver the runtime epsilon host value in the variant pack.
+    const float epsilonHostValue = 1e-5f;
+    *static_cast<float*>(runtimeBundle.tensors[runtimeAttrs.epsilon_tensor_uid()]->rawHostData())
+        = epsilonHostValue;
+
+    const auto* runtimeInvRmsPtr = runtimeAttrs.inv_rms_tensor_uid().has_value()
+                                       ? runtimeMap.at(runtimeAttrs.inv_rms_tensor_uid().value())
+                                       : nullptr;
+    RMSNormFwdParams runtimeParams(*runtimeMap.at(runtimeAttrs.x_tensor_uid()),
+                                   *runtimeMap.at(runtimeAttrs.scale_tensor_uid()),
+                                   *runtimeMap.at(runtimeAttrs.epsilon_tensor_uid()),
+                                   *runtimeMap.at(runtimeAttrs.y_tensor_uid()),
+                                   runtimeInvRmsPtr);
+    const std::unordered_map<int64_t, void*> runtimePack = runtimeBundle.toHostVariantPack();
+    RMSNormFwdPlan<float, float, float, float> runtimePlan(std::move(runtimeParams));
+    runtimePlan.execute(runtimePack);
+
+    // Baked-epsilon reference graph with the same seed and the same epsilon value.
+    auto bakedGraph = buildRMSNormFwdGraph(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
+    auto [bakedSerialized, bakedErr] = bakedGraph->to_binary();
+    ASSERT_TRUE(bakedErr.is_good()) << bakedErr.get_message();
+    const GraphWrapper bakedWrapper(bakedSerialized.data(), bakedSerialized.size());
+    const INodeWrapper& bakedNode = bakedWrapper.getNodeWrapper(0);
+    RMSNormFwdTensorBundle bakedBundle(bakedNode, bakedWrapper.getTensorMap(), seed);
+
+    const auto& bakedAttrs
+        = bakedNode.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes>();
+    const auto& bakedMap = bakedWrapper.getTensorMap();
+    const auto* bakedInvRmsPtr = bakedAttrs.inv_rms_tensor_uid().has_value()
+                                     ? bakedMap.at(bakedAttrs.inv_rms_tensor_uid().value())
+                                     : nullptr;
+    RMSNormFwdParams bakedParams(*bakedMap.at(bakedAttrs.x_tensor_uid()),
+                                 *bakedMap.at(bakedAttrs.scale_tensor_uid()),
+                                 *bakedMap.at(bakedAttrs.epsilon_tensor_uid()),
+                                 *bakedMap.at(bakedAttrs.y_tensor_uid()),
+                                 bakedInvRmsPtr);
+    const std::unordered_map<int64_t, void*> bakedPack = bakedBundle.toHostVariantPack();
+    RMSNormFwdPlan<float, float, float, float> bakedPlan(std::move(bakedParams));
+    bakedPlan.execute(bakedPack);
+
+    const float tolerance
+        = rmsnorm::calculateRMSNormFwdTolerance<float, float, float>(0.0, 1.0, 0.0, 1.0, dims[1]);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(*bakedBundle.tensors[bakedAttrs.y_tensor_uid()].get(),
+                                        *runtimeBundle.tensors[runtimeAttrs.y_tensor_uid()].get()));
+}
+
 TEST(TestRMSNormFwdPlanBuilder, PlanConstruction)
 {
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -95,11 +170,12 @@ TEST(TestRMSNormFwdPlanBuilder, PlanConstruction)
 
 TEST(TestRMSNormFwdPlanBuilder, IsApplicable)
 {
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraph(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;
@@ -119,13 +195,15 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
     const unsigned int seed = getGlobalTestSeed();
     auto graph = buildRMSNormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
     const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
     RMSNormFwdWithBiasTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
     RMSNormFwdWithBiasTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
 
-    const auto& attributes = node.attributesAs<hipdnn_data_sdk::data_objects::RMSNormAttributes>();
+    const auto& attributes
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes>();
     const auto& tensorMap = graphWrapper.getTensorMap();
 
     const auto* invRmsBiasPtr = attributes.inv_rms_tensor_uid().has_value()
@@ -141,7 +219,8 @@ TEST(TestRMSNormFwdPlan, ExecutePlanWithBias)
                             invRmsBiasPtr,
                             biasPtr);
 
-    const double epsilon = extractDoubleFromTensorValue(params.epsilonTensor, "Epsilon");
+    const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
+        params.epsilonTensor, "Epsilon");
 
     auto shallowXTensor = createShallowTensor<float>(
         params.xTensor, directTensorBundle.tensors[attributes.x_tensor_uid()]->rawHostData());
@@ -179,8 +258,9 @@ TEST(TestRMSNormFwdPlanBuilder, PlanConstructionWithBias)
     const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         patient;
@@ -197,8 +277,9 @@ TEST(TestRMSNormFwdPlanBuilder, IsApplicableWithBias)
     const std::vector<int64_t> dims = {1, 2, 1, 1};
     auto graph = buildRMSNormFwdGraphWithBias(
         DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, dims, TensorLayout::NHWC);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-    const GraphWrapper graphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
 
     const RMSNormFwdPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT>
         floatPlanBuilder;

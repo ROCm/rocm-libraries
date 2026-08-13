@@ -150,7 +150,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa PAGE_TABLE_K_EXT tensor"));
     if(pageTableKTensor)
     {
-        attributes.set_page_table_k(pageTableKTensor);
+        attributes.set_paged_attention_k_table(pageTableKTensor);
     }
 
     // Unpack page_table_v tensor
@@ -162,7 +162,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa PAGE_TABLE_V_EXT tensor"));
     if(pageTableVTensor)
     {
-        attributes.set_page_table_v(pageTableVTensor);
+        attributes.set_paged_attention_v_table(pageTableVTensor);
     }
 
     // Unpack block_mask tensor
@@ -282,7 +282,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa MAX_EXT tensor"));
     if(maxOutputTensor)
     {
-        attributes.set_max(maxOutputTensor);
+        attributes.set_logit_max(maxOutputTensor);
     }
 
     // Unpack sum_exp tensor
@@ -294,7 +294,7 @@ namespace hipdnn_frontend::detail
                                             "sdpa SUM_EXP_EXT tensor"));
     if(sumExpTensor)
     {
-        attributes.set_sum_exp(sumExpTensor);
+        attributes.set_score_sum_exp(sumExpTensor);
     }
 
     // Unpack rng_dump tensor
@@ -333,16 +333,18 @@ namespace hipdnn_frontend::detail
         attributes.set_amax_o(amaxOTensor);
     }
 
-    // Unpack mma_core_mode — the packer omits this attribute when NOT_SET because
-    // toHipdnnDataType() has no mapping for NOT_SET, so setDescriptorAttrDataType()
-    // would return an error. The attribute is therefore absent when not explicitly set.
+    // Unpack mma_core_mode. The backend reports count=0 when the field was never
+    // set (the packer skips the setAttribute call for NOT_SET because the C-API
+    // has no mapping for the sentinel), and unpackGraphDataType returns
+    // DataType::NOT_SET in that case — which is the default we want to keep.
     {
         auto [mmaCoreMode, mmaCoreModeErr] = unpackGraphDataType(
             opDesc, HIPDNN_ATTR_SDPA_FWD_MMA_CORE_MODE_EXT, "sdpa mma_core_mode");
-        if(!mmaCoreModeErr.is_bad())
+        if(mmaCoreModeErr.is_bad())
         {
-            attributes.set_mma_core_mode(mmaCoreMode);
+            return mmaCoreModeErr;
         }
+        attributes.mma_core_mode = mmaCoreMode;
     }
 
     // Unpack generate_stats (optional)

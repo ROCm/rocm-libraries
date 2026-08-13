@@ -46,14 +46,24 @@ _detected_arch: Optional[str] = None
 
 def detect_gpu_arch(fallback: str = "gfx942") -> str:
     """
-    Auto-detect the GPU architecture by querying rocminfo.
+    Auto-detect the GPU architecture, preferring amd-smi.
 
-    Caches the result after the first call. Falls back to `fallback` if
-    detection fails (e.g. no GPU, rocminfo not installed).
+    Tries the shared amd-smi-first ``smi_utils`` wrapper (via dispatcher_common),
+    then rocminfo, then ``fallback``. Caches the result after the first call.
     """
     global _detected_arch
     if _detected_arch is not None:
         return _detected_arch
+
+    # Prefer amd-smi via the single canonical bridge.
+    try:
+        from dispatcher_common import _detect_gpu_arch_via_amd_smi
+        arch = _detect_gpu_arch_via_amd_smi()
+        if arch:
+            _detected_arch = arch
+            return _detected_arch
+    except Exception:  # noqa: BLE001 - optional dependency; fall back to rocminfo
+        pass
 
     try:
         result = subprocess.run(
@@ -154,6 +164,7 @@ def get_arch_filter_data() -> Dict[str, Any]:
             TRAIT_UNSUPPORTED_COMBINATIONS,
             WARP_SUPPORTED_COMBINATIONS,
             WARP_TILE_SUPPORTED_COMBINATIONS,
+            PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
             get_supported_archs,
         )
 
@@ -161,6 +172,12 @@ def get_arch_filter_data() -> Dict[str, Any]:
             "trait_unsupported": TRAIT_UNSUPPORTED_COMBINATIONS,
             "warp_combos": WARP_SUPPORTED_COMBINATIONS,
             "warp_tile_combos": WARP_TILE_SUPPORTED_COMBINATIONS,
+            # Preshuffle uses a distinct (smaller) MFMA warp-tile whitelist -- e.g.
+            # gfx942 fp8 preshuffle allows [16,16,32]/[16,16,64] but NOT the
+            # standard [16,16,16]. Using the standard table would let expand_sweep
+            # emit fp8/bf8 preshuffle configs the codegen then rejects (disjoint
+            # accepted sets), so validation consults this table for preshuffle.
+            "preshuffle_warp_tile_combos": PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
             "supported_archs": get_supported_archs(),
         }
     except ImportError:
@@ -177,13 +194,17 @@ def get_arch_filter_data() -> Dict[str, Any]:
                 "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
             },
             "warp_tile_combos": {
-                "gfx942": {"fp16_fp16_fp16": [[16, 16, 16], [32, 32, 16]]},
-                "gfx90a": {"fp16_fp16_fp16": [[16, 16, 16], [32, 32, 16]]},
+                "gfx942": {"fp16_fp16_fp32": [[16, 16, 16], [32, 32, 16]]},
+                "gfx90a": {"fp16_fp16_fp32": [[16, 16, 16], [32, 32, 16]]},
+            },
+            "preshuffle_warp_tile_combos": {
+                "gfx942": {
+                    "fp16_fp16_fp32": [[16, 16, 16], [32, 32, 16], [16, 16, 32]],
+                    "fp8_fp8_fp32": [[32, 32, 16], [16, 16, 32], [16, 16, 64]],
+                },
             },
             "supported_archs": ["gfx90a", "gfx942", "gfx950"],
         }
-
-
 @dataclass
 class ValidationResult:
     """Result of kernel config validation."""
@@ -281,18 +302,42 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             suggested_fixes["wave_n"] = warp_combos[0][1]
             suggested_fixes["wave_k"] = warp_combos[0][2]
 
-    # Check warp tile configuration for this arch and dtype
-    dtype_key = f"{dtype}_{dtype}_{dtype}"
+    # Check warp tile configuration for this arch and dtype.
+    # The arch_specs tables key on the ACCUMULATOR dtype (e.g. "fp8_fp8_fp32",
+    # "int8_int8_int32"), not the input dtype repeated -- using
+    # f"{dtype}_{dtype}_{dtype}" silently missed every non-fp16 key and fell
+    # through to the permissive default, admitting warp tiles the codegen rejects.
+    #
+    # The key is "{dtype_a}_{dtype_b}_{dtype_acc}". This shared standard path also
+    # serves mixed-A/B-dtype configs (e.g. fp8_bf8). The tables above are indexed
+    # by the (dtype_a, dtype_b) pair, so both must be threaded through -- building
+    # the key from dtype_a repeated would silently look up the wrong (or a
+    # nonexistent) entry for a mixed-dtype caller and fall through to the
+    # permissive default. Preshuffle's own scope pins dtype_a == dtype_b, but this
+    # helper lives on the shared path, so key on both explicitly.
+    dtype_b = getattr(config, "dtype_b", None) or dtype
+    dtype_acc = getattr(config, "dtype_acc", None) or (
+        "int32" if dtype == "int8" else "fp32"
+    )
+    dtype_key = f"{dtype}_{dtype_b}_{dtype_acc}"
+    # Preshuffle consults its own (smaller) whitelist; other variants use the
+    # standard GEMM warp-tile table.
+    table_key = (
+        "preshuffle_warp_tile_combos"
+        if variant == "preshuffle"
+        else "warp_tile_combos"
+    )
     warp_tile_combos = (
-        arch_data["warp_tile_combos"]
+        arch_data.get(table_key, {})
         .get(arch, {})
         .get(dtype_key, [[32, 32, 16], [16, 16, 16]])
     )
     warp_cfg = [warp_m, warp_n, warp_k]
     if warp_cfg not in warp_tile_combos:
         valid_str = ", ".join(f"[{c[0]},{c[1]},{c[2]}]" for c in warp_tile_combos[:5])
+        dtype_label = dtype if dtype_b == dtype else f"{dtype}/{dtype_b}"
         errors.append(
-            f"Unsupported warp tile [{warp_m},{warp_n},{warp_k}] for {arch}/{dtype}. Valid: {valid_str}"
+            f"Unsupported warp tile [{warp_m},{warp_n},{warp_k}] for {arch}/{dtype_label}. Valid: {valid_str}"
         )
         if warp_tile_combos:
             suggested_fixes["warp_m"] = warp_tile_combos[0][0]
@@ -311,8 +356,6 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
         warnings=warnings,
         suggested_fixes=suggested_fixes,
     )
-
-
 def auto_correct_kernel_config(
     config: "KernelConfig", verbose: bool = False
 ) -> Tuple["KernelConfig", bool, List[str]]:
@@ -1073,7 +1116,7 @@ def _generate_single_kernel_subprocess(args: dict) -> Tuple[bool, Optional[str],
             "--config",
             config_file,
             "--variants",
-            "standard",
+            args.get("variant", "standard"),
         ]
 
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -1389,7 +1432,7 @@ class KernelConfig:
     gfx_arch: str = "gfx942"
 
     # GEMM variant (affects arch filter validation)
-    # "standard", "preshuffle", or "multi_d"
+    # "standard", "preshuffle", "multi_d", or "stream_k"
     variant: str = "standard"
 
     @property
@@ -1946,8 +1989,16 @@ class CodegenRunner:
         Returns: Path to new library, or None on failure
         """
         build_dir = get_build_dir()
-        # Use unique filename based on dtype/layout to avoid overwriting loaded library
-        lib_name = f"libdispatcher_gemm_{config.dtype_a}_{config.layout}_lib.so"
+        # Use unique filename based on ALL distinguishing config parameters
+        # Include: dtype, layout, tile, wave, warp, pipeline, epilogue, scheduler
+        # This ensures different configs don't collide even if tile/pipeline match
+        wave_str = f"{config.wave_m}x{config.wave_n}x{config.wave_k}"
+        warp_str = f"{config.warp_m}x{config.warp_n}x{config.warp_k}"
+        lib_name = (
+            f"libdispatcher_gemm_{config.dtype_a}_{config.layout}_"
+            f"{config.tile_str}_{wave_str}_{warp_str}_"
+            f"{config.pipeline}_{config.epilogue}_{config.scheduler}.so"
+        )
         lib_path = build_dir / "examples" / lib_name
 
         print(f"  Rebuilding library: {lib_name}")
@@ -2548,29 +2599,66 @@ def setup_gemm_dispatcher(
 
     if needs_rebuild and auto_rebuild:
         log(f"  Library kernel doesn't match config: {', '.join(mismatches)}")
-        log("  Rebuilding library for exact config match...")
 
-        # First ensure we have a kernel header for this exact config
-        if not kernel_header:
-            # Generate kernel for the exact config
-            log("  Generating kernel for config...")
-            codegen_result = codegen.generate_from_config(config, force=True)
-            kernel_header = find_matching_kernel_header(config)
-            result.kernel_header = kernel_header
+        # Check if a rebuilt library for this exact config already exists
+        build_dir = get_build_dir()
+        wave_str = f"{config.wave_m}x{config.wave_n}x{config.wave_k}"
+        warp_str = f"{config.warp_m}x{config.warp_n}x{config.warp_k}"
+        cached_lib_name = (
+            f"libdispatcher_gemm_{config.dtype_a}_{config.layout}_"
+            f"{config.tile_str}_{wave_str}_{warp_str}_"
+            f"{config.pipeline}_{config.epilogue}_{config.scheduler}.so"
+        )
+        cached_lib_path = build_dir / "examples" / cached_lib_name
 
-        if kernel_header:
-            new_lib_path = codegen._rebuild_library_for_config(config, kernel_header)
-            if new_lib_path:
-                lib = DispatcherLib.load(new_lib_path)
-                if lib is None or not lib.initialize():
-                    result.error = "Failed to load rebuilt library"
-                    return result
+        if cached_lib_path.exists():
+            log(f"  Using cached library: {cached_lib_name}")
+            lib = DispatcherLib.load(cached_lib_path)
+            if lib is not None and lib.initialize():
                 result.lib = lib
-                log(f"  OK Rebuilt library: {lib.get_kernel_name()}")
+                log(f"  OK Loaded cached library: {lib.get_kernel_name()}")
             else:
-                log("  WARNING Rebuild failed, using existing library")
+                log("  WARNING Cached library failed to load/initialize")
+                cached_lib_path = None  # Force rebuild
         else:
-            log("  WARNING No kernel header found for config, using existing library")
+            log("  Rebuilding library for exact config match...")
+
+            # First ensure we have a kernel header for this exact config
+            if not kernel_header:
+                # Generate kernel for the exact config
+                log("  Generating kernel for config...")
+                codegen_result = codegen.generate_from_config(config, force=True)
+
+                # Check if generation succeeded
+                if not codegen_result.success:
+                    log(f"  WARNING Kernel generation failed:")
+                    if codegen_result.stderr:
+                        # Show first few lines of error
+                        error_lines = codegen_result.stderr.split('\n')[:5]
+                        for line in error_lines:
+                            if line.strip():
+                                log(f"    {line}")
+                    log("  This config may not be valid for the target architecture")
+                    log("  Falling back to existing library")
+                    # Don't try to rebuild without a valid kernel
+                    kernel_header = None
+                else:
+                    kernel_header = find_matching_kernel_header(config)
+                    result.kernel_header = kernel_header
+
+            if kernel_header:
+                new_lib_path = codegen._rebuild_library_for_config(config, kernel_header)
+                if new_lib_path:
+                    lib = DispatcherLib.load(new_lib_path)
+                    if lib is None or not lib.initialize():
+                        result.error = "Failed to load rebuilt library"
+                        return result
+                    result.lib = lib
+                    log(f"  OK Rebuilt library: {lib.get_kernel_name()}")
+                else:
+                    log("  WARNING Rebuild failed, using existing library")
+            else:
+                log("  WARNING No kernel header found for config, using existing library")
 
     # Step 5: Create registry and dispatcher
     log("  Creating registry and dispatcher...")

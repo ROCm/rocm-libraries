@@ -925,6 +925,116 @@ miopenStatus_t CallGemm(const Handle& handle,
     return miopenStatusUnknownError;
 }
 
+miopenStatus_t CallGemm(const Handle& handle,
+                        GemmDescriptor gemm_desc,
+                        ConstData_t A,
+                        std::size_t a_offset,
+                        ConstData_t B,
+                        std::size_t b_offset,
+                        Data_t C,
+                        std::size_t c_offset,
+                        miopenDataType_t cType,
+                        GemmBackend_t gemm_backend)
+{
+    // If C/D type matches A/B type, delegate to the standard overload
+    if(cType == gemm_desc.dataType)
+        return CallGemm(handle, gemm_desc, A, a_offset, B, b_offset, C, c_offset, gemm_backend);
+
+    MIOPEN_LOG_I2("gemm_desc: " << gemm_desc << " cType: " << GetDataType(cType));
+
+    gemm_backend = enforce_gemm_backend(gemm_backend);
+
+    if(!gemm_desc.isColMajor)
+    {
+        gemm_desc.isColMajor = !gemm_desc.isColMajor;
+        std::swap(A, B);
+        std::swap(a_offset, b_offset);
+        std::swap(gemm_desc.a_cast_type, gemm_desc.b_cast_type);
+        std::swap(gemm_desc.transA, gemm_desc.transB);
+        std::swap(gemm_desc.m, gemm_desc.n);
+        std::swap(gemm_desc.lda, gemm_desc.ldb);
+    }
+
+    switch(gemm_backend)
+    {
+    case GemmBackend_t::nogemmbackend: return miopenStatusNotImplemented;
+    case GemmBackend_t::rocblas: {
+#if MIOPEN_USE_ROCBLAS
+        MIOPEN_LOG_I2("rocBLAS mixed-precision C/D");
+
+        HipEventPtr start = nullptr;
+        HipEventPtr stop  = nullptr;
+        if(handle.IsProfilingEnabled())
+        {
+            ProfilingRecordStart(handle, start, stop);
+        }
+        rocblas_atomics_mode cur_mode = rocblas_atomics_mode::rocblas_atomics_allowed;
+        if(gemm_desc.deterministic)
+            cur_mode = DisableRocblasAtomics(handle);
+
+        rocblas_status rb_status = rocblas_status::rocblas_status_internal_error;
+
+        // Currently only bf16 A/B with fp32 C/D is supported
+        if(gemm_desc.dataType == miopenBFloat16 && cType == miopenFloat)
+        {
+            float alpha = gemm_desc.alpha;
+            float beta  = gemm_desc.beta;
+
+            rb_status = miopen_rocblas_gemm_ex(
+                handle,
+                gemm_desc,
+                gemm_desc.transA ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.transB ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.m,
+                gemm_desc.n,
+                gemm_desc.k,
+                &alpha,
+                static_cast<const rocblas_bfloat16*>(A) + a_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.lda,
+                static_cast<const rocblas_bfloat16*>(B) + b_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.ldb,
+                &beta,
+                static_cast<const float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                static_cast<float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                rocBlasComputeType(gemm_desc),
+                rocblas_gemm_algo::rocblas_gemm_algo_standard,
+                0,
+                0);
+        }
+        else
+        {
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "CallGemm with cType: unsupported dataType/cType combination");
+        }
+
+        if(handle.IsProfilingEnabled())
+            ProfilingRecordStop(handle, start, stop);
+
+        if(rb_status != rocblas_status::rocblas_status_success)
+            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+
+        if(gemm_desc.deterministic)
+            SetRocblasAtomics(handle, cur_mode);
+        return miopenStatusSuccess;
+#else
+        return miopenStatusNotImplemented;
+#endif
+    }
+    case GemmBackend_t::hipblaslt: {
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "CallGemm with cType: hipblaslt backend not supported");
+    }
+    }
+
+    return miopenStatusUnknownError;
+}
+
 miopenStatus_t CallGemmStridedBatched(const Handle& handle,
                                       GemmDescriptor gemm_desc,
                                       ConstData_t A,
@@ -1208,6 +1318,124 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
 #else
         return miopenStatusNotImplemented;
 #endif
+    }
+    }
+
+    return miopenStatusUnknownError;
+}
+
+miopenStatus_t CallGemmStridedBatched(const Handle& handle,
+                                      GemmDescriptor gemm_desc,
+                                      ConstData_t A,
+                                      std::size_t a_offset,
+                                      ConstData_t B,
+                                      std::size_t b_offset,
+                                      Data_t C,
+                                      std::size_t c_offset,
+                                      miopenDataType_t cType,
+                                      GemmBackend_t gemm_backend)
+{
+    // If C/D type matches A/B type, delegate to the standard overload
+    if(cType == gemm_desc.dataType)
+        return CallGemmStridedBatched(
+            handle, gemm_desc, A, a_offset, B, b_offset, C, c_offset, gemm_backend);
+
+    MIOPEN_LOG_I2("gemm_desc: " << gemm_desc << " cType: " << GetDataType(cType));
+
+    gemm_backend = enforce_gemm_backend(gemm_backend);
+
+    if(!gemm_desc.isColMajor)
+    {
+        gemm_desc.isColMajor = !gemm_desc.isColMajor;
+        std::swap(A, B);
+        std::swap(a_offset, b_offset);
+        std::swap(gemm_desc.a_cast_type, gemm_desc.b_cast_type);
+        std::swap(gemm_desc.transA, gemm_desc.transB);
+        std::swap(gemm_desc.m, gemm_desc.n);
+        std::swap(gemm_desc.lda, gemm_desc.ldb);
+        std::swap(gemm_desc.strideA, gemm_desc.strideB);
+    }
+
+    switch(gemm_backend)
+    {
+    case GemmBackend_t::nogemmbackend: return miopenStatusNotImplemented;
+    case GemmBackend_t::rocblas: {
+#if MIOPEN_USE_ROCBLAS
+        MIOPEN_LOG_I2("rocBLAS mixed-precision C/D (strided batched)");
+
+        HipEventPtr start = nullptr;
+        HipEventPtr stop  = nullptr;
+        if(handle.IsProfilingEnabled())
+        {
+            ProfilingRecordStart(handle, start, stop);
+        }
+        rocblas_atomics_mode cur_mode = rocblas_atomics_mode::rocblas_atomics_allowed;
+        if(gemm_desc.deterministic)
+            cur_mode = DisableRocblasAtomics(handle);
+
+        rocblas_status rb_status = rocblas_status::rocblas_status_internal_error;
+
+        // Currently only bf16 A/B with fp32 C/D is supported
+        if(gemm_desc.dataType == miopenBFloat16 && cType == miopenFloat)
+        {
+            float alpha = gemm_desc.alpha;
+            float beta  = gemm_desc.beta;
+
+            rb_status = miopen_rocblas_gemm_strided_batched_ex(
+                handle.rhandle().get(),
+                gemm_desc.transA ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.transB ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.m,
+                gemm_desc.n,
+                gemm_desc.k,
+                &alpha,
+                static_cast<const rocblas_bfloat16*>(A) + a_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.lda,
+                gemm_desc.strideA,
+                static_cast<const rocblas_bfloat16*>(B) + b_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.ldb,
+                gemm_desc.strideB,
+                &beta,
+                static_cast<const float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                gemm_desc.strideC,
+                static_cast<float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                gemm_desc.strideC,
+                gemm_desc.batch_count,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                rocblas_gemm_algo::rocblas_gemm_algo_standard,
+                0,
+                0);
+        }
+        else
+        {
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                "CallGemmStridedBatched with cType: unsupported dataType/cType combination");
+        }
+
+        if(handle.IsProfilingEnabled())
+            ProfilingRecordStop(handle, start, stop);
+
+        if(rb_status != rocblas_status::rocblas_status_success)
+            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+
+        if(gemm_desc.deterministic)
+            SetRocblasAtomics(handle, cur_mode);
+
+        return miopenStatusSuccess;
+#else
+        return miopenStatusNotImplemented;
+#endif
+    }
+    case GemmBackend_t::hipblaslt: {
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "CallGemmStridedBatched with cType: hipblaslt backend not supported");
     }
     }
 
@@ -1526,9 +1754,12 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k =
-        in_c * std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                    wei_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int lda         = k;
     int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
     int ldc         = n;
@@ -1578,13 +1809,16 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
-    int m =
-        in_c * std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int n   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k   = wei_k;
-    int lda = m;
-    int ldb = n;
-    int ldc = n;
+    int m           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                    wei_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = wei_k;
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1632,12 +1866,16 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
     bool transA     = false;
     bool transB     = true;
     int m           = wei_k;
-    int n           = static_cast<int>(in_c) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int k   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int lda = k;
-    int ldb = k;
-    int ldc = n;
+    int n =
+        static_cast<int>(in_c) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                  wei_spatial.end(),
+                                                                  std::size_t{1},
+                                                                  std::multiplies<std::size_t>()));
+    int k           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1686,8 +1924,10 @@ GemmDescriptor CreateGemmDescriptorConvCNHWFwd(const TensorDescriptor& wDesc,
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = in_c;
     int lda         = k;
     int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
@@ -1738,8 +1978,10 @@ GemmDescriptor CreateGemmDescriptorConvCNHWBwdData(const TensorDescriptor& wDesc
     bool transA     = true;
     bool transB     = false;
     int m           = in_c;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = wei_k;
     int lda         = m;
     int ldb         = n;
@@ -1794,11 +2036,12 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1Fwd(const TensorDescript
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
-    int k   = in_c;
-    int lda = k;
-    int ldb = wDesc.GetType() == miopenInt8 ? k : n;
-    int ldc = n;
+    int n           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = in_c;
+    int lda         = k;
+    int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
+    int ldc         = n;
     int batch_count = in_n;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(k) * n;
@@ -1847,11 +2090,12 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdData(const TensorDesc
     bool transA     = true;
     bool transB     = false;
     int m           = in_c;
-    int n   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
-    int k   = wei_k;
-    int lda = m;
-    int ldb = n;
-    int ldc = n;
+    int n           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = wei_k;
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
     int batch_count = in_n;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(k) * n;
@@ -1901,10 +2145,11 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
     bool transB     = true;
     int m           = wei_k;
     int n           = in_c;
-    int k   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
-    int lda = k;
-    int ldb = k;
-    int ldc = n;
+    int k           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
     int batch_count = in_n;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
@@ -1953,9 +2198,12 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
     bool transA     = false;
     bool transB     = false;
     int m           = wei_k / groupCount;
-    int n = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                   wei_spatial.end(),
+                                                                   std::size_t{1},
+                                                                   std::multiplies<std::size_t>()));
     int lda         = k;
     int ldb         = n;
     int ldc         = n;
@@ -2006,13 +2254,16 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
-    int m           = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int n   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k   = wei_k / groupCount;
-    int lda = m;
-    int ldb = n;
-    int ldc = n;
+    int m           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                   wei_spatial.end(),
+                                                                   std::size_t{1},
+                                                                   std::multiplies<std::size_t>()));
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = wei_k / groupCount;
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
@@ -2061,12 +2312,15 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dy
     bool transA     = false;
     bool transB     = true;
     int m           = wei_k / groupCount;
-    int n           = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int k   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int lda = k;
-    int ldb = k;
-    int ldc = n;
+    int n           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                   wei_spatial.end(),
+                                                                   std::size_t{1},
+                                                                   std::multiplies<std::size_t>()));
+    int k           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
@@ -2114,8 +2368,10 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWFwd(const TensorDescriptor& wDes
     bool transA     = false;
     bool transB     = false;
     int m           = wei_k / groupCount;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = in_c / groupCount;
     int lda         = k;
     int ldb         = n;
@@ -2167,8 +2423,10 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWBwdData(const TensorDescriptor& 
     bool transA     = true;
     bool transB     = false;
     int m           = in_c / groupCount;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = wei_k / groupCount;
     int lda         = m;
     int ldb         = n;

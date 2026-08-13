@@ -1,4 +1,4 @@
-// Copyright (C) 2020 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
+#include <algorithm>
 #include <cuda_runtime_api.h>
 #include <iostream>
 
@@ -83,14 +84,8 @@ static hipfftResult_t cufftResultToHipResult(cufftResult_t cufft_result)
     case CUFFT_UNALIGNED_DATA:
         return HIPFFT_UNALIGNED_DATA;
 
-    case CUFFT_INCOMPLETE_PARAMETER_LIST:
-        return HIPFFT_INCOMPLETE_PARAMETER_LIST;
-
     case CUFFT_INVALID_DEVICE:
         return HIPFFT_INVALID_DEVICE;
-
-    case CUFFT_PARSE_ERROR:
-        return HIPFFT_PARSE_ERROR;
 
     case CUFFT_NO_WORKSPACE:
         return HIPFFT_NO_WORKSPACE;

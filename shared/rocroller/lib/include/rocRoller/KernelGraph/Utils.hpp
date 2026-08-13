@@ -537,7 +537,8 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isGlobalToLDS = false);
+                                bool                             isGlobalToLDS = false,
+                                bool                             ldsSwizzle    = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -659,7 +660,9 @@ namespace rocRoller
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
                                  bool                               rightmostFastest,
-                                 bool                               isGlobalToLDS = false);
+                                 bool                               isGlobalToLDS     = false,
+                                 bool                               ldsSwizzle        = false,
+                                 unsigned int                       columnsPerBankRow = 0u);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.
@@ -870,6 +873,24 @@ namespace rocRoller
          */
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg);
+
+        /**
+         * @brief Return true if the layout of the given element number is swapped.
+         *
+         * In LowerTile, swapped layout means when X & Y dimensions for a particular tile are swapped
+         * to improve the use of long dword instructions. This function determines whether the layout
+         * was swapped for a given element number, which affects how tile elements should be accessed.
+         */
+        bool isSwappedLayout(KernelGraph const&                    graph,
+                             int                                   elementNumberTag,
+                             CoordinateGraph::ElementNumber const& elementNumber);
+
+        /**
+         * @brief Get the size of the VGPRBlockSet dimension for a given tag.
+         *
+         * @return The VGPRBlockSet size, or std::nullopt if no VGPRBlockSet dimension exists.
+         */
+        std::optional<uint> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag);
     }
 }
 

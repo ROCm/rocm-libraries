@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,81 @@ static inline const float* get_boost_tol(const rocsparse_float_complex* tol)
 static inline const double* get_boost_tol(const rocsparse_double_complex* tol)
 {
     return reinterpret_cast<const double*>(tol);
+}
+
+//
+// @brief Convert a block level CSR matrix into a Blocked ELL matrix.
+//
+// The input CSR matrix describes the block sparsity pattern (mb block rows). Each non-zero block
+// is expanded into a dense ell_block_size x ell_block_size block of random values. The ELL width
+// is the maximum number of non-zero blocks across all block rows. Slots beyond a block row's
+// actual non-zero count are padded with column index -1 and zero values. Values are laid out in
+// the cuSPARSE row-major convention:
+//   val[(blockRow * ell_block_size + r) * ell_cols + ellBlockCol * ell_block_size + c].
+//
+template <typename T, typename I, typename J>
+inline void host_csr_to_bell(I                     mb,
+                             I                     ell_block_size,
+                             const std::vector<I>& csr_row_ptr,
+                             const std::vector<J>& csr_col_ind,
+                             std::vector<I>&       bell_col_ind,
+                             std::vector<T>&       bell_val,
+                             I&                    ell_cols,
+                             rocsparse_index_base  base)
+{
+    // Compute the ELL block width: maximum number of non-zero blocks in any block row.
+    I ell_block_width = 0;
+    for(I i = 0; i < mb; ++i)
+    {
+        I row_nnz       = csr_row_ptr[i + 1] - csr_row_ptr[i];
+        ell_block_width = std::max(ell_block_width, row_nnz);
+    }
+
+    ell_cols = ell_block_width * ell_block_size;
+
+    bell_col_ind.resize(static_cast<size_t>(ell_block_width) * mb);
+    bell_val.resize(static_cast<size_t>(mb) * ell_block_size * ell_cols);
+
+    for(I i = 0; i < mb; ++i)
+    {
+        I p         = 0;
+        I row_start = csr_row_ptr[i] - base;
+        I row_end   = csr_row_ptr[i + 1] - base;
+
+        for(I j = row_start; j < row_end; ++j)
+        {
+            // Column index stored in row-major [mb][ell_block_width] layout.
+            bell_col_ind[static_cast<size_t>(i) * ell_block_width + p]
+                = static_cast<I>(csr_col_ind[j]);
+
+            for(I r = 0; r < ell_block_size; ++r)
+            {
+                for(I c = 0; c < ell_block_size; ++c)
+                {
+                    bell_val[(static_cast<size_t>(i) * ell_block_size + r) * ell_cols
+                             + static_cast<size_t>(p) * ell_block_size + c]
+                        = random_cached_generator_exact<T>(1, 10);
+                }
+            }
+            ++p;
+        }
+
+        // Pad remaining ELL slots with sentinel column index -1 and zero values.
+        for(I j = p; j < ell_block_width; ++j)
+        {
+            bell_col_ind[static_cast<size_t>(i) * ell_block_width + j] = static_cast<I>(-1);
+
+            for(I r = 0; r < ell_block_size; ++r)
+            {
+                for(I c = 0; c < ell_block_size; ++c)
+                {
+                    bell_val[(static_cast<size_t>(i) * ell_block_size + r) * ell_cols
+                             + static_cast<size_t>(j) * ell_block_size + c]
+                        = static_cast<T>(0);
+                }
+            }
+        }
+    }
 }
 
 //
@@ -729,8 +804,9 @@ struct rocsparse_matrix_utils
         }
 
         nnz = 0;
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
         {
+        case rocsparse_fill_mode_lower:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -744,9 +820,8 @@ struct rocsparse_matrix_utils
                     }
                 }
             }
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -760,6 +835,7 @@ struct rocsparse_matrix_utils
                     }
                 }
             }
+            break;
         }
 
         csr_row_ptr.resize(M + 1, 0);
@@ -769,8 +845,9 @@ struct rocsparse_matrix_utils
         I index        = 0;
         csr_row_ptr[0] = base;
 
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
         {
+        case rocsparse_fill_mode_lower:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -788,9 +865,8 @@ struct rocsparse_matrix_utils
 
                 csr_row_ptr[i + 1] = index + base;
             }
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -808,6 +884,7 @@ struct rocsparse_matrix_utils
 
                 csr_row_ptr[i + 1] = index + base;
             }
+            break;
         }
     }
 
@@ -840,7 +917,9 @@ struct rocsparse_matrix_utils
 
         int64_t old_nnz = nnz;
         int64_t new_nnz = 0;
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
+        {
+        case rocsparse_fill_mode_lower:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -855,8 +934,9 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
         }
-        else
+        case rocsparse_fill_mode_upper:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -871,6 +951,8 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
+        }
         }
 
         coo_row_ind.resize(new_nnz, 0);
@@ -878,7 +960,9 @@ struct rocsparse_matrix_utils
         coo_val.resize(new_nnz, static_cast<T>(0));
 
         nnz = 0;
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
+        {
+        case rocsparse_fill_mode_lower:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -896,8 +980,9 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
         }
-        else
+        case rocsparse_fill_mode_upper:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -915,6 +1000,8 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
+        }
         }
     }
 
@@ -969,6 +1056,31 @@ struct rocsparse_matrix_utils
         host_gebsrunsort(const I* bsr_row_ptr, J* bsr_col_ind, J Mb, rocsparse_index_base base)
     {
         host_csrunsort<T, I, J>(bsr_row_ptr, bsr_col_ind, Mb, base);
+    }
+
+    // Given a flat block array \p blk of size bd*bd stored in \p direction order,
+    // symmetrize the off-diagonal entries as A[i][j] <- A[i][j] + conj(A[j][i])
+    // and set the diagonal to 2*bd to ensure diagonal dominance.
+    template <typename T>
+    static void make_block_hpd(T* blk, rocsparse_int bd, rocsparse_direction direction)
+    {
+        for(rocsparse_int i = 0; i < bd; i++)
+        {
+            for(rocsparse_int j = i + 1; j < bd; j++)
+            {
+                const size_t ij  = (direction == rocsparse_direction_row)
+                                       ? static_cast<size_t>(bd) * i + j
+                                       : static_cast<size_t>(bd) * j + i;
+                const size_t ji  = (direction == rocsparse_direction_row)
+                                       ? static_cast<size_t>(bd) * j + i
+                                       : static_cast<size_t>(bd) * i + j;
+                const T      sym = blk[ij] + rocsparse_conj(blk[ji]);
+                blk[ij]          = sym;
+                blk[ji]          = rocsparse_conj(sym);
+            }
+            blk[static_cast<size_t>(bd) * i + i]
+                = static_cast<T>(static_cast<floating_data_t<T>>(2 * bd));
+        }
     }
 
     template <typename T, typename I, typename J>

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@ namespace rocisa
         int, int, int, int, std::optional<ContinuousRegister>, bool, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivideAndRemainder<int, std::string>(
         int, int, std::string, int, std::optional<ContinuousRegister>, bool, const std::string&);
+    template std::shared_ptr<Module> vectorStaticDivideAndRemainder<std::string, int>(
+        std::string, int, int, int, std::optional<ContinuousRegister>, bool, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivide<int, int>(
         int, int, int, std::optional<ContinuousRegister>, const std::string&);
     template std::shared_ptr<Module> vectorStaticDivide<int, std::string>(
@@ -113,8 +115,10 @@ namespace rocisa
     ExplicitInstantiation(int,         int,         int,         int)
     #undef ExplicitInstantiation
     // template of scalarStaticRemainder
-    template std::shared_ptr<Module> scalarStaticRemainder<int, int>(
+    template std::shared_ptr<Module> scalarStaticRemainder<int, int, int>(
         int, int, int, int, std::optional<ContinuousRegister>, const std::string&);
+    template std::shared_ptr<Module> scalarStaticRemainder<int, int, std::string>(
+        int, int, std::string, int, std::optional<ContinuousRegister>, const std::string&);
     // template of scalarUInt32DivideAndRemainder
     #define ExplicitInstantiation(QREG, DREG, DIVREG, RREG) \
         template std::shared_ptr<Module> scalarUInt32DivideAndRemainder<QREG, DREG, DIVREG, RREG>( \
@@ -276,8 +280,58 @@ namespace rocisa
         }
         return module;
     }
-} // namespace rocisa
 
+    std::shared_ptr<Module>
+        vectorAddMultiplyBpe(int dst,
+                             int src0,
+                             int src1,
+                             float bpe,
+                             const std::string&  comment)
+    {
+        auto module = std::make_shared<Module>("vectorAddMultiplyBpe");
+        std::string mcomment = comment + " (multiple bpe)";
+        auto dstVgpr  = vgpr(dst);
+        auto src0Vgpr = vgpr(src0);
+        auto src1Vgpr = vgpr(src1);
+        if (bpe == 0.5) {
+            module->addT<VAddU32>(dstVgpr, src0Vgpr, src1Vgpr, mcomment);
+            module->addT<VLShiftRightB32>(dstVgpr, 1, dstVgpr, mcomment); // mul 4 bits and div 8 bits
+        } else if (bpe == 0.75) {
+            module->addT<VAddU32>(dstVgpr, src0Vgpr, src1Vgpr, mcomment);
+            module->addT<VMulLOU32>(dstVgpr, 6, dstVgpr, mcomment); // mul 6 bits
+            module->addT<VLShiftRightB32>(dstVgpr, 3, dstVgpr, mcomment); // div 8 bits
+        } else {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            if (bpe_log2 == 0) {
+                module->addT<VAddU32>(dstVgpr, src0Vgpr, src1Vgpr, mcomment);
+                module->addCommentAlign(comment + " (bpe is 1, no mul)");
+            } else {
+                 module->addT<VAddLShiftLeftU32>(dstVgpr, bpe_log2, src0Vgpr, src1Vgpr, mcomment);
+            }
+        }
+        return module;
+    }
+    template std::shared_ptr<Module>
+        vectorMultiplyBpe<std::string, std::string>(std::string, std::string, float, const std::string&);
+    template std::shared_ptr<Module>
+        vectorMultiplyBpe<int, int>(int, int, float, const std::string&);
+    template std::shared_ptr<Module>
+        vectorMultiply64Bpe<int, int, int>(int, int, float, int, const std::string&);
+    template std::shared_ptr<Module>
+        vectorMultiply64Bpe<std::string, std::string, int>(std::string, std::string, float, int, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<int, int>(int, int, float, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<std::string, std::string>(std::string, std::string, float, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<int, std::string>(int, std::string, float, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiplyBpe<std::string, int>(std::string, int, float, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiply64Bpe<int, int, int>(int, int, float, int, const std::string&);
+    template std::shared_ptr<Module>
+        scalarMultiply64Bpe<std::string, std::string, int>(std::string, std::string, float, int, const std::string&);
+} // namespace rocisa
 void math_func(nb::module_ m)
 {
     m.def("vectorStaticDivideAndRemainder",
@@ -304,6 +358,22 @@ void math_func(nb::module_ m)
                             bool,
                             const std::string&>(
               &rocisa::vectorStaticDivideAndRemainder<int, std::string>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpVgprRes")  = std::nullopt,
+          nb::arg("doRemainder") = true,
+          nb::arg("comment")     = "");
+    m.def("vectorStaticDivideAndRemainder",
+          nb::overload_cast<std::string,
+                            int,
+                            int,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            bool,
+                            const std::string&>(
+              &rocisa::vectorStaticDivideAndRemainder<std::string, int>),
           nb::arg("qReg"),
           nb::arg("rReg"),
           nb::arg("dReg"),
@@ -406,7 +476,6 @@ void math_func(nb::module_ m)
           nb::arg("tmpVgprRes") = std::nullopt,
           nb::arg("tmpSgprRes") = std::nullopt,
           nb::arg("comment")    = "");
-
     m.def("scalarStaticDivideAndRemainder",
           nb::overload_cast<int, int, int, int, std::optional<rocisa::ContinuousRegister>, int>(
               &rocisa::scalarStaticDivideAndRemainder<int, int, int>),
@@ -504,6 +573,19 @@ void math_func(nb::module_ m)
                             int,
                             std::optional<rocisa::ContinuousRegister>,
                             const std::string&>(&rocisa::scalarStaticRemainder<int, int, int>),
+          nb::arg("qReg"),
+          nb::arg("rReg"),
+          nb::arg("dReg"),
+          nb::arg("divisor"),
+          nb::arg("tmpSgprRes") = std::nullopt,
+          nb::arg("comment")    = "");
+    m.def("scalarStaticRemainder",
+          nb::overload_cast<int,
+                            int,
+                            std::string,
+                            int,
+                            std::optional<rocisa::ContinuousRegister>,
+                            const std::string&>(&rocisa::scalarStaticRemainder<int, int, std::string>),
           nb::arg("qReg"),
           nb::arg("rReg"),
           nb::arg("dReg"),
@@ -623,4 +705,86 @@ void math_func(nb::module_ m)
           nb::arg("multiplier"),
           nb::arg("tmpSgprRes") = std::nullopt,
           nb::arg("comment")    = "");
+    m.def("vectorAddMultiplyBpe",
+          &rocisa::vectorAddMultiplyBpe,
+          nb::arg("dst"),
+          nb::arg("src0"),
+          nb::arg("src1"),
+          nb::arg("bpe"),
+          nb::arg("comment")    = "");
+    m.def("vectorMultiplyBpe",
+        nb::overload_cast<int, int, float, const std::string&>(
+            &rocisa::vectorMultiplyBpe<int, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("vectorMultiplyBpe",
+        nb::overload_cast<std::string, std::string, float, const std::string&>(
+            &rocisa::vectorMultiplyBpe<std::string, std::string>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("vectorMultiply64Bpe",
+          nb::overload_cast<int, int, float, int, const std::string&>(
+              &rocisa::vectorMultiply64Bpe<int, int, int>),
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
+          nb::arg("comment")    = "");
+    m.def("vectorMultiply64Bpe",
+          nb::overload_cast<std::string, std::string, float, int, const std::string&>(
+              &rocisa::vectorMultiply64Bpe<std::string, std::string, int>),
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
+          nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<int, int, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<int, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<std::string, std::string, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<std::string, std::string>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<int, std::string, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<int, std::string>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiplyBpe",
+        nb::overload_cast<std::string, int, float, const std::string&>(
+            &rocisa::scalarMultiplyBpe<std::string, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("comment")    = "");
+    m.def("scalarMultiply64Bpe",
+          nb::overload_cast<int, int, float, int, const std::string&>(
+              &rocisa::scalarMultiply64Bpe<int, int, int>),
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
+          nb::arg("comment")    = "");
+    m.def("scalarMultiply64Bpe",
+        nb::overload_cast<std::string, std::string, float, int, const std::string&>(
+            &rocisa::scalarMultiply64Bpe<std::string, std::string, int>),
+        nb::arg("dst"),
+        nb::arg("src"),
+        nb::arg("bpe"),
+        nb::arg("tmp"),
+        nb::arg("comment")    = "");
 }
+

@@ -4,6 +4,42 @@ alwaysApply: true
 
 # AI Rules for hipDNN Project
 
+## Project AI Skills
+
+Reusable AI skills for hipDNN live under `tools/ai/skills/`. The skills below describe what each one does and when to suggest it.
+
+**To use a skill, follow this sequence — do not read `SKILL.md` and execute its steps directly.** That bypasses the install path the skill is meant to be invoked through, and misses the entire point of having skills.
+
+1. **Check whether the skill is loaded in this session.** Look at the available-skills list in the session's system reminder. The skill being present under `tools/ai/skills/` is *not* enough — it's invocable only after it is installed into the active host's skills directory and surfaced in the session's skill list.
+2. **If not loaded, ask the user which skill(s) to install and which host/scope.** Use `--codex` for Codex user-global skills (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`), `--claude` for Claude user-global skills (`~/.claude/skills`), or `--target <dir>` for an explicit workspace or user scope. Then run one of:
+   ```
+   python3 tools/ai/install-skills.py --codex <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --claude <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --target <target-skills-dir> <skill-name> [<skill-name> ...]
+   ```
+   Use `python3 tools/ai/install-skills.py --list` to see what's available. If the user names skills, pass them explicitly; if they ask for a full refresh, omit names to install all available skills. The installer copies skills as snapshots, updates stale copies by comparing content hashes, and skips existing symlinks rather than replacing them. After changing committed skill packages, run `python3 tools/ai/validate-skills.py` before offering or installing them.
+3. **Invoke via the active host's skill syntax.** In Codex, use `$hipdnn-pr-quality`, `$hipdnn-superbuild`, or the other `$skill-name` form. In Claude, use the slash-command adapters such as `/hipdnn-pr-quality` or `/hipdnn-superbuild`. The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
+
+When a user asks for a workflow covered by a project skill, tell them the project has a matching skill and offer to install and invoke it.
+
+- `tools/ai/skills/hipdnn-pr-quality/SKILL.md`
+  - Authors, reviews, or pre-merge gates a hipDNN pull request. It is a thin overlay that *tightens* the library-agnostic `rocm-pr-quality` base skill (in `ROCm/TheRock` at `skills/rocm-pr-quality/`) for hipDNN — scope buckets, the Libraries PR Bot title/tracking gate, the hipDNN PR body format, RAII/resource ownership, provider behavior, cuDNN compatibility, FlatBuffers schema compatibility, and ASIC/multi-arch coverage. It refreshes the base from TheRock `main` at user scope on every run, never relaxes a base rule, and never posts to GitHub/Jira without explicit human approval.
+  - Suggest this skill when the user asks to draft a PR title/body, review a hipDNN PR or local diff, assess merge-readiness, or pre-merge gate a change. It supersedes the former `pr-summary` and `hipdnn-review` skills.
+- `tools/ai/skills/pr-summary/SKILL.md` *(deprecated)*
+  - Deprecated stub that redirects to `hipdnn-pr-quality` (author assist). Kept only so the old name still resolves; when invoked it announces its deprecation and defers to the new skill.
+- `tools/ai/skills/hipdnn-review/SKILL.md` *(deprecated)*
+  - Deprecated stub that redirects to `hipdnn-pr-quality` (review assist). Same behavior: announce deprecation, then defer.
+- `tools/ai/skills/hipdnn-superbuild/SKILL.md`
+  - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
+  - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
+- `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
+  - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
+  - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
+
+## Commit & PR Conventions
+
+Commit messages and PR titles follow the rules enforced by the **Libraries PR Bot**, the authoritative gate every PR must clear before it can be reviewed (a [Conventional Commits](https://www.conventionalcommits.org/) title, a tracking reference in the body, an accompanying test for code changes, and more). Don't rely on a copy of those rules here — they change over time, and a duplicate goes stale. Read the bot's live policy and FAQ in the rocm-libraries repo for the current specifics, and use the `hipdnn-pr-quality` skill to draft conforming PR titles and bodies.
+
 ## Project Overview & Architecture
 
 hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.
@@ -12,8 +48,9 @@ hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based a
 | Component | Type | Links To | Purpose |
 |-----------|------|----------|---------|
 | **Backend** (`backend/`) | Shared library (C API) | Data SDK | Core engine, plugin loading, graph execution |
-| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API |
-| **Data SDK** (`data_sdk/`) | Header-only | Third-party deps | Shared data objects, Flatbuffer schemas, logging |
+| **Frontend** (`frontend/`) | Header-only C++ | Backend, Data SDK | User-friendly wrapper around backend C API (uses Data SDK for types/logging, not FlatBuffers) |
+| **Data SDK** (`data_sdk/`) | Header-only | (none) | Shared data types, logging |
+| **FlatBuffers SDK** (`flatbuffers_sdk/`) | Header-only | FlatBuffers, nlohmann_json | FlatBuffer schemas, generated headers, JSON helpers |
 | **Plugin SDK** (`plugin_sdk/`) | Header-only | Data SDK | Interfaces for plugin development |
 | **Test SDK** (`test_sdk/`) | Header-only | Data SDK | Shared test utilities |
 
@@ -45,8 +82,9 @@ cmake -GNinja ..
 
 ninja              # Build everything
 ninja check        # Build and run ALL tests
-ninja unit-check   # Unit tests only (faster)
-ninja integration-check  # Integration tests only
+ninja quick-check  # Build and run the YAML-defined quick category
+ninja unit-check   # YAML-defined unit category
+ninja integration-check  # YAML-defined integration category
 ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 ```
 
@@ -74,7 +112,7 @@ cmake -B build -GNinja -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider;hip
 cmake --build build
 ```
 
-In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `miopen-provider-unit-check`).
+In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `hipdnn-quick-check`, `miopen-provider-quick-check`).
 
 ### 3. Standalone Provider Build (fallback — provider not in superbuild)
 
@@ -137,7 +175,7 @@ When requested to build/test:
 - **Avoid implicit casts** — use explicit `static_cast<>`. The codebase compiles with `-Wconversion` and `-Wsign-conversion`
 - Always use braces for if/for/while bodies, even single-line
 - Use CMake for managing C/C++ dependencies
-- Use Flatbuffers for serialization needs
+- Use Flatbuffers for serialization needs (backend/data_sdk only; frontend uses the backend C API)
 
 ### RAII & Resource Management
 
@@ -147,12 +185,12 @@ When requested to build/test:
 
 | Pattern | Wrong | Right |
 |---------|-------|-------|
-| FlatBuffers Graph unpacking | `auto obj = graph->UnPack();` (raw `GraphT*`) | `auto obj = UnPackGraph(serialized.ptr);` (returns `unique_ptr<GraphT>`) |
-| FlatBuffers `UnPack()` (other types) | `auto obj = table->UnPack();` (raw `T*`) | `auto obj = std::unique_ptr<T>(table->UnPack());` |
+| FlatBuffers Graph unpacking (backend/data_sdk) | `auto obj = graph->UnPack();` (raw `GraphT*`) | `auto obj = UnPackGraph(serialized.ptr);` (returns `unique_ptr<GraphT>`) |
+| FlatBuffers `UnPack()` (backend/data_sdk) | `auto obj = table->UnPack();` (raw `T*`) | `auto obj = std::unique_ptr<T>(table->UnPack());` |
 | `getAttribute()` for tensor arrays | Use raw pointer, forget cleanup | Wrap immediately: `auto owned = std::unique_ptr<HipdnnBackendDescriptor>(rawPtr);` |
 | `createDescriptorPtr<T>()` | Store raw pointer | Use `createDescriptor<T>()` which returns `unique_ptr` |
 
-**FlatBuffers `UnPack()` returns owning raw pointers.** The generated `Graph::UnPack()`, `Node::UnPack()`, etc. all return `T*` allocated with `new`. Prefer the generated helpers like `UnPackGraph()` which return `std::unique_ptr<T>` directly. For types without helpers, wrap manually: `std::unique_ptr<T>(table->UnPack())`.
+**FlatBuffers `UnPack()` returns owning raw pointers (backend/data_sdk only).** The generated `Graph::UnPack()`, `Node::UnPack()`, etc. all return `T*` allocated with `new`. Prefer the generated helpers like `UnPackGraph()` which return `std::unique_ptr<T>` directly. For types without helpers, wrap manually: `std::unique_ptr<T>(table->UnPack())`.
 
 **`getAttribute()` with `HIPDNN_TYPE_BACKEND_DESCRIPTOR` allocates new descriptors.** The C API packs shared descriptors into fresh `HipdnnBackendDescriptor*` via `packDescriptor()`. Ownership transfers to the caller — wrap in `std::unique_ptr<HipdnnBackendDescriptor>` immediately after retrieval.
 
@@ -168,19 +206,19 @@ Rules apply to the TestSuite name (first param of `TEST` / `TEST_F` / `TEST_P`).
 
 **Composition (left → right):**
 
-1. Optional `Integration` prefix (only for integration tests, always first)
-2. Optional `Gpu` (immediately after `Integration` if both apply, otherwise first)
+1. Required `Test` (unit tests) or `Integration` (integration tests) prefix, always first
+2. Optional `Gpu` immediately after `Test`/`Integration` if the test needs GPU support
 3. Core Feature / Subject under test (PascalCase, no underscores)
 4. Optional Datatype token: `Bfp16`, `Fp16`, `Fp32`
 
-Omit any position that does not apply.
+Omit any optional position that does not apply.
 
-**Unit tests**: Mirror the class under test — `TestMyClass` or `GpuTestMyClass` if GPU is required.
+**Unit tests**: Mirror the class under test — `TestMyClass` or `TestGpuMyClass` if GPU is required.
 
 **Valid examples:**
 ```
-IntegrationGpuConvolutionPlannerNchwFp32   GpuTestActivationKernelNchwFp32
-GpuTestExecutionPlanBuilderFp32            IntegrationGraphFusion
+IntegrationGpuConvolutionPlannerNchwFp32   TestGpuActivationKernelNchwFp32
+TestGpuExecutionPlanBuilderFp32            IntegrationGraphFusion
 TestConvolutionHeuristicsFp32              TestConvolutionHeuristics
 ```
 

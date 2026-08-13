@@ -14,10 +14,10 @@
 
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -63,7 +63,7 @@ namespace hipdnn_frontend::graph
  *
  * @code{.cpp}
  * SdpaAttributes attr;
- * attr.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(d_k)))
+ * attr.set_attn_scale(1.0f / std::sqrt(static_cast<float>(d_k)))
  *     .set_causal_mask(true);
  *
  * auto [o, stats] = graph.sdpa(q, k, v, attr);
@@ -136,6 +136,10 @@ public:
     DiagonalAlignment diagonal_alignment = DiagonalAlignment::TOP_LEFT;
     DataType mma_core_mode = DataType::NOT_SET;
     AttentionImplementation implementation = AttentionImplementation::AUTO;
+
+    // Advisory cuDNN FMA-unfuse hint; hipDNN selects fusion internally, so it is
+    // recorded here and warned-and-ignored by Graph::sdpa.
+    bool unfuse_fma_hint = false;
     // NOLINTEND(readability-identifier-naming)
 
     // -- Input tensor getters --
@@ -397,22 +401,22 @@ public:
         return setInput(InputNames::Dropout_scale, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_k(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_paged_attention_k_table(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Page_table_K, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_k(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_paged_attention_k_table(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::Page_table_K, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_v(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_paged_attention_v_table(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Page_table_V, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_v(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_paged_attention_v_table(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::Page_table_V, std::move(value));
     }
@@ -520,22 +524,22 @@ public:
         return setOutput(OutputNames::Stats, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_max(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_logit_max(const std::shared_ptr<TensorAttributes>& value)
     {
         return setOutput(OutputNames::Max, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_max(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_logit_max(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Max, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_sum_exp(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_score_sum_exp(const std::shared_ptr<TensorAttributes>& value)
     {
         return setOutput(OutputNames::Sum_exp, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_sum_exp(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_score_sum_exp(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Sum_exp, std::move(value));
     }
@@ -618,8 +622,10 @@ public:
         dropout_probability = probability;
         return *this;
     }
+    // cuDNN spells the scalar attention-scale overload set_attn_scale(float);
+    // it joins the shared_ptr set_attn_scale overloads above.
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_attn_scale_value(float value)
+    SdpaAttributes& set_attn_scale(float value)
     {
         attn_scale_value = value;
         return *this;
@@ -663,183 +669,57 @@ public:
         return *this;
     }
 
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::SdpaAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
+    // -- cuDNN parity setters --
+    // Each accepts the cuDNN frontend spelling/overload/semantics that is more
+    // than a straight rename of a native setter (overload merge, semantic remap,
+    // one-to-many split, or a capability hipDNN lacks). The pure renames were
+    // folded into the native setters above.
+    // cuDNN [[deprecated]] set_is_inference(b) means "no stats": the inverse of
+    // generate_stats. PyTorch still emits it on CUDNN_FRONTEND_VERSION <= 11200.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    [[deprecated("use set_generate_stats(!value)")]] SdpaAttributes& set_is_inference(bool value)
     {
-        const auto optUid
-            = [](const std::shared_ptr<TensorAttributes>& t) -> flatbuffers::Optional<int64_t> {
-            return t ? flatbuffers::Optional<int64_t>(t->get_uid()) : flatbuffers::nullopt;
-        };
-
-        return hipdnn_data_sdk::data_objects::CreateSdpaAttributes(builder,
-                                                                   get_q()->get_uid(),
-                                                                   get_k()->get_uid(),
-                                                                   get_v()->get_uid(),
-                                                                   get_o()->get_uid(),
-                                                                   optUid(get_bias()),
-                                                                   optUid(get_attn_scale()),
-                                                                   optUid(get_seq_len_q()),
-                                                                   optUid(get_seq_len_kv()),
-                                                                   optUid(get_seed()),
-                                                                   optUid(get_offset()),
-                                                                   optUid(get_dropout_mask()),
-                                                                   optUid(get_dropout_scale()),
-                                                                   optUid(get_page_table_k()),
-                                                                   optUid(get_page_table_v()),
-                                                                   optUid(get_block_mask()),
-                                                                   optUid(get_sink_token()),
-                                                                   optUid(get_descale_q()),
-                                                                   optUid(get_descale_k()),
-                                                                   optUid(get_descale_v()),
-                                                                   optUid(get_descale_s()),
-                                                                   optUid(get_scale_s()),
-                                                                   optUid(get_scale_o()),
-                                                                   optUid(get_stats()),
-                                                                   optUid(get_max()),
-                                                                   optUid(get_sum_exp()),
-                                                                   optUid(get_rng_dump()),
-                                                                   optUid(get_amax_s()),
-                                                                   optUid(get_amax_o()),
-                                                                   generate_stats,
-                                                                   alibi_mask,
-                                                                   padding_mask,
-                                                                   causal_mask,
-                                                                   causal_mask_bottom_right,
-                                                                   dropout_probability,
-                                                                   attn_scale_value,
-                                                                   left_bound,
-                                                                   right_bound,
-                                                                   max_seq_len_kv,
-                                                                   toSdkType(diagonal_alignment),
-                                                                   toSdkType(mma_core_mode),
-                                                                   toSdkType(implementation));
+        return set_generate_stats(!value);
     }
-
-    static SdpaAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::SdpaAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
+    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_sliding_window_length(int value)
     {
-        SdpaAttributes attr;
-
-        attr.set_q(tensorMap.at(fb->q_tensor_uid()));
-        attr.set_k(tensorMap.at(fb->k_tensor_uid()));
-        attr.set_v(tensorMap.at(fb->v_tensor_uid()));
-        attr.set_o(tensorMap.at(fb->o_tensor_uid()));
-
-        if(fb->attn_mask_tensor_uid().has_value())
-        {
-            attr.set_bias(tensorMap.at(fb->attn_mask_tensor_uid().value()));
-        }
-        if(fb->scale_tensor_uid().has_value())
-        {
-            attr.set_attn_scale(tensorMap.at(fb->scale_tensor_uid().value()));
-        }
-        if(fb->seq_len_q_tensor_uid().has_value())
-        {
-            attr.set_seq_len_q(tensorMap.at(fb->seq_len_q_tensor_uid().value()));
-        }
-        if(fb->seq_len_kv_tensor_uid().has_value())
-        {
-            attr.set_seq_len_kv(tensorMap.at(fb->seq_len_kv_tensor_uid().value()));
-        }
-        if(fb->seed_tensor_uid().has_value())
-        {
-            attr.set_seed(tensorMap.at(fb->seed_tensor_uid().value()));
-        }
-        if(fb->offset_tensor_uid().has_value())
-        {
-            attr.set_offset(tensorMap.at(fb->offset_tensor_uid().value()));
-        }
-        if(fb->dropout_mask_tensor_uid().has_value())
-        {
-            attr.set_dropout_mask(tensorMap.at(fb->dropout_mask_tensor_uid().value()));
-        }
-        if(fb->dropout_scale_tensor_uid().has_value())
-        {
-            attr.set_dropout_scale(tensorMap.at(fb->dropout_scale_tensor_uid().value()));
-        }
-        if(fb->page_table_k_tensor_uid().has_value())
-        {
-            attr.set_page_table_k(tensorMap.at(fb->page_table_k_tensor_uid().value()));
-        }
-        if(fb->page_table_v_tensor_uid().has_value())
-        {
-            attr.set_page_table_v(tensorMap.at(fb->page_table_v_tensor_uid().value()));
-        }
-        if(fb->block_mask_tensor_uid().has_value())
-        {
-            attr.set_block_mask(tensorMap.at(fb->block_mask_tensor_uid().value()));
-        }
-        if(fb->sink_token_tensor_uid().has_value())
-        {
-            attr.set_sink_token(tensorMap.at(fb->sink_token_tensor_uid().value()));
-        }
-        if(fb->descale_q_tensor_uid().has_value())
-        {
-            attr.set_descale_q(tensorMap.at(fb->descale_q_tensor_uid().value()));
-        }
-        if(fb->descale_k_tensor_uid().has_value())
-        {
-            attr.set_descale_k(tensorMap.at(fb->descale_k_tensor_uid().value()));
-        }
-        if(fb->descale_v_tensor_uid().has_value())
-        {
-            attr.set_descale_v(tensorMap.at(fb->descale_v_tensor_uid().value()));
-        }
-        if(fb->descale_s_tensor_uid().has_value())
-        {
-            attr.set_descale_s(tensorMap.at(fb->descale_s_tensor_uid().value()));
-        }
-        if(fb->scale_s_tensor_uid().has_value())
-        {
-            attr.set_scale_s(tensorMap.at(fb->scale_s_tensor_uid().value()));
-        }
-        if(fb->scale_o_tensor_uid().has_value())
-        {
-            attr.set_scale_o(tensorMap.at(fb->scale_o_tensor_uid().value()));
-        }
-        if(fb->stats_tensor_uid().has_value())
-        {
-            attr.set_stats(tensorMap.at(fb->stats_tensor_uid().value()));
-        }
-        if(fb->max_tensor_uid().has_value())
-        {
-            attr.set_max(tensorMap.at(fb->max_tensor_uid().value()));
-        }
-        if(fb->sum_exp_tensor_uid().has_value())
-        {
-            attr.set_sum_exp(tensorMap.at(fb->sum_exp_tensor_uid().value()));
-        }
-        if(fb->rng_dump_tensor_uid().has_value())
-        {
-            attr.set_rng_dump(tensorMap.at(fb->rng_dump_tensor_uid().value()));
-        }
-        if(fb->amax_s_tensor_uid().has_value())
-        {
-            attr.set_amax_s(tensorMap.at(fb->amax_s_tensor_uid().value()));
-        }
-        if(fb->amax_o_tensor_uid().has_value())
-        {
-            attr.set_amax_o(tensorMap.at(fb->amax_o_tensor_uid().value()));
-        }
-
-        attr.generate_stats = fb->generate_stats();
-        attr.alibi_mask = fb->alibi_mask();
-        attr.padding_mask = fb->padding_mask();
-        attr.causal_mask = fb->causal_mask();
-        attr.causal_mask_bottom_right = fb->causal_mask_bottom_right();
-
-        attr.dropout_probability = fb->dropout_probability();
-        attr.attn_scale_value = fb->attn_scale_value();
-        attr.left_bound = fb->left_bound();
-        attr.right_bound = fb->right_bound();
-        attr.max_seq_len_kv = fb->max_seq_len_kv();
-
-        attr.diagonal_alignment = fromSdkType(fb->diagonal_alignment());
-        attr.mma_core_mode = fromSdkType(fb->mma_core_mode());
-        attr.implementation = fromSdkType(fb->implementation());
-
-        return attr;
+        return set_diagonal_band_left_bound(value);
+    }
+    // cuDNN spells the internal MMA core-mode override _set_mma_core_mode.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& _set_mma_core_mode(DataType value)
+    {
+        return set_mma_core_mode(value);
+    }
+    // cuDNN set_dropout(mask, scale) is one fused call; hipDNN sets both tensors.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout(std::shared_ptr<TensorAttributes> mask,
+                                std::shared_ptr<TensorAttributes> scale)
+    {
+        set_dropout_mask(std::move(mask));
+        set_dropout_scale(std::move(scale));
+        return *this;
+    }
+    // cuDNN's programmable score modifier is a callback over the graph; hipDNN
+    // has no equivalent. Accepted for source compatibility, recorded as
+    // unsupported so the graph fails loudly at validate(). Templated to accept
+    // any callable without naming the cuDNN std::function type.
+    template <typename ScoreModifier>
+    SdpaAttributes& set_score_mod(ScoreModifier&& value) // NOLINT(readability-identifier-naming)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA score modifier is unsupported by hipDNN");
+    }
+    // cuDNN FMA-unfuse perf hint; hipDNN selects fusion internally. Advisory and
+    // safe to drop: recorded so Graph::sdpa can warn-and-ignore (logging is not
+    // available in this standalone header).
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_unfuse_fma(bool value)
+    {
+        unfuse_fma_hint = value;
+        return *this;
     }
 };
 

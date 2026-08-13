@@ -35,7 +35,7 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 
 ### User Guides
 - **[Building](./docs/Building.md)** - Prerequisites, build configurations, and platform-specific instructions
-- **[Consumer Quick Start](./docs/ConsumerQuickStart.md)** - Using an installed hipDNN in your CMake project
+- **[Add hipDNN to your project](https://rocm.docs.amd.com/projects/hipdnn/en/latest/install/add-project.html)** - Using an installed hipDNN in your CMake project (published documentation)
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and extending the framework
 - **[Environment Configuration](./docs/Environment.md)** - Runtime configuration and logging setup
 - **[Operation Support](./docs/OperationSupport.md)** - Currently supported operations and their status
@@ -63,10 +63,10 @@ hipDNN is organized into several key components. For detailed architecture descr
 | Component | Description |
 |-----------|-------------|
 | **[Backend](./backend/)** | Core shared library providing C API for operation graphs and managing plugins |
+| **[Data SDK](./data_sdk/)** | Header-only library with shared types, tensor utilities, logging, and the engine name registry |
+| **[Flatbuffers SDK](./flatbuffers_sdk/)** | Header-only library with FlatBuffers schemas, generated headers, graph wrappers, and optional JSON helpers |
 | **[Frontend](./frontend/)** | Header-only C++ API wrapper around the backend |
-| **[Data SDK](./data_sdk/)** | Header-only library with data objects, utilities, and logging |
 | **[Plugin SDK](./plugin_sdk/)** | Header-only library for plugin development |
-| **[Flatbuffers SDK](./flatbuffers_sdk/)** | *(Stubbed — not yet usable)* Future home of FlatBuffers-generated headers and utilities, isolated from Data SDK |
 | **[Samples](./samples/)** | Example implementations demonstrating hipDNN usage |
 | **[Tests](./tests/)** | Tests for the public API (incl. frontend integration tests) |
 | **[Tools](./tools/)** | Experimental utilities (e.g., benchmarking, engine listing) — subject to change |

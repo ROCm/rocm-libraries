@@ -15,20 +15,13 @@ endif()
 add_executable(
     miopen_plugin_integration_tests
     main.cpp
-    IntegrationGpuBatchnormBackward.cpp
-    IntegrationGpuBatchnormBackwardActivation.cpp
-    IntegrationGpuBatchnormForwardInference.cpp
-    IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-    IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-    IntegrationGpuBatchnormFwdPlusActive.cpp
-    IntegrationGpuBatchnormForwardTraining.cpp
-    IntegrationGpuBatchnormFwdTrainingActiv.cpp
-    IntegrationGpuConvForward.cpp
-    IntegrationGpuConvFwdBiasActiv.cpp
-    IntegrationGpuConvBackwardData.cpp
-    IntegrationGpuConvBackwardWeights.cpp
+    IntegrationGpuBatchnormUnsupportedDataTypes.cpp
+    IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
+    IntegrationGpuBatchnormUnhappyActivation.cpp
+    IntegrationGpuBatchnormUnhappyLayouts.cpp
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
+    IntegrationGpuPassByValue.cpp
 )
 
 target_compile_options(miopen_plugin_integration_tests PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
@@ -50,4 +43,4 @@ add_dependencies(miopen_plugin_integration_tests miopen_plugin)
 
 clang_tidy_check(miopen_plugin_integration_tests)
 
-add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_integration_test_target(miopen_plugin_integration_tests ${CMAKE_CURRENT_BINARY_DIR} LABELS slow)

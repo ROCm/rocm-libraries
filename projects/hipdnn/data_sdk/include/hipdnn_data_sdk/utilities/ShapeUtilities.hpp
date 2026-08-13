@@ -3,8 +3,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -343,7 +345,7 @@ inline std::vector<int64_t> getDerivedShape(const std::vector<int64_t>& shape)
 // Iterates the elements along each of the dimensions specified in dims and calls func for each unique index
 // Formally, we are iterating over a cartesian product of the ranges [0, dims[0]), [0, dims[1]), ..., [0, dims[n - 1]) for n dimensions
 template <typename F>
-static void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
+void iterateAlongDimensions(const std::vector<int64_t>& dims, F&& func)
 {
     if(dims.empty())
     {

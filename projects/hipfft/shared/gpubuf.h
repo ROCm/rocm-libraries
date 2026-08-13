@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ public:
         return instance;
     }
 
-    const size_t num_devices() const
+    size_t num_devices() const
     {
         return mem_account_on_device.size();
     }
@@ -75,6 +75,18 @@ public:
         if(dev_account.is_integrated_device)
             system_memory::singleton().release_used_bytes(allocation_size);
     }
+
+    std::vector<size_t> get_usable_bytes_all_devices()
+    {
+        auto                ndevices = num_devices();
+        std::vector<size_t> ret(ndevices);
+        for(size_t dev_id = 0; dev_id < ndevices; ++dev_id)
+        {
+            ret[dev_id] = get_usable_bytes(dev_id);
+        }
+        return ret;
+    }
+
     size_t get_usable_bytes(int dev_id)
     {
         if(dev_id < 0 || static_cast<size_t>(dev_id) >= num_devices())

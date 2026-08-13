@@ -3,41 +3,49 @@
 
 #pragma once
 
-#include "HipKernelContext.hpp"
-#include "HipKernelHandle.hpp"
-#include "HipKernelSettings.hpp"
+#include "SdpaModuleCache.hpp"
+#include "core/Context.hpp"
+#include "core/Handle.hpp"
+#include "core/Settings.hpp"
 
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 
 namespace asm_sdpa_engine
 {
 
-class SdpaFwdPlanBuilder
-    : public hipdnn_plugin_sdk::IPlanBuilder<HipKernelHandle, HipKernelSettings, HipKernelContext>
+class SdpaFwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
 {
 public:
-    bool isApplicable(const HipKernelHandle& handle,
-                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+    static SdpaModuleCache& moduleCache()
+    {
+        static SdpaModuleCache s_cache;
+        return s_cache;
+    }
 
-    size_t getMaxWorkspaceSize(const HipKernelHandle& handle,
-                               const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                               const HipKernelSettings& executionSettings) const override;
+    bool isApplicable(
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+
+    size_t getMaxWorkspaceSize(const Handle& handle,
+                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               const Settings& executionSettings) const override;
 
     void initializeExecutionSettings(
-        const HipKernelHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-        HipKernelSettings& executionSettings) const override;
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        Settings& executionSettings) const override;
 
-    void buildPlan(const HipKernelHandle& handle,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-                   const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-                   HipKernelContext& executionContext) const override;
+    void buildPlan(const Handle& handle,
+                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                   const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+                   Context& executionContext) const override;
 
-    std::vector<hipdnn_data_sdk::data_objects::KnobT>
+    std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
-        getCustomKnobs(const HipKernelHandle& handle,
-                       const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+        getCustomKnobs(
+            const Handle& handle,
+            const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 };
 
 } // namespace asm_sdpa_engine

@@ -40,4 +40,9 @@ typedef enum
     HIPDNN_OPERATION_TYPE_BLOCK_SCALE_DEQUANTIZE_EXT = 15, ///< Block scale dequantization
     HIPDNN_OPERATION_TYPE_CUSTOM_OP_EXT = 16, ///< Custom operation
     HIPDNN_OPERATION_TYPE_REDUCTION_EXT = 17, ///< Reduction operation
+    HIPDNN_OPERATION_TYPE_RESAMPLE_FWD = 18, ///< Resample forward operation
+    HIPDNN_OPERATION_TYPE_RMSNORM_BACKWARD_EXT = 19, ///< RMS normalization backward
+    HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT = 20, ///< Layer normalization backward
+    HIPDNN_OPERATION_TYPE_RESAMPLE_BWD_EXT = 21, ///< Resample backward operation
+    HIPDNN_OPERATION_TYPE_MOE_GROUPED_MATMUL_EXT = 22, ///< Forward MoE grouped matmul
 } hipdnnOperationType_ext_t;

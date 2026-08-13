@@ -126,8 +126,16 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** To skip tests on specific platforms, add an entry in `clients/tests/data/known_bugs.yaml` (e.g. `function`, `initialization`, `known_bug_platforms`).
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). At test time, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is skipped via `GTEST_SKIP()` and counted in the `[ SKIPPED ]` summary; the test still appears in the test list. Entries with no `known_bug_platforms` are treated as known-bug on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
+
+---
+
+## TensileLite Python tests (codegen / characterization)
+
+The sections above cover the **client** tests (`hipblaslt-test`, gtest, YAML data). The in-repo **TensileLite generator** has its own Python test suite under `tensilelite/Tensile/Tests/unit/`, including **characterization tests** that pin current behavior with [syrupy](https://github.com/syrupy-project/syrupy) `.ambr` golden files.
+
+If your change makes a characterization test fail, do **not** run a blanket `pytest --snapshot-update` (it rewrites every golden and destroys the safety net). Update only the affected node and review the diff. Full policy and the decision tree: [`tensilelite/Tensile/Tests/unit/characterization/README.md`](tensilelite/Tensile/Tests/unit/characterization/README.md).
 
 ---
 

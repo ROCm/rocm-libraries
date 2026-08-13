@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
@@ -7,26 +7,20 @@
 
 using namespace example_provider;
 
-class ExampleProviderContainerTest : public ::testing::Test
-{
-protected:
-    ExampleProviderContainer container;
-};
-
-TEST_F(ExampleProviderContainerTest, CopyEngineIds_QueryCountOnly)
+TEST(ExampleProviderContainerStaticTest, CopyEngineIds_QueryCountOnly)
 {
     uint32_t numEngines = 0;
-    auto total = ExampleProviderContainer::copyEngineIds(nullptr, 0, numEngines);
+    const auto total = ExampleProviderContainer::copyEngineIds(nullptr, 0, numEngines);
 
     EXPECT_EQ(total, 2u);
     EXPECT_EQ(numEngines, 2u);
 }
 
-TEST_F(ExampleProviderContainerTest, CopyEngineIds_CopyAll)
+TEST(ExampleProviderContainerStaticTest, CopyEngineIds_CopyAll)
 {
     std::vector<int64_t> ids(2, 0);
     uint32_t numEngines = 0;
-    auto total = ExampleProviderContainer::copyEngineIds(ids.data(), 2, numEngines);
+    const auto total = ExampleProviderContainer::copyEngineIds(ids.data(), 2, numEngines);
 
     EXPECT_EQ(total, 2u);
     EXPECT_EQ(numEngines, 2u);
@@ -37,11 +31,11 @@ TEST_F(ExampleProviderContainerTest, CopyEngineIds_CopyAll)
     EXPECT_NE(ids[0], ids[1]);
 }
 
-TEST_F(ExampleProviderContainerTest, CopyEngineIds_CopyPartial)
+TEST(ExampleProviderContainerStaticTest, CopyEngineIds_CopyPartial)
 {
     std::vector<int64_t> ids(1, 0);
     uint32_t numEngines = 0;
-    auto total = ExampleProviderContainer::copyEngineIds(ids.data(), 1, numEngines);
+    const auto total = ExampleProviderContainer::copyEngineIds(ids.data(), 1, numEngines);
 
     // Total is always the full count, but only 1 was copied
     EXPECT_EQ(total, 2u);
@@ -49,10 +43,26 @@ TEST_F(ExampleProviderContainerTest, CopyEngineIds_CopyPartial)
     EXPECT_NE(ids[0], 0);
 }
 
+class ExampleProviderContainerTest : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        int deviceCount = 0;
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0)
+        {
+            GTEST_SKIP() << "No GPU devices available.";
+        }
+        _container = std::make_unique<ExampleProviderContainer>();
+    }
+
+    std::unique_ptr<ExampleProviderContainer> _container;
+};
+
 TEST_F(ExampleProviderContainerTest, GetEngineManager_HasAllEngines)
 {
-    auto& manager = container.getEngineManager();
-    auto ids = manager.getAllEngineIds();
+    auto& manager = _container->getEngineManager();
+    const auto ids = manager.getAllEngineIds();
     // The EngineManager should have 2 engines registered
     EXPECT_EQ(ids.size(), 2u);
 }

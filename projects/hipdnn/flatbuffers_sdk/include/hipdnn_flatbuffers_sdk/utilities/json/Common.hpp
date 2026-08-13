@@ -6,6 +6,7 @@
 
 #include <flatbuffers/flatbuffer_builder.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/resample_common_generated.h>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
 
@@ -33,10 +34,6 @@ void from_json(const BasicJsonType& j, std::optional<T>& opt)
 NLOHMANN_JSON_NAMESPACE_END
 #endif
 
-// These inline overloads mirror data_sdk's Common.hpp. Both SDKs need them independently
-// because the json headers are consumed directly (no transitive include path). Identical
-// inline definitions across TUs are explicitly permitted by C++ and do not violate ODR.
-// Once data_sdk drops its flatbuffers dependency, these become the sole definitions.
 namespace flatbuffers
 {
 
@@ -81,6 +78,11 @@ void to_json(nlohmann::json& vectorList, const Vector<Offset<T>>* vec)
     }
 }
 
+inline const char* safeStr(const String* s)
+{
+    return s != nullptr ? s->c_str() : "";
+}
+
 }
 
 // NOLINTEND(readability-identifier-naming)
@@ -105,6 +107,9 @@ NLOHMANN_JSON_SERIALIZE_ENUM(DataType,
                                  {DataType::FP6_E2M3, "fp6_e2m3"},
                                  {DataType::FP6_E3M2, "fp6_e3m2"},
                                  {DataType::INT64, "int64"},
+                                 {DataType::BOOLEAN, "boolean"},
+                                 {DataType::FP8_E4M3_FNUZ, "fp8_e4m3_fnuz"},
+                                 {DataType::FP8_E5M2_FNUZ, "fp8_e5m2_fnuz"},
                              }
 
 )
@@ -119,9 +124,21 @@ NLOHMANN_JSON_SERIALIZE_ENUM(TensorValue,
                                  {TensorValue::Int32Value, "Int32Value"},
                                  {TensorValue::Int64Value, "Int64Value"},
                                  {TensorValue::Float64Value, "Float64Value"},
+                                 {TensorValue::BoolValue, "BoolValue"},
                              }
 
 )
+
+NLOHMANN_JSON_SERIALIZE_ENUM(ResampleMode,
+                             {{ResampleMode::NOT_SET, "not_set"},
+                              {ResampleMode::MAXPOOL, "maxpool"},
+                              {ResampleMode::AVGPOOL_EXCLUDE_PADDING, "avgpool_exclude_padding"},
+                              {ResampleMode::AVGPOOL_INCLUDE_PADDING, "avgpool_include_padding"}})
+
+NLOHMANN_JSON_SERIALIZE_ENUM(PaddingMode,
+                             {{PaddingMode::PADDING_NOT_SET, "padding_not_set"},
+                              {PaddingMode::NEG_INF_PAD, "neg_inf_pad"},
+                              {PaddingMode::ZERO_PAD, "zero_pad"}})
 }
 
 namespace hipdnn_flatbuffers_sdk::json

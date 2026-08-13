@@ -10,9 +10,9 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/RMSNormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -22,7 +22,7 @@
 #include <vector>
 
 using namespace hipdnn_backend;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -81,9 +81,9 @@ protected:
         _tensorMap[K_RMSNORM_TENSOR_INV_RMS_UID] = TensorDescriptor::fromFlatBuffer(invRmsAttrs);
     }
 
-    static hipdnn_data_sdk::data_objects::RMSNormAttributesT createStandardRMSNormAttrs()
+    static hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributesT createStandardRMSNormAttrs()
     {
-        hipdnn_data_sdk::data_objects::RMSNormAttributesT attrs;
+        hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributesT attrs;
         attrs.x_tensor_uid = K_RMSNORM_TENSOR_X_UID;
         attrs.scale_tensor_uid = K_RMSNORM_TENSOR_SCALE_UID;
         attrs.epsilon_tensor_uid = K_RMSNORM_TENSOR_EPSILON_UID;

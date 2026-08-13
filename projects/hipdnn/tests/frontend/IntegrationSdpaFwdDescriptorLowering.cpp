@@ -8,8 +8,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/SdpaFwdConstants.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -21,10 +21,10 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
-using DiagonalAlignmentSdk = hipdnn_data_sdk::data_objects::DiagonalAlignment;
-using AttentionImplementationSdk = hipdnn_data_sdk::data_objects::AttentionImplementation;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using DiagonalAlignmentSdk = hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+using AttentionImplementationSdk = hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation;
 
 namespace
 {
@@ -40,12 +40,12 @@ public:
 // Builds an SDPA graph with standard Q/K/V tensors, validates, lowers via
 // descriptors, serializes, and returns the deserialized GraphT.
 // The caller configures optional tensors and scalars on sdpaAttrs before calling.
-hipdnn_data_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnnHandle_t handle,
-                                                                   SdpaAttributes sdpaAttrs,
-                                                                   DataType tensorDataType
-                                                                   = DataType::FLOAT)
+hipdnn_flatbuffers_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnnHandle_t handle,
+                                                                          SdpaAttributes sdpaAttrs,
+                                                                          DataType tensorDataType
+                                                                          = DataType::FLOAT)
 {
-    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
 
     const bool wantStats = sdpaAttrs.generate_stats.has_value() && sdpaAttrs.generate_stats.value();
 
@@ -113,7 +113,7 @@ hipdnn_data_sdk::data_objects::GraphT buildAndDeserializeSdpaGraph(hipdnnHandle_
         return graphT;
     }
 
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data());
     if(graphFb == nullptr)
     {
         ADD_FAILURE() << "GetGraph returned null";
@@ -207,9 +207,9 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
               HIPDNN_STATUS_SUCCESS);
 
     // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data());
     ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     graphFb->UnPackTo(&graphT);
 
     // -- Verify graph-level attributes --
@@ -220,7 +220,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
     // -- Verify tensors (Q, K, V, O = 4 tensors) --
     ASSERT_EQ(graphT.tensors.size(), 4u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+        tensorMap;
     for(const auto& t : graphT.tensors)
     {
         tensorMap[t->uid] = t.get();
@@ -281,6 +282,45 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdGraphRoundTrip)
     EXPECT_EQ(sdpa->implementation, AttentionImplementationSdk::AUTO);
 }
 
+// Verifies that a tensor attention scale survives descriptor lowering and serialization.
+TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdTensorScaleRoundTrip)
+{
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_SDPA_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_value(0.125f);
+
+    SdpaAttributes sdpaAttrs;
+    sdpaAttrs.set_name("sdpa_tensor_scale").set_attn_scale(scale);
+
+    auto graphT = buildAndDeserializeSdpaGraph(_handle, std::move(sdpaAttrs));
+    if(HasFailure())
+    {
+        return;
+    }
+
+    ASSERT_EQ(graphT.tensors.size(), 5u);
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+        tensorMap;
+    for(const auto& tensor : graphT.tensors)
+    {
+        tensorMap[tensor->uid] = tensor.get();
+    }
+
+    ASSERT_NE(tensorMap.count(K_SDPA_TENSOR_SCALE_UID), 0u);
+    const auto* scaleT = tensorMap[K_SDPA_TENSOR_SCALE_UID];
+    EXPECT_EQ(scaleT->name, "SCALE");
+    EXPECT_EQ(scaleT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(scaleT->dims, (std::vector<int64_t>{1}));
+    EXPECT_EQ(scaleT->strides, (std::vector<int64_t>{1}));
+
+    ASSERT_EQ(graphT.nodes.size(), 1u);
+    const auto* sdpa = graphT.nodes[0]->attributes.AsSdpaAttributes();
+    ASSERT_NE(sdpa, nullptr);
+    ASSERT_TRUE(sdpa->scale_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->scale_tensor_uid.value(), K_SDPA_TENSOR_SCALE_UID);
+    EXPECT_FALSE(sdpa->attn_scale_value.has_value());
+}
+
 // Verifies that tensor UIDs auto-assigned by the frontend are preserved
 // through the lowering round-trip.
 TEST_F(IntegrationSdpaFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
@@ -326,8 +366,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, AutoAssignedUidsPreservedInRoundTri
                   rawDesc, serializedSize, &serializedSize, serializedData.data()),
               HIPDNN_STATUS_SUCCESS);
 
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
 
     // All tensors should have been auto-assigned unique UIDs (Q, K, V, O = 4)
     ASSERT_EQ(graphT.tensors.size(), 4u);
@@ -412,9 +452,9 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
               HIPDNN_STATUS_SUCCESS);
 
     // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data());
     ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     graphFb->UnPackTo(&graphT);
 
     // -- Verify tensors (Q, K, V, O, STATS = 5 tensors) --
@@ -434,7 +474,8 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithStatsRoundTrip)
     EXPECT_TRUE(sdpa->generate_stats);
 
     // Verify inferred stats tensor shape
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
+    std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
+        tensorMap;
     for(const auto& t : graphT.tensors)
     {
         tensorMap[t->uid] = t.get();
@@ -479,7 +520,7 @@ TEST_F(IntegrationSdpaFwdDescriptorLowering, SdpaFwdWithOptionalTensorsAndScalar
     sdpaAttrs.set_dropout_mask(dropoutMask);
     sdpaAttrs.set_generate_stats(true);
     sdpaAttrs.set_causal_mask(true);
-    sdpaAttrs.set_attn_scale_value(0.125f);
+    sdpaAttrs.set_attn_scale(0.125f);
     sdpaAttrs.set_diagonal_band_left_bound(0);
     sdpaAttrs.set_diagonal_band_right_bound(128);
     sdpaAttrs.set_diagonal_alignment(DiagonalAlignment::BOTTOM_RIGHT);

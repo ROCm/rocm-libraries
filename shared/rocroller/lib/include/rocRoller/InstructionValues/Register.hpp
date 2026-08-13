@@ -128,6 +128,7 @@ namespace rocRoller
             //> Returns a new instruction that only allocates registers for this value.
             Instruction allocate();
             void        allocate(Instruction& inst);
+            void        setForceReservedRegion();
 
             bool canAllocateNow() const;
             void allocateNow();
@@ -138,8 +139,9 @@ namespace rocRoller
             constexpr bool isSpecial() const;
             constexpr bool isTTMP() const;
             constexpr bool isSCC() const;
+            constexpr bool isEXECZ() const;
             bool           isVCC() const;
-            constexpr bool isExec() const;
+            bool           isEXEC() const;
 
             /**
              * Asserts that `this` is in a valid state to be used as an operand to an instruction.
@@ -164,7 +166,7 @@ namespace rocRoller
 
             void setVariableType(VariableType value);
 
-            void        toStream(std::ostream& os) const;
+            void        toStream(std::ostream& os, bool useNormalized = false) const;
             std::string toString() const;
             std::string description() const;
 
@@ -351,7 +353,7 @@ namespace rocRoller
             /**
              * Implementation of toString() for general-purpose registers.
              */
-            void gprString(std::ostream& os) const;
+            void gprString(std::ostream& os, bool useNormalized = false) const;
 
             /**
              * Implementation of toString() for special registers.
@@ -443,6 +445,8 @@ namespace rocRoller
 
             std::vector<int> const& registerIndices() const;
 
+            std::vector<int> const& normalizedRegisterIndices() const;
+
             void setAllocation(std::shared_ptr<Allocator> allocator,
                                std::vector<int> const&    registers);
             void setAllocation(std::shared_ptr<Allocator> allocator, std::vector<int>&& registers);
@@ -480,6 +484,7 @@ namespace rocRoller
 
             std::shared_ptr<Allocator> m_allocator;
             std::vector<int>           m_registerIndices;
+            std::vector<int>           m_normalizedRegisterIndices;
 
             std::string m_name;
 
