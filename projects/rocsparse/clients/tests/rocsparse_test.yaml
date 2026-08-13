@@ -165,6 +165,11 @@ include: test_spgeam_reuse_csr_2.yaml
 include: test_spmat_scale.yaml
 include: test_gemvi.yaml
 include: test_sddmm.yaml
+include: test_sddmm_batched_ell.yaml
+include: test_sddmm_batched_coo.yaml
+include: test_sddmm_batched_coo_aos.yaml
+include: test_sddmm_batched_csr.yaml
+include: test_sddmm_batched_csc.yaml
 include: test_csrcolor.yaml
 include: test_copy_info.yaml
 include: test_check_matrix_csr.yaml

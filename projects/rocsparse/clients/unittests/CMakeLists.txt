@@ -114,6 +114,7 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 # ---------------------------------------------------------------------------
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
+  unit_test_host_conversion_sort.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure

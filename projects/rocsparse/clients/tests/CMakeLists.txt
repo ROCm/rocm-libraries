@@ -255,6 +255,15 @@ if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 endif()
 
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_sddmm_batched_ell.cpp
+    test_sddmm_batched_coo.cpp
+    test_sddmm_batched_coo_aos.cpp
+    test_sddmm_batched_csr.cpp
+    test_sddmm_batched_csc.cpp)
+endif()
+
 set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_axpby.cpp
 ../testings/testing_axpyi.cpp
@@ -417,6 +426,15 @@ endif()
 
 if(ROCSPARSE_ENABLE_SPMAT_SCALE)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_sddmm_batched_ell.cpp
+    ../testings/testing_sddmm_batched_coo.cpp
+    ../testings/testing_sddmm_batched_coo_aos.cpp
+    ../testings/testing_sddmm_batched_csr.cpp
+    ../testings/testing_sddmm_batched_csc.cpp)
 endif()
 
 
