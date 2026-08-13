@@ -74,30 +74,6 @@ struct HWModel {
     Barrier barrier;
     Coexec coexec;
     Hazards hazards;
-
-    /// Effective LDS drain latency for a burst of \p matchingDsLoadCount ds_reads
-    /// whose per-load modeled latency is \p targetDSLoadLatency, with \p numWaves
-    /// waves sharing the LDS return path.
-    ///
-    /// lds.readDrainLatency is the static, single-wave figure; this narrows it to
-    /// the burst actually in flight: loads within lds.readQueueDepth overlap and
-    /// cost only their per-wave issue spacing, while the overflow past the depth
-    /// issues at half that rate. Defined out of line in HWModel.cpp and exported
-    /// so consumers outside libstinkytofu.so can call it.
-    ///
-    /// \p numWaves is clamped to the range the model was characterized over (1..4),
-    /// so callers can hand over a raw GemmTileConfig::NumWaves, zero included.
-    ///
-    /// Reads lds.readQueueDepth directly, so a caller honoring the
-    /// dagFeatures.dsReadQueueDepth override cannot express that override here.
-    ///
-    /// Not virtual, and it must stay that way: the per-arch models are constexpr
-    /// aggregates initialized with designated initializers, and their address
-    /// identity is load-bearing (PassContext caches a pointer). An arch whose
-    /// numbers differ gets new HWModel fields; an arch whose *formula* differs
-    /// gets a per-arch function pointer, the way hazards.rules is handled.
-    STINKYTOFU_EXPORT int computeDynamicDrainLatency(int matchingDsLoadCount,
-                                                     int targetDSLoadLatency, int numWaves) const;
 };
 
 // Deliberately NOT here: InsertDelayAluPass's s_delay_alu scoreboard depths
@@ -128,6 +104,11 @@ constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 // https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0
 // ArchInfo. Changing it here retargets both the HWModel and the CDNA5 policy table.
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
+
+// Internal helper used by stinkytofu passes to model dynamic LDS drain latency
+// from per-arch HWModel facts. Not part of the exported API surface.
+int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
+                               int numWaves);
 
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.

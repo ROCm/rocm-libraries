@@ -10,12 +10,6 @@
 namespace stinkytofu {
 namespace {
 
-// Wave counts the LDS drain model is defined over. A caller whose tile config was
-// never filled in reports zero waves, and the model has only been characterized up
-// to four waves contending for the LDS return path.
-constexpr int kMinModeledWaves = 1;
-constexpr int kMaxModeledWaves = 4;
-
 // The models are defined here, out of line, rather than as inline objects in the
 // header. STINKYTOFU_EXPORT is empty for consumers on Linux (see Export.hpp), so a
 // header-inline object would get a distinct address in libstinkytofu.so and in each
@@ -55,10 +49,13 @@ constexpr HWModel kGfx1250v0Model = kGfx1250Model;
 
 }  // namespace
 
-int HWModel::computeDynamicDrainLatency(int matchingDsLoadCount, int targetDSLoadLatency,
-                                        int rawNumWaves) const {
+int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
+                               int rawNumWaves) {
+    // Keep these local: they only define this function's modeled input range.
+    constexpr int kMinModeledWaves = 1;
+    constexpr int kMaxModeledWaves = 4;
     const int numWaves = std::clamp(rawNumWaves, kMinModeledWaves, kMaxModeledWaves);
-    const int queueDepth = lds.readQueueDepth;
+    const int queueDepth = hw.lds.readQueueDepth;
     // A zero queue depth means the arch has no modeled LDS return queue (the other
     // consumers of lds.* already treat it as inert), and a lone load has nothing
     // queued behind it. Either way only the load's own latency applies.

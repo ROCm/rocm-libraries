@@ -382,7 +382,7 @@ class RemoveDscntPass : public StinkyInstPass {
         for (int count = 1; count <= static_cast<int>(numDsLoads); ++count) {
             const int issueTime = computeDsIssueTime(count);
             const int landsAt =
-                issueTime + hw_->computeDynamicDrainLatency(count, targetDsLoadLatency, numWaves);
+                issueTime + computeDynamicDrainLatency(*hw_, count, targetDsLoadLatency, numWaves);
             if (landsAt + dsProximityThreshold_ > totalIssueTime) break;
             drained = count;
         }
@@ -396,7 +396,7 @@ class RemoveDscntPass : public StinkyInstPass {
     /// How many of the outstanding LDS reads the hardware should have retired by
     /// `cycles`. Does not touch the FIFO.
     ///
-    /// HWModel::computeDynamicDrainLatency() answers, for a burst of N loads, how many
+    /// computeDynamicDrainLatency() answers, for a burst of N loads, how many
     /// cycles pass between the burst's first issue and the N-th load landing. Both that
     /// curve and the FIFO's issue cycles grow with N, so the loads that have come back
     /// are the prefix whose drain latency, plus the dsProximityThreshold_ margin, still
@@ -420,7 +420,7 @@ class RemoveDscntPass : public StinkyInstPass {
             const int elapsedForCount = cycles - inFlight[count - 1].cycle;
             const int landedCyclesAgo =
                 elapsedForCount -
-                hw_->computeDynamicDrainLatency(count, targetDsLoadLatency, numWaves_);
+                computeDynamicDrainLatency(*hw_, count, targetDsLoadLatency, numWaves_);
             if (landedCyclesAgo < dsProximityThreshold_) break;
             drained = count;
         }
