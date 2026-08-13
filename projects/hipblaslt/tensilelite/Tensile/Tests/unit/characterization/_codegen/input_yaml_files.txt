@@ -97,5 +97,6 @@ Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/mx_
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/seed.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/subtile.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/subtile3_gr_variants.yaml
+Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/subtile_bf16_peel.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/subtile_kern_tlu1.yaml
 Tensile/Tests/unit/characterization/_codegen/data/test_data/_designed/gfx950/subtile_lr_fp8.yaml
