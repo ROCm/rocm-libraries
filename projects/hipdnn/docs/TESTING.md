@@ -75,37 +75,22 @@ or floor; and exact required-check settings are not visible in this repository.
 
 ## Component Overview
 
-hipDNN is a graph-based DNN execution library for Windows and Linux. Its header-only frontend builds
-graphs, the backend C API validates and routes them, and dynamically loaded provider plugins supply
-operation implementations. Shared Data, FlatBuffers, Plugin, and Test SDKs support those layers; see
-the [Design Overview](Design.md) for component boundaries.
+The project [README](../README.md#overview) owns the product overview and
+[component inventory](../README.md#project-structure). The [Design Overview](Design.md) owns
+architecture and component-boundary details.
 
-The architecture splits validation responsibility:
-
-- hipDNN can unit-test most graph construction, descriptors, serialization, logging, plugin loading,
-  and API behavior without a real provider.
-- hipDNN integration tests verify that graphs and data travel through the frontend, backend, and
-  plugin boundary correctly.
-- Providers and the shared cross-provider suite own numerical correctness on supported GPUs because
-  hipDNN itself does not implement architecture-specific kernels.
-
-Major dependencies shaping testing are HIP and the ROCm compiler/runtime, dynamically loaded provider
-plugins, TheRock build and package-test infrastructure, and GPU hardware for real-provider execution.
+Only the testing-specific ownership split is repeated here: hipDNN validates its public APIs,
+graph/data routing, and provider boundary; provider projects and the shared cross-provider suite
+validate numerical correctness on their supported GPU architectures. That split determines which
+test layer owns a change.
 
 ## Development Workflow
 
-For configure, build, CTest, check-target, filtering, and naming details, use
-[Developer Testing Commands and Authoring Reference](#developer-testing-commands-and-authoring-reference). The expected development sequence is:
-
-1. Identify the behavior and the validation owner using the table below.
-2. Add or update a test at the lowest layer that can observe the behavior.
-3. Build and run the narrow test locally. Use a check target when source changed because it rebuilds
-   before running; use raw `ctest` only when binaries are already current.
-4. For a defect, prove the regression test fails without the fix and passes with it.
-5. Run the applicable wider category before pushing.
-6. On the pull request, inspect every triggered status. A skipped workflow is not passing evidence.
-7. Record exact commands and results in the PR testing summary. Record any untested configuration or
-   waiver explicitly.
+Use [Getting Started](../README.md#getting-started) for the entry point,
+[CONTRIBUTING](../CONTRIBUTING.md) for the contribution and pull-request workflow, and
+[Building](Building.md#quick-start-guide) for setup and build procedures. This document adds only
+the testing decision: which validation must accompany each change. Exact commands live in
+[Developer Testing Commands and Authoring Reference](#developer-testing-commands-and-authoring-reference).
 
 | Change | Minimum validation before push | GPU |
 | --- | --- | --- |
@@ -117,22 +102,6 @@ For configure, build, CTest, check-target, filtering, and naming details, use
 | Bug fix | Regression test that fails before and passes after | Depends on defect |
 | Build, package, install, or platform support | Relevant standalone/superbuild and install flow | Depends on scope |
 | Performance-sensitive behavior | Manual before/after benchmark; no automated gate exists | Yes |
-
-### Local command entry points
-
-```bash
-# Standalone, from projects/hipdnn/
-cmake --preset debug
-cmake --build build/debug --target hipdnn-unit-check
-cmake --build build/debug --target hipdnn-integration-check
-
-# Raw CTest after tests are already built
-ctest --test-dir build/debug -L unit --output-on-failure
-ctest --test-dir build/debug -L integration --output-on-failure
-```
-
-The superbuild uses prefixed targets only. See [Running Tests](#running-tests)
-for complete commands and the `ROCM_LIBS_ENABLE_ROOT_CTEST` requirement.
 
 ## Testing Strategy and Layers
 
