@@ -179,7 +179,7 @@ rocblas_status rocsolver_slarft_64(rocblas_handle handle,
                                    float* T,
                                    const int64_t ldt)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
     return rocsolver::rocsolver_larft_impl<float, int64_t>(handle, direct, storev, n, k, V, ldv,
                                                            tau, T, ldt);
 #else
@@ -198,7 +198,7 @@ rocblas_status rocsolver_dlarft_64(rocblas_handle handle,
                                    double* T,
                                    const int64_t ldt)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
     return rocsolver::rocsolver_larft_impl<double, int64_t>(handle, direct, storev, n, k, V, ldv,
                                                             tau, T, ldt);
 #else
@@ -217,7 +217,7 @@ rocblas_status rocsolver_clarft_64(rocblas_handle handle,
                                    rocblas_float_complex* T,
                                    const int64_t ldt)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
     return rocsolver::rocsolver_larft_impl<rocblas_float_complex, int64_t>(handle, direct, storev, n,
                                                                            k, V, ldv, tau, T, ldt);
 #else
@@ -236,7 +236,7 @@ rocblas_status rocsolver_zlarft_64(rocblas_handle handle,
                                    rocblas_double_complex* T,
                                    const int64_t ldt)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
     return rocsolver::rocsolver_larft_impl<rocblas_double_complex, int64_t>(
         handle, direct, storev, n, k, V, ldv, tau, T, ldt);
 #else

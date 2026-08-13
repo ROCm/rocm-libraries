@@ -88,6 +88,17 @@ void testing_larft_bad_arg()
     I n = 1;
     I ldv = 1;
     I ldt = 1;
+    
+#ifndef ROCSOLVER_ENABLE_EIGENSOLVERS_64
+    // 64-bit API disabled: entry points must report not_implemented.
+    if constexpr(std::is_same<I, int64_t>::value)
+    {
+        EXPECT_ROCBLAS_STATUS(rocsolver_larft(handle, direct, storev, n, k, (T*)nullptr, ldv,
+                                              (T*)nullptr, (T*)nullptr, ldt),
+                              rocblas_status_not_implemented);
+        return;
+    }
+#endif
 
     // memory allocation
     device_strided_batch_vector<T> dV(1, 1, 1, 1);
@@ -302,6 +313,17 @@ void testing_larft(Arguments& argus)
     rocblas_direct direct = char2rocblas_direct(directC);
     rocblas_storev storev = char2rocblas_storev(storevC);
     rocblas_int hot_calls = argus.iters;
+    
+#ifndef ROCSOLVER_ENABLE_EIGENSOLVERS_64
+    // 64-bit API disabled: entry points must report not_implemented.
+    if constexpr(std::is_same<I, int64_t>::value)
+    {
+        EXPECT_ROCBLAS_STATUS(rocsolver_larft(handle, direct, storev, n, k, (T*)nullptr, ldv,
+                                              (T*)nullptr, (T*)nullptr, ldt),
+                              rocblas_status_not_implemented);
+        return;
+    }
+#endif
 
     // check non-supported values
     // N/A
