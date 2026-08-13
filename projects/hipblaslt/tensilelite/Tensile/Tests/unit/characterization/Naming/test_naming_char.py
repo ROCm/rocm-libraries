@@ -183,7 +183,7 @@ def test_name_space_filling_algo_nonempty(make_state, snapshot):
 
 
 def test_kernel_name_min_split_gsu_unit(make_state, snapshot):
-    # GSU==1 with splitGSU=True: the L155 rewrite leaves GSU==1 (1 is not >1 and
+    # GSU==1 with splitGSU=True: the rewrite leaves GSU==1 (1 is not >1 and
     # not -1), so the subsequent `GSU > 0` discard works.
     assert N.getKernelNameMin(make_state(GlobalSplitU=1), splitGSU=True) == snapshot
 
@@ -192,8 +192,8 @@ def test_kernel_name_min_split_gsu_unit(make_state, snapshot):
 def test_kernel_name_min_split_gsu_typeerror(make_state, gsu):
     # CHARACTERIZED BUG: with ignoreInternalArgs=True (getKernelNameMin) and
     # splitGSU=True, GSU>1 or GSU==-1 is rewritten to the string "M" at
-    # Naming.py:155, then compared with `"M" > 0` at Naming.py:160 -> TypeError.
-    # Pinned as current behaviour; see resistance.md.
+    # Naming.py:172, then compared with `"M" > 0` at Naming.py:177 -> TypeError.
+    # Pinned as current behaviour; see ADR 0003.
     with pytest.raises(TypeError):
         N.getKernelNameMin(make_state(GlobalSplitU=gsu), splitGSU=True)
 

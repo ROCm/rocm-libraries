@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
-#include "../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -99,17 +99,29 @@ std::string SdpaFwdTestCase::getName(const testing::TestParamInfo<SdpaFwdTestCas
            + std::to_string(tc.vDims[3]) + "_" + maskStr;
 }
 
-GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config, bool withStats)
+GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats)
+{
+    auto tc = GraphTestCase{config, getConfigDescription(config), config.arch};
+    if(withStats)
+    {
+        tc.withStats = true;
+        tc.name += "Stats";
+    }
+    return tc;
+}
+
+std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTestCase& testCase)
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
     using namespace hipdnn_data_sdk::utilities;
 
-    // Arbitrary dimensions for testing
-    const int64_t batch = 2;
-    const int64_t numHeads = 4;
-    const int64_t seqQ = 256;
-    const int64_t seqKv = 128;
+    const fmha_v3_fwdConfig& config = testCase.config;
+
+    const int64_t batch = testCase.batch;
+    const int64_t numHeads = testCase.numHeads;
+    const int64_t seqQ = testCase.seqQ;
+    const int64_t seqKv = testCase.seqKv;
 
     // Determine data type
     const DataType dataType = toDataType(config.dtype);
@@ -135,11 +147,17 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config, b
 
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
-    attributes.set_name(withStats ? "SdpaFwdKernelConfigStatsTest" : "SdpaFwdKernelConfigTest");
+    attributes.set_name(testCase.withStats ? "SdpaFwdKernelConfigStatsTest"
+                                          : "SdpaFwdKernelConfigTest");
 
-    if(withStats)
+    if(testCase.withStats)
     {
         attributes.set_generate_stats(true);
+    }
+
+    if(testCase.attnScale.has_value())
+    {
+        attributes.set_attn_scale(testCase.attnScale.value());
     }
 
     // Configure mask type
@@ -196,19 +214,13 @@ GraphTestCase configToCompatibleGraphTestCase(const fmha_v3_fwdConfig& config, b
     o->set_output(true);
     o->set_data_type(dataType);
 
-    if(withStats)
+    if(testCase.withStats)
     {
         stats->set_output(true);
         stats->set_data_type(DataType::FLOAT);
     }
 
-    std::string description = getConfigDescription(config);
-    if(withStats)
-    {
-        description += "Stats";
-    }
-
-    return {graph, description, config.arch};
+    return graph;
 }
 
 } // namespace asm_sdpa_engine
