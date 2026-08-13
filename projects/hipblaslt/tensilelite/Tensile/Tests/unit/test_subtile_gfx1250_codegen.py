@@ -341,38 +341,47 @@ class TestIterateMode:
 
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_buffer_load_iterate_passes_group2_group3(self, tc):
-        """In iterate mode, emitSingleBufferLoad passes Group2/Group3 to tensor_load_to_lds."""
-        from Tensile.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
+        """In iterate mode, emitSingleBufferLoad passes non-None Group2 and Group3."""
+        from unittest.mock import patch
+        from Tensile.Components.Subtile import SubtileGREmit
         kernel = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs_iterate(writer)
         tiA.allocOffsetRegisters(writer, kernel)
         tiB.allocOffsetRegisters(writer, kernel)
         ti = tiA if tc == 'A' else tiB
-        module = emitSingleBufferLoad(ti, kernel, 0, 0)
+        with patch.object(SubtileGREmit, 'TensorLoadToLds', wraps=SubtileGREmit.TensorLoadToLds) as mock_tl:
+            module = SubtileGREmit.emitSingleBufferLoad(ti, kernel, 0, 0)
+            mock_tl.assert_called_once()
+            # positional args: src0 (Group0), src1 (Group1), src2 (Group2), src3 (Group3)
+            args = mock_tl.call_args.args
+            assert args[2] is not None, "iterate mode must pass Group2 (src2)"
+            assert args[3] is not None, "iterate mode must pass Group3 (src3)"
         asm = str(module)
         assert "tensor_load_to_lds" in asm
-        group2_name = "tdm%sGroup2" % tc
-        assert group2_name in asm, f"iterate mode must pass {group2_name}"
 
     @pytest.mark.parametrize("tc", ['A', 'B'])
     def test_buffer_load_normal_omits_group2_group3(self, tc):
-        """Non-iterate mode: emitSingleBufferLoad passes None for Group2/Group3."""
-        from Tensile.Components.Subtile.SubtileGREmit import emitSingleBufferLoad
+        """Non-iterate mode: emitSingleBufferLoad passes None for both Group2 and Group3."""
+        from unittest.mock import patch
+        from Tensile.Components.Subtile import SubtileGREmit
         kernel = _create_gfx1250_kernel(64, 64, depth_u=NORMAL_DEPTH_U)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
         tiA.allocOffsetRegisters(writer, kernel)
         tiB.allocOffsetRegisters(writer, kernel)
         ti = tiA if tc == 'A' else tiB
-        module = emitSingleBufferLoad(ti, kernel, 0, 0)
+        with patch.object(SubtileGREmit, 'TensorLoadToLds', wraps=SubtileGREmit.TensorLoadToLds) as mock_tl:
+            module = SubtileGREmit.emitSingleBufferLoad(ti, kernel, 0, 0)
+            mock_tl.assert_called_once()
+            args = mock_tl.call_args.args
+            assert args[2] is None, "non-iterate mode must not pass Group2 (src2)"
+            assert args[3] is None, "non-iterate mode must not pass Group3 (src3)"
         asm = str(module)
         assert "tensor_load_to_lds" in asm
-        group2_name = "tdm%sGroup2" % tc
-        assert group2_name not in asm, f"non-iterate mode must not pass {group2_name}"
 
     def test_iterate_mode_flag_on_states(self):
-        """KernelWriter.states derives subtileIterateMode{A,B} from kernel dict."""
+        """isSubtileIterateMode returns correct results for iterate vs normal kernel configs."""
         from Tensile.SolutionStructs.Utilities import isSubtileIterateMode
         kernel_iter = _create_gfx1250_kernel(64, 64, depth_u=ITERATE_DEPTH_U)
         assert isSubtileIterateMode(kernel_iter, "A") is True

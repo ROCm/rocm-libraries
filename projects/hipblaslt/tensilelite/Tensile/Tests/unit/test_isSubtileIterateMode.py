@@ -112,5 +112,5 @@ class TestAsymmetricBpe:
 # -- constant value --
 
 def test_pad_interval_limit_is_1024():
-    """Sanity: the exported constant matches the hardware spec."""
+    """Sanity: the internal pad_interval limit constant matches the HW spec."""
     assert _TDM_PAD_INTERVAL_LIMIT == 1024
