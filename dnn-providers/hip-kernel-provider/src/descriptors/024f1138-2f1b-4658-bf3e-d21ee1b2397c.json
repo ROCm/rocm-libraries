@@ -1,8 +1,0 @@
-{
-  "schema": "hipdnn.umd/v1",
-  "version": "1.0",
-  "id": "024f1138-2f1b-4658-bf3e-d21ee1b2397c",
-  "name": "kernel dtype matches the graph's dtype",
-  "scope": "kernel",
-  "match_symbol": "hipkernel.pointwise_sub.kernel_match"
-}

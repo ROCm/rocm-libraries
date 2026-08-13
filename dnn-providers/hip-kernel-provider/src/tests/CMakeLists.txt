@@ -36,7 +36,7 @@ add_kernels_for_embedding(TARGET hip_kernel_provider_tests FILES ${CMAKE_CURRENT
 # directories doubles its CMAKE_CONFIGURE_DEPENDS entry, which Ninja rejects as two
 # rules for one file. A loop, so a new pack adds its kernel to one list.
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    set(HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS PointwiseAdd PointwiseMul PointwiseSub)
+    set(HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS PointwiseAdd PointwiseMul PointwiseSub ConvFwd)
     foreach(kernel IN LISTS HIP_KERNEL_PROVIDER_INGESTOR_TEST_KERNELS)
         configure_file(
             ${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/kernels/${kernel}.cpp

@@ -44,7 +44,7 @@ TEST(TestPointwisePacks, EachPackShipsThreeKernelsCoveringTwoBlockSizesAndTwoDat
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    ASSERT_EQ(set.packs.size(), 2U);
+    ASSERT_EQ(set.packs.size(), 3U);
     for(const auto& pack : set.packs)
     {
         const auto& kernels = pack.kernels;
@@ -70,7 +70,7 @@ TEST(TestPointwisePacks, EveryKernelNamesItsPacksEmbeddedSource)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    for(const std::string operation : {"Add", "Mul"})
+    for(const std::string operation : {"Add", "Mul", "Sub"})
     {
         for(const auto& kernel : packFor(set, operation).kernels)
         {
@@ -82,16 +82,19 @@ TEST(TestPointwisePacks, EveryKernelNamesItsPacksEmbeddedSource)
     }
 }
 
-/// The point of two packs under one engine: everything but the operation matcher and the
-/// kernels is one descriptor referenced twice, not two copies.
-TEST(TestPointwisePacks, BothPacksShareTheEngineDispatchAndAllButOneMatcher)
+/// The point of three packs under one engine: everything but the operation matcher and
+/// the kernels is one descriptor referenced three times, not three copies.
+TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
     const auto& add = packFor(set, "Add");
     const auto& mul = packFor(set, "Mul");
+    const auto& sub = packFor(set, "Sub");
 
     EXPECT_EQ(add.engineId, mul.engineId);
+    EXPECT_EQ(add.engineId, sub.engineId);
     EXPECT_EQ(add.dispatchId, mul.dispatchId);
+    EXPECT_EQ(add.dispatchId, sub.dispatchId);
     ASSERT_EQ(set.dispatches.size(), 1U);
 
     // Three matchers each: the shared applicability check, the shared kernel-scoped dtype
@@ -99,16 +102,22 @@ TEST(TestPointwisePacks, BothPacksShareTheEngineDispatchAndAllButOneMatcher)
     // expensive graph work run once per graph instead of once per pack.
     ASSERT_EQ(add.matcherIds.size(), 3U);
     ASSERT_EQ(mul.matcherIds.size(), 3U);
+    ASSERT_EQ(sub.matcherIds.size(), 3U);
 
     // Counted rather than set_intersection'd: matcher ids are in the order the pack
     // authored them, not sorted, and a sorted-range algorithm would quietly under-count.
+    const auto lists = {&mul.matcherIds, &sub.matcherIds};
     EXPECT_EQ(std::count_if(add.matcherIds.begin(),
                             add.matcherIds.end(),
-                            [&mul](const auto& matcherId) {
-                                return std::find(mul.matcherIds.begin(),
-                                                 mul.matcherIds.end(),
-                                                 matcherId)
-                                       != mul.matcherIds.end();
+                            [&lists](const auto& matcherId) {
+                                return std::all_of(lists.begin(),
+                                                   lists.end(),
+                                                   [&matcherId](const auto* other) {
+                                                       return std::find(other->begin(),
+                                                                        other->end(),
+                                                                        matcherId)
+                                                              != other->end();
+                                                   });
                             }),
               2);
 }
@@ -126,7 +135,7 @@ TEST(TestPointwisePacks, MatchersCoverBothScopes)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");
 
-    // Three graph-scoped: one shared applicability check both packs list, plus one
+    // Four graph-scoped: one shared applicability check every pack lists, plus one
     // operation check each. One kernel-scoped, shared, pruning per candidate.
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
@@ -134,7 +143,7 @@ TEST(TestPointwisePacks, MatchersCoverBothScopes)
                                 return matcher.scope
                                        == hipdnn_plugin_sdk::ingestor::MatchScope::GRAPH;
                             }),
-              3);
+              4);
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {

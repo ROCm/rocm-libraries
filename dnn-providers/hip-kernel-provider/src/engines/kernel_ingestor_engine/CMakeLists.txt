@@ -10,6 +10,7 @@ add_kernels_for_embedding(
         ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseAdd.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseMul.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/kernels/PointwiseSub.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/kernels/ConvFwd.cpp
 )
 
 target_sources(hip_kernel_provider_impl PRIVATE
@@ -19,7 +20,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     # explicitly rather than globbed -- CMake's own docs discourage GLOB for sources,
     # and CONFIGURE_DEPENDS does not re-run on removal under every generator.
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseNative.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseSubNative.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvNative.cpp
 )
 
 # Sources above are entirely inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`; the

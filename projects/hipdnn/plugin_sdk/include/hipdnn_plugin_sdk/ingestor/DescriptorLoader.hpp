@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <deque>
@@ -46,24 +47,41 @@
  * The UED follows RFC 0020, which is the source of truth for that file; the other five
  * follow RFC 0017 §4 until their own follow-ups land.
  *
- * One descriptor per file, named `<id>.json`; the file's own `id` field is authoritative
- * and the filename is never parsed. Because neither the filename nor the directory carries
- * a type, each file declares its own with a `schema` string:
+ * One descriptor per file. The file's type comes from its filename suffix; the `id` field
+ * inside is authoritative for identity and the stem is never parsed:
  *
- * | `schema`          | Struct               |
+ * | Filename          | Struct               |
  * |-------------------|----------------------|
- * | `hipdnn.kmd/v1`   | MetadataSchema       |
- * | `hipdnn.uhd/v1`   | HeuristicDescriptor  |
- * | `hipdnn.ued/v1`   | EngineDescriptor     |
- * | `hipdnn.umd/v1`   | MatchDescriptor      |
- * | `hipdnn.udd/v1`   | DispatchDescriptor   |
- * | `hipdnn.kdp/v1`   | KernelDescriptorPack |
+ * | `<name>.kmd.json` | MetadataSchema       |
+ * | `<name>.uhd.json` | HeuristicDescriptor  |
+ * | `<name>.ued.json` | EngineDescriptor     |
+ * | `<name>.umd.json` | MatchDescriptor      |
+ * | `<name>.udd.json` | DispatchDescriptor   |
+ * | `<name>.kdp.json` | KernelDescriptorPack |
  *
- * The tag is matched exactly, so an unrecognised one is skipped with its path logged.
- * RFC 0017 §4 versions each type independently as `major.minor` and gates it at load, but
- * carries that in a sibling `version` field this loader does not parse yet; the minor half
- * of that rule arrives with the field. A tag naming a major this build has no reader for
- * is already refused, since it matches nothing here.
+ * The stem is free-form documentation: `pointwise_add.kdp.json` and `a.kdp.json` are read
+ * identically, and a non-empty stem is required, so a bare `.ued.json` is not a descriptor.
+ * Directories under the root are organizational only -- the tree is walked recursively and
+ * a file's folder means nothing to the loader. A `.json` whose name matches no suffix is
+ * logged at WARN and skipped before it is opened.
+ *
+ * Every file carries a required `version`, `major.minor`, gated by RFC 0017 §4's rule:
+ * accept iff the major equals this build's and the minor is no newer. A file this build
+ * cannot read is skipped whole rather than half-understood.
+ *
+ * Three deliberate divergences from RFC 0020 §4.2, all pending an amendment; a §11.3
+ * schema validator would reject these files until it lands:
+ *
+ * - `schema` is not a member. RFC 0020 §4.2 requires it with `const: "hipdnn.ued/v1"`,
+ *   and this loader takes the type from the filename suffix instead, so a file still
+ *   carrying the key is rejected as an unknown key.
+ * - `version` is required on all six types. RFC 0020 §4.2 mandates it for the UED and no
+ *   RFC yet covers the other five, so this is stricter than the letter of the spec -- but
+ *   RFC 0017 §4 versions every file type independently, and a type carrying no version
+ *   cannot be gated by the §11.1 accept rule at all. A KMD that gained a field in a later
+ *   minor would otherwise be read by an older runtime with no way to refuse it.
+ * - `sdk_version` sits on the UED where RFC 0017 §4 puts it on the UMD. See the note at
+ *   parseEngineDescriptor().
  *
  * Apart from the UED, whose keys RFC 0020 §4.2 fixes, every JSON key is the `snake_case`
  * spelling of the C++ field name, and any key not spelled by the struct is a parse error
@@ -119,17 +137,16 @@ struct DescriptorCatalog
 namespace detail
 {
 
-/// A file's declared type. RFC 0017 §4 versions each type independently as `major.minor`
-/// but carries that in a sibling `version` field, not in this tag, so the tag is matched
-/// exactly and a `/v2` file is an unrecognised type -- which is the right answer for a
-/// major bump anyway, since no reader for it exists here. The minor half of the accept
-/// rule lives in the sibling `version` field, applied by versionIsSupported() below.
-inline constexpr std::string_view SCHEMA_KMD = "hipdnn.kmd/v1";
-inline constexpr std::string_view SCHEMA_UHD = "hipdnn.uhd/v1";
-inline constexpr std::string_view SCHEMA_UED = "hipdnn.ued/v1";
-inline constexpr std::string_view SCHEMA_UMD = "hipdnn.umd/v1";
-inline constexpr std::string_view SCHEMA_UDD = "hipdnn.udd/v1";
-inline constexpr std::string_view SCHEMA_KDP = "hipdnn.kdp/v1";
+/// A descriptor file's type, taken from the suffix of its filename. The stem is free-form
+/// documentation and is never parsed: `pointwise_add.kdp.json` and `a.kdp.json` are read
+/// identically. RFC 0017 §4 versions each type independently; that version is the sibling
+/// `version` field, applied by versionIsSupported() below.
+inline constexpr std::string_view SUFFIX_KMD = ".kmd.json";
+inline constexpr std::string_view SUFFIX_UHD = ".uhd.json";
+inline constexpr std::string_view SUFFIX_UED = ".ued.json";
+inline constexpr std::string_view SUFFIX_UMD = ".umd.json";
+inline constexpr std::string_view SUFFIX_UDD = ".udd.json";
+inline constexpr std::string_view SUFFIX_KDP = ".kdp.json";
 
 /// The descriptor format version this build implements. RFC 0017 §4 versions each file
 /// type independently and RFC 0020 §11.1 fixes the rule: accept iff `file.major` equals
@@ -242,28 +259,25 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
 /// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed, so a
 /// file this build cannot read is skipped whole rather than half-understood.
 ///
-/// Required on the UED, which RFC 0020 §4.2 makes a mandatory member. The other five
-/// types have no merged RFC of their own yet, so the field is optional there and its
-/// absence means `1.0` -- the version every descriptor authored before the field existed
-/// was implicitly stamped with. That is absence-safe in RFC 0020 §11.2's sense, so files
-/// predating this check keep loading, and each type's RFC promotes it to required by
-/// moving one key from the optional side to the required one.
+/// Required on all six types. RFC 0020 §4.2 mandates it for the UED and no merged RFC
+/// yet covers the other five, so this is stricter than the letter of the spec. It is
+/// deliberate: RFC 0017 §4 versions every file type independently, and a type carrying
+/// no version cannot be gated by the §11.1 accept rule at all -- a KMD that gained a
+/// field at 1.1 would be read by a 1.0 runtime with no way to refuse it.
+///
+/// @p suffix names the type and doubles as the human label in messages.
 ///
 /// Runs ahead of the catalog insert, which is what puts it ahead of duplicate detection:
 /// RFC 0020 §10.2.1 requires an unsupported-version UED to drop for its version alone and
 /// leave the descriptors it would have collided with standing.
 inline bool versionIsSupported(const nlohmann::json& document,
-                               std::string_view schema,
+                               std::string_view suffix,
                                const std::filesystem::path& path)
 {
-    const std::string where{schema};
+    const std::string where{suffix};
     if(document.find("version") == document.end())
     {
-        if(schema == SCHEMA_UED)
-        {
-            fail("missing required key 'version' in " + where);
-        }
-        return true;
+        fail("missing required key 'version' in " + where);
     }
 
     const auto version = parseDescriptorVersion(requireString(document, "version", where), where);
@@ -495,8 +509,8 @@ inline bool coerceToDeclaredType(MetadataValue& value, MetadataType declared)
 
 inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 {
-    const std::string where{SCHEMA_KMD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "fields"}, where);
+    const std::string where{SUFFIX_KMD};
+    requireOnlyKeys(root, {"version", "id", "name", "fields"}, where);
 
     MetadataSchema schema;
     schema.id = requireId(root, "id", where);
@@ -534,8 +548,8 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 
 inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root)
 {
-    const std::string where{SCHEMA_UHD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "kind", "payload"}, where);
+    const std::string where{SUFFIX_UHD};
+    requireOnlyKeys(root, {"version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
@@ -563,7 +577,7 @@ inline void requireNoDuplicates(const std::vector<std::string>& values,
 
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
 {
-    const std::string where{SCHEMA_UED};
+    const std::string where{SUFFIX_UED};
     // `sdk_version` is a known deviation from RFC 0020 §4.2, whose field table and
     // `additionalProperties: false` schema do not list it: RFC 0017 §4 puts the graph
     // schema version on the UMD ("Every other descriptor needs only its own version"),
@@ -572,8 +586,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
     // schema. Accepted here pending the RFC amendment that moves the field; a §11.3
     // schema validator would reject it until then.
     requireOnlyKeys(root,
-                    {"schema",
-                     "version",
+                    {"version",
                      "id",
                      "name",
                      "sdk_version",
@@ -629,8 +642,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
 
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
 {
-    const std::string where{SCHEMA_UMD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "scope", "match_symbol"}, where);
+    const std::string where{SUFFIX_UMD};
+    requireOnlyKeys(root, {"version", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
@@ -642,8 +655,8 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
 
 inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root)
 {
-    const std::string where{SCHEMA_UDD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "dispatch_symbol"}, where);
+    const std::string where{SUFFIX_UDD};
+    requireOnlyKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
@@ -716,10 +729,9 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
 
 inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root)
 {
-    const std::string where{SCHEMA_KDP};
+    const std::string where{SUFFIX_KDP};
     requireOnlyKeys(root,
-                    {"schema",
-                     "version",
+                    {"version",
                      "id",
                      "name",
                      "matcher_ids",
@@ -933,14 +945,72 @@ inline bool isEngineDisabled(const EngineDescriptor& engine)
     return false;
 }
 
+/// One row per descriptor file type. Replaces a six-branch if/else on a `schema` field:
+/// the filename selects the row, and the row carries everything that differs between
+/// types, so adding a type is a row rather than another branch.
+struct FileType
+{
+    std::string_view suffix;
+    void (*insert)(DescriptorCatalog&, const nlohmann::json&, const std::filesystem::path&);
+};
+
+inline constexpr std::array FILE_TYPES{
+    FileType{SUFFIX_KMD,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.schemas, parseMetadataSchema(d), d, p);
+             }},
+    FileType{SUFFIX_UHD,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d), d, p);
+             }},
+    FileType{SUFFIX_UED,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.engines, parseEngineDescriptor(d), d, p);
+             }},
+    FileType{SUFFIX_UMD,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.matchers, parseMatchDescriptor(d), d, p);
+             }},
+    FileType{SUFFIX_UDD,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.dispatches, parseDispatchDescriptor(d), d, p);
+             }},
+    FileType{SUFFIX_KDP,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.packs, parseKernelDescriptorPack(d), d, p);
+             }},
+};
+static_assert(FILE_TYPES.size() == 6, "one row per descriptor file type");
+
+/// The row @p filename's suffix selects, or nullptr if it names no descriptor type.
+///
+/// Requires a non-empty stem, so a bare `.ued.json` is not a descriptor. C++17: no
+/// std::string_view::ends_with (the project is set to 17 in projects/hipdnn/CMakeLists.txt).
+inline const FileType* findFileType(std::string_view filename)
+{
+    for(const auto& candidate : FILE_TYPES)
+    {
+        if(filename.size() > candidate.suffix.size()
+           && filename.compare(filename.size() - candidate.suffix.size(),
+                               candidate.suffix.size(),
+                               candidate.suffix)
+                  == 0)
+        {
+            return &candidate;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace detail
 
 /**
  * @brief Every descriptor file under @p root, parsed and keyed by (type, id).
  *
- * Walks the tree in sorted path order and takes every `*.json` file. Never throws: a file
- * that fails to open, fails to parse, declares no recognised `schema`, or violates the
- * authored format is logged at ERROR with its path and the reason, and skipped.
+ * Walks the tree in sorted path order and takes every file whose name ends in one of the
+ * six type suffixes. Never throws: a file that fails to open, fails to parse, or violates
+ * the authored format is logged at ERROR with its path and the reason, and skipped; a
+ * `.json` naming no type is logged at WARN and skipped before it is opened.
  */
 inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root)
 {
@@ -965,7 +1035,7 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
     // Iterated with the error_code increment rather than a range-for, whose operator++ is
     // the throwing overload: an unreadable subdirectory under the root would otherwise
     // throw filesystem_error out of a loader that promises never to throw.
-    std::vector<std::filesystem::path> files;
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
     auto walk = std::filesystem::recursive_directory_iterator(root, error);
     if(error)
     {
@@ -981,9 +1051,23 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
             break;
         }
         std::error_code entryError;
-        if(walk->is_regular_file(entryError) && walk->path().extension() == ".json")
+        if(walk->is_regular_file(entryError))
         {
-            files.push_back(walk->path());
+            if(const auto* fileType = detail::findFileType(walk->path().filename().string()))
+            {
+                files.emplace_back(walk->path(), fileType);
+            }
+            else if(walk->path().extension() == ".json")
+            {
+                // A .json naming no descriptor type is skipped before it is opened. WARN,
+                // not ERROR: an unrelated JSON file under the root is legitimate, but a
+                // misspelled suffix silently costs an engine, and this is the only place
+                // that can say so.
+                HIPDNN_PLUGIN_LOG_WARN("descriptor loader: " << walk->path()
+                                                             << " is not a descriptor filename "
+                                                                "(expected <name>.{kmd,uhd,ued,"
+                                                                "umd,udd,kdp}.json); skipping");
+            }
         }
         else if(entryError)
         {
@@ -993,9 +1077,11 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
     }
     // Sorted before parsing so which file of a conflicting pair is reported as the
     // incumbent, and the order the load lines appear in, never depend on the filesystem.
-    std::sort(files.begin(), files.end());
+    std::sort(files.begin(), files.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
 
-    for(const auto& path : files)
+    for(const auto& [path, fileType] : files)
     {
         nlohmann::json document;
         try
@@ -1023,46 +1109,11 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
         try
         {
             detail::requireObject(document, "the document root");
-            const auto schema = detail::requireString(document, "schema", "the document root");
-            if(!detail::versionIsSupported(document, schema, path))
+            if(!detail::versionIsSupported(document, fileType->suffix, path))
             {
                 continue;
             }
-            if(schema == detail::SCHEMA_KMD)
-            {
-                detail::insertCatalogEntry(
-                    catalog.schemas, detail::parseMetadataSchema(document), document, path);
-            }
-            else if(schema == detail::SCHEMA_UHD)
-            {
-                detail::insertCatalogEntry(
-                    catalog.heuristics, detail::parseHeuristicDescriptor(document), document, path);
-            }
-            else if(schema == detail::SCHEMA_UED)
-            {
-                detail::insertCatalogEntry(
-                    catalog.engines, detail::parseEngineDescriptor(document), document, path);
-            }
-            else if(schema == detail::SCHEMA_UMD)
-            {
-                detail::insertCatalogEntry(
-                    catalog.matchers, detail::parseMatchDescriptor(document), document, path);
-            }
-            else if(schema == detail::SCHEMA_UDD)
-            {
-                detail::insertCatalogEntry(
-                    catalog.dispatches, detail::parseDispatchDescriptor(document), document, path);
-            }
-            else if(schema == detail::SCHEMA_KDP)
-            {
-                detail::insertCatalogEntry(
-                    catalog.packs, detail::parseKernelDescriptorPack(document), document, path);
-            }
-            else
-            {
-                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: " << path << " declares unknown schema '"
-                                                              << schema << "'; skipping");
-            }
+            fileType->insert(catalog, document, path);
         }
         catch(const std::exception& formatError)
         {

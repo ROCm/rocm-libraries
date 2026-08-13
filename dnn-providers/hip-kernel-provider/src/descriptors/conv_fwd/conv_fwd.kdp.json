@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "id": "4b449330-4b06-4e8e-a5b5-5c3f0f7fd020",
+  "name": "hipkernel:conv_fwd",
+  "matcher_ids": [
+    "b833015e-2640-4eb5-be56-1bcd4da916b4",
+    "91d0e798-8522-4a50-9db7-5e0d01b1fdec"
+  ],
+  "engine_id": "4e06e981-aaf2-4fe1-836d-09c221009a0c",
+  "dispatch_id": "e2564353-856f-43dc-b82c-1400a4c1929d",
+  "kernels": [
+    {
+      "id": "b667a8fd-2228-4e18-95a7-3cbbb8cf7acd",
+      "name": "conv_fwd.f32_block64",
+      "source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwd.cpp",
+        "entry_point": "ConvFwd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "id": "527a4807-7453-4d9a-9949-5f7228af22cc",
+      "name": "conv_fwd.f32_block256",
+      "source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwd.cpp",
+        "entry_point": "ConvFwd"
+      },
+      "metadata": {
+        "block_size": 256,
+        "dtype": "FLOAT"
+      },
+      "priority": 0
+    },
+    {
+      "id": "2eb00697-80a3-4ffe-b4cd-2e5c71d9d834",
+      "name": "conv_fwd.f16_block64",
+      "source": {
+        "kind": "embedded_source",
+        "source_file": "ConvFwd.cpp",
+        "entry_point": "ConvFwd"
+      },
+      "metadata": {
+        "block_size": 64,
+        "dtype": "HALF"
+      },
+      "priority": 0
+    }
+  ]
+}

@@ -225,10 +225,10 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
 }
 
 // ---------------------------------------------------------------------------
-// Two packs under one engine, end to end
+// Three packs under one engine, end to end
 // ---------------------------------------------------------------------------
 
-TEST(TestKernelIngestorEngine, ServesBothItsPacksOperationsUnderOneEngineId)
+TEST(TestKernelIngestorEngine, ServesAllItsPacksOperationsUnderOneEngineId)
 {
     // Matchers decline outright with no device resolved, so an accept is only
     // meaningful where there is one.
@@ -238,12 +238,13 @@ TEST(TestKernelIngestorEngine, ServesBothItsPacksOperationsUnderOneEngineId)
     auto& engineManager = container.getEngineManager();
     Handle handle;
 
-    // The whole point of the two-pack topology: one engine id answers for both
-    // operations, reached through a shared graph matcher and two different kernels.
+    // The whole point of the multi-pack topology: one engine id answers for every
+    // operation, reached through a shared graph matcher and three different kernels.
     const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName);
 
     for(const auto operation : {hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD,
-                                hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL})
+                                hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL,
+                                hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB})
     {
         const auto graph = buildPointwiseGraph(operation);
         const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
@@ -259,11 +260,12 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphNoPackOfItsClaims)
     auto& engineManager = container.getEngineManager();
     Handle handle;
 
-    // A subtraction is a servable shape, so the shared matcher admits it; both packs
+    // A division is a servable shape, so the shared matcher admits it; all three packs
     // then decline it on operation. Exercised through the full engine because "no pack
     // passed" and "the matcher refused" are different failures with the same symptom.
+    // Not SUB: that is one of the three packs now, so it would prove the opposite.
     const auto graph
-        = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB);
+        = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV);
     const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
 
     EXPECT_EQ(std::find(applicable.begin(),

@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.kdp/v1",
   "version": "1.0",
   "id": "19373f40-1ee2-4f5d-97da-58d0447ef6a7",
   "name": "hipkernel:pointwise_mul",

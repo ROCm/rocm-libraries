@@ -1,8 +1,0 @@
-{
-  "schema": "hipdnn.uhd/v1",
-  "version": "1.0",
-  "id": "f02bf944-c856-44fe-99f5-b0fe563bac6b",
-  "name": "pointwise sub selector",
-  "kind": "native",
-  "payload": "hipkernel.pointwise_sub.score"
-}

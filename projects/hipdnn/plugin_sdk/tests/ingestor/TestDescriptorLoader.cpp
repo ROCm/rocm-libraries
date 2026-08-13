@@ -143,7 +143,14 @@ constexpr char ROLE_KERNEL_MATCHER = '5';
 constexpr char ROLE_DISPATCH = '6';
 constexpr char ROLE_PACK = '7';
 
-using Documents = std::vector<nlohmann::json>;
+/// A document plus the type the loader will read it as. The type is no longer inside the
+/// body: it comes from the filename writeDocument() builds from `suffix`.
+struct TestDocument
+{
+    std::string_view suffix; ///< ".ued.json" etc; selects the type the loader will read
+    nlohmann::json body;
+};
+using Documents = std::vector<TestDocument>;
 
 /// The complete seven-file set one engine needs: a KMD, a UHD, a UED, two UMDs, a UDD,
 /// and one KDP over three kernels.
@@ -168,59 +175,66 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
     };
 
     return {
-        {{"schema", "hipdnn.kmd/v1"},
-         {"id", schemaId},
-         {"name", "variant fields"},
-         {"fields",
-          {{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}},
-           {{"name", "dtype"}, {"type", "string"}}}}},
-        {{"schema", "hipdnn.uhd/v1"},
-         {"id", heuristicId},
-         {"name", "selector"},
-         {"kind", "native"},
-         {"payload", SCORE_SYMBOL}},
-        {{"schema", "hipdnn.ued/v1"},
-         // Required on the UED alone (RFC 0020 §4.2). The other six documents here leave
-         // it absent on purpose, so every test that does not name a version exercises the
-         // absence-safe default the other five types rely on.
-         {"version", "1.0"},
-         {"id", engineId},
-         {"name", engineName},
-         {"heuristic", heuristicId},
-         {"metadata", schemaId},
-         {"knobs", {"block_size"}},
-         {"behavior_notes", {"runtime_compilation"}}},
-        {{"schema", "hipdnn.umd/v1"},
-         {"id", graphMatcherId},
-         {"name", "graph shape"},
-         {"scope", "graph"},
-         {"match_symbol", GRAPH_SYMBOL}},
-        {{"schema", "hipdnn.umd/v1"},
-         {"id", kernelMatcherId},
-         {"name", "kernel dtype"},
-         {"scope", "kernel"},
-         {"match_symbol", KERNEL_SYMBOL}},
-        {{"schema", "hipdnn.udd/v1"},
-         {"id", dispatchId},
-         {"name", "dispatch"},
-         {"dispatch_symbol", DISPATCH_SYMBOL}},
-        {{"schema", "hipdnn.kdp/v1"},
-         {"id", testUuid(tag, ROLE_PACK)},
-         {"name", "pack"},
-         {"matcher_ids", {graphMatcherId, kernelMatcherId}},
-         {"engine_id", engineId},
-         {"dispatch_id", dispatchId},
-         {"kernels",
-          {kernel('8', 64, "FLOAT"), kernel('9', 256, "FLOAT"), kernel('a', 64, "HALF")}}},
+        {".kmd.json",
+         {{"version", "1.0"},
+          {"id", schemaId},
+          {"name", "variant fields"},
+          {"fields",
+           {{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}},
+            {{"name", "dtype"}, {"type", "string"}}}}}},
+        {".uhd.json",
+         {{"version", "1.0"},
+          {"id", heuristicId},
+          {"name", "selector"},
+          {"kind", "native"},
+          {"payload", SCORE_SYMBOL}}},
+        {".ued.json",
+         {{"version", "1.0"},
+          {"id", engineId},
+          {"name", engineName},
+          {"heuristic", heuristicId},
+          {"metadata", schemaId},
+          {"knobs", {"block_size"}},
+          {"behavior_notes", {"runtime_compilation"}}}},
+        {".umd.json",
+         {{"version", "1.0"},
+          {"id", graphMatcherId},
+          {"name", "graph shape"},
+          {"scope", "graph"},
+          {"match_symbol", GRAPH_SYMBOL}}},
+        {".umd.json",
+         {{"version", "1.0"},
+          {"id", kernelMatcherId},
+          {"name", "kernel dtype"},
+          {"scope", "kernel"},
+          {"match_symbol", KERNEL_SYMBOL}}},
+        {".udd.json",
+         {{"version", "1.0"},
+          {"id", dispatchId},
+          {"name", "dispatch"},
+          {"dispatch_symbol", DISPATCH_SYMBOL}}},
+        {".kdp.json",
+         {{"version", "1.0"},
+          {"id", testUuid(tag, ROLE_PACK)},
+          {"name", "pack"},
+          {"matcher_ids", {graphMatcherId, kernelMatcherId}},
+          {"engine_id", engineId},
+          {"dispatch_id", dispatchId},
+          {"kernels",
+           {kernel('8', 64, "FLOAT"), kernel('9', 256, "FLOAT"), kernel('a', 64, "HALF")}}}},
     };
 }
 
-void writeDocument(const std::filesystem::path& directory, const nlohmann::json& document)
+void writeDocument(const std::filesystem::path& directory, const TestDocument& document)
 {
     std::filesystem::create_directories(directory);
-    std::ofstream file(directory / (document.at("id").get<std::string>() + ".json"),
+    // Stem is the id purely to keep names unique here. The loader never parses the stem,
+    // which is what makes an arbitrary one the right choice for a fixture.
+    std::ofstream file(directory
+                           / (document.body.at("id").get<std::string>()
+                              + std::string(document.suffix)),
                        std::ios::binary);
-    file << document.dump(2) << '\n';
+    file << document.body.dump(2) << '\n';
 }
 
 void writeDocuments(const std::filesystem::path& directory, const Documents& documents)
@@ -231,17 +245,18 @@ void writeDocuments(const std::filesystem::path& directory, const Documents& doc
     }
 }
 
-/// The first document in @p documents declaring @p schema, for a case that corrupts it.
-nlohmann::json& documentWithSchema(Documents& documents, std::string_view schema)
+/// The body of the first document in @p documents of type @p suffix, for a case that
+/// corrupts it.
+nlohmann::json& documentOfType(Documents& documents, std::string_view suffix)
 {
     for(auto& document : documents)
     {
-        if(document.at("schema") == schema)
+        if(document.suffix == suffix)
         {
-            return document;
+            return document.body;
         }
     }
-    throw std::runtime_error("no document with schema " + std::string(schema));
+    throw std::runtime_error("no document of type " + std::string(suffix));
 }
 
 /// Keyed on the pid, not on gtest's random_seed(), which is 0 unless --gtest_shuffle is
@@ -302,9 +317,9 @@ TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)
     writeDocuments(dir.path(), conflicted);
     // Same id, different content, different filename: the file's own id is what claims
     // the entry, so this is a second definition rather than a second descriptor.
-    auto& engine = documentWithSchema(conflicted, "hipdnn.ued/v1");
+    auto& engine = documentOfType(conflicted, ".ued.json");
     engine["name"] = "test:conflicted_other";
-    std::ofstream(dir.path() / "second-claim.json", std::ios::binary) << engine.dump(2);
+    std::ofstream(dir.path() / "second-claim.ued.json", std::ios::binary) << engine.dump(2);
 
     const auto sets = loadFrom(dir.path());
 
@@ -330,7 +345,9 @@ TEST(TestDescriptorLoader, MalformedJsonDoesNotCostTheOtherEngine)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("malformed"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
-    std::ofstream(dir.path() / "broken.json", std::ios::binary) << "not json";
+    // Named with a real suffix so it reaches the parser: a bare `broken.json` would be
+    // skipped at the filename stage and prove nothing about malformed bodies.
+    std::ofstream(dir.path() / "broken.ued.json", std::ios::binary) << "not json";
 
     const auto sets = loadFrom(dir.path());
 
@@ -340,7 +357,7 @@ TEST(TestDescriptorLoader, MalformedJsonDoesNotCostTheOtherEngine)
 
 TEST(TestDescriptorLoader, IgnoresANonJsonFile)
 {
-    // The extension check, not the parser, is what skips this -- it never even opens.
+    // The filename check, not the parser, is what skips this -- it never even opens.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_json"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
     std::ofstream(dir.path() / "README.txt", std::ios::binary) << "not a descriptor";
@@ -357,7 +374,7 @@ TEST(TestDescriptorLoader, RejectsADescriptorWhoseRootIsNotAnObject)
     // a different rejection path than MalformedJsonDoesNotCostTheOtherEngine above.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_object_root"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
-    std::ofstream(dir.path() / "not-an-object.json", std::ios::binary)
+    std::ofstream(dir.path() / "not-an-object.ued.json", std::ios::binary)
         << nlohmann::json::array({1, 2, 3}).dump();
 
     const auto sets = loadFrom(dir.path());
@@ -407,69 +424,77 @@ INSTANTIATE_TEST_SUITE_P(
         // load errors rather than something to ignore.
         ViolationCase{"unknown_key",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["features_signature"]
+                          documentOfType(documents, ".ued.json")["features_signature"]
                               = nlohmann::json::array({"tensor_core"});
                       }},
-        ViolationCase{"unknown_schema",
+        // The type comes from the filename now, so a leftover `schema` key is simply an
+        // unknown one. Rejected rather than ignored: accepting both would leave two
+        // sources of truth for a file's type.
+        ViolationCase{"leftover_schema_key",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["schema"]
-                              = "hipdnn.ued/v2";
+                          documentOfType(documents, ".ued.json")["schema"]
+                              = "hipdnn.ued/v1";
                       }},
         ViolationCase{"missing_required_key",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1").erase("heuristic");
+                          documentOfType(documents, ".ued.json").erase("heuristic");
                       }},
         ViolationCase{"unknown_behavior_note",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["behavior_notes"]
+                          documentOfType(documents, ".ued.json")["behavior_notes"]
                               = nlohmann::json::array({"teleportation"});
                       }},
         ViolationCase{"default_value_contradicts_type",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.kmd/v1")
+                          documentOfType(documents, ".kmd.json")
                               .at("fields")[1]["default_value"]
                               = 5;
                       }},
         ViolationCase{"unparsable_id",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["id"] = "not-a-uuid";
+                          documentOfType(documents, ".ued.json")["id"] = "not-a-uuid";
                       }},
-        // RFC 0020 §4.2 makes `version` a required UED member; absent is malformed, not
-        // the 1.0 default the other five types get.
+        // Required on every type, with no absence-safe default: a type carrying no
+        // version cannot be gated by the RFC 0020 §11.1 accept rule at all.
         ViolationCase{"ued_missing_version",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1").erase("version");
+                          documentOfType(documents, ".ued.json").erase("version");
+                      }},
+        // Pinned as per-type rather than UED-only.
+        ViolationCase{"udd_missing_version",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".udd.json").erase("version");
                       }},
         // RFC 0020 §11.1: `file.minor <= provider.minor`. A newer minor may carry fields
         // this build has no reader for.
         ViolationCase{"version_newer_minor",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "1.1";
+                          documentOfType(documents, ".ued.json")["version"] = "1.1";
                       }},
         // RFC 0020 §11.1: a major mismatch is a hard break in either direction.
         ViolationCase{"version_newer_major",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "2.0";
+                          documentOfType(documents, ".ued.json")["version"] = "2.0";
                       }},
         ViolationCase{"version_older_major",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "0.9";
+                          documentOfType(documents, ".ued.json")["version"] = "0.9";
                       }},
         // `major.minor`, exactly two numeric halves: a three-part version is the SDK's
         // `Version` spelling, not this field's, and reading it as 1.0 would accept a file
         // stamped for a generation this build never saw.
         ViolationCase{"version_three_components",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "1.0.0";
+                          documentOfType(documents, ".ued.json")["version"] = "1.0.0";
                       }},
         ViolationCase{"version_not_numeric",
                       [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.ued/v1")["version"] = "1.x";
+                          documentOfType(documents, ".ued.json")["version"] = "1.x";
                       }},
         // The gate is per file type, not UED-only: a KMD this build cannot read is
         // skipped, and the engine whose `metadata` named it drops with it.
         ViolationCase{"non_ued_newer_minor", [](Documents& documents) {
-                          documentWithSchema(documents, "hipdnn.kmd/v1")["version"] = "1.1";
+                          documentOfType(documents, ".kmd.json")["version"] = "1.1";
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
 
@@ -478,11 +503,11 @@ TEST(TestDescriptorLoader, DropsOnlyThePackWhoseMatcherIsMissing)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_matcher"));
     auto documents = makeSetDocuments('1', "test:two_packs");
 
-    auto danglingPack = documentWithSchema(documents, "hipdnn.kdp/v1");
+    auto danglingPack = documentOfType(documents, ".kdp.json");
     danglingPack["id"] = testUuid('1', 'b');
     danglingPack["name"] = "pack with a dangling matcher";
     danglingPack["matcher_ids"] = nlohmann::json::array({testUuid('f', 'f')});
-    documents.push_back(danglingPack);
+    documents.push_back(TestDocument{".kdp.json", danglingPack});
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -497,7 +522,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackIsUnresolvable)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:packless");
-    documentWithSchema(broken, "hipdnn.kdp/v1")["dispatch_id"] = testUuid('f', 'f');
+    documentOfType(broken, ".kdp.json")["dispatch_id"] = testUuid('f', 'f');
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -512,7 +537,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackDeclaresNoKernels)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:empty_pack");
-    documentWithSchema(broken, "hipdnn.kdp/v1")["kernels"] = nlohmann::json::array();
+    documentOfType(broken, ".kdp.json")["kernels"] = nlohmann::json::array();
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -530,7 +555,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
     // the one place resolveDescriptorSets logs a pack rather than losing it with no trace.
     // test:orphaned's own UED is left with no pack of its own and is dropped along with it.
     auto orphaned = makeSetDocuments('2', "test:orphaned");
-    documentWithSchema(orphaned, "hipdnn.kdp/v1")["engine_id"] = testUuid('f', 'f');
+    documentOfType(orphaned, ".kdp.json")["engine_id"] = testUuid('f', 'f');
     writeDocuments(dir.path(), orphaned);
 
     const auto sets = loadFrom(dir.path());
@@ -549,7 +574,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsMissing)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_schema"));
     auto documents = makeSetDocuments('1', "test:schemaless");
-    documentWithSchema(documents, "hipdnn.ued/v1")["metadata"] = testUuid('f', 'f');
+    documentOfType(documents, ".ued.json")["metadata"] = testUuid('f', 'f');
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
@@ -591,10 +616,10 @@ TEST(TestDescriptorLoader, CoercesAnIntegerValueForAFloatField)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("float_coercion"));
     auto documents = makeSetDocuments('1', "test:coerced");
-    documentWithSchema(documents, "hipdnn.kmd/v1")
+    documentOfType(documents, ".kmd.json")
         .at("fields")
         .push_back({{"name", "scale"}, {"type", "float"}, {"default_value", 1}});
-    for(auto& kernel : documentWithSchema(documents, "hipdnn.kdp/v1").at("kernels"))
+    for(auto& kernel : documentOfType(documents, ".kdp.json").at("kernels"))
     {
         kernel["metadata"]["scale"] = 2;
     }
@@ -618,7 +643,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseMetadataContradictsTheSchema)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:bad_metadata");
-    for(auto& kernel : documentWithSchema(broken, "hipdnn.kdp/v1").at("kernels"))
+    for(auto& kernel : documentOfType(broken, ".kdp.json").at("kernels"))
     {
         kernel["metadata"]["block_size"] = "sixty-four";
     }
@@ -638,7 +663,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseKnobNamesNoSchemaField)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:bad_knob");
-    documentWithSchema(broken, "hipdnn.ued/v1")["knobs"] = {"block_sizes"};
+    documentOfType(broken, ".ued.json")["knobs"] = {"block_sizes"};
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -654,7 +679,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:registered"));
 
     auto unregistered = makeSetDocuments('2', "test:unregistered");
-    documentWithSchema(unregistered, "hipdnn.umd/v1")["match_symbol"] = "descriptorloader.absent";
+    documentOfType(unregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
     writeDocuments(dir.path(), unregistered);
 
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
@@ -672,7 +697,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineWhoseKernelsShareAMetadataTupl
     writeDocuments(dir.path(), makeSetDocuments('1', "test:registered"));
 
     auto duplicated = makeSetDocuments('2', "test:duplicate_tuple");
-    auto& kernels = documentWithSchema(duplicated, "hipdnn.kdp/v1").at("kernels");
+    auto& kernels = documentOfType(duplicated, ".kdp.json").at("kernels");
     kernels[1]["metadata"] = kernels[0]["metadata"];
     writeDocuments(dir.path(), duplicated);
 
@@ -720,17 +745,29 @@ TEST(TestDescriptorLoader, ValidationIsIdempotentAcrossReloads)
 // RFC 0020: UED format, collision handling, disable lever
 // ---------------------------------------------------------------------------
 
-/// The tag is matched exactly, so a major this build has no reader for is refused by
-/// naming nothing -- which is the whole of the accept rule until the sibling `version`
-/// field lands and brings the minor comparison with it.
-TEST(TestDescriptorLoader, DropsADescriptorWhoseSchemaTagIsUnrecognised)
+/// The suffix is the only thing consulted. Nothing infers a type from a file's contents,
+/// and the stem is free-form documentation, so renaming every stem changes nothing.
+TEST(TestDescriptorLoader, ReadsTheTypeFromTheSuffixNotTheStem)
 {
-    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unknown_tag"));
-    auto documents = makeSetDocuments('1', "test:unknown_tag");
-    documentWithSchema(documents, "hipdnn.ued/v1")["schema"] = "hipdnn.ued/v2";
-    writeDocuments(dir.path(), documents);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stem_ignored"));
+    const auto documents = makeSetDocuments('1', "test:stems");
 
-    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    // Deliberately not the id, and deliberately not descriptive: a stem carrying no
+    // information at all must still load.
+    int index = 0;
+    for(const auto& document : documents)
+    {
+        std::ofstream file(dir.path()
+                               / ("descriptor" + std::to_string(index++)
+                                  + std::string(document.suffix)),
+                           std::ios::binary);
+        file << document.body.dump(2) << '\n';
+    }
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:stems");
 }
 
 /// The name is hashed into a global id space, so an unscoped one is the name two vendors
@@ -749,7 +786,7 @@ TEST(TestDescriptorLoader, AcceptsAnEngineDeclaringNumericalNotes)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("numerical_notes"));
     auto documents = makeSetDocuments('1', "test:numerical");
-    documentWithSchema(documents, "hipdnn.ued/v1")["numerical_notes"]
+    documentOfType(documents, ".ued.json")["numerical_notes"]
         = nlohmann::json::array({"tensor_core", "reduced_precision_reduction"});
     writeDocuments(dir.path(), documents);
 
@@ -766,7 +803,7 @@ TEST(TestDescriptorLoader, DropsAnEngineRepeatingANumericalNote)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("repeated_note"));
     auto documents = makeSetDocuments('1', "test:repeated");
-    documentWithSchema(documents, "hipdnn.ued/v1")["numerical_notes"]
+    documentOfType(documents, ".ued.json")["numerical_notes"]
         = nlohmann::json::array({"tensor_core", "tensor_core"});
     writeDocuments(dir.path(), documents);
 
@@ -864,7 +901,7 @@ TEST(TestDescriptorLoader, CarriesTheEnginesDeclaredSdkVersion)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("sdk_version"));
     auto documents = makeSetDocuments('1', "test:versioned");
-    documentWithSchema(documents, "hipdnn.ued/v1")["sdk_version"] = "1.2.3";
+    documentOfType(documents, ".ued.json")["sdk_version"] = "1.2.3";
     writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
@@ -879,30 +916,24 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseSdkVersionIsMalformed)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bad_sdk_version"));
     auto documents = makeSetDocuments('1', "test:bad_version");
-    documentWithSchema(documents, "hipdnn.ued/v1")["sdk_version"] = "1.2";
+    documentOfType(documents, ".ued.json")["sdk_version"] = "1.2";
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
-/// The five non-UED types accept the field they do not require, so an author can stamp
-/// every descriptor uniformly (as the shipped corpus does) without tripping the
-/// unknown-key rejection.
-TEST(TestDescriptorLoader, AcceptsAnExplicitCurrentVersionOnEveryDescriptorType)
+/// The inverse of the UED case: `version` is required on every type, with no absence-safe
+/// default. A KMD with no version drops, and the engine whose `metadata` named it goes
+/// with it -- which is what makes the rule enforceable rather than advisory.
+TEST(TestDescriptorLoader, RejectsANonUedDescriptorWithNoVersion)
 {
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("version_all"));
     auto documents = makeSetDocuments('1', "test:versioned");
-    for(auto& document : documents)
-    {
-        document["version"] = "1.0";
-    }
+    documentOfType(documents, ".kmd.json").erase("version");
     writeDocuments(dir.path(), documents);
 
-    const auto sets = loadFrom(dir.path());
-
-    ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:versioned");
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
 }
 
 /// RFC 0020 §10.2.1: the version check runs before duplicate detection, so a UED the
@@ -916,7 +947,7 @@ TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideByName)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:contested"));
 
     auto newer = makeSetDocuments('2', "test:contested");
-    documentWithSchema(newer, "hipdnn.ued/v1")["version"] = "2.0";
+    documentOfType(newer, ".ued.json")["version"] = "2.0";
     writeDocuments(dir.path(), newer);
 
     const auto sets = loadFrom(dir.path());
@@ -939,10 +970,10 @@ TEST(TestDescriptorLoader, AnUnsupportedVersionDropsBeforeItCanCollideById)
     // is supposed to collide with and prove nothing. Without the version bump this is the
     // drop-all case DropsAnIdTwoFilesDisagreeAbout covers.
     auto casualtySet = makeSetDocuments('2', "test:casualty");
-    auto casualty = documentWithSchema(casualtySet, "hipdnn.ued/v1");
+    auto casualty = documentOfType(casualtySet, ".ued.json");
     casualty["id"] = testUuid('1', ROLE_ENGINE);
     casualty["version"] = "2.0";
-    writeDocument(dir.path() / "gfx950", casualty);
+    writeDocument(dir.path() / "gfx950", TestDocument{".ued.json", casualty});
 
     const auto sets = loadFrom(dir.path());
 
@@ -966,15 +997,54 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
     std::filesystem::create_directories(commented);
     for(const auto& document : documents)
     {
-        std::ofstream file(commented / (document.at("id").get<std::string>() + ".json"),
+        std::ofstream file(commented
+                               / (document.body.at("id").get<std::string>()
+                                  + std::string(document.suffix)),
                            std::ios::binary);
-        file << "// authored with a comment, per RFC 0020 §4.3\n" << document.dump(2) << "\n";
+        file << "// authored with a comment, per RFC 0020 §4.3\n"
+             << document.body.dump(2) << "\n";
     }
 
     const auto sets = loadFrom(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:commented");
+}
+
+/// A `.json` naming no descriptor type is skipped before it is opened, so an unrelated
+/// JSON file living under the descriptor root costs nothing. Distinct from
+/// IgnoresANonJsonFile, which never had a `.json` extension to begin with.
+TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stray_json"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "notes.json", std::ios::binary) << R"({"id":"x"})";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+/// Folders are organizational only: the walk is recursive and a file's directory means
+/// nothing to the loader, so a set split across a subdirectory resolves as one engine.
+TEST(TestDescriptorLoader, LoadsDescriptorsFromNestedFolders)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("nested"));
+    auto documents = makeSetDocuments('1', "test:nested");
+
+    // One descriptor a level down, the rest at the root: the cross-references that bind
+    // them carry ids, not paths.
+    writeDocument(dir.path() / "pointwise", documents.front());
+    documents.erase(documents.begin());
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:nested");
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -44,7 +44,8 @@ const std::vector<IngestorPack>& ingestorPacks();
 /// @see packs/PointwiseNative.cpp
 void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 
-void registerPointwiseSubSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+/// @see packs/ConvNative.cpp
+void registerConvFwdSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

@@ -64,6 +64,7 @@ namespace
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise.graph_match";
 constexpr std::string_view ADD_MATCHER_SYMBOL = "hipkernel.pointwise.add_match";
 constexpr std::string_view MUL_MATCHER_SYMBOL = "hipkernel.pointwise.mul_match";
+constexpr std::string_view SUB_MATCHER_SYMBOL = "hipkernel.pointwise.sub_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise.dispatch";
@@ -279,6 +280,11 @@ bool pointwiseMulMatches(const MatchContext& context, BoundTokens& /*bound*/)
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::MUL);
 }
 
+bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
+{
+    return pointwiseOperationMatches(context, data_objects::PointwiseMode::SUB);
+}
+
 /**
  * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
  *
@@ -490,6 +496,7 @@ void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& 
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &pointwiseGraphMatches);
     scope.add(std::string(ADD_MATCHER_SYMBOL), &pointwiseAddMatches);
     scope.add(std::string(MUL_MATCHER_SYMBOL), &pointwiseMulMatches);
+    scope.add(std::string(SUB_MATCHER_SYMBOL), &pointwiseSubMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &pointwiseKernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &pointwiseScore);
     scope.add(std::string(DISPATCH_SYMBOL), &pointwiseDispatchHandler());

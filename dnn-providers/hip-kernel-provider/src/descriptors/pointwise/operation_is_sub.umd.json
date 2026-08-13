@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "dc67dde9-b2a1-470e-80c9-4ee84c1e3b25",
+  "name": "graph operation is sub",
+  "scope": "graph",
+  "match_symbol": "hipkernel.pointwise.sub_match"
+}

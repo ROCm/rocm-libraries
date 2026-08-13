@@ -7,5 +7,5 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseSubPack.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
 )

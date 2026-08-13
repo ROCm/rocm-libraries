@@ -1,8 +1,0 @@
-{
-  "schema": "hipdnn.umd/v1",
-  "version": "1.0",
-  "id": "dc67dde9-b2a1-470e-80c9-4ee84c1e3b25",
-  "name": "single-node pointwise sub over 1-element tensors",
-  "scope": "graph",
-  "match_symbol": "hipkernel.pointwise_sub.graph_match"
-}

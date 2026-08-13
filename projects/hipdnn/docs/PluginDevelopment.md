@@ -16,6 +16,11 @@
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
   - [Key Files Reference](#key-files-reference)
+- [Adding an Engine with the Kernel Ingestor](#adding-an-engine-with-the-kernel-ingestor)
+  - [What a pack is](#what-a-pack-is)
+  - [The three extension points](#the-three-extension-points)
+  - [Adding a pack](#adding-a-pack)
+  - [Why registration is a table, not a static](#why-registration-is-a-table-not-a-static)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
 - [How to Test Plugins](#how-to-test-plugins)
@@ -419,6 +424,116 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 
 3. **Remove only during major version updates** to maintain backward compatibility.
 
+## Adding an Engine with the Kernel Ingestor
+
+> [!NOTE]
+> Built only when `HIPDNN_ENABLE_KERNEL_INGESTOR=ON`. Every file below is guarded by
+> `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, and with the flag off none of it is compiled
+> or installed.
+
+The kernel ingestor (RFC 0017) is a second way to add an engine *inside* an existing
+provider. Rather than writing an engine class, you describe the engine as data — a
+**descriptor set** — and supply only the native code the data cannot express. The
+reference implementation lives in
+[`hip-kernel-provider/src/engines/kernel_ingestor_engine/`](../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/).
+
+### What a pack is
+
+A **pack** is one engine's contribution, and it is one `.cpp` file plus its kernel
+source and its descriptors:
+
+| File | Contains |
+|---|---|
+| `<Op>Native.cpp` | The escape hatches: graph matcher, kernel matcher, scorer, dispatch handler, and the one function registering them. |
+| `descriptors/<engine>/*.json` | The descriptor set as installed data: the engine descriptor, its metadata schema (KMD), and one kernel definition per variant. |
+| `kernels/<Op>.cpp` | The kernel itself. |
+
+Nothing else is per-pack. Matchers, scorer, and dispatch handler stay internal to the
+native file — they are reached only through the symbol names the descriptors quote, so
+a pack has no header.
+
+### The three extension points
+
+There are **three**, not four. Expect no separate workspace registration point:
+workspace sizing is a method on the dispatch handler, because the backend asks for a
+workspace size before a kernel has been chosen.
+
+| Extension point | Registered under | Purpose |
+|---|---|---|
+| Graph matcher | `GraphMatcherRegistry` | Is this pack applicable to this graph? Evaluated once per (graph, device). |
+| Kernel matcher + scorer | `KernelMatcherRegistry`, `ScoreRegistry` | Which kernels can serve it, and which is preferred. |
+| Dispatch handler | `DispatchRegistry` | `workspaceBytes()`, `prepare()`, and `launch()`. |
+
+A matcher runs as an applicability check on a graph **nothing has validated yet**. A
+plugin-ABI caller or a deserialized graph can present a tensor the frontend would have
+rejected, so every refusal predicate must be total: check `dims()` *and* `strides()` for
+null before dereferencing, and assert the extent you actually require rather than a
+product that a shape like `{-1,-1,1,1}` satisfies.
+
+### Adding a pack
+
+1. Write `<Op>Native.cpp`. End it with a registration function that adds one entry per
+   symbol name its descriptors quote:
+
+   ```cpp
+   void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
+   {
+       scope.add(std::string(GRAPH_MATCHER_SYMBOL), &pointwiseGraphMatches);
+       scope.add(std::string(ADD_MATCHER_SYMBOL), &pointwiseAddMatches);
+       scope.add(std::string(MUL_MATCHER_SYMBOL), &pointwiseMulMatches);
+       scope.add(std::string(SUB_MATCHER_SYMBOL), &pointwiseSubMatches);
+       scope.add(std::string(KERNEL_MATCHER_SYMBOL), &pointwiseKernelMatches);
+       scope.add(std::string(SCORE_SYMBOL), &pointwiseScore);
+       scope.add(std::string(DISPATCH_SYMBOL), &pointwiseDispatchHandler());
+   }
+   ```
+
+   Every symbol a descriptor names must be registered here. Symbols resolve **at engine
+   construction**, not on first use, so a typo is a load-time error naming the
+   descriptor rather than a failure much later on the execution path.
+
+   One native file can serve several packs of the same engine. Above, add, mul and sub
+   are three packs sharing one graph matcher, one scorer and one dispatch handler, and
+   differing only in the operation matcher each names.
+
+2. Write the descriptor files under `src/descriptors/<engine>/`. They are **data, not
+   code** — installed JSON the loader reads at engine construction, so adding a variant
+   ships no C++. A file's type comes from its filename suffix, one of `.kmd.json`,
+   `.uhd.json`, `.ued.json`, `.umd.json`, `.udd.json` or `.kdp.json`; the stem is
+   free-form documentation and is never parsed. Every file carries a `"version"`.
+   Subdirectories are organizational only — the loader walks the tree and a `.json`
+   matching no suffix is warned about and skipped.
+
+   Each `MetadataField` in the KMD declares its `name`, its expected `type`, and either
+   a `default_value` or nothing (making it mandatory). A kernel supplying a field of
+   the wrong type is rejected at load.
+
+3. Declare the registration function in
+   [`IngestorPacks.hpp`](../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/IngestorPacks.hpp)
+   and add **one row** to the table in `IngestorPacks.cpp`. Descriptors need no entry
+   anywhere: they are found by walking the installed tree.
+
+4. Add the native file and the kernel to the engine's `CMakeLists.txt`, and add tests.
+   The descriptor files need no CMake change — the staging and install rules are
+   recursive and match `*.json`.
+
+That row is the only shared file an engine edits. `discoverDescriptorSets()`, the
+container's engine loop, and the symbol-registration sweep all iterate the table and
+need no change.
+
+### Why registration is a table, not a static
+
+Self-registering statics are the obvious design here and they do not work. Unit tests
+link the provider as a **static archive**, and a linker pulls an archive member in only
+to resolve a reference. A translation unit that registers itself from a namespace-scope
+static, and that nothing else names, is dropped from the test binary while surviving in
+the plugin `.so` — which links objects directly. The engine would then be tested as
+present and ship as present, but be absent from exactly one of the two. The table is
+that reference.
+
+A pack's `registerSymbols` may throw. The sweep catches per pack, rolls that pack's
+symbols back, records its label, and carries on, so one bad pack costs its own engine
+rather than the provider.
 ## Plugin Architecture
 
 ### Directory Structure for Kernel Engine Plugins

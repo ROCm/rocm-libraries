@@ -14,6 +14,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -44,8 +45,8 @@ struct PackSymbols
     std::string_view outputToken;
 };
 
-/// The two packs of the multi-pack engine. Everything but `operationMatcher` is
-/// deliberately identical: sharing by id is what the two-pack topology exists to show.
+/// The three packs of the multi-pack engine. Everything but `operationMatcher` is
+/// deliberately identical: sharing by id is what the three-pack topology exists to show.
 inline constexpr PackSymbols POINTWISE_ADD{"hipkernel:Pointwise",
                                            "hipkernel.pointwise.graph_match",
                                            "hipkernel.pointwise.add_match",
@@ -66,16 +67,28 @@ inline constexpr PackSymbols POINTWISE_MUL{"hipkernel:Pointwise",
                                            "pointwise.input_b.uid",
                                            "pointwise.output.uid"};
 
-/// The single-pack engine, whose graph matcher checks its own operation.
-inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:PointwiseSub",
-                                           "hipkernel.pointwise_sub.graph_match",
-                                           "",
-                                           "hipkernel.pointwise_sub.kernel_match",
-                                           "hipkernel.pointwise_sub.score",
-                                           "hipkernel.pointwise_sub.dispatch",
-                                           "pointwise_sub.input_a.uid",
-                                           "pointwise_sub.input_b.uid",
-                                           "pointwise_sub.output.uid"};
+inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:Pointwise",
+                                           "hipkernel.pointwise.graph_match",
+                                           "hipkernel.pointwise.sub_match",
+                                           "hipkernel.pointwise.kernel_match",
+                                           "hipkernel.pointwise.score",
+                                           "hipkernel.pointwise.dispatch",
+                                           "pointwise.input_a.uid",
+                                           "pointwise.input_b.uid",
+                                           "pointwise.output.uid"};
+
+/// The second engine, split from Pointwise by graph node type rather than operation.
+/// One pack, so `operationMatcher` is empty -- its graph matcher both admits the node
+/// type and validates the shape in one pass, unlike the three Pointwise packs above.
+inline constexpr PackSymbols CONV_FWD{"hipkernel:ConvFwd",
+                                      "hipkernel.conv_fwd.graph_match",
+                                      "",
+                                      "hipkernel.conv_fwd.kernel_match",
+                                      "hipkernel.conv_fwd.score",
+                                      "hipkernel.conv_fwd.dispatch",
+                                      "conv_fwd.x.uid",
+                                      "conv_fwd.w.uid",
+                                      "conv_fwd.y.uid"};
 
 /// The descriptor set this provider ships for @p engineName, read from the same files
 /// the provider reads. Asserting on a loaded set rather than a hand-written twin is
@@ -353,6 +366,99 @@ inline flatbuffers::FlatBufferBuilder buildTwoNodePointwiseGraph()
                                                    data_objects::DataType::FLOAT,
                                                    &tensors,
                                                    &nodes));
+
+    return builder;
+}
+
+/// @brief Row-major packed strides for @p dims -- the layout the conv kernel's flat
+/// index arithmetic assumes, since it takes no stride arguments of its own.
+inline std::vector<int64_t> packedRowMajorStrides(const std::vector<int64_t>& dims)
+{
+    std::vector<int64_t> strides(dims.size(), 1);
+    for(size_t i = dims.size(); i-- > 1;)
+    {
+        strides[i - 1] = strides[i] * dims[i];
+    }
+    return strides;
+}
+
+/// Tensor uids buildConvFwdGraph() uses, in kernel argument order.
+constexpr int64_t CONV_X_UID = 1;
+constexpr int64_t CONV_W_UID = 2;
+constexpr int64_t CONV_Y_UID = 3;
+
+/**
+ * @brief Builds a single-node conv-forward graph, parameterized on everything this
+ *        pack's matcher gates: mode, stride, dilation, padding, and dtype.
+ *
+ * Defaults to the one shape the engine's naive kernel can serve: unit stride and
+ * dilation, no padding, cross-correlation, packed NCHW/KCRS/NKPQ, uniform dtype.
+ * @p wDims and @p yDims default from @p xDims assuming a 1-in/1-out-channel, 2x2
+ * kernel with no padding (P = H - R + 1, Q = W - S + 1), so a caller overriding only
+ * @p xDims for a refusal case does not also have to keep w/y consistent by hand.
+ *
+ * @param wDataType Overrides w's dtype away from @p dataType, for the cross-operand
+ *        dtype-mismatch refusal.
+ */
+inline flatbuffers::FlatBufferBuilder buildConvFwdGraph(
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+    hipdnn_flatbuffers_sdk::data_objects::ConvMode convMode
+    = hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION,
+    const std::vector<int64_t>& stride = {1, 1},
+    const std::vector<int64_t>& dilation = {1, 1},
+    const std::vector<int64_t>& prePadding = {0, 0},
+    const std::vector<int64_t>& postPadding = {0, 0},
+    const std::vector<int64_t>& xDims = {1, 1, 3, 3},
+    const std::optional<std::vector<int64_t>>& wDims = std::nullopt,
+    const std::optional<std::vector<int64_t>>& yDims = std::nullopt,
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> wDataType = std::nullopt)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+    const auto resolvedWDims = wDims.value_or(std::vector<int64_t>{1, xDims[1], 2, 2});
+    const auto resolvedYDims = yDims.value_or(
+        std::vector<int64_t>{xDims[0], resolvedWDims[0], xDims[2] - resolvedWDims[2] + 1,
+                             xDims[3] - resolvedWDims[3] + 1});
+    const auto resolvedWDataType = wDataType.value_or(dataType);
+
+    const auto xStrides = packedRowMajorStrides(xDims);
+    const auto wStrides = packedRowMajorStrides(resolvedWDims);
+    const auto yStrides = packedRowMajorStrides(resolvedYDims);
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<data_objects::TensorAttributes>> tensors;
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, CONV_X_UID, nullptr, dataType, &xStrides, &xDims));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, CONV_W_UID, nullptr, resolvedWDataType, &wStrides, &resolvedWDims));
+    tensors.push_back(data_objects::CreateTensorAttributesDirect(
+        builder, CONV_Y_UID, nullptr, dataType, &yStrides, &resolvedYDims));
+
+    auto attributes = data_objects::CreateConvolutionFwdAttributesDirect(builder,
+                                                                         CONV_X_UID,
+                                                                         CONV_W_UID,
+                                                                         CONV_Y_UID,
+                                                                         &prePadding,
+                                                                         &postPadding,
+                                                                         &stride,
+                                                                         &dilation,
+                                                                         convMode);
+
+    std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
+    nodes.push_back(data_objects::CreateNodeDirect(
+        builder, "conv_fwd", dataType, data_objects::NodeAttributes::ConvolutionFwdAttributes,
+        attributes.Union()));
+
+    auto name = builder.CreateString("conv_fwd_test");
+    auto tensorsVector = builder.CreateVector(tensors);
+    auto nodesVector = builder.CreateVector(nodes);
+
+    data_objects::GraphBuilder graphBuilder(builder);
+    graphBuilder.add_name(name);
+    graphBuilder.add_tensors(tensorsVector);
+    graphBuilder.add_nodes(nodesVector);
+    builder.Finish(graphBuilder.Finish());
 
     return builder;
 }

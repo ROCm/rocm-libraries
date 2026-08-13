@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
@@ -48,7 +50,7 @@ namespace
 {
 
 constexpr const char* ENGINE_NAME = "hipkernel:Pointwise";
-constexpr const char* SUB_ENGINE_NAME = "hipkernel:PointwiseSub";
+constexpr const char* CONV_ENGINE_NAME = "hipkernel:ConvFwd";
 constexpr const char* BLOCK_SIZE_KNOB = "block_size";
 
 /// Maximum workspace across the pack's surviving kernels for a FLOAT graph.
@@ -99,6 +101,47 @@ std::shared_ptr<Graph> buildPointwiseSubGraph()
     return buildPointwiseGraph(PointwiseMode::SUB);
 }
 
+/// A single conv-forward node: N=1, C=2, H=4, W=4, K=3, R=3, S=3, unit stride/dilation,
+/// no padding, cross-correlation, packed NCHW/KCRS. y's dims and strides are left
+/// unset -- ConvolutionFpropNode::infer_properties_node() derives NKPQ (P = H - R + 1,
+/// Q = W - S + 1) from x, w and the attributes, the same way pointwise's output relies
+/// on inference above. y keeps uid 3, matching executeAndVerify()'s hardcoded output uid.
+std::shared_ptr<Graph> buildConvFwdGraph()
+{
+    auto graph = std::make_shared<Graph>();
+    graph->set_name("conv_fwd")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("X")
+        .set_dim({1, 2, 4, 4})
+        .set_stride({32, 16, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_uid(2)
+        .set_name("W")
+        .set_dim({3, 2, 3, 3})
+        .set_stride({18, 9, 3, 1})
+        .set_data_type(DataType::FLOAT);
+
+    ConvFpropAttributes attrs;
+    attrs.set_name("conv_fwd")
+        .set_padding({0, 0})
+        .set_stride({1, 1})
+        .set_dilation({1, 1})
+        .set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
+
+    auto y = graph->conv_fprop(x, w, attrs);
+    y->set_uid(3).set_name("Y").set_output(true).set_data_type(DataType::FLOAT);
+
+    return graph;
+}
+
+/// A graph this pack must decline: two nodes, so no single prebuilt kernel serves it.
 std::shared_ptr<Graph> buildUnsupportedGraph()
 {
     auto graph = std::make_shared<Graph>();
@@ -142,9 +185,9 @@ protected:
         return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
     }
 
-    static int64_t subEngineId()
+    static int64_t convEngineId()
     {
-        return hipdnn_data_sdk::utilities::engineNameToId(SUB_ENGINE_NAME);
+        return hipdnn_data_sdk::utilities::engineNameToId(CONV_ENGINE_NAME);
     }
 
     /// Pins @p pinnedEngineId before plan creation and compiles with default knobs.
@@ -170,9 +213,19 @@ protected:
         buildAndCompile(graph, engineId());
     }
 
-    /// Executes `graph` once on GPU with `workspace` and verifies against
-    /// CpuReferenceGraphExecutor.
-    void executeAndVerify(Graph& graph, void* workspace, unsigned int seed)
+    /// Builds fresh CPU/GPU tensor bundles for `graph`, executes it once on GPU with
+    /// `workspace`, and verifies against CpuReferenceGraphExecutor. `seed` varies the
+    /// input values so repeated calls never compare against stale buffers.
+    ///
+    /// @param reductionLength How many products each output element sums. 1 -- the
+    ///        pointwise default -- demands bit-exactness, which an elementwise op over
+    ///        one element must deliver. A kernel that accumulates cannot: GPU and CPU
+    ///        sum in different orders, so the float error grows with the term count and
+    ///        the tolerance has to say so rather than be loosened globally.
+    void executeAndVerify(Graph& graph,
+                          void* workspace,
+                          unsigned int seed,
+                          int reductionLength = 1)
     {
         GraphTensorBundle gpuBundle;
         GraphTensorBundle cpuBundle;
@@ -213,7 +266,14 @@ protected:
         auto& gpuOut = gpuBundle.getTensor(3);
         auto& cpuOut = cpuBundle.getTensor(3);
         gpuOut.markDeviceModified();
-        EXPECT_TRUE(CpuFpReferenceValidation<float>().allClose(cpuOut, gpuOut));
+        // Proves the full chain: matcher admission, heuristic ranking, handler compile
+        // and launch, and argument resolution by tensor uid.
+        // atol/rtol scaled by the reduction length: worst-case relative error of a
+        // K-term float sum is about K*epsilon, and holding an 18-term conv to the
+        // exactness a 1-term pointwise op meets would fail on summation order alone.
+        const auto tolerance
+            = static_cast<float>(reductionLength) * std::numeric_limits<float>::epsilon();
+        EXPECT_TRUE(CpuFpReferenceValidation<float>(tolerance, tolerance).allClose(cpuOut, gpuOut));
     }
 };
 
@@ -348,8 +408,14 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectl
     executeAndVerify(*graphB, workspaceB.get(), 1);
 }
 
-// Two packs, one provider: the topology commit 2 exists to prove
-TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
+// ---------------------------------------------------------------------------
+// Three packs, one provider: the topology commit 2 exists to prove
+// ---------------------------------------------------------------------------
+
+// The claim the seam makes good on. An engine is described entirely by data and native
+// symbols resolved by name, and hipDNN routes each operation to the pack that claims
+// it with no code above the packs knowing any of them exists.
+TEST_F(IntegrationGpuKernelIngestor, ResolvesEveryPointwiseOperationToTheOneEngine)
 {
     auto addGraph = buildPointwiseAddGraph();
     ASSERT_EQ(addGraph->build_operation_graph(_handle).code, ErrorCode::OK);
@@ -370,22 +436,19 @@ TEST_F(IntegrationGpuKernelIngestor, ResolvesEachOperationToItsOwnEngine)
         return std::find(engines.begin(), engines.end(), id) != engines.end();
     };
 
-    // The multi-pack engine claims both of its operations under one id...
+    // Every operation resolves to the one engine id: add, mul and sub are packs of it,
+    // separated by their operation matchers rather than by an engine boundary.
     EXPECT_TRUE(offers(addEngines, engineId()));
     EXPECT_TRUE(offers(mulEngines, engineId()));
-    // ...the single-pack engine claims its own...
-    EXPECT_TRUE(offers(subEngines, subEngineId()));
-    // ...and neither claims the other's. Without this every engine would match every
-    // pointwise graph and selection between them would be arbitrary.
-    EXPECT_FALSE(offers(addEngines, subEngineId()));
-    EXPECT_FALSE(offers(mulEngines, subEngineId()));
-    EXPECT_FALSE(offers(subEngines, engineId()));
+    EXPECT_TRUE(offers(subEngines, engineId()));
 }
 
+// Numeric proof, not just routing: a-b and b-a are both plausible, so only comparing
+// against the CPU reference catches an operand swap in the third pack's binding.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
 {
     auto graph = buildPointwiseSubGraph();
-    buildAndCompile(*graph, subEngineId());
+    buildAndCompile(*graph, engineId());
 
     int64_t workspaceSize = 0;
     ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
@@ -419,10 +482,10 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothOperationsOfOneEngineThroughDif
     executeAndVerify(*addGraph, addWorkspace.get(), 2);
 }
 
-// Both packs' catalogs are cached under (graph, device) keys in per-engine state
-// managers. Executing one after the other proves neither engine's catalog or bound
-// token state reaches the other, a failure mode that only exists once a provider
-// serves more than one descriptor set.
+// Each pack's catalog is cached under (graph, device) keys in the engine's state
+// manager. Executing a third pack between two runs of the first proves neither pack's
+// catalog or bound token state reaches the others, a failure mode that only exists
+// once one descriptor set serves more than one pack.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
 {
     auto addGraph = buildPointwiseAddGraph();
@@ -433,7 +496,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
     executeAndVerify(*addGraph, addWorkspace.get(), 0);
 
     auto subGraph = buildPointwiseSubGraph();
-    buildAndCompile(*subGraph, subEngineId());
+    buildAndCompile(*subGraph, engineId());
     int64_t subWorkspaceSize = 0;
     ASSERT_EQ(subGraph->get_workspace_size(subWorkspaceSize).code, ErrorCode::OK);
     const hipdnn_data_sdk::utilities::Workspace subWorkspace(static_cast<size_t>(subWorkspaceSize));
@@ -441,6 +504,55 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterfe
 
     // Confirms the add graph still answers correctly after the sub graph ran.
     executeAndVerify(*addGraph, addWorkspace.get(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// A second engine, split by graph node type
+// ---------------------------------------------------------------------------
+
+// Numeric proof for the second engine, the same way ExecutesASubtractGraphThroughItsOwnPack
+// is for the third pack of the first: only the CPU reference catches a swapped operand
+// or a wrong accumulation order in the naive kernel.
+TEST_F(IntegrationGpuKernelIngestor, ExecutesAConvForwardGraphOnDevice)
+{
+    auto graph = buildConvFwdGraph();
+    buildAndCompile(*graph, convEngineId());
+
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    // C*R*S = 2*3*3: every output element is an 18-term sum, so it is held to an
+    // 18-term tolerance rather than the pointwise default of bit-exactness.
+    executeAndVerify(*graph, workspace.get(), 0, /*reductionLength=*/2 * 3 * 3);
+}
+
+// The claim the graph-node-type split exists to make: a conv graph's ranked engine ids
+// offer ConvFwd and not Pointwise, and a pointwise graph's offer Pointwise and not
+// ConvFwd. ResolvesEveryPointwiseOperationToTheOneEngine (above) already shows every
+// pointwise operation lands on one engine; this is the complementary claim that the two
+// engines themselves do not overlap.
+TEST_F(IntegrationGpuKernelIngestor, ResolvesAConvGraphToTheConvEngineAndNotThePointwiseOne)
+{
+    auto convGraph = buildConvFwdGraph();
+    ASSERT_EQ(convGraph->build_operation_graph(_handle).code, ErrorCode::OK);
+    std::vector<int64_t> convEngines;
+    ASSERT_EQ(convGraph->get_ranked_engine_ids(convEngines).code, ErrorCode::OK);
+
+    auto pointwiseGraph = buildPointwiseAddGraph();
+    ASSERT_EQ(pointwiseGraph->build_operation_graph(_handle).code, ErrorCode::OK);
+    std::vector<int64_t> pointwiseEngines;
+    ASSERT_EQ(pointwiseGraph->get_ranked_engine_ids(pointwiseEngines).code, ErrorCode::OK);
+
+    const auto offers = [](const std::vector<int64_t>& engines, int64_t id) {
+        return std::find(engines.begin(), engines.end(), id) != engines.end();
+    };
+
+    EXPECT_TRUE(offers(convEngines, convEngineId()));
+    EXPECT_FALSE(offers(convEngines, engineId()));
+
+    EXPECT_TRUE(offers(pointwiseEngines, engineId()));
+    EXPECT_FALSE(offers(pointwiseEngines, convEngineId()));
 }
 
 INSTANTIATE_TEST_SUITE_P(,

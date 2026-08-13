@@ -1,14 +1,14 @@
 {
-  "schema": "hipdnn.kdp/v1",
   "version": "1.0",
   "id": "530216cb-d708-4097-9391-d81882633b3b",
   "name": "hipkernel:pointwise_sub",
   "matcher_ids": [
+    "e5d38a04-9c71-4b2f-83a6-7f14b0d29e58",
     "dc67dde9-b2a1-470e-80c9-4ee84c1e3b25",
-    "024f1138-2f1b-4658-bf3e-d21ee1b2397c"
+    "1a7f52c8-b036-4e91-95d2-6c83af407b14"
   ],
-  "engine_id": "d49308c3-5e9e-4fea-8bc5-4ee6aec001fe",
-  "dispatch_id": "8bd42efc-96dc-4de3-84a9-9cbeed5fc420",
+  "engine_id": "8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911",
+  "dispatch_id": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
   "kernels": [
     {
       "id": "f8da0a47-fed7-453d-97ff-f5d3e0f382e1",
@@ -20,7 +20,8 @@
       },
       "metadata": {
         "block_size": 64,
-        "dtype": "FLOAT"
+        "dtype": "FLOAT",
+        "operation": "SUB"
       },
       "priority": 0
     },
@@ -34,7 +35,8 @@
       },
       "metadata": {
         "block_size": 256,
-        "dtype": "FLOAT"
+        "dtype": "FLOAT",
+        "operation": "SUB"
       },
       "priority": 0
     },
@@ -48,7 +50,8 @@
       },
       "metadata": {
         "block_size": 64,
-        "dtype": "HALF"
+        "dtype": "HALF",
+        "operation": "SUB"
       },
       "priority": 0
     }

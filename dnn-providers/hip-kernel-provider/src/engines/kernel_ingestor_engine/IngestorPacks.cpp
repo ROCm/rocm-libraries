@@ -14,7 +14,7 @@ const std::vector<IngestorPack>& ingestorPacks()
     // in a way that matters before main().
     static const std::vector<IngestorPack> s_packs = {
         {"hipkernel:Pointwise", &registerPointwiseSymbols},
-        {"hipkernel:PointwiseSub", &registerPointwiseSubSymbols},
+        {"hipkernel:ConvFwd", &registerConvFwdSymbols},
     };
     return s_packs;
 }

@@ -1,8 +1,7 @@
 {
-  "schema": "hipdnn.kmd/v1",
   "version": "1.0",
-  "id": "b27e4d15-3f89-4c62-8a07-51de93b4c7a2",
-  "name": "pointwise variant fields",
+  "id": "a7745b41-dcd5-4b4f-89ca-a98f608dba38",
+  "name": "conv_fwd variant fields",
   "fields": [
     {
       "name": "block_size",
@@ -11,10 +10,6 @@
     },
     {
       "name": "dtype",
-      "type": "string"
-    },
-    {
-      "name": "operation",
       "type": "string"
     }
   ]
