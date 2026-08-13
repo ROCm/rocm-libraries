@@ -397,7 +397,7 @@ def _d256_problem():
         max_seqlen_q=4096,
         max_seqlen_k=4096,
         dtype="bf16",
-        num_sms=120,
+        num_cus=120,
     )
 
 

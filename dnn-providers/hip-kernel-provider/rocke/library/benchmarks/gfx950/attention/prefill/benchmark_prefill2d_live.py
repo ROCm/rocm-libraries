@@ -381,9 +381,9 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: Optional[str] = None, num_sms: int = 256):
+    def __init__(self, *, compile_backend: Optional[str] = None, num_cus: int = 256):
         self.compile_backend = compile_backend
-        self.num_sms = num_sms
+        self.num_cus = num_cus
         self._launchers: dict[tuple, Any] = {}
 
     def _problem(self, shape, sliding_window: int, is_fp8: bool):
@@ -405,7 +405,7 @@ class CkVariantBench:
             use_alibi=shape.has_alibi,
             use_qq_bias=False,
             use_fp8=is_fp8,
-            num_sms=self.num_sms,
+            num_cus=self.num_cus,
             compile_backend=self.compile_backend,
         )
 
@@ -726,7 +726,7 @@ def main() -> int:
     # to a production-representative cap. Measured: bf16 cohort 0.90x at
     # cap=8192 vs 1.11x at cap=65536.
     ap.add_argument("--cap-blocks", type=int, default=65536)
-    ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument("--num-cus", type=int, default=256)
     ap.add_argument(
         "--compile-backend",
         choices=("auto", "llvm", "hipcc"),
@@ -773,7 +773,7 @@ def main() -> int:
     print(f"shapes: {len(shapes)}  variants: {args.variants}  flydsl={args.flydsl}")
 
     _cb = None if args.compile_backend == "auto" else args.compile_backend
-    bench = CkVariantBench(num_sms=args.num_sms, compile_backend=_cb)
+    bench = CkVariantBench(num_cus=args.num_cus, compile_backend=_cb)
     results = []
     n_fly_supported = 0
     n_fly_correct = 0
@@ -1052,7 +1052,7 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
+        num_cus=bench.num_cus,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").

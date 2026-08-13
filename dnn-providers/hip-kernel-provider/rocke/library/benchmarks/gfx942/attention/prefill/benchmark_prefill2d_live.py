@@ -20,7 +20,7 @@ pre-profiled Triton CSV), this harness:
 
 gfx942 differences vs gfx950:
   * ``arch="gfx942"`` passed to compile / build / supports helpers.
-  * ``num_sms`` defaults to 120 (MI300X production dispatch value).
+  * ``num_cus`` defaults to 120 (MI300X production dispatch value).
   * The flash-regime combo variant uses ``use_mfma_32x32x8=True`` (the
     ``mfma_f32_32x32x8_f16`` atom available on gfx942; fp16-only) rather than
     the gfx950 ``use_mfma_32x32=True`` (``mfma_f32_32x32x16_{f16,bf16}``).
@@ -408,9 +408,9 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 120):
+    def __init__(self, *, compile_backend: str = "llvm", num_cus: int = 120):
         self.compile_backend = compile_backend
-        self.num_sms = num_sms
+        self.num_cus = num_cus
         self._launchers: dict[tuple, Any] = {}
 
     def _problem(self, shape, sliding_window: int, is_fp8: bool):
@@ -432,7 +432,7 @@ class CkVariantBench:
             use_alibi=shape.has_alibi,
             use_qq_bias=False,
             use_fp8=is_fp8,
-            num_sms=self.num_sms,
+            num_cus=self.num_cus,
             compile_backend=self.compile_backend,
         )
 
@@ -755,7 +755,7 @@ def main() -> int:
     # MI300X has 228 CUs; 120 is the production dispatch value used by the
     # gfx942 attention provider (matches parity_unified_attention.py).
     ap.add_argument("--cap-blocks", type=int, default=65536)
-    ap.add_argument("--num-sms", type=int, default=120)
+    ap.add_argument("--num-cus", type=int, default=120)
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument("--shape-utils-path", type=Path, default=DEFAULT_SHAPE_UTILS)
     ap.add_argument(
@@ -799,7 +799,7 @@ def main() -> int:
     print(f"arch:   {ARCH}")
     print(f"shapes: {len(shapes)}  variants: {args.variants}  flydsl={args.flydsl}")
 
-    bench = CkVariantBench(num_sms=args.num_sms)
+    bench = CkVariantBench(num_cus=args.num_cus)
     results = []
     n_fly_supported = 0
     n_fly_correct = 0
@@ -1099,7 +1099,7 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
+        num_cus=bench.num_cus,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").

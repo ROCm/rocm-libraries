@@ -114,7 +114,7 @@ namespace rocisa
         {
             auto        newInstStr = preStr();
             std::string kStr;
-            if(getArchCaps()["CMPXWritesSGPR"])
+            if(capOrDefault(getArchCaps(), "CMPXWritesSGPR"))
             {
                 kStr = newInstStr + " " + getArgStr();
                 if(sdwa)

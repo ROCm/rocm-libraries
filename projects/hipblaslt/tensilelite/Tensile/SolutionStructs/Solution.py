@@ -725,7 +725,7 @@ class Solution(collections.abc.Mapping):
                "SwInstructionPrefetch=2 (Absolute) is not supported on Stream-K kernels; "
                "use Auto(-1) or Relative(1)")
         return
-      if state["ISA"] != (12, 5, 0):
+      if tuple(state["ISA"]) != (12, 5, 0):
         reject(state, printRejectionReason,
                f"SwInstructionPrefetch=2 (Absolute) is only supported on gfx1250, not {state['ISA']}; "
                "use Auto(-1) or Off(0)")
@@ -1083,7 +1083,9 @@ class Solution(collections.abc.Mapping):
     # each WG's tile per iteration, so the broadcast would target the wrong partner.
     # Keep the cluster WG-id decode (gated on ClusterDim) but leave multicast off for Stream-K.
     if state["ClusterDim"] != [1, 1] and state["StreamK"] == 0:
-      state["Multicast"] = True
+      # gfx1250 v0 silicon has no TDM-multicast (an arch fact, in archCaps); clustering
+      # and ClusterBarrier are separate features it keeps, so only multicast is gated.
+      state["Multicast"] = isaInfoMap[state["ISA"]].archCaps.get("HasTDMMulticast", True)
       # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
       if state["TDMInst"] != 0 and isaInfoMap[state["ISA"]].asmCaps.get("HasClusterBarrier", False):
         state["ClusterBarrier"] = True
@@ -2753,9 +2755,6 @@ class Solution(collections.abc.Mapping):
       if state["PrefetchGlobalRead"] == 0:
         reject(state, printRejectionReason, "HalfPLR only supports PGR > 0")
         return
-      if state["LoopIters"] == 1:
-        reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
-        return
       if not (state["enableTDMA"] and state["enableTDMB"]):
         reject(state, printRejectionReason, "HalfPLR only supports TDMInst")
         return
@@ -2940,6 +2939,18 @@ class Solution(collections.abc.Mapping):
     isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or state["ProblemType"]["DataTypeB"].isFloat4()
     isFloat6 = state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat()
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and (isFloat4 or isFloat6):
+      # gfx1250 v0 silicon lacks the fp4 32x16 WMMA opcode. Gate on the *physical* opcode dims
+      # MIBlock[0]/[1], not the effective MatrixInstM/N: under SourceSwap the effective extents
+      # transpose (32x16 -> 16x32) while the physical opcode is unchanged. Real 32x16 fp4 configs
+      # ship with SourceSwap both ways (true in mxf4_gfx1250.yaml, false in
+      # streamk/gfx1250/sk_mxf4gemm_tdm_ext.yaml), so only the physical dims identify the opcode.
+      if isFloat4 and not isaInfoMap[isa].asmCaps.get("HasWMMA_f4_32x16", True) \
+          and len(state.get("MIBlock", [])) >= 2 \
+          and state["MIBlock"][0] == 32 and state["MIBlock"][1] == 16:
+        reject(state, printRejectionReason,
+               "This gfx1250 stepping does not support the fp4 32x16 matrix-instruction shape; "
+               "use a 16x16 MatrixInstruction or build for gfx1250")
+        return
       if state["ProblemType"]["MacDataTypeA"].isFloat4() or state["ProblemType"]["MacDataTypeB"].isFloat4():
         if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
@@ -5479,6 +5490,9 @@ class Solution(collections.abc.Mapping):
 
     if state["LoopIters"] < 1:
       reject(state, printRejectionReason, "LoopIters need to greater than 0")
+      return
+    if state["HalfPLR"] and state["LoopIters"] == 1:
+      reject(state, printRejectionReason, "HalfPLR only supports LoopIters > 1")
       return
 
     # Reject SIA3 + PLR>0 + PGR2 + BufferLoad=0 when LoopIters <= 1.
