@@ -196,8 +196,15 @@ namespace rocsparse
             local_csr_col_ind = (const J*)trm_info->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_lower:
+                fill_mode = rocsparse_fill_mode_upper;
+                break;
+            case rocsparse_fill_mode_upper:
+                fill_mode = rocsparse_fill_mode_lower;
+                break;
+            }
         }
         else if(force_conj)
         {
@@ -561,7 +568,6 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
             const int64_t inc_y           = static_cast<int64_t>(1);
 
             _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                       false,
                                        batch_count,
                                        m,
                                        m,

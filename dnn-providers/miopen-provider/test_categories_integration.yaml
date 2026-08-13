@@ -59,6 +59,20 @@ test_categories:
       - "full"
       - "all"
 
+  ffm_quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: one Smoke case per operation for rapid signal"
+    test_patterns:
+      - "Smoke/IntegrationGpuConvFwd2dFp32.Correctness/0"
+      - "Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
+      - "Smoke/IntegrationGpuActivationForwardFp32.Correctness/0"
+      - "Smoke/IntegrationGpuReductionFp32.Correctness/0"
+      - "Smoke/IntegrationGpuRMSNormFp32.Correctness/0"
+      - "Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/mha"
+    exclude: *common_excludes
+    labels:
+      - "ffm_quick"
+      - "ffm_full"
+
 exclude_gpu:
   exclude_gpu_gfx110X_windows:
     test_patterns:

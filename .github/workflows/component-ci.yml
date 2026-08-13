@@ -22,7 +22,9 @@ jobs:
     outputs:
       stinkytofu: ${{ steps.configure.outputs.stinkytofu }}
       rocisa: ${{ steps.configure.outputs.rocisa }}
+      geko: ${{ steps.configure.outputs.geko }}
       miopen: ${{ steps.configure.outputs.miopen }}
+      tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -61,11 +63,30 @@ jobs:
       linux_runner: ${{ needs.changes.outputs.linux-runner }}
       windows_runner: ${{ needs.changes.outputs.windows-runner }}
 
+  geko:
+    name: "GEKO"
+    needs: changes
+    if: needs.changes.outputs.geko == 'true'
+    uses: ./.github/workflows/component-ci-geko.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+      windows_runner: ${{ needs.changes.outputs.windows-runner }}
+
   miopen:
     name: "MIOpen"
     needs: changes
     if: needs.changes.outputs.miopen == 'true'
     uses: ./.github/workflows/component-ci-miopen.yml
+
+  tensilelite-coverage:
+    name: "TensileLite coverage"
+    needs: changes
+    if: needs.changes.outputs.tensilelite-coverage == 'true'
+    uses: ./.github/workflows/component-ci-tensilelite-coverage.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
 
   component-ci-summary:
     name: "Component CI Summary"
@@ -73,7 +94,9 @@ jobs:
     needs:
       - stinkytofu
       - rocisa
+      - geko
       - miopen
+      - tensilelite-coverage
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository
