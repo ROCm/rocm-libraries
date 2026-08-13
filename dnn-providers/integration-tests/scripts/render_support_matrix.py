@@ -63,6 +63,7 @@ from bundle_discovery import (  # noqa: E402
     find_graph_files,
     find_sweep_roots,
 )
+from engine_registry import known_engines  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Paths
@@ -797,6 +798,36 @@ def collect_single_graph_unit(
     return unit
 
 
+def warn_unregistered_engines(units: list[ClaimUnit]) -> None:
+    """Flag claimed engine names that no longer exist in the engine registry.
+
+    A sidecar names its engine as a bare string, so a renamed or retired engine
+    leaves claims behind that nothing can ever check: the enforcer only loads
+    engines the handle actually has, so such a claim is never satisfied and
+    never broken -- it just quietly stops meaning anything, while still
+    rendering a column here. Counting the sidecars makes the size of the
+    cleanup visible; the registry is read from EngineNames.hpp so this cannot
+    drift from the C++ list.
+
+    Silent when the header is unreadable: a partial checkout must not be
+    reported as a tree full of retired engines.
+    """
+    registry = known_engines()
+    if registry is None:
+        return
+    counts: dict[str, int] = defaultdict(int)
+    for unit in units:
+        for engine in unit.claims:
+            if engine not in registry:
+                counts[engine] += 1
+    for engine, count in sorted(counts.items()):
+        plural = "" if count == 1 else "s"
+        warn(
+            f"engine '{engine}' appears in {count} claim unit{plural} but is not"
+            " in the engine registry -- may be retired"
+        )
+
+
 def collect_units(root: pathlib.Path) -> list[ClaimUnit]:
     sweep_roots = find_sweep_roots(root)
     units: list[ClaimUnit] = []
@@ -806,6 +837,7 @@ def collect_units(root: pathlib.Path) -> list[ClaimUnit]:
         unit = collect_single_graph_unit(graph_path, root)
         if unit is not None:
             units.append(unit)
+    warn_unregistered_engines(units)
     return units
 
 
