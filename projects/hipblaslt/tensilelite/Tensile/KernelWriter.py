@@ -57,6 +57,7 @@ from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled
 from .Common.GlobalParameters import globalParameters
+from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -6776,6 +6777,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
+                               # colliding stepping is targeted) tells StinkyTofu which cost table to use.
+                               "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
@@ -6957,6 +6961,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.asmCaps  = ti.getAsmCaps()
     self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
+
+    # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
+    # the build's arch name is the only signal here (empty for v1). Rebuild the
+    # dict rather than mutate: some backends return the live cached cap dict.
+    archName = globalParameters.get("StinkyTofuArchName") or ""
+    archCapDeltas = ARCH_CAP_OVERRIDES.get(archName, {}).get("archCaps", {})
+    if archCapDeltas:
+      self.states.archCaps = {**self.states.archCaps, **archCapDeltas}
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 

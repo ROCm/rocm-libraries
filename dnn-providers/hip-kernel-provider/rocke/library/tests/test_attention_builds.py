@@ -746,6 +746,49 @@ class TestAttentionHelpers(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("supported", reason)
 
+    def test_gfx950_d128_ksingle_buffer_geometry_guard(self):
+        """gfx950 d128 single-seq prefill: ``_enable_k_single_buffer`` must
+        derive ``block_m <= tile_size`` from the geometry selectors, not proxy
+        it as ``block_size >= 32``.
+
+        The stale proxy assumed num_warps=2; ``_enable_softmax_mfma_interleave``
+        later widened this cohort to num_warps=4 (block_m=128), so block_size=32
+        (T=64) tripped the ``block_m <= tile_size`` validator with an uncaught
+        ValueError at spec build (no sliding window needed). block_size=64
+        survived only by coincidence (T=128 == block_m). Pin: bs32 builds with
+        K-single OFF; bs64 keeps K-single ON (golden parity case 53) -- both
+        dtypes, no SW.
+        """
+        import kernels.common.attention_unified as au
+
+        def _p(block_size, dtype):
+            return UnifiedAttentionProblem(
+                total_q=2048,
+                num_seqs=1,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                block_size=block_size,
+                max_seqlen_q=2048,
+                max_seqlen_k=2048,
+                dtype=dtype,
+                sliding_window=0,
+            )
+
+        with _patch_resolved_arch("gfx950"):
+            for dtype in ("fp16", "bf16"):
+                # bs32 was an uncaught ValueError at spec build; must now build.
+                p32 = _p(32, dtype)
+                self.assertEqual(p32.select_path(), "2d")
+                self.assertFalse(au._enable_k_single_buffer(p32))
+                spec32 = au._tiled_spec_from_problem(p32)  # must NOT raise
+                self.assertFalse(spec32.use_k_single_buffer)
+                # bs64 still satisfies block_m <= tile_size -> K-single stays on.
+                p64 = _p(64, dtype)
+                self.assertTrue(au._enable_k_single_buffer(p64))
+                spec64 = au._tiled_spec_from_problem(p64)
+                self.assertTrue(spec64.use_k_single_buffer)
+
     def test_unified_attention_scalar_kernels_compile(self):
         p = UnifiedAttentionProblem(
             total_q=3,
