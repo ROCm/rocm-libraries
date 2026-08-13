@@ -13,25 +13,30 @@
 # Consumers should `target_link_libraries(<tgt> PUBLIC hipblaslt::mxdatagen)`
 # (PRIVATE if no further consumer needs the macro). Linking propagates:
 #   * the include path for `<mxDataGen.hpp>`
-#   * the link to `roc::mxDataGenerator`
 #   * the C++20 requirement
 #   * the `HIPBLASLT_ENABLE_MXDATAGENERATOR` macro
 #   * `hipblaslt::headers`, which carries the in-tree `<hipblaslt/...>` API
 #     headers (the source pulls in `<hipblaslt/hipblaslt-export.h>` and
 #     `<hipblaslt/hipblaslt-types.h>`).
+#
+# The helper privately consumes `roc::mx-layout-transforms`; that dependency
+# is not exposed to its downstream targets.
 
-if(NOT TARGET roc::mxDataGenerator AND NOT ROCM_LIBS_SUPERBUILD)
-    if(HIPBLASLT_ENABLE_THEROCK)
-        find_package(mxDataGenerator REQUIRED)
-    else()
-        # `${PROJECT_SOURCE_DIR}/../../shared/mxdatagenerator` resolves to the
-        # sibling `shared/mxdatagenerator` subtree of the project. The binary
+if(NOT TARGET roc::mx-layout-transforms AND NOT ROCM_LIBS_SUPERBUILD)
+    set(_hipblaslt_mx_layout_transforms_source
+        "${PROJECT_SOURCE_DIR}/../../shared/mx-layout-transforms"
+    )
+    if(NOT HIPBLASLT_ENABLE_THEROCK
+       AND EXISTS "${_hipblaslt_mx_layout_transforms_source}/CMakeLists.txt")
+        # The binary
         # dir is anchored under the hipblaslt project's build tree to match
-        # the upstream subdirectory's existing layout assumptions.
+        # the other in-tree shared dependencies.
         add_subdirectory(
-            "${PROJECT_SOURCE_DIR}/../../shared/mxdatagenerator"
-            "${PROJECT_BINARY_DIR}/mxdatagenerator"
+            "${_hipblaslt_mx_layout_transforms_source}"
+            "${PROJECT_BINARY_DIR}/mx-layout-transforms"
         )
+    else()
+        find_package(ROCMxLayoutTransforms REQUIRED CONFIG)
     endif()
 endif()
 
@@ -49,8 +54,8 @@ target_link_libraries(hipblaslt-mxdatagen
     PUBLIC
         hipblaslt::headers
         roc::host-validation-mx
-        roc::mxDataGenerator
     PRIVATE
+        roc::mx-layout-transforms
         # `-x hip` (via hip::device's INTERFACE_COMPILE_OPTIONS) makes the
         # translation unit compile through hipcc/clang. mxDataGen.cpp itself
         # does not launch kernels, but the modern ROCm bf16 header it pulls

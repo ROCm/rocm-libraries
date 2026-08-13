@@ -333,18 +333,19 @@ if(_rocroller_needs_host_numerics)
     add_subdirectory(host)
 endif()
 
-if(ROCROLLER_ENABLE_CLIENT AND NOT TARGET roc::mxDataGenerator)
-    set(_rocroller_mx_data_generator_source
-        "${CMAKE_CURRENT_SOURCE_DIR}/../mxdatagenerator"
+if((ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
+   AND NOT TARGET roc::mx-layout-transforms)
+    set(_rocroller_mx_layout_transforms_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../mx-layout-transforms"
     )
-    if(EXISTS "${_rocroller_mx_data_generator_source}/CMakeLists.txt")
+    if(EXISTS "${_rocroller_mx_layout_transforms_source}/CMakeLists.txt")
         add_subdirectory(
-            "${_rocroller_mx_data_generator_source}"
-            "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator"
+            "${_rocroller_mx_layout_transforms_source}"
+            "${CMAKE_CURRENT_BINARY_DIR}/mx-layout-transforms"
             EXCLUDE_FROM_ALL
         )
     else()
-        find_package(mxDataGenerator REQUIRED CONFIG)
+        find_package(ROCMxLayoutTransforms REQUIRED CONFIG)
     endif()
 endif()
 

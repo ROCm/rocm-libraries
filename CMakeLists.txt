@@ -39,7 +39,7 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
 set(DEFAULT_COMPONENTS
     # shared
     host-validation
-    mxdatagenerator
+    mx-layout-transforms
     rocroller
     origami
     # projects
@@ -150,11 +150,11 @@ if("host-validation" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
-if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+if("mx-layout-transforms" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
-        COMPONENT mxdatagenerator
+        COMPONENT mx-layout-transforms
         PREFIX_PATH shared
-        EXPECT_TARGET roc::mxDataGenerator
+        EXPECT_TARGET roc::mx-layout-transforms
     )
 endif()
 

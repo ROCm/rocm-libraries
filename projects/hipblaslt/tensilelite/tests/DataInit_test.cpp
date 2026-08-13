@@ -26,12 +26,6 @@
 #include <vector>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <hip/hip_runtime.h>
-#include <mxDataGenerator/dataTypeInfo.hpp>
-#include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>
-#include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>
-#include <mxDataGenerator/ocp_e3m2_mxfp6.hpp>
-#include <mxDataGenerator/ocp_e4m3_mxfp8.hpp>
-#include <mxDataGenerator/ocp_e5m2_mxfp8.hpp>
 #endif
 
 using TensileLite::ContractionProblemGemm;

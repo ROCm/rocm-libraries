@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <mxDataGenerator/PreSwizzle.hpp>
+#include <roc/mx_layout_transforms/pre_swizzle.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -60,8 +60,7 @@ namespace
 
     bool isRandomLike(MxGenerationMode mode)
     {
-        return mode == MxGenerationMode::Bounded
-               || mode == MxGenerationMode::BoundedAlternatingSign
+        return mode == MxGenerationMode::Bounded || mode == MxGenerationMode::BoundedAlternatingSign
                || mode == MxGenerationMode::Unbounded || mode == MxGenerationMode::Normal;
     }
 
@@ -171,10 +170,11 @@ namespace
         switch(scaleLayout)
         {
         case MXScaleLayout::GFX950:
-            return DGen::preSwizzleScalesGFX950(scaleBytes, {slowDimension, fastDimension});
+            return roc::mx_layout_transforms::preSwizzleScalesGFX950(
+                scaleBytes, {slowDimension, fastDimension});
         case MXScaleLayout::GFX1250:
             if(blockSize > 0)
-                return DGen::preSwizzleScalesGFX1250(
+                return roc::mx_layout_transforms::preSwizzleScalesGFX1250(
                     scaleBytes, slowDimension, fastDimension, blockSize);
             break;
         case MXScaleLayout::None:
@@ -213,7 +213,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
         throw std::overflow_error("generateMXInput leading dimension exceeds ptrdiff_t.");
     if(scaleBlockRowSize <= 0 || scaleBlockColSize <= 0)
         throw std::invalid_argument("generateMXInput scale block dimensions must be positive.");
-    const size_t blockRows = static_cast<size_t>(scaleBlockRowSize);
+    const size_t blockRows    = static_cast<size_t>(scaleBlockRowSize);
     const size_t blockColumns = static_cast<size_t>(scaleBlockColSize);
     if(blockRows > std::numeric_limits<size_t>::max() / blockColumns)
         throw std::overflow_error("generateMXInput scale block size overflow.");
@@ -246,16 +246,10 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     std::memcpy(scaleBytes.data(), result.scales.storage().data(), scaleBytes.size());
     const size_t blockedScaleExtent
         = (problem.shape[problem.blockAxis] + problem.blockSize - 1) / problem.blockSize;
-    const size_t fastScaleExtent
-        = problem.blockAxis == 0 ? blockedScaleExtent : problem.shape[0];
-    const size_t slowScaleExtent
-        = problem.blockAxis == 0 ? problem.shape[1] : blockedScaleExtent;
-    scaleBytes = swizzleScaleBytes(
-        std::move(scaleBytes),
-        scaleLayout,
-        slowScaleExtent,
-        fastScaleExtent,
-        problem.blockSize);
+    const size_t fastScaleExtent = problem.blockAxis == 0 ? blockedScaleExtent : problem.shape[0];
+    const size_t slowScaleExtent = problem.blockAxis == 0 ? problem.shape[1] : blockedScaleExtent;
+    scaleBytes                   = swizzleScaleBytes(
+        std::move(scaleBytes), scaleLayout, slowScaleExtent, fastScaleExtent, problem.blockSize);
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size());
 
     std::vector<float> reference(problem.shape.elementCount());
@@ -274,29 +268,27 @@ void restrideMXScaleBufferKFast(uint8_t* buffer,
 {
     if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
         return;
+    if(buffer == nullptr)
+        throw std::invalid_argument("restrideMXScaleBufferKFast: buffer must not be null");
+    if(elemBytes == 0)
+        throw std::invalid_argument("restrideMXScaleBufferKFast: element size must be non-zero");
+    if(paddedKBlocks < compactKBlocks)
+        throw std::invalid_argument(
+            "restrideMXScaleBufferKFast: padded extent is smaller than compact extent");
+    if(compactKBlocks > std::numeric_limits<size_t>::max() / elemBytes
+       || paddedKBlocks > std::numeric_limits<size_t>::max() / elemBytes)
+        throw std::overflow_error("restrideMXScaleBufferKFast: row size overflow");
     size_t const compactRow = compactKBlocks * elemBytes;
     size_t const paddedRow  = paddedKBlocks * elemBytes;
-    size_t const padTail    = paddedRow - compactRow;
+    if(compactFreeDim > std::numeric_limits<size_t>::max() / paddedRow)
+        throw std::overflow_error("restrideMXScaleBufferKFast: buffer size overflow");
+    size_t const padTail = paddedRow - compactRow;
     for(size_t f = compactFreeDim; f-- > 1;)
     {
         std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
         std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
     }
     std::memset(buffer + compactRow, 0x00, padTail);
-}
-
-void applyMXScaleLayoutInPlace(uint8_t*      scale,
-                               size_t        scaleElemCount,
-                               MXScaleLayout scaleLayout,
-                               size_t        slowDim,
-                               size_t        fastDim,
-                               size_t        mxBlock)
-{
-    if(scaleLayout == MXScaleLayout::None || scaleElemCount == 0)
-        return;
-    std::vector<uint8_t> scaleBytes(scale, scale + scaleElemCount);
-    scaleBytes = swizzleScaleBytes(std::move(scaleBytes), scaleLayout, slowDim, fastDim, mxBlock);
-    std::memcpy(scale, scaleBytes.data(), scaleBytes.size());
 }
 
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
