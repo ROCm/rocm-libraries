@@ -480,8 +480,7 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
         std::move(schema),
         std::vector<MatchDescriptor>{
             {GRAPH_MATCHER_ID, "device gated", MatchScope::GRAPH, DEVICE_GATED_MATCH_SYMBOL}},
-        std::vector<DispatchDescriptor>{
-            {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}},
+        makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 

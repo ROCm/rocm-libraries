@@ -49,6 +49,14 @@ struct ResolvedMatcher
     KernelMatcherFn kernelFn = nullptr;
 };
 
+/// A UDD paired with the handler its dispatchSymbol resolved to at construction.
+template <typename THandle>
+struct ResolvedDispatch
+{
+    DispatchDescriptor descriptor;
+    const IKernelDispatchHandler<THandle>* handler = nullptr;
+};
+
 /**
  * @brief The engine's view of its own kernels: which apply to a graph, in what order,
  *        and how to launch one.
@@ -146,10 +154,24 @@ public:
         for(auto& dispatch : dispatches)
         {
             const auto id = dispatch.id;
-            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(dispatch)); !inserted)
+            // Resolved here for the same reason matchers are, and it closes the last
+            // hole in that argument. SymbolScope makes a pack's registration atomic, so
+            // a dispatch symbol missing because its pack failed is already handled; what
+            // is not is a descriptor naming a symbol no pack registers. That is exactly
+            // what the two-file split admits, since the descriptor and native halves
+            // agree by string value with no compile-time check. Lazily, such a typo
+            // survives load, survives isApplicable, and throws at plan build, past the
+            // point RFC 0017 §8.6 made applicability a binding promise.
+            ResolvedDispatch<THandle> resolved{std::move(dispatch), nullptr};
+            resolved.handler = DispatchRegistry<THandle>::resolve(
+                resolved.descriptor.dispatchSymbol,
+                describeDescriptor("dispatch", resolved.descriptor.name, id));
+
+            if(const auto [it, inserted] = _dispatches.emplace(id, std::move(resolved)); !inserted)
             {
                 throw std::invalid_argument("duplicate dispatch descriptor id '" + toString(id)
-                                            + "' collides with '" + it->second.name + "'");
+                                            + "' collides with '" + it->second.descriptor.name
+                                            + "'");
             }
         }
 
@@ -240,7 +262,8 @@ public:
                                      + toString(kernel.dispatchId) + "'");
         }
 
-        return {kernel, DispatchRegistry<THandle>::resolve(it->second.dispatchSymbol)};
+        // Resolved at construction, so this cannot fail here.
+        return {kernel, it->second.handler};
     }
 
     /// @brief The distinct values @p field takes across @p kernels, in ranked-first order.
@@ -290,6 +313,21 @@ private:
 
             for(const auto& kernel : pack.kernels)
             {
+                // The source kind is RFC 0017 §9.1's adapter dispatch point, and only
+                // EMBEDDED_SOURCE has an adapter. Rejected here rather than left to the
+                // dispatch handler: a kind with no adapter otherwise passes validation,
+                // passes matching, and reaches prepare(), which hands a payload meant
+                // for another loader to a source compile. That is a throw after
+                // applicability already promised the graph (§8.6). A loader reading
+                // kinds from a file is the case this exists for.
+                if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE)
+                {
+                    throw std::invalid_argument(
+                        describeDescriptor("kernel", kernel.name, kernel.id)
+                        + " declares a source kind this build has no adapter for; only "
+                          "EMBEDDED_SOURCE is implemented");
+                }
+
                 auto key = completeMetadata(kernel);
                 if(std::find(seenKeys.begin(), seenKeys.end(), key) != seenKeys.end())
                 {
@@ -414,9 +452,11 @@ private:
     /**
      * @brief Runs every pack's matchers over @p context, cheapest and broadest first.
      *
-     * Graph-scoped matchers run once per (graph, device) regardless of how many packs
-     * list them; a failure disqualifies the pack before kernel-scoped matching runs.
-     * A pruned pack's graph-scoped bindings are discarded, never merged.
+     * Packs whose declared architecture excludes this call's device are dropped before
+     * any matcher runs. Graph-scoped matchers then run once per (graph, device)
+     * regardless of how many packs list them; a failure disqualifies the pack before
+     * kernel-scoped matching runs. A pruned pack's graph-scoped bindings are discarded,
+     * never merged.
      */
     Catalog buildCatalog(const MatchContext& context) const
     {
@@ -425,6 +465,26 @@ private:
 
         for(const auto& pack : _packs)
         {
+            // Arch first, ahead of every matcher. Cheaper, since it skips a mutexed
+            // registry resolve, the matcher body, a token merge, and per kernel a
+            // KernelDefinition plus a completeMetadata() map allocation -- all provably
+            // wasted for a pack that cannot run here, and it scales with kernel count.
+            //
+            // The correctness argument is the stronger one. Arch enforced inside a
+            // native matcher depends on the author remembering to encode it; miss it and
+            // the pack matches, wins ranking, and fails at plan build in a wrong-target
+            // hipRTC compile -- past isApplicable, so RFC 0017 §8.6's promise is already
+            // broken. Declaring it makes that unreachable rather than diligence-dependent.
+            if(!archSupports(pack.arch, context.deviceProperties.gcnArchName))
+            {
+                // Deliberately distinct from the matcher-decline line below: this is a
+                // correct, expected decline on a cross-arch install, not a fault.
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
+                                       << toString(pack.id) << " does not support device arch '"
+                                       << context.deviceProperties.gcnArchName << "'");
+                continue;
+            }
+
             // Merged into catalog.bound below only if the pack survives.
             BoundTokens packBound;
             if(!graphLevelMatchersPass(pack, context, graphVerdicts, packBound))
@@ -435,7 +495,7 @@ private:
                 continue;
             }
 
-            mergeBound(catalog.bound, packBound, pack);
+            mergeBound(catalog.bound, packBound, describeDescriptor("pack", pack.name, pack.id));
 
             size_t admitted = 0;
             for(const auto& kernel : pack.kernels)
@@ -467,25 +527,28 @@ private:
         return catalog;
     }
 
-    /// Folds @p packBound into @p bound. Throws if two packs bind the same token to
-    /// different values.
+    /// Folds @p source into @p bound, rejecting a token bound to two different values.
     ///
-    /// Names the pack the way every other descriptor diagnostic does: an operator
-    /// reading this has to find the pack in a descriptor set, and a bare UUID is not
-    /// something they can grep for.
-    static void mergeBound(BoundTokens& bound,
-                           const BoundTokens& packBound,
-                           const KernelDescriptorPack& pack)
+    /// One code path for both scopes: across packs, where two packs disagree, and
+    /// within one pack, where two of its graph matchers disagree. The invariant the
+    /// message states is engine-wide, so enforcing it only at the pack boundary would
+    /// leave the narrower conflict resolved silently by matcher declaration order.
+    ///
+    /// @param scope Names what disagreed, for the message: an operator has to find the
+    ///        offending descriptor, and a bare UUID is not something they can grep for.
+    static void mergeBound(BoundTokens& bound, const BoundTokens& source, const std::string& scope)
     {
-        for(const auto& [token, value] : packBound)
+        for(const auto& [token, value] : source)
         {
             const auto [it, inserted] = bound.emplace(token, value);
             if(!inserted && !(it->second == value))
             {
-                throw std::runtime_error(
-                    describeDescriptor("pack", pack.name, pack.id) + " binds token '" + token
-                    + "' to a value that disagrees with another pack's binding of the "
-                      "same token; one token name must mean one thing across an engine");
+                std::string message = scope;
+                message += " binds token '";
+                message += token;
+                message += "' to a value that disagrees with another binding of the same "
+                           "token; one token name must mean one thing across an engine";
+                throw std::runtime_error(message);
             }
         }
     }
@@ -521,8 +584,14 @@ private:
                 return false;
             }
 
-            // Merges this matcher's bindings into the pack's scoped view.
-            packBound.insert(memo->second.bound.begin(), memo->second.bound.end());
+            // Merges this matcher's bindings into the pack's scoped view. Two matchers
+            // in one pack disagreeing is the same authoring error as two packs
+            // disagreeing, and for the reference packs these tokens are tensor uids, so
+            // silently taking the first would launch a kernel against the wrong buffer.
+            mergeBound(
+                packBound,
+                memo->second.bound,
+                describeDescriptor("matcher", matcher.descriptor.name, matcher.descriptor.id));
         }
         return true;
     }
@@ -548,7 +617,7 @@ private:
 
     MetadataSchema _schema;
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
-    std::unordered_map<DescriptorId, DispatchDescriptor, DescriptorIdHash> _dispatches;
+    std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     /// Mutable because the query methods are logically const; the cache is internally

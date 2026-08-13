@@ -76,13 +76,25 @@ void registerNativeIngestorSymbols()
 
 std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> discoverDescriptorSets()
 {
+    // Registration first, and this is load-bearing rather than defensive. The backend's
+    // first call into a plugin is hipdnnEnginePluginGetAllEngineIds, from
+    // EnginePluginManager::validateBeforeAdding at load time, which reaches here
+    // through Container's *static* copyEngineIds -- before any Container exists and so
+    // before the constructor's sweep would have run. Memoizing without this call means
+    // s_sets is built with failedPackLabels() still empty on every real run, so a pack
+    // that could not register its symbols is enumerated anyway, gets an engine id, and
+    // then throws out of makeEngine (matcher and scorer symbols resolve eagerly) with
+    // no catch above it, taking down the whole plugin. Idempotent: call_once.
+    registerNativeIngestorSymbols();
+
     // The C++ stand-in for a descriptor-file scan. ALMIOPEN-2401 replaces this body
     // with a directory scan; nothing downstream changes.
     //
     // Memoized because two callers read it at different times: Container's static
     // engine-id enumeration and Container's constructor. "Read once at startup" has
     // to mean once, not once per caller, and post-2401 it stops two filesystem scans
-    // from disagreeing.
+    // from disagreeing. The call above also gives the read below a happens-before
+    // edge on the write inside the sweep, which a bare unordered_set otherwise lacks.
     static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
         std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
         for(const auto& pack : ingestorPacks())

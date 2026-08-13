@@ -34,9 +34,11 @@ void registerNativeIngestorSymbols();
  * **The one function ALMIOPEN-2401 replaces.** Its body is the C++ stand-in for a
  * descriptor-file scan; the return type is already what a loader produces.
  *
- * Safe to call for enumeration alone, before registerNativeIngestorSymbols(): it
- * builds plain data and touches no registry. Container::copyEngineIds depends on that,
- * being static and running before any Container exists.
+ * Registers native symbols first, so a pack that could not register is excluded rather
+ * than enumerated. That ordering is required, not defensive: the backend's first call
+ * into a plugin is getAllEngineIds at load time, which arrives through the static
+ * Container::copyEngineIds before any Container exists, and an enumerated-but-broken
+ * pack throws out of makeEngine with nothing above it to catch.
  *
  * Reads the inventory once per process and memoizes, so every caller sees the same
  * set.

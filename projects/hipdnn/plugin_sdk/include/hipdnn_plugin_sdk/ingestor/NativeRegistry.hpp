@@ -94,6 +94,42 @@ public:
         return it->second;
     }
 
+    /// @brief Resolves @p symbol, or returns a value-initialized T if it is absent.
+    ///
+    /// For callers asking whether a symbol is registered rather than depending on it.
+    /// Production code should use resolve(), which fails closed with a diagnostic.
+    static T tryResolve(const std::string& symbol)
+    {
+        auto& self = instance();
+        const std::lock_guard<std::mutex> lock(self._mutex);
+
+        auto it = self._symbols.find(symbol);
+        return it == self._symbols.end() ? T{} : it->second;
+    }
+
+    /// @brief Registers @p implementation under @p symbol, replacing any existing
+    ///        entry, and returns what was there before (value-initialized if nothing).
+    ///
+    /// Never throws, so it is safe from a destructor. Used by tests to take a symbol
+    /// over for a scope and hand it back; production registration uses registerSymbol,
+    /// which fails closed on a duplicate rather than silently winning.
+    static T replaceSymbol(const std::string& symbol, T implementation)
+    {
+        auto& self = instance();
+        const std::lock_guard<std::mutex> lock(self._mutex);
+
+        auto it = self._symbols.find(symbol);
+        if(it == self._symbols.end())
+        {
+            self._symbols.emplace(symbol, implementation);
+            return T{};
+        }
+
+        const T previous = it->second;
+        it->second = implementation;
+        return previous;
+    }
+
     /// @brief Removes @p symbol if present. Used by tests to swap in a temporary
     /// implementation and restore the original; production code never unregisters.
     static void unregisterSymbol(const std::string& symbol)

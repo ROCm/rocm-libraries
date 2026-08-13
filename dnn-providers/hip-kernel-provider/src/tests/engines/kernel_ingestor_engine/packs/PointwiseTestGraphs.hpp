@@ -195,7 +195,8 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     bool includeThirdOperand = false,
     std::optional<int64_t> danglingInputBUid = std::nullopt,
     bool inputAVirtual = false,
-    bool inputAIsRuntimePassByValue = false)
+    bool inputAIsRuntimePassByValue = false,
+    bool outputVirtual = false)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -219,7 +220,7 @@ inline flatbuffers::FlatBufferBuilder buildPointwiseGraph(
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
         builder, INPUT_B_UID, nullptr, resolvedInputBDataType, &strides, &dims, false));
     tensors.push_back(data_objects::CreateTensorAttributesDirect(
-        builder, OUTPUT_UID, nullptr, dataType, &strides, &dims, false));
+        builder, OUTPUT_UID, nullptr, dataType, &strides, &dims, outputVirtual));
     if(includeThirdOperand)
     {
         tensors.push_back(data_objects::CreateTensorAttributesDirect(

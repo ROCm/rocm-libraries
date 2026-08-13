@@ -99,10 +99,39 @@ enum class MetadataType
 };
 
 /// @brief The type of a value, for checking one against its field's declaration.
+///
+/// Relies on MetadataType's enumerators being in MetadataValue's alternative order.
+/// The assertions below make a reordering a compile error here rather than a silent
+/// mis-typing of every kernel in every pack.
 inline MetadataType metadataTypeOf(const MetadataValue& value)
 {
     return static_cast<MetadataType>(value.index());
 }
+
+static_assert(std::variant_size_v<MetadataValue> == 5,
+              "MetadataValue gained or lost an alternative; add the matching MetadataType "
+              "enumerator and extend the assertions below.");
+static_assert(std::is_same_v<std::variant_alternative_t<static_cast<size_t>(MetadataType::BOOL),
+                                                        MetadataValue>,
+                             bool>,
+              "MetadataType::BOOL no longer indexes MetadataValue's bool alternative.");
+static_assert(std::is_same_v<
+                  std::variant_alternative_t<static_cast<size_t>(MetadataType::INT), MetadataValue>,
+                  int64_t>,
+              "MetadataType::INT no longer indexes MetadataValue's int64_t alternative.");
+static_assert(std::is_same_v<std::variant_alternative_t<static_cast<size_t>(MetadataType::FLOAT),
+                                                        MetadataValue>,
+                             double>,
+              "MetadataType::FLOAT no longer indexes MetadataValue's double alternative.");
+static_assert(std::is_same_v<std::variant_alternative_t<static_cast<size_t>(MetadataType::STRING),
+                                                        MetadataValue>,
+                             std::string>,
+              "MetadataType::STRING no longer indexes MetadataValue's std::string alternative.");
+static_assert(
+    std::is_same_v<
+        std::variant_alternative_t<static_cast<size_t>(MetadataType::INT_LIST), MetadataValue>,
+        std::vector<int64_t>>,
+    "MetadataType::INT_LIST no longer indexes MetadataValue's vector<int64_t> alternative.");
 
 /// A kernel's complete metadata tuple: every KMD field mapped to this kernel's value.
 /// Must be unique per kernel within an engine (RFC 0017 §4); ordered so equal tuples
@@ -207,7 +236,10 @@ struct MatchDescriptor
 {
     DescriptorId id;
     std::string name;
-    MatchScope scope;
+    /// Defaulted like every other enum member here. GRAPH is the safer default: the
+    /// consumer is a two-way branch, so an indeterminate value would resolve out of the
+    /// wrong registry and report a correctly-spelled symbol as missing.
+    MatchScope scope = MatchScope::GRAPH;
     /// Resolved through NativeRegistry; a data-driven form (structural node pattern plus
     /// declarative criteria) is the UMD follow-up RFC.
     std::string matchSymbol;
@@ -276,6 +308,32 @@ struct KernelDescriptorPack
     std::vector<DescriptorId> matcherIds;
     DescriptorId engineId;
     DescriptorId dispatchId;
+    /**
+     * @brief GFX targets this pack's kernels support, e.g. `{"gfx942", "gfx950"}`.
+     *
+     * **Empty means arch-independent:** the pack applies on every device. That is the
+     * default, so a pack with no architecture constraint needs no edit.
+     *
+     * Base identifiers, without the target-id feature suffix: a device reports
+     * `gfx942:sramecc+:xnack-`, and the comparison strips that before matching. Matching
+     * is exact on the base id, not by prefix or family, so `gfx942` never silently
+     * accepts `gfx950`; a pack serving a family lists every member.
+     *
+     * A pack property rather than a kernel one because a pack is already the unit
+     * binding one dispatch ABI over N kernels, and a differently-targeted kernel needs
+     * its own pack regardless. Per-kernel arch would be a second source of truth against
+     * the pack's own dispatch handler.
+     *
+     * Enforced in two places, and they are not redundant. Here, at catalog build, using
+     * the device *this call* targets, which a multi-GPU box with mixed architectures
+     * needs per call. ALMIOPEN-2401 adds the second gate at load (RFC 0017 §12), using
+     * the machine's devices at startup, so a pack no local device can run is never built.
+     *
+     * An arch-excluded pack is a correct, expected decline, the same category as a
+     * matcher returning false. It is not a malformed entity and must not be reported as
+     * one, or a healthy cross-arch install reads as a pile of failures.
+     */
+    std::vector<std::string> arch;
     std::vector<KernelDescriptor> kernels;
 };
 

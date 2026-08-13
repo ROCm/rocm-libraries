@@ -4,7 +4,10 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -32,26 +35,66 @@ using namespace hipdnn_plugin_sdk::ingestor::testing;
 constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
 
+/// Ceiling on every wait in this file.
+///
+/// The waits here are on thread scheduling, not on work: the whole suite runs in ~20ms,
+/// and ~20ms under deliberate CPU oversubscription. 30s is roughly three orders of
+/// magnitude of headroom, so reaching it means a thread never ran at all, which is a
+/// deadlock rather than a slow machine. Kept far below ctest's 1500s default so a
+/// genuine deadlock fails as a named assertion here rather than as a killed binary with
+/// no diagnosis.
+constexpr auto WAIT_TIMEOUT = std::chrono::seconds(30);
+
+/// A one-shot gate several threads block on until it is opened.
+///
+/// Blocking rather than spinning. A spin-wait keeps every waiting thread on a core,
+/// competing with the threads doing the work under test and, on a small CI runner, with
+/// the thread trying to open the gate. Blocked threads leave the runqueue, so the
+/// opener runs immediately and the release is closer to simultaneous.
+class Gate
+{
+public:
+    /// @return false on timeout, meaning the gate was never opened.
+    bool wait()
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, WAIT_TIMEOUT, [this] { return _open; });
+    }
+
+    void open()
+    {
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            _open = true;
+        }
+        _cv.notify_all();
+    }
+
+private:
+    std::mutex _mutex;
+    std::condition_variable _cv;
+    bool _open = false;
+};
+
 /// Runs @p body on threadCount threads, releasing them together so they truly overlap.
 template <typename Body>
 void runConcurrently(int threadCount, Body body)
 {
-    std::atomic<bool> go{false};
+    Gate start;
     std::vector<std::thread> threads;
     threads.reserve(static_cast<size_t>(threadCount));
 
     for(int i = 0; i < threadCount; ++i)
     {
-        threads.emplace_back([&go, &body, i]() {
-            while(!go.load(std::memory_order_acquire))
-            {
-                std::this_thread::yield();
-            }
+        threads.emplace_back([&start, &body, i]() {
+            // On timeout, run anyway: the test then fails on its own assertions rather
+            // than deadlocking in join() below.
+            EXPECT_TRUE(start.wait()) << "thread " << i << " timed out waiting to start";
             body(i);
         });
     }
 
-    go.store(true, std::memory_order_release);
+    start.open();
     for(auto& thread : threads)
     {
         thread.join();
@@ -215,6 +258,72 @@ double countingScoreByBlockSize(const KernelDefinition& kernel, const MatchConte
 /// the sorting thread has installed its ranking.
 thread_local bool holdUntilRanked = false;
 
+/// A two-thread rendezvous plus a one-way "ranking installed" signal, both bounded.
+///
+/// Not the Gate above: this is reached from inside a graph matcher called by library
+/// code, and its release condition is another thread arriving at the same line rather
+/// than an external open(). std::barrier would express the rendezvous directly but is
+/// C++20; this file is C++17.
+class RankingBarrier
+{
+public:
+    /// Blocks until both threads have arrived. @return false on timeout.
+    bool arriveAndWait()
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        ++_arrived;
+        _cv.notify_all();
+        return _cv.wait_for(lock, WAIT_TIMEOUT, [this] { return _arrived >= 2; });
+    }
+
+    /// Blocks until markRanked(). @return false on timeout.
+    bool waitForRanked()
+    {
+        std::unique_lock<std::mutex> lock(_mutex);
+        return _cv.wait_for(lock, WAIT_TIMEOUT, [this] { return _ranked; });
+    }
+
+    void markRanked()
+    {
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            _ranked = true;
+        }
+        _cv.notify_all();
+    }
+
+    /// True if any wait timed out. The test asserts on this: a timeout means the
+    /// interleaving never happened, and the scorer-count assertion below would then
+    /// pass for the wrong reason.
+    bool timedOut() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _timedOut;
+    }
+
+    void recordTimeout()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _timedOut = true;
+    }
+
+private:
+    mutable std::mutex _mutex;
+    std::condition_variable _cv;
+    int _arrived = 0;
+    bool _ranked = false;
+    bool _timedOut = false;
+};
+
+/// The barrier the registered matcher below reaches. A GraphMatcherFn is a plain
+/// function pointer with no state of its own, so the matcher needs a way to find it;
+/// the test sets this before registering and clears it after.
+RankingBarrier*& rankingBarrier()
+{
+    static RankingBarrier* s_barrier = nullptr;
+    return s_barrier;
+}
+
 TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAccess)
 {
     // D3, and the only interleaving that reaches it. Both threads must miss one key and
@@ -223,31 +332,31 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
     // state-manager suite covers only the half of D3 it can see.
     //
     // Both conditions are forced rather than raced for, so this fails every run against
-    // the defect instead of occasionally.
+    // the defect instead of occasionally. Every wait is bounded: an unbounded one turns
+    // a future refactor that stops both threads reaching the matcher into a hung CI job
+    // rather than a failing test.
     constexpr const char* BARRIER_GRAPH_SYMBOL = "test.d3.barrier_graph_match";
     constexpr const char* COUNTING_SCORE_SYMBOL = "test.d3.counting_score";
 
-    static std::atomic<int> s_arrived{0};
-    static std::atomic<bool> s_ranked{false};
-    s_arrived.store(0);
-    s_ranked.store(false);
+    RankingBarrier barrier;
+    rankingBarrier() = &barrier;
     scoreCalls().store(0);
 
     GraphMatcherRegistry::registerSymbol(
         BARRIER_GRAPH_SYMBOL, [](const MatchContext&, BoundTokens&) -> bool {
             // Neither thread leaves until both are here: this is what makes them miss
             // the cache together rather than one serving the other.
-            s_arrived.fetch_add(1, std::memory_order_acq_rel);
-            while(s_arrived.load(std::memory_order_acquire) < 2)
+            if(!rankingBarrier()->arriveAndWait())
             {
-                std::this_thread::yield();
+                rankingBarrier()->recordTimeout();
+                return true;
             }
 
             // The unsorted thread then waits for the ranking to be installed, so its
             // own write is the one that lands last, the case that used to clobber.
-            while(holdUntilRanked && !s_ranked.load(std::memory_order_acquire))
+            if(holdUntilRanked && !rankingBarrier()->waitForRanked())
             {
-                std::this_thread::yield();
+                rankingBarrier()->recordTimeout();
             }
             return true;
         });
@@ -274,7 +383,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
         std::vector<MatchDescriptor>{
             {GRAPH_MATCHER_ID, "barrier graph scoped", MatchScope::GRAPH, BARRIER_GRAPH_SYMBOL},
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}},
-        std::vector<DispatchDescriptor>{{DISPATCH_ID, "d3 dispatch", "test.d3.dispatch"}},
+        makeTestDispatches<TestHandle>(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(COUNTING_SCORE_SYMBOL));
 
@@ -286,7 +395,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
         if(thread == 0)
         {
             EXPECT_TRUE(manager.sortedCatalog(context).isSorted);
-            s_ranked.store(true, std::memory_order_release);
+            barrier.markRanked();
         }
         else
         {
@@ -295,6 +404,13 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
             holdUntilRanked = false;
         }
     });
+
+    // Checked before the real assertion, and separately from it. A timed-out barrier
+    // means the interleaving never happened, and without the ordering it forces the
+    // scorer-count check below passes for the wrong reason. Silence there would read as
+    // proof the defect is fixed.
+    ASSERT_FALSE(barrier.timedOut())
+        << "the forced interleaving did not happen, so this run proves nothing about D3";
 
     // Asserting isSorted here would prove nothing: sortedCatalog() ranks on demand, so
     // it reads true whether or not the cached entry survived. Whether the scorer runs
@@ -306,6 +422,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
     EXPECT_EQ(scoreCalls().load(std::memory_order_relaxed), callsAfterRace)
         << "the cached ranking was discarded, so this query had to rank again";
 
+    rankingBarrier() = nullptr;
     GraphMatcherRegistry::unregisterSymbol(BARRIER_GRAPH_SYMBOL);
     KernelMatcherRegistry::unregisterSymbol(KERNEL_MATCH_SYMBOL);
     ScoreRegistry::unregisterSymbol(COUNTING_SCORE_SYMBOL);

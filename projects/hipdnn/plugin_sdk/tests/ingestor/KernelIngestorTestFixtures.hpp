@@ -223,6 +223,53 @@ public:
     ScopedTestSymbols& operator=(const ScopedTestSymbols&) = delete;
 };
 
+/// A handler that answers nothing, for the many tests that build a state manager but
+/// never dispatch through it.
+///
+/// Needed because dispatch symbols resolve when the manager is constructed: a
+/// descriptor naming an unregistered symbol is a load error, which is the whole point,
+/// but it means every manager needs *some* handler behind its UDD.
+template <typename THandle>
+class NoopDispatchHandler : public IKernelDispatchHandler<THandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& /*kernel*/) const override
+    {
+        return 0;
+    }
+
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& /*kernel*/) const override
+    {
+        return nullptr;
+    }
+
+    void launch(const THandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
+/// Ensures "test.dispatch" resolves, so a fixture-built state manager constructs.
+///
+/// Process-lifetime and idempotent: registration is global, and a test wanting real
+/// dispatch behaviour installs its own with ScopedDispatchRegistration, which replaces
+/// this for its scope and restores it after.
+template <typename THandle>
+inline void ensureNoopDispatchRegistered(const std::string& symbol = "test.dispatch")
+{
+    static const NoopDispatchHandler<THandle> s_handler;
+    // replaceSymbol, not registerSymbol: idempotent across repeated calls and across
+    // the several symbols the fixtures use, without a per-symbol once flag.
+    static_cast<void>(DispatchRegistry<THandle>::replaceSymbol(symbol, &s_handler));
+}
+
 /// Device resolver reporting one fixed device; no multi-device behavior is exercised.
 class TestDeviceResolver : public IDeviceResolver<int>
 {
@@ -287,6 +334,10 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
     std::vector<MatchDescriptor> matchers{
         {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL},
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
+    // Same symbol name as the stub fixture, but this manager is over TestHandle, so it
+    // needs the TestHandle registry populated; DispatchRegistry is per handle type.
+    // int, not TestHandle: that alias is declared further down this file.
+    ensureNoopDispatchRegistered<int>("hipdnn.kernel_ingestor.test.dispatch");
     std::vector<DispatchDescriptor> dispatches{
         {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
 
@@ -421,7 +472,11 @@ inline KernelDescriptor makeKernel(const DescriptorId& id,
 }
 
 /// The pack shape a real engine ships, wired to the counting matchers above.
-inline KernelDescriptorPack makePack(const std::vector<DescriptorId>& matcherIds)
+///
+/// @param arch Supported GFX targets; empty (the default) is arch-independent, which
+///        is what every test not about the arch gate wants.
+inline KernelDescriptorPack makePack(const std::vector<DescriptorId>& matcherIds,
+                                     const std::vector<std::string>& arch = {})
 {
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
@@ -429,6 +484,7 @@ inline KernelDescriptorPack makePack(const std::vector<DescriptorId>& matcherIds
     pack.matcherIds = matcherIds;
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
+    pack.arch = arch;
     pack.kernels = {makeKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
                     makeKernel(testId(0x65), "kernel_256_float", 256, "FLOAT"),
                     makeKernel(testId(0x66), "kernel_64_half", 64, "HALF")};
@@ -441,8 +497,12 @@ inline std::vector<MatchDescriptor> makeTestMatchers()
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
 }
 
+/// @note Registers the no-op handler as a side effect, so the descriptor this returns
+///       always resolves. Call it before constructing the manager that uses it.
+template <typename THandle = int>
 inline std::vector<DispatchDescriptor> makeTestDispatches()
 {
+    ensureNoopDispatchRegistered<THandle>();
     return {{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 }
 
@@ -517,21 +577,33 @@ inline std::unique_ptr<StateManager>
         cacheCapacity);
 }
 
-/// Registers @p handler under @p symbol in DispatchRegistry<THandle> for the object's
-/// lifetime.
+/// Installs @p handler under @p symbol in DispatchRegistry<THandle> for the object's
+/// lifetime, replacing whatever was registered and restoring it afterwards.
+///
+/// Replace rather than add, because makeTestDispatches() keeps a process-lifetime no-op
+/// under "test.dispatch" so a fixture-built manager can construct at all. A test
+/// wanting real dispatch behaviour takes the symbol over for its scope and hands it
+/// back, so tests stay order-independent.
 template <typename THandle>
 class ScopedDispatchRegistration
 {
 public:
     ScopedDispatchRegistration(std::string symbol, const IKernelDispatchHandler<THandle>& handler)
         : _symbol(std::move(symbol))
+        , _previous(DispatchRegistry<THandle>::replaceSymbol(_symbol, &handler))
     {
-        DispatchRegistry<THandle>::registerSymbol(_symbol, &handler);
     }
 
     ~ScopedDispatchRegistration()
     {
-        DispatchRegistry<THandle>::unregisterSymbol(_symbol);
+        if(_previous != nullptr)
+        {
+            static_cast<void>(DispatchRegistry<THandle>::replaceSymbol(_symbol, _previous));
+        }
+        else
+        {
+            DispatchRegistry<THandle>::unregisterSymbol(_symbol);
+        }
     }
 
     ScopedDispatchRegistration(const ScopedDispatchRegistration&) = delete;
@@ -539,6 +611,7 @@ public:
 
 private:
     std::string _symbol;
+    const IKernelDispatchHandler<THandle>* _previous = nullptr;
 };
 
 // StubHandle: minimal stand-ins for the types GenericEngine/GenericPlanBuilder are
@@ -573,6 +646,12 @@ struct StubContext
         _plan = std::move(plan);
     }
 
+    /// True once a plan builder has installed a plan, which nothing else can do.
+    bool hasPlan() const
+    {
+        return _plan != nullptr;
+    }
+
 private:
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> _plan;
 };
@@ -596,6 +675,53 @@ private:
     DeviceProperties _properties = testDeviceProperties();
 };
 
+/// Reports block_size as its workspace, so a workspace answer is traceable to a
+/// specific kernel rather than to a default. The StubHandle counterpart of
+/// TestGenericPlanBuilder.cpp's handler of the same shape.
+class StubWorkspaceHandler : public IKernelDispatchHandler<StubHandle>
+{
+public:
+    size_t workspaceBytes(const MatchContext& /*context*/,
+                          const BoundTokens& /*bound*/,
+                          const KernelDefinition& kernel) const override
+    {
+        return static_cast<size_t>(kernel.getIntMetadata(BLOCK_SIZE));
+    }
+
+    /// A real object, not nullptr: GenericPlanBuilder rejects a handler that prepares
+    /// no launch, so returning nullptr would fail before a plan reaches the context.
+    std::unique_ptr<PreparedDispatch> prepare(const MatchContext& /*context*/,
+                                              const BoundTokens& /*bound*/,
+                                              const KernelDefinition& /*kernel*/) const override
+    {
+        return std::make_unique<PreparedDispatch>();
+    }
+
+    void launch(const StubHandle& /*handle*/,
+                const PreparedDispatch& /*prepared*/,
+                const hipdnnPluginDeviceBuffer_t* /*deviceBuffers*/,
+                uint32_t /*numDeviceBuffers*/,
+                void* /*workspace*/) const override
+    {
+    }
+};
+
+/// The StubHandle equivalent of makeTestDispatches().
+///
+/// DispatchRegistry is per handle type, so registering into the TestHandle one leaves
+/// a StubHandle manager unable to resolve. Same side effect, different registry.
+inline std::vector<DispatchDescriptor> makeStubDispatches()
+{
+    static const NoopDispatchHandler<StubHandle> s_handler;
+    static const bool s_registered = [] {
+        DispatchRegistry<StubHandle>::replaceSymbol("hipdnn.kernel_ingestor.test.dispatch",
+                                                    &s_handler);
+        return true;
+    }();
+    static_cast<void>(s_registered);
+    return {{DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
+}
+
 /// State manager over StubHandle: one FLOAT kernel behind one graph-scoped matcher.
 inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateManager()
 {
@@ -617,8 +743,7 @@ inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateMana
         std::move(schema),
         std::vector<MatchDescriptor>{
             {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL}},
-        std::vector<DispatchDescriptor>{
-            {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}},
+        makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 }

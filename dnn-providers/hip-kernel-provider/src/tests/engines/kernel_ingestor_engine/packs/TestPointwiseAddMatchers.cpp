@@ -205,6 +205,25 @@ INSTANTIATE_TEST_SUITE_P(
                                         /*inputAVirtual=*/false,
                                         /*inputAIsRuntimePassByValue=*/true);
          }},
+        {"AVirtualOutput",
+         // The output, not input A. The matcher checks all three operands, and this is
+         // the case that distinguishes that from checking only the first: a virtual
+         // output has no device buffer for findDeviceBuffer to resolve at launch, so
+         // accepting it is a wrong answer rather than a failed one.
+         []() {
+             return buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                        data_objects::DataType::FLOAT,
+                                        {1, 1, 1, 1},
+                                        std::nullopt,
+                                        /*binary=*/true,
+                                        /*explicitStrides=*/std::nullopt,
+                                        /*inputBDataType=*/std::nullopt,
+                                        /*includeThirdOperand=*/false,
+                                        /*danglingInputBUid=*/std::nullopt,
+                                        /*inputAVirtual=*/false,
+                                        /*inputAIsRuntimePassByValue=*/false,
+                                        /*outputVirtual=*/true);
+         }},
     }),
     [](const ::testing::TestParamInfo<GraphMatcherRefusalCase>& info) { return info.param.name; });
 

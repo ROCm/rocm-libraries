@@ -115,8 +115,7 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
         std::move(schema),
         std::vector<MatchDescriptor>{
             {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, REJECT_SYMBOL}},
-        std::vector<DispatchDescriptor>{
-            {DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}},
+        makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
 
@@ -155,25 +154,33 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
 {
-    // No dispatch symbol is registered, so getDispatchDetails() throws, proving
-    // the call reached the plan builder rather than returning a stub zero.
+    // Asserted positively rather than by an expected throw. These once proved
+    // delegation by leaving the dispatch symbol unregistered, which stopped working
+    // when dispatch symbols began resolving at construction; and a test that passes
+    // because something upstream threw cannot tell delegation from any other failure.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
 
     const StubHandle handle;
     const TestGraph graph(makeGraphId(0x63));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper emptyConfig(nullptr, 0);
 
-    EXPECT_THROW(engine.getMaxWorkspaceSize(handle, graph, emptyConfig), std::runtime_error);
+    // The stub manager ships one 64-block kernel, and the handler reports block_size as
+    // its workspace, so this value can only come from the plan builder having run.
+    EXPECT_EQ(engine.getMaxWorkspaceSize(handle, graph, emptyConfig), 64U);
 }
 
 TEST(TestIngestorGenericEngine, InitializeExecutionContextDelegatesToThePlanBuilder)
 {
-    // No dispatch handler is registered, so buildPlan()'s lookup throws, proving
-    // this reached the plan builder.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
+    const StubWorkspaceHandler handler;
+    const ScopedDispatchRegistration<StubHandle> dispatch("hipdnn.kernel_ingestor.test.dispatch",
+                                                          handler);
     const StubEngine engine(makeEngineWithKnobs({BLOCK_SIZE}), makeStubStateManager(), resolver);
 
     const StubHandle handle;
@@ -181,8 +188,10 @@ TEST(TestIngestorGenericEngine, InitializeExecutionContextDelegatesToThePlanBuil
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper emptyConfig(nullptr, 0);
     StubContext context;
 
-    EXPECT_THROW(engine.initializeExecutionContext(handle, graph, emptyConfig, context),
-                 std::runtime_error);
+    engine.initializeExecutionContext(handle, graph, emptyConfig, context);
+
+    // A plan reached the context, which only the plan builder can put there.
+    EXPECT_TRUE(context.hasPlan());
 }
 
 } // namespace

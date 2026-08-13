@@ -95,10 +95,18 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
     // engine from an extra native one, and it cannot see the failure this is really
     // guarding: the pack table being dropped from a binary that links the provider as a
     // static archive, which leaves the engine absent and every other assertion happy.
+    const auto sets = discoverDescriptorSets();
+
+    // Reading the expectation from the function under test reintroduces the blindness
+    // this test exists to remove: with an empty result the loop below is vacuous and
+    // every count assertion in this file still passes. Reachable, since a pack that
+    // fails symbol registration is excluded from exactly this list.
+    ASSERT_FALSE(sets.empty()) << "no descriptor sets discovered, so nothing was asserted";
+
     Container container;
     const auto allEngineIds = container.getEngineManager().getAllEngineIds();
 
-    for(const auto& set : discoverDescriptorSets())
+    for(const auto& set : sets)
     {
         const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(set.engine.name);
         EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), engineId), allEngineIds.end())

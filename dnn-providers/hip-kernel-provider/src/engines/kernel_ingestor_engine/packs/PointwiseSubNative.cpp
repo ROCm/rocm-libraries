@@ -112,22 +112,31 @@ bool hasSupportedLayout(const data_objects::TensorAttributes& tensor)
 }
 
 /// True when the tensor is a supported rank and layout holding exactly one element.
+///
+/// Runs as an applicability check on a graph nothing has validated yet, so it must be
+/// total: a plugin-ABI caller or a deserialized graph can present a tensor the frontend
+/// would have rejected.
 bool isSingleElement(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
-    if(dims == nullptr || dims->size() < MIN_SUPPORTED_RANK || dims->size() > MAX_SUPPORTED_RANK)
+    const auto* strides = tensor.strides();
+    // strides is as optional as dims, and the layout classifier below dereferences it
+    // without checking. A refusal predicate must not be able to crash the process.
+    if(dims == nullptr || strides == nullptr || strides->size() != dims->size()
+       || dims->size() < MIN_SUPPORTED_RANK || dims->size() > MAX_SUPPORTED_RANK)
     {
         return false;
     }
 
-    int64_t elements = 1;
+    // Every dim must be 1, not merely multiply to 1: {-1,-1,1,1} has product 1, and a
+    // large-dim product can overflow onto 1. The kernel indexes element 0 and nothing
+    // else, so the claim being made here is about extent, not about a product.
     for(const auto dim : *dims)
     {
-        elements *= dim;
-    }
-    if(elements != 1)
-    {
-        return false;
+        if(dim != 1)
+        {
+            return false;
+        }
     }
 
     return hasSupportedLayout(tensor);

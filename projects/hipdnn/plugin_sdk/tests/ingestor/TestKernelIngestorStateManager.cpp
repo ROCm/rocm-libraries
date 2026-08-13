@@ -231,6 +231,52 @@ TEST(TestKernelIngestorStateManager, PrunedPackBindingsAreNotVisibleToSurvivingP
     GraphMatcherRegistry::unregisterSymbol(ALWAYS_FAILS_SYMBOL);
 }
 
+TEST(TestKernelIngestorStateManager, TwoMatchersInOnePackBindingOneTokenDifferentlyThrows)
+{
+    // The same authoring error as the cross-pack case below, one scope narrower, and it
+    // used to be resolved silently: the pack's view was folded with unordered_map's
+    // insert, which does not overwrite, so whichever matcher appeared earlier in
+    // matcherIds won. Matchers are shared by id and composed per pack, so a pack listing
+    // two binding matchers is ordinary; for the reference packs these tokens are tensor
+    // uids, making the silent winner a kernel launched against the wrong buffer.
+    constexpr const char* CONFLICTING_SYMBOL = "test.bound_conflict.within_pack";
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    GraphMatcherRegistry::registerSymbol(CONFLICTING_SYMBOL, &bindConflictingTokenValue);
+
+    const auto conflictingMatcherId = testId(0xC0);
+
+    // One pack, both binding matchers.
+    const KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, conflictingMatcherId});
+
+    const StateManager manager(makeSchema(),
+                               {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+                                {conflictingMatcherId,
+                                 "binds a conflicting value",
+                                 MatchScope::GRAPH,
+                                 CONFLICTING_SYMBOL}},
+                               makeTestDispatches(),
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+
+    const TestGraph graph(makeGraphId(0x53));
+    const auto properties = testDeviceProperties();
+
+    try
+    {
+        manager.unsortedCatalog(MatchContext{graph, 0, properties});
+        ADD_FAILURE() << "expected a within-pack token conflict to be reported";
+    }
+    catch(const std::runtime_error& error)
+    {
+        // Names the matcher, since that is the descriptor to go and fix.
+        const std::string message = error.what();
+        EXPECT_NE(message.find("binds a conflicting value"), std::string::npos);
+        EXPECT_NE(message.find("test.bound_token"), std::string::npos);
+    }
+
+    GraphMatcherRegistry::unregisterSymbol(CONFLICTING_SYMBOL);
+}
+
 TEST(TestKernelIngestorStateManager, TwoPacksBindingOneTokenToDifferentValuesThrows)
 {
     // Conflicting values under one token name is an authoring error; a silent merge
@@ -500,6 +546,37 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
 }
 
+TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDispatchSymbol)
+{
+    // The fourth symbol kind. Matchers and the scorer already resolved at construction;
+    // dispatch did not, so a UDD naming a symbol this build does not ship survived load
+    // and survived isApplicable, then threw at plan build, past the point RFC 0017 §8.6
+    // made applicability a binding promise. That is the failure eager resolution exists
+    // to remove, and the two-file pack split is what makes it reachable: the descriptor
+    // and native halves agree by string value with no compile-time check.
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+
+    try
+    {
+        const StateManager manager(
+            makeSchema(),
+            makeTestMatchers(),
+            std::vector<DispatchDescriptor>{
+                {DISPATCH_ID, "misspelled dispatch", "test.dispatch.not_registered"}},
+            std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        FAIL() << "expected an unresolved-symbol failure";
+    }
+    catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("test.dispatch.not_registered"), std::string::npos);
+        // Names the descriptor, not just the symbol: after ALMIOPEN-2401 that is what
+        // tells an operator which file to fix.
+        EXPECT_NE(message.find("misspelled dispatch"), std::string::npos);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // getDispatchDetails
 // ---------------------------------------------------------------------------
@@ -509,11 +586,27 @@ TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatch
     // A missing dispatch after a graph was accepted is a hard error, not a silent
     // decline. Built directly, bypassing pack validation, since validateAndIndexPacks()
     // cannot see a definition that never went through a pack.
+    //
+    // The dispatch id must be one the manager does not know. makeDefinition() hands
+    // back the registered DISPATCH_ID, so this test used to observe the *resolve* on
+    // the next line failing and never reach the branch it names; deleting the guard
+    // left it green.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
-    const auto kernel = makeDefinition(testId(0x01), 64);
+    auto kernel = makeDefinition(testId(0x01), 64);
+    kernel.dispatchId = testId(0xDD);
 
-    EXPECT_THROW(manager->getDispatchDetails(kernel), std::runtime_error);
+    try
+    {
+        manager->getDispatchDetails(kernel);
+        FAIL() << "expected an unknown-dispatch-descriptor failure";
+    }
+    catch(const std::runtime_error& error)
+    {
+        EXPECT_NE(std::string(error.what()).find("names unknown dispatch descriptor"),
+                  std::string::npos)
+            << "threw for the wrong reason: " << error.what();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -713,8 +806,10 @@ INSTANTIATE_TEST_SUITE_P(
             "duplicate dispatch descriptor id",
             [] {
                 std::vector<DispatchDescriptor> dispatches = makeTestDispatches();
+                // Same symbol, since the case is about a duplicate id; a second
+                // symbol would fail resolution first and never reach the id check.
                 dispatches.push_back(
-                    {DISPATCH_ID, "a different dispatch entirely", "test.dispatch.other"});
+                    {DISPATCH_ID, "a different dispatch entirely", "test.dispatch"});
                 return std::make_unique<StateManager>(
                     makeSchema(),
                     makeTestMatchers(),

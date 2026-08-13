@@ -180,16 +180,25 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
 {
     // The cache is mutex-guarded (see class doc); many threads querying the same small
     // id set maximize a real race's chance to corrupt the map.
+    //
+    // Every result is checked rather than discarded. FakeQueryResolver encodes the
+    // device id in warpSize precisely so a torn or cross-wired entry is observable, and
+    // discarding the value left the test unable to fail on anything short of a crash.
     const FakeQueryResolver resolver;
+    std::atomic<int> mismatches{0};
 
     std::vector<std::thread> threads;
     threads.reserve(8);
     for(int t = 0; t < 8; ++t)
     {
-        threads.emplace_back([&resolver, t]() {
+        threads.emplace_back([&resolver, &mismatches, t]() {
+            const auto deviceId = (t % 4) + 2000;
             for(int i = 0; i < 200; ++i)
             {
-                static_cast<void>(resolver.deviceProperties((t % 4) + 2000));
+                if(resolver.deviceProperties(deviceId).warpSize != deviceId)
+                {
+                    mismatches.fetch_add(1, std::memory_order_relaxed);
+                }
             }
         });
     }
@@ -197,6 +206,9 @@ TEST(TestHandleDeviceResolver, ConcurrentDevicePropertyLookupsAreSafe)
     {
         thread.join();
     }
+
+    EXPECT_EQ(mismatches.load(std::memory_order_relaxed), 0)
+        << "a concurrent lookup returned another device's properties";
 
     static_cast<void>(hipGetLastError());
     static_cast<void>(hipExtGetLastError());
