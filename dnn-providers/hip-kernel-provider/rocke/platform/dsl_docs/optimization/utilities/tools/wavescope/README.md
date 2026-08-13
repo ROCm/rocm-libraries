@@ -144,6 +144,7 @@ already have.
 | Viewer opens empty | folder is the `rocprofv3 -d` output root, not the `ui_output_*_dispatch_*` directory inside it |
 | Source tab empty | kernel built without `ROCKE_DEBUG_LOC=1`, so no DWARF and no source snapshots |
 | One helper line owns most of the stalls | no `inline_frames.json`; re-run `emit_inline_frames.py`, then use `+ inlined` |
+| Console warns the sidecar matched few or no instructions | it was built from a different build of the kernel — re-run `emit_inline_frames.py` against *this* trace |
 | No dispatch folder decoded at all | the kernel regex matched nothing, or the trace decoder is missing — the capture script says which |
 | Stall totals exceed wall-clock | `code.json` columns are totals over every execution; divide by `Hit`, don't multiply |
 

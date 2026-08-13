@@ -41,7 +41,8 @@ op.loc = "file:line:col:func;..."    innermost frame first
   ▼  rocprofv3 --att      decode; also dumps the code object and copies sources in
 ui_output_*_dispatch_*/   code.json (innermost frame only) + source_* snapshots
   │
-  ▼  emit_inline_frames.py   llvm-dwarfdump inline tree, joined to code.json Vaddr
+  ▼  emit_inline_frames.py   llvm-dwarfdump inline tree, joined to code.json
+                             by (Codeobj, Vaddr)
 inline_frames.json        the full call stack per instruction
   │
   ▼  WaveScope extension
@@ -87,9 +88,12 @@ says nothing about which phase issued the loads.
 
 Rather than change the decoder, which is a separate upstream component,
 `emit_inline_frames.py` reads the `DW_TAG_inlined_subroutine` tree out of the code
-object and joins its PC ranges to `code.json`'s `Vaddr` column. The result is
-purely additive: a viewer without the sidecar behaves exactly as before, and a
-stale sidecar is warned about rather than fatal. That property is what lets the
+object and joins its PC ranges to `code.json`'s `Codeobj` and `Vaddr` columns. The
+result is purely additive: a viewer without the sidecar behaves exactly as before,
+and a sidecar that does not fit the trace is warned about rather than fatal — the
+viewer compares how many entries found an instruction against how many the sidecar
+carries, so a rebuild that moved half the addresses is reported too, not just one
+that moved all of them. That property is what lets the
 feature ship without coupling to a decoder release.
 
 ## Invariants
@@ -110,8 +114,14 @@ whole reason the feature is usable for optimization rather than just for reading
 | --- | --- | --- |
 | `Op.loc` | `file:line:col:func` frames, `;`-separated, innermost first | `core/ir.py` |
 | debug metadata | `DILocation` chain via `inlinedAt`, one `DISubprogram` per Python function | `core/lower_llvm.py` |
-| `inline_frames.json` | `{functions, files, stacks: {addr: [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
-| `code.json` | per-instruction rows; `Vaddr` is the join key | rocprofv3 |
+| `inline_frames.json` | `{version: 2, functions, files, stacks: {"codeobj:addr": [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
+| `code.json` | per-instruction rows; `Codeobj` and `Vaddr` together are the join key | rocprofv3 |
+
+Virtual addresses are per code object, so a trace that loaded more than one has the
+same address standing for different instructions. Both columns are therefore in the
+key, and the producer skips rows belonging to any object other than the one the
+DWARF came from. `version` is checked by the viewer, which refuses a layout it does
+not know rather than reading it on the assumption that it resembles a known one.
 
 Function and file names are interned in the sidecar because the same handful
 repeat across hundreds of instructions and the file crosses a network hop to the
