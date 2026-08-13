@@ -533,6 +533,10 @@ Tests:
 # the col_block_dim list lands blocks_per_row in the [8,16) and [16,32) ranges.
 # col_block_dim 17/32 additionally exercise the general-kernel fall-through path.
 #
+# row_block_dim 1/2 stay in quick; row_block_dim 3/4 are labelled pre_checkin so
+# quick/gebsrmv stays within the ~5s per-routine quick budget. Each block still
+# independently sweeps the WFSIZE=8/16 dispatch via the N x col_block_dim grid.
+#
 - name: gebsrmv
   category: quick
   function: gebsrmv
@@ -564,7 +568,7 @@ Tests:
   matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
 
 - name: gebsrmv
-  category: quick
+  category: pre_checkin
   function: gebsrmv
   precision: *single_precision
   M: [192]
@@ -579,7 +583,7 @@ Tests:
   matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
 
 - name: gebsrmv
-  category: quick
+  category: pre_checkin
   function: gebsrmv
   precision: *single_precision
   M: [256]

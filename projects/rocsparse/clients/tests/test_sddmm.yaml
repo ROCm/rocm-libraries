@@ -381,8 +381,11 @@ Tests:
             rocsparse_format_ell]
 
 # transpose x order x base variety (default alg) across all formats.
+# Moved to pre_checkin: this is the largest sddmm coverage block (full
+# transA x transB x baseC x order x orderB x format sweep); keeping it in
+# quick pushed quick/sddmm well past the ~5s per-routine quick budget.
 - name: sddmm
-  category: quick
+  category: pre_checkin
   function: sddmm
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
