@@ -7,7 +7,19 @@ endif()
 
 file(READ "${CORE_HEADER}" core_contents)
 
-foreach(forbidden IN ITEMS GEMM AMDGPU HIP hipBLASLt TensileLite rocisa BLAS GTest)
+foreach(
+    forbidden
+    IN ITEMS
+        GEMM
+        AMDGPU
+        amd_gpu_layout
+        HIP
+        hipBLASLt
+        TensileLite
+        rocisa
+        BLAS
+        GTest
+)
     string(FIND "${core_contents}" "${forbidden}" position)
     if(NOT position EQUAL -1)
         message(FATAL_ERROR

@@ -39,7 +39,6 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
 set(DEFAULT_COMPONENTS
     # shared
     host-validation
-    mx-layout-transforms
     rocroller
     origami
     # projects
@@ -147,14 +146,6 @@ if("host-validation" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT host-validation
         PREFIX_PATH shared
         EXPECT_TARGET roc::host-validation
-    )
-endif()
-
-if("mx-layout-transforms" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    add_subdirectory_with_message(
-        COMPONENT mx-layout-transforms
-        PREFIX_PATH shared
-        EXPECT_TARGET roc::mx-layout-transforms
     )
 endif()
 

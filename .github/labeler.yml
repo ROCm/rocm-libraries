@@ -128,10 +128,6 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rpp/**/*'
 
-"shared: mxdatagenerator":
-- changed-files:
-  - any-glob-to-any-file: 'shared/mx-layout-transforms/**/*'
-
 "shared: host-validation":
 - changed-files:
   - any-glob-to-any-file: 'shared/host-validation/**/*'

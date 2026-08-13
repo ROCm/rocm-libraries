@@ -156,6 +156,8 @@ set(forbidden_patterns
     "hipblas"
     "Tensile"
     "rocisa"
+    "rocRoller"
+    "rocroller"
     "mxDataGenerator"
     "#[ \t]*include[ \t]*[<\"]hip[/<\"]"
     "hip::"
