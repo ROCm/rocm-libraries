@@ -78,9 +78,7 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
             ],
             dtype=np.int32,
         )
-        right = np.asarray(
-            [[-3, 5], [7, -11], [12_345, -54_321]], dtype=np.int32
-        )
+        right = np.asarray([[-3, 5], [7, -11], [12_345, -54_321]], dtype=np.int32)
         initial = np.asarray(
             [[2_147_483_647, -2_147_483_648], [13_579, -24_680]],
             dtype=np.int32,
@@ -169,13 +167,9 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         )
         selected = [0, 4, 5]
 
-        operand_a = hv.GemmOperand(
-            hv.from_numpy(left, hv.ScalarType.Float4E2M1)
-        )
+        operand_a = hv.GemmOperand(hv.from_numpy(left, hv.ScalarType.Float4E2M1))
         operand_a.block_scale = hv.BlockScaleBinding(scale_a, block_a)
-        operand_b = hv.GemmOperand(
-            hv.from_numpy(right, hv.ScalarType.Float4E2M1)
-        )
+        operand_b = hv.GemmOperand(hv.from_numpy(right, hv.ScalarType.Float4E2M1))
         operand_b.block_scale = hv.BlockScaleBinding(scale_b, block_b)
         request = hv.GemmRequest(
             operand_a,
@@ -224,9 +218,7 @@ class CanonicalPointwiseOracleTests(unittest.TestCase):
         output_layout = hv.Layout(hv.Shape([2, 2]), [8, 3], 2)
 
         operand_a = hv.GemmOperand(
-            affine_tensor(
-                left, hv.ScalarType.ComplexFloat32, strides=[6, 1], offset=1
-            )
+            affine_tensor(left, hv.ScalarType.ComplexFloat32, strides=[6, 1], offset=1)
         )
         operand_a.conjugate = True
         request = hv.GemmRequest(
