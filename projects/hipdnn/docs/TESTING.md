@@ -487,7 +487,7 @@ making this document stale.
 | Exact TheRock hipDNN package-test matrix comes from live external configuration | Medium | Medium | This dated document and workflow logs | Untracked |
 | Linux gfx950/gfx125X are built but package tests are skipped in primary TheRock PR CI | Medium | High | Nightly and provider-owned validation where configured | Untracked |
 | Windows validates a different subset and disables clang-tidy in superbuild CI | Medium | Medium | Manual hipDNN-only clang-tidy plus Windows CPU/build tests | Untracked |
-| Static analysis is manual, limited to hipDNN C++ code, excludes provider components and HIP-language code, and has no regular cadence | High | High | Manual `hipdnn-tidy` on eligible hipDNN sources | Untracked |
+| Static analysis is manual, limited to hipDNN C++ code, excludes provider components and HIP-language code, and has no regular cadence | High | High | Manual `hipdnn-tidy` on eligible hipDNN sources | [ALMIOPEN-2300](https://amd-hub.atlassian.net/browse/ALMIOPEN-2300) |
 | No named technical lead, validation-area owners, or release exception owner is recorded | Medium | Medium | CODEOWNERS teams | Untracked |
 | Mainline/NPI and pre-silicon validation expectations are not documented | Medium | Medium | Release-specific coordination | Untracked |
 
