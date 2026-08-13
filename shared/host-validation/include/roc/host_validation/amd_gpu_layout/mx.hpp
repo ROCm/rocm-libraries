@@ -18,7 +18,7 @@
 #include <omp.h>
 #endif
 
-namespace roc::mx_layout_transforms {
+namespace roc::host_validation::amd_gpu_layout {
 namespace detail {
 
 inline size_t checkedMultiply(size_t left, size_t right, std::string_view context) {
@@ -504,8 +504,7 @@ inline size_t preSwizzleScalesGFX1250PaddedSize(size_t slowDim, size_t fastDim, 
 }
 
 /**
- * @brief Pre-swizzle scale data for the gfx1250 (and other non-rocroller WMMA)
- *        block-scaled MX layout.
+ * @brief Pre-swizzle scale data for the gfx1250-class block-scaled MX layout.
  *
  * The kernel expects the scale tensor to be viewed as
  *   `{slowDim, ceil(fastDim / dimk), dimk}`
@@ -580,4 +579,4 @@ inline std::vector<T> preSwizzleScalesGFX1250(std::vector<T> const& input, size_
     return output;
 }
 
-}  // namespace roc::mx_layout_transforms
+}  // namespace roc::host_validation::amd_gpu_layout

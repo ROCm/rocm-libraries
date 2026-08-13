@@ -8,16 +8,23 @@
 #include <iterator>
 #include <limits>
 #include <numeric>
-#include <roc/mx_layout_transforms/pre_swizzle.hpp>
+#include <roc/host_validation/amd_gpu_layout/mx.hpp>
 #include <stdexcept>
 #include <vector>
 
-using namespace roc::mx_layout_transforms;
+using namespace roc::host_validation::amd_gpu_layout;
 using detail::computeShuffledStrides;
 using detail::computeStrides;
 using detail::product;
 using detail::roundUp;
 using detail::shuffleDims;
+
+namespace {
+size_t runtimeSize(size_t value) {
+    volatile size_t runtimeValue = value;
+    return runtimeValue;
+}
+}  // namespace
 
 // ============================================================================
 // Tests for product() helper function
@@ -955,8 +962,8 @@ TEST(PreSwizzleScalesGFX950Test, InputSizeMismatch) {
 }
 
 // ============================================================================
-// Tests for preSwizzleScalesGFX1250() (dimk-based swizzle for gfx1250 / non-
-// rocroller WMMA path).
+// Tests for preSwizzleScalesGFX1250() (dimk-based swizzle for gfx1250-class
+// WMMA layouts).
 //
 // The swizzle is "pad fast dim to multiple of dimk = 128 / mxBlock; view as
 // {slow, fast/dimk, dimk}; permute (1,0,2)". This block tests:
@@ -989,15 +996,15 @@ TEST(PreSwizzleScalesGFX1250Test, RejectsUnsupportedBlockAndOverflow) {
     std::vector<uint8_t> input;
     EXPECT_THROW(preSwizzleScalesGFX1250(input, 0, 0, 64), std::runtime_error);
     EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(1, 1, 64), std::runtime_error);
-    EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(std::numeric_limits<size_t>::max(), 8, 16),
-                 std::overflow_error);
-    EXPECT_THROW(preSwizzleScalesGFX1250(input, std::numeric_limits<size_t>::max(), 2, 16),
-                 std::overflow_error);
+    const size_t maximumSize = runtimeSize(std::numeric_limits<size_t>::max());
+    EXPECT_THROW(preSwizzleScalesGFX1250PaddedSize(maximumSize, 8, 16), std::overflow_error);
+    EXPECT_THROW(preSwizzleScalesGFX1250(input, maximumSize, 2, 16), std::overflow_error);
 }
 
 TEST(PreSwizzleScalesGFX1250Test, ThrowsOnSizeMismatch) {
     std::vector<uint8_t> in(7);  // slow*fast = 8 expected
-    EXPECT_THROW(preSwizzleScalesGFX1250(in, 2, 4, 32), std::runtime_error);
+    EXPECT_THROW(preSwizzleScalesGFX1250(in, runtimeSize(2), runtimeSize(4), runtimeSize(32)),
+                 std::runtime_error);
 }
 
 TEST(PreSwizzleScalesGFX1250Test, MapsAlignedFastDim) {

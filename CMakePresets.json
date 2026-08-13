@@ -17,17 +17,17 @@
             }
         },
         {
-            "name": "mx-layout-transforms",
+            "name": "host-validation",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "mx-layout-transforms"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "host-validation"
             }
         },
         {
             "name": "rocroller",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "mx-layout-transforms;rocroller"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "host-validation;rocroller"
             }
         },
         {
@@ -41,7 +41,7 @@
             "name": "hipblaslt",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "mx-layout-transforms;rocroller;origami;hipblas-common;hipblaslt"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "host-validation;rocroller;origami;hipblas-common;hipblaslt"
             }
         },
         {
