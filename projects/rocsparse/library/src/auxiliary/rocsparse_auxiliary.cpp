@@ -577,11 +577,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, handle);
-#ifdef ROCSPARSE_WITH_HANDLE_CREATE
-    *handle = new _rocsparse_handle(static_cast<hipStream_t>(0));
-#else
     *handle = new _rocsparse_handle();
-#endif
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -4832,7 +4828,10 @@ catch(...)
  * scalar, recording whether the scalar lives in host or device memory. It is a
  * convenience wrapper meant to feed scalar arguments (e.g. the scaling factor of
  * rocsparse_spmat_scale) as a self-describing dense vector descriptor.
+ *
+ * Gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
  *******************************************************************************/
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
                                                      rocsparse_dnvec_descr* descr,
                                                      rocsparse_pointer_mode pointer_mode,
@@ -4870,6 +4869,7 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+#endif /* ROCSPARSE_WITH_SPMAT_SCALE */
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.

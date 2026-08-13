@@ -16,9 +16,9 @@ CTA processes a chunk of kv_len keys/values, writes a partial softmax
 accumulator and log-sum-exp to a scratch buffer, then a second reduction
 pass merges the partials.
 
-num_sms controls how many CTAs participate in the split.  Too few leaves
+num_cus controls how many CTAs participate in the split.  Too few leaves
 compute stranded; too many create merge overhead.  The script sweeps
-num_sms = {30, 60, 80, 120, 152, 304} and picks the best.
+num_cus = {30, 60, 80, 120, 152, 304} and picks the best.
 
 Why parity (not a win) for A3B
 --------------------------------
@@ -118,15 +118,15 @@ def bench_kv_len(kv_len: int) -> None:
     except Exception as exc:
         print(f"    AITER unavailable: {exc}")
 
-    # DSL unified attention — sweep num_sms
+    # DSL unified attention — sweep num_cus
     try:
         from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
         out_dsl = torch.empty_like(q)
         best_ms = float("inf")
-        best_sms = 60
+        best_cus = 60
 
-        for num_sms in [30, 60, 80, 120, 152, 304]:
+        for num_cus in [30, 60, 80, 120, 152, 304]:
             try:
                 prob = UnifiedAttentionProblem(
                     total_q=BATCH,
@@ -138,7 +138,7 @@ def bench_kv_len(kv_len: int) -> None:
                     max_seqlen_q=1,
                     max_seqlen_k=kv_len,
                     dtype="bf16",
-                    num_sms=num_sms,
+                    num_cus=num_cus,
                 )
 
                 def dsl_fn():
@@ -161,13 +161,13 @@ def bench_kv_len(kv_len: int) -> None:
                 torch.cuda.synchronize()
                 t = ms(dsl_fn, warmup=WARMUP, iters=ITERS, repeats=REPEATS)
                 if t < best_ms:
-                    best_ms, best_sms = t, num_sms
+                    best_ms, best_cus = t, num_cus
             except Exception:
                 pass
 
         spd = speedup(bl_ms, best_ms)
         print(
-            f"    DSL 3d sms={best_sms:3d}:    {best_ms * 1000:.2f}µs  speedup={spd:.3f}×"
+            f"    DSL 3d num_cus={best_cus:3d}:    {best_ms * 1000:.2f}µs  speedup={spd:.3f}×"
         )
     except Exception as exc:
         print(f"    DSL unavailable: {exc}")

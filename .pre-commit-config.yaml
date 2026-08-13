@@ -26,6 +26,7 @@ exclude: |
     projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
+    projects/hipthreads/.*|
     projects/rocblas/.*|
     projects/rocfft/.*|
     projects/rocprim/.*|
