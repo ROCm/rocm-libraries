@@ -262,6 +262,15 @@ LOC_CAPTURE_ENV = "ROCKE_DEBUG_LOC"
 _CORE_DIR = os.path.dirname(os.path.abspath(__file__))
 _CORE_PREFIX = _CORE_DIR + os.sep
 
+# The rest of the rocke package -- ``helpers/``, ``instances/`` -- is authoring
+# code: a shipped kernel is written there, so those frames are exactly the ones
+# worth showing. Classified before the site-packages rule below, because an
+# installed rocke lives in site-packages and would otherwise be mistaken for the
+# harness that launched the build, ending the walk before it captured anything.
+# That is what keeps a kernel's locations the same whether rocke is imported
+# from a checkout or from a wheel.
+_ROCKE_PREFIX = os.path.dirname(_CORE_DIR) + os.sep
+
 # Where the authoring stack stops being the user's. Above the outermost
 # interesting frame sits whatever launched the build -- runpy, unittest, a test
 # runner in site-packages -- and none of it emitted any GPU instruction.
@@ -305,6 +314,8 @@ def _frame_role(filename: str) -> str:
             path = _abspath(filename)
             if path.startswith(_CORE_PREFIX):
                 cached = "core"
+            elif path.startswith(_ROCKE_PREFIX):
+                cached = "user"
             elif path.startswith(_STDLIB_DIR + os.sep) or "site-packages" in path:
                 cached = "runner"
             else:

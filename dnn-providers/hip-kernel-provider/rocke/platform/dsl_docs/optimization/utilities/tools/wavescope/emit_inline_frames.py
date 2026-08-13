@@ -243,19 +243,68 @@ def dispatch_dirs(root: Path) -> list[Path]:
     return sorted(root.glob(DISPATCH_GLOB))
 
 
-def find_code_object(root: Path) -> Path | None:
-    """Largest code object under ``root`` -- the kernel's, not a stub."""
+def find_code_objects(root: Path) -> list[Path]:
+    """Every code object rocprofv3 dumped under ``root``, largest first.
+
+    All of them are kept rather than just the biggest: a trace with more than
+    one dispatch can carry a different object per dispatch, and the biggest one
+    is not necessarily the one any particular dispatch ran.
+    """
     candidates = [p for p in root.rglob(CODE_OBJECT_GLOB) if p.is_file()]
     candidates += [p for p in root.rglob("*.hsaco") if p.is_file()]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda p: p.stat().st_size)
+    return sorted(candidates, key=lambda p: (-p.stat().st_size, p.name))
 
 
 def code_object_id_of(path: Path) -> str | None:
     """The id rocprofv3 put in the dump's filename, if it named one that way."""
     m = CODE_OBJECT_ID_RE.search(path.name)
     return m.group(1) if m else None
+
+
+def select_code_object(
+    candidates: list[Path], present: set[str], explicit: Path | None
+) -> tuple[Path | None, str | None, str | None]:
+    """Pick the code object a single dispatch ran, as ``(path, id, problem)``.
+
+    Matching is by the id rocprofv3 named the dump with against the ids the
+    dispatch's own rows carry, so a trace with several objects attributes each
+    dispatch to the one it actually executed. Guessing is what makes this
+    dangerous -- addresses repeat across objects, so a wrong pick still joins
+    and silently reports another kernel's source -- and every case that cannot
+    be decided returns a ``problem`` instead.
+    """
+
+    matches = [(p, cid) for p in candidates if (cid := code_object_id_of(p)) in present]
+    if len(matches) == 1:
+        return matches[0][0], matches[0][1], None
+    if len(matches) > 1:
+        names = ", ".join(sorted(p.name for p, _ in matches))
+        return (
+            None,
+            None,
+            f"ran several dumped code objects ({names}); pass --code-object to "
+            "choose which one to read DWARF from",
+        )
+    if explicit is not None and code_object_id_of(explicit) is None:
+        # A file rocprofv3 did not label with an id -- an .hsaco from the build,
+        # say. The caller named it, so trust that over a filename convention,
+        # but only where there is a single object for it to be.
+        if len(present) == 1:
+            return explicit, next(iter(present)), None
+        return (
+            None,
+            None,
+            f"{explicit.name} carries no code object id and this dispatch ran "
+            f"{len(present) or 'no'} objects, so which rows it produced is unknown",
+        )
+    labelled = sorted(i for p in candidates if (i := code_object_id_of(p)))
+    have = f"ids {', '.join(labelled)}" if labelled else "no id in its name"
+    return (
+        None,
+        None,
+        f"ran code objects {sorted(present)}, and the dumped DWARF carries "
+        f"{have}; pass --code-object to point at this dispatch's",
+    )
 
 
 def row_code_objects(rows: list) -> set[str]:
@@ -281,62 +330,67 @@ def main(argv=None) -> int:
     if not root.is_dir():
         raise SystemExit(f"not a directory: {root}")
 
-    code_object = args.code_object or find_code_object(root)
-    if code_object is None:
+    candidates = [args.code_object] if args.code_object else find_code_objects(root)
+    if not candidates:
         raise SystemExit(
             f"no code object found under {root}. rocprofv3 writes "
             f"'{CODE_OBJECT_GLOB}' beside the raw trace; pass --code-object "
             "to point at it (or at the .hsaco the kernel was built from)."
         )
 
-    dwarfdump = find_dwarfdump()
-    frames = parse_inline_frames(code_object, dwarfdump)
-    if not frames:
-        raise SystemExit(
-            f"{code_object.name} carries no inlining info. Build the kernel with "
-            "ROCKE_DEBUG_LOC=1 (or IRBuilder(capture_loc=True)) so the lowering "
-            "emits DWARF inlining scopes, then re-capture."
-        )
-
     dirs = dispatch_dirs(root)
     if not dirs:
         raise SystemExit(f"no decoded dispatch folder under {root}")
 
-    dumped_id = code_object_id_of(code_object)
-    print(f"code object: {code_object}")
-    print(f"inline frames with PC ranges: {len(frames)}")
+    dwarfdump = find_dwarfdump()
+    parsed: dict[Path, list[dict]] = {}
+    written = 0
+    skipped = 0
     for d in dirs:
         code_json = d / "code.json"
         if not code_json.is_file():
             continue
         rows = json.loads(code_json.read_text())["code"]
-
-        # Prefer the id rocprofv3 named the dump with. Fall back to the trace's
-        # own value when it loaded exactly one object, which is the common case
-        # and unambiguous. Anything else is left unfiltered rather than guessed
-        # at, and the key still carries each row's code object.
         present = row_code_objects(rows)
-        if dumped_id in present:
-            code_object_id = dumped_id
-        elif len(present) == 1:
-            code_object_id = next(iter(present))
-        else:
-            code_object_id = None
+
+        code_object, code_object_id, problem = select_code_object(
+            candidates, present, args.code_object
+        )
+        if problem is not None:
+            print(f"  {d.name}: skipped: {problem}")
+            skipped += 1
+            continue
+
+        if code_object not in parsed:
+            parsed[code_object] = parse_inline_frames(code_object, dwarfdump)
             print(
-                f"  {d.name}: warning: cannot tell which of {sorted(present)} "
-                f"{code_object.name} is; matching on address across all of them"
+                f"  {code_object.name}: {len(parsed[code_object])} inline frames "
+                "with PC ranges"
             )
+        frames = parsed[code_object]
+        if not frames:
+            print(
+                f"  {d.name}: skipped: {code_object.name} carries no inlining "
+                "info. Build the kernel with ROCKE_DEBUG_LOC=1 (or "
+                "IRBuilder(capture_loc=True)) so the lowering emits DWARF "
+                "inlining scopes, then re-capture."
+            )
+            skipped += 1
+            continue
 
         sidecar = build_sidecar(rows, frames, code_object_id)
         total = len([r for r in rows if r and r[0] and not r[0].startswith(";")])
         out = d / SIDECAR
         out.write_text(json.dumps(sidecar))
+        written += 1
         print(
             f"  {d.name}: {sidecar['resolved']}/{total} instructions resolved, "
             f"{len(sidecar['functions'])} functions -> {SIDECAR} "
             f"({out.stat().st_size / 1024:.1f} KiB)"
         )
-    return 0
+    if written == 0:
+        raise SystemExit(f"no sidecar written ({skipped} dispatch(es) skipped)")
+    return 1 if skipped else 0
 
 
 if __name__ == "__main__":

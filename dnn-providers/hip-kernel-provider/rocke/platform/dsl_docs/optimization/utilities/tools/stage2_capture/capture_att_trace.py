@@ -226,8 +226,9 @@ def report(dispatch: Path) -> None:
         print(f"      stall={stall:<10} hits={hits:<7} {asm}")
     if mapped == 0:
         print(
-            "    note: no source mapping. rocke emits no DWARF today, so the "
-            "Source tab stays empty and analysis is at ISA level."
+            "    note: no source mapping, so the Source tab stays empty and "
+            "analysis is at ISA level. Rebuild the kernel with "
+            "ROCKE_DEBUG_LOC=1 to get DWARF and re-capture."
         )
     print()
 

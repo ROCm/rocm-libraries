@@ -146,6 +146,7 @@ already have.
 | One helper line owns most of the stalls | no `inline_frames.json`; re-run `emit_inline_frames.py`, then use `+ inlined` |
 | Console warns the sidecar matched few or no instructions | it was built from a different build of the kernel — re-run `emit_inline_frames.py` against *this* trace |
 | No dispatch folder decoded at all | the kernel regex matched nothing, or the trace decoder is missing — the capture script says which |
+| `emit_inline_frames.py` skipped a dispatch | it ran a code object none of the dumped DWARF belongs to; pass `--code-object` to name the right one. Skipping is deliberate — addresses repeat across objects, so a guess would attribute another kernel's source rather than fail |
 | Stall totals exceed wall-clock | `code.json` columns are totals over every execution; divide by `Hit`, don't multiply |
 
 ## Related
@@ -154,7 +155,6 @@ already have.
   its own for an ISA-level trace with no source correlation.
 - [`../../skills/capture-kernel-trace-rocke.md`](../../skills/capture-kernel-trace-rocke.md)
   — the underlying rocprofv3 flags and the PMC fallback when the trace decoder is
-  unavailable. Its debug-info section predates `ROCKE_DEBUG_LOC` and still says
-  rocke emits no DWARF.
+  unavailable.
 - [`../../../../architecture/wavescope_integration.md`](../../../../architecture/wavescope_integration.md)
   — how the pieces fit together, and how to drive the viewer during optimization.

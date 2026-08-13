@@ -14,13 +14,19 @@ Covers:
     ``!dbg`` per instruction and never two on one instruction;
   * multi-file kernels are attributed per file via ``DILexicalBlockFile``;
   * locations survive the ``ck.dsl.ir/v1`` round-trip, so the C++ engine sees
-    them too.
+    them too, and the C++ engine emits the same bytes from them;
+  * an installed rocke captures the same locations as a checkout;
+  * the metadata survives assembly and codegen into a real AMDGPU object, which
+    is where every downstream consumer actually reads it from.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 from rocke.core import ir as ir_mod
@@ -310,6 +316,208 @@ class TestSingleFrameFallback(unittest.TestCase):
         ll = lower_kernel_to_llvm(kernel, arch="gfx950")
         self.assertIn('filename: "weird.py"', ll)
         self.assertIn('directory: "/tmp/od:d"', ll)
+
+
+class TestInstalledLayout(unittest.TestCase):
+    """An installed rocke authors kernels just like a checkout does.
+
+    ``helpers/`` and ``instances/`` are where a shipped kernel is written, so
+    those frames are the ones worth showing. Treating them as the harness that
+    launched the build -- which is what classifying all of site-packages as a
+    runner did -- ends the stack walk before it captures anything, and a
+    pip-installed rocke silently produced no locations at all while a checkout
+    produced a full chain.
+    """
+
+    CHECKOUT = os.path.join("/src", "rocke", "platform", "python", "rocke")
+    INSTALLED = os.path.join("/venv", "lib", "python3.12", "site-packages", "rocke")
+
+    def roles_under(self, root):
+        """Roles of the same modules with the package rooted at ``root``."""
+        saved = (ir_mod._CORE_PREFIX, ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE)
+        ir_mod._CORE_PREFIX = os.path.join(root, "core") + os.sep
+        ir_mod._ROCKE_PREFIX = root + os.sep
+        ir_mod._FRAME_ROLE = {}
+        try:
+            return {
+                name: ir_mod._frame_role(os.path.join(root, *name.split("/")))
+                for name in ("core/ir.py", "helpers/loads.py", "instances/common/x.py")
+            }
+        finally:
+            (ir_mod._CORE_PREFIX, ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE) = saved
+
+    def test_installed_and_checkout_agree(self):
+        self.assertEqual(
+            self.roles_under(self.INSTALLED), self.roles_under(self.CHECKOUT)
+        )
+
+    def test_authoring_modules_are_user_code_when_installed(self):
+        roles = self.roles_under(self.INSTALLED)
+        self.assertEqual(roles["helpers/loads.py"], "user")
+        self.assertEqual(roles["instances/common/x.py"], "user")
+        self.assertEqual(roles["core/ir.py"], "core")
+
+    def test_other_site_packages_are_still_runners(self):
+        """Only rocke is exempt; a test runner installed beside it still stops
+        the walk, or every kernel would carry pytest's frames."""
+        saved = (ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE)
+        ir_mod._ROCKE_PREFIX = self.INSTALLED + os.sep
+        ir_mod._FRAME_ROLE = {}
+        try:
+            beside = os.path.dirname(self.INSTALLED)
+            self.assertEqual(
+                ir_mod._frame_role(os.path.join(beside, "_pytest", "python.py")),
+                "runner",
+            )
+            self.assertEqual(
+                ir_mod._frame_role(
+                    os.path.join(ir_mod._STDLIB_DIR, "unittest", "case.py")
+                ),
+                "runner",
+            )
+        finally:
+            (ir_mod._ROCKE_PREFIX, ir_mod._FRAME_ROLE) = saved
+
+    def test_capture_reaches_the_caller_through_a_package_helper(self):
+        """The end-to-end shape of the bug: an op emitted by a rocke helper.
+
+        With the helper misread as a runner the walk stopped at it and the op
+        came back with no location at all, so this asserts the chain reaches
+        back out to the test.
+        """
+        loc = build_flat(capture_loc=True).body.ops[0].loc
+        self.assertIsNotNone(loc)
+        funcs = [f for _, _, _, f in frames(loc)]
+        self.assertIn("test_capture_reaches_the_caller_through_a_package_helper", funcs)
+
+
+def engine_or_skip():
+    try:
+        import rocke_engine  # noqa: F401
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise unittest.SkipTest(f"rocke_engine not importable: {exc}")
+
+
+class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
+    """The C++ engine is the default; it must emit the same metadata.
+
+    ``debug_info`` and every ``@loc`` ride the ck.dsl.ir/v1 serialization, so
+    the engine has what the Python lowerer has. When it ignored them, a normal
+    installation ran the capture and produced an object with no DWARF in it --
+    and ``ROCKE_BACKEND=both`` failed outright, because the two engines really
+    were emitting different bytes.
+    """
+
+    def lower_with(self, backend, kernel):
+        prev = os.environ.get("ROCKE_BACKEND")
+        os.environ["ROCKE_BACKEND"] = backend
+        try:
+            return lower_kernel_to_llvm(kernel, arch="gfx950")
+        finally:
+            if prev is None:
+                os.environ.pop("ROCKE_BACKEND", None)
+            else:
+                os.environ["ROCKE_BACKEND"] = prev
+
+    def test_engines_agree_byte_for_byte(self):
+        engine_or_skip()
+        for build in (build_flat, build_loop):
+            kernel = build(capture_loc=True)
+            cpp = self.lower_with("cpp", kernel)
+            python = self.lower_with("python", kernel)
+            self.assertIn("!dbg", cpp, f"{build.__name__}: cpp emitted no debug info")
+            self.assertEqual(cpp, python, build.__name__)
+
+    def test_both_mode_accepts_a_debug_build(self):
+        """`both` is the gate that would catch any drift, so run it directly."""
+        engine_or_skip()
+        ll = self.lower_with("both", build_loop(capture_loc=True))
+        self.assertIn("DICompileUnit", ll)
+
+    def test_engines_agree_with_capture_off(self):
+        engine_or_skip()
+        kernel = build_loop(capture_loc=False)
+        self.assertEqual(
+            self.lower_with("cpp", kernel), self.lower_with("python", kernel)
+        )
+
+
+def llvm_tool(name):
+    """An LLVM tool from PATH or the ROCm install, or None."""
+    found = shutil.which(name)
+    if found:
+        return found
+    rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
+    candidate = os.path.join(rocm, "llvm", "bin", name)
+    return candidate if os.path.isfile(candidate) else None
+
+
+class TestObjectRoundTrip(unittest.TestCase):
+    """The metadata has to survive into a real code object, not just the IR.
+
+    Everything downstream reads DWARF out of the object rocprofv3 dumps, so
+    asserting on the ``.ll`` alone would not notice the emitted metadata being
+    dropped by the assembler or the AMDGPU backend. This runs the same path the
+    capture does -- assemble, codegen to an object, dump the DWARF -- and checks
+    the inlining survives it.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tools = {n: llvm_tool(n) for n in ("llvm-as", "llc", "llvm-dwarfdump")}
+        missing = [n for n, p in cls.tools.items() if p is None]
+        if missing:
+            raise unittest.SkipTest(f"missing LLVM tools: {', '.join(missing)}")
+
+    def dwarf_for(self, kernel):
+        ll = lower_kernel_to_llvm(kernel, arch="gfx950")
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {ext: os.path.join(tmp, f"k.{ext}") for ext in ("ll", "bc", "o")}
+            with open(paths["ll"], "w") as fh:
+                fh.write(ll)
+            subprocess.run(
+                [self.tools["llvm-as"], paths["ll"], "-o", paths["bc"]], check=True
+            )
+            subprocess.run(
+                [
+                    self.tools["llc"],
+                    "-mtriple=amdgcn-amd-amdhsa",
+                    "-mcpu=gfx950",
+                    "-filetype=obj",
+                    paths["bc"],
+                    "-o",
+                    paths["o"],
+                ],
+                check=True,
+            )
+            return subprocess.run(
+                [self.tools["llvm-dwarfdump"], "--debug-info", paths["o"]],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+
+    def test_inlined_subroutines_reach_the_object(self):
+        dwarf = self.dwarf_for(build_flat(capture_loc=True))
+        self.assertIn("DW_TAG_compile_unit", dwarf)
+        self.assertIn("DW_TAG_subprogram", dwarf)
+        # The inline tree is the whole point: without it the sidecar has only
+        # the leaf line and cannot say which phase of the kernel asked for it.
+        self.assertIn("DW_TAG_inlined_subroutine", dwarf)
+
+    def test_call_sites_survive_with_file_and_line(self):
+        dwarf = self.dwarf_for(build_flat(capture_loc=True))
+        for attr in ("DW_AT_call_file", "DW_AT_call_line", "DW_AT_abstract_origin"):
+            self.assertIn(attr, dwarf, f"{attr} did not survive to the object")
+        self.assertIn(os.path.basename(THIS_FILE), dwarf)
+
+    def test_the_builder_function_is_named(self):
+        """The sidecar labels a frame with this name, so it has to be there."""
+        dwarf = self.dwarf_for(build_flat(capture_loc=True))
+        self.assertRegex(dwarf, r'DW_AT_name\s+\("build_flat"\)')
+
+    def test_capture_off_emits_no_debug_info_section(self):
+        self.assertNotIn("DW_TAG_subprogram", self.dwarf_for(build_flat()))
 
 
 class TestSerializationRoundTrip(unittest.TestCase):

@@ -33,7 +33,7 @@ your bench script                    ROCKE_DEBUG_LOC=1 set on this process
 op.loc = "file:line:col:func;..."    innermost frame first
   │
   ▼  core/lower_llvm.py   DICompileUnit / DISubprogram / DILocation chain, !dbg
-.ll with debug metadata
+.ll with debug metadata      (the C++ engine emits the same bytes)
   │
   ▼  comgr                normal compile, no extra flags
 .hsaco carrying DWARF
@@ -66,6 +66,13 @@ The stack is filtered to drop stdlib frames and stored on `Op.loc` as a
 `file:line:col:func` chain. Packing the chain into the existing `loc` string keeps
 the IR schema unchanged, so serialization and the C++ engine seam are untouched.
 
+What survives the filter is the point: `helpers/` and `instances/` are where a
+shipped kernel is actually written, so those frames are kept, and they are kept
+whether rocke is imported from a checkout or from site-packages. Classifying an
+installed rocke as the harness that launched the build — which a plain
+`site-packages` test did — ended the walk at the first helper and left every op
+with no location at all, from a run that otherwise looked like it worked.
+
 ### Lower: chain, not leaf
 
 `lower_llvm.py` turns that chain into a linked list of `!DILocation` nodes joined
@@ -78,6 +85,22 @@ Two details are easy to get wrong. The module needs the `Debug Info Version` fla
 or LLVM silently drops every `!dbg` attachment. And file paths can contain colons,
 so the frame parser reads right-to-left — digits first for column and line — rather
 than splitting on the first separator.
+
+Both engines do this, not just the Python one. The C++ engine receives `debug_info`
+and every `@loc` through the serialized IR, and `cpp/core/lower_llvm/debug.cpp`
+mirrors `_DebugInfo` node for node — same id allocation order, same cache keys — so
+the two emit the same bytes and `ROCKE_BACKEND=both` still passes with capture on.
+It has to: `cpp` is the default backend wherever `rocke_engine` is installed, so an
+engine that ignored the locations would mean the documented one-command capture
+produced an object with no DWARF in it on exactly the installations most people
+have.
+
+`emissionKind` stays `LineTablesOnly`. That is enough for the inline tree —
+`DW_TAG_subprogram` with `DW_AT_name`, `DW_TAG_inlined_subroutine` with
+`DW_AT_abstract_origin` / `DW_AT_call_file` / `DW_AT_call_line` — and
+`TestObjectRoundTrip` in `tests/core/test_debug_info.py` proves it by assembling
+the emitted IR into a real AMDGPU object and dumping the DWARF back out, which is
+the only check that would notice the metadata being dropped downstream of the `.ll`.
 
 ### Post-process: why a sidecar
 
@@ -103,6 +126,14 @@ material on sweeps that build thousands of kernels, and populating `Op.loc`
 **changes the emitted `.ll` bytes** — so the byte-identity gate between the Python
 and C++ engines, and the IR goldens, run with it off.
 
+The gate runs with it off for a second reason: its two sides build the same kernel
+independently, once in Python and once in C, and the C emitters have no Python
+stack to record. Comparing them with capture on would report drift for two kernels
+that lowered identically, so `run_diff.py` drops the variable from the reference
+side. The engines' debug output is compared where the comparison means something —
+one kernel, both lowerers — by `tests/core/test_debug_info.py` under
+`ROCKE_BACKEND=both`.
+
 What it does *not* change is the generated ISA: the same kernel built with and
 without debug disassembles to the same 268 instructions. A trace captured with
 capture enabled therefore measures the kernel you actually ship, which is the
@@ -113,7 +144,7 @@ whole reason the feature is usable for optimization rather than just for reading
 | Artifact | Shape | Source of truth |
 | --- | --- | --- |
 | `Op.loc` | `file:line:col:func` frames, `;`-separated, innermost first | `core/ir.py` |
-| debug metadata | `DILocation` chain via `inlinedAt`, one `DISubprogram` per Python function | `core/lower_llvm.py` |
+| debug metadata | `DILocation` chain via `inlinedAt`, one `DISubprogram` per Python function | `core/lower_llvm.py`, mirrored by `cpp/core/lower_llvm/debug.cpp` |
 | `inline_frames.json` | `{version: 2, functions, files, stacks: {"codeobj:addr": [[func, call_file, call_line, call_col], ...]}}`, outermost frame first, indices into the interned tables | `emit_inline_frames.py` |
 | `code.json` | per-instruction rows; `Codeobj` and `Vaddr` together are the join key | rocprofv3 |
 
@@ -122,6 +153,12 @@ same address standing for different instructions. Both columns are therefore in 
 key, and the producer skips rows belonging to any object other than the one the
 DWARF came from. `version` is checked by the viewer, which refuses a layout it does
 not know rather than reading it on the assumption that it resembles a known one.
+
+Which object that is gets decided per dispatch, by matching the id rocprofv3 named
+the dump with against the ids that dispatch's own rows carry — not once for the
+whole trace. A wrong pick does not fail: the addresses overlap, so the join
+succeeds and reports another kernel's source. So a dispatch whose object cannot be
+identified is reported and skipped, and `--code-object` is how you settle it.
 
 Function and file names are interned in the sidecar because the same handful
 repeat across hundreds of instructions and the file crosses a network hop to the

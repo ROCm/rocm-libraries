@@ -93,5 +93,10 @@ folder and the developer replies with `notes.json` — so a bottleneck claim can
 visually verified and argued with rather than just read. See Step 6 of
 `skills/capture-kernel-trace-rocke.md`.
 
-Note that rocke emits no DWARF, so the `Source` column of `code.json` is always
-empty and all trace analysis is at ISA level.
+The `Source` column of `code.json` is empty unless the kernel was built with
+`ROCKE_DEBUG_LOC=1`, which makes the lowering emit DWARF line tables and gives
+every instruction the Python line that authored it. Without it all trace
+analysis is at ISA level. See
+`tools/wavescope/README.md` for the capture, and
+`dsl_docs/architecture/wavescope_integration.md` for how the inline call stack
+above that line is recovered.

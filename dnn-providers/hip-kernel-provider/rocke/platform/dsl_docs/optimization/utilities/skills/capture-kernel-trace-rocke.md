@@ -271,8 +271,8 @@ WaveScope carries a two-way annotation protocol, which is the reason to prefer i
   notes must be answered in its next pass.
 
 Two files, one writer each: the agent owns `annotations.json` and rewrites it wholesale each
-round, so notes must not share it. Since rocke emits no DWARF, use instruction and wave/time
-anchors — the source-line anchor is the only one that needs debug info.
+round, so notes must not share it. Instruction and wave/time anchors always work; the
+source-line anchor needs the trace to have been captured with `ROCKE_DEBUG_LOC=1`.
 
 ---
 
@@ -357,7 +357,7 @@ PMC gives high-level bottleneck categories (MFMA utilization, memory stalls, LDS
 | `rocprof-trace-decoder library path not found` | Install it from <https://github.com/ROCm/rocprof-trace-decoder>, or set `ROCPROF_TRACE_DECODER_LIB`. Failing that, **use PMC profiling** (see Alternative section) |
 | `INVALID_SHADER_DATA` | aqlprofile/decoder version mismatch, update both |
 | Empty ui_output_agent_* | kernel_include_regex didn't match -- re-check kernel name from Step 2 |
-| No source mapping in code.json | Expected: rocke emits no DWARF. Use ISA disassembly / WaveScope's Trace tab |
+| No source mapping in code.json | The kernel was built without `ROCKE_DEBUG_LOC=1`, so there is no DWARF. Rebuild with it set and re-capture, or analyze with ISA disassembly / WaveScope's Trace tab |
 | Stall cycles exceed kernel wall-clock | Cols 7/8 are hit-weighted totals, not averages -- divide by `Hit` |
 | Trace truncated (missing instructions) | Increase `att_buffer_size` to `0xC000000` (192MB) |
 | SSH timeout | Increase timeout, check host connectivity |
@@ -370,37 +370,42 @@ PMC gives high-level bottleneck categories (MFMA utilization, memory stalls, LDS
 
 ### Debug Info in CK DSL
 
-**There is no debug-info path today.** Unlike FlyDSL, which has
-`FLYDSL_DEBUG_ENABLE_DEBUG_INFO=1`, rocke emits no DWARF at all, so the `Source` column in
-`code.json` is always empty and the source-mapped percentage is always 0%.
+**Source mapping is opt-in, via `ROCKE_DEBUG_LOC=1`.** Set it on the process that *builds*
+the kernel — it is read when `IRBuilder` constructs the kernel, not at compile time:
+
+```bash
+ROCKE_DEBUG_LOC=1 python your_bench.py
+```
 
 ```python
 from rocke.helpers import compile_kernel
 
-# The only form. There is no debug= parameter; passing one raises TypeError.
+# No debug= parameter; the env var (or IRBuilder(capture_loc=True)) is the switch.
 artifact = compile_kernel(kernel, isa="amdgcn-amd-amdhsa--gfx950")
 ```
 
-Three separate things are missing, and all three are needed before source mapping works:
+With it set, `IRBuilder` records the authoring Python call stack on every `Op.loc`, the
+lowering turns each stack into a `DICompileUnit` / `DISubprogram` / `DILocation` chain, and
+comgr's normal compile carries the resulting DWARF into the `.hsaco` — no `-g` needed, because
+the metadata is in the IR rather than requested from a source file. The `Source` column of
+`code.json` then names the Python line that emitted each instruction, and
+`tools/wavescope/emit_inline_frames.py` recovers the *call stack* above that line from the
+same DWARF.
 
-1. **Nothing records a source location.** `Op` carries a `loc` field and `IRBuilder._op()`
-   accepts `loc=`, but no builder passes one, so `op.loc` is `None` on every op of every
-   kernel. The IR normalizer also strips it (`loc=None,  # stripped` in `ir_serialize.py`).
-2. **`lower_llvm.py` emits no debug metadata** — no `DICompileUnit`, `DISubprogram`,
-   `DILocation`, `!dbg`, or `Debug Info Version` module flag.
-3. **`-g` is never passed.** `_comgr_options_for_kernel()` emits only `-O3` plus an optional
-   `-mllvm -amdgpu-mfma-vgpr-form`. Adding `-g` alone accomplishes nothing, because comgr is
-   handed a synthetic in-memory `kernel.ll` with no `.py` file behind it.
+Two properties worth knowing:
 
-Note that adding this collides with the byte-identity invariant: a Python authoring location
-cannot be reproduced by the C++ engine, which exists precisely to serve kernels with no Python
-at runtime. The workable shape is to carry the location through the *serialized* IR (which
-already has an `@loc` field) so both engines emit identical debug metadata from identical
-input.
+- **Off by default, and byte-identical when off.** Capturing a frame per op costs real time on
+  sweeps that build thousands of kernels, and the metadata changes the emitted `.ll` bytes,
+  which the IR goldens and the byte-identity gate both pin.
+- **Backend-independent.** The location rides the serialized `ck.dsl.ir/v1` artifact as `@loc`,
+  and both the Python lowerer and the C++ engine emit the same metadata from it, so
+  `ROCKE_BACKEND=cpp` (the default when `rocke_engine` is installed) produces the same DWARF —
+  `ROCKE_BACKEND=both` asserts exactly that.
 
-Until then, analyze at ISA level. `llvm-objdump` and `tools/stage3_extract_isa/extract_isa.py`
-give you the disassembly, and WaveScope's Trace tab correlates ISA against the wave timeline
-without needing source.
+Without the variable set there is no DWARF and the `Source` column is empty; analyze at ISA
+level instead. `llvm-objdump` and `tools/stage3_extract_isa/extract_isa.py` give you the
+disassembly, and WaveScope's Trace tab correlates ISA against the wave timeline without
+needing source.
 
 ### Kernel Naming Convention
 
