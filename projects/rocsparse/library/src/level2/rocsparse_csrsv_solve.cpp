@@ -86,6 +86,98 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     // Initialize buffers
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
 
+    // Diagonal-only solve: x_i = alpha * b_i / a_ii. Every row is independent, so
+    // no dependency analysis, row map or transposed structure is required. The
+    // matrix is its own transpose; for the conjugate transpose case the values
+    // are conjugated on the fly.
+    if(descr->fill_mode == rocsparse_fill_mode_diagonal)
+    {
+        // A diagonal solve divides by the diagonal entry; a unit diagonal would
+        // reduce it to an identity scaling and is therefore not supported.
+        ROCSPARSE_CHECKARG(
+            8, descr, (diag_type == rocsparse_diag_type_unit), rocsparse_status_not_implemented);
+
+        // Zero pivot reporting
+        RETURN_IF_ROCSPARSE_ERROR(
+            csrsv_info->create_zero_pivot_async(batch_count, A->col_type, stream));
+        csrsv_info->create_singularity_numeric_exact(batch_count, A->col_type, stream);
+
+        auto numeric_exact = csrsv_info->get_singularity_numeric_exact();
+        if(A->col_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_device_async<int32_t>(batch_count,
+                                                        (int32_t*)numeric_exact->get_position(),
+                                                        (const int32_t*)csrsv_info->get_position(),
+                                                        stream));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::assign_device_async<int64_t>(batch_count,
+                                                        (int64_t*)numeric_exact->get_position(),
+                                                        (const int64_t*)csrsv_info->get_position(),
+                                                        stream));
+        }
+
+        const void* diag_val_data   = A->const_val_data;
+        int64_t     diag_val_stride = A->batch_stride;
+
+        // For the conjugate transpose, conjugate the values (diagonal positions
+        // are unchanged by transposition).
+        if(trans == rocsparse_operation_conjugate_transpose)
+        {
+            void*        conj_val = ptr;
+            const size_t sizeof_T = rocsparse::datatype_sizeof(A->data_type);
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy2DAsync(conj_val,
+                                                           A->nnz * sizeof_T,
+                                                           A->const_val_data,
+                                                           A->batch_stride * sizeof_T,
+                                                           A->nnz * sizeof_T,
+                                                           batch_count,
+                                                           hipMemcpyDeviceToDevice,
+                                                           stream));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
+                handle, batch_count, A->nnz, A->data_type, conj_val, A->nnz)));
+            diag_val_data   = conj_val;
+            diag_val_stride = (batch_count > 1) ? A->nnz : 0;
+        }
+
+        const std::string arch   = rocsparse::handle_get_arch_name(handle);
+        const bool        sleep  = (arch == rocpsarse_arch_names::gfx908 && handle->asic_rev < 2);
+        const uint32_t    wfsize = sleep ? 64 : handle->wavefront_size;
+        rocsparse::csrsv_launch_kernel_t launch_kernel{};
+        RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(
+            &launch_kernel, 1024, wfsize, sleep, A->row_type, A->col_type, A->data_type));
+
+        launch_kernel(handle,
+                      batch_count,
+                      A->rows,
+                      alpha,
+                      alpha_stride,
+                      A->const_row_data,
+                      A->const_col_data,
+                      diag_val_data,
+                      1,
+                      diag_val_stride,
+                      x->const_values,
+                      x->inc,
+                      x->batch_stride,
+                      y->values,
+                      y->inc,
+                      y->batch_stride,
+                      done_array,
+                      nullptr,
+                      0,
+                      numeric_exact->get_position(),
+                      1,
+                      descr->base,
+                      rocsparse_fill_mode_diagonal,
+                      diag_type,
+                      handle->pointer_mode == rocsparse_pointer_mode_host);
+        return rocsparse_status_success;
+    }
+
     const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
     if(csrsv == nullptr)
     {

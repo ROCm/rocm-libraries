@@ -381,12 +381,27 @@ namespace rocsparse
         const rocsparse_format    format    = A->format;
         const rocsparse_operation operation = sptrsv_descr->get_operation();
 
-#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+#ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
+        // The diagonal fill mode was disabled at build time
+        // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF).
         ROCSPARSE_CHECKARG(2,
                            A,
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
                            rocsparse_status_not_implemented);
 #endif
+        // The diagonal fill mode is supported by the CSR and CSC formats, and it
+        // requires a non-unit diagonal (a unit diagonal would reduce the solve to
+        // an identity scaling and is therefore rejected).
+        ROCSPARSE_CHECKARG(2,
+                           A,
+                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal
+                            && format != rocsparse_format_csr && format != rocsparse_format_csc),
+                           rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(2,
+                           A,
+                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal
+                            && A->descr->diag_type == rocsparse_diag_type_unit),
+                           rocsparse_status_not_implemented);
 
         switch(sptrsv_stage)
         {
@@ -542,12 +557,27 @@ namespace rocsparse
         const rocsparse_sptrsv_stage previous_stage = sptrsv_descr->get_stage();
         const rocsparse_sptrsv_alg   alg            = sptrsv_descr->get_alg();
 
-#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+#ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
+        // The diagonal fill mode was disabled at build time
+        // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF).
         ROCSPARSE_CHECKARG(2,
                            A,
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
                            rocsparse_status_not_implemented);
 #endif
+        // The diagonal fill mode is supported by the CSR and CSC formats, and it
+        // requires a non-unit diagonal (a unit diagonal would reduce the solve to
+        // an identity scaling and is therefore rejected).
+        ROCSPARSE_CHECKARG(2,
+                           A,
+                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal
+                            && format != rocsparse_format_csr && format != rocsparse_format_csc),
+                           rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(2,
+                           A,
+                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal
+                            && A->descr->diag_type == rocsparse_diag_type_unit),
+                           rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(1,
                            sptrsv_descr,
