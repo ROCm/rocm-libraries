@@ -29,6 +29,12 @@ _CONFIGS = [
     ("Tensile/Tests/common/sparse/gfx950/bf16_gate_r.yaml", "gfx950", True),
     ("Tensile/Tests/common/sparse/gfx94x/spmm_i8_mi16.yaml", "gfx942", True),
     ("Tensile/Tests/common/sparse/gfx94x/spmm_vw_lg_one.yaml", "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/fp16_gate_r.yaml", "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_i8is.yaml", "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/i8_activation.yaml", "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_bf8n.yaml", "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx94x/spmm_fp16_mi16.yaml", "gfx942", True),
+    ("Tensile/Tests/common/sparse/gfx950/spmm_ldstr.yaml", "gfx950", True),
 ]
 
 _IDS = [c[0].rsplit("/", 1)[-1][:-5] for c in _CONFIGS]
