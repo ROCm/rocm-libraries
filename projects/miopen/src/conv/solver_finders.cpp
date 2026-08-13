@@ -227,24 +227,25 @@ struct NaiveWarmup
     float elapsed;
 };
 
-/// Redirects the handle onto a pooled stream with profiling off, restoring both
-/// on scope exit so no early return can strand the handle off the root stream.
-struct AutoPoolStream
+/// Redirects the handle onto a tracker-owned stream with profiling off, restoring
+/// both on scope exit so no early return can strand the handle off the root stream.
+struct AutoExclusiveStream
 {
-    AutoPoolStream(const Handle& h, int pool_id) : handle(h), prev_profiling(h.IsProfilingEnabled())
+    AutoExclusiveStream(const Handle& h, hipStream_t stream)
+        : handle(h), prev_profiling(h.IsProfilingEnabled())
     {
-        handle.SetStreamFromPool(pool_id);
+        handle.SetExclusiveStream(stream);
         handle.EnableProfiling(false);
     }
 
-    ~AutoPoolStream()
+    ~AutoExclusiveStream()
     {
-        handle.SetStreamFromPool(0);
+        handle.SetExclusiveStream(nullptr);
         handle.EnableProfiling(prev_profiling);
     }
 
-    AutoPoolStream(const AutoPoolStream&)            = delete;
-    AutoPoolStream& operator=(const AutoPoolStream&) = delete;
+    AutoExclusiveStream(const AutoExclusiveStream&)            = delete;
+    AutoExclusiveStream& operator=(const AutoExclusiveStream&) = delete;
 
 private:
     const Handle& handle;
@@ -302,7 +303,7 @@ static NaiveWarmup TryNaiveWithTimeout(const Handle& handle,
     auto slot     = tracker.acquire(handle);
     slot.scratch  = scratch;
 
-    AutoPoolStream stream_guard{handle, slot.pool_id};
+    AutoExclusiveStream stream_guard{handle, slot.stream};
 
     HipEventPtr ev_start = make_hip_event();
     HipEventPtr ev_stop  = make_hip_event();

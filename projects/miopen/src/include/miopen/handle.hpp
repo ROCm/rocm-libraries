@@ -95,6 +95,17 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     void SetStreamFromPool(int streamID) const;
     void ReserveExtraStreamsInPool(int cnt) const;
 
+    /// Creates a stream that belongs to the caller rather than to this Handle's
+    /// index-addressed stream pool.
+    StreamTracker::StreamPtr CreateExclusiveStream() const;
+
+    /// Redirects GetStream() on the calling thread to \p stream, overriding the
+    /// stream-pool index. Pass nullptr to restore the index-selected stream.
+    /// Only valid for work that never reaches rocBLAS or hipBLASLt, whose
+    /// handles remain bound to the pool stream and will throw while an
+    /// exclusive stream is set.
+    void SetExclusiveStream(miopenAcceleratorQueue_t stream) const;
+
     StreamTracker& GetStreamTracker() const;
 
     void SetAllocator(miopenAllocatorFunction allocator,

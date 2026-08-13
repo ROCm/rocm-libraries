@@ -8,6 +8,7 @@
 #include <miopen/allocator.hpp>
 
 #include <memory>
+#include <type_traits>
 #include <vector>
 #include <hip/hip_runtime_api.h>
 
@@ -21,12 +22,17 @@ struct ScratchAllocation
     std::size_t size = 0;
 };
 
+/// Pool of streams dedicated to speculative kernel evaluation. The streams are
+/// created and owned here rather than taken from the Handle's index-addressed
+/// stream pool, whose ids MHA and RNN claim by hardcoded number: a slot handed
+/// out here must not be one another solver is also writing to.
 struct MIOPEN_INTERNALS_EXPORT StreamTracker
 {
+    using StreamPtr = std::shared_ptr<std::remove_pointer_t<hipStream_t>>;
+
     struct Slot
     {
-        int pool_id;
-        hipStream_t stream;
+        hipStream_t stream = nullptr;
         std::shared_ptr<ScratchAllocation> scratch;
     };
 
@@ -56,9 +62,11 @@ struct MIOPEN_INTERNALS_EXPORT StreamTracker
     void abandon(Slot slot) { draining_.push_back(std::move(slot)); }
 
 private:
+    /// Declared first so it is destroyed last: the slots below borrow these
+    /// streams, and the destructor synchronizes on them before they go away.
+    std::vector<StreamPtr> owned_streams_;
     std::vector<Slot> available_;
     std::vector<Slot> draining_;
-    int next_id_ = 1;
 };
 
 } // namespace miopen

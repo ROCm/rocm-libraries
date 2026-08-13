@@ -11,6 +11,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <set>
 
 namespace {
 
@@ -49,22 +50,41 @@ protected:
 TEST_F(GPU_StreamTracker_FP32, AcquireRelease)
 {
     auto slot = tracker.acquire(handle);
-    ASSERT_GT(slot.pool_id, 0);
     ASSERT_NE(slot.stream, nullptr);
 
-    int saved_id = slot.pool_id;
+    auto saved_stream = slot.stream;
     tracker.release(slot);
 
     auto slot2 = tracker.acquire(handle);
-    EXPECT_EQ(slot2.pool_id, saved_id);
+    EXPECT_EQ(slot2.stream, saved_stream);
     tracker.release(slot2);
+}
+
+TEST_F(GPU_StreamTracker_FP32, AcquireIsNotAHandlePoolStream)
+{
+    // The Handle's stream-pool indices are claimed by hardcoded number elsewhere
+    // (MHA, RNN), so a tracker slot must never alias one of them.
+    constexpr int kPoolSize = 2;
+    handle.ReserveExtraStreamsInPool(kPoolSize);
+
+    auto slot = tracker.acquire(handle);
+    ASSERT_NE(slot.stream, nullptr);
+
+    for(int id = 0; id <= kPoolSize; ++id)
+    {
+        handle.SetStreamFromPool(id);
+        EXPECT_NE(slot.stream, handle.GetStream()) << "aliases stream-pool id " << id;
+    }
+    handle.SetStreamFromPool(0);
+
+    tracker.release(slot);
 }
 
 TEST_F(GPU_StreamTracker_FP32, AcquireGrowsPool)
 {
     auto slot1 = tracker.acquire(handle);
     auto slot2 = tracker.acquire(handle);
-    EXPECT_NE(slot1.pool_id, slot2.pool_id);
+    EXPECT_NE(slot1.stream, slot2.stream);
 
     tracker.release(slot2);
     tracker.release(slot1);
@@ -78,13 +98,13 @@ TEST_F(GPU_StreamTracker_FP32, AbandonAndReclaim)
     ASSERT_EQ(hipMalloc(&dev_ptr, 64), hipSuccess);
     ASSERT_EQ(hipMemsetAsync(dev_ptr, 0, 64, slot.stream), hipSuccess);
 
-    int abandoned_id = slot.pool_id;
+    auto abandoned_stream = slot.stream;
     tracker.abandon(slot);
 
-    ASSERT_EQ(hipStreamSynchronize(slot.stream), hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(abandoned_stream), hipSuccess);
 
     auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(reclaimed.pool_id, abandoned_id);
+    EXPECT_EQ(reclaimed.stream, abandoned_stream);
     tracker.release(reclaimed);
 
     ASSERT_EQ(hipFree(dev_ptr), hipSuccess);
@@ -97,18 +117,18 @@ TEST_F(GPU_StreamTracker_FP32, AbandonStillDraining)
     StreamGate gate;
     ASSERT_EQ(hipLaunchHostFunc(slot.stream, StreamGate::callback, &gate), hipSuccess);
 
-    int abandoned_id = slot.pool_id;
+    auto abandoned_stream = slot.stream;
     tracker.abandon(slot);
 
     auto next = tracker.acquire(handle);
-    EXPECT_NE(next.pool_id, abandoned_id);
+    EXPECT_NE(next.stream, abandoned_stream);
 
     gate.open();
-    ASSERT_EQ(hipStreamSynchronize(slot.stream), hipSuccess);
+    ASSERT_EQ(hipStreamSynchronize(abandoned_stream), hipSuccess);
 
     // Don't release `next` yet — keep available_ empty so acquire scans draining
     auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(reclaimed.pool_id, abandoned_id);
+    EXPECT_EQ(reclaimed.stream, abandoned_stream);
     tracker.release(reclaimed);
     tracker.release(next);
 }
@@ -117,47 +137,45 @@ TEST_F(GPU_StreamTracker_FP32, CascadeAbandonReclaim)
 {
     constexpr int kCount = 4;
     std::vector<miopen::StreamTracker::Slot> slots;
-    std::vector<int> abandoned_ids;
+    std::set<hipStream_t> seen;
 
     for(int i = 0; i < kCount; ++i)
     {
         auto slot = tracker.acquire(handle);
-        abandoned_ids.push_back(slot.pool_id);
+        seen.insert(slot.stream);
         tracker.abandon(slot);
     }
 
     for(int i = 0; i < kCount; ++i)
     {
-        slots.emplace_back(tracker.acquire(handle));
+        auto slot = tracker.acquire(handle);
+        seen.insert(slot.stream);
+        slots.emplace_back(std::move(slot));
     }
 
-    // Wait for everything to drain
     for(auto& s : slots)
         tracker.release(s);
 
-    // Now acquire kCount — all should come from available (no new pool growth)
-    auto before = tracker.acquire(handle);
-    int max_id  = before.pool_id;
-    tracker.release(before);
-
+    // Every stream is idle and reclaimed, so acquiring kCount more must not
+    // create any stream that hasn't been handed out before.
     for(int i = 0; i < kCount; ++i)
     {
         auto s = tracker.acquire(handle);
-        EXPECT_LE(s.pool_id, max_id);
+        EXPECT_EQ(seen.count(s.stream), 1u);
         tracker.release(s);
     }
 }
 
 TEST_F(GPU_StreamTracker_FP32, SweepReclaimsIdleStream)
 {
-    auto slot        = tracker.acquire(handle);
-    int abandoned_id = slot.pool_id;
+    auto slot                   = tracker.acquire(handle);
+    const auto abandoned_stream = slot.stream;
     tracker.abandon(std::move(slot));
 
     tracker.sweep();
 
     auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(reclaimed.pool_id, abandoned_id);
+    EXPECT_EQ(reclaimed.stream, abandoned_stream);
     tracker.release(reclaimed);
 }
 
@@ -168,7 +186,6 @@ TEST_F(GPU_StreamTracker_FP32, SweepLeavesBusyStreamDraining)
     StreamGate gate;
     ASSERT_EQ(hipLaunchHostFunc(slot.stream, StreamGate::callback, &gate), hipSuccess);
 
-    int abandoned_id = slot.pool_id;
     auto busy_stream = slot.stream;
     tracker.abandon(std::move(slot));
 
@@ -176,7 +193,7 @@ TEST_F(GPU_StreamTracker_FP32, SweepLeavesBusyStreamDraining)
 
     // Still gated, so the slot must not have been reclaimed
     auto next = tracker.acquire(handle);
-    EXPECT_NE(next.pool_id, abandoned_id);
+    EXPECT_NE(next.stream, busy_stream);
     tracker.release(next);
 
     gate.open();
@@ -186,7 +203,7 @@ TEST_F(GPU_StreamTracker_FP32, SweepLeavesBusyStreamDraining)
 
     // available_ is LIFO, so the just-swept slot is on top
     auto reclaimed = tracker.acquire(handle);
-    EXPECT_EQ(reclaimed.pool_id, abandoned_id);
+    EXPECT_EQ(reclaimed.stream, busy_stream);
     tracker.release(reclaimed);
 }
 
