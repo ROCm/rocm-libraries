@@ -22,12 +22,14 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <iosfwd>
 #include <memory>
 #include <set>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
@@ -39,6 +41,9 @@
 
 namespace stinkytofu {
 class PassContext;
+// Deliberately forward-declared, not included: HWModel.hpp reaches HazardRules.hpp
+// and from there the asm IR, which does not belong in every PassManager consumer.
+struct HWModel;
 
 //----------------------------------------------------------------------
 // BasicBlock Filter Support
@@ -52,12 +57,12 @@ class BasicBlockFilterBuilder {
    public:
     // Filter by label prefix
     static BasicBlockFilter byLabelPrefix(const std::string& prefix) {
-        return [prefix](const BasicBlock& bb) { return bb.getLabel().rfind(prefix, 0) == 0; };
+        return [prefix](const BasicBlock& bb) { return bb.getLabel().starts_with(prefix); };
     }
 
     // Filter by exact label names
     static BasicBlockFilter byLabels(const std::set<std::string>& labels) {
-        return [labels](const BasicBlock& bb) { return labels.count(bb.getLabel()) > 0; };
+        return [labels](const BasicBlock& bb) { return labels.contains(bb.getLabel()); };
     }
 
     // Filter by custom predicate
@@ -111,7 +116,10 @@ class STINKYTOFU_EXPORT PassContext {
     GemmTileConfig gemmConfig;
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
-    uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
+    bool enableRemarks_ = false;
+    bool analysisFailed_ = false;
+    uint32_t wavefrontSize = 0;         ///< Computed from gemmConfig.arch
+    const HWModel* hwModel_ = nullptr;  ///< Computed from gemmConfig.arch
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
     // By default, all BasicBlocks are processed.
@@ -131,6 +139,19 @@ class STINKYTOFU_EXPORT PassContext {
         return wavefrontSize;
     }
 
+    /// Physical hardware facts for this context's architecture (derived, not
+    /// user-configurable). Defined out of line so this header need not include
+    /// HWModel.hpp, which would pull the asm IR into every PassManager consumer.
+    ///
+    /// Safe to call on a PassContext that never had setGemmTileConfig() called:
+    /// many unit tests construct a bare `PassContext ctx;` and then run a pass
+    /// against it. Those get the default model rather than a null dereference,
+    /// matching how getWavefrontSize() returns 0 instead of failing. Contexts the
+    /// pipeline builds are always configured first - setGemmTileConfig() is what
+    /// caches the pointer, and it aborts outright on an arch it cannot read - so
+    /// the fallback exists for those bare test contexts, not for production paths.
+    const HWModel& getHWModel() const;
+
     void setPassFeatureConfig(const PassFeatureConfig& config) {
         passConfig = config;
     }
@@ -145,6 +166,24 @@ class STINKYTOFU_EXPORT PassContext {
 
     const AsmCapsConfig& getAsmCapsConfig() const {
         return asmCapsConfig;
+    }
+
+    void setRemarksEnabled(bool enable) {
+        enableRemarks_ = enable;
+    }
+
+    bool getRemarksEnabled() const {
+        return enableRemarks_;
+    }
+
+    /// Set by analysis/verification passes that detect a failure the driver should
+    /// surface as a non-zero exit code, instead of aborting the process themselves.
+    void setAnalysisFailed(bool failed = true) {
+        analysisFailed_ = failed;
+    }
+
+    bool getAnalysisFailed() const {
+        return analysisFailed_;
     }
 
     /// Set global BasicBlock filter for all StinkyInstPass instances.
@@ -271,7 +310,7 @@ class STINKYTOFU_EXPORT PassManager {
     void setAsmCapsConfig(const AsmCapsConfig& config);
 
     void setBasicBlockFilter(BasicBlockFilter filter) {
-        passCtx.setBasicBlockFilter(filter);
+        passCtx.setBasicBlockFilter(std::move(filter));
     }
 
     // Get access to the PassContext (for advanced usage)

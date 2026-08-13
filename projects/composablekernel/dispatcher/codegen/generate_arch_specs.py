@@ -230,7 +230,7 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
 
     for arch, data in archs.items():
         enum_name = arch.upper().replace("GFX", "GFX_")
-        arch_enums.append(f"    {enum_name},  // {data['description']}")
+        arch_enums.append(f"    {enum_name},")
         arch_to_string_cases.append(
             f'        case GpuArch::{enum_name}: return "{arch}";'
         )
@@ -278,6 +278,7 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         "compv3": "CompV3",
         "compv4": "CompV4",
         "compv5": "CompV5",
+        "compv6": "CompV6",
         "preshufflev1": "PreShuffleV1",
         "preshufflev2": "PreShuffleV2",
     }
@@ -288,12 +289,12 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
                 f"    if (pipeline == Pipeline::{pipeline_enum_map[pipeline]}) return {limit};"
             )
 
-    content = f"""// SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+    content = f"""// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  * AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
- * 
+ *
  * Generated from: arch_specs.json
  * Generated at: {timestamp}
  * 

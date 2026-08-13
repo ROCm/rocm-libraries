@@ -97,7 +97,7 @@ static std::vector<IRInstDef> getIRInstructions() {
 }
 
 // Generate special instruction factory functions (pure enum design with specialData_)
-bool genSpecialMFMAClasses(std::ofstream& out) {
+static bool genSpecialMFMAClasses(std::ofstream& out) {
     // Factory functions for special instructions (MFMA, Label, etc.)
     out << "    // "
            "========================================================================\n";
@@ -125,6 +125,10 @@ bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const StinkyRegister& b,\n";
     out << "        const StinkyRegister* acc2 = nullptr,\n";
     out << "        bool neg = false,\n";
+    out << "        const std::string& matrixAFmt = \"\",\n";
+    out << "        const std::string& matrixBFmt = \"\",\n";
+    out << "        bool scaled = false,\n";
+    out << "        bool scaleOperands = false,\n";
     out << "        const std::string& comment = \"\")\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MFMA);\n";
@@ -137,7 +141,7 @@ bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        \n";
     out << "        // Create and set special data\n";
     out << "        auto* data = new MFMAData(instType, accType, m, n, k, blocks, mfma1k, "
-           "neg);\n";
+           "neg, matrixAFmt, matrixBFmt, scaled, scaleOperands);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";
@@ -169,6 +173,8 @@ bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        const StinkyRegister& mxsb,\n";
     out << "        bool reuseA = false,\n";
     out << "        bool reuseB = false,\n";
+    out << "        const std::string& matrixAFmt = \"\",\n";
+    out << "        const std::string& matrixBFmt = \"\",\n";
     out << "        const std::string& comment = \"\")\n";
     out << "    {\n";
     out << "        auto* inst = IRBase::createIR<LogicalInstruction>(logical::MXMFMA);\n";
@@ -184,7 +190,8 @@ bool genSpecialMFMAClasses(std::ofstream& out) {
     out << "        // Create and set special data\n";
     out << "        auto* data = new MXMFMAData(instType, accType, mxScaleATypeStr, "
            "mxScaleBTypeStr,\n";
-    out << "                                    m, n, k, block, reuseA, reuseB);\n";
+    out << "                                    m, n, k, block, reuseA, reuseB, matrixAFmt, "
+           "matrixBFmt);\n";
     out << "        inst->setSpecialData(data);\n";
     out << "        inst->comment = comment;\n";
     out << "        \n";
@@ -262,7 +269,7 @@ bool genSpecialMFMAClasses(std::ofstream& out) {
 
 // Generate IR instruction class definitions
 // Generate opcode enum values
-bool genOpcodeEnum(const std::string& outdir) {
+static bool genOpcodeEnum(const std::string& outdir) {
     std::ofstream out(outdir + "/LogicalOpcodes_generated.inc");
     if (!out) {
         std::cerr << "Failed to open LogicalOpcodes_generated.inc for writing\n";
@@ -285,7 +292,7 @@ bool genOpcodeEnum(const std::string& outdir) {
 }
 
 // Generate opcode to string mapping tables
-bool genOpcodeMappings(const std::string& outdir) {
+static bool genOpcodeMappings(const std::string& outdir) {
     std::ofstream out(outdir + "/stinkytofu/ir/logical/LogicalOpcode.cpp");
     if (!out) {
         std::cerr << "Failed to open LogicalOpcode.cpp for writing\n";
@@ -329,6 +336,10 @@ bool genOpcodeMappings(const std::string& outdir) {
     out << "        return \"Label\";\n";
     out << "    case IntrinsicCall:\n";
     out << "        return \"IntrinsicCall\";\n";
+    out << "    case SWaitAlu:\n";
+    out << "        return \"SWaitAlu\";\n";
+    out << "    case SchedulingFence:\n";
+    out << "        return \"SchedulingFence\";\n";
 
     out << "    default:\n";
     out << "        return \"INVALID\";\n";
@@ -359,6 +370,10 @@ bool genOpcodeMappings(const std::string& outdir) {
     out << "        return \"label\";\n";
     out << "    case IntrinsicCall:\n";
     out << "        return \"intrinsic_call\";\n";
+    out << "    case SWaitAlu:\n";
+    out << "        return \"s_wait_alu\";\n";
+    out << "    case SchedulingFence:\n";
+    out << "        return \"scheduling_fence\";\n";
 
     out << "    default:\n";
     out << "        return \"invalid\";\n";
@@ -372,7 +387,7 @@ bool genOpcodeMappings(const std::string& outdir) {
     return true;
 }
 
-bool genIRClasses(const std::string& outdir) {
+static bool genIRClasses(const std::string& outdir) {
     std::ofstream out(outdir + "/stinkytofu/ir/logical/LogicalInstructions_generated.hpp");
     if (!out) {
         std::cerr << "Failed to open LogicalInstructions_generated.hpp for writing\n";
@@ -519,13 +534,13 @@ bool genIRClasses(const std::string& outdir) {
 
         // Set modifiers
         if (inst.supportsDPP) {
-            out << "        inst->dpp = dpp;\n";
+            out << "        inst->dpp = std::move(dpp);\n";
         }
         if (inst.supportsSDWA) {
-            out << "        inst->sdwa = sdwa;\n";
+            out << "        inst->sdwa = std::move(sdwa);\n";
         }
         if (inst.hasDS) {
-            out << "        inst->ds = ds;\n";
+            out << "        inst->ds = std::move(ds);\n";
         }
 
         // Set comment
@@ -585,6 +600,10 @@ bool genIRClasses(const std::string& outdir) {
     out << "        case logical::VMulPKF32:\n";
     out << "        case logical::VMovB64:\n";
     out << "        case logical::VLShiftLeftOrB32:\n";
+    out << "        case logical::SAddU64:\n";
+    out << "        case logical::VAddNCU64:\n";
+    out << "        case logical::VAddLShiftLeftU32:\n";
+    out << "        case logical::VLShiftLeftAddU32:\n";
     out << "            return true;\n";
     out << "        default:\n";
     out << "            return false;\n";
@@ -605,7 +624,7 @@ bool genIRClasses(const std::string& outdir) {
 // Generate builder method implementations
 // Generate C++ factory functions for all IR instructions
 // Generate Python bindings for all IR instructions
-bool genPythonBindings(const std::string& outdir) {
+static bool genPythonBindings(const std::string& outdir) {
     std::ofstream out(outdir + "/PythonBindings_generated.inc");
     if (!out) {
         std::cerr << "Failed to open PythonBindings_generated.inc for writing\n";
@@ -682,12 +701,11 @@ bool genPythonBindings(const std::string& outdir) {
         out << "        return makeLogicalInstructionShared(" << className << "(";
 
         // Pass parameters, converting optional sources to pointers
-        size_t srcIdx = 0;
         for (size_t i = 0; i < paramNames.size(); i++) {
-            std::string paramName = paramNames[i];
+            const std::string& paramName = paramNames[i];
 
             // Check if this is an optional source parameter
-            bool isOptionalSrc = paramName.find("src") == 0 &&
+            bool isOptionalSrc = paramName.starts_with("src") &&
                                  paramTypes[i].find("std::optional") != std::string::npos;
 
             if (isOptionalSrc) {
@@ -722,6 +740,7 @@ bool genPythonBindings(const std::string& outdir) {
 }
 
 // Generate all high-level IR artifacts
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genLogicalIR(const std::string& outdir) {
     bool success = true;
 

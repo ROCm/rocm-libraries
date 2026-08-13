@@ -268,6 +268,10 @@ void testing_aux_mat_init_structured_bad_arg(const Arguments& arg)
     case HIP_R_8F_E4M3:
     case HIP_R_8F_E5M2:
 #endif
+#if HIP_FP8_TYPE_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E5M2_FNUZ:
+#endif
         num_elements = 16;
         break;
     default:

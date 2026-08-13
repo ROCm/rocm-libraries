@@ -87,6 +87,7 @@ miopen::fs::path GetOwningModuleDirectory()
 
 void* OpenDynamicLibrary(const miopen::fs::path& library_path)
 {
+    MIOPEN_LOG_I("Loading Composable Kernel dynamic library: " << library_path.string());
 #ifdef _WIN32
     const auto native_path = library_path.wstring();
     return static_cast<void*>(LoadLibraryW(native_path.c_str()));
@@ -154,8 +155,9 @@ miopenStatus_t toMiopenStatus(ck_impl_status_t status)
     case CK_IMPL_STATUS_INVALID_VALUE: return miopenStatusInvalidValue;
     case CK_IMPL_STATUS_INTERNAL_ERROR: return miopenStatusInternalError;
     case CK_IMPL_STATUS_ALLOC_FAILED: return miopenStatusAllocFailed;
-    default: return miopenStatusInternalError;
     }
+
+    return miopenStatusInternalError;
 }
 
 } // namespace
@@ -368,7 +370,8 @@ bool CkImplLibLoader::LoadSymbols()
         {CKSolverType::FusedBiasResAddActiv, "fused_bias_res_add_activ"},
         {CKSolverType::FusedGrpActiv, "fused_grp_activ"},
         {CKSolverType::FusedGrpBiasActiv, "fused_grp_bias_activ"},
-        {CKSolverType::DepthwiseFwd, "depthwise_fwd"}};
+        {CKSolverType::DepthwiseFwd, "depthwise_fwd"},
+        {CKSolverType::DepthwiseBwdData, "depthwise_bwd_data"}};
 
     for(const auto& binding : solver_bindings)
         BindSolverSymbols(binding.solver, binding.prefix, missing);

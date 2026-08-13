@@ -3,35 +3,13 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
 
-#ifdef _WIN32
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#include <windows.h>
-
-namespace hipdnn_backend::platform_utilities
-{
-
-typedef HMODULE PluginLibHandle;
-
-}
-
-#elif defined(__linux__)
-
-namespace hipdnn_backend::platform_utilities
-{
-
-typedef void* PluginLibHandle;
-
-}
-
-#else
+#if !defined(_WIN32) && !defined(__linux__)
 
 #error "Unsupported platform"
 
@@ -40,11 +18,14 @@ typedef void* PluginLibHandle;
 namespace hipdnn_backend::platform_utilities
 {
 
+using PluginLibHandle = hipdnn_data_sdk::utilities::SharedLibraryHandle;
+
 std::filesystem::path getCurrentModuleDirectory();
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath);
 void closeLibrary(PluginLibHandle handle);
 void* getSymbol(PluginLibHandle handle, const char* symbolName);
 std::string getSystemInfo();
+std::array<uint8_t, 16> generateUuidV4();
 
 }

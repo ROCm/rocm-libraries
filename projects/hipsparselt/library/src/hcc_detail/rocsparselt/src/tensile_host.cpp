@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -138,11 +138,21 @@ namespace
     template <>
     constexpr auto tensile_datatype<float> = rocisa::DataType::Float;
 
+#if HIP_FP8_TYPE_OCP
     template <>
     constexpr auto tensile_datatype<__hip_fp8_e4m3> = rocisa::DataType::Float8;
 
     template <>
     constexpr auto tensile_datatype<__hip_fp8_e5m2> = rocisa::DataType::BFloat8;
+#endif
+
+#if HIP_FP8_TYPE_FNUZ
+    template <>
+    constexpr auto tensile_datatype<__hip_fp8_e4m3_fnuz> = rocisa::DataType::Float8_fnuz;
+
+    template <>
+    constexpr auto tensile_datatype<__hip_fp8_e5m2_fnuz> = rocisa::DataType::BFloat8_fnuz;
+#endif
 
     /*************************************************************************
      * Class for converting alpha and beta between rocsparselt and Tensile types *
@@ -184,6 +194,12 @@ namespace
             return rocisa::DataType::Float8;
         case HIP_R_8F_E5M2:
             return rocisa::DataType::BFloat8;
+#endif
+#if HIP_FP8_TYPE_FNUZ
+        case HIP_R_8F_E4M3_FNUZ:
+            return rocisa::DataType::Float8_fnuz;
+        case HIP_R_8F_E5M2_FNUZ:
+            return rocisa::DataType::BFloat8_fnuz;
 #endif
         default:
             assert(!"hipblasltDatatype_to_tensile_type: non-supported type");
@@ -294,6 +310,7 @@ namespace
         TensileLite::TensorDescriptor scaleC{"scaleC"};
         TensileLite::TensorDescriptor scaleD{"scaleD"};
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
+        TensileLite::TensorDescriptor gate{"gate"};
 
         // The ContractionProblemGemm
         TensileLite::ContractionProblemGemm tensileProblem(a,
@@ -311,7 +328,8 @@ namespace
                                                        batchIndex,
                                                        boundIndex,
                                                        static_cast<double>(*prob.beta),
-                                                       prob.workspaceSize);
+                                                       prob.workspaceSize,
+                                                       gate);
         tensileProblem.setComputeInputTypeA(Tensile_Ti);
         tensileProblem.setComputeInputTypeB(Tensile_Ti);
         tensileProblem.setAlphaType(Tensile_Tc);
@@ -408,6 +426,19 @@ namespace
                                                                                 : d.sizes()[0],
                                             prob.order == rocsparselt_order_row);
         }
+
+        // set gate residual
+        if(prob.gate != nullptr)
+        {
+            auto             gateType    = hipDataType_to_tensile_type(prob.gate_type);
+            std::vector<size_t> gateSizes   = {prob.m, prob.n, prob.batch_count};
+            std::vector<size_t> gateStrides = {prob.row_stride_g,
+                                               prob.col_stride_g,
+                                               prob.batch_stride_g};
+            tensileProblem.setUseGateResidual(true);
+            tensileProblem.setGateResidual(gateType, gateSizes, gateStrides);
+        }
+
         return tensileProblem;
     }
 
@@ -453,6 +484,9 @@ namespace
 
         // set bias vector
         inputs.bias = reinterpret_cast<const void*>(prob.bias_vector);
+
+        // set gate residual
+        inputs.gateResidual = reinterpret_cast<const void*>(prob.gate);
         if(prob.alpha_vector_scaling)
             inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.alpha);
 
@@ -703,10 +737,10 @@ namespace
                 tensileLibPath = path + "/TensileLibrary_" + processor + ".dat";
 #endif
 #endif
-                if(!TestPath(tensileLibPath))
+                if(!TestPath(tensileLibPath) && !TestPath(tensileLibPath + ".zlib"))
                 {
-                    hipsparselt_cerr << "\nhipsparselt_error: Cannot read " << tensileLibPath << ": "
-                                     << strerror(errno) << std::endl;
+                    hipsparselt_cerr << "\nhipsparselt_error: Cannot read " << tensileLibPath
+                                     << " (or .zlib variant): " << strerror(errno) << std::endl;
                     //rocsparselt_abort();
                 }
 
@@ -1107,7 +1141,13 @@ GENERATE_DEFINITIONS(int8_t, int8_t, float)
 GENERATE_DEFINITIONS(int8_t, __half, float)
 GENERATE_DEFINITIONS(int8_t, hip_bfloat16, float)
 GENERATE_DEFINITIONS(int8_t, int32_t, float)
+#if HIP_FP8_TYPE_OCP
 GENERATE_DEFINITIONS(__hip_fp8_e4m3, float, float)
 GENERATE_DEFINITIONS(__hip_fp8_e5m2, float, float)
+#endif
+#if HIP_FP8_TYPE_FNUZ
+GENERATE_DEFINITIONS(__hip_fp8_e4m3_fnuz, float, float)
+GENERATE_DEFINITIONS(__hip_fp8_e5m2_fnuz, float, float)
+#endif
 
 #undef GENERATE_DEFINITIONS

@@ -43,9 +43,7 @@
 #include <sstream>
 #include <vector>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -137,186 +135,6 @@ namespace TensileLite
                     int freeSize = !problem.transposeC01() ? problem.freeSizeB(index)
                                                            : problem.freeSizeA(index);
                     return debugEvalCmp(problem, stream, "prob", freeSize, "%", "sol", value);
-                }
-            };
-
-            // Address-interleave restriction:
-            // Require tiles1 (=Free1Size/value) to have lowbit(tiles1) > 1 (i.e. even),
-            // and require Free1Size % value == 0.
-            // This matches the kernel's initBInterleaveG enable condition that G=min(lowbit, LVCB) must be > 1.
-            struct Free1SizeDivByValueLowbitGT1
-                : public Predicate_CRTP<Free1SizeDivByValueLowbitGT1, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = true,
-                    HasValue = true
-                };
-                size_t index;
-                size_t value;
-
-                Free1SizeDivByValueLowbitGT1() = default;
-                Free1SizeDivByValueLowbitGT1(size_t index, size_t value)
-                    : index(index)
-                    , value(value)
-                {
-                }
-
-                static std::string Type()
-                {
-                    return "Free1SizeDivByValueLowbitGT1";
-                }
-
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    if(value == 0)
-                        return false;
-                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
-                                                              : problem.freeSizeA(index));
-                    if(freeSize % value != 0)
-                        return false;
-                    size_t tiles1 = freeSize / value;
-                    if(tiles1 == 0)
-                        return false;
-                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
-                    return lowbit > 1;
-                }
-
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    size_t freeSize = (!problem.transposeC01() ? problem.freeSizeB(index)
-                                                              : problem.freeSizeA(index));
-                    bool   okDiv    = (value != 0) && (freeSize % value == 0);
-                    size_t tiles1   = okDiv ? (freeSize / value) : 0;
-                    size_t lowbit   = tiles1 ? (tiles1 & (~tiles1 + 1)) : 0;
-                    bool   ok       = okDiv && (lowbit > 1);
-                    return debugEvalCmp(problem,
-                                        stream,
-                                        "free1",
-                                        freeSize,
-                                        "%",
-                                        "value",
-                                        value,
-                                        "lowbit",
-                                        lowbit,
-                                        ">",
-                                        "1",
-                                        size_t(1)) && ok;
-                }
-            };
-
-            // KRingShift wrap restriction:
-            // Require that any (k + KRingShift) wrap occurs only in tail loop (no main-loop wrap fix).
-            //
-            // We model the exact KRS enable/shift computation used in initKRingShift:
-            //   rem = StrideB1J % cacheLineElements
-            //   shift = (-WorkGroup1 * rem) mod cacheLineElements
-            //
-            // mainLoopElems = k - (k % DepthU)
-            // tailSize      = k % DepthU
-            //
-            // To guarantee no wrap in main loop for any WG1, require:
-            //   maxShift(wg1 in [0, tiles1-1]) <= tailSize
-            //
-            // Packed value format (size_t):
-            //   [63:48]=cacheLineBytes, [47:32]=depthU, [31:16]=mt1, [15:8]=lvcb, [7:0]=bpeB
-            struct KRingShiftTailWrapOnly
-                : public Predicate_CRTP<KRingShiftTailWrapOnly, ContractionProblemGemm>
-            {
-                enum
-                {
-                    HasIndex = true,
-                    HasValue = true
-                };
-                int64_t index;
-                size_t value;
-
-                KRingShiftTailWrapOnly() = default;
-                KRingShiftTailWrapOnly(int64_t index, size_t value)
-                    : index(index)
-                    , value(value)
-                {
-                }
-
-                static std::string Type()
-                {
-                    return "KRingShiftTailWrapOnly";
-                }
-
-                virtual bool operator()(ContractionProblemGemm const& problem) const override
-                {
-                    if(value == 0)
-                        return false;
-
-                    size_t bpeB          = (value & 0xFFu);
-                    size_t lvcb          = ((value >> 8) & 0xFFu);
-                    size_t mt1           = ((value >> 16) & 0xFFFFu);
-                    size_t depthU        = ((value >> 32) & 0xFFFFu);
-                    size_t cacheLineByte = ((value >> 48) & 0xFFFFu);
-
-                    if(mt1 == 0 || lvcb == 0 || bpeB == 0 || depthU == 0 || cacheLineByte == 0)
-                        return false;
-                    size_t cacheLineElems = cacheLineByte / bpeB;
-                    // Compute runtime G from Free1 size and MT1.
-                    size_t free1 = (!problem.transposeC01() ? problem.freeSizeB(0)
-                                                           : problem.freeSizeA(0));
-                    if(free1 % mt1 != 0)
-                        return false;
-                    size_t tiles1 = free1 / mt1;
-                    if(tiles1 == 0)
-                        return false;
-                    size_t lowbit = tiles1 & (~tiles1 + 1); // tiles1 & -tiles1
-                    size_t G      = (lowbit <= lvcb) ? lowbit : lvcb;
-                    if(G <= 1)
-                        return false;
-
-                    // StrideB1J: stride of B along Free1 (J) in elements.
-                    auto const& freeB = problem.freeIndicesB();
-                    if(freeB.empty())
-                        return false;
-                    size_t bDim = freeB[0].i;
-                    if(bDim >= problem.b().strides().size())
-                        return false;
-                    size_t strideB1J = problem.b().strides()[bDim];
-
-                    // Determine whether KRS shift can be enabled at runtime.
-                    size_t mask = cacheLineElems - 1;
-                    size_t rem  = strideB1J & mask; // mod cacheLineElems (pow2)
-
-                    // K is the (last) bound index (typically the summation dimension).
-                    auto const boundCount = static_cast<int64_t>(problem.boundIndices().size());
-                    int64_t    idx        = (index < 0) ? (boundCount + index) : index;
-                    if(idx < 0 || idx >= boundCount)
-                        return false;
-                    size_t k = problem.boundSize(static_cast<size_t>(idx));
-
-                    // tailSize = k % depthU. If depthU>k, tailSize=k and mainloop is empty => safe.
-                    size_t tailSize = (depthU != 0) ? (k % depthU) : 0;
-
-                    // Compute maxShift over wg1 in [0, tiles1-1] (cycle length <= cacheLineElems <= 256 typically, <=64 on gfx950).
-                    size_t wgCount = tiles1;
-                    size_t limit   = (wgCount < cacheLineElems) ? wgCount : cacheLineElems;
-                    size_t maxShift = 0;
-                    for(size_t wg1 = 0; wg1 < limit; ++wg1)
-                    {
-                        // shift = (-wg1*rem) mod cacheLineElems
-                        size_t prod  = (wg1 * rem) & mask;
-                        size_t shift = (prod == 0) ? 0 : ((cacheLineElems - prod) & mask);
-                        if(shift > maxShift)
-                            maxShift = shift;
-                    }
-
-                    return tailSize >= maxShift;
-                }
-
-                virtual bool debugEval(ContractionProblemGemm const& problem,
-                                       std::ostream&                 stream) const override
-                {
-                    // Reuse operator() and print a single boolean result for simplicity.
-                    bool ok = (*this)(problem);
-                    return debugEvalCmp(problem, stream, "KRingShiftTailWrapOnly", size_t(ok), "==", "true", size_t(1))
-                           && ok;
                 }
             };
 
@@ -2482,6 +2300,43 @@ namespace TensileLite
                 }
             };
 
+            struct UseGateResidualEqual
+                : public Predicate_CRTP<UseGateResidualEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                UseGateResidualEqual() = default;
+                UseGateResidualEqual(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "UseGateResidual";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.useGateResidual() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob=" << problem.useGateResidual() << ", sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct UseEEqual : public Predicate_CRTP<UseEEqual, ContractionProblemGemm>
             {
                 enum
@@ -2716,6 +2571,59 @@ namespace TensileLite
                     details << "]";
                     if(problem.useBias())
                         details << ", prob_type=" << ToString(problem.bias().dataType());
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct GateResidualDataTypeWhiteList
+                : public Predicate_CRTP<GateResidualDataTypeWhiteList, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                GateResidualDataTypeWhiteList() = default;
+
+                std::vector<rocisa::DataType> value;
+
+                static std::string Type()
+                {
+                    return "GateResidualDataTypeWhiteList";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(problem.useGateResidual())
+                    {
+                        for(size_t i = 0; i < value.size(); i++)
+                        {
+                            if(value[i] == problem.gateResidual().dataType())
+                            {
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "supported_types=[";
+                    for(size_t i = 0; i < value.size(); i++)
+                    {
+                        details << ToString(value[i]);
+                        if(i < value.size() - 1)
+                            details << ", ";
+                    }
+                    details << "]";
+                    if(problem.useGateResidual())
+                        details << ", prob_type=" << ToString(problem.gateResidual().dataType());
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -3025,6 +2933,14 @@ namespace TensileLite
                     cuCount                  = pAMDGPU->computeUnitCount;
                 }
 
+                /// Constructor for testing: inject cuCount so selection logic can be
+                /// unit-tested without a GPU (e.g. ROCM-2963: 38-CU partition alignment).
+                WorkgroupMappingXCCCheck(std::array<int, 2> value, size_t cuCountForTest)
+                    : value(value)
+                    , cuCount(cuCountForTest)
+                {
+                }
+
                 static std::string Type()
                 {
                     return "WorkgroupMappingXCCCheck";
@@ -3199,7 +3115,6 @@ namespace TensileLite
                         problem, stream, "prob", problem.mxTypeB(), "==", "sol", value);
                 }
             };
-
         } // namespace Contraction
 
         /**
@@ -3208,4 +3123,3 @@ namespace TensileLite
     } // namespace Predicates
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

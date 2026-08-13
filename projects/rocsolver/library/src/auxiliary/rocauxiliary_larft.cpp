@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_larft.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -40,6 +41,7 @@ rocblas_status rocsolver_larft_impl(rocblas_handle handle,
                                     T* tau,
                                     T* F,
                                     const I ldf)
+try
 {
     ROCSOLVER_ENTER_TOP("larft", "--direct", direct, "--storev", storev, "-n", n, "-k", k, "--ldv",
                         ldv, "--ldt", ldf);
@@ -90,6 +92,10 @@ rocblas_status rocsolver_larft_impl(rocblas_handle handle,
     return rocsolver_larft_template<T>(handle, direct, storev, n, k, V, shiftV, ldv, stridev, tau,
                                        stridet, F, ldf, stridef, batch_count, (T*)scalars, (T*)work,
                                        (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

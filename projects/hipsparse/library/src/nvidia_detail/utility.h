@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -755,7 +755,32 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 13001)
+    inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPMV_ALG_DEFAULT:
+            return CUSPARSE_SPMV_ALG_DEFAULT;
+        case HIPSPARSE_SPMV_COO_ALG1:
+            return CUSPARSE_SPMV_COO_ALG1;
+        case HIPSPARSE_SPMV_COO_ALG2:
+            return CUSPARSE_SPMV_COO_ALG2;
+        case HIPSPARSE_SPMV_CSR_ALG1:
+            return CUSPARSE_SPMV_CSR_ALG1;
+        case HIPSPARSE_SPMV_CSR_ALG2:
+            return CUSPARSE_SPMV_CSR_ALG2;
+        case HIPSPARSE_SPMV_SELL_ALG1:
+            return CUSPARSE_SPMV_SELL_ALG1;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+        case HIPSPARSE_SPMV_BSR_ALG1:
+            return CUSPARSE_SPMV_BSR_ALG1;
+#endif
+        default:
+            throw "Non existant hipsparseSpMVAlg_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)
@@ -837,7 +862,36 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12051)
+    inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPMM_ALG_DEFAULT:
+            return CUSPARSE_SPMM_ALG_DEFAULT;
+        case HIPSPARSE_SPMM_COO_ALG1:
+            return CUSPARSE_SPMM_COO_ALG1;
+        case HIPSPARSE_SPMM_COO_ALG2:
+            return CUSPARSE_SPMM_COO_ALG2;
+        case HIPSPARSE_SPMM_COO_ALG3:
+            return CUSPARSE_SPMM_COO_ALG3;
+        case HIPSPARSE_SPMM_COO_ALG4:
+            return CUSPARSE_SPMM_COO_ALG4;
+        case HIPSPARSE_SPMM_CSR_ALG1:
+            return CUSPARSE_SPMM_CSR_ALG1;
+        case HIPSPARSE_SPMM_CSR_ALG2:
+            return CUSPARSE_SPMM_CSR_ALG2;
+        case HIPSPARSE_SPMM_CSR_ALG3:
+            return CUSPARSE_SPMM_CSR_ALG3;
+        case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
+            return CUSPARSE_SPMM_BLOCKED_ELL_ALG1;
+        case HIPSPARSE_SPMM_BSR_ALG1:
+            return CUSPARSE_SPMM_BSR_ALG1;
+        default:
+            throw "Non existent hipsparseSpMMAlg_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
     inline cusparseSpMMAlg_t hipSpMMAlgToCudaSpMMAlg(hipsparseSpMMAlg_t alg)
     {
         switch(alg)
@@ -861,7 +915,7 @@ namespace hipsparse
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
             return CUSPARSE_SPMM_BLOCKED_ELL_ALG1;
         default:
-            throw "Non existant hipsparseSpMMAlg_t";
+            throw "Non existent hipsparseSpMMAlg_t";
         }
     }
 #elif(CUDART_VERSION >= 11021 && CUDART_VERSION < 12000)
@@ -893,7 +947,7 @@ namespace hipsparse
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
             return CUSPARSE_SPMM_BLOCKED_ELL_ALG1;
         default:
-            throw "Non existant hipsparseSpMMAlg_t";
+            throw "Non existent hipsparseSpMMAlg_t";
         }
     }
 #elif(CUDART_VERSION >= 11003 && CUDART_VERSION < 11021)
@@ -923,7 +977,7 @@ namespace hipsparse
         case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
             return CUSPARSE_SPMM_BLOCKED_ELL_ALG1;
         default:
-            throw "Non existant hipsparseSpMMAlg_t";
+            throw "Non existent hipsparseSpMMAlg_t";
         }
     }
 #elif(CUDART_VERSION >= 10010 && CUDART_VERSION < 11003)
@@ -942,7 +996,7 @@ namespace hipsparse
         case HIPSPARSE_CSRMM_ALG1:
             return CUSPARSE_CSRMM_ALG1;
         default:
-            throw "Non existant hipsparseSpMMAlg_t";
+            throw "Non existent hipsparseSpMMAlg_t";
         }
     }
 #endif
@@ -992,6 +1046,23 @@ namespace hipsparse
             return CUSPARSE_SPGEMM_DEFAULT;
         default:
             throw "Non existant cusparseSpGEMMAlg_t";
+        }
+    }
+#endif
+
+    // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+    // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+    // clang-format off
+#if(defined(HIPSPARSE_WITH_SPGEAM) && CUDART_VERSION >= 13030)
+    // clang-format on
+    inline cusparseSpGEAMAlg_t hipSpGEAMAlgToCudaSpGEAMAlg(hipsparseSpGEAMAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPGEAM_ALG1:
+            return CUSPARSE_SPGEAM_ALG1;
+        default:
+            throw "Non existant cusparseSpGEAMAlg_t";
         }
     }
 #endif

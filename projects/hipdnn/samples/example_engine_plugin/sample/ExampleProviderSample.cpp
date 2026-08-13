@@ -35,6 +35,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -54,6 +55,19 @@
 #include <hipdnn_frontend/Utilities.hpp>
 
 using namespace hipdnn_frontend;
+
+// Gracefully skip the sample when no GPU is present: prints a skip message and
+// returns 0 from the enclosing function.
+#define RETURN_SUCCESS_IF_NO_DEVICE()                                         \
+    do                                                                        \
+    {                                                                         \
+        int deviceCount = 0;                                                  \
+        if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0) \
+        {                                                                     \
+            std::cout << "SKIPPED: No GPU devices available.\n";              \
+            return 0;                                                         \
+        }                                                                     \
+    } while(0)
 
 // ============================================================================
 // Helper Functions
@@ -270,7 +284,7 @@ static bool verifyPluginPresence(hipdnnHandle_t handle, const std::string& modeL
 // ============================================================================
 // Scenario 1: ReLU Forward with Engine Selection and Knob Modification
 // ============================================================================
-static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths, bool hasGpu)
+static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths)
 {
     std::cout << "\n=== Scenario 1: ReLU Forward with Engine Selection and Knob Modification ===\n";
     std::cout
@@ -381,12 +395,6 @@ static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths, bo
 
     std::cout << "  Graph built successfully.\n";
 
-    if(!hasGpu)
-    {
-        std::cout << "  GPU execution skipped (no GPU detected).\n";
-        return true;
-    }
-
     // GPU execution and verification
     std::vector<float> input = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 1.5f};
     std::vector<float> output(input.size(), -999.0f);
@@ -459,7 +467,7 @@ static bool scenario1ReluForward(const std::vector<std::string>& pluginPaths, bo
 // ============================================================================
 // Scenario 2: Convolution Forward with Engine Selection
 // ============================================================================
-static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths, bool hasGpu)
+static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths)
 {
     std::cout << "\n=== Scenario 2: Convolution Forward with Engine Selection ===\n";
     std::cout
@@ -534,12 +542,6 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths, bo
     }
 
     std::cout << "  Graph built successfully.\n";
-
-    if(!hasGpu)
-    {
-        std::cout << "  GPU execution skipped (no GPU detected).\n";
-        return true;
-    }
 
     // 4x4 input matrix (values 1..16), managed by Tensor class
     // clang-format off
@@ -619,7 +621,7 @@ static bool scenario2ConvForward(const std::vector<std::string>& pluginPaths, bo
 // ============================================================================
 // Scenario 3: Plugin Loading Modes
 // ============================================================================
-static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPaths, bool hasGpu)
+static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPaths)
 {
     std::cout << "\n=== Scenario 3: Plugin Loading Modes ===\n";
     std::cout << "Demonstrates ADDITIVE and ABSOLUTE loading modes with presence verification "
@@ -683,40 +685,33 @@ static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPa
         }
 
         // Run a quick ReLU execution to confirm the loaded plugin is functional
-        if(hasGpu)
+        std::cout << "\n  Running quick ReLU to confirm plugin functionality...\n";
+        std::vector<float> input = {-2.0f, 0.0f, 3.0f};
+        std::vector<float> output;
+        if(!runReluGraph(*handle, "Scenario3_QuickReLU", input, output))
         {
-            std::cout << "\n  Running quick ReLU to confirm plugin functionality...\n";
-            std::vector<float> input = {-2.0f, 0.0f, 3.0f};
-            std::vector<float> output;
-            if(!runReluGraph(*handle, "Scenario3_QuickReLU", input, output))
-            {
-                return false;
-            }
+            return false;
+        }
 
-            // Verify the output
-            bool correct = true;
-            for(size_t i = 0; i < input.size(); ++i)
+        // Verify the output
+        bool correct = true;
+        for(size_t i = 0; i < input.size(); ++i)
+        {
+            const float expected = std::max(0.0f, input[i]);
+            if(output[i] != expected)
             {
-                const float expected = std::max(0.0f, input[i]);
-                if(output[i] != expected)
-                {
-                    std::cerr << "  MISMATCH at [" << i << "]: expected " << expected << ", got "
-                              << output[i] << "\n";
-                    correct = false;
-                }
+                std::cerr << "  MISMATCH at [" << i << "]: expected " << expected << ", got "
+                          << output[i] << "\n";
+                correct = false;
             }
-            if(correct)
-            {
-                std::cout << "  Quick ReLU verification passed.\n";
-            }
-            else
-            {
-                return false;
-            }
+        }
+        if(correct)
+        {
+            std::cout << "  Quick ReLU verification passed.\n";
         }
         else
         {
-            std::cout << "\n  GPU execution skipped (no GPU detected).\n";
+            return false;
         }
     }
 
@@ -753,117 +748,109 @@ static bool scenario3PluginLoadingModes(const std::vector<std::string>& pluginPa
 // Main
 // ============================================================================
 int main(int argc, char* argv[])
-try
 {
-    std::cout << "hipDNN Example Plugin Sample Application\n";
-    std::cout << "=========================================\n";
-
-    // Check GPU availability
-    bool hasGpu = false;
-    int deviceCount = 0;
-    if(hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0)
+    try
     {
-        hasGpu = true;
+        std::cout << "hipDNN Example Plugin Sample Application\n";
+        std::cout << "=========================================\n";
+
+        RETURN_SUCCESS_IF_NO_DEVICE();
         hipDeviceProp_t props;
         static_cast<void>(hipGetDeviceProperties(&props, 0));
         std::cout << "GPU: " << props.name << " (" << props.gcnArchName << ")\n";
-    }
-    else
-    {
-        std::cout << "No GPU detected. Skipping GPU execution scenarios.\n"
-                  << "Running non-GPU portions only.\n";
-    }
 
-    // Determine plugin path: CLI argument > HIPDNN_PLUGIN_DIR > executable directory.
+        // Determine plugin path: CLI argument > HIPDNN_PLUGIN_DIR > executable directory.
 #ifdef _WIN32
-    const std::string pluginFilename = "example_provider_plugin.dll";
+        const std::string pluginFilename = "example_provider_plugin.dll";
 #else
-    const std::string pluginFilename = "libexample_provider_plugin.so";
+        const std::string pluginFilename = "libexample_provider_plugin.so";
 #endif
 
-    std::string pluginPath;
-    if(argc > 1)
-    {
-        pluginPath = argv[1];
-        std::cout << "Plugin path (from argument): " << pluginPath << "\n";
-    }
-    else
-    {
-        pluginPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
-        if(!pluginPath.empty())
+        std::string pluginPath;
+        if(argc > 1)
         {
-            std::cout << "Plugin path (from HIPDNN_PLUGIN_DIR): " << pluginPath << "\n";
+            pluginPath = argv[1];
+            std::cout << "Plugin path (from argument): " << pluginPath << "\n";
         }
         else
         {
-            auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
-            pluginPath = std::filesystem::absolute(exeDir).string();
-            std::cout << "Plugin path (from executable location): " << pluginPath << "\n";
+            pluginPath = hipdnn_data_sdk::utilities::getEnv("HIPDNN_PLUGIN_DIR");
+            if(!pluginPath.empty())
+            {
+                std::cout << "Plugin path (from HIPDNN_PLUGIN_DIR): " << pluginPath << "\n";
+            }
+            else
+            {
+                auto exeDir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory();
+                pluginPath = std::filesystem::absolute(exeDir).string();
+                std::cout << "Plugin path (from executable location): " << pluginPath << "\n";
+            }
         }
-    }
 
-    // To assist in debugging issues when running this sample, determine whether
-    // the plugin exists before running the scenarios.
-    std::vector<std::string> pluginPaths;
-    auto fsPath = std::filesystem::path(pluginPath);
-    if(std::filesystem::is_regular_file(fsPath))
-    {
-        if(fsPath.filename().string().find("example_provider_plugin") != std::string::npos)
+        // To assist in debugging issues when running this sample, determine whether
+        // the plugin exists before running the scenarios.
+        std::vector<std::string> pluginPaths;
+        auto fsPath = std::filesystem::path(pluginPath);
+        if(std::filesystem::is_regular_file(fsPath))
         {
-            pluginPaths.push_back(pluginPath);
+            if(fsPath.filename().string().find("example_provider_plugin") != std::string::npos)
+            {
+                pluginPaths.push_back(pluginPath);
+            }
         }
-    }
-    else if(std::filesystem::is_directory(fsPath))
-    {
-        if(std::filesystem::exists(fsPath / pluginFilename))
+        else if(std::filesystem::is_directory(fsPath))
         {
-            pluginPaths.push_back(pluginPath);
+            if(std::filesystem::exists(fsPath / pluginFilename))
+            {
+                pluginPaths.push_back(pluginPath);
+            }
         }
-    }
 
-    std::cout << "Plugin paths:\n";
-    for(size_t i = 0; i < pluginPaths.size(); ++i)
-    {
-        std::cout << "  [" << i << "] " << pluginPaths[i] << "\n";
-    }
+        std::cout << "Plugin paths:\n";
+        for(size_t i = 0; i < pluginPaths.size(); ++i)
+        {
+            std::cout << "  [" << i << "] " << pluginPaths[i] << "\n";
+        }
 
-    if(pluginPaths.empty())
-    {
-        std::cerr << "\nERROR: Example plugin library (" << pluginFilename << ") not found.\n\n";
-        std::cerr << "Path provided: " << pluginPath << "\n\n";
-        std::cerr << "Usage: " << argv[0] << " [plugin_path]\n\n"
-                  << "The plugin path can be:\n"
-                  << "  - A directory containing " << pluginFilename << "\n"
-                  << "  - The full path to the plugin file itself\n\n"
-                  << "Plugin path resolution (when no argument is provided):\n"
-                  << "  1. If HIPDNN_PLUGIN_DIR is set, that is used.\n"
-                  << "  2. Otherwise, the directory containing this executable is used.\n";
+        if(pluginPaths.empty())
+        {
+            std::cerr << "\nERROR: Example plugin library (" << pluginFilename
+                      << ") not found.\n\n";
+            std::cerr << "Path provided: " << pluginPath << "\n\n";
+            std::cerr << "Usage: " << argv[0] << " [plugin_path]\n\n"
+                      << "The plugin path can be:\n"
+                      << "  - A directory containing " << pluginFilename << "\n"
+                      << "  - The full path to the plugin file itself\n\n"
+                      << "Plugin path resolution (when no argument is provided):\n"
+                      << "  1. If HIPDNN_PLUGIN_DIR is set, that is used.\n"
+                      << "  2. Otherwise, the directory containing this executable is used.\n";
+            return 1;
+        }
+
+        bool allPassed = true;
+
+        allPassed = scenario1ReluForward(pluginPaths) && allPassed;
+        allPassed = scenario2ConvForward(pluginPaths) && allPassed;
+        allPassed = scenario3PluginLoadingModes(pluginPaths) && allPassed;
+
+        std::cout << "\n=========================================\n";
+        if(allPassed)
+        {
+            std::cout << "All scenarios completed successfully.\n";
+            return 0;
+        }
+
+        std::cerr << "Some scenarios failed.\n";
         return 1;
     }
-
-    bool allPassed = true;
-
-    allPassed = scenario1ReluForward(pluginPaths, hasGpu) && allPassed;
-    allPassed = scenario2ConvForward(pluginPaths, hasGpu) && allPassed;
-    allPassed = scenario3PluginLoadingModes(pluginPaths, hasGpu) && allPassed;
-
-    std::cout << "\n=========================================\n";
-    if(allPassed)
+    catch(const std::exception& e)
     {
-        std::cout << "All scenarios completed successfully.\n";
-        return 0;
+        std::fprintf(stderr, "Fatal error: %s\n", e.what());
+        return 1;
     }
-
-    std::cerr << "Some scenarios failed.\n";
-    return 1;
-}
-catch(const std::exception& e)
-{
-    std::cerr << "Fatal error: " << e.what() << "\n";
-    return 1;
-}
-catch(...)
-{
-    std::cerr << "Fatal error: unknown exception\n";
-    return 1;
+    catch(...)
+    {
+        std::fprintf(stderr, "Fatal error: unknown exception\n");
+        return 1;
+    }
 }

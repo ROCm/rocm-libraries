@@ -88,13 +88,34 @@ bool IsDeviceSupported(Gpu supported_devs, Gpu dev)
     return false;
 }
 
+bool IsDeviceExcluded(const UnitTestConvSolverParams& params, std::string_view dev_name)
+{
+    // Runtime device names can include target properties such as xnack/sramecc.
+    // Test exclusions are written against the bare architecture name.
+    return params.excluded_devices.count(GetBaseDeviceName(dev_name)) != 0;
+}
+
+bool IsDeviceSupported(const UnitTestConvSolverParams& params,
+                       Gpu dev,
+                       std::string_view dev_name,
+                       bool xnack_enabled)
+{
+    return IsDeviceSupported(params.supported_devs, dev) && !IsDeviceExcluded(params, dev_name) &&
+           !(params.check_xnack_disabled && xnack_enabled);
+}
+
+bool IsCKDynamicLibLoaded(std::string_view dev_name)
+{
+    return miopen::solver::CkImplLibLoader::Get(std::string{dev_name}).IsLoaded();
+}
+
 } // namespace
 
 //************************************************************************************
 // ConvTestCase
 //************************************************************************************
 
-ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}){};
+ConvTestCase::ConvTestCase() : x(miopenHalf, {}), w(miopenHalf, {}), conv({}, {}, {}) {};
 
 ConvTestCase::ConvTestCase(std::vector<size_t>&& x_,
                            std::vector<size_t>&& w_,
@@ -197,8 +218,9 @@ ConvTestCase::GetProblemDescription(miopen::conv::Direction direction) const
     case miopen::conv::Direction::BackwardData:
     case miopen::conv::Direction::BackwardWeights:
         return miopen::conv::ProblemDescription(y_desc, w_desc, x_desc, conv_desc, direction);
-    default: throw std::runtime_error("unknown direction");
     }
+
+    throw std::runtime_error("unknown direction");
 }
 
 std::ostream& operator<<(std::ostream& os, const ConvTestCase& tc)
@@ -809,10 +831,10 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
     case miopen::conv::Direction::BackwardWeights:
         RunSolverWrw<T, Tref>(solver, params, conv_config, algo);
         return;
-    default:
-        throw std::runtime_error("unknown direction");
     }
     // clang-format on
+
+    throw std::runtime_error("unknown direction");
 }
 
 void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
@@ -839,7 +861,12 @@ void RunSolver(const miopen::solver::conv::ConvSolverInterface& solver,
         case miopenInt8:
             RunSolver<int8_t, int8_t>(solver, params, direction, conv_config, algo);
             return;
-        default:
+
+        case miopenInt32:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64:
             throw std::runtime_error("handling of this data type is not yet implemented");
         }
         // clang-format on
@@ -863,13 +890,17 @@ void UnitTestConvSolverBase::SetUpImpl(const UnitTestConvSolverParams& params)
     {
         GTEST_SKIP();
     }
-    else if(params.excluded_devices.count(get_handle().GetDeviceName()) > 0)
+    else if(IsDeviceExcluded(params, get_handle().GetDeviceName()))
     {
         GTEST_SKIP();
     }
     else if(params.check_xnack_disabled && get_handle_xnack())
     {
         GTEST_SKIP();
+    }
+    else if(params.uses_ck_dynamic_lib && !IsCKDynamicLibLoaded(get_handle().GetDeviceName()))
+    {
+        GTEST_SKIP() << "CK dynamic library is not available for " << get_handle().GetDeviceName();
     }
 }
 
@@ -902,11 +933,22 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
 
     const auto problem = conv_config.GetProblemDescription(direction);
 
-    const auto all_known_devs = GetAllKnownDevices();
+    if(params.uses_ck_dynamic_lib)
+    {
+        const auto current_dev_name = get_handle().GetDeviceName();
+        if(!IsCKDynamicLibLoaded(current_dev_name))
+            GTEST_SKIP() << "CK dynamic library is not available for " << current_dev_name;
+    }
+
+    const auto current_dev_name      = get_handle().GetDeviceName();
+    const auto current_dev_base_name = GetBaseDeviceName(current_dev_name);
+    const auto all_known_devs        = GetAllKnownDevices();
     for(const auto& [dev, dev_descr] : all_known_devs)
     {
-        const auto supported = IsDeviceSupported(params.supported_devs, dev) &&
-                               params.excluded_devices.count(dev_descr.name) == 0;
+        if(params.uses_ck_dynamic_lib && current_dev_base_name != dev_descr.name)
+            continue;
+
+        const auto supported = IsDeviceSupported(params, dev, dev_descr.name, false);
         // std::cout << "Test " << dev_descr << " (supported: " << supported << ")" << std::endl;
 
         auto handle    = MockHandle{dev_descr, params.check_xnack_disabled};
@@ -921,15 +963,6 @@ void UnitTestConvSolverDevApplicabilityBase::RunTestImpl(
         // std::cout << "IsApplicable: " << is_applicable << std::endl;
         if(is_applicable != supported)
         {
-            // If the solver uses CK dynamic libraries and the library for this
-            // device wasn't built, the solver correctly reports not-applicable.
-            if(params.uses_ck_dynamic_lib && supported && !is_applicable)
-            {
-                const auto& loader =
-                    miopen::solver::CkImplLibLoader::Get(std::string(dev_descr.name));
-                if(!loader.IsLoaded())
-                    continue;
-            }
             GTEST_FAIL() << dev_descr << " is" << (is_applicable ? "" : " not")
                          << " applicable for " << solver.SolverDbId() << " but "
                          << (supported ? "" : "not ") << "marked as supported";

@@ -29,16 +29,6 @@
 using namespace stinkytofu;
 using namespace stinkytofu::test;
 
-// Helper to create v_mov_b32 in a specific block
-static StinkyInstruction* createVMovInBlock(BasicBlock* bb, GfxArchID arch, int destReg,
-                                            int srcReg) {
-    AsmIRBuilder builder(*bb, arch);
-    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_mov_b32, arch));
-    inst->addDestReg(StinkyRegister("v", destReg, 1));
-    inst->addSrcReg(StinkyRegister("v", srcReg, 1));
-    return inst;
-}
-
 // Helper to create an instruction with BARRIER (pseudo register) as dest.
 // Simulates s_waitcnt-like instructions used for dependency tracking.
 static StinkyInstruction* createBarrierDestInBlock(BasicBlock* bb, GfxArchID arch) {
@@ -112,7 +102,7 @@ TEST_F(DefUseChainTest, LoopBack_TwoBlocks) {
 // =============================================================================
 // CFG:
 //    A    v0 = v0 + v1
-//    | \
+//    | \.
 //    +--+
 // =============================================================================
 TEST_F(DefUseChainTest, LoopBack_SelfLoop) {
@@ -201,12 +191,13 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
     // PHI operands are ordered by A's predecessors: sources[i] = def from preds[i].
     const std::vector<BasicBlock*>& preds = A->getPredecessors();
     for (size_t i = 0; i < preds.size(); ++i) {
-        if (preds[i] == B)
+        if (preds[i] == B) {
             EXPECT_EQ(phi->getSources()[i], bAdd) << "PHI operand for B should be B's add";
-        else if (preds[i] == C)
+        } else if (preds[i] == C) {
             EXPECT_EQ(phi->getSources()[i], cAdd) << "PHI operand for C should be C's add";
-        else if (preds[i] == D)
+        } else if (preds[i] == D) {
             EXPECT_EQ(phi->getSources()[i], dAdd) << "PHI operand for D should be D's add";
+        }
     }
 
     // B, C, D each have 1 predecessor — they use the reaching def directly (no PHI).
@@ -219,7 +210,7 @@ TEST_F(DefUseChainTest, ThreePredecessors_ABCBDA) {
 // =============================================================================
 // CFG:
 //      Entry      v0 = v1 + v2
-//     /  |  \
+//     /  |  \.
 //    B   C   D    v0 = v0 + v3/v4/v5
 //     \  |  /
 //      Exit       v10 = v0 + v11
@@ -338,13 +329,13 @@ TEST_F(DefUseChainTest, PassThrough_ValueUsedBySuccessorsSuccessor) {
 // Edge order: Entry -> A, Entry -> F, Entry -> B (so C's preds = [A, F, B])
 //
 //       Entry
-//      /  |  \
+//      /  |  \.
 //     A   F   B
 //     |   |   |
 //   v0=x  |  v0=y  (F has no v0)
 //       \ | /
 //         C (pass-through, no v0)
-//        / \
+//        / \.
 //       D   E  (both use v0)
 // =============================================================================
 
@@ -503,6 +494,64 @@ TEST_F(DefUseChainTest, IteratedDominanceFrontier) {
     const auto& phiGUsers = phiG->getUsers();
     EXPECT_TRUE(std::find(phiGUsers.begin(), phiGUsers.end(), phiH) != phiGUsers.end());
     EXPECT_TRUE(std::find(phiGUsers.begin(), phiGUsers.end(), cfg.gUse) != phiGUsers.end());
+}
+
+// =============================================================================
+// Rebuilding removes a stale PHI that is not at block entry.
+//
+// entry(v0 = entryDef) -> choice -> direct -----------------> join(PHI) -> use(v0)
+//                           |
+//                           +-----> redef -------------------+
+//                                   v0 = exitDef
+//                                   v0 = stale PHI (appended)
+//
+// The stale PHI models a PHI moved after `exitDef` by CFG flattening. A rebuild
+// must remove it before placing new PHIs; otherwise it shadows `exitDef` as the
+// reaching definition supplied to the join PHI.
+// =============================================================================
+TEST_F(DefUseChainTest, RebuildRemovesNonLeadingStalePhi) {
+    Function func("non_leading_stale_phi");
+    setFunctionArch(func, arch);
+
+    BasicBlock* entry = func.createBasicBlock("entry");
+    BasicBlock* choice = func.createBasicBlock("choice");
+    BasicBlock* direct = func.createBasicBlock("direct");
+    BasicBlock* redef = func.createBasicBlock("redef");
+    BasicBlock* join = func.createBasicBlock("join");
+
+    func.addEdge(entry, choice);
+    func.addEdge(choice, direct);
+    func.addEdge(choice, redef);
+    func.addEdge(direct, join);
+    func.addEdge(redef, join);
+
+    StinkyInstruction* entryDef = createVAddInBlock(entry, arch, 0, 1, 2);
+    StinkyInstruction* exitDef = createVAddInBlock(redef, arch, 0, 5, 6);
+    StinkyInstruction* use = createVAddInBlock(join, arch, 7, 0, 8);
+
+    buildUseDefChain(func, false);
+
+    AsmIRBuilder staleBuilder(*redef, arch);
+    StinkyInstruction* stalePhi = staleBuilder.createPhi(RegType::V, 0);
+    redef->removeIR(stalePhi);
+    redef->appendIR(stalePhi);
+
+    buildUseDefChain(func, true);
+
+    verifyDefUseChainConsistency(func);
+    verifyUsersSourcesConsistency(func);
+
+    StinkyInstruction* joinPhi = findPhi(*join, RegType::V, 0);
+    ASSERT_NE(joinPhi, nullptr);
+
+    EXPECT_EQ(findPhi(*redef, RegType::V, 0), nullptr);
+
+    ASSERT_EQ(joinPhi->getSources().size(), 2u);
+    EXPECT_EQ(joinPhi->getSources()[0], entryDef);
+    EXPECT_EQ(joinPhi->getSources()[1], exitDef);
+
+    ASSERT_EQ(use->getSources().size(), 1u);
+    EXPECT_EQ(use->getSources()[0], joinPhi);
 }
 
 // =============================================================================

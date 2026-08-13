@@ -56,7 +56,7 @@ void traverseCFGInRPO(Function& func, Visitor&& visitor) {
     std::unordered_set<BasicBlock*> visited;
 
     std::function<void(BasicBlock*)> dfs = [&](BasicBlock* bb) {
-        if (!bb || visited.count(bb)) return;
+        if (!bb || visited.contains(bb)) return;
         visited.insert(bb);
 
         // Visit successors first (post-order)

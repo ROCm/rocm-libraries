@@ -2,7 +2,7 @@
 - gfx1250
 - gfx1250
 - [Device 73f0]
-- Activation: 1
+- Activation: True
   ActivationComputeDataType: 0
   ActivationNoGuard: false
   ActivationType: hipblaslt_all
@@ -73,8 +73,8 @@
   TileAwareSelection: false
   TileB: 1
   TotalIndices: 4
-  TransposeA: 1
-  TransposeB: 0
+  TransposeA: True
+  TransposeB: False
   UseBeta: true
   UseBias: 0
   UseE: true
@@ -238,7 +238,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 0
-    PreloadKernArgs: false
+    PreloadKernArgs: true
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1

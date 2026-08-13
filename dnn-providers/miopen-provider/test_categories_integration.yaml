@@ -1,0 +1,98 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# miopen-provider external integration Test Categories Configuration.
+#
+# This file is applied to hipdnn_integration_tests when it is run against the
+# miopen provider plugin. These patterns match hipdnn_integration_tests GTest
+# names, not miopen_plugin_tests names.
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Fast external integration coverage: Smoke GPU cases, quick-tier bundle sweeps, plus quick CPU golden-reference bundles"
+    test_patterns:
+      # "Smoke/*" (slash) matches the C++ parameterised smoke suites (legacy
+      # naming, to be renamed later); "quick_*" matches the bundle sweep
+      # suites whose names mirror the on-disk tier directory. GTest treats
+      # '/' and '_' as literal chars, so both patterns are needed.
+      - "Smoke/*"
+      # - "quick_*"  # uncomment when bundles are the CI driver
+      - "TestCpu*GoldenReference*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
+    test_patterns:
+      - "Smoke/*"
+      # - "quick_*"  # uncomment when bundles are the CI driver
+      - "TestCpu*GoldenReference*"
+      - "TestCpu*GoldenRefStd*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive external integration coverage"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete external integration coverage"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+  ffm_quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: one Smoke case per operation for rapid signal"
+    test_patterns:
+      - "Smoke/IntegrationGpuConvFwd2dFp32.Correctness/0"
+      - "Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
+      - "Smoke/IntegrationGpuActivationForwardFp32.Correctness/0"
+      - "Smoke/IntegrationGpuReductionFp32.Correctness/0"
+      - "Smoke/IntegrationGpuRMSNormFp32.Correctness/0"
+      - "Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/mha"
+    exclude: *common_excludes
+    labels:
+      - "ffm_quick"
+      - "ffm_full"
+
+exclude_gpu:
+  exclude_gpu_gfx110X_windows:
+    test_patterns:
+      - "*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx110X"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    # Interim workaround: Windows runners show high runtime variance and
+    # intermittently exceed 5 minutes on "quick" tests. Revert once per-OS
+    # timeouts (or the underlying flakiness) are resolved; tracked in
+    # https://github.com/ROCm/rocm-libraries/issues/6864.
+    quick: 1200
+    standard: 2700
+    comprehensive: 25200
+    full: 28800

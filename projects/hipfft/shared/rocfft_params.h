@@ -29,10 +29,6 @@
 #include "rocfft/rocfft.h"
 #include "rocfft_enums_vs_fft_enums.h"
 
-#ifdef ROCFFT_MPI_ENABLE
-#include <mpi.h>
-#endif
-
 #ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
@@ -276,6 +272,40 @@ public:
                    != rocfft_status_success)
                     throw std::runtime_error("rocfft_plan_description_set_comm failed");
             }
+
+            if(run_callbacks == fft_callback_type_jit)
+            {
+                // - not implemented yet
+                throw unimplemented_exception("jit callbacks not implemented");
+#if 0
+                check_jit_callback_state();
+                fft_status = rocfft.plan_description_set_load_callback(
+                    desc,
+                    load_jit_cb_state->symbol,
+                    load_jit_cb_state->func.data(),
+                    load_jit_cb_state->func.size(),
+                    load_jit_cb_state->data.empty() ? nullptr
+                                                    : load_jit_cb_state->get_raw_data_ptrs().data(),
+                    load_jit_cb_state->shared_mem_bytes);
+                if(fft_status != rocfft_status_success)
+                {
+                    throw std::runtime_error("rocfft_plan_description_set_load_callback failed");
+                }
+                fft_status = rocfft.plan_description_set_store_callback(
+                    desc,
+                    store_jit_cb_state->symbol,
+                    store_jit_cb_state->func.data(),
+                    store_jit_cb_state->func.size(),
+                    store_jit_cb_state->data.empty()
+                        ? nullptr
+                        : store_jit_cb_state->get_raw_data_ptrs().data(),
+                    store_jit_cb_state->shared_mem_bytes);
+                if(fft_status != rocfft_status_success)
+                {
+                    throw std::runtime_error("rocfft_plan_description_set_store_callback failed");
+                }
+#endif
+            }
         }
 
         if(plan == nullptr)
@@ -347,7 +377,7 @@ public:
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
                     oss << "\n" << device_memory_accountant::singleton().get_details(device);
-                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
+                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device], hip_status);
                 }
 
                 auto rocret = rocfft.execution_info_set_work_buffer(
@@ -364,7 +394,7 @@ public:
 
     // Return the number of expected callback entries for supplied
     // fields.
-    size_t expected_callback_count(const std::vector<fft_field>& fields)
+    size_t expected_callback_count(const std::vector<fft_field>& fields) const
     {
         // If fields are not specified, we consider the input or
         // output to have a single brick (and thus expect a single
@@ -387,14 +417,14 @@ public:
         return expected_callbacks;
     }
 
-    fft_status set_callbacks(std::vector<void*>* load_cb_func,
-                             std::vector<void*>* load_cb_data,
-                             std::vector<void*>* store_cb_func,
-                             std::vector<void*>* store_cb_data,
-                             size_t              load_cb_shared_mem_bytes  = 0,
-                             size_t              store_cb_shared_mem_bytes = 0) override
+    fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes  = 0,
+                                     size_t              store_cb_shared_mem_bytes = 0) override
     {
-        if(run_callbacks)
+        if(run_callbacks == fft_callback_type_funcptr)
         {
             auto expected_load_cb_count  = expected_callback_count(ifields);
             auto expected_store_cb_count = expected_callback_count(ofields);
@@ -713,28 +743,6 @@ private:
         }
         return splitDims;
     }
-
-    int get_process_rank() const
-    {
-        int process_rank = -1; // invalid initialization
-        if(mp_lib == fft_mp_lib_mpi)
-        {
-#ifdef ROCFFT_MPI_ENABLE
-            if(!mp_comm)
-                throw std::runtime_error("Multi-process communicator is not defined");
-            auto ret = MPI_Comm_rank(*static_cast<MPI_Comm*>(mp_comm), &process_rank);
-            if(ret != MPI_SUCCESS || process_rank < 0)
-                throw std::runtime_error("Rank of current process couldn't be set");
-#else
-            throw std::runtime_error("MPI is not enabled");
-#endif
-        }
-        else
-        {
-            process_rank = 0;
-        }
-        return process_rank;
-    }
 };
 
 #define ROCFFT_API_WRAP(func)                            \
@@ -766,6 +774,9 @@ struct rocfft_funcs
     ROCFFT_API_WRAP(plan_description_set_comm);
     ROCFFT_API_WRAP(plan_description_set_data_layout);
     ROCFFT_API_WRAP(plan_description_set_scale_factor);
+    // - not implemented yet
+    // ROCFFT_API_WRAP(plan_description_set_load_callback);
+    // ROCFFT_API_WRAP(plan_description_set_store_callback);
     ROCFFT_API_WRAP(plan_destroy);
     ROCFFT_API_WRAP(plan_get_work_buffer_size);
     ROCFFT_API_WRAP(setup);
@@ -849,6 +860,9 @@ struct dyna_rocfft_funcs
     ROCFFT_DYNA_API_WRAP(plan_description_set_comm);
     ROCFFT_DYNA_API_WRAP(plan_description_set_data_layout);
     ROCFFT_DYNA_API_WRAP(plan_description_set_scale_factor);
+    // - not implemented yet
+    // ROCFFT_DYNA_API_WRAP(plan_description_set_load_callback);
+    // ROCFFT_DYNA_API_WRAP(plan_description_set_store_callback);
     ROCFFT_DYNA_API_WRAP(plan_destroy);
     ROCFFT_DYNA_API_WRAP(plan_get_work_buffer_size);
     ROCFFT_DYNA_API_WRAP(setup);
@@ -880,6 +894,9 @@ struct dyna_rocfft_funcs
         ROCFFT_DYNA_API_LOAD(plan_description_set_comm);
         ROCFFT_DYNA_API_LOAD(plan_description_set_data_layout);
         ROCFFT_DYNA_API_LOAD(plan_description_set_scale_factor);
+        // - not implemented yet
+        // ROCFFT_DYNA_API_LOAD(plan_description_set_store_callback);
+        // ROCFFT_DYNA_API_LOAD(plan_description_set_load_callback);
         ROCFFT_DYNA_API_LOAD(plan_destroy);
         ROCFFT_DYNA_API_LOAD(plan_get_work_buffer_size);
         ROCFFT_DYNA_API_LOAD(setup);
@@ -918,6 +935,11 @@ struct dyna_rocfft_funcs
         std::swap(this->plan_description_set_comm, other.plan_description_set_comm);
         std::swap(this->plan_description_set_data_layout, other.plan_description_set_data_layout);
         std::swap(this->plan_description_set_scale_factor, other.plan_description_set_scale_factor);
+        // - not implemented yet
+        // std::swap(this->plan_description_set_load_callback,
+        //           other.plan_description_set_load_callback);
+        // std::swap(this->plan_description_set_store_callback,
+        //           other.plan_description_set_store_callback);
         std::swap(this->plan_destroy, other.plan_destroy);
         std::swap(this->plan_get_work_buffer_size, other.plan_get_work_buffer_size);
         std::swap(this->setup, other.setup);

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -67,8 +67,8 @@ namespace rocsparse
 template <typename T>
 rocsparse_status rocsparse::prune_dense2csr_by_percentage_buffer_size_template(
     rocsparse_handle          handle, //0
-    rocsparse_int             m, //1
-    rocsparse_int             n, //2
+    int64_t                   m, //1
+    int64_t                   n, //2
     const T*                  A, //3
     int64_t                   lda, //4
     T                         percentage, //5
@@ -100,7 +100,7 @@ rocsparse_status rocsparse::prune_dense2csr_by_percentage_buffer_size_template(
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
-    ROCSPARSE_CHECKARG_ARRAY(3, size_t(m) * n, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, m * n, A);
 
     ROCSPARSE_CHECKARG(4, lda, (lda < m), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(5,
@@ -128,8 +128,8 @@ rocsparse_status rocsparse::prune_dense2csr_by_percentage_buffer_size_template(
 template <typename T>
 rocsparse_status
     rocsparse::prune_dense2csr_nnz_by_percentage_template(rocsparse_handle          handle, //0
-                                                          rocsparse_int             m, //1
-                                                          rocsparse_int             n, //2
+                                                          int64_t                   m, //1
+                                                          int64_t                   n, //2
                                                           const T*                  A, //3
                                                           int64_t                   lda, //4
                                                           T                         percentage, //5
@@ -158,7 +158,7 @@ rocsparse_status
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
-    ROCSPARSE_CHECKARG_ARRAY(3, size_t(m) * n, A);
+    ROCSPARSE_CHECKARG_ARRAY(3, m * n, A);
 
     ROCSPARSE_CHECKARG(4, lda, (lda < m), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG(5,
@@ -187,7 +187,7 @@ rocsparse_status
 
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                     nnz_total_dev_host_ptr, 0, sizeof(rocsparse_int), handle->stream));
             }
             else
@@ -202,21 +202,32 @@ rocsparse_status
     ROCSPARSE_CHECKARG_POINTER(8, nnz_total_dev_host_ptr);
     ROCSPARSE_CHECKARG_POINTER(10, temp_buffer);
 
-    const rocsparse_int nnz_A = m * n;
+    const int64_t nnz_A = m * n;
 
-    rocsparse_int pos = rocsparse::ceil(nnz_A * (percentage / 100)) - 1;
-    pos               = rocsparse::min(pos, nnz_A - 1);
-    pos               = rocsparse::max(pos, static_cast<rocsparse_int>(0));
+    int64_t pos = rocsparse::ceil(nnz_A * (percentage / 100)) - 1;
+    pos         = rocsparse::min(pos, nnz_A - 1);
+    pos         = rocsparse::max(pos, static_cast<int64_t>(0));
 
     T* output = reinterpret_cast<T*>(temp_buffer);
 
-    // Compute absolute value of A and store in first half of output array
     {
-        dim3 grid((nnz_A - 1) / 256 + 1);
-        dim3 threads(256);
+        static constexpr int BLOCKSIZE = 256;
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (abs_kernel<256, T>), grid, threads, 0, stream, m, n, A, lda, output);
+        const int64_t nblocks = (nnz_A - 1) / BLOCKSIZE + 1;
+
+        const uint32_t grid_x = std::min(nblocks, static_cast<int64_t>(2147483647));
+        const uint32_t grid_y = std::min((nblocks - 1) / grid_x + 1, static_cast<int64_t>(65535));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((abs_kernel<BLOCKSIZE, T>),
+                                           dim3(grid_x, grid_y, 1),
+                                           dim3(BLOCKSIZE, 1, 1),
+                                           0,
+                                           stream,
+                                           m,
+                                           n,
+                                           A,
+                                           lda,
+                                           output);
     }
 
     // Determine amount of temporary storage needed for rocprim sort and inclusive scan and allocate if necessary
@@ -279,14 +290,14 @@ rocsparse_status
     }
 
     // Store threshold at first entry in output array
-    RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(output, d_threshold, sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        output, d_threshold, sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
 
     // Compute csr_row_ptr with the right index base.
     rocsparse_int first_value = descr->base;
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         csr_row_ptr, &first_value, sizeof(rocsparse_int), hipMemcpyHostToDevice, handle->stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     // Perform actual inclusive sum
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::inclusive_scan(
@@ -313,11 +324,11 @@ rocsparse_status
     else
     {
         rocsparse_int start, end;
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &start, &csr_row_ptr[0], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &end, &csr_row_ptr[m], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
         *nnz_total_dev_host_ptr = end - start;
     }
@@ -328,8 +339,8 @@ rocsparse_status
 template <typename T>
 rocsparse_status
     rocsparse::prune_dense2csr_by_percentage_template(rocsparse_handle          handle, //0
-                                                      rocsparse_int             m, //1
-                                                      rocsparse_int             n, //2
+                                                      int64_t                   m, //1
+                                                      int64_t                   n, //2
                                                       const T*                  A, //3
                                                       int64_t                   lda, //4
                                                       T                         percentage, //5
@@ -390,13 +401,13 @@ rocsparse_status
         rocsparse_int start = 0;
         rocsparse_int end   = 0;
 
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &end, &csr_row_ptr[m], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
 
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &start, &csr_row_ptr[0], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
 
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
         const rocsparse_int nnz = (end - start);
 

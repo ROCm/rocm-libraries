@@ -9,7 +9,11 @@
 
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 #include "ck_tile/host/device_prop.hpp"
+#ifdef CK_TILE_DISPATCHER
+#include "profiler/grouped_convolution_forward_tile_dispatcher_algs.hpp"
+#else
 #include "profiler/grouped_convolution_forward_tile_algs.hpp"
+#endif
 
 static ck::index_t args_mask      = 0xffff;
 static ck::index_t instance_index = -1;
@@ -145,7 +149,25 @@ using KernelTypes2d = ::testing::Types<SignatureDetails<2,
                                                         ckb::DataType::FP32,
                                                         ckb::TensorLayout::NHWGC,
                                                         ckb::TensorLayout::GKYXC,
-                                                        ckb::TensorLayout::NHWGK>>;
+                                                        ckb::TensorLayout::NHWGK>,
+                                       SignatureDetails<2,
+                                                        ckb::DataType::FP32,
+                                                        ckb::DataType::FP32,
+                                                        ckb::TensorLayout::NGCHW,
+                                                        ckb::TensorLayout::GKCYX,
+                                                        ckb::TensorLayout::NGKHW>,
+                                       SignatureDetails<2,
+                                                        ckb::DataType::FP16,
+                                                        ckb::DataType::FP32,
+                                                        ckb::TensorLayout::NGCHW,
+                                                        ckb::TensorLayout::GKCYX,
+                                                        ckb::TensorLayout::NGKHW>,
+                                       SignatureDetails<2,
+                                                        ckb::DataType::BF16,
+                                                        ckb::DataType::FP32,
+                                                        ckb::TensorLayout::NGCHW,
+                                                        ckb::TensorLayout::GKCYX,
+                                                        ckb::TensorLayout::NGKHW>>;
 
 using KernelTypes3d = ::testing::Types<SignatureDetails<3,
                                                         ckb::DataType::FP32,

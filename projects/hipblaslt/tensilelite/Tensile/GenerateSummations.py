@@ -36,7 +36,7 @@ from copy import deepcopy
 from . import LibraryIO
 
 from . import ClientWriter
-from .TensileCreateLibrary import libraryDir
+from .TensileCreateLibrary import tensileLibraryFile
 from Tensile.Common import ensurePath, printExit
 from Tensile.Common.Architectures import isaToGfx, gfxToSwCodename, detectGlobalCurrentISA
 from Tensile.Common.GlobalParameters import assignGlobalParameters
@@ -130,12 +130,12 @@ def GenerateSummations(userArgs):
         configFile = os.path.join(configFilePath, "ClientParameters.ini")
         scriptPath = ensurePath(os.path.join(outputPath, logicFileStem, "script"))
 
-        ClientWriter.CreateBenchmarkClientParametersForSizes(libraryPath, problemSizes, dataFilePath, configFile, problemTypeObj)
+        ClientWriter.CreateBenchmarkClientParametersForSizes(libraryPath, problemSizes, dataFilePath, configFile, 0, gfxName, problemTypeDict=problemTypeObj)
         ClientWriter.runNewClient(scriptPath, configFile, clientBuildDir, cxxCompiler, cCompiler)
 
-        tensileLibraryFile = libraryDir(libPath, []) / "TensileLibrary.yaml"
+        libraryFilePath = tensileLibraryFile(libPath, gfxName, "yaml")
 
-        stream = open(tensileLibraryFile, "r")
+        stream = open(libraryFilePath, "r")
         tensileLibrary = yaml.load(stream, yaml.SafeLoader)
         stream.close()
 

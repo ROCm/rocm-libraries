@@ -34,9 +34,7 @@
 #include <stdexcept>
 #include <string>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -63,10 +61,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(ScalarValue d);
-    std::string   TypeAbbrev(ScalarValue d);
-    std::ostream& operator<<(std::ostream& stream, ScalarValue const& t);
-    std::istream& operator>>(std::istream& stream, ScalarValue& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::string   TypeAbbrev(ScalarValue d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, ScalarValue const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ScalarValue& t);
 
     /**
  * \ingroup ScalarValue
@@ -143,20 +141,35 @@ namespace TensileLite
         if constexpr(std::is_same<T, ConstantVariant>::value)
         {
             if(CompareValue(value, (double)1))
+            {
+
                 return ScalarValue::One;
+            }
             else if(CompareValue(value, (double)-1))
+            {
                 return ScalarValue::NegativeOne;
+            }
             else
+            {
                 return ScalarValue::Any;
+            }
         }
         else
         {
             if(value == T(1))
+            {
+
                 return ScalarValue::One;
+            }
             else if(value == T(-1))
+            {
+
                 return ScalarValue::NegativeOne;
+            }
             else
+            {
                 return ScalarValue::Any;
+            }
         }
     }
 
@@ -177,4 +190,3 @@ namespace std
     };
 } // namespace std
 
-TENSILE_HIDDEN_END

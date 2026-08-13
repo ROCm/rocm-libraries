@@ -24,16 +24,18 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iomanip>
 #include <limits>
 #include <sstream>
 
+#include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace stinkytofu {
-// Helper function to format vector as [a,b,c]
-inline std::string vectorToString(const std::vector<int>& vec) {
+static std::string vectorToString(const std::vector<int>& vec) {
     std::string result = "[";
     for (size_t i = 0; i < vec.size(); ++i) {
         result += std::to_string(vec[i]);
@@ -44,7 +46,6 @@ inline std::string vectorToString(const std::vector<int>& vec) {
     result += "]";
     return result;
 }
-
 }  // namespace stinkytofu
 
 namespace stinkytofu {
@@ -63,7 +64,8 @@ static void emitDirective(std::ostream& os, const AsmDirective& directive,
 static void emitBasicBlock(std::ostream& os, const BasicBlock& bb, const AsmEmitterOptions& options,
                            StinkyAsmEmitter* emitter);
 
-// Stream operators for instruction modifiers
+// NOLINTBEGIN(misc-use-internal-linkage)
+// Stream operators for instruction modifiers — must remain in namespace stinkytofu for ADL.
 inline std::ostream& operator<<(std::ostream& os, const SWaitTensorCntData& waitTensorCntData) {
     os << "tlcnt=" << (int)waitTensorCntData.tlcnt;
     return os;
@@ -77,7 +79,7 @@ inline std::ostream& operator<<(std::ostream& os, const SDelayAluData& delayAluD
             case SDelayAluData::InstType::SALU:
                 return "SALU";
             case SDelayAluData::InstType::TRANS:
-                return "TRANS";
+                return "TRANS32";
             case SDelayAluData::InstType::NO_DEP:
                 return "NO_DEP";
             default:
@@ -181,6 +183,15 @@ inline std::ostream& operator<<(std::ostream& os, const FLATModifiers& flatMod) 
         else if (flatMod.hasSC0Modifier)
             os << " sc1";
     }
+    // gfx12+ FLAT ops use scope:/th: in place of glc/slc/sc0/sc1; the rocisa
+    // emitter writes these for cross-CU sync (e.g. flat_atomic_dec_u32 for
+    // MBSK GSU), and dropping them on re-emit silently breaks coherence.
+    if (flatMod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(flatMod.scope);
+    }
+    if (hasTemporalHint(flatMod.th)) {
+        os << " th:" << toString(flatMod.th);
+    }
     if (flatMod.lds) {
         os << " lds";
     }
@@ -206,11 +217,41 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     if (mubufMod.scope != MUBUFScope::SCOPE_NONE) {
         os << " scope:" << toString(mubufMod.scope);
     }
-    if (mubufMod.nt) {
+    // Match rocisa MUBUFModifiers::toString(): gfx1250+ temporal hints replace the
+    // legacy nt token when both are present in the modifier bag.
+    if (hasTemporalHint(mubufMod.th)) {
+        os << " th:" << toString(mubufMod.th, mubufMod.isStore);
+    } else if (mubufMod.nt) {
         os << " nt";
+    }
+    if (mubufMod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mubufMod.nv);
     }
     if (mubufMod.lds) {
         os << " lds";
+    }
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod) {
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
+    }
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
+    if (mod.offset != 0) {
+        os << " offset:" << mod.offset;
+    }
+    // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
+    // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
+    // hint first then scope (e.g. " th:TH_LOAD_NT scope:SCOPE_SE").
+    if (hasTemporalHint(mod.th)) {
+        os << " th:" << toString(mod.th);
+    }
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
     }
     return os;
 }
@@ -272,27 +313,60 @@ inline std::ostream& operator<<(std::ostream& os, const SDWAModifiers& sdwaMod) 
 }
 
 inline std::ostream& operator<<(std::ostream& os, const DPPModifiers& dppMod) {
-    if (dppMod.row_shr != -1) os << " row_shr:" << dppMod.row_shr;
-    if (dppMod.row_bcast != -1) os << " row_bcast:" << dppMod.row_bcast;
-    if (dppMod.bound_ctrl != -1) os << " bound_ctrl:" << dppMod.bound_ctrl;
+    if (dppMod.isDPP8) {
+        os << " dpp8:[" << (int)dppMod.dpp8[0];
+        for (int i = 1; i < 8; ++i) os << "," << (int)dppMod.dpp8[i];
+        os << "]";
+    } else if (dppMod.dppCtrl != DppCtrl::NONE) {
+        os << " " << dppCtrlToAsmStr(dppMod.dppCtrl);
+    }
+    if (!dppMod.isDPP8) {
+        if (dppMod.rowMask != 0xF)
+            os << " row_mask:0x" << std::hex << (int)dppMod.rowMask << std::dec;
+        if (dppMod.bankMask != 0xF)
+            os << " bank_mask:0x" << std::hex << (int)dppMod.bankMask << std::dec;
+    }
+    if (dppMod.boundCtrl) os << " bound_ctrl:1";
+    if (dppMod.fi) os << " fi:1";
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const MatrixFmtModifiers& m) {
+    // Input formats: matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8
+    if (m.fmtA != MatrixFmt::NONE) os << " matrix_a_fmt:" << matrixFmtToStr(m.fmtA);
+    if (m.fmtB != MatrixFmt::NONE) os << " matrix_b_fmt:" << matrixFmtToStr(m.fmtB);
+    // MX scale-select: 0 is the default and emitted implicitly (matches rocisa).
+    // Must be emitted BEFORE matrix_*_scale_fmt: the assembler enforces the modifier
+    // order matrix_*_fmt -> matrix_*_scale -> matrix_*_scale_fmt and rejects any other
+    // ordering with "not a valid operand".
+    if (m.scaleSelA != 0) os << " matrix_a_scale:" << m.scaleSelA;
+    if (m.scaleSelB != 0) os << " matrix_b_scale:" << m.scaleSelB;
+    // Scale formats: rocisa emits the raw integer (matrix_a_scale_fmt:2), so
+    // match that for byte-for-byte parity in the asm output. The IR (.stir)
+    // serializer keeps the symbolic name via matrixScaleFmtToStr().
+    if (m.scaleFmtA != MatrixScaleFmt::NONE)
+        os << " matrix_a_scale_fmt:" << static_cast<int>(m.scaleFmtA);
+    if (m.scaleFmtB != MatrixScaleFmt::NONE)
+        os << " matrix_b_scale_fmt:" << static_cast<int>(m.scaleFmtB);
     return os;
 }
 
 inline std::ostream& operator<<(std::ostream& os, const MFMAModifiers& mfmaMod) {
-    if (!mfmaMod.scaleStr.empty()) {
-        os << mfmaMod.scaleStr;
+    // Reuse hints
+    if (mfmaMod.reuseA) os << " matrix_a_reuse";
+    if (mfmaMod.reuseB) os << " matrix_b_reuse";
+    // Neg bits: neg_lo:[1,1] neg_hi:[0,1]
+    if (mfmaMod.negBits.hasNegLo()) {
+        os << " neg_lo:[" << (int)mfmaMod.negBits.negLo[0];
+        for (int i = 1; i < mfmaMod.negBits.numSrcs; ++i)
+            os << "," << (int)mfmaMod.negBits.negLo[i];
+        os << "]";
     }
-    if (!mfmaMod.inputPermute.empty()) {
-        os << " " << mfmaMod.inputPermute;
-    }
-    if (mfmaMod.reuseA) {
-        os << " matrix_a_reuse";
-    }
-    if (mfmaMod.reuseB) {
-        os << " matrix_b_reuse";
-    }
-    if (!mfmaMod.negStr.empty()) {
-        os << " " << mfmaMod.negStr;
+    if (mfmaMod.negBits.hasNegHi()) {
+        os << " neg_hi:[" << (int)mfmaMod.negBits.negHi[0];
+        for (int i = 1; i < mfmaMod.negBits.numSrcs; ++i)
+            os << "," << (int)mfmaMod.negBits.negHi[i];
+        os << "]";
     }
     return os;
 }
@@ -309,6 +383,7 @@ inline std::ostream& operator<<(std::ostream& os, const VOP3PModifiers& vop3pMod
     }
     return os;
 }
+// NOLINTEND(misc-use-internal-linkage)
 
 static void emitRegister(std::ostream& os, const StinkyRegister& reg,
                          const AsmEmitterOptions& options) {
@@ -407,6 +482,10 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
             os << reg.getLiteralString();
             break;
 
+        case StinkyRegister::Type::HwReg:
+            HwReg::printOperand(os, reg);
+            break;
+
         case StinkyRegister::Type::Invalid:
             os << "<invalid>";
             break;
@@ -431,20 +510,9 @@ static bool isEXECType(RegType t) {
     return t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI;
 }
 
-/// A destination register is implicit (not printed) when it was added
-/// solely for dependency tracking.  The instruction's HW flags tell us
-/// which special registers are implicit vs encoded as real operands.
-static bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& inst) {
-    if (reg.dataType != StinkyRegister::Type::Register) return false;
-
-    RegType t = reg.reg.type;
-
-    if (t == RegType::SCC) return true;
-
-    if (isEXECType(t) && inst.is(IF_ImplicitWriteEXEC)) return true;
-
-    return false;
-}
+// isImplicitDest() (destination-side) is shared -- see StinkyAsmIR.hpp. It is
+// also consumed by the waitcnt dataflow's isReturningAtomic(), so both agree
+// on exactly the same "does this atomic return a value" answer.
 
 /// A source register is implicit (not printed) when it was added solely
 /// for dependency tracking.
@@ -459,6 +527,24 @@ static bool isImplicitSrc(const StinkyRegister& reg, const StinkyInstruction& in
 
     if (isEXECType(t) && inst.is(IF_ImplicitReadEXEC)) return true;
 
+    return false;
+}
+
+static FieldType fieldTypeForEmittedSrcOperand(const StinkyInstruction& inst, size_t emitSrcIndex) {
+    const HwInstDesc* desc = inst.getHwInstDesc();
+    if (desc == nullptr) return FieldType::None;
+    size_t srcIdx = 0;
+    for (const auto& f : desc->operandFields) {
+        if (f.isDest) continue;
+        if (srcIdx == emitSrcIndex) return f.fieldType;
+        srcIdx++;
+    }
+    return FieldType::None;
+}
+
+static bool isNullSmemOffsetNokOperand(const StinkyRegister& reg) {
+    if (reg.dataType == StinkyRegister::Type::LiteralString) return reg.literalValue == "null";
+    if (reg.dataType == StinkyRegister::Type::LiteralInt) return reg.literalInt == 0;
     return false;
 }
 
@@ -500,7 +586,11 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
     // Check if instruction has VOP3 modifiers
     const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
 
-    // Check if this is a MUBUF instruction (buffer operations) with offen
+    // Check if this is a MUBUF instruction (buffer operations) with offen.
+    // Note: SOPP fences (global_wb / global_inv) carry a CacheScopeModifiers
+    // instead of MUBUFModifiers, so this query correctly returns nullptr for
+    // them — the null/0-soffset substitution below is only meaningful for
+    // true buffer ops with src registers.
     const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
 
     // Compute the number of source operands to emit from the HW field metadata.
@@ -542,12 +632,20 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
             }
         }
 
+        if (fieldTypeForEmittedSrcOperand(inst, nonSkippedIndex) == FieldType::smem_offset_nok &&
+            isNullSmemOffsetNokOperand(srcRegs[i])) {
+            os << "null";
+            firstOperand = false;
+            nonSkippedIndex++;
+            continue;
+        }
+
         bool needsNeg = false;
         bool needsAbs = false;
 
         // Check VOP3 modifiers for this source operand
         if (vop3Mod) {
-            switch (nonSkippedIndex) {
+            switch (nonSkippedIndex) {  // NOLINT(bugprone-switch-missing-default-case)
                 case 0:
                     needsNeg = vop3Mod->neg_src0;
                     needsAbs = vop3Mod->abs_src0;
@@ -688,15 +786,22 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(DS, DS);
             EMIT_TRAILING_MODIFIER(FLAT, FLAT);
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
+            EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
+            EMIT_TRAILING_MODIFIER(GLOBAL, GLOBAL);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);
             EMIT_TRAILING_MODIFIER(MFMA_DATA, MFMA);
+            EMIT_TRAILING_MODIFIER(MATRIX_FMT, MatrixFmt);
             default:
                 break;
         }
     }
 #undef EMIT_TRAILING_MODIFIER
+
+    if (isReturningAtomic(inst)) {
+        os << " th:TH_ATOMIC_RETURN";
+    }
 }
 
 static void emitCycleComment(std::ostream& os, const StinkyInstruction& inst, int currentColumn,

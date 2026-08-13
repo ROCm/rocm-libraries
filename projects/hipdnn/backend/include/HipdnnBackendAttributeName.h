@@ -55,7 +55,16 @@
  * - 3000-3099: Custom op operation attributes
  * - 3100-3199: SDPA backward propagation operation attributes
  * - 3200-3299: Reduction operation attributes
- * - 60000+: Extension attributes
+ * - 3300-3399: Resample forward operation attributes
+ * - 3400-3499: Shared resample descriptor attributes
+ * - 3500-3599: RMSNorm backward operation attributes
+ * - 3600-3699: Layernorm backward operation attributes
+ * - 3700-3799: MoE grouped matmul operation attributes
+ * - 60000-60099: Knob info serialized value extension attributes
+ * - 60100-60199: Knob choice serialized value extension attributes
+ * - 60200-60299: Operation type extension attributes
+ * - 60300-60399: Operation name extension attributes
+ * - 60400-60499: Profiling control extension attributes
  */
 typedef enum
 {
@@ -82,6 +91,26 @@ typedef enum
 
     /** @brief Find first mode: stop after finding any applicable engine (bool, extension) */
     HIPDNN_ATTR_ENGINEHEUR_FIND_FIRST_EXT = 105,
+
+    /**
+     * @brief Ordered list of heuristic policy IDs for engine selection (array of int64, extension)
+     *
+     * Specifies the policy order for the heuristic outer loop. Each element is an int64_t
+     * policy ID, produced by hashing a policy name (e.g., "SelectionHeuristic::StaticOrdering")
+     * with hipdnn_data_sdk::utilities::policyNameToId.
+     * Hashing is performed by the caller before the C ABI; the backend stores and dispatches
+     * by ID only.
+     *
+     * Resolution priority at finalize time (highest first):
+     *   1. HIPDNN_HEUR_POLICY_ORDER env var (comma-separated tokens; each token is
+     *      either a policy name, which is hashed via policyNameToId, or a raw
+     *      decimal int64 policy ID).
+     *   2. This descriptor attribute, if set.
+     *   3. Built-in default: [SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering].
+     *
+     * Type: HIPDNN_TYPE_INT64
+     */
+    HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT = 106,
 
     /** @} */
 
@@ -138,6 +167,13 @@ typedef enum
     /** @brief UIDs of tensors required by this plan */
     HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT = 308,
 
+    /** @brief Global index of the engine backing this finalized execution plan (read-only) */
+    HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT = 309,
+
+    /** @brief Whether execute-time override shapes are enabled for this plan (bool, read-only,
+     * extension) */
+    HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT = 310,
+
     /** @} */
 
     /**
@@ -189,7 +225,7 @@ typedef enum
     /** @brief Total number of engines available globally */
     HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT = 602,
 
-    /** @brief Whether dynamic shapes are enabled for this graph */
+    /** @brief Whether dynamic shape support is enabled for this graph */
     HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED = 603,
 
     /** @brief Compute data type for the operation graph (hipdnnDataType_t, extension) */
@@ -206,6 +242,9 @@ typedef enum
 
     /** @brief Name of the operation graph (HIPDNN_TYPE_CHAR, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT = 608,
+
+    /** @brief Whether execute-time override shapes are enabled for this graph (bool, extension) */
+    HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT = 609,
 
     /** @} */
 
@@ -226,6 +265,50 @@ typedef enum
 
     /** @brief Workspace pointer for execution */
     HIPDNN_ATTR_VARIANT_PACK_WORKSPACE = 703,
+
+    /**
+     * @brief Per-execute UIDs of tensors whose shape/stride is being overridden
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * Selector array: each entry identifies which tensor in the graph the
+     * corresponding entries in OVERRIDE_LENGTHS / OVERRIDE_SHAPES /
+     * OVERRIDE_STRIDES describe. The four override attributes share this
+     * ordering. UIDs must be unique and must also be present in
+     * HIPDNN_ATTR_VARIANT_PACK_UNIQUE_IDS.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS_EXT = 704,
+
+    /**
+     * @brief Per-execute override shapes, packed flat across all UIDs
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * Concatenation of each tensor's shape vector in the order given by
+     * OVERRIDE_UNIQUE_IDS. The per-tensor rank used to slice this flat
+     * array comes from OVERRIDE_LENGTHS. The total element count must equal
+     * the sum of OVERRIDE_LENGTHS.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_EXT = 705,
+
+    /**
+     * @brief Per-execute override strides, packed flat across all UIDs
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * Concatenation of each tensor's stride vector in the order given by
+     * OVERRIDE_UNIQUE_IDS. Sliced using OVERRIDE_LENGTHS like OVERRIDE_SHAPES,
+     * and must have the same total element count.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_EXT = 706,
+
+    /**
+     * @brief Per-UID rank of the override shape/stride vectors
+     *        (HIPDNN_TYPE_INT64).
+     *
+     * One positive entry per UID in OVERRIDE_UNIQUE_IDS, giving the rank used
+     * to slice OVERRIDE_SHAPES / OVERRIDE_STRIDES at dispatch. Stored as
+     * int64_t in the variant pack and narrowed to uint32_t only at the SDK
+     * dispatch boundary.
+     */
+    HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS_EXT = 707,
 
     /** @} */
 
@@ -379,8 +462,20 @@ typedef enum
     /** @brief Pass-by-value tensor data (extension) */
     HIPDNN_ATTR_TENSOR_VALUE_EXT = 1306,
 
-    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor (extension) */
+    /** @brief Read-only: whether a pass-by-value scalar is set on this tensor */
     HIPDNN_ATTR_TENSOR_IS_BY_VALUE = 1307,
+
+    /** @brief Read-only alias of HIPDNN_ATTR_TENSOR_VALUE_EXT for cuDNN porting parity */
+    HIPDNN_ATTR_TENSOR_CONSTANT_VALUE = HIPDNN_ATTR_TENSOR_VALUE_EXT, // 1306
+
+    /** @brief Settable: whether this tensor is a runtime pass-by-value scalar (extension) */
+    HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT = 1308,
+
+    /** @brief Required byte alignment of the tensor's physical buffer pointer */
+    HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT = 1309,
+
+    /** @brief UID of the ragged-offset aux tensor for this tensor (int64_t, optional) */
+    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC = 1310,
 
     /** @} */
 
@@ -1096,6 +1191,181 @@ typedef enum
     /** @} */
 
     /**
+     * @name Resample Forward Operation Attributes (3300-3399)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Input tensor for forward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_XDESC = 3300,
+
+    /** @brief Output tensor for forward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_YDESC = 3301,
+
+    /** @brief Optional index tensor for max resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_FWD_IDXDESC = 3302,
+
+    /** @} */
+
+    /**
+      * @name Resample Backward Operation Attributes (3408-3410)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RESAMPLE_BWD_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Gradient of output tensor for backward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DYDESC = 3408,
+
+    /** @brief Gradient of input tensor for backward resample */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_DXDESC = 3409,
+
+    /** @brief Optional index tensor for max resample backward */
+    HIPDNN_ATTR_OPERATION_RESAMPLE_BWD_IDXDESC = 3410,
+
+    /** @} */
+
+    /**
+      * @name Shared Resample Descriptor Attributes (3400-3407)
+     * Attributes shared across resample operation descriptors (forward, backward).
+     * These are set directly on the operation descriptor.
+     * @{
+     */
+
+    /** @brief Resample mode (max, average, average_inclusive) */
+    HIPDNN_ATTR_RESAMPLE_MODE = 3400,
+
+    /** @brief Pre-padding values for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_PRE_PADDINGS = 3401,
+
+    /** @brief Post-padding values for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_POST_PADDINGS = 3402,
+
+    /** @brief Stride values for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_STRIDES = 3403,
+
+    /** @brief Resample window for each spatial dimension */
+    HIPDNN_ATTR_RESAMPLE_WINDOW_DIMS = 3404,
+
+    /** @brief Padding mode for resample (zero pad, neg inf pad) */
+    HIPDNN_ATTR_RESAMPLE_PADDING_MODE = 3405,
+
+    /** @brief Whether to generate index output (for max resample) */
+    HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT = 3406,
+
+    /** @brief Compute data type for resample */
+    HIPDNN_ATTR_RESAMPLE_COMP_TYPE = 3407,
+
+    /** @} */
+
+    /**
+     * @name RMSNorm Backward Operation Attributes (3500-3599)
+     * Attributes for HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Gradient input tensor (dy) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DY_EXT = 3500,
+
+    /** @brief Input tensor (x) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_X_EXT = 3501,
+
+    /** @brief Scale tensor for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_SCALE_EXT = 3502,
+
+    /** @brief Inverse RMS tensor for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_INV_RMS_EXT = 3503,
+
+    /** @brief Gradient output tensor (dx) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DX_EXT = 3504,
+
+    /** @brief Scale gradient tensor (dscale) for rmsnorm backward */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DSCALE_EXT = 3505,
+
+    /** @brief Bias gradient tensor (dbias) for rmsnorm backward (optional) */
+    HIPDNN_ATTR_OPERATION_RMSNORM_BACKWARD_DBIAS_EXT = 3506,
+
+    /** @brief Compute data type for rmsnorm backward */
+    HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT = 3507,
+
+    /** @} */
+
+    /**
+     * @name Layernorm Backward Operation Attributes (3600-3699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT = 3600,
+
+    /** @brief Input tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT = 3601,
+
+    /** @brief Scale tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT = 3602,
+
+    /** @brief Mean tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT = 3603,
+
+    /** @brief Inverse variance tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT = 3604,
+
+    /** @brief Epsilon tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT = 3605,
+
+    /** @brief Input gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT = 3606,
+
+    /** @brief Scale gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT = 3607,
+
+    /** @brief Bias gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT = 3608,
+
+    /** @brief Number of normalized dimensions for backward layernorm */
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT = 3609,
+
+    /** @brief Compute type for backward layernorm */
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT = 3610,
+
+    /** @} */
+
+    /**
+     * @name MoE Grouped Matmul Operation Attributes (3700-3799)
+     * Attributes for HIPDNN_BACKEND_OPERATION_MOE_GROUPED_MATMUL_DESCRIPTOR
+     * @{
+     */
+
+    /** @brief Token tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_DESC = 3700,
+
+    /** @brief Expert weight tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_WEIGHT_DESC = 3701,
+
+    /** @brief First-token offset tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_FIRST_TOKEN_OFFSET_DESC = 3702,
+
+    /** @brief Optional source-token index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_INDEX_DESC = 3703,
+
+    /** @brief Optional routed-token expert-index tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOKEN_KS_DESC = 3704,
+
+    /** @brief Output tensor */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_OUTPUT_DESC = 3705,
+
+    /** @brief Routing mode */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MODE = 3706,
+
+    /** @brief Number of routed experts per token */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_TOP_K = 3707,
+
+    /** @brief Math precision */
+    HIPDNN_ATTR_OPERATION_MOE_GROUPED_MATMUL_MATH_PREC = 3708,
+
+    /** @} */
+
+    /**
      * @name Extension Attributes (60000+)
      * hipDNN-specific extension attributes
      * @{
@@ -1134,6 +1404,29 @@ typedef enum
      * Type: HIPDNN_TYPE_CHAR
      */
     HIPDNN_ATTR_OPERATION_NAME_EXT = 60300,
+
+    /** @} */
+
+    /**
+     * @name Profiling Control Attributes (60400-60499)
+     * Attributes for HIPDNN_BACKEND_PROFILING_CONTROL_EXT
+     * @{
+     */
+
+    /** @brief hipDNN handle providing the HIP stream for profiling (HIPDNN_TYPE_HANDLE) */
+    HIPDNN_ATTR_PROFILING_HANDLE_EXT = 60400,
+
+    /** @brief Trigger: record start event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_START_EXT = 60401,
+
+    /** @brief Trigger: record stop event on the stream (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_STOP_EXT = 60402,
+
+    /** @brief Elapsed time in milliseconds between start and stop events (HIPDNN_TYPE_FLOAT, read-only) */
+    HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT = 60403,
+
+    /** @brief Trigger: call hipDeviceSynchronize before benchmarking (HIPDNN_TYPE_BOOLEAN, write-only) */
+    HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT = 60404,
 
     /** @} */
 

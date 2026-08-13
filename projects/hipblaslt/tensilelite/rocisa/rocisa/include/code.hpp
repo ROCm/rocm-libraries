@@ -119,7 +119,7 @@ namespace rocisa
                 t += "  /// " + comment;
             }
             t += "\n";
-            if(getAsmCaps()["HasVgprMSB"])
+            if(capOrDefault(getAsmCaps(), "HasVgprMSB"))
             {
                 rocIsa::getInstance().setVgprMsb(-1);
             }
@@ -166,6 +166,10 @@ namespace rocisa
     {
         std::vector<std::shared_ptr<Item>> itemList;
         std::shared_ptr<Container>         tempVgpr = nullptr;
+        // Metadata-only callable marker for consumers that preserve function
+        // boundaries (for example StinkyTofu). This does not affect toString().
+        bool                               isCallable = false;
+        std::string                        callableName;
         bool                               _isNoOpt;
 
         Module(const std::string& name = "")
@@ -177,6 +181,8 @@ namespace rocisa
         Module(const Module& other)
             : Item(other)
             , tempVgpr(other.tempVgpr ? other.tempVgpr->clone() : nullptr)
+            , isCallable(other.isCallable)
+            , callableName(other.callableName)
             , _isNoOpt(other._isNoOpt)
         {
             itemList = cloneItemList(other.itemList);
@@ -874,7 +880,7 @@ namespace rocisa
             : ValueSet(name, value, offset)
             , regType(regType)
         {
-            if(getAsmCaps()["HasVgprMSB"] && regType == "v")
+            if(capOrDefault(getAsmCaps(), "HasVgprMSB") && regType == "v")
                 setIdx(value, offset);
         }
 
@@ -885,7 +891,7 @@ namespace rocisa
             : ValueSet(name, value, offset)
             , regType(regType)
         {
-            if(getAsmCaps()["HasVgprMSB"] && regType == "v")
+            if(capOrDefault(getAsmCaps(), "HasVgprMSB") && regType == "v")
                 setIdx(value, offset);
         }
 
@@ -905,7 +911,7 @@ namespace rocisa
 
         std::string toString() const override
         {
-            if(regType == "v" && getAsmCaps()["HasVgprMSB"]){
+            if(regType == "v" && capOrDefault(getAsmCaps(), "HasVgprMSB")){
                 if(ref)
                 {
                     setIdx(ref.value(), offset);
@@ -1346,7 +1352,7 @@ namespace rocisa
         int                groupSegSize;
         std::array<int, 3> sgprWorkGroup;
         int                vgprWorkItem;
-        bool               enablePreloadKernArgs;
+        int                numSgprPreload;
 
         SignatureKernelDescriptor(const std::string&        name,
                                   int                       groupSegSize,
@@ -1355,7 +1361,7 @@ namespace rocisa
                                   int                       totalVgprs      = 0,
                                   int                       totalAgprs      = 0,
                                   int                       totalSgprs      = 0,
-                                  bool                      preloadKernArgs = false)
+                                  int                       numSgprPreload  = 0)
             : Item(name)
             , groupSegSize(groupSegSize)
             , sgprWorkGroup(sgprWorkGroup)
@@ -1364,9 +1370,9 @@ namespace rocisa
             , totalAgprs(totalAgprs)
             , totalSgprs(totalSgprs)
             , originalTotalVgprs(totalVgprs)
-            , enablePreloadKernArgs(preloadKernArgs)
+            , numSgprPreload(numSgprPreload)
         {
-            if(getArchCaps()["ArchAccUnifiedRegs"])
+            if(capOrDefault(getArchCaps(), "ArchAccUnifiedRegs"))
             {
                 accumOffset      = std::ceil(totalVgprs / 8.0) * 8;
                 this->totalVgprs = accumOffset + totalAgprs;
@@ -1380,7 +1386,7 @@ namespace rocisa
 
         void setGprs(int totalVgprs, int totalAgprs, int totalSgprs)
         {
-            if(getArchCaps()["ArchAccUnifiedRegs"])
+            if(capOrDefault(getArchCaps(), "ArchAccUnifiedRegs"))
             {
                 accumOffset      = std::ceil(totalVgprs / 8.0) * 8;
                 this->totalVgprs = accumOffset + totalAgprs;
@@ -1430,7 +1436,7 @@ namespace rocisa
                     + " // sgprs\n";
             kStr += kdIndent + ".amdhsa_group_segment_fixed_size " + std::to_string(groupSegSize)
                     + " // lds bytes\n";
-            if(getArchCaps()["HasWave32"])
+            if(capOrDefault(getArchCaps(), "HasWave32"))
             {
                 if(kernel().wavefront == 32)
                 {
@@ -1452,13 +1458,13 @@ namespace rocisa
                     + "\n";
             kStr += kdIndent + ".amdhsa_float_denorm_mode_32 3\n";
             kStr += kdIndent + ".amdhsa_float_denorm_mode_16_64 3\n";
-            if(enablePreloadKernArgs)
+            if(numSgprPreload)
             {
-                int numWorkgroupSgpr = sgprWorkGroup[0] + sgprWorkGroup[1] + sgprWorkGroup[2];
+                // kernArg ptr(2 sgprs) is preloaded in user sgpr, but not counted in preload_length
                 kStr += kdIndent + ".amdhsa_user_sgpr_count "
-                        + std::to_string(16 - numWorkgroupSgpr) + "\n";
+                        + std::to_string(numSgprPreload + 2) + "\n";
                 kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_length "
-                        + std::to_string(14 - numWorkgroupSgpr) + "\n";
+                        + std::to_string(numSgprPreload) + "\n";
                 kStr += kdIndent + ".amdhsa_user_sgpr_kernarg_preload_offset 0\n";
             }
             kStr += ".end_amdhsa_kernel\n";
@@ -1592,7 +1598,7 @@ namespace rocisa
                       int                       totalVgprs      = 0,
                       int                       totalAgprs      = 0,
                       int                       totalSgprs      = 0,
-                      bool                      preloadKernArgs = false)
+                      int                       numSgprPreload  = 0)
             : Item(kernelName)
             , kernelDescriptor(kernelName,
                                groupSegmentSize,
@@ -1601,7 +1607,7 @@ namespace rocisa
                                totalVgprs,
                                totalAgprs,
                                totalSgprs,
-                               preloadKernArgs)
+                               numSgprPreload)
             , codeMeta(kernelName,
                        kernArgsVersion,
                        groupSegmentSize,

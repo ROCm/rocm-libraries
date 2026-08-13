@@ -314,8 +314,9 @@ const char* LoggingLevelToCString(const LoggingLevel level)
     case LoggingLevel::Info: return "Info";
     case LoggingLevel::Info2: return "Info2";
     case LoggingLevel::Trace: return "Trace";
-    default: return "<Unknown>";
     }
+
+    return "<Unknown>";
 }
 
 bool IsLoggingCmd() { return env::enabled(MIOPEN_ENABLE_LOGGING_CMD) && !IsLoggingDebugQuiet(); }
@@ -329,11 +330,6 @@ std::string LoggingPrefix()
         ss << GetProcessAndThreadId() << ' ';
     }
     ss << "MIOpen";
-#if MIOPEN_BACKEND_OPENCL
-    ss << "(OpenCL)";
-#elif MIOPEN_BACKEND_HIP
-    ss << "(HIP)";
-#endif
     if(env::enabled(MIOPEN_ENABLE_LOGGING_ELAPSED_TIME))
     {
         ss << std::fixed << std::setprecision(3) << std::setw(8) << GetTimeDiff();
@@ -353,13 +349,7 @@ std::string LoggingPrefixMinimal()
     // and is used for buffer-only logs when actual logging is disabled.
     static const std::string prefix = []() {
         std::stringstream ss;
-        ss << "MIOpen";
-#if MIOPEN_BACKEND_OPENCL
-        ss << "(OpenCL)";
-#elif MIOPEN_BACKEND_HIP
-        ss << "(HIP)";
-#endif
-        ss << ": ";
+        ss << "MIOpen: ";
         return ss.str();
     }();
     return prefix;

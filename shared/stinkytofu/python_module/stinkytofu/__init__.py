@@ -83,12 +83,54 @@ if _bi is not None:
 
     _so = Path(_stinkytofu.__file__)
     _so_mtime = _so.stat().st_mtime
-    _build_dir = Path(_bi.BUILD_DIR).resolve()
+    _source_root = Path(_bi.SOURCE_ROOT)
+
+    # Build trees to ignore when scanning for newer sources: the build dir that
+    # produced this module, plus any *other* CMake build tree living under the
+    # source root (a second build-coverage/ or Debug/ dir, etc.). Their generated
+    # files and fetched _deps sources are not real stinkytofu sources; without
+    # this, two coexisting build dirs trip a false "stale" positive.
+    _build_dirs = {Path(_bi.BUILD_DIR).resolve()}
+    for _child in _source_root.iterdir():
+        if _child.is_dir() and (_child / "CMakeCache.txt").exists():
+            _build_dirs.add(_child.resolve())
+
+    # Only scan sources actually compiled into _stinkytofu.so, so its scan set
+    # matches exactly what the binary is built from:
+    #   - python_module/src/  the nanobind binding TUs of _stinkytofu.so itself
+    #   - src/                libstinkytofu core (linked into _stinkytofu.so),
+    #                         EXCEPT src/conversion/ (see _skip_dirs below)
+    #   - include/            headers used by the above
+    #   - hardware/, tools/tablegen/  build-time generators whose generated
+    #                         output is compiled into libstinkytofu; editing
+    #                         them must invalidate the binding too
+    # tests/, examples/ and the standalone tools/ (stinkytofu-opt, -check, -cfg,
+    # intrinsic-compiler, waitcnt-check) are never compiled into _stinkytofu.so,
+    # so a change there is not a valid staleness signal.
+    _scan_dirs = [
+        d
+        for d in (
+            _source_root / "python_module" / "src",
+            _source_root / "src",
+            _source_root / "include",
+            _source_root / "hardware",
+            _source_root / "tools" / "tablegen",
+        )
+        if d.is_dir()
+    ]
+    # src/conversion/ holds the rocisa<->stinkytofu glue compiled into _rocisa.so
+    # only (not libstinkytofu, not _stinkytofu.so); exclude it so editing the glue
+    # does not falsely mark the standalone binding stale.
+    _skip_dirs = {(_source_root / "src" / "conversion").resolve()}
     _stale = [
         str(p)
+        for _dir in _scan_dirs
         for _pattern in ("*.[ch]pp", "*.h", "*.def", "*.inc")
-        for p in Path(_bi.SOURCE_ROOT).rglob(_pattern)
-        if p.stat().st_mtime > _so_mtime and not p.resolve().is_relative_to(_build_dir)
+        for p in _dir.rglob(_pattern)
+        if p.stat().st_mtime > _so_mtime
+        and "_deps" not in p.parts
+        and not any(p.resolve().is_relative_to(_b) for _b in _build_dirs)
+        and not any(p.resolve().is_relative_to(_s) for _s in _skip_dirs)
     ]
     if _stale:
         _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
@@ -97,4 +139,14 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  cmake --build <build_dir> --target stinkytofu_python"
         )
-    del _bi, _so, _so_mtime, _stale, _build_dir, Path
+    del (
+        _bi,
+        _so,
+        _so_mtime,
+        _stale,
+        _build_dirs,
+        _source_root,
+        _scan_dirs,
+        _skip_dirs,
+        Path,
+    )

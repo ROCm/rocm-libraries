@@ -716,8 +716,9 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::RELU_BWD, output, input, upstreamGrad);
+        // ReLU backward expects dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::RELU_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * (x > 0 ? 1 : 0)
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -864,8 +865,9 @@ protected:
         const float upperClip = TEST_VALUE_4; // 4.0
         auto lowerSlope = static_cast<float>(0.1);
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::RELU_BWD, output, input, upstreamGrad, lowerClip, upperClip, lowerSlope);
+        // ReLU backward expects dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::RELU_BWD, output, upstreamGrad, input, lowerClip, upperClip, lowerSlope);
 
         // Create expected tensor: dx = dy * local_gradient
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -1011,8 +1013,9 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::SIGMOID_BWD, output, input, upstreamGrad);
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::SIGMOID_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * sigmoid(x) * (1 - sigmoid(x))
         Tensor<OutputType> expected({1, 2, 2, 2});
@@ -1113,8 +1116,9 @@ protected:
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_1_5), 0, 1, 1, 0); // 1.5
         upstreamGrad.setHostValue(safeTestTypeCast<Input2Type>(TEST_VALUE_3), 0, 1, 1, 1); // 3.0
 
-        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
-            PointwiseMode::TANH_BWD, output, input, upstreamGrad);
+        // Backward activations expect dy first, then x.
+        CpuReferencePointwiseImpl<OutputType, Input2Type, Input1Type>::pointwiseCompute(
+            PointwiseMode::TANH_BWD, output, upstreamGrad, input);
 
         // Create expected tensor: dx = dy * (1 - tanh²(x))
         // The functor computes in double (default ComputeType), so we must match that
@@ -1914,4 +1918,34 @@ TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeGeluApproxTanhFor
 TEST_F(TestCpuReferencePointwiseUnaryMixed2Fp32, UnaryMixedTypeSwishForward)
 {
     this->testSwishForwardOperation();
+}
+
+// --- Regression tests ---
+
+TEST(TestCpuReferencePointwiseRegressions, ParameterizedReluBwdBfloat16LowerClipEdgeCase)
+{
+    // In bfloat16, a value higher than lowerClip can be equal to lowerClip if lowerClip itself is cast to bfloat16. However, this value should still register as higher than lowerClip.
+
+    Tensor<bfloat16> dy({1, 1, 1, 1});
+    Tensor<bfloat16> y({1, 1, 1, 1});
+    Tensor<bfloat16> output({1, 1, 1, 1});
+
+    const float lowerClip = 0.1f;
+    const float upperClip = 0.5f;
+    const float lowerSlope = 0.2f;
+
+    // Set y to a value slightly above lowerClip. In bfloat16, this is equal to lowerClip
+    dy.setHostValue(safeTestTypeCast<bfloat16>(1.0f), 0, 0, 0, 0);
+    dy.markHostModified();
+    y.setHostValue(safeTestTypeCast<bfloat16>(0.10009765625f), 0, 0, 0, 0);
+    y.markHostModified();
+
+    EXPECT_NE(lowerClip, safeTestTypeCast<float>(y.getHostValue(0, 0, 0, 0)));
+
+    CpuReferencePointwiseImpl<bfloat16, bfloat16, bfloat16>::pointwiseCompute(
+        PointwiseMode::RELU_BWD, output, dy, y, lowerClip, upperClip, lowerSlope);
+
+    output.markDeviceModified();
+
+    EXPECT_EQ(output.getHostValue(0, 0, 0, 0), dy.getHostValue(0, 0, 0, 0));
 }

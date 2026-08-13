@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -37,7 +37,7 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_spmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$ matrix \f$op(A)\f$,
-*  defined in CSR, COO, BSR or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
+*  defined in CSR, CSC, COO, BSR, or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
 *  and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that is multiplied by the scalar
 *  \f$\beta\f$, such that
 *  \f[
@@ -83,41 +83,41 @@ extern "C" {
 *
 *  <table>
 *  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
-*  <tr><th>CSR Algorithms                         <th>Deterministic  <th>Preprocessing  <th>Notes
-*  <tr><td>rocsparse_spmm_alg_csr</td>            <td>Yes</td>       <td>No</td>        <td>Default algorithm.</td>
-*  <tr><td>rocsparse_spmm_alg_csr_row_split</td>  <td>Yes</td>       <td>No</td>        <td>Assigns a fixed number of threads per row, regardless of the number of non-zeros in each row. This can perform well when each row in the matrix has roughly the same number of non-zeros.</td>
-*  <tr><td>rocsparse_spmm_alg_csr_nnz_split</td>  <td>No</td>        <td>Yes</td>       <td>Distributes work by having each thread block work on a fixed number of non-zeros, regardless of the number of rows that might be involved. This can perform well when the matrix has some rows with few non-zeros and some rows with many non-zeros.</td>
-*  <tr><td>rocsparse_spmm_alg_csr_merge_path</td> <td>No</td>        <td>Yes</td>       <td>Attempts to combine the approaches of row-split and non-zero split by having each block work on a fixed amount of work, which can be either non-zeros or rows.</td>
+*  <tr><th>CSR Algorithms                         <th>Deterministic  <th>Preprocessing  <th>Batched  <th>Notes
+*  <tr><td>rocsparse_spmm_alg_csr</td>            <td>Yes</td>       <td>No</td>        <td>Yes</td> <td>Default algorithm.</td>
+*  <tr><td>rocsparse_spmm_alg_csr_row_split</td>  <td>Yes</td>       <td>No</td>        <td>Yes</td> <td>Assigns a fixed number of threads per row, regardless of the number of non-zeros in each row. This can perform well when each row in the matrix has roughly the same number of non-zeros.</td>
+*  <tr><td>rocsparse_spmm_alg_csr_nnz_split</td>  <td>No</td>        <td>Yes</td>       <td>Yes</td> <td>Distributes work by having each thread block work on a fixed number of non-zeros, regardless of the number of rows that might be involved. This can perform well when the matrix has some rows with few non-zeros and some rows with many non-zeros.</td>
+*  <tr><td>rocsparse_spmm_alg_csr_merge_path</td> <td>No</td>        <td>Yes</td>       <td>Yes</td> <td>Attempts to combine the approaches of row-split and non-zero split by having each block work on a fixed amount of work, which can be either non-zeros or rows.</td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_coo_algorithms">COO Algorithms</caption>
-*  <tr><th>COO Algorithms                               <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_coo_segmented</td>        <td>Yes</td>        <td>No</td>       <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
-*  <tr><td>rocsparse_spmm_alg_coo_atomic</td>           <td>No</td>         <td>No</td>       <td>Generally the fastest COO algorithm. This is the default algorithm.</td>
-*  <tr><td>rocsparse_spmm_alg_coo_segmented_atomic</td> <td>No</td>         <td>No</td>       <td> </td>
+*  <tr><th>COO Algorithms                               <th>Deterministic   <th>Preprocessing <th>Batched  <th>Notes
+*  <tr><td>rocsparse_spmm_alg_coo_segmented</td>        <td>Yes</td>        <td>No</td>       <td>Yes</td> <td>Generally not as fast as the atomic algorithm but is deterministic.</td>
+*  <tr><td>rocsparse_spmm_alg_coo_atomic</td>           <td>No</td>         <td>No</td>       <td>Yes</td> <td>Generally the fastest COO algorithm. This is the default algorithm.</td>
+*  <tr><td>rocsparse_spmm_alg_coo_segmented_atomic</td> <td>No</td>         <td>No</td>       <td>Yes</td> <td> </td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_bell_algorithms">Blocked-ELL Algorithms</caption>
-*  <tr><th>ELL Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_bell</td>  <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>Blocked ELL Algorithms       <th>Deterministic   <th>Preprocessing <th>Batched <th>Notes
+*  <tr><td>rocsparse_spmm_alg_bell</td> <td>Yes</td>        <td>No</td>       <td>No</td> <td></td>
 *  </table>
 *
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
-*  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Notes
-*  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td></td>
+*  <tr><th>BSR Algorithms                <th>Deterministic   <th>Preprocessing <th>Batched <th>Notes
+*  <tr><td>rocsparse_spmm_alg_bsr</td>   <td>Yes</td>        <td>No</td>       <td>No</td> <td></td>
 *  </table>
 *
 *  It is also possible to pass \ref rocsparse_spmm_alg_default, which will automatically select from the algorithms listed above
-*  based on the sparse matrix format. In the case of CSR matrices, this will set the algorithm to be \ref rocsparse_spmm_alg_csr. In
+*  based on the sparse matrix format. In the case of CSR or CSC matrices, this will set the algorithm to be \ref rocsparse_spmm_alg_csr. In
 *  the case of blocked ELL matrices, this will set the algorithm to be \ref rocsparse_spmm_alg_bell. In the case of BSR matrices, this
 *  will set the algorithm to be \ref rocsparse_spmm_alg_bsr, and for COO matrices, it will set the algorithm to be
 *  \ref rocsparse_spmm_alg_coo_atomic.
 *
 *  When A is transposed, \p rocsparse_spmm will revert to using \ref rocsparse_spmm_alg_csr
-*  for CSR format and \ref rocsparse_spmm_alg_coo_atomic for COO format, regardless of algorithm selected.
+*  for CSR and CSC formats and \ref rocsparse_spmm_alg_coo_atomic for COO format, regardless of algorithm selected.
 *
 *  \p rocsparse_spmm supports multiple combinations of data types and compute types. The tables below indicate the currently
 *  supported different data types that can be used for for the sparse matrix \f$op(A)\f$ and the dense matrices \f$op(B)\f$ and
@@ -149,7 +149,13 @@ extern "C" {
 *  \p rocsparse_spmm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
-*  \p rocsparse_spmm also supports batched computation for CSR and COO matrices. There are three supported batch modes:
+*  \p rocsparse_spmm also supports batched computation for CSR and COO matrices. For the CSR format, batched computation is
+*  supported by all of the available algorithms, namely \ref rocsparse_spmm_alg_csr, \ref rocsparse_spmm_alg_csr_row_split,
+*  \ref rocsparse_spmm_alg_csr_nnz_split, and \ref rocsparse_spmm_alg_csr_merge_path. For the COO format, batched computation is
+*  likewise supported by all of the available algorithms, namely \ref rocsparse_spmm_alg_coo_segmented,
+*  \ref rocsparse_spmm_alg_coo_atomic, and \ref rocsparse_spmm_alg_coo_segmented_atomic. Batched computation is not supported
+*  for the BSR and Blocked ELL formats.
+*  There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\
@@ -191,6 +197,16 @@ extern "C" {
 *  See the examples below.
 *
 *  \note
+*  When using batched computation, the sparsity pattern of the sparse matrix \f$A\f$ must be the same
+*  across all batches. That is, even in the batch modes that use a distinct \f$A_i\f$ per batch
+*  (\f$C_i = A_i \times B\f$ and \f$C_i = A_i \times B_i\f$), only the values of \f$A_i\f$ may differ
+*  between batches; the row offset and column index arrays must describe an identical sparsity pattern
+*  for every batch. This is because the \ref rocsparse_spmm_stage_preprocess analysis of \f$op(A)\f$ is
+*  performed only once and is reused for all batches. Note that the offset and index arrays may still be
+*  laid out per batch in memory via \p offsets_batch_stride_A and \p columns_values_batch_stride_A, but
+*  their contents must be identical from one batch to the next.
+*
+*  \note
 *  None of the algorithms above are deterministic when \f$A\f$ is transposed or conjugate transposed.
 *
 *  \note
@@ -216,7 +232,7 @@ extern "C" {
 *  support execution in a hipGraph context. The \ref rocsparse_spmm_stage_preprocess stage does not support hipGraph.
 *
 *  \note
-*  Currently, only CSR, COO, BSR, and blocked ELL sparse formats are supported.
+*  Currently, only CSR, CSC, COO, BSR, and blocked ELL sparse formats are supported.
 *
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.

@@ -3,125 +3,131 @@
 > [!CAUTION]
 > **This is a POC of python bindings for hipdnn.  It likely has bugs and features missing.  Making this not a POC has been planned for a future date**
 
+
 This project provides Python bindings for the hipDNN frontend library using the nanobind library. The bindings allow users to access the functionalities of the hipDNN library directly from Python, enabling seamless integration of deep learning operations.
 
 ## Project Structure
 
-The project is organized as follows:
-
 ```
-python
-├── src
-│   ├── module.cpp               # Main entry point for the nanobind module
-│   ├── graph_bindings.cpp       # Bindings for the Graph class and its methods
-│   ├── handle_bindings.cpp      # Bindings for handle management
-│   ├── memory_bindings.cpp      # Bindings for device memory management
-│   ├── tensor_bindings.cpp      # Bindings for tensor-related functionalities
-│   ├── attributes_bindings.cpp  # Bindings for attribute classes
-│   └── types_bindings.cpp       # Bindings for custom types and enums
-├── hipdnn_frontend
-│   ├── __init__.py          # Initializes the hipdnn_frontend package
-│   └── samples
-│       ├── bn_inference.py    # Batch normalization inference sample(DISABLED)
-│       ├── conv_fprop.py      # Convolution forward propagation sample
-│       ├── conv_dgrad.py      # Convolution backward data gradient sample
-│       └── conv_wgrad.py      # Convolution backward weight gradient sample
-├── CMakeLists.txt               # CMake configuration file
-├── pyproject.toml               # Python project configuration
-└── README.md                    # Project documentation
+python/
+├── README.md
+├── download_third_party_deps.py             # Downloads pinned CI third-party source archives
+├── frontend_bindings/
+│   ├── CMakeLists.txt                     # Standalone CMake build for bindings
+│   └── src/
+│       ├── module.cpp                     # Main nanobind module entry point
+│       ├── bindings.hpp                   # Shared binding declarations
+│       ├── graph_bindings.cpp
+│       ├── handle_bindings.cpp
+│       ├── memory_bindings.cpp
+│       ├── tensor_bindings.cpp
+│       ├── attributes_bindings.cpp
+│       ├── hip_bindings.cpp
+│       └── types_bindings.cpp
+└── frontend_wheel_package/
+    ├── src/
+    │   └── hipdnn_frontend/
+    │       └── __init__.py                # Runtime package initializer
+    ├── samples/                           # Source-tree sample scripts
+    ├── tests/                             # Source-tree tests
+    ├── pyproject.toml                     # Wheel metadata and pytest config
+    └── pack_frontend_wheel.py             # Stages and packs the wheel package
 ```
 
 ## Prerequisites
 
-- CMake 3.15 or higher
+- CMake 3.26 or higher
+- Ninja or another CMake generator
 - A C++ compiler with C++17 support (e.g. clang++)
-- Python 3.8 or higher
+- Python 3.12 or higher, including development headers
 - ROCm/HIP runtime and libraries
-- hipDNN frontend library (built and installed)
+- Installed hipDNN development artifacts with `hipdnn_frontendConfig.cmake`,
+  `hipdnn_backendConfig.cmake`, headers, and the backend shared library
+- `nanobind` and `tsl-robin-map` CMake packages, or network access during
+  configure so CMake can fetch the pinned source archives
+- The `build` Python package when creating a wheel
+- The `numpy` and `pytest` Python packages when running source-tree tests or samples
 
-## Getting Started
+## Building
 
-### 1. Setting up a Python Virtual Environment
+The Python bindings are a standalone CMake project. Build and install hipDNN
+first, then point `CMAKE_PREFIX_PATH` at that install or nightly artifact prefix.
+The extension uses installed hipDNN package metadata for headers and compile
+definitions, and links the installed `hipdnn_frontend` and `hipdnn_backend`
+package targets directly.
 
-It's recommended to use a Python virtual environment to isolate the project dependencies:
-
-```bash
-# Create a virtual environment
-python3 -m venv hipdnn_env
-
-# Activate the virtual environment
-# On Linux/Mac:
-source hipdnn_env/bin/activate
-# On Windows:
-# hipdnn_env\Scripts\activate
-
-# Upgrade pip
-pip install --upgrade pip
-```
-
-### 2. Building and Installing the Python Bindings
-
-The Python bindings use scikit-build to handle the CMake build process automatically through pip:
+From the repository root:
 
 ```bash
-# Navigate to the hipdnn python directory
-cd python
-
-export CMAKE_PREFIX_PATH=/path/to/hipdnn/install:$CMAKE_PREFIX_PATH
-pip install -v .
-
-or
-
-pip install -v . --config-settings=cmake.define.CMAKE_PREFIX_PATH=/path/to/hipdnn/install
+cmake -S projects/hipdnn/python/frontend_bindings -B build/hipdnn-python -GNinja \
+    -DCMAKE_PREFIX_PATH=/path/to/hipdnn/install
+cmake --build build/hipdnn-python
 ```
 
-### 3. Development Installation
+`CMAKE_PREFIX_PATH` is required. Point it at the installed hipDNN artifact prefix
+or set the `CMAKE_PREFIX_PATH` environment variable before configuring.
 
-For development work where you want to rebuild and apply the changes you have two options:
+The default build builds only the nanobind extension into the CMake build tree.
+CMake does not know about wheel packaging, does not configure
+`hipdnn_frontend/__init__.py`, and has no install rules.
 
-#### Editable Installation
-```bash
-# from within the hipdnn python directory
-pip install -e .
-```
+Run the wheel packer to create the staged import package under
+`build/hipdnn-python/wheel_package/hipdnn_frontend`; downstream environment
+wiring should use that staged package tree.
 
-#### Uninstall and Reinstall Flow
-Instead of doing an editable install, if you prefer a full reinstall after C++ changes:
+For a source-tree development import after staging the package, put the staged
+wheel package root on `PYTHONPATH`:
 
 ```bash
-# from within the hipdnn python directory
-pip uninstall hipdnn-frontend -y
-pip install -v .
+PYTHONPATH=build/hipdnn-python/wheel_package python -c "import hipdnn_frontend"
 ```
 
-### 4. Running the Sample Applications
+The backend shared library must also be discoverable at runtime: use
+`LD_LIBRARY_PATH=/path/to/hipdnn/install/lib` on Linux, or set `ROCM_PATH` to the
+artifact prefix on Windows so `hipdnn_frontend/__init__.py` can register `bin/`.
 
-The repository includes several sample applications demonstrating different operations:
+## Creating a Wheel
 
-#### Convolution Forward Propagation
+After building the bindings, run the packer script:
+
 ```bash
-python conv_fprop.py
+python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
+    --build-dir build/hipdnn-python \
+    --wheel-dir build/hipdnn-python/wheel_package
 ```
 
-This sample demonstrates:
-- Setting up a convolution forward pass
-- Configuring padding, stride, and dilation parameters
-- Executing the convolution and displaying results
+The wheel is written to `build/hipdnn-python/wheel_package/`, beside the
+`hipdnn_frontend/` package directory. The script packs
+`wheel_package/hipdnn_frontend` into a temporary setuptools project. The wheel
+contains only `hipdnn_frontend/__init__.py` and the native extension. It does
+not include samples or tests, and it does not bundle `libhipdnn_backend`; users
+still need ROCm and hipDNN runtime libraries discoverable through ROCm wheels,
+`ROCM_PATH`, or the platform loader path.
 
-#### Convolution Backward Data Gradient
+## Testing the Wheel
+
+The `hipDNN Superbuild CI` workflow validates the wheel end-to-end inside the
+matching Linux and Windows superbuild jobs after installing the superbuild
+outputs into the ROCm SDK path. The workflow calls
+`projects/hipdnn/python/download_third_party_deps.py` to download and verify
+pinned third-party source archives from `rocm-third-party-deps`, then passes
+those source directories to CMake FetchContent. It then builds the nanobind
+extension, packs the wheel, installs that wheel into the same venv, and runs:
+
 ```bash
-python conv_dgrad.py
+python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 ```
 
-This sample demonstrates:
-- Computing input gradients (dx) given output gradients (dy) and weights
-- Used in backpropagation for training neural networks
+The wheel package uses a `src/` layout, so running pytest from
+`frontend_wheel_package/` does not accidentally import the source package.
 
-#### Convolution Backward Weight Gradient
+## Running the Samples
+
+Sample scripts are source-tree utilities and are not included in the wheel.
+
 ```bash
-python conv_wgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_fprop.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_dgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/conv_wgrad.py
+python projects/hipdnn/python/frontend_wheel_package/samples/matmul.py
 ```
-
-This sample demonstrates:
-- Computing weight gradients (dw) given output gradients (dy) and input (x)
-- Used for updating convolution filter weights during training

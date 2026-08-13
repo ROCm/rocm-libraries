@@ -49,7 +49,7 @@ enum class RegType {
 ///
 /// For new code, prefer tryParseRegType() which returns std::optional.
 inline RegType stringToRegType(const std::string& str) {
-#define REGISTER_TYPE(ENUM, STR, DESC) \
+#define REGISTER_TYPE(ENUM, STR, DESC) /* NOLINT(bugprone-macro-parentheses) */ \
     if (str == STR) return RegType::ENUM;
 #include "stinkytofu/ir/asm/RegisterType.def"
     // Don't assert on invalid input - return UNKNOWN for error handling
@@ -60,6 +60,13 @@ inline RegType stringToRegType(const std::string& str) {
 /// Check if a register type is valid (not UNKNOWN)
 inline bool isValidRegType(RegType type) {
     return type != RegType::UNKNOWN;
+}
+
+/// Check if a register type is an allocatable register (VGPR, SGPR, AGPR).
+/// Excludes special registers (SCC, VCC, EXEC, M0, LDS).
+inline bool isAllocatableReg(RegType type) {
+    return type == RegType::V || type == RegType::S || type == RegType::A || type == RegType::ACC ||
+           type == RegType::AGPR;
 }
 
 /// Validate if a string represents a valid register type
@@ -110,7 +117,7 @@ struct STINKYTOFU_EXPORT StinkyRegister {
     // cause obvious failures.
     static constexpr uint32_t kVirtualBit = 1u << 31;
 
-    enum class Type { Register, LiteralInt, LiteralDouble, LiteralString, Invalid };
+    enum class Type { Register, LiteralInt, LiteralDouble, LiteralString, HwReg, Invalid };
 
     Type dataType;
 
@@ -137,6 +144,13 @@ struct STINKYTOFU_EXPORT StinkyRegister {
 
         int32_t literalInt;
         double literalDouble;
+
+        // For HwReg type: structured hwreg(id, offset, size) operand of s_setreg/s_getreg.
+        struct {
+            uint16_t id;
+            uint16_t offset;
+            uint16_t size;
+        } hwreg;
     };
 
     // For LiteralString type - kept separate as std::string is non-trivial
@@ -160,6 +174,10 @@ struct STINKYTOFU_EXPORT StinkyRegister {
                 return literalDouble < other.literalDouble;
             case Type::LiteralString:
                 return literalValue < other.literalValue;
+            case Type::HwReg:
+                if (hwreg.id != other.hwreg.id) return hwreg.id < other.hwreg.id;
+                if (hwreg.offset != other.hwreg.offset) return hwreg.offset < other.hwreg.offset;
+                return hwreg.size < other.hwreg.size;
             case Type::Invalid:
                 return false;
         }
@@ -181,6 +199,9 @@ struct STINKYTOFU_EXPORT StinkyRegister {
                 return literalDouble == other.literalDouble;
             case Type::LiteralString:
                 return literalValue == other.literalValue;
+            case Type::HwReg:
+                return hwreg.id == other.hwreg.id && hwreg.offset == other.hwreg.offset &&
+                       hwreg.size == other.hwreg.size;
             case Type::Invalid:
                 return true;  // Two invalid registers are equal
         }
@@ -199,7 +220,11 @@ struct STINKYTOFU_EXPORT StinkyRegister {
         : dataType(Type::Register),
           reg{stringToRegType(typeStr), regIdx, regNum, offset, false, false} {}
 
-    StinkyRegister(const std::string& str) : dataType(Type::LiteralString), literalValue(str) {}
+    // reg{} value-initializes the union: this ctor sets no union member, so without it the
+    // implicit copy ctor reads uninitialized bytes (fires -Werror=maybe-uninitialized at -O3
+    // when a LiteralString register is copied, e.g. vector push_back in addSrcReg).
+    StinkyRegister(const std::string& str)
+        : dataType(Type::LiteralString), reg{}, literalValue(str) {}
 
     StinkyRegister(int literalInt) : dataType(Type::LiteralInt), literalInt(literalInt) {}
 
@@ -262,6 +287,16 @@ struct STINKYTOFU_EXPORT StinkyRegister {
 
     static StinkyRegister getSCCRegister() {
         return StinkyRegister(RegType::SCC, 0, 1);
+    }
+
+    // Structured hwreg(id, offset, size) operand for s_setreg/s_getreg.
+    static StinkyRegister Hwreg(uint16_t id, uint16_t offset, uint16_t size) {
+        StinkyRegister r;
+        r.dataType = Type::HwReg;
+        r.hwreg.id = id;
+        r.hwreg.offset = offset;
+        r.hwreg.size = size;
+        return r;
     }
 
     static StinkyRegister getVCCRegister(uint32_t wavefrontSize) {

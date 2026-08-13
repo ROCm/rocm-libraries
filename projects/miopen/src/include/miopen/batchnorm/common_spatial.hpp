@@ -34,6 +34,13 @@ namespace solver {
 
 namespace batchnorm {
 
+// Maximum vector width supported by the batch-norm spatial kernels.
+// Matches the DEFINE_VECTOR_MAPPING entries in src/kernels/vector_types.hpp and
+// the static_assert allowlists in src/kernels/miopen_math.hpp.
+// Increment this constant (and add the corresponding DEFINE_VECTOR_MAPPING) when
+// adding a new vector width.
+inline constexpr size_t kMaxSupportedVectorSize = 8;
+
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
 inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& problem,
@@ -170,7 +177,7 @@ inline int GetStashMethod(bool IsLayoutNHWC,
         (in_cstride) % ylocalsize == 0 ? ylocalsize : (in_cstride) % ylocalsize;
     unsigned int last_zlocalsize =
         n % (zlocalsize * nelements) == 0 ? (zlocalsize * nelements) : n % (zlocalsize * nelements);
-    if(last_ylocalsize < stash_values && last_zlocalsize >= (size_t)stash_values)
+    if(last_ylocalsize < stash_values && last_zlocalsize >= static_cast<size_t>(stash_values))
     {
         stash_method = 1;
     }
@@ -400,8 +407,9 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         //    be large enough
         //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!bfp32parm && (c % 2 != 0 && last_zlocalsize < (size_t)stash_values)) ||
-           ((last_ylocalsize < stash_values) && (last_zlocalsize < (size_t)stash_values)))
+        if((!bfp32parm && (c % 2 != 0 && last_zlocalsize < static_cast<size_t>(stash_values))) ||
+           ((last_ylocalsize < stash_values) &&
+            (last_zlocalsize < static_cast<size_t>(stash_values))))
         {
             return false;
         }
@@ -425,7 +433,7 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
         stash_values *= (problem.GetXDesc().GetType() == miopenFloat ? 1 : 2);
-        if(last_ylocalsize < stash_values && last_zlocalsize < (size_t)stash_values)
+        if(last_ylocalsize < stash_values && last_zlocalsize < static_cast<size_t>(stash_values))
         {
             return false;
         }

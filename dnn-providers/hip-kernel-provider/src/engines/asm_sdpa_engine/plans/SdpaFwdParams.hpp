@@ -3,8 +3,12 @@
 
 #pragma once
 
+#include "SdpaPlanUtils.hpp"
+
 #include <cstdint>
 #include <string>
+
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -22,6 +26,7 @@ struct SdpaFwdParams
     int64_t kUid;
     int64_t vUid;
     int64_t oUid;
+    int64_t lseUid = -1; // LSE output, -1 = disabled
 
     // Tensor dimensions
     unsigned int batchSize; // B
@@ -53,6 +58,10 @@ struct SdpaFwdParams
     unsigned int oStrideHead;
     unsigned int oStrideBatch;
 
+    // LSE tensor stride (in elements).  The forward kernel args struct
+    // (fmha_fwd_v3_args) only exposes s_lse_Hs — no batch stride field.
+    unsigned int lseStrideHead = 0;
+
     // Tile size
     unsigned int tileSizeQo;
 
@@ -60,10 +69,12 @@ struct SdpaFwdParams
     std::string archString;
 
     // Mask type
-    bool noMask;
+    plan_utils::MaskType maskType;
 
-    // Attention scale
-    float attnScale;
+    // Attention scale — resolved at execute via resolveScalarOperand().
+    // Supports compile-time constant, runtime-with-default, and pure runtime
+    // user-supplied (RFC 0016 pass-by-value) states.
+    hipdnn_plugin_sdk::ScalarOperand attnScale;
 };
 
 } // namespace asm_sdpa_engine

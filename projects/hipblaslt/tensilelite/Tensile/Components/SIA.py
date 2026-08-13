@@ -35,7 +35,7 @@ from copy import deepcopy
 from typing import Tuple
 PRECISION = 100
 class SIA3(SIA):
-    kernel = {"ScheduleIterAlg": 3}
+    kernel = {"_ScheduleIterAlg": 3}
     def __call__(self):
         assert(0)
 
@@ -75,6 +75,8 @@ class SIA3(SIA):
         if not writer.states.scheduleLocalWrite:
             noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, localWriteEndIter)
             writer.states.lwStartMfmaIndex = writer.states.lwEndMfmaIndex
+            if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
+                writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
         else:
             itemsLWToSched, numWritesToSched = prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=isNGLL)
             startIter = assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEndIter, numWritesToSched)
@@ -93,7 +95,7 @@ class SIA3(SIA):
               firstIter, lastLc, isNGLL, startIterItem)
 
 class SIA2(SIA):
-    kernel = {"ScheduleIterAlg": 2}
+    kernel = {"_ScheduleIterAlg": 2}
     def __call__(self):
         assert(0)
 
@@ -121,7 +123,7 @@ class SIA2(SIA):
               firstIter, lastLc, isNGLL)
 
 class SIA1(SIA):
-    kernel = {"ScheduleIterAlg": 1}
+    kernel = {"_ScheduleIterAlg": 1}
     def __call__(self):
         assert(0)
 
@@ -149,7 +151,7 @@ class SIA1(SIA):
               firstIter, lastLc, isNGLL)
 
 class SIA0(SIA):
-    kernel = {"ScheduleIterAlg": 0}
+    kernel = {"_ScheduleIterAlg": 0}
     def __call__(self):
         assert False
 
@@ -512,11 +514,11 @@ def fixLocalWriteEndMfmaIndex(writer, kernel, tPA, tPB, globalReadIncACode, glob
 ################################################################################
 ################################################################################
 
-def _splitTdmLoad(grACode):
-    """Split globalReadA into (non-TDM items module, TDM-load-only module)."""
+def _splitTdmLoad(grCode):
+    """Split a globalRead module into (non-TDM items module, TDM-load-only module)."""
     tdmLoadMod = Module("deferredTdmLoad")
     nonTdmMod = Module()
-    grAItems = grACode.items() if hasattr(grACode, 'items') else []
+    grAItems = grCode.items() if hasattr(grCode, 'items') else []
     for item in grAItems:
         hasTdm = isinstance(item, TensorLoadToLds) or \
                  (hasattr(item, 'flatitems') and any(isinstance(f, TensorLoadToLds) for f in item.flatitems()))
@@ -535,7 +537,13 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
     tdmLoadIter = min(localWriteEndIter + 1, kernel["LoopIters"] - 1)
 
     if kernel["PrefetchGlobalRead"] == 2:
-        imod = writer.codes.perIterGlobalRead[0].add(Module())
+        # SIA0 does not schedule GR/LW instruction-by-instruction. If global reads
+        # are emitted at iter 0, they clobber vgprG2L* before the later local-write
+        # iteration stores the previous prefetch to LDS. Place non-TDM reads in the
+        # local-write iteration; SIA0 sub-iteration order emits localWriteCode before
+        # globalReadCode, preserving the G2L value until it is consumed.
+        grIter = localWriteEndIter if kernel["_ScheduleIterAlg"] == 0 and not kernel["NoLdsWriteCode"] and not tdmDeferLoad else 0
+        imod = writer.codes.perIterGlobalRead[grIter].add(Module())
         imod.addComment1("Global Read IncA")
         imod.add(globalReadIncACode)
         imod.addComment1("Global Read IncB")
@@ -543,21 +551,55 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         if tdmDeferLoad:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
-            nonTdmMod, tdmLoadMod = _splitTdmLoad(writer.codes.globalReadA)
+            nonTdmMod, tdmLoadModA = _splitTdmLoad(writer.codes.globalReadA)
             imod.add(nonTdmMod)
             imod.addComment1("Global Read MXSA")
             imod.add(writer.codes.dtlsM0UpdateMXSA)
-            imod.add(writer.codes.globalReadMXSA)
+            # MXSA/MXSB share A/B's XOR double-buffered MX-scale LDS, so their
+            # tensor_load_to_lds must defer in lockstep with A/B (after the LDS swap).
+            # Emitting them eagerly lets the async TDM overwrite the MX-scale LDS while
+            # this wave's own MX ds_loads are still reading it (self-wave WAR; s_wait_dscnt
+            # does not gate TDM, which retires on tensorcnt).
+            nonTdmModMXSA, tdmLoadModMXSA = _splitTdmLoad(writer.codes.globalReadMXSA)
+            imod.add(nonTdmModMXSA)
             imod.addComment1("Global Read MXSB")
             imod.add(writer.codes.dtlsM0UpdateMXSB)
-            imod.add(writer.codes.globalReadMXSB)
+            nonTdmModMXSB, tdmLoadModMXSB = _splitTdmLoad(writer.codes.globalReadMXSB)
+            imod.add(nonTdmModMXSB)
             imod.addComment1("Global Read B")
             imod.add(writer.codes.dtlsM0UpdateB)
-            imod.add(writer.codes.globalReadB)
-            if tdmLoadMod.itemsSize() > 0:
-                deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+            nonTdmModB, tdmLoadModB = _splitTdmLoad(writer.codes.globalReadB)
+            imod.add(nonTdmModB)
+            # Defer both A and B tensor_load_to_lds to after the LDS swap (at tdmLoadIter).
+            # This ensures both loads go into the post-swap buffer, matching the ds_load reads.
+            deferMod = writer.codes.perIterGlobalRead[tdmLoadIter].add(Module())
+            if tdmLoadModA.itemsSize() > 0:
                 deferMod.addComment1("Global Read A (TDM deferred after LDS swap)")
-                deferMod.add(tdmLoadMod)
+                deferMod.add(tdmLoadModA)
+            if tdmLoadModMXSA.itemsSize() > 0:
+                deferMod.addComment1("Global Read MXSA (TDM deferred after LDS swap)")
+                deferMod.add(tdmLoadModMXSA)
+            if tdmLoadModMXSB.itemsSize() > 0:
+                deferMod.addComment1("Global Read MXSB (TDM deferred after LDS swap)")
+                deferMod.add(tdmLoadModMXSB)
+            if tdmLoadModB.itemsSize() > 0:
+                # TODO: For the 1-wave case, schedule B's TDM load independently for better tensor load balance.
+                deferMod.addComment1("Global Read B (TDM deferred after LDS swap)")
+                deferMod.add(tdmLoadModB)
+            # Metadata TDM also writes to a double-buffered LDS region that is XOR-swapped
+            # alongside A's (see s_xor on sgprtdmMetadataGroup0+1). Defer its tensor_load_to_lds
+            # to tdmLoadIter so the load lands in the post-swap buffer, matching the
+            # ds_load_tr8_b64 reads from the new side; otherwise the async TDM write races
+            # against the current iter's metadata local reads from the same LDS region.
+            if kernel["ProblemType"]["Sparse"]:
+                nonTdmModM, tdmLoadModM = _splitTdmLoad(writer.codes.globalReadMetadata)
+                imod.addComment1("Global Read Metadata")
+                imod.add(nonTdmModM)
+                if tdmLoadModM.itemsSize() > 0:
+                    deferMod.addComment1("Global Read Metadata (TDM deferred after LDS swap)")
+                    deferMod.add(tdmLoadModM)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
         else:
             imod.addComment1("Global Read A")
             imod.add(writer.codes.dtlsM0UpdateA)
@@ -571,6 +613,11 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
             imod.addComment1("Global Read B")
             imod.add(writer.codes.dtlsM0UpdateB)
             imod.add(writer.codes.globalReadB)
+            if kernel["ProblemType"]["Sparse"]:
+                imod.addComment1("Global Read Metadata")
+                imod.add(writer.codes.globalReadMetadata)
+            imod.add(writer.codes.gl2PrefetchIncrement)
+            imod.add(writer.codes.gl2Prefetch)
     else:
         # put everything in the header (original behavior for PGR=0/1):
         writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateA)
@@ -581,8 +628,11 @@ def noSchedGlobalRead(writer, kernel, globalReadIncACode, globalReadIncBCode):
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB)
         writer.codes.unrollLoopHeader.add(writer.codes.dtlsM0UpdateB)
         writer.codes.unrollLoopHeader.add(writer.codes.globalReadB)
+        writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata) if kernel["ProblemType"]["Sparse"] else None
         writer.codes.unrollLoopHeader.add(globalReadIncACode)
         writer.codes.unrollLoopHeader.add(globalReadIncBCode)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2PrefetchIncrement)
+        writer.codes.unrollLoopHeader.add(writer.codes.gl2Prefetch)
     # Dummy
     itemsGRToSchedLater = []
     lastLoadIter = 0
@@ -593,6 +643,7 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSA.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadMXSB.header)
     writer.codes.unrollLoopHeader.add(writer.codes.globalReadB.header)
+    writer.codes.unrollLoopHeader.add(writer.codes.globalReadMetadata.header) if kernel["ProblemType"]["Sparse"] else None
 
     # Add all loads from middle as individual schedulable items
     # when using PGR2, put global read instruction right after corresponding localWrite instruction
@@ -604,12 +655,14 @@ def prepareGRInstToSched(writer, kernel, isNGLL):
         itemsGRToSchedLater = list(writer.codes.globalReadA.middle.items()) + \
                          list(writer.codes.globalReadMXSA.middle.items()) + \
                          list(writer.codes.globalReadMXSB.middle.items()) + \
-                         list(writer.codes.globalReadB.middle.items())
+                         list(writer.codes.globalReadB.middle.items()) + \
+                         list(writer.codes.globalReadMetadata.middle.items())
     else:
         itemsGRToSched =  list(writer.codes.globalReadA.middle.items()) + \
                         list(writer.codes.globalReadMXSA.middle.items()) + \
                         list(writer.codes.globalReadMXSB.middle.items()) + \
-                        list(writer.codes.globalReadB.middle.items())
+                        list(writer.codes.globalReadB.middle.items()) + \
+                        list(writer.codes.globalReadMetadata.middle.items())
         itemsGRToSchedLater = []
 
     itemsGRToSchedTemp = []
@@ -740,6 +793,9 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
         writer.codes.globalReadMXSB.middle.getItem(0).add(writer.codes.dtlsM0UpdateMXSB, 0)
     if writer.codes.globalReadB.middle.items():
         writer.codes.globalReadB.middle.getItem(0).add(writer.codes.dtlsM0UpdateB, 0)
+    # TODO: if metadata supports directToLds
+    # if writer.codes.globalReadMetadata.middle.items():
+    #     writer.codes.globalReadMetadata.middle.getItem(0).add(writer.codes.dtlsM0UpdateMetadata, 0)
 
     itemsGRToSched.extend(itemsGRIncToSched)
     # append 'n' global load at a time
@@ -767,6 +823,7 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSA.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMXSB.footer)
     writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadB.footer)
+    writer.codes.perIterGlobalRead[endIter-1].add(writer.codes.globalReadMetadata.footer)
     return lastLoadIter
 
 ################################################################################
@@ -781,7 +838,7 @@ def noSchedLocalWrite(writer, kernel, tensorParametersA, tensorParametersB, loca
     # if no scheduleLocalWrite - just add writes to localWritelocalWriteEndIter
     # If PGR=0, writes have to be done immediately following the loads - no opportunity to schedule
     #   so don't add to schedule, these will be added separately and before the first iter
-    if kernel["PrefetchGlobalRead"]:
+    if kernel["PrefetchGlobalRead"] and not kernel["NoLdsWriteCode"]:
         # do we need a module here? That would prevent these from being scheduled
         imod = writer.codes.perIterLocalWrite[localWriteEndIter][1].add(Module())
         imod.add(
@@ -865,6 +922,16 @@ def prepareLWInstToSched(writer, kernel, numLocalWritesPerSched, isNGLL=False):
               lenB -= lenBFooter
             numDummy += lenB
             insertDummyTop = swapped
+        if kernel["ProblemType"]["Sparse"]:
+            if kernel["DirectToLdsMetadata"]:
+                # DirectToLdsMetadata M0 update
+                numDummy -= 1
+            else:
+                # Workaround, Sparse B + (DTLB only) don't need this since there's no meta GR in globalReadB
+                sparseTc = 'B' if kernel["ProblemType"]["Sparse"] == 2 else 'A'
+                if not (sparseTc == 'B' and kernel["DirectToLdsB"] and not kernel["DirectToLdsA"]) and kernel["DirectToLds%s"%sparseTc]:
+                    numMetaGR = kernel["NumLoadsPerpendicularMetadata"] * kernel["NumLoadsCoalescedMetadata"]
+                    numDummy -= numMetaGR
     # extend localWrite by inserting empty Module
     # See getNumLocalWritePerMfma for how this work
     itemsLWToSchedTemp = []

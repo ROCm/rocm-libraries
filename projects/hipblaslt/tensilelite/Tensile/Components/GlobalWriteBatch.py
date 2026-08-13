@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,25 +22,25 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
-  SDWAModifiers, replaceHolder, EXEC, EXECLO, EXECHI, VCC, vgpr, sgpr, ContinuousRegister
+  SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
 from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
 from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
-  SCBranchSCC0, SCBranchSCC1, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, \
-  SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, \
+  SCBranchSCC0, SCBranchSCC1, SCmpGtU32, SCmpKGtU32, SCSelectB32, SCmpEQI32, SCmpEQU32, SCmpGtI32, SCmpLeI32, SMinU32, SEndpgm, \
+  SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLShiftRightB64, SMovB32, SMovB64, SMulI32, \
   SNop, SOrB32, SOrB64, SOrSaveExecB32, SOrSaveExecB64, SSleep, SSubI32, SSubU32, \
   SSwapPCB64, SWaitCnt, SWaitAlu, VAShiftRightI32, VAddCCOU32, VAddCOU32, VAddF32, VAddF64, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
-  VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
+  VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, VSubU32
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticMultiply
 
-from ..Common import DataDirection, SemanticVersion
+from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -50,8 +50,22 @@ from ..AsmStoreState import StoreState
 from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
+from ..KernelWriterModules import hasSequentialValuC
 
 from math import ceil, log2
+
+
+def _scmpGtU32(writer, src, imm, comment=""):
+    """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
+    if writer.states.asmCaps["HasSCMPK"]:
+        return SCmpKGtU32(src=src, simm16=imm, comment=comment)
+    else:
+        module = Module("scmpGtU32")
+        tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+        module.add(SMovB32(dst=sgpr(tmpSgpr), src=imm))
+        module.add(SCmpGtU32(src0=src, src1=sgpr(tmpSgpr), comment=comment))
+        writer.sgprPool.checkIn(tmpSgpr)
+        return module
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
@@ -59,19 +73,22 @@ class GlobalWriteBatchComponent(GlobalWriteComponents):
     batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
-    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion) -> Module:
+    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0) -> Module:
     return GlobalWriteBatchWriter(kernel, tPA, tPB, activation, ss, batchIdx, applyAlpha, \
       beta, edge, atomic, gwvw, atomicW, \
       batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit, \
       tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, \
-      codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion).emit()
+      codeAccVgprRead, codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion, numBatches,
+      inter_iter_rowInc, direct_next_rowInc).emit()
 
 class GlobalWriteBatchWriter:
   def __init__(self, kernel: Solution, tPA, tPB, activation: ActivationModule, ss: StoreState, \
     batchIdx, applyAlpha, beta, edge, atomic, gwvw, atomicW, \
     batchElements, addrE, addrD, addrC, addrBias, addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, isLocalBarrierInit: bool, \
     tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, batchElementSgprs, tmpSgpr, codeAccVgprRead, \
-    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion):
+    codeMulAlpha, packdata, parentWriter, factorDim, amdClangVersion: SemanticVersion, numBatches: int,
+    inter_iter_rowInc: int = 0, direct_next_rowInc: int = 0):
     self.kernel = kernel
     self.tPA    = tPA
     self.tPB    = tPB
@@ -120,6 +137,17 @@ class GlobalWriteBatchWriter:
     self._subtileNGroupSkipLabel = None   # end-of-N-group label (M cbranch target)
     self._subtileAllStoresEndLabel = None # end-of-all-stores label (N cbranch target)
     self._subtileCloadPrevD1 = -1         # sentinel: last d1 group seen in C load guard
+    self._subtilePendingSrdDInc = None    # deferred SrdD incToNextRow (emitted after N-group label)
+    self._align8NMaskBlockIdxN = -1       # last blockIdxN for which N mask was computed
+    self.numBatches = numBatches
+
+    # CompactLoopStore: stash the "next batch's first elt rowInc" passed in via
+    # `inter_iter_rowInc`. Used as the look-ahead fall-through value at the
+    # LAST emitting elt of the batch (cross-batch transition), where the
+    # intra-batch forward scan finds no further emitting elt.
+    # 0 means no override (non-CLS / last batch / atomic).
+    self.inter_iter_rowInc = inter_iter_rowInc
+    self.direct_next_rowInc = direct_next_rowInc
 
     # Internal state for GlobalWriteBatch
     # 0 for None, 1 for WorkGroupReduction = False, 2 for WorkGroupReduction = True
@@ -129,7 +157,64 @@ class GlobalWriteBatchWriter:
       self.kernel["ProblemType"]["BiasSrc"] == "D":
       self.storeBiasD = 1
 
+  @property
+  def needsAccumToDestConversion(self) -> bool:
+    """
+    Check if accumulation values need to be converted to destination type:
+    1. HighPrecisionAccumulate is enabled (accumulator precision > output precision)
+       e.g., F32 accumulator -> FP16/BF16/FP8/BF8/I32/I8 output
+    2. _GlobalAccumulation is not 'MultipleBuffer'
 
+    When True, the pack/convert module will be generated to perform:
+    - F32 -> FP16/BF16 packing
+    - F32 -> FP8/BF8 conversion (with optional stochastic rounding)
+    - F32 -> I32/I8 conversion and packing
+    """
+    return self.kernel["ProblemType"]["HighPrecisionAccumulate"] and \
+           (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer')
+
+  @property
+  def skipRearrangement(self) -> bool:
+    """
+    Check if we can skip v_mov_b32 rearrangement and use WMMA output registers directly.
+
+    skipRearrangement changes store to read from (elementSumIdx - elementSumIdx[0]),
+    but other operations (bias, activation, alpha) work on (elementSumIdx - startVgprValu).
+    These positions are only the same when no operations modify the data.
+
+    Safe to skip rearrangement only when:
+    1. MIArchVgpr is True (MFMA/WMMA writes directly to arch VGPRs)
+    2. hasSequentialValuC is True (WMMA output is already sequential)
+    3. needsAccumToDestConversion is False (no pack module to do the rearrangement)
+    4. Not a Beta path (Beta paths need separate alpha multiply + beta*C)
+    5. Not complex (real/imag are interleaved in acc VGPRs, so the relative
+       offset elementSumIdx[i]-elementSumIdx[0] does not locate the imag half)
+    6. Single output tile (MIWaveTile == [1,1] and VectorWidth == 1). The
+       i*gwvw offset only matches the arch-VGPR layout for one contiguous block;
+       with multiple wave-tiles the acc registers are grouped per tile (e.g. TN +
+       2x2 read the wrong registers).
+    7. CompactLoopStore is off. CLS-loop store reads acc VGPRs via
+       v_movrelsd_2_b32 indexing, which relies on the rearrangement layout.
+    """
+    if self.parentWriter.states.useBias == DataDirection.READ or \
+       self.kernel.get("CompactLoopStore", False) or \
+       self.kernel.get("ActivationFuncCall", False) or \
+       self.applyAlpha or \
+       self.kernel["ProblemType"].get("UseScaleAlphaVec", 0) or \
+       self.kernel["ProblemType"].get("UseScaleAB", "") == "Vector" or \
+       self.kernel["ProblemType"].get("UseScaleCD", False) or \
+       self.kernel["ProblemType"]["DataType"].isComplex():
+      return False
+
+    miWaveTile = self.kernel.get("MIWaveTile", [1, 1])
+    if miWaveTile[0] != 1 or miWaveTile[1] != 1 or \
+       self.kernel.get("VectorWidthA", 1) != 1 or self.kernel.get("VectorWidthB", 1) != 1:
+      return False
+
+    return self.kernel["MIArchVgpr"] and \
+           hasSequentialValuC(self.kernel) and \
+           not self.needsAccumToDestConversion and \
+           not self.beta
 
   @property
   def wavelen(self) -> int:
@@ -175,19 +260,144 @@ class GlobalWriteBatchWriter:
   def getSOrSaveExecType(self):
     return SOrSaveExecB32 if self.wavelen == 32 else SOrSaveExecB64
 
+  @staticmethod
+  def computeCLSLayout(kernel, numBatches: int):
+    """Single source of truth for the CLS loop layout math.
+
+    Returns (batchesPerCLSBody, iterCount, m0Step), all derived from ONE shared
+    read of the MI output layout so the loop trip count and the M0 src stride
+    can never drift apart:
+      - batchesPerCLSBody: how many batches one CLS loop body covers. The body
+        must align to the SrdD-advance period, else the loop would run s_add
+        SrdD too many times.
+      - iterCount: numBatches / batchesPerCLSBody (>= 1).
+      - m0Step: stride of the CLS iter dim in the v_movrelsd_2_b32 src formula
+        (added to M0 each iteration).
+    Which dim is the CLS iter dim depends on the output layout:
+      (a) outerTT1  > 1, VW1 == 1            : iter = wgIdx1, step = OPM*BM*BN*VW0*outerTT0*VW1
+      (b) outerTT1 == 1, VW1 > 1, SS=False   : iter = vw1,    step = OPM*BM*BN*VW0*outerTT0
+      (c) outerTT1 == 1, VW1 == 1, SS=True   : iter = tIdx,   step = NEPBS / inner_dims
+    Store paths not covered by the CLS loop (non-MI, StoreRemap, StreamK) and
+    non-divisible / non-regular layouts fall back to a single iteration
+    (batchesPerCLSBody = numBatches), where m0Step is dead.
+    """
+    batchesPerBody = numBatches
+    m0Step = 1
+    if not kernel["EnableMatrixInstruction"]:
+      return batchesPerBody, 1, m0Step
+
+    VW0 = kernel["VectorWidthA"]
+    VW1 = kernel["VectorWidthB"]
+    outerTT0 = kernel["MIWaveTile"][0] // VW0
+    outerTT1 = kernel["MIWaveTile"][1] // VW1
+    miT  = min(kernel["MatrixInstM"], kernel["MatrixInstN"])
+    miM_ = (kernel["MatrixInstM"] * kernel["MatrixInstBM"]) if (kernel["MatrixInstM"] == 4) else miT
+    miN_ = (kernel["MatrixInstN"] * kernel["MatrixInstBN"]) if (kernel["MatrixInstN"] == 4) else miT
+    matrixInstBM = 1 if (kernel["MatrixInstM"] == 4) else kernel["MatrixInstBM"]
+    matrixInstBN = 1 if (kernel["MatrixInstN"] == 4) else kernel["MatrixInstBN"]
+    OPM   = miM_ * miN_ // kernel["WavefrontSize"]
+    NEPBS = kernel["NumElementsPerBatchStore"]
+
+    if outerTT1 > 1 and VW1 == 1:
+      m0Step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0 * VW1
+      if numBatches % outerTT1 == 0:
+        batchesPerBody = max(1, numBatches // outerTT1)
+    elif outerTT1 == 1 and VW1 > 1 and not kernel["SourceSwap"]:
+      m0Step = OPM * matrixInstBM * matrixInstBN * VW0 * outerTT0
+      if numBatches % VW1 == 0:
+        batchesPerBody = max(1, numBatches // VW1)
+    elif outerTT1 == 1 and VW1 == 1 and kernel["SourceSwap"]:
+      inner_dims = VW0 * outerTT0 * matrixInstBM * matrixInstBN
+      if NEPBS % inner_dims == 0:
+        m0Step = max(1, NEPBS // inner_dims)
+        batchesPerBody = max(1, ceil(numBatches / NEPBS))
+
+    # StoreRemap / StreamK store paths are not covered by the CLS loop: force a
+    # single iteration (body = all batches). m0Step is left as derived above to
+    # preserve the original emitted SrdD step (it is dead when iterCount == 1).
+    if kernel.get("StoreRemapVectorWidth", 0) != 0 or kernel.get("StreamK", 0) != 0:
+      batchesPerBody = numBatches
+
+    iterCount = max(1, numBatches // batchesPerBody)
+    return batchesPerBody, iterCount, m0Step
+
+  @staticmethod
+  def computeBatchesPerCLSBody(kernel, numBatches: int) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches)[0]
+
+  def _computeBatchesPerCLSBody(self) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)[0]
+
+  @staticmethod
+  def computeCLSIterCount(kernel, numBatches: int) -> int:
+    """CLS loop iter count = numBatches / batchesPerCLSBody. Minimum 1."""
+    return GlobalWriteBatchWriter.computeCLSLayout(kernel, numBatches)[1]
+
+  def _computeCLSIterCount(self) -> int:
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)[1]
+
+  def _computeCLSLayout(self):
+    return GlobalWriteBatchWriter.computeCLSLayout(self.kernel, self.numBatches)
+
   def emit(self) -> Module:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    self._emitAdd(module)
-    # UseSubtileImpl with bias/SAV: drain LDS reads and sync waves after alpha
-    # multiply to prevent cross-wave LDS corruption from ds_bpermute.
-    if self.kernel.get("UseSubtileImpl") and \
+    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
+    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
+    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
+    # _emitAdd first.
+    isMultiDU = isSubtileMultiDU(self.kernel)
+    drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
-        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0)):
+        self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
+    if not isMultiDU:
+      self._emitAdd(module)
+    if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
-      module.add(SBarrier("sync waves before subtile paired stores"))
+      module.add(SBarrier(comment="sync waves before subtile paired stores"))
+    if isMultiDU:
+      self._emitAdd(module)
     self._epilog(module)
+    # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
+    # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
+    # CompactLoopStore so non-CLS .s matches baseline (no CLS tail emit).
+    if self.kernel["CompactLoopStore"]:
+      #     updateCoord1 = (edge or multi-packed)
+      if self.direct_next_rowInc != 0 and self.ss.elementAddr:
+        kw = self.parentWriter
+        rowInc = self.direct_next_rowInc
+        bufferStore = self.kernel["BufferStore"]
+        updateCoord1 = self.edge or len(self.kernel["PackedC1IndicesX"]) > 1
+        emit_coord1 = (not bufferStore) or updateCoord1
+        emit_rowptr = (not self.ss.optSrdIncForRow) and bufferStore
+        if emit_coord1 or emit_rowptr:
+          module.addComment0("CLS look-ahead: next batch's row advance at end of this batch")
+          # Reuse the canonical per-element advance helpers (emitCoord1Advance +
+          # emitRowPtrAdvance) on a representative AddrCalculation instead of
+          # re-implementing the coord1 / rowPtr advance inline. The look-ahead is just
+          # the next batch's emitAddressSetupCode row-advance, produced from the same
+          # source. Same spirit as the delayed-primer reuse of incrementToNextRow.
+          addrCalc = self.ss.elementAddr[0]
+        if emit_coord1:
+          module.add(addrCalc.emitCoord1Advance(rowInc, self.tmpS01,
+                     comment="coord1.la: coord1Vgpr += rowInc (look-ahead)",
+                     scomment="rowInc look-ahead"))
+        if emit_rowptr:
+          # Reuse the canonical row-pointer advance (the SAME helper the per-element
+          # advance uses in emitAddressSetupCode) instead of re-implementing the
+          # cinRowPtr/coutRowPtrD adds inline. This also makes the look-ahead cover
+          # coutRowPtrE / coutRowPtrBias / packed-C1 for free (same conditions).
+          module.add(addrCalc.emitRowPtrAdvance(self.kernel, self.ss, self.tmpS01, rowInc, lookahead=True))
+
+      clsLabel = getattr(self.ss, "_clsLoopLabel", None)
+      if clsLabel is not None and (self._computeBatchesPerCLSBody() - 1 == self.batchIdx) and self.ss.elementAddr:
+        module.add(SSubI32(dst=sgpr("CLSLoopCounter"), src0=sgpr("CLSLoopCounter"), src1=1))
+        module.add(SCmpEQU32(src0=sgpr("CLSLoopCounter"), src1=0))
+        module.add(SCBranchSCC0(clsLabel.getLabelName(), "loop while counter != 0"))
+        # if not self.kernel["StreamK"] == 3:
+        #   module.add(SEndpgm(comment="stop here after CLS loop"))
+        self.ss._clsLoopLabel = None
     return module
 
   def globalStoreWait(self, elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, interleaveStoreVmcnt: bool):
@@ -207,6 +417,9 @@ class GlobalWriteBatchWriter:
       if self.loadE:
         waitLoadCnt += self.eLoadIssued[elementIdx]
         waitLoadCntStrList.append("%d (load E)"%self.eLoadIssued[elementIdx])
+      if self.parentWriter.states.useGateResidual and elementIdx < len(self.gateLoadIssued):
+        waitLoadCnt += self.gateLoadIssued[elementIdx]
+        waitLoadCntStrList.append("%d (load Gate)"%self.gateLoadIssued[elementIdx])
       # Calculate local loads
       # UseSubtileImpl with bias/SAV: skip bias/SAV LDS loads from interleaved
       # waitcnt and rely on the batch-start barrier for LDS synchronization.
@@ -245,7 +458,10 @@ class GlobalWriteBatchWriter:
         dscnt = -1
       # Get vscnt
       if vlcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
-          vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
+          if self.kernel.get("UseSubtileImpl") and not self.kernel["GroupLoadStore"]:
+            vscnt = 0
+          else:
+            vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
       if (vlcnt != -1) or (vscnt != -1) or (dscnt != -1):
         # Get comment
         comment = ""
@@ -272,6 +488,9 @@ class GlobalWriteBatchWriter:
       if self.loadE:
         vlcnt = 0
         commentList.append("E")
+      if self.parentWriter.states.useGateResidual:
+        vlcnt = 0
+        commentList.append("Gate")
       # Local read wait
       if self.parentWriter.states.useBias == DataDirection.READ:
         dscnt = 0
@@ -323,6 +542,223 @@ class GlobalWriteBatchWriter:
 
     return module
 
+  def _emitLdsBarrierIfNeeded(self, targetModule: Module, isSingleKernel: bool):
+    """Emit the LDS write barrier once per batch; idempotent via
+    self.isLocalBarrierInit so repeat callers (preamble/body) are no-ops.
+    """
+    if isSingleKernel and (not self.isLocalBarrierInit):
+      targetModule.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
+      targetModule.add(SBarrier(comment="LDS write barrier"))
+      self.isLocalBarrierInit = True
+
+  def _emitElt0EpilogueLoads(self, module: Module, addrCalc: 'AddrCalculation',
+                             mask, elementIdx: int, bufferOOB,
+                             loadInputCode: Module, factor_gwvw: int,
+                             preamble: bool = False):
+    """Emit one element's epilogue LDS loads (Bias -> ScaleAlphaVec ->
+    ScaleAVec/ScaleBVec, then reorder). Shared by the CLS preamble
+    (preamble=True: address compute only) and the per-element loop
+    (preamble=False: also ds_load). xxxLoadIssued lists are appended in the
+    body only, so the preamble adds no extra entry.
+    """
+    addrBiasVgpr          = addrCalc.addrBiasVgpr
+    addrScaleAVecVgpr     = addrCalc.addrScaleAVecVgpr
+    addrScaleBVecVgpr     = addrCalc.addrScaleBVecVgpr
+    addrScaleAlphaVecVgpr = addrCalc.addrScaleAlphaVecVgpr
+    dataBias              = self.ss.elementDataBias[elementIdx]
+    dataScaleAVec         = self.ss.elementDataScaleAVec[elementIdx]
+    dataScaleBVec         = self.ss.elementDataScaleBVec[elementIdx]
+    dataScaleAlphaVec     = self.ss.elementDataScaleAlphaVec[elementIdx]
+    skipLoad = True if self.factorDim else False
+    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
+
+    def addEpilogueLoad(modGwvw, ldName: str, addrVecVgpr, addrVec, dataVec, loadedDataVec,
+                        vecOffset, gwvw, referenceVgpr, dim, referenceDim,
+                        skipLoad: bool = False, comment: str = "") -> int:
+      """One vector's epilogue load: emitLdChange (address compute) always runs;
+      captured `preamble` gates ONLY the ds_load (preamble=True = address only).
+      """
+      loadsIssued = 0
+      tmpInrSgpr = self._epilogScratchSgpr(1)
+      module.add(addrCalc.emitLdChange(self.kernel, self.ss, ldName, self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrVecVgpr, addrVec, dim))
+      self._epilogScratchFree(tmpInrSgpr)
+      ldsAddrVgpr = referenceVgpr if (referenceVgpr and (dim == referenceDim)) else addrVecVgpr
+      if dataVec not in loadedDataVec:
+        # GroupLoadStore routes barrier+ds_load into `loadInputCode` so they
+        # are grouped with the C input; otherwise both go into `module`.
+        targetModule = loadInputCode if self.kernel["GroupLoadStore"] else module
+        self._emitLdsBarrierIfNeeded(targetModule, isSingleKernel)
+        if not preamble:
+          targetModule.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
+          loadedDataVec[dataVec] = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
+          loadsIssued = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
+          if (self.ss.cfg.gwvw != gwvw) and (not skipLoad):
+            remain_load = self.ss.cfg.gwvw - 1
+            #For below ds_read instruction do not add bias issued , because of all ds_load instructions need to be completed at the same time in this batch.
+            for r in range(remain_load):
+              modGwvw.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, factor_gwvw, comment=comment))
+      return loadsIssued
+
+    modGwvwScale = []
+    localReferenceVgpr = None
+    if self.parentWriter.states.useBias == DataDirection.READ:
+      modGwvwBias = Module("GwvwBias")
+      self.localLoadsBiasIssued += addEpilogueLoad(modGwvwBias, 'Bias', addrBiasVgpr, self.addrBias, dataBias, self.loadedDataBias, addrCalc.biasOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load Bias")
+      localReferenceVgpr = addrBiasVgpr
+      modGwvwScale.append(modGwvwBias)
+    if not preamble:
+      self.biasLoadIssued.append(len(self.loadedDataBias) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
+
+    if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+      modGwvwScaleAlpha = Module("GwvwScaleAlpha")
+      # For multi-DU, the subtile ScaleAlphaVec epilogue load passes None as the
+      # LDS reference vgpr; non-multi-DU uses localReferenceVgpr.
+      savIsMultiDU = isSubtileMultiDU(self.kernel)
+      if savIsMultiDU:
+        savLdsRefVgpr = None if (self.kernel.get("UseSubtileImpl") and addrScaleAlphaVecVgpr is not None) else localReferenceVgpr
+      else:
+        savLdsRefVgpr = localReferenceVgpr
+      self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, self.loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, savLdsRefVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
+      if localReferenceVgpr == None:
+        localReferenceVgpr = addrScaleAlphaVecVgpr
+      modGwvwScale.append(modGwvwScaleAlpha)
+    if not preamble:
+      self.scaleAlphaVecLoadIssued.append(len(self.loadedDataScaleAlphaVec) if self.factorDim else len(self.loadedDataScaleAlphaVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
+
+    if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
+      modGwvwScaleA = Module("GwvwScaleA")
+      modGwvwScaleB = Module("GwvwScaleB")
+      self.loadsScaleAVecIssued += addEpilogueLoad(modGwvwScaleA, "ScaleAVec", addrScaleAVecVgpr, self.addrScaleAVec, dataScaleAVec, self.loadedDataScaleAVec, addrCalc.scaleAVecOffset, self.ss.cfg.gwvw, localReferenceVgpr, 0, self.factorDim, comment="load scaleA")
+      self.loadsScaleBVecIssued += addEpilogueLoad(modGwvwScaleB, "ScaleBVec", addrScaleBVecVgpr, self.addrScaleBVec, dataScaleBVec, self.loadedDataScaleBVec, addrCalc.scaleBVecOffset, 1, localReferenceVgpr, 1, self.factorDim, skipLoad=True, comment="load scaleB")
+      if localReferenceVgpr == None:
+        localReferenceVgpr = addrScaleAVecVgpr if self.factorDim == 0 else addrScaleBVecVgpr
+      modGwvwScale.append(modGwvwScaleA)
+      modGwvwScale.append(modGwvwScaleB)
+    if not preamble:
+      self.scaleAVecLoadIssued.append(len(self.loadedDataScaleAVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.scaleBVecLoadIssued.append(len(self.loadedDataScaleBVec))
+
+    # Reorder scale
+    length = 0
+    for mod in modGwvwScale:
+      length = max(length, len(mod.items()))
+
+    for index in range(0, length):
+      for mod in modGwvwScale:
+        if len(mod.items()) > index:
+          module.add(mod.items()[index])
+
+  def _emitElt0LdsPreambleBeforeBanner(self, module: Module, bufferOOB,
+                                       loadInputCode: Module, factor_gwvw: int):
+    """CompactLoopStore preamble (batch 0): hoist elt-0 LDS setup out of the
+    per-element loop so the CLS countdown loop need not re-emit it each iter. The
+    body dedups via state flags (ss.singleCol*AddrUpdated, isLocalBarrierInit).
+    Per-section gating (addr compute only if optSingleColVgpr; D scaleToBpe /
+    sgpr-offset init / MSB prewarm NonEdge-only) is documented inline below.
+    """
+    elementIdx = 0
+    addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
+    addrBiasVgpr          = addrCalc.addrBiasVgpr
+    addrCVgpr             = addrCalc.addrCVgpr
+    addrDVgpr             = addrCalc.addrDVgpr
+    addrScaleAlphaVecVgpr = addrCalc.addrScaleAlphaVecVgpr
+    addrScaleAVecVgpr     = addrCalc.addrScaleAVecVgpr
+    addrScaleBVecVgpr     = addrCalc.addrScaleBVecVgpr
+    mask                  = self.ss.elementMask[elementIdx]
+    bufferOOB             = None
+
+    isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or \
+                      self.kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel") or \
+                     self.kernel["StreamK"] > 0
+
+    # emitAddressSetupCode for elt 0 is safe: coordOffset0=0 and rowInc=0, so it
+    # only emits the (d1,vc1,d0,vc0) comment + sets coord0Vgpr state -- no real
+    # instructions. The body re-runs it for elt 0 (just re-emits the comment).
+    tmpInrSgpr = self._epilogScratchSgpr(1)
+    module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, \
+        tmpInrSgpr, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+    self._epilogScratchFree(tmpInrSgpr)
+
+    # elt-0 epilogue hoist: optSingleColVgpr -> hoist the address compute
+    # (preamble=True; body folds it via ss.singleCol*AddrUpdated). Else (Edge /
+    # non-optSingleCol) -> hoist only the LDS barrier.
+    if self.ss.optSingleColVgpr:
+      self._emitElt0EpilogueLoads(module, addrCalc, mask, elementIdx, bufferOOB,
+                                   loadInputCode, factor_gwvw,
+                                   True)
+    else:
+      targetModule = loadInputCode if self.kernel["GroupLoadStore"] else module
+      self._emitLdsBarrierIfNeeded(targetModule, isSingleKernel)
+
+    # D scaleToBpe -- NonEdge only (Edge has its own per-elt path that is not
+    # safe to hoist).
+    if not self.edge:
+      tmpInrSgpr = self._epilogScratchSgpr(1)
+      if self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel"):
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, \
+            mask, bufferOOB, True, self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
+      if self.beta:
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, \
+            mask, bufferOOB, True, self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
+      self._epilogScratchFree(tmpInrSgpr)
+
+    # Init sgpr offset -- NonEdge only. Needed for the delayed-pattern
+    # incrementToNextRow when optSrdIncForRow=1 (NonEdge). Edge path
+    # (optSrdIncForRow=0) can skips the delayed pattern entirely so these inits
+    # might not needed.
+
+    module.add(SMovB32(dst=sgpr(self.tmpS01),   src=0, comment="Init sgpr offset"))
+    module.add(SMovB32(dst=sgpr(self.tmpS01+1), src=0, comment="Init sgpr offset"))
+
+    # Prewarm VGPR MSB bank -- NonEdge only. Forces the upper-bank toggle
+    # for the upcoming ds_load to settle ahead of time so the loop body
+    # avoids a stall on first use.
+    prewarmVgpr = None
+    if self.parentWriter.states.useBias == DataDirection.READ and addrBiasVgpr is not None:
+      prewarmVgpr = addrBiasVgpr
+    elif self.kernel["ProblemType"]["UseScaleAlphaVec"] and addrScaleAlphaVecVgpr is not None:
+      prewarmVgpr = addrScaleAlphaVecVgpr
+    elif (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and addrScaleAVecVgpr is not None:
+      prewarmVgpr = addrScaleAVecVgpr
+    if prewarmVgpr is not None:
+      module.add(VMovB32(dst=vgpr(prewarmVgpr), src=vgpr(prewarmVgpr),
+                          comment="prewarm VGPR MSB bank for upcoming ds_load"))
+
+  def _lookaheadRowInc(self, elementIdx: int) -> int:
+    """CompactLoopStore look-ahead: the rowInc that the NEXT EMITTING elt's
+    s_add will consume, so this elt's delayed AFTER-primer can encode it
+    (removes the off-by-one in the CLS primer chain). Forward-scan from
+    elementIdx+1 for the first elt with rowInc != 0; if none remain in this
+    batch, fall through to self.inter_iter_rowInc (the cross-batch advance,
+    precomputed by KernelWriterAssembly; 0 on the last batch). Returns 0 when
+    there is no override (non-CLS, no elementAddr, or no further advance).
+    """
+    if not (self.kernel["CompactLoopStore"] and self.ss.elementAddr):
+      return 0
+    for _j in range(elementIdx + 1, len(self.batchElements)):
+      _ri = self.ss.elementAddr[_j].rowInc
+      if _ri != 0:
+        return _ri
+    return self.inter_iter_rowInc
+
+  def _epilogScratchSgpr(self, n: int = 1):
+    """Scratch sgpr for epilogue address math.
+    CompactLoopStore: borrow `n` aligned sgpr(s) from the pool so the address
+    math does NOT clobber the row-increment primer chain (which lives in
+    tmpS01 / tmpS01+1). Non-CLS: reuse self.tmpSgpr -- this is the baseline, so
+    CLS=0 codegen is bit-for-bit unchanged. Pair with _epilogScratchFree.
+    """
+    if self.kernel["CompactLoopStore"]:
+      return self.parentWriter.sgprPool.checkOutAligned(n, 1)
+    return self.tmpSgpr
+
+  def _epilogScratchFree(self, sgprIdx):
+    """Release a scratch sgpr from _epilogScratchSgpr (no-op for non-CLS, which
+    reused self.tmpSgpr and owns nothing).
+    """
+    if self.kernel["CompactLoopStore"]:
+      self.parentWriter.sgprPool.checkIn(sgprIdx)
+
   def _prolog(self, module: Module):
     module.addComment0("optSingleColVgpr=%u optSharedColVgpr=%u optSGPRUsage=%s optSrdIncForRow=%u factorDim=%u" % \
               (self.ss.optSingleColVgpr, self.ss.optSharedColVgpr, self.ss.optSGPRUsage, self.ss.optSrdIncForRow, self.factorDim))
@@ -341,8 +777,12 @@ class GlobalWriteBatchWriter:
                                ":vaw:%u"%self.atomicW if self.atomic else "",
                                "" if idx == len(self.batchElements) -1 else "; ")
                                for idx, element in enumerate(self.batchElements)])
-    module.addComment2(commentStr)
-
+    # setupStoreElementsForBatch must run before the CLS preamble call so
+    # ss.elementAddr[0] is populated. For non-CLS the batch banner is emitted
+    # right after in the else branch (matches baseline ordering); for CLS the
+    # banner is moved into the CLS header block below (after sgpr setup, before
+    # the CLS label) so the per-iter store body is visually a single labelled
+    # unit.
     if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
       self.ss.setupStoreElementsForBatch(self.kernel, self.gwvw, self.batchElements, self.batchElementSgprs, isOptNLL=False, factorDim=self.factorDim)
     else:
@@ -352,21 +792,22 @@ class GlobalWriteBatchWriter:
     self.storesIssued    = 0
     self.loadsBetaIssued   = 0
     self.loadsEIssued      = 0
+    self.loadsGateIssued   = 0
     self.loadsScaleAVecIssued = 0
     self.loadsScaleBVecIssued = 0
     self.loadsScaleAlphaVecIssued     = 0
 
     ########################################
     # calculate addr and masks
-    module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
     # On input, coord0 and coord1 are VGPRs computed in the pre-batch code, based
     # on the thread and tid number.  These are ELEMENT offsets from start of tensor C
     # for the top-left corner this thread will write.  These are not changed
     # across all the store loop iters.
     if self.debugConfig["ConservativeWaitCnt"] & 0x10:
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
       module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
+
     if not self.edge and self.debugConfig["ForceEdgeStores"] >= 2:
       module.add(self.parentWriter.getBomb()) # should not get here
     if self.edge and self.debugConfig["AssertNoEdge"]:
@@ -401,24 +842,57 @@ class GlobalWriteBatchWriter:
 
     self.betaLoadIssued = []
     self.eLoadIssued = []
+    self.gateLoadIssued = []
     self.biasLoadIssued = []
     self.scaleAVecLoadIssued = []
     self.scaleBVecLoadIssued = []
     self.scaleAlphaVecLoadIssued = []
-    loadedDataBeta = {}
-    loadedDataE = {}
-    loadedDataBias = {}
-    loadedDataScaleAVec = {}
-    loadedDataScaleBVec = {}
-    loadedDataScaleAlphaVec = {}
+
+    self.loadedDataBeta = {}
+    self.loadedDataE = {}
+    self.loadedDataGate = {}
+    self.loadedDataBias = {}
+    self.loadedDataScaleAVec = {}
+    self.loadedDataScaleBVec = {}
+    self.loadedDataScaleAlphaVec = {}
+
+    #when factorDim = 1 the bias's gwvw is alwasy be 1.
+    factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
+
+    # CompactLoopStore CLS header (batch 0 only): preamble + sgpr setup + CLS
+    # label + M0 assignment + M0 step. Wrapped in `if CompactLoopStore` as a
+    # unit so non-CLS .s emits ONLY the original module.addComment2(commentStr)
+    # in the else branch (matches baseline)
+    if self.kernel["CompactLoopStore"] and self.batchIdx == 0:
+      self._emitElt0LdsPreambleBeforeBanner(module, None, #bufferOOB,
+                                             loadInputCode,
+                                             factor_gwvw)
+
+      module.add(SMovB32(dst=sgpr("CLSm0Base"), src=hex(0x0), comment="CLS M0 base = 0"))
+      module.add(SMovB32(dst=sgpr("CLSLoopCounter"), src=hex(self._computeCLSIterCount()), comment="CLS loop iter count"))
+      module.addComment2(commentStr)
+      self.ss._clsLoopLabel = Label(self.parentWriter.labels.getNameInc("CLS"), "")
+      module.add(self.ss._clsLoopLabel)
+      module.add(SMovB32(dst=mgpr(0), src=sgpr("CLSm0Base"),
+          comment="LDS clamp at sgpr(CLSm0Base)"))
+      # CLS M0 step: M0 indirectly offsets the src VGPR index of v_movrelsd_2_b32.
+      # Step = the stride of the CLS iter dim in the SRC formula; taken from the
+      # same layout derivation as the loop iter count (computeCLSLayout) so the
+      # two can never drift apart.
+      _, _, cls_m0_step = self._computeCLSLayout()
+      module.add(SAddU32(dst=sgpr("CLSm0Base"), src0=sgpr("CLSm0Base"), src1=cls_m0_step,
+                         comment="CLS M0 step (src coef of CLS iter dim)"))
+    else:
+      module.addComment2(commentStr)
+
+    module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 
     if self.kernel["BufferStore"] and (self.edge or (self.kernel["NumWaveSplitK"] > 1)):
       bufferOOB = self.tmpVgpr + self.tmpVgprSize - 1
       module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
     else:
       bufferOOB = None
-    #when factorDim = 1 the bias's gwvw is alwasy be 1.
-    factor_gwvw = 1 if self.factorDim else self.ss.cfg.gwvw
+
     for elementIdx, element in enumerate(self.batchElements):
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
       addrCVgpr    = addrCalc.addrCVgpr
@@ -431,6 +905,7 @@ class GlobalWriteBatchWriter:
       data     = self.ss.elementData[elementIdx]
       dataBeta = self.ss.elementData[elementIdx]
       dataE    = self.ss.elementDataE[elementIdx]
+      dataGate = self.ss.elementDataGate[elementIdx] if self.parentWriter.states.useGateResidual else 0
       dataBias = self.ss.elementDataBias[elementIdx]
       dataScaleAVec = self.ss.elementDataScaleAVec[elementIdx]
       dataScaleBVec = self.ss.elementDataScaleBVec[elementIdx]
@@ -439,16 +914,28 @@ class GlobalWriteBatchWriter:
       vc0 = element[3]
       sumIdxGSUSYNC = self.ss.elementSumIdx[elementIdx]
 
-      module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, self.tmpS01, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr))
+      # CompactLoopStore look-ahead override: this elt's delayed AFTER-primer
+      # encodes the NEXT EMITTING elt's rowInc (see _lookaheadRowInc).
+      _emitOverrideRows = self._lookaheadRowInc(elementIdx)
+
+      tmpInrSgpr = self._epilogScratchSgpr(1)
+      _skipCrossBatchAdv = (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx > 0)
+      module.add(addrCalc.emitAddressSetupCode(self.kernel, self.tPB, self.ss, self.tmpVgpr, tmpInrSgpr, self.edge, self.beta, self.atomic, elementIdx, addrDVgpr,
+                                               skipCrossBatchAdvance=_skipCrossBatchAdv))
+      self._epilogScratchFree(tmpInrSgpr)
 
       if self.edge:
-        module.add(addrCalc.edgeProtectCode(self.kernel, self.edge, self.beta, self.atomic, mask, self.tmpSgpr))
+        tmpInrSgpr = self._epilogScratchSgpr(2)
+        module.add(addrCalc.edgeProtectCode(self.kernel, self.edge, self.beta, self.atomic, mask, tmpInrSgpr))
+        self._epilogScratchFree(tmpInrSgpr)
         if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
           module.addComment1("edge Protect")
       # create code Module to push mov vgpr,acc instructions
       if self.beta:
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrCVgpr, self.addrC, 0))
-        if dataBeta not in loadedDataBeta:
+        tmpInrSgpr = self._epilogScratchSgpr(1)
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'C', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrCVgpr, self.addrC, 0))
+        self._epilogScratchFree(tmpInrSgpr)
+        if dataBeta not in self.loadedDataBeta:
           # In the UseSubtileImpl NonEdge path the workgroup-level edge check is relaxed
           # (subtile-aligned remainder is allowed into NonEdge), so individual waves may
           # own rows/columns beyond the valid output region.  Gate each C load by writing
@@ -465,14 +952,15 @@ class GlobalWriteBatchWriter:
             d1, d0 = element[0], element[1]
             # N guard: emit once per d1 group.
             if nGuardSgpr is not None and d1 != self._subtileCloadPrevD1:
-              module.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=d1,
-                                    comment="subtile C load: numNBlocks > d1=%d?" % d1))
+              d1Cmp = d1 * 16 if self.parentWriter.states.storeAlign8 else d1
+              module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), d1Cmp,
+                                    comment="subtile C load: clamped > %d?" % d1Cmp))
               module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
                                      comment="SrdC+2 = BufferOOB if N valid, else 0"))
               self._subtileCloadPrevD1 = d1
             # M guard: emit per element, AND into SrdC+2.
             if mGuardSgpr is not None:
-              module.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=d0,
+              module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), d0,
                                     comment="subtile C load: numMBlocks > d0=%d?" % d0))
               if nGuardSgpr is not None:
                 module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0=sgpr("SrdC+2"), src1=0,
@@ -480,112 +968,146 @@ class GlobalWriteBatchWriter:
               else:
                 module.add(SCSelectB32(dst=sgpr("SrdC+2"), src0="BufferOOB", src1=0,
                                        comment="SrdC+2 = BufferOOB if M valid, else 0"))
+          # Pass `elementIdx` so the readInput's incrementToNextRow gate can
+          # open the CompactLoopStore chain-seed emit for elt-0. Pass
+          # `overrideAfterPrimerRows=_emitOverrideRows` so the AFTER-primer
+          # encodes the NEXT EMITTING elt's rowInc (look-ahead). Non-CLS:
+          # `elementIdx` is unused and `_emitOverrideRows`==0 means no override.
           if self.kernel["GroupLoadStore"]:
-            loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
+            loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                                                          overrideAfterPrimerRows=_emitOverrideRows))
           else:
-            module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01))
-          loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
+            module.add(self.parentWriter.readInput(self.kernel, self.ss, 'C', self.kernel["ProblemType"]["DestDataType"], addrCalc, vc0, data, self.gwvw, addrCVgpr, self.tmpS01, elementIdx, self.batchIdx,
+                                                  overrideAfterPrimerRows=_emitOverrideRows))
+          self.loadedDataBeta[dataBeta] = ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsBetaIssued += ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.gwvw / 16)
-      self.betaLoadIssued.append(len(loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.betaLoadIssued.append(len(self.loadedDataBeta) * ceil(self.kernel["ProblemType"]["DestDataType"].numBytes() * self.ss.cfg.gwvw / 16))
 
       if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none') and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrEVgpr, self.addrE, 0))
-        if dataE not in loadedDataE:
+        tmpInrSgpr = self._epilogScratchSgpr(1)
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrEVgpr, self.addrE, 0))
+        self._epilogScratchFree(tmpInrSgpr)
+        if dataE not in self.loadedDataE:
           loadOffset = int((self.kernel["ProblemType"]["ComputeDataType"].numRegisters() - self.kernel["ProblemType"]["DataTypeE"].numRegisters()) * self.ss.cfg.gwvw)
           if self.kernel["GroupLoadStore"]:
             loadInputCode.add(self.parentWriter.readInput(self.kernel, self.ss, 'E', self.kernel["ProblemType"]["DataTypeE"], addrCalc, vc0, dataE + loadOffset, self.gwvw, addrEVgpr, self.tmpS01))
           else:
             module.add(self.parentWriter.readInput(self.kernel, self.ss, 'E', self.kernel["ProblemType"]["DataTypeE"], addrCalc, vc0, dataE + loadOffset, self.gwvw, addrEVgpr, self.tmpS01))
-          loadedDataE[dataE] = ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16)
+          self.loadedDataE[dataE] = ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16)
           self.loadsEIssued += ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.gwvw / 16)
         self.loadE = True
       else:
         self.loadE = False
-      self.eLoadIssued.append(len(loadedDataE) * ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16))
+      self.eLoadIssued.append(len(self.loadedDataE) * ceil(self.kernel["ProblemType"]["DataTypeE"].numBytes() * self.ss.cfg.gwvw / 16))
 
-      def addEpilogueLoad(modGwvw, ldName: str, addrVecVgpr, addrVec, dataVec, loadedDataVec, vecOffset, gwvw, referenceVgpr, dim, referenceDim, skipLoad=False, comment=""):
-        loadsIssued = 0
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, ldName, self.edge, self.beta, mask, bufferOOB, (elementIdx == 0), self.tmpVgpr, self.tmpSgpr, addrVecVgpr, addrVec, dim))
-        ldsAddrVgpr = referenceVgpr if (referenceVgpr and (dim == referenceDim)) else addrVecVgpr
-        isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
-        if dataVec not in loadedDataVec:
-          if self.kernel["GroupLoadStore"]:
-            # Group bias load with C input to
-            if isSingleKernel and (not self.isLocalBarrierInit):
-              loadInputCode.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-              loadInputCode.add(SBarrier("LDS write barrier"))
-              self.isLocalBarrierInit = True
-            loadInputCode.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
-          else:
-            if isSingleKernel and (not self.isLocalBarrierInit):
-              module.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
-              module.add(SBarrier("LDS write barrier"))
-              self.isLocalBarrierInit = True
-            module.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
-          loadedDataVec[dataVec] = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
-          loadsIssued = ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw / 16)
-          if (self.ss.cfg.gwvw != gwvw) and (not skipLoad):
-            remain_load = self.ss.cfg.gwvw - 1
-            bpl = self.kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
-            bpr = ceil(bpl / self.parentWriter.states.bpr)
-            #For below ds_read instruction do not add bias issued , because of all ds_load instructions need to be completed at the same time in this batch.
-            for r in range(remain_load):
-              modGwvw.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, factor_gwvw, comment=comment))
-        return loadsIssued
-
-      skipLoad = True if self.factorDim else False
-
-      modGwvwScale = []
-      localReferenceVgpr = None
-      if self.parentWriter.states.useBias == DataDirection.READ:
-        modGwvwBias = Module("GwvwBias")
-        self.localLoadsBiasIssued += addEpilogueLoad(modGwvwBias, 'Bias', addrBiasVgpr, self.addrBias, dataBias, loadedDataBias, addrCalc.biasOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load Bias")
-        localReferenceVgpr = addrBiasVgpr
-        modGwvwScale.append(modGwvwBias)
-
-      self.biasLoadIssued.append(len(loadedDataBias) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
-
-      isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
-
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-        modGwvwScaleAlpha = Module("GwvwScaleAlpha")
-        self.loadsScaleAlphaVecIssued += addEpilogueLoad(modGwvwScaleAlpha, "ScaleAlphaVec", addrScaleAlphaVecVgpr, self.addrScaleAlphaVec, dataScaleAlphaVec, loadedDataScaleAlphaVec, addrCalc.scaleAlphaVecOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load scaleAlpha")
-        if localReferenceVgpr == None:
-          localReferenceVgpr = addrScaleAlphaVecVgpr
-        modGwvwScale.append(modGwvwScaleAlpha)
-      self.scaleAlphaVecLoadIssued.append(len(loadedDataScaleAlphaVec) if self.factorDim else len(loadedDataScaleAlphaVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * factor_gwvw / 16))
-
-      if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
-        modGwvwScaleA = Module("GwvwScaleA")
-        modGwvwScaleB = Module("GwvwScaleB")
-        self.loadsScaleAVecIssued += addEpilogueLoad(modGwvwScaleA, "ScaleAVec", addrScaleAVecVgpr, self.addrScaleAVec, dataScaleAVec, loadedDataScaleAVec, addrCalc.scaleAVecOffset, self.ss.cfg.gwvw, localReferenceVgpr, 0, self.factorDim, comment="load scaleA")
-        self.loadsScaleBVecIssued += addEpilogueLoad(modGwvwScaleB, "ScaleBVec", addrScaleBVecVgpr, self.addrScaleBVec, dataScaleBVec, loadedDataScaleBVec, addrCalc.scaleBVecOffset, 1, localReferenceVgpr, 1, self.factorDim, skipLoad=True, comment="load scaleB")
-        if localReferenceVgpr == None:
-          localReferenceVgpr = addrScaleAVecVgpr if self.factorDim == 0 else addrScaleBVecVgpr
-        modGwvwScale.append(modGwvwScaleA)
-        modGwvwScale.append(modGwvwScaleB)
-      self.scaleAVecLoadIssued.append(len(loadedDataScaleAVec) * ceil(self.kernel["ProblemType"]["ComputeDataType"].numBytes() * self.ss.cfg.gwvw / 16))
-      self.scaleBVecLoadIssued.append(len(loadedDataScaleBVec))
-
-      # Reorder scale
-      length = 0
-      for mod in modGwvwScale:
-        length = max(length, len(mod.items()))
-
-      for index in range(0, length):
-        for mod in modGwvwScale:
-          if len(mod.items()) > index:
-            module.add(mod.items()[index])
-
+      # Per-element epilogue LDS loads (same helper the CLS preamble used for
+      # elt 0); if the preamble already loaded it, the ds_load is skipped here.
+      self._emitElt0EpilogueLoads(module, addrCalc, mask, elementIdx, bufferOOB,
+                                   loadInputCode, factor_gwvw,
+                                   False)
+      tmpInrSgpr = self._epilogScratchSgpr(1)
       if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrEVgpr, self.addrE, 0))
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'E', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrEVgpr, self.addrE, 0))
       if self.storeBiasD == 1:
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
-      if self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel"): # "SingleBuffer" or "MultipleBuffer"
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrDVgpr, self.addrD, 0))
-      if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, self.tmpSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'Bias', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrBiasVgpr, self.addrBias, self.factorDim))
 
+      if self.parentWriter.states.useGateResidual and \
+         (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+        _gateList = self.kernel["ProblemType"].get("GateResidualDataTypeList", [])
+        _destDtype = self.kernel["ProblemType"]["DestDataType"]
+        if not _gateList:
+          _prologLoadDtype = self.kernel["ProblemType"]["DestDataType"]
+        elif len(_gateList) == 1:
+          _prologLoadDtype = _gateList[0]
+        else:
+          _prologLoadDtype = _destDtype if _destDtype in _gateList else _gateList[0]
+
+        _multiDtypeGate = (_gateList and len(_gateList) > 1)
+
+        addrGateVgpr = addrCalc.addrGateVgpr if addrCalc.addrGateVgpr != None else addrDVgpr
+        if not _multiDtypeGate and not self.ss.optSingleColVgpr:
+          module.add(addrCalc.emitLdChange(
+              self.kernel, self.ss, 'Gate', self.edge, self.beta, mask, bufferOOB,
+              (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrGateVgpr, self.addrD, 0))
+        if dataGate not in self.loadedDataGate:
+          if self.ss.optSingleColVgpr:
+            # opt (single + multi dtype): hoisted to ONE branch after the prolog loop
+            # (see _emitHoistedGateLoadPhase).
+            pass
+          elif not _multiDtypeGate:
+            # no-opt single-dtype: unconditional load.
+            # Null gate -> SRD num_records==0 -> buffer_load returns 0;
+            _glTgt = loadInputCode if self.kernel["GroupLoadStore"] else module
+            gateLoadMod = self.parentWriter.readInput(
+                self.kernel, self.ss, 'Gate',
+                _prologLoadDtype,
+                addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01)
+            _glTgt.add(gateLoadMod)
+          else:
+            # no-opt (edge) multi-dtype: per-dtype dispatcher per element (gate
+            # borrows D's per-element addr, so it must stay interleaved here).
+            # all using this element's fresh mask. The dispatcher tail-branches
+            # to a common "GateLoad_End" label per element.
+            labels = self.parentWriter.labels
+            gateLoadEndLabel = Label(
+                labels.getNameInc("GateLoad_End_%u"%elementIdx), "")
+            gateLoadTypeLabels = [
+                Label(labels.getNameInc(
+                    "GateLoad_%s_%u"%(g.toNameAbbrev(), elementIdx)), "")
+                for g in _gateList]
+            gateLoadTypeLabels.append(gateLoadEndLabel)
+
+            # Snapshot mutables we'll restore after the dispatcher chain.
+            _savedBpeGate = self.parentWriter.states.bpeGate
+            _savedGlobalOffsetGate = addrCalc.globalOffsetGate
+
+            # Per-element skip when gate pointer is null (no-gate problem): jump past
+            # the whole dtype dispatcher straight to GateLoad_End for this element.
+            module.add(self.parentWriter.getSCMPKInstruction(
+                "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+            module.add(SCBranchSCC1(gateLoadEndLabel.getLabelName(), "skip gate load if disabled (null gate)"))
+
+            for i, nextLabel in enumerate(gateLoadTypeLabels[1:]):
+              typeValue = _gateList[i].value
+              gDtype = _gateList[i]
+              module.add(gateLoadTypeLabels[i])
+              module.add(self.parentWriter.getSCMPKInstruction(
+                  "LGU32", "GateType", typeValue,
+                  comment="GateType != %u"%typeValue))
+              module.add(SCBranchSCC1(nextLabel.getLabelName(),
+                                      "Branch if true (try next gate dtype)"))
+              # per-dtype bpe. no-opt path only (opt is handled by the hoisted phase),
+              # so gate uses per-element runtime addr -> globalOffsetGate fixed 0.
+              perBranchBpe = int(self.parentWriter.states.bpr * gDtype.numRegisters())
+              perBranchBpe = max(1, perBranchBpe)
+              self.parentWriter.states.bpeGate = perBranchBpe
+              addrCalc.globalOffsetGate = 0
+              # Force fresh per-dtype gate address setup.
+              self.ss.singleColGateAddrUpdated = False
+              module.add(addrCalc.emitLdChange(
+                  self.kernel, self.ss, 'Gate', self.edge, self.beta, mask, bufferOOB,
+                  (elementIdx == 0), self.tmpVgpr, tmpInrSgpr, addrGateVgpr, self.addrD, 0))
+              module.add(self.parentWriter.readInput(
+                  self.kernel, self.ss, 'Gate', gDtype,
+                  addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01))
+              # Restore bpe/offset for the next branch in this elem.
+              self.parentWriter.states.bpeGate = _savedBpeGate
+              addrCalc.globalOffsetGate = _savedGlobalOffsetGate
+              module.add(SBranch(labelName=gateLoadEndLabel.getLabelName(),
+                                 comment="Branch to GateLoad end"))
+            module.add(gateLoadEndLabel)
+          gateBytes = ceil(_prologLoadDtype.numBytes() * self.ss.cfg.gwvw / 16)
+          self.loadedDataGate[dataGate] = gateBytes
+          self.loadsGateIssued += gateBytes
+        self.gateLoadIssued.append(len(self.loadedDataGate) * ceil(_prologLoadDtype.numBytes() * self.ss.cfg.gwvw / 16))
+      else:
+        self.gateLoadIssued.append(0)
+
+      if self.kernel["GlobalSplitU"] == 1 or (self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel"): # "SingleBuffer" or "MultipleBuffer"
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'D', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrDVgpr, self.addrD, 0))
+      if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+        module.add(addrCalc.emitLdChange(self.kernel, self.ss, 'TD', self.edge, self.beta, mask, bufferOOB, (elementIdx == len(self.batchElements) - 1), self.tmpVgpr, tmpInrSgpr, addrCalc.addrGSUSyncVgprs, self.addrD, 0))
+      self._epilogScratchFree(tmpInrSgpr)
       if self.atomic and (not self.parentWriter.states.useAtomicAdd):
         # load c into data+1 because of CAS structure
         # TODO - Fix for double here, would need bigger load
@@ -613,29 +1135,36 @@ class GlobalWriteBatchWriter:
         module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       if not self.kernel["BufferStore"]:
-        offsetSrc = (self.tmpVgpr + 2) if self.beta else addrDVgpr
+        # emitLdChange for 'D' (above) already computed addrDVgpr = addrD + offset
+        # Only need to build the address here if emitLdChange for 'D' was NOT called
+        if not (self.kernel["GlobalSplitU"] == 1 or (self.kernel["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel")):
+          offsetSrc = (self.tmpVgpr + 2) if self.beta else addrDVgpr
 
-        module.add(VAddCOU32(vgpr(addrDVgpr+0), VCC(), vgpr(self.addrD+0), \
-            vgpr(offsetSrc+0), "addrDVgpr = D + index*bytes (lo)"))
-        module.add(VAddCCOU32(vgpr(addrDVgpr+1), VCC(), vgpr(self.addrD+1), \
-            vgpr(offsetSrc+1), VCC(), "addrDVgpr = D + index*bytes (hi)"))
+          module.add(VAddCOU32(vgpr(addrDVgpr+0), VCC(), vgpr(self.addrD+0), \
+              vgpr(offsetSrc+0), "addrDVgpr = D + index*bytes (lo)"))
+          module.add(VAddCCOU32(vgpr(addrDVgpr+1), VCC(), vgpr(self.addrD+1), \
+              vgpr(offsetSrc+1), VCC(), "addrDVgpr = D + index*bytes (hi)"))
 
         # restore full exec mask for calculating addr of next element
         if self.edge and (self.beta or self.loadE or self.atomic):
           module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -1 -> exec"))
 
       if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and addrCalc.rowInc and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
           module.addComment1("StoreRemap: shift coord1 address MultipleBufferSingleKernel")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
             printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
             # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
-          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
           module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
     module.add(loadInputCode)
+
+    # opt + multi-dtype gate: emit the gate prolog load as ONE GateType dispatch
+    # (the per-element loop above skipped it on the opt path).
+    self._emitHoistedGateLoadPhase(module, bufferOOB)
 
     # Restore SrdC+2 = BufferOOB after subtile NonEdge C-load OOB gating (which may have set it to 0).
     if self.beta and not self.edge:
@@ -712,7 +1241,9 @@ class GlobalWriteBatchWriter:
     if self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" and self.kernel["StoreRemapVectorWidth"]:
       if self.parentWriter.StoreRemapLastBatch == 1:
         module.addComment1("Handle local read and global write")
-        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, self.tmpS01, self.edge, self.parentWriter.StoreRemapLastBatch)
+        tmpInrSgpr = self._epilogScratchSgpr(2)
+        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, tmpInrSgpr, self.edge, self.parentWriter.StoreRemapLastBatch)
+        self._epilogScratchFree(tmpInrSgpr)
         module.add(storeModule)
         self.storesIssued += numNewStores
 
@@ -749,6 +1280,7 @@ class GlobalWriteBatchWriter:
     lastDataD       = -1
     lastDataE       = -1
     checkedDataBias = {}
+    checkedDataGate = {}
     checkedDataScaleAVec = {}
     checkedDataScaleBVec = {}
     checkedDataScaleAlphaVec = {}
@@ -761,6 +1293,7 @@ class GlobalWriteBatchWriter:
         addrGSUSyncVgprs    = addrCalc.addrGSUSyncVgprs
         addrCVgpr    = addrCalc.addrCVgpr
         addrBiasVgpr = addrCalc.addrBiasVgpr
+        addrGateVgpr = addrCalc.addrGateVgpr
         addrScaleAVecVgpr = addrCalc.addrScaleAVecVgpr
         addrScaleBVecVgpr = addrCalc.addrScaleBVecVgpr
         addrScaleAlphaVecVgpr = addrCalc.addrScaleAlphaVecVgpr
@@ -773,6 +1306,9 @@ class GlobalWriteBatchWriter:
           self.parentWriter.vgprPool.checkIn(addrGSUSyncVgprs)
         if addrBiasVgpr != None:
           self.parentWriter.vgprPool.checkIn(addrBiasVgpr)
+        # No-opt path: addrGateVgpr aliases addrDVgpr
+        if addrGateVgpr != None and addrGateVgpr != addrDVgpr:
+          self.parentWriter.vgprPool.checkIn(addrGateVgpr)
         if addrScaleAVecVgpr != None:
           self.parentWriter.vgprPool.checkIn(addrScaleAVecVgpr)
         if addrScaleBVecVgpr != None:
@@ -798,6 +1334,13 @@ class GlobalWriteBatchWriter:
           self.parentWriter.vgprPool.checkIn(dataE)
         lastDataE = dataE
 
+      if self.parentWriter.states.useGateResidual:
+        dataGate = self.ss.elementDataGate[elementIdx]
+        if dataGate != 0:
+          if dataGate not in checkedDataGate:
+            self.parentWriter.vgprPool.checkIn(dataGate)
+          checkedDataGate[dataGate] = 1
+
       def checkScaleVec(dataScaleVec, checkedDataScaleVec):
         if dataScaleVec != 0:
           if dataScaleVec not in checkedDataScaleVec:
@@ -816,7 +1359,9 @@ class GlobalWriteBatchWriter:
         # this seems buggy? it's possible to issue more than one stores for SR
         # module.add(self.storeRemapAddStore(kernel, tmpVgpr, tmpS01, edge))
         # storesIssued += 1
-        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, self.tmpS01, self.edge, self.parentWriter.StoreRemapLastBatch)
+        tmpInrSgpr = self._epilogScratchSgpr(2)
+        storeModule, numNewStores = self.parentWriter.storeRemapAddStore(self.kernel, self.tmpVgpr, tmpInrSgpr, self.edge, self.parentWriter.StoreRemapLastBatch)
+        self._epilogScratchFree(tmpInrSgpr)
         module.add(storeModule)
         self.storesIssued += numNewStores
 
@@ -835,6 +1380,152 @@ class GlobalWriteBatchWriter:
         self._emitCasAdd(module)
     else:
       self._emitNonatomicAdd(module)
+
+  def _emitGateCvt(self, dataGate, gateDtype):
+    cvtMod = Module("GateCvt_%s" % gateDtype.toNameAbbrev())
+    if gateDtype.isSingle():
+      pass
+    elif gateDtype.isHalf():
+      for vi in range(self.gwvw - 1, -1, -1):
+        sel = HighBitSel.LOW if (vi % 2) == 0 else HighBitSel.HIGH
+        cvtMod.add(ECvtF16toF32(dst=vgpr(dataGate + vi), src=vgpr(dataGate + vi // 2), sel=sel,
+          comment="GateCvt[h]: f16 -> f32 (vi=%d)"%vi))
+    elif gateDtype.isBFloat16():
+      # bf16 = top 16 bits of an f32; lo half shifts up, hi half masks.
+      for vi in range(self.gwvw - 1, -1, -1):
+        if (vi % 2) == 0:
+          cvtMod.add(VLShiftLeftB32(dst=vgpr(dataGate + vi), shiftHex=16, src=vgpr(dataGate + vi // 2),
+            comment="GateCvt[bf16]: lo bf16 -> f32 (vi=%d)"%vi))
+        else:
+          cvtMod.add(VAndB32(dst=vgpr(dataGate + vi), src0=hex(0xffff0000), src1=vgpr(dataGate + vi // 2),
+            comment="GateCvt[bf16]: hi bf16 -> f32 (vi=%d)"%vi))
+    elif gateDtype.isAnyFloat8() or gateDtype.isAnyBFloat8():
+      # PK-cvt 2 elements per instruction into a tmp, then move to dataGate.
+      isFP8 = gateDtype.isAnyFloat8()
+      CvtPk = ECvtPkFP8toF32 if isFP8 else ECvtPkBF8toF32
+      cvtTmp = self.tmpVgpr
+      for vi in range(((self.gwvw - 1) // 2) * 2, -1, -2):
+        sel = HighBitSel.LOW if (vi % 4) == 0 else HighBitSel.HIGH
+        cvtMod.add(CvtPk(dst=vgpr(cvtTmp, 2), src=vgpr(dataGate + vi // 4), sel=sel,
+          comment="GateCvt[%s]: 2x8bit -> 2xf32 (vi=%d)"%(gateDtype.toNameAbbrev(), vi)))
+        for j in range(2):
+          if (vi + j) < self.gwvw:
+            cvtMod.add(VMovB32(dst=vgpr(dataGate + vi + j), src=vgpr(cvtTmp + j),
+              comment="GateCvt[%s]: store f32 (vi=%d)"%(gateDtype.toNameAbbrev(), vi + j)))
+    elif gateDtype.isInt8():
+      # int8 = 4 signed bytes/dword; extract+sign-extend byte (vi%4) to i32, then -> f32.
+      for vi in range(self.gwvw - 1, -1, -1):
+        dst = dataGate + vi
+        if (vi % 4) != 3:
+          cvtMod.add(VMovB32(dst=vgpr(self.tmpVgpr), src=hex((vi % 4) * 8), comment="byte offset"))
+          cvtMod.add(VBfeI32(dst=vgpr(dst), src0=vgpr(dataGate + vi // 4), src1=vgpr(self.tmpVgpr), src2=8,
+            comment="GateCvt[i8]: int8 -> int32 (vi=%d)"%vi))
+        else:
+          cvtMod.add(VAShiftRightI32(dst=vgpr(dst), shiftHex=24, src=vgpr(dataGate + vi // 4),
+            comment="GateCvt[i8]: int8(byte3) -> int32 (vi=%d)"%vi))
+        cvtMod.add(VCvtI32toF32(dst=vgpr(dst), src=vgpr(dst), comment="GateCvt[i8]: int32 -> f32 (vi=%d)"%vi))
+    elif gateDtype.isInt32():
+      # int32 = 1 value/dword; cvt in place to f32.
+      for vi in range(self.gwvw - 1, -1, -1):
+        cvtMod.add(VCvtI32toF32(dst=vgpr(dataGate + vi), src=vgpr(dataGate + vi),
+          comment="GateCvt[i32]: int32 -> f32 (vi=%d)"%vi))
+    else:
+      raise RuntimeError(
+          "GateResidual: unsupported gate dtype %s" % str(gateDtype))
+    return cvtMod
+
+  def _emitHoistedGateLoadPhase(self, module: Module, bufferOOB):
+    """opt path: emit the gate prolog load wrapped in ONE null-gate skip branch."""
+    if not (self.parentWriter.states.useGateResidual and
+            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
+      return
+    if not self.ss.optSingleColVgpr:
+      return  # no-opt path keeps the per-element load in the prolog loop
+    gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
+    if not gateList:
+      return
+    multi = len(gateList) > 1
+
+    labels = self.parentWriter.labels
+    endLabel = Label(labels.getNameInc("GateLoadAll_End"), "")
+    savedBpe = self.parentWriter.states.bpeGate
+
+    def _emitLoadsFor(gDtype):
+      bpe = max(1, int(self.parentWriter.states.bpr * gDtype.numRegisters()))
+      self.parentWriter.states.bpeGate = bpe
+      self.ss.singleColGateAddrUpdated = False
+      seen = set()
+      for ei, element in enumerate(self.batchElements):
+        addrCalc = self.ss.elementAddr[ei]
+        dataGate = self.ss.elementDataGate[ei]
+        if dataGate == 0 or dataGate in seen:
+          continue
+        seen.add(dataGate)
+        addrGateVgpr = addrCalc.addrGateVgpr  # opt: gate's own sharedColGateVgprs
+        addrCalc.globalOffsetGate = addrCalc.coordOffset0 * bpe
+        module.add(addrCalc.emitLdChange(
+            self.kernel, self.ss, 'Gate', self.edge, self.beta, self.ss.elementMask[ei],
+            bufferOOB, (ei == 0), self.tmpVgpr, self.tmpSgpr, addrGateVgpr, self.addrD, 0))
+        module.add(self.parentWriter.readInput(
+            self.kernel, self.ss, 'Gate', gDtype, addrCalc, element[3], dataGate,
+            self.gwvw, addrGateVgpr, self.tmpS01))
+
+    if not multi:
+      # single-dtype: no GateType dispatch needed, just the loads.
+      _emitLoadsFor(gateList[0])
+    else:
+      typeLabels = [Label(labels.getNameInc("GateLoadAll_%s"%g.toNameAbbrev()), "") for g in gateList]
+      typeLabels.append(endLabel)
+      for i, nextLabel in enumerate(typeLabels[1:]):
+        gDtype = gateList[i]
+        module.add(typeLabels[i])
+        module.add(self.parentWriter.getSCMPKInstruction(
+            "LGU32", "GateType", gDtype.value, comment="GateType != %u"%gDtype.value))
+        module.add(SCBranchSCC1(nextLabel.getLabelName(), "Branch if true (try next gate dtype)"))
+        _emitLoadsFor(gDtype)
+        module.add(SBranch(labelName=endLabel.getLabelName(), comment="Branch to GateLoadAll end"))
+    module.add(endLabel)
+    self.parentWriter.states.bpeGate = savedBpe
+
+  def _emitGateCvtAllPhase(self, module: Module):
+    """Multi-dtype Gate: convert ALL loaded gate values to f32 in one GateType
+    dispatch."""
+    if not (self.parentWriter.states.useGateResidual and
+            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
+      return
+    gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
+    if len(gateList) <= 1:
+      if self.ss.optSingleColVgpr:
+        module.add(SWaitCnt(vlcnt=0, comment="GateResidual: wait for hoisted single-dtype gate loads"))
+      return
+
+    labels = self.parentWriter.labels
+    cvtEndLabel = Label(labels.getNameInc("GateCvtAll_End"), "")
+    cvtTypeLabels = [Label(labels.getNameInc("GateCvtAll_%s"%g.toNameAbbrev()), "") for g in gateList]
+    cvtTypeLabels.append(cvtEndLabel)
+
+    # Skip the whole gate cvt phase when the gate pointer is null (no-gate problem).
+    module.add(self.parentWriter.getSCMPKInstruction(
+        "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+    module.add(SCBranchSCC1(cvtEndLabel.getLabelName(), "skip gate cvt if disabled (null gate)"))
+
+    # One wait for all prolog gate loads (multi-dtype already paid a blunt wait
+    # per element previously; this hoists it to a single wait).
+    module.add(SWaitCnt(vlcnt=0, comment="GateResidual: wait for prolog gate loads (branch-once cvt)"))
+    for i, nextLabel in enumerate(cvtTypeLabels[1:]):
+      gDtype = gateList[i]
+      module.add(cvtTypeLabels[i])
+      module.add(self.parentWriter.getSCMPKInstruction(
+          "LGU32", "GateType", gDtype.value, comment="GateType != %u"%gDtype.value))
+      module.add(SCBranchSCC1(nextLabel.getLabelName(), "Branch if true (try next gate dtype)"))
+      seen = set()
+      for ei in range(len(self.batchElements)):
+        dg = self.ss.elementDataGate[ei]
+        if dg != 0 and dg not in seen:
+          seen.add(dg)
+          module.add(self._emitGateCvt(dg, gDtype))
+      module.add(SBranch(labelName=cvtEndLabel.getLabelName(), comment="Branch to GateCvtAll end"))
+    module.add(cvtEndLabel)
 
   def _emitNonatomicAdd(self, module: Module):
     ########################################
@@ -866,6 +1557,17 @@ class GlobalWriteBatchWriter:
       if waitcntInst:
         module.add(waitcntInst)
 
+    if self.kernel["ProblemType"]["StochasticRounding"]:
+      if self.parentWriter.states.asmCaps["v_prng_b32"]:
+        vgprRND = self.parentWriter.vgprPool.checkOut(1, tag="_emitNonatomicAdd_vgprRND")
+      else:
+        # legacy PRNG approach needs extra 2 VGPRs
+        # Ref.: Module("StochasticRoundingCvt")
+        vgprRND = self.parentWriter.vgprPool.checkOut(3, tag="_emitNonatomicAdd_vgprRND2")
+
+    # Multi-dtype Gate: branch-once cvt of all loaded gate values to f32.
+    self._emitGateCvtAllPhase(module)
+
     module.addComment1("apply mask, calc new C and issue writes")
     # module.add(self.getBomb()) # can see store addresses just before the store inst
 
@@ -889,6 +1591,7 @@ class GlobalWriteBatchWriter:
       and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
            self.kernel["ProblemType"]["DestDataType"].isHalf())
       and self.kernel["ProblemType"]["HighPrecisionAccumulate"]
+      and self.kernel["WavefrontSize"] != 32  # wave32: skip permute-based packed store (uses wave64-only ops)
     )
     if is16bitSubtile:
       assert self.kernel["BufferStore"], \
@@ -908,7 +1611,7 @@ class GlobalWriteBatchWriter:
       module.add(VPermlane16SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 16 swap"))
       # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
       # selects lanes 0-15 and 32-47 within the wave.
-      stmp = self.parentWriter.sgprPool.checkOutAligned(2,2)
+      stmp = self.parentWriter.sgprPool.checkOutAligned(2,2, tag="_emitNonatomicAdd_stmp")
       module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))
       module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
       module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
@@ -942,7 +1645,7 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
     storeCode = Module("GroupLoadStore")
-    vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued
+    vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
     for elementIdx in range(0, len(self.batchElements)):
@@ -950,27 +1653,62 @@ class GlobalWriteBatchWriter:
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
       addr = addrCalc.addrDVgpr
       dataE = self.ss.elementDataE[elementIdx]
+      dataGate = self.ss.elementDataGate[elementIdx] if self.parentWriter.states.useGateResidual else 0
       dataBias = self.ss.elementDataBias[elementIdx]
       dataScaleAVec = self.ss.elementDataScaleAVec[elementIdx]
       dataScaleBVec = self.ss.elementDataScaleBVec[elementIdx]
       dataScaleAlphaVec = self.ss.elementDataScaleAlphaVec[elementIdx]
       mask = self.ss.elementMask[elementIdx]
       vc0 = element[3]
-      sumIdx = self.ss.elementSumIdx[elementIdx]
+
+      # When skipRearrangement is True:
+      # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
+      # - Store should read from WMMA output directly
+      # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
+      #
+      # skipRearrangement requires elementSumIdx to be contiguous so that
+      # (elementSumIdx[i] - elementSumIdx[0]) == i.  When checkOutAligned
+      # returns non-contiguous blocks (gaps in the pool), the relative offset
+      # no longer matches the sequential MFMA output layout, causing stores
+      # to read from wrong VGPRs.
+      esIdx = self.ss.elementSumIdx
+      contiguous = all(esIdx[i] - esIdx[0] == i for i in range(len(esIdx)))
+      if self.skipRearrangement and contiguous:
+        sumIdx = esIdx[elementIdx] - esIdx[0]
+      else:
+        sumIdx = self.ss.elementSumIdx[elementIdx]
+
+      # CompactLoopStore look-ahead override for this store loop (see
+      # _lookaheadRowInc). Separate for-loop pass from the _prolog one, so it is
+      # recomputed here.
+      _emitOverrideRows = self._lookaheadRowInc(elementIdx)
 
       # print(str(element)+" rowInc="+str(addrCalc.rowInc))
       # Already write wave column block into LDS
       # Now read lds data back to registers and write to global memroy
       if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and addrCalc.rowInc and self.kernel["StoreRemapVectorWidth"] > 0:
+        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
           module.addComment1("StoreRemap: shift coord1 address")
           if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
             # TODO Check if works with StreamK
             printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
             # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
-          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
           module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
+
+      # When stores are interleaved (GLS=0) with subtile NonEdge guards, the
+      # M-guard branch for the last store in N-group K targets the N-group end
+      # label.  That label must be placed BEFORE the beta*C fmacs for N-group K+1,
+      # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
+      if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
+        blockIdxN = element[0]
+        if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
+          module.add(self._subtileNGroupSkipLabel)
+          self._subtileNGroupSkipLabel = None
+          if self._subtilePendingSrdDInc is not None:
+            module.add(self._subtilePendingSrdDInc)
+            self._subtilePendingSrdDInc = None
 
       # apply in-bounds exec mask
       if self.edge and not self.kernel["BufferStore"]:
@@ -1092,6 +1830,59 @@ class GlobalWriteBatchWriter:
           else:
             raise RuntimeError("Unsupported bias compute data type %s."%str(self.kernel["ProblemType"]["ComputeDataType"]))
 
+      # Gate Residual: acc = gate*acc + gate. Built here but DEFERRED — added after
+      # activation+scaleD (see module.add(gateModule) below), on the f32 ValuC.
+      gateModule = Module("Empty GateResidual")
+      if self.parentWriter.states.useGateResidual and \
+         (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+        # TODO: I8 input (int32 compute) — needs int32 acc -> cvt f32 -> FMA ->
+        # saturate-cast. Not supported yet; reject below.
+        if not self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+          raise RuntimeError(
+              "GateResidual currently requires ComputeDataType=f32 (HPA); got %s" %
+              str(self.kernel["ProblemType"]["ComputeDataType"]))
+
+        gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
+        if not gateList:
+          # Default fallback: use DestDataType as the gate dtype.
+          gateList = [self.kernel["ProblemType"]["DestDataType"]]
+
+        def _emit_gate_fma():
+          """Identity (branchless null): ValuC = (gate+s)*ValuC + gate.
+          GateNullOne (s) = 1.0 if gate null else 0.0 -> null:(0+1)*acc+0=acc; real:gate*acc+gate.
+          gwvw>1 packs 2 elements/op (v_pk_add_f32 + v_pk_fma_f32). s is broadcast from its sgpr
+          via op_sel_hi."""
+          fmaMod = Module("GateFMA")
+          assert self.tmpVgprSize >= 2, "gate packed FMA needs a 2-vgpr store-tmps scratch"
+          tmpPk = self.tmpVgpr
+          for vi in range(0, self.gwvw):
+            sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+              # scalar (gwvw==1 or odd tail): sgpr GateNullOne broadcasts naturally.
+              fmaMod.add(VAddF32(dst=vgpr(self.tmpVgpr), src0=vgpr(dataGate + vi),
+                src1=sgpr("GateNullOne"), comment="gate + s (vi=%d)"%vi))
+              fmaMod.add(VFmaF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(self.tmpVgpr),
+                src1=vgpr("ValuC+%d"%vgprIdx), src2=vgpr(dataGate + vi),
+                comment="GateResidual identity: acc = (gate+s)*acc + gate (vi=%d)"%vi))
+            elif vi % 2 == 1:
+              assert (self.gwvw % 2 == 0)
+            else:
+              # packed pair: op_sel_hi=[1,0,1] broadcasts GateNullOne (src1) low element to both lanes.
+              fmaMod.add(VAddPKF32(dst=vgpr(tmpPk, 2), src0=vgpr(dataGate + vi, 2),
+                src1=sgpr("GateNullOne", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]),
+                comment="gate + s (vi=%d,%d)"%(vi, vi+1)))
+              fmaMod.add(VFmaPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(tmpPk, 2),
+                src1=vgpr("ValuC+%d"%vgprIdx, 2), src2=vgpr(dataGate + vi, 2),
+                comment="GateResidual identity packed: acc = (gate+s)*acc + gate (vi=%d,%d)"%(vi, vi+1)))
+          return fmaMod
+
+        if len(gateList) == 1:
+          gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
+          gateModule.add(_emit_gate_fma())
+        else:
+          gateModule.add(_emit_gate_fma())
+
       if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         vgprIdx   = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
         vgprDst   = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else vgprIdx
@@ -1168,6 +1959,12 @@ class GlobalWriteBatchWriter:
           # the elementSumIdx has indicated the VGPRs from LSU.
           # Don't use the ValuC prefix here.
           enableValuC = False
+        # gradientInput is an absolute vgpr index (= elementSumIdx). The
+        # ActivationFuncCall/copyData and getActivationDestDataType consumers below
+        # address it directly as an absolute vgpr, so keep it absolute here. Only
+        # getActivationActivationComputeType() uses the "ValuC+N" relative namespace
+        # (when enableValuC is set); that startVgprValu offset is applied at its
+        # call site below.
       if self.kernel["ActivationFuncCall"]:
         if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
           (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
@@ -1176,8 +1973,14 @@ class GlobalWriteBatchWriter:
         if (not mergeActFuncCall) and (not isActivationInsertAfter):
           activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
             self.activationSetPCStruct.vgprActCopy))
-        activationModule.add(SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
-          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2)))
+        swappc = SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
+          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2))
+        calleeLabelsByGwvw = getattr(self.activationSetPCStruct, "calleeLabelsByGwvw", None)
+        if calleeLabelsByGwvw:
+          calleeFuncs = list(calleeLabelsByGwvw.get(self.gwvw, ()))
+          if calleeFuncs:
+            swappc.calleeFuncs = calleeFuncs
+        activationModule.add(swappc)
         activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
           self.activationSetPCStruct.vgprActCopy, 1))
       elif self.parentWriter.insertActivationAfterPacked(self.kernel, self.activationTypeStr) and (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False):
@@ -1190,8 +1993,15 @@ class GlobalWriteBatchWriter:
           if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
+        # getActivationActivationComputeType emits on the "ValuC+N" relative
+        # register namespace when enableValuC is set, so make its input index
+        # relative to startVgprValu. The offset is scoped to this consumer only;
+        # the absolute-vgpr consumers above are left untouched.
+        actComputeInput = gradientInput
+        if enableValuC:
+          actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, gradientInput, gradientInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+          self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
       # Add C *= GradientAct
       if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         if isActivationInsertAfter:
@@ -1240,11 +2050,12 @@ class GlobalWriteBatchWriter:
       # pack stores, beta and non-beta reach here:
       packModule = Module("Empty pack module")
       convertModule = Module("Empty convert module")
-      if self.kernel["ProblemType"]["HighPrecisionAccumulate"] and (self.kernel["_GlobalAccumulation"] != 'MultipleBuffer'):
+      if self.needsAccumToDestConversion:
         if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
           destIdx = self.ss.elementSumIdx[elementIdx]
+        packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
         if self.kernel["ProblemType"]["DestDataType"].isHalf():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
@@ -1253,13 +2064,21 @@ class GlobalWriteBatchWriter:
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
             packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
-                                       tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          if self.kernel["ProblemType"]["StochasticRounding"]:
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu, alphaScale=1.0)
+          else:
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
+          # TODO: BF8 stochastic rounding is not yet supported here.
+          #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
+          #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
+          #       and select VCvtSRF32toBF8 based on DestDataType.
           packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=self.tmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+                                     tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
         elif self.kernel["ProblemType"]["DestDataType"].isInt32():
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
             convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, \
@@ -1270,6 +2089,7 @@ class GlobalWriteBatchWriter:
                                         inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
           packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, self.tmpS01,
                                      SaturateTypeInt8=SaturateTypeInt8, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+        self._epilogScratchFree(packTmpS01)
 
       if self.parentWriter.states.asmCaps["HasWMMA_V1"] and self.kernel["EnableMatrixInstruction"] and self.kernel["ProblemType"]["DestDataType"].isHalf() and (not self.kernel["ProblemType"]["HighPrecisionAccumulate"]):
         for vi in range(0, self.gwvw):
@@ -1290,6 +2110,11 @@ class GlobalWriteBatchWriter:
         biasReductionModule.add(self.parentWriter.addStore(self.kernel, self.ss, 'Bias', addrCalc, "ValuC+%d"%vgprIdx, self.tmpS01, self.edge, comment="store Bias"))
 
       if isActivationInsertAfter:
+        if self.parentWriter.states.useGateResidual and \
+           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
+          raise RuntimeError(
+              "GateResidual is not supported with isActivationInsertAfter "
+              "(activation applied after pack on dest-dtype value).")
         module.add(convertModule)
         module.add(packModule)
         module.add(gradientCvtModule)
@@ -1299,6 +2124,7 @@ class GlobalWriteBatchWriter:
         module.add(activationModule)
         module.add(scaleDModule)
         module.add(biasReductionModule)
+        module.add(gateModule)
         module.add(convertModule)
         module.add(packModule)
 
@@ -1334,37 +2160,70 @@ class GlobalWriteBatchWriter:
               sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
               sumIdx1 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
-              # blockIdxM = (tt0-1) // 2: each pair of tt0 values spans one 32-row block.
-              blockIdxM = (tt0 - 1) // 2
-              blockIdxN = element[0]  # d1 = tt1
-              # Early exit: skip this paired store if the wave group is outside the valid M/N tile bounds.
+              blockIdxN = element[0]
+              # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
+              # This also handles N-group transitions.
+              blockIdxM = tt0 - 1
               skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
                                                     labelPrefix="subtile_skip_store")
-              tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1)
-              storeCodeModule.add(tmpStoreCode)
+              # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
+              # When only the lower block is valid, fall through to a scalar fallback.
+              guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+              if guardMSgpr is not None:
+                afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
+                                        f"after paired/fallback store tt0={tt0}")
+                fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
+                fallbackLabel = Label(fallbackLabelName,
+                                      f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
+                storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
+                                               comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
+                storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
+                                                 comment=f"only d0={tt0-1} valid -> scalar fallback"))
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                storeCodeModule.add(tmpStoreCode)
+                storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
+                                            comment="skip scalar fallback"))
+                storeCodeModule.add(fallbackLabel)
+                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                storeCodeModule.add(tmpFallbackCode)
+                storeCodeModule.add(afterPairedLabel)
+              else:
+                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                storeCodeModule.add(tmpStoreCode)
               if skipLabel is not None:
                 storeCodeModule.add(skipLabel)
               self.storesIssued += 1
-            # else: no partner — the sba=0 orphan was handled as a scalar store below
+            else:
+              # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
+              blockIdxM = tt0
+              blockIdxN = element[0]
+              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                          labelPrefix="subtile_skip_orphan")
+              sumIdx0 = self.ss.elementSumIdx[elementIdx]
+              prefixOffset = self.parentWriter.states.c.startVgprValu
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+              storeCodeModule.add(tmpStoreCode)
+              if orphanSkipLabel is not None:
+                storeCodeModule.add(orphanSkipLabel)
+              self.storesIssued += 1
           else:
-            # sba=0 element (even tt0): emit SRD row increment if needed; store deferred to sba=1.
+            # sba=0 element (even tt0): defer SRD row increment until after N-group label.
             if self.ss.optSrdIncForRow and addrCalc.rowInc:
-              module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01))
+              self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
             partnerElementIdx = elementIdx + 1
             partnerExists = (partnerElementIdx < len(self.batchElements) and
                              self.batchElements[partnerElementIdx][1] == tt0 + 1)
             if not partnerExists:
               # Orphan element (no sba=1 partner in this batch): scalar 16bit store now.
               # Guard against OOB wave groups (same as paired store path).
-              mBlockSize = self.parentWriter.states.subtileMBlockSize
-              blockIdxM = (tt0 * self.kernel["MatrixInstM"]) // mBlockSize
+              blockIdxM = tt0
               blockIdxN = element[0]
               # Early exit: skip this orphan scalar store if the wave group is outside the valid M/N tile bounds.
               orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
                                                           labelPrefix="subtile_skip_orphan")
               sumIdx0 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
-              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0)
+              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
               storeCodeModule.add(tmpStoreCode)
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
@@ -1379,12 +2238,23 @@ class GlobalWriteBatchWriter:
           if isSubtileNonEdge:
             tt0 = element[1]
             blockIdxM = tt0  # each tt0 maps to one mBlockSize-row block
-            blockIdxN = element[0]  # tt1
+            blockIdxN = element[0]
             # Early exit: skip this store if the wave group is outside the valid M/N tile bounds.
             skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
                                                   labelPrefix="subtile_skip_store")
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store D")
+          # Apply exec mask for partial M/N blocks (regular fp32 store path)
+          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+            # wave32: 2 LGs x 8 rows/LG -> shift=1; wave64: 4 LGs x 4 rows/LG -> shift=2
+            rowScaleShift = 1 if self.wavelen == 32 else 2
+            self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                                     mGuardOffset=1, rowScaleShift=rowScaleShift)
+            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
+          # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
+          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
+                                                   overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
           storeCodeModule.add(tmpStoreCode)
+          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
           if skipLabel is not None:
             storeCodeModule.add(skipLabel)
           self.storesIssued += 1
@@ -1416,6 +2286,8 @@ class GlobalWriteBatchWriter:
 
     # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
     self._finalizeSubtileOobGuards(storeCode if self.kernel["GroupLoadStore"] else module)
+    if self.kernel["ProblemType"]["StochasticRounding"]:
+      self.parentWriter.vgprPool.checkIn(vgprRND)
 
     module.add(storeCode)
 
@@ -1469,9 +2341,9 @@ class GlobalWriteBatchWriter:
       module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
 
     if self.parentWriter.db["ConservativeWaitCnt"] & 0x40:
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
       module.add(SWaitCnt(vscnt=0, comment="ConservativeWaitCnt"))
-      module.add(SBarrier("debug"))
+      module.add(SBarrier(comment="debug"))
 
   def _emitSubtilePackedPermute(self, vPack: int, vPermAddr: int, addrWhilePermuting=None) -> Module:
     """Shuffle four packed dwords across wave halves for a subtile dwordx4 store.
@@ -1517,7 +2389,7 @@ class GlobalWriteBatchWriter:
                                comment=f"perm dword {k}"))
 
     if addrWhilePermuting is not None:
-      addrWhilePermuting()
+      addrWhilePermuting(module)
 
     module.add(SWaitCnt(dscnt=0, comment="wait for ds_bpermute (lgkmcnt=0)"))
 
@@ -1573,6 +2445,9 @@ class GlobalWriteBatchWriter:
       if self._subtileNGroupSkipLabel is not None:
         targetModule.add(self._subtileNGroupSkipLabel)
         self._subtileNGroupSkipLabel = None
+      if self._subtilePendingSrdDInc is not None:
+        targetModule.add(self._subtilePendingSrdDInc)
+        self._subtilePendingSrdDInc = None
       # Create the single end-of-all-stores label on the first N group.
       if self._subtileAllStoresEndLabel is None:
         endLabelName = self.parentWriter.labels.getNameInc("subtile_all_stores_end")
@@ -1581,8 +2456,9 @@ class GlobalWriteBatchWriter:
         f"{labelPrefix}_N{blockIdxN}_end")
       nGroupEndLabel = Label(nGroupEndLabelName,
                              f"end of N group blockIdxN={blockIdxN} (M cbranch target)")
-      targetModule.add(SCmpKGtU32(src=sgpr("SubtileNGuard"), simm16=blockIdxN,
-                                   comment=f"quick-exit: numValidNBlocks > {blockIdxN}? (OOB -> skip all stores)"))
+      nGuardCmp = blockIdxN * 16 if self.parentWriter.states.storeAlign8 else blockIdxN
+      targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nGuardCmp,
+                                   comment=f"quick-exit: clamped > {nGuardCmp}? (OOB -> skip all stores)"))
       targetModule.add(SCBranchSCC0(labelName=self._subtileAllStoresEndLabel.getLabelName(),
                                      comment=f"quick-exit: N OOB at blockIdxN={blockIdxN}, skip all remaining stores"))
       self._subtileNGroupSkipLabel = nGroupEndLabel
@@ -1594,7 +2470,7 @@ class GlobalWriteBatchWriter:
     # is OOB then all subsequent M elements in this N group are also OOB.
     if guardMSgpr is None:
       return None
-    targetModule.add(SCmpKGtU32(src=sgpr("SubtileMGuard"), simm16=blockIdxM,
+    targetModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), blockIdxM,
                                  comment=f"quick-exit: numValidMBlocks > {blockIdxM}? (OOB -> skip N group)"))
     if guardNSgpr is not None and self._subtileNGroupSkipLabel is not None:
       # M OOB → jump to end of this N group (no per-element label needed).
@@ -1620,11 +2496,126 @@ class GlobalWriteBatchWriter:
     if self._subtileNGroupSkipLabel is not None:
       targetModule.add(self._subtileNGroupSkipLabel)
       self._subtileNGroupSkipLabel = None
+    if self._subtilePendingSrdDInc is not None:
+      targetModule.add(self._subtilePendingSrdDInc)
+      self._subtilePendingSrdDInc = None
     if self._subtileAllStoresEndLabel is not None:
       targetModule.add(self._subtileAllStoresEndLabel)
       self._subtileAllStoresEndLabel = None
 
-  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0) -> Module:
+  def _emitAlign8ExecMask(self, module, tmpS, tmpS2, blockIdxM, blockIdxN, mGuardOffset, rowScaleShift):
+    """Emit exec mask for partial M/N blocks in the NonEdge store path.
+
+    Computes a 64-bit exec mask that disables OOB lanes for partial M and N
+    blocks at the tile boundary.  The mask is the AND of an M component and
+    an N component, each computed independently.
+
+    MMA output layout (MI16x16, wavefront=64):
+      64 lanes = 4 lane-groups (LGs) of 16 lanes each.
+      Each LG owns consecutive M-rows:
+        - Paired bf16 store: 8 M-rows per LG (32 rows total, 2 MMA tiles)
+        - Scalar/fp32 store: 4 M-rows per LG (16 rows total, 1 MMA tile)
+      Within each LG, lane_id % 16 selects the N-column (0..15).
+
+    M mask algorithm:
+      Given validRows (number of valid M-rows in this block), the number of
+      active lane-groups is validRows / rowsPerLG.  Each LG occupies 16
+      consecutive lanes, so the mask is the bottom (numValidLGs * 16) bits of
+      a 64-bit word.  This is computed as:
+        shiftAmt = 64 - validRows * (16 / rowsPerLG)
+        mask = (uint64_t)-1 >> shiftAmt
+      validM_wave is precomputed once per tile in _emitSubtileGuards.
+
+    N mask algorithm:
+      SubtileNGuard holds the clamped valid-N-column count for this wave.
+      partialN = SubtileNGuard % 16 gives the number of valid columns within
+      the last 16-column MMA tile.  The N mask disables columns >= partialN:
+        nMask = (1 << partialN) - 1        e.g. partialN=5 -> 0x001F
+        nMask = nMask | (nMask << 16)      replicate across both LG halves
+      This 32-bit word is ANDed into both lo and hi halves of the exec mask.
+
+    This sequence is designed to fit within the ds_bpermute latency window
+    (~88 cycles at 4 cyc/issue) for zero-overhead execution on interior blocks.
+
+    Args:
+        module:         Target module to emit instructions into.
+        tmpS:           SGPR index for mask result (2 consecutive, even-aligned).
+        tmpS2:          SGPR index for scratch (2 consecutive).
+        blockIdxM:      M block index for this store element.
+        blockIdxN:      N block index for this store element.
+        mGuardOffset:   Number of MMA tiles this store spans (2=paired, 1=single).
+        rowScaleShift:  Left-shift to convert validRows to lane-count
+                        (1 for paired/8-rows-per-LG, 2 for scalar-fp32/4-rows-per-LG).
+    """
+    miM = self.kernel["MatrixInstM"]
+    blockStartRow = blockIdxM * miM
+    validMWaveSgpr = self.parentWriter.states.subtileTotalMOffsetSgpr
+    mMaskDone = Label(self.parentWriter.labels.getNameInc("align8_m_done"), "")
+
+    # --- M mask: per-lane-group selection via right-shift ---
+    isWave32 = self.wavelen == 32
+    if isWave32:
+      module.add(SMovB32(dst=sgpr(tmpS), src=-1, comment="mask = full"))
+    else:
+      module.add(SMovB64(dst=sgpr(tmpS, 2), src=-1, comment="mask = full"))
+    module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), blockIdxM + mGuardOffset,
+                          comment=f"SubtileMGuard > {blockIdxM + mGuardOffset}? (block fully interior)"))
+    module.add(SCBranchSCC1(labelName=mMaskDone.getLabelName(),
+                            comment="interior M block -> mask stays -1"))
+    if blockStartRow > 0:
+      module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(validMWaveSgpr), src1=blockStartRow,
+                         comment=f"validRows = validM_wave - {blockStartRow}"))
+      module.add(SCSelectB32(dst=sgpr(tmpS2), src0=0, src1=sgpr(tmpS2), comment="clamp to 0"))
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=sgpr(tmpS2), shiftHex=rowScaleShift,
+                                comment=f"validRows * {1 << rowScaleShift}"))
+    else:
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=sgpr(validMWaveSgpr), shiftHex=rowScaleShift,
+                                comment=f"validM_wave * {1 << rowScaleShift}"))
+    module.add(SSubU32(dst=sgpr(tmpS2), src0=self.wavelen, src1=sgpr(tmpS2),
+                       comment=f"shiftAmt = {self.wavelen} - validRows * scale"))
+    if isWave32:
+      module.add(SLShiftRightB32(dst=sgpr(tmpS), src=-1, shiftHex=sgpr(tmpS2),
+                                 comment="M mask = -1 >> shiftAmt"))
+    else:
+      module.add(SLShiftRightB64(dst=sgpr(tmpS, 2), src=-1, shiftHex=sgpr(tmpS2),
+                                 comment="M mask = -1 >> shiftAmt"))
+    module.add(mMaskDone)
+
+    # --- N mask: per-column bit-mask for arbitrary partial N ---
+    nCmpVal = (blockIdxN + 1) * 16
+    nMaskDone = Label(self.parentWriter.labels.getNameInc("align8_n_done"), "")
+    module.add(_scmpGtU32(self.parentWriter, sgpr("SubtileNGuard"), nCmpVal,
+                          comment=f"clamped > {nCmpVal}? (not last N block)"))
+    module.add(SCBranchSCC1(labelName=nMaskDone.getLabelName(),
+                            comment="interior N block -> mask unchanged"))
+    module.add(SAndB32(dst=sgpr(tmpS2), src0=sgpr("SubtileNGuard"), src1=0xF,
+                       comment="partialN = clamped %% 16, SCC=1 if non-zero"))
+    nFullLabel = Label(self.parentWriter.labels.getNameInc("align8_n_full"), "")
+    module.add(SCBranchSCC0(labelName=nFullLabel.getLabelName(),
+                            comment="partialN==0 -> full 16-col block"))
+    module.add(SLShiftLeftB32(dst=sgpr(tmpS2), src=1, shiftHex=sgpr(tmpS2),
+                              comment="1 << partialN"))
+    module.add(SSubU32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=1,
+                       comment="(1 << partialN) - 1"))
+    if isWave32:
+      # wave32: replicate lo16 to both halves without extra scratch SGPR
+      module.add(SMulI32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=hex(0x10001),
+                         comment="replicate lo16 to both halves"))
+      module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr(tmpS2),
+                         comment="mask &= N mask"))
+    else:
+      module.add(SLShiftLeftB32(dst=sgpr(tmpS2+1), src=sgpr(tmpS2), shiftHex=16,
+                                comment="replicate to hi16"))
+      module.add(SOrB32(dst=sgpr(tmpS2), src0=sgpr(tmpS2), src1=sgpr(tmpS2+1),
+                        comment="N mask word = lo16 | hi16"))
+      module.add(SAndB32(dst=sgpr(tmpS), src0=sgpr(tmpS), src1=sgpr(tmpS2),
+                         comment="mask_lo &= N mask"))
+      module.add(SAndB32(dst=sgpr(tmpS+1), src0=sgpr(tmpS+1), src1=sgpr(tmpS2),
+                         comment="mask_hi &= N mask"))
+    module.add(nFullLabel)
+    module.add(nMaskDone)
+
+  def _emit16bitSubtilePairedStore(self, addrCalc, sumIdx0: int, sumIdx1: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
     """Emit a paired 16bit store combining sba=0 and sba=1 subtile data.
 
     Works for both bf16 and fp16 HPA output types.
@@ -1696,8 +2687,19 @@ class GlobalWriteBatchWriter:
     globalOffset = addrCalc.globalOffset * bpeDest // bpeCurr
     addrScaleShift = int(log2(bpeCurr // bpeDest)) if bpeCurr > bpeDest else 0
 
-    def emitAddrWhilePermuting():
-      """Compute vAddrScratch overlapped with the in-flight ds_bpermute."""
+    useAlign8 = self.parentWriter.states.storeAlign8
+
+    def emitAddrWhilePermuting(module):
+      """Callback emitted between ds_bpermute and s_waitcnt lgkmcnt(0).
+
+      The ds_bpermute has ~88 cycles of LDS latency.  We overlap SALU/VALU
+      work in this window to hide the cost:
+        1. Compute the adjusted D store address (VALU).
+        2. Compute the exec mask for partial M/N blocks (SALU) — this
+           suppresses OOB lanes at tile boundaries without adding any
+           latency to the critical path.
+      `module` is the permute Module, so instructions emitted here land
+      between the ds_bpermute issue and the s_waitcnt that consumes results."""
       if addrScaleShift:
         module.add(VLShiftRightB32(dst=vgpr(vAddrScratch), shiftHex=addrScaleShift,
                                    src=vgpr(addrDVgpr), comment=f"scale addrDVgpr bpe {bpeCurr}->{bpeDest}"))
@@ -1706,8 +2708,15 @@ class GlobalWriteBatchWriter:
       else:
         module.add(VAddU32(dst=vgpr(vAddrScratch), src0=vgpr(addrDVgpr), src1=vgpr(vLGDelta),
                            comment="adjusted D addr = addrDVgpr + lane_group*8"))
+      if useAlign8:
+        self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                                 mGuardOffset=2, rowScaleShift=1)
 
     module.add(self._emitSubtilePackedPermute(vPack, vPermAddr, addrWhilePermuting=emitAddrWhilePermuting))
+
+    if useAlign8:
+      tmpS = self.tmpS01
+      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(tmpS, self.laneSGPRC), "apply exec mask"))
 
     module.addComment1("buffer_store_dwordx4: write 8 16bit values (4 dwords, 2-aligned src)")
     module.add(BufferStoreB128(
@@ -1719,6 +2728,9 @@ class GlobalWriteBatchWriter:
       comment=f"16bit paired dwordx4 store tt0={tt0},{tt0+1}"
     ))
 
+    if useAlign8:
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
+
     # WAR hazard: buffer_store_dwordx4 reads vPack[0:3] as source operands.
     # The next paired store's v_cvt_pk_bf16_f32 will overwrite vPack.
     # Insert nop to ensure the store has latched its source VGPRs.
@@ -1726,11 +2738,11 @@ class GlobalWriteBatchWriter:
 
     return module
 
-  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0) -> Module:
-    """Emit a 16bit store for an orphan sba=0 subtile with no sba=1 partner.
+  def _emit16bitSubtileScalarStore(self, addrCalc, sumIdx0: int, prefixOffset: int, tt0: int = 0, blockIdxM: int = 0, blockIdxN: int = 0) -> Module:
+    """Emit a 16bit store for an orphan subtile element with no partner.
 
-    sba = subtile block index along A (M dimension).  Used when MIWaveTile[0] is
-    odd and the last sba=0 element has no sba=1 partner.
+    Used when MIWaveTile[0] is odd and the last sba=0 element has no sba=1
+    partner, or when batch boundaries split an (sba=0, sba=1) pair.
 
     The layout below is specific to the mfma instruction used here: lane l = LG*16 + r
     owns 4 output values at M-rows (LG*4 + 0..3) and a single N-column
@@ -1877,6 +2889,13 @@ class GlobalWriteBatchWriter:
     module.add(VCvtPkF32to16(dst=vgpr(vPack+0), src0=vc(0), src1=vc(1), comment=f"M-row+0/+1 -> {typeStr}"))
     module.add(VCvtPkF32to16(dst=vgpr(vPack+1), src0=vc(2), src1=vc(3), comment=f"M-row+2/+3 -> {typeStr}"))
     module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
+
+    useAlign8 = self.parentWriter.states.storeAlign8
+    if useAlign8:
+      self._emitAlign8ExecMask(module, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                               mGuardOffset=1, rowScaleShift=2)
+      module.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
+
     module.addComment1(f"buffer_store_b64: write 4 {typeStr} M-rows at fixed N-col (orphan subtile)")
     module.add(BufferStoreB64(
       src=vgpr(vPack+0, 2),
@@ -1886,6 +2905,10 @@ class GlobalWriteBatchWriter:
       mubuf=MUBUFModifiers(offen=True, offset12=globalOffset, glc=isGlc, slc=isSlc, nt=isNT),
       comment=f"orphan tt0={tt0} vc=0..3: 4 consecutive M-rows at fixed N-col"
     ))
+
+    if useAlign8:
+      module.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
+
     return module
 
   def _emitAtomicAdd(self, module: Module):
@@ -2232,7 +3255,7 @@ class GlobalWriteBatchWriter:
         # single precision complex
         elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
           newSumIdx = sumIdxV * 2 - self.parentWriter.states.c.startVgprValu
-          tmpVgpr = self.parentWriter.vgprPool.checkOut(1)
+          tmpVgpr = self.parentWriter.vgprPool.checkOut(1, tag="_applyAlpha_tmpVgpr")
           module.add(VMovB32(dst=vgpr(tmpVgpr), src=vgpr("ValuC+%u"%(newSumIdx)), comment="store Cr"))
           module.add(VMulF32(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%(newSumIdx)), comment="*= alpha ( Cr = Ar * Cr)"))
           module.add(VMacF32(dst=vgpr("ValuC+%u"%(newSumIdx)), src0=(sgpr("Alpha+1").getMinus()), src1=vgpr("ValuC+%u"%(newSumIdx+1)), comment="*= alpha ( Cr += -Ai * Ci )"))
@@ -2250,8 +3273,8 @@ class GlobalWriteBatchWriter:
         # double precision complex
         elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
           newSumIdx = sumIdxV * 4 - self.parentWriter.states.c.startVgprValu
-          vtmp1 = self.parentWriter.vgprPool.checkOutAligned(2, 2)
-          vtmp2 = self.parentWriter.vgprPool.checkOutAligned(2, 2)
+          vtmp1 = self.parentWriter.vgprPool.checkOutAligned(2, 2, tag="_applyAlpha_vtmp1")
+          vtmp2 = self.parentWriter.vgprPool.checkOutAligned(2, 2, tag="_applyAlpha_vtmp2")
           # tmp1 = a.real * b.real (t1 = Ar*Cr)
           module.add(VMulF64(dst=vgpr(vtmp1,2), src0=sgpr("Alpha+0",2), src1=vgpr("ValuC+%u"%(newSumIdx+0),2)))
           # tmp2 = a.imag * b.real (t2 = Ai*Cr)
@@ -2333,11 +3356,13 @@ class GlobalWriteBatchWriter:
 
       elif kernel["ProblemType"]["DestDataType"].isInt8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          dataCExternal   = ss.elementData[elementIdx] + (vi // 4)
+          byteIdx       = vi %  4
           if (vi%4) != 3:
-            module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=hex(vi * 8), comment="value = %u"%(vi * 8)))
-            module.add(VBfeI32(dst=vgpr(tmpVgpr), src0=vgpr(dataV+0), src1=vgpr(tmpVgpr+1), src2=8, comment="int8 to int32"))
+            module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=hex(byteIdx * 8), comment="value = %u"%(byteIdx * 8)))
+            module.add(VBfeI32(dst=vgpr(tmpVgpr), src0=vgpr(dataCExternal), src1=vgpr(tmpVgpr+1), src2=8, comment="int8 to int32"))
           else:
-            module.add(VAShiftRightI32(dst=vgpr(tmpVgpr), shiftHex=24, src=vgpr(dataV+0), comment="int8 to int32"))
+            module.add(VAShiftRightI32(dst=vgpr(tmpVgpr), shiftHex=24, src=vgpr(dataCExternal), comment="int8 to int32"))
 
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
@@ -2386,6 +3411,7 @@ class GlobalWriteBatchWriter:
       # float8 precision
       elif kernel["ProblemType"]["DestDataType"].isAnyFloat8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          dataCExternal   = ss.elementData[elementIdx] + (vi // 4)
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           # Generate single f32 code if edge is detected.
           isPK = False
@@ -2393,18 +3419,18 @@ class GlobalWriteBatchWriter:
             if self.parentWriter.states.archCaps["VOP3ByteSel"]:
               sb = 0 if self.gwvw == 1 else 1
               if not self.amdClangVersion.major >= 19:
-                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[0,sb])))
+                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(op_sel=[0,sb])))
               else:
-                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(byte_sel=[sb])))
+                module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(byte_sel=[sb])))
             else:
               sb = SelectBit.BYTE_0 if self.gwvw == 1 else SelectBit.BYTE_2
-              module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+              module.add(VCvtFP8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), sdwa=SDWAModifiers(src0_sel=sb)))
           # Original packed route
           elif vi%2 == 1:
             continue
           else:
             isPK = True
-            module.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
+            module.add(ECvtPkFP8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataCExternal), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))
@@ -2413,6 +3439,7 @@ class GlobalWriteBatchWriter:
       # bfloat8 precision
       elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
+          dataCExternal   = ss.elementData[elementIdx] + (vi // 4)
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
           # Generate single f32 code if edge is detected.
           isPK = False
@@ -2420,18 +3447,18 @@ class GlobalWriteBatchWriter:
             if self.parentWriter.states.archCaps["VOP3ByteSel"]:
               sb = 0 if self.gwvw == 1 else 1
               if not self.amdClangVersion.major >= 19:
-                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(op_sel=[0,sb])))
+                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(op_sel=[0,sb])))
               else:
-                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), vop3=VOP3PModifiers(byte_sel=[sb])))
+                module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vop3=VOP3PModifiers(byte_sel=[sb])))
             else:
               sb = SelectBit.BYTE_0 if self.gwvw == 1 else SelectBit.BYTE_2
-              module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataV), sdwa=SDWAModifiers(src0_sel=sb)))
+              module.add(VCvtBF8toF32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), sdwa=SDWAModifiers(src0_sel=sb)))
           # Original packed route
           elif vi%2 == 1:
             continue
           else:
             isPK = True
-            module.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataV), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
+            module.add(ECvtPkBF8toF32(dst=vgpr(tmpVgpr, 2), src=vgpr(dataCExternal), sel=HighBitSel.LOW if vi%4 == 0 else HighBitSel.HIGH))
           module.add(SNop(waitState=0))
           if kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), comment="finalSum = sum*alpha + C*beta"))

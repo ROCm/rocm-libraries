@@ -4,6 +4,7 @@
 target_sources(hipblaslt-clients-common
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/singletons.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.cpp"

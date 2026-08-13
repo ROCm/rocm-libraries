@@ -42,7 +42,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   DataInitTypeBias: 21
   DataInitTypeScaleAlphaVec: 21
-  NumElementsToValidate: -1
   BoundsCheck: 2
 
 BenchmarkProblems:
@@ -85,7 +84,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - PrefetchLocalRead: [3]
         - PrefetchGlobalRead: [2]
-        - SourceSwap: [1] # known bug for dst f8/b8
+        - SourceSwap: [true] # known bug for dst f8/b8
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -160,7 +159,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - PrefetchLocalRead: [3]
         - PrefetchGlobalRead: [2]
-        - SourceSwap: [1] # known bug for dst f8/b8
+        - SourceSwap: [true] # known bug for dst f8/b8
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -235,7 +234,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - PrefetchLocalRead: [3]
         - PrefetchGlobalRead: [2]
-        - SourceSwap: [1] # known bug for dst f8/b8
+        - SourceSwap: [true] # known bug for dst f8/b8
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -309,7 +308,7 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - PrefetchLocalRead: [3]
         - PrefetchGlobalRead: [2]
-        - SourceSwap: [1] # known bug for dst f8/b8
+        - SourceSwap: [true] # known bug for dst f8/b8
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

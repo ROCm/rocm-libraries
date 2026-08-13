@@ -268,8 +268,9 @@ void cpu_csrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
                             csr_row_ptr,
@@ -282,9 +283,8 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_usolve(M,
                             alpha,
                             csr_row_ptr,
@@ -297,6 +297,7 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose
@@ -327,8 +328,9 @@ void cpu_csrsv(rocsparse_operation  trans,
             }
         }
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -341,9 +343,8 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_lsolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -356,6 +357,7 @@ void cpu_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -600,12 +602,52 @@ namespace rocsparse_clients
             break;
         }
 
+        case rocsparse_format_csc:
+        {
+#ifdef ROCSPARSE_WITH_CSC_TRSV
+            // A CSC matrix is the transpose of the CSR matrix sharing the same
+            // arrays, so host_cscsv forwards to host_csrsv with the transpose
+            // operation and the fill mode flipped (and, for the conjugate
+            // transpose, the values conjugated). Each batch entry is solved
+            // independently using the per-batch strides of the matrix values and
+            // of the x / y dense vectors.
+            auto& host = A.template as<rocsparse_format_csc>().host();
+            for(int64_t i = 0; i < batch_count; ++i)
+            {
+                const T* p    = host.val.data() + i * A.get_stride();
+                const T* p_hx = x.host().data() + i * x.get_stride();
+                T*       p_hy = y.host().data() + i * y.get_stride();
+
+                J analysis_pivot = -1;
+                J solve_pivot    = -1;
+                host_cscsv<I, J, T>(operation,
+                                    host.m,
+                                    host.nnz,
+                                    *halpha,
+                                    host.ptr,
+                                    host.ind,
+                                    p,
+                                    p_hx,
+                                    (int64_t)1,
+                                    p_hy,
+                                    diag,
+                                    uplo,
+                                    host.base,
+                                    &analysis_pivot,
+                                    &solve_pivot);
+
+                symbolic[i] = analysis_pivot;
+                exact[i]    = solve_pivot;
+            }
+#endif
+            break;
+        }
+
         case rocsparse_format_bsr:
         case rocsparse_format_ell:
         case rocsparse_format_sell:
         case rocsparse_format_bell:
         case rocsparse_format_coo_aos:
-        case rocsparse_format_csc:
         {
             break;
         }
@@ -628,6 +670,15 @@ void testing_sptrsv(const Arguments& arg)
     {
         return;
     }
+
+#ifndef ROCSPARSE_WITH_CSC_TRSV
+    // CSC triangular solve support can be disabled at build time
+    // (BUILD_WITH_CSC_TRSV=OFF); skip the CSC cases in that configuration.
+    if(arg.formatA == rocsparse_format_csc)
+    {
+        return;
+    }
+#endif
 
     const int64_t batch_count   = (arg.batch_count > 1) ? arg.batch_count : 1;
     const int64_t batch_count_A = (arg.batch_count_A > 0) ? arg.batch_count_A : batch_count;
@@ -800,12 +851,19 @@ void testing_sptrsv(const Arguments& arg)
         switch(format)
         {
 
-        case rocsparse_format_csc:
         case rocsparse_format_ell:
         case rocsparse_format_bell:
         case rocsparse_format_sell:
         case rocsparse_format_coo_aos:
         {
+            break;
+        }
+
+        case rocsparse_format_csc:
+        {
+            auto& device = A.template as<rocsparse_format_csc>().device();
+            gbyte_count  = csrsv_gbyte_count<T>(device.m, device.nnz);
+            A_nnz        = device.nnz;
             break;
         }
 

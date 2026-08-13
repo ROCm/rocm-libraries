@@ -4,6 +4,7 @@
 #include "NodeFactory.hpp"
 #include "BatchnormOperationDescriptor.hpp"
 #include "HipdnnException.hpp"
+#include "RMSNormBackwardOperationDescriptor.hpp"
 
 namespace hipdnn_backend
 {
@@ -38,18 +39,28 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::LayernormAttributes:
         return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::LayernormBackwardAttributes:
+        return LayernormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::MatmulAttributes:
         return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::MoeGroupedMatmulAttributes:
+        return MoeGroupedMatmulOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PointwiseAttributes:
         return PointwiseOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::ReductionAttributes:
         return ReductionOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::RMSNormAttributes:
         return RMSNormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::RMSNormBackwardAttributes:
+        return RMSNormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaAttributes:
         return SdpaFwdOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::SdpaBackwardAttributes:
         return SdpaBwdOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::ResampleFwdAttributes:
+        return ResampleFwdOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::ResampleBwdAttributes:
+        return ResampleBwdOperationDescriptor::fromNode(nodeT, tensorMap);
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,

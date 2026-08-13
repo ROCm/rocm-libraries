@@ -3,7 +3,29 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## (Unreleased) hipFFT 1.0.23
+## (Unreleased) hipFFT 1.0.26
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+### Changed
+
+* Modified the rocFFT backend's implementation details of hipFFT so that cuFFT backend's
+  behavior is matched for single-process, multi-device plans configured via
+  `hipfftMakePlan{2,3}d` and `hipfftMakePlanMany`, with respect to data distribution
+  within descriptors. Behaviors are now aligned for unbatched multi-dimensional transforms
+  (in-place only) and all batched transforms (in-place and out-of-place).
+  Multi-device, unbatched one-dimensional transforms remain unimplemented pending
+  further analyses of the exact behavior(s) to be matched.
+
+## hipFFT 1.0.24 for ROCm 7.14
+
+### Added
+
+* Support for the gfx1250 architecture.
+
+## hipFFT 1.0.23 for ROCm 7.13
 
 ### Added
 
@@ -32,9 +54,11 @@ Documentation for hipFFT is available at
 
 * Moved library to C++20 standard.
 * Removed Boost as a dependency for clients and samples.
+* Callback functions specified as function pointers to hipfftXtSetCallback will be deprecated in a future release.
 
 ### Added
 * Support for gfx1150 architecture.
+* Support for the gfx90c compilation target.
 
 ### Resolved issues
 

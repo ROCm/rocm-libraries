@@ -23,11 +23,13 @@
 
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
+#include <cstdint>
 #include <limits>
 #include <regex>
 
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
@@ -35,8 +37,6 @@ namespace stinkytofu {
 Legalized legalizeVNop(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
     assert(inst->getUnifiedOpcode() == GFX::v_nop && "Invalid v_nop instruction");
     // Check if this is a v_nop with count > 1
-    const auto& srcRegs = inst->getSrcRegs();
-
     int count = inst->getSrcReg(0).literalInt;
     if (count <= 1) {
         inst->erase();
@@ -149,11 +149,11 @@ Legalized legalizeVCmpX(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArc
 }
 
 Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
+    // Only legalize on gfx12.5 (either stepping).
     // TODO: Support other SeparateVMcnt + SeparateLGKMcnt archs (e.g. gfx1200,
     // gfx1201). Need to verify whether they also support combined instructions
     // (s_wait_loadcnt_dscnt, s_wait_storecnt_dscnt).
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get wait count data from modifiers
     const SWaitCntData* waitData = inst->getModifier<SWaitCntData>();
@@ -241,6 +241,7 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
         if (!firstInst) firstInst = lastInst;
     }
 
+    assert(lastInst && "legalizeWaitCnt: no wait instruction created");
     lastInst->addModifier<SWaitCntData>(*waitData);
 
     // Remove the original s_waitcnt instruction
@@ -250,8 +251,8 @@ Legalized legalizeWaitCnt(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxA
 }
 
 Legalized legalizeBarrier(StinkyInstruction* inst, AsmIRBuilder& irBuilder, GfxArchID archId) {
-    // Only legalize on gfx1250
-    if (archId != GfxArchID::Gfx1250) return {nullptr, nullptr};
+    // Only legalize on gfx12.5 (either stepping).
+    if (!isGfx125(archId)) return {nullptr, nullptr};
 
     // Get modifiers to transfer
     const CommentData* commentMod = inst->getModifier<CommentData>();
@@ -289,7 +290,7 @@ static int16_t getVgprMsbOffsetForIdx(RegType type, uint32_t regIdx, bool hasVgp
 }
 
 /// Helper function to adjust symbolic register name for split instructions
-std::string adjustSymbolicRegName(const std::string& symbolicName, int offsetAdjust = 0) {
+static std::string adjustSymbolicRegName(const std::string& symbolicName, int offsetAdjust = 0) {
     if (symbolicName.empty()) return "";
 
     // Pattern: ${name}+${digitBase}
@@ -595,6 +596,38 @@ Legalized legalizeDSStoreB256(StinkyInstruction* inst, AsmIRBuilder& irBuilder, 
     inst->erase();
 
     return {store1, store2};
+}
+
+namespace {
+// Add `reg` to the dest list of `inst`, unless a register with the same
+// RegType/idx is already present. SCC/VCC/EXEC are singletons, so RegType+idx
+// is sufficient to detect duplicates introduced by an upstream stage or by an
+// instruction that already encodes the register as an explicit operand.
+void addUniqueSpecialDest(StinkyInstruction* inst, const StinkyRegister& reg) {
+    for (const StinkyRegister& d : inst->getDestRegs())
+        if (isSameRegister(d, reg)) return;
+    inst->addDestReg(reg);
+}
+
+void addUniqueSpecialSrc(StinkyInstruction* inst, const StinkyRegister& reg) {
+    for (const StinkyRegister& s : inst->getSrcRegs())
+        if (isSameRegister(s, reg)) return;
+    inst->addSrcReg(reg);
+}
+}  // namespace
+
+void legalizeImplicitSpecialRegisters(StinkyInstruction* inst, uint32_t wavefrontSize) {
+    if (inst == nullptr) return;
+
+    if (inst->is(IF_ImplicitReadSCC)) addUniqueSpecialSrc(inst, StinkyRegister::getSCCRegister());
+    if (inst->is(IF_ImplicitWriteSCC)) addUniqueSpecialDest(inst, StinkyRegister::getSCCRegister());
+
+    if (inst->is(IF_ImplicitReadVCC))
+        addUniqueSpecialSrc(inst, StinkyRegister::getVCCRegister(wavefrontSize));
+    if (inst->is(IF_ImplicitReadEXEC))
+        addUniqueSpecialSrc(inst, StinkyRegister::getEXECRegister(wavefrontSize));
+    if (inst->is(IF_ImplicitWriteEXEC))
+        addUniqueSpecialDest(inst, StinkyRegister::getEXECRegister(wavefrontSize));
 }
 
 }  // namespace stinkytofu

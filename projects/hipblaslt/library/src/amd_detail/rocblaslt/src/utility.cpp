@@ -119,6 +119,10 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "f32_r";
     case HIP_R_64F:
         return "f64_r";
+    case HIP_C_32F:
+        return "f32_c";
+    case HIP_C_64F:
+        return "f64_c";    
     case HIP_R_16F:
         return "f16_r";
     case HIP_R_16BF:
@@ -198,9 +202,9 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
     switch(type)
     {
     case ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT:
-        return "MATRIX_LAYOUT_BATCH_COUNT";
+        return "ROCBLASLT_MATRIX_LAYOUT_BATCH_COUNT";
     case ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET:
-        return "MATRIX_LAYOUT_STRIDED_BATCH_OFFSET";
+        return "ROCBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET";
     case ROCBLASLT_MATRIX_LAYOUT_TYPE:
         return "ROCBLASLT_MATRIX_LAYOUT_TYPE";
     case ROCBLASLT_MATRIX_LAYOUT_ORDER:
@@ -213,6 +217,8 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
         return "ROCBLASLT_MATRIX_LAYOUT_LD";
     case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
         return "ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE";        
+    case ROCBLASLT_MATRIX_LAYOUT_OFFSET:
+        return "ROCBLASLT_MATRIX_LAYOUT_OFFSET";
     case ROCBLASLT_MATRIX_LAYOUT_MAX:
         return "ROCBLASLT_MATRIX_LAYOUT_MAX";
     default:
@@ -260,6 +266,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_A_SCALE_MODE";
     case ROCBLASLT_MATMUL_DESC_B_SCALE_MODE:
         return "MATMUL_DESC_B_SCALE_MODE";
+    case ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET:
+        return "MATMUL_DESC_SM_COUNT_TARGET";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
         return "MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT:
@@ -268,8 +276,12 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT";
     case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
         return "MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT";
+    case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
+        return "MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
+    case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
+        return "MATMUL_DESC_BIAS_BATCH_STRIDE";
     default:
         return "Invalid";
     }
@@ -382,8 +394,6 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_BGRADB";
     case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         return "EPILOGUE_DRELU_BGRAD";
-    case ROCBLASLT_EPILOGUE_SIGMOID:
-        return "EPILOGUE_SIGMOID";        
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
         return "EPILOGUE_SWISH_EXT";
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:

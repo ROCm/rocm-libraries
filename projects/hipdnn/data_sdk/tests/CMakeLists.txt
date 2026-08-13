@@ -22,7 +22,9 @@ add_executable(
     types/TestFp6E2M3.cpp
     types/TestFp6E3M2.cpp
     types/TestFp8E4M3.cpp
+    types/TestFp8E4M3Fnuz.cpp
     types/TestFp8E5M2.cpp
+    types/TestFp8E5M2Fnuz.cpp
     types/TestFp8E8M0.cpp
     types/TestHalf.cpp
     types/TestPortableTypes.cpp
@@ -31,9 +33,12 @@ add_executable(
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
     utilities/TestMigratableMemory.cpp
+    utilities/TestPackedFp4Tensor.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestScopedResource.cpp
+    utilities/TestRaggedTensor.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
+    utilities/TestShallowRaggedTensor.cpp
     utilities/TestShallowTensor.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestStringUtil.cpp
@@ -59,4 +64,4 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_data_sdk_tests)
-add_unit_test_target(hipdnn_data_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_data_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

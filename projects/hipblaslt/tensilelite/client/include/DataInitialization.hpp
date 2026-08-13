@@ -34,6 +34,8 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <mxDataGen.hpp>
+
 #include <cstddef>
 #include <random>
 
@@ -54,9 +56,31 @@ namespace TensileLite
                 || isMXFP4Tensor(problem.b(), problem.mxBlockB());
         }
 
+        inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
+        {
+            if(mxBlock == 0)
+                return false;
+            auto dt = tensor.dataType();
+            return dt == rocisa::DataType::Float4
+                || dt == rocisa::DataType::Float6
+                || dt == rocisa::DataType::BFloat6
+                || dt == rocisa::DataType::Float8
+                || dt == rocisa::DataType::BFloat8;
+        }
+
+        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        {
+            return isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB());
+        }
+
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
         // And problem-dept. from 8~15 (values depend on problem)
         // RandomNegPosLimited: integer -128~128. fp -1.0~1.0
+        // UniformLowPrecision (27): uniform random in [-maxVal, maxVal] where maxVal is
+        //   the maximum representable value of the target type. Only supported for
+        //   low-precision packed types (FP4, FP6, BF6). Produces significantly fewer
+        //   zeros than Random by covering the full representable range uniformly.
         enum class InitMode
         {
             Zero = 0, // 0
@@ -86,6 +110,7 @@ namespace TensileLite
             TrigIndCos, // 24
             TrigIndAbsSin, // 25
             TrigIndAbsCos, // 26
+            UniformLowPrecision, // 27
             Count
         };
 
@@ -323,6 +348,7 @@ namespace TensileLite
                 hipMemcpyKind kind;
 
                 bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
+                bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
 
                 if(m_keepPristineCopyOnGPU && !m_problemDependentData)
                 {
@@ -336,7 +362,7 @@ namespace TensileLite
                 }
 
                 if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle)
+                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
                 {
                     if(m_elementsToValidate)
                     {
@@ -356,7 +382,7 @@ namespace TensileLite
                         initializeCPUInputs(problem);
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem);
-                    if(needSwizzle)
+                    if(needSwizzle || needMXSwizzle)
                         copySwizzledToGPUBuffer(problem);
 
                     // gpu to gpu
@@ -523,6 +549,8 @@ namespace TensileLite
                     return getValue<T, InitMode::RandomNegPosLimited>();
                 case InitMode::Free:
                     return convertDoubleTo<T>(value);
+                case InitMode::UniformLowPrecision:
+                    return getValue<T, InitMode::UniformLowPrecision>();
                 case InitMode::SerialIdx:
                 case InitMode::SerialDim0:
                 case InitMode::SerialDim1:
@@ -599,8 +627,12 @@ namespace TensileLite
                     break;
                 case InitMode::DenormMax:
                     initArray<T, InitMode::DenormMax>(array, elements);
+                    break;
                 case InitMode::RandomNegPosLimited:
                     initArray<T, InitMode::RandomNegPosLimited>(array, elements);
+                    break;
+                case InitMode::UniformLowPrecision:
+                    initArray<T, InitMode::UniformLowPrecision>(array, elements);
                     break;
                 case InitMode::SerialIdx:
                     initArrayConvert<T>(array, elements);
@@ -713,6 +745,9 @@ namespace TensileLite
                     break;
                 case InitMode::RandomNegPosLimited:
                     initArray<T, InitMode::RandomNegPosLimited>(array, tensor);
+                    break;
+                case InitMode::UniformLowPrecision:
+                    initArray<T, InitMode::UniformLowPrecision>(array, tensor);
                     break;
                 case InitMode::Free:
                 case InitMode::Count:
@@ -866,29 +901,51 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX FP4 inputs once the solution is known (MI-based preSwizzle when enabled).
-                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
-                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                // Re-init MX inputs for solution-dependent HostPreSwizzle.
                 if(m_currentSolution != nullptr
-                   && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty())
+                   && !m_gpuPtrs.empty()
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                         m_currentSolution))
                 {
-                    bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);
-                    if(isMXFP4)
+                    initializeMXData(*m_currentGemmProblem);
+                    copyValidToGPUBuffer(*m_currentGemmProblem);
+                    copyInputs(m_gpuPtrs,
+                               m_gpuBatchPtrs,
+                               m_maxElements,
+                               m_groupedOffsets,
+                               *m_currentGemmProblem,
+                               hipMemcpyDeviceToDevice);
+                    // Sync CPU current buffers so the reference matches GPU data.
+                    for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                  ContractionProblemGemm::TENSOR::B,
+                                  ContractionProblemGemm::TENSOR::MXSA,
+                                  ContractionProblemGemm::TENSOR::MXSB})
                     {
-                        initializeMXDataForFP4(*m_currentGemmProblem);
-                        copyValidToGPUBuffer(*m_currentGemmProblem);
-                        copyInputs(m_gpuPtrs,
-                                   m_gpuBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
-                                   *m_currentGemmProblem,
-                                   hipMemcpyDeviceToDevice);
+                        auto& desc = m_currentGemmProblem->tensors()[ti];
+                        auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                        if(it == m_vdata[ti].pristine.end())
+                            continue;
+                        auto& p = it->second;
+                        if(p.cpuInput.valid && p.cpuInput.current)
+                        {
+                            size_t bytes = multiplyElementSize(
+                                p.maxElements, desc.elementBytes());
+                            std::memcpy(p.cpuInput.current.get(),
+                                        p.cpuInput.valid.get(),
+                                        bytes);
+                        }
                     }
                 }
             }
-            virtual void postSolution() override {}
+            virtual void postSolution() override
+            {
+                if(m_boundsCheck == BoundsCheckMode::GuardPageAll)
+                {
+                    m_numRunsInSolution = 0;
+                    m_curBoundsCheck    = BoundsCheckMode::GuardPageFront;
+                }
+            }
             virtual bool needMoreRunsInSolution() const override
             {
                 return m_numRunsInSolution < m_numRunsPerSolution;
@@ -896,6 +953,8 @@ namespace TensileLite
 
             virtual size_t numWarmupRuns() override
             {
+                if(m_numRunsInSolution < m_numRunsPerSolution)
+                    return 1;
                 return 0;
             };
             virtual void setNumWarmupRuns(size_t count) override {}
@@ -1004,7 +1063,18 @@ namespace TensileLite
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
-            void initializeMXDataForFP4(ContractionProblemGemm const& problem);
+            void initializeMXData(ContractionProblemGemm const& problem);
+
+            // True when swizzled MX scales depend on the solution.
+            bool needsSolutionDependentMXPreswizzle(
+                ContractionProblemGemm const& problem,
+                ContractionSolution const*    solution) const
+            {
+                return isMXProblem(problem) && m_mxScaleFormat > 0
+                       && m_mxScaleLayout == MXScaleLayout::GFX950
+                       && solution != nullptr
+                       && solution->problemType.mxScaleFormat == 1;
+            }
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
@@ -1042,6 +1112,7 @@ namespace TensileLite
                 ConvertToProblemInputs(ContractionProblemGemm const& problem, bool isGPU);
 
             std::vector<VectorDataInitProperties> m_vdata;
+            std::vector<std::shared_ptr<void>>    m_guardPages;
             std::vector<void*>                    m_cpuPtrs;
             std::vector<void*>                    m_gpuPtrs;
             std::vector<std::vector<size_t>>      m_groupedOffsets;
@@ -1104,6 +1175,12 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
+            MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            // Set by initializeMXData when a preswizzled scale was uploaded
+            // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
+            // hand back gpuInput.valid as-is rather than re-swizzling).
+            bool m_mxPreswizzledA = false;
+            bool m_mxPreswizzledB = false;
         };
 
         template <>
@@ -3689,6 +3766,110 @@ namespace TensileLite
         inline E5M3 DataInitialization::getValue<E5M3, InitMode::RandomNegPosLimited>()
         {
             return getValueWithUpperLowerBoundInteger<E5M3>();
+        }
+
+        // ---- UniformLowPrecision: only supported for low-precision types (FP4, FP6, BF6) ----
+
+#define TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(T)                                        \
+        template <>                                                                         \
+        inline T DataInitialization::getValue<T, InitMode::UniformLowPrecision>()            \
+        {                                                                                   \
+            throw std::runtime_error(                                                       \
+                "UniformLowPrecision init mode is only supported for low-precision "         \
+                "data types (FP4, FP6, BF6).");                                             \
+        }
+
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(float)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(double)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(BFloat16)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Half)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Float8)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(BFloat8)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Float8_fnuz)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(BFloat8_fnuz)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(int32_t)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Int8x4)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(int8_t)
+
+        template <>
+        inline std::complex<float>
+            DataInitialization::getValue<std::complex<float>, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
+        template <>
+        inline std::complex<double>
+            DataInitialization::getValue<std::complex<double>, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
+#undef TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED
+
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32
+            DataInitialization::getValue<Float6x32, InitMode::UniformLowPrecision>()
+        {
+            float maxVal = getValue<Float6x32, InitMode::Max>().getElement(0);
+            float v[32];
+            for(int i = 0; i < 32; i++)
+                v[i] = getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal);
+            return Float6x32(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                            v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15],
+                            v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
+                            v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32
+            DataInitialization::getValue<BFloat6x32, InitMode::UniformLowPrecision>()
+        {
+            float maxVal = getValue<BFloat6x32, InitMode::Max>().getElement(0);
+            float v[32];
+            for(int i = 0; i < 32; i++)
+                v[i] = getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal);
+            return BFloat6x32(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                            v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15],
+                            v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
+                            v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2
+            DataInitialization::getValue<Float4x2, InitMode::UniformLowPrecision>()
+        {
+            float maxVal = getValue<Float4x2, InitMode::Max>().getElement(0);
+            return Float4x2(getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal),
+                            getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal));
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
         }
 
         template <>

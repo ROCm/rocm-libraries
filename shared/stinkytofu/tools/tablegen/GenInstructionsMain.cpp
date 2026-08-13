@@ -7,29 +7,30 @@
 #include <string>
 
 namespace stinkytofu {
-bool genInstructions(const std::string& arch, const std::string& inputDir,
-                     const std::string& outputDir);
-// Generate for all archs and emit ISA .inc; no --arch needed.
-bool genAllInstructions(const std::string& inputDir, const std::string& outputDir);
+// Generate the requested arch(s)' full, buildable set (costs, init, operands, ISA, GfxArchDefines).
+// arch may be a comma/semicolon separated list; genAllInstructions splits it.
+bool genAllInstructions(const std::string& inputDir, const std::string& outputDir,
+                        const std::string& arch);
 }  // namespace stinkytofu
 
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0]
-                  << " --input-dir=<dir> --output-dir=<dir> [--arch=<arch>]\n"
-                  << "  Without --arch: generate for all archs + ISA .inc (single-build mode).\n"
-                  << "  With --arch: generate for one arch only (costs, init, operands).\n";
+        std::cerr
+            << "Usage: " << argv[0]
+            << " --input-dir=<dir> --output-dir=<dir> [--arch=<Arch>[,<Arch>...]]\n"
+            << "  Without --arch: generate the default build (Gfx1250 + Gfx1250v0).\n"
+            << "  With --arch:    generate that stepping (or comma-separated list) instead.\n";
         return 1;
     }
 
     std::string arch, inputDir, outputDir;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg.find("--arch=") == 0)
+        if (arg.starts_with("--arch="))
             arch = arg.substr(7);
-        else if (arg.find("--input-dir=") == 0)
+        else if (arg.starts_with("--input-dir="))
             inputDir = arg.substr(12);
-        else if (arg.find("--output-dir=") == 0)
+        else if (arg.starts_with("--output-dir="))
             outputDir = arg.substr(13);
     }
 
@@ -50,10 +51,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    bool ok = false;
-    if (arch.empty())
-        ok = stinkytofu::genAllInstructions(inputDir, outputDir);
-    else
-        ok = stinkytofu::genInstructions(arch, inputDir, outputDir);
-    return ok ? 0 : 1;
+    // No --arch builds both gfx12.5 steppings so a default build ships one library holding v0 and
+    // v1 (their identity, not the shared {12,5,0} triple, selects the cost table). --arch selects a
+    // single stepping (or an explicit comma-separated subset). Both take the same buildable path.
+    const std::string selected = arch.empty() ? "Gfx1250,Gfx1250v0" : arch;
+    return stinkytofu::genAllInstructions(inputDir, outputDir, selected) ? 0 : 1;
 }

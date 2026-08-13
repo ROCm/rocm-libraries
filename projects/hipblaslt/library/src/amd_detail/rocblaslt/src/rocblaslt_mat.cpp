@@ -24,6 +24,7 @@
  *
  * ************************************************************************ */
 
+#include "check_numerics_matrix.hpp"
 #include "definitions.h"
 #include "handle.h"
 #include "rocblaslt_mat_utils.hpp"
@@ -57,8 +58,10 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                        size_t                       workspaceSizeInBytes,
                                        hipStream_t                  stream)
 {
-    int64_t m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
-        batch_stride_d, batch_stride_e;
+    int64_t m, n, k, lda, ldb, ldc, ldd, lde;
+    int64_t batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d, batch_stride_e;
+    int64_t batch_offset_a, batch_offset_b, batch_offset_c, batch_offset_d;
+
     hipDataType            bias_type;
     hipDataType            aux_type;
     hipDataType            type_a, type_b, type_c, type_d;
@@ -86,15 +89,19 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                                            type_a,
                                                            lda,
                                                            batch_stride_a,
+                                                           batch_offset_a,
                                                            type_b,
                                                            ldb,
                                                            batch_stride_b,
+                                                           batch_offset_b,
                                                            type_c,
                                                            ldc,
                                                            batch_stride_c,
+                                                           batch_offset_c,
                                                            type_d,
                                                            ldd,
                                                            batch_stride_d,
+                                                           batch_offset_d,
                                                            lde,
                                                            batch_stride_e,
                                                            bias,
@@ -124,6 +131,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     hipDataType        scale_type    = matmul_descr->scale_type;
 
     // Others
+    // Use strided_batch=true for kernel selection (StridedBatched=true kernels with SupportUserArgs)
+    // The actual batch mode is tracked via problem.batchMode() for argument passing
     bool strided_batch = true;
     bool grouped_gemm  = false;
 
@@ -173,22 +182,26 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         nullptr,
                                         lda,
                                         batch_stride_a,
+                                        batch_offset_a,
                                         type_b,
                                         B,
                                         nullptr,
                                         ldb,
                                         batch_stride_b,
+                                        batch_offset_b,
                                         beta,
                                         type_c,
                                         C,
                                         nullptr,
                                         ldc,
                                         batch_stride_c,
+                                        batch_offset_c,
                                         type_d,
                                         D,
                                         nullptr,
                                         ldd,
                                         batch_stride_d,
+                                        batch_offset_d,
                                         E,
                                         nullptr,
                                         lde,
@@ -220,9 +233,32 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batch_mode};
+                                        batch_mode,
+                                        matmul_descr->bias_stride,
+                                        matmul_descr->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
 
-    return runContractionProblem(handle, algo, problem, gemmData);
+    rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    if(st == rocblaslt_status_success)
+    {
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
+        if(call_id != 0)
+        {
+            st = hipblaslt_check_numerics_scan_D(handle,
+                                                 stream,
+                                                 call_id,
+                                                 m, n,
+                                                 matD->batch_count,
+                                                 type_d,
+                                                 D,
+                                                 ldd,
+                                                 batch_stride_d,
+                                                 (matD->order == HIPBLASLT_ORDER_ROW));
+        }
+    }
+
+    return st;
 }
 
 rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle           handle,
@@ -241,8 +277,10 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                                 std::shared_ptr<void>&           gemmData,
                                                 size_t&                          gemmCount)
 {
-    int64_t m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
-        batch_stride_d, batch_stride_e;
+    int64_t m, n, k, lda, ldb, ldc, ldd, lde;
+    int64_t batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d, batch_stride_e;
+    int64_t batch_offset_a, batch_offset_b, batch_offset_c, batch_offset_d;
+
     hipDataType            bias_type;
     hipDataType            aux_type;
     hipDataType            type_a, type_b, type_c, type_d;
@@ -269,15 +307,19 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                                            type_a,
                                                            lda,
                                                            batch_stride_a,
+                                                           batch_offset_a,
                                                            type_b,
                                                            ldb,
                                                            batch_stride_b,
+                                                           batch_offset_b,
                                                            type_c,
                                                            ldc,
                                                            batch_stride_c,
+                                                           batch_offset_c,
                                                            type_d,
                                                            ldd,
                                                            batch_stride_d,
+                                                           batch_offset_d,
                                                            lde,
                                                            batch_stride_e,
                                                            bias,
@@ -306,6 +348,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
     void*              amaxD         = matmul_descr->amaxD;
 
     // Others
+    // Use strided_batch=true for kernel selection (StridedBatched=true kernels with SupportUserArgs)
+    // The actual batch mode is tracked via problem.batchMode() for argument passing
     bool strided_batch = true;
     bool grouped_gemm  = false;
 
@@ -334,22 +378,26 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         nullptr,
                                         lda,
                                         batch_stride_a,
+                                        batch_offset_a,
                                         type_b,
                                         B,
                                         nullptr,
                                         ldb,
                                         batch_stride_b,
+                                        batch_offset_b,
                                         beta,
                                         type_c,
                                         C,
                                         nullptr,
                                         ldc,
                                         batch_stride_c,
+                                        batch_offset_c,
                                         type_d,
                                         D,
                                         nullptr,
                                         ldd,
                                         batch_stride_d,
+                                        batch_offset_d,
                                         E,
                                         nullptr,
                                         lde,
@@ -381,7 +429,10 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         handle->Synchronizer,
                                         swizzleA,
                                         swizzleB,
-                                        batch_mode};
+                                        batch_mode,
+                                        matmul_descr->bias_stride,
+                                        matmul_descr->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr, nullptr)};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -625,22 +676,26 @@ rocblaslt_status
                                         nullptr,
                                         lda_vec[i],
                                         batch_stride_a_vec[i],
+                                        0, // batch_offset_a
                                         type_b,
                                         B_vec[i],
                                         nullptr,
                                         ldb_vec[i],
                                         batch_stride_b_vec[i],
+                                        0, // batch_offset_b
                                         beta_vec[i],
                                         type_c,
                                         C_vec[i],
                                         nullptr,
                                         ldc_vec[i],
                                         batch_stride_c_vec[i],
+                                        0, // batch_offset_c
                                         type_d,
                                         D_vec[i],
                                         nullptr,
                                         ldd_vec[i],
                                         batch_stride_d_vec[i],
+                                        0, // batch_offset_d
                                         E_vec[i],
                                         nullptr,
                                         lde_vec[i],
@@ -672,7 +727,10 @@ rocblaslt_status
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
-                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        matmul_descr[i]->bias_stride,
+                                        matmul_descr[i]->streamk_tile_scheduling_ext,
+                                        effective_sm_count_target(handle, matmul_descr[i], nullptr)});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
@@ -709,6 +767,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
     // Update for the valid case: ((alpha_in_host && alpha=0) && (A=NULL || B=NULL))
     bool alpha_A_B_violation
         = (!alpha || ((matmul_descr->pointermode || (*((float*)alpha))) && (!A || !B)));
+
     // Check if pointer is valid
     if(alpha == nullptr || beta == nullptr || C == nullptr || D == nullptr || alpha_A_B_violation)
     {
@@ -760,36 +819,48 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
 
     if(get_logger_layer_mode() != rocblaslt_layer_mode_none)
     {
-        log_trace(__func__,
-                  "A",
-                  A,
-                  "Adesc",
-                  rocblaslt_matrix_layout_to_string(matA),
-                  "B",
-                  B,
-                  "Bdesc",
-                  rocblaslt_matrix_layout_to_string(matB),
-                  "C",
-                  C,
-                  "Cdesc",
-                  rocblaslt_matrix_layout_to_string(matC),
-                  "D",
-                  D,
-                  "Ddesc",
-                  rocblaslt_matrix_layout_to_string(matD),
-                  "computeDesc",
-                  rocblaslt_matmul_desc_to_string(matmul_descr),
-                  "workSpace",
-                  workspace,
-                  "workSpaceSizeInBytes",
-                  workspaceSizeInBytes,
-                  (matmul_descr->pointermode) ? "alphaVector" : "alpha",
-                  *(reinterpret_cast<const float*>(
-                      alpha)), // TODO: Add casts for f16 and int types of alpha.
-                  "beta",
-                  *(reinterpret_cast<const float*>(beta)),
-                  "stream",
-                  stream);
+        hipDataType alpha_type = matA->type;
+        hipDataType beta_type  = matD->type;
+        
+        // alpha is a device pointer when scaleAlpha_vector (pointermode != 0) is set;
+        // avoid CPU dereference which causes an access violation on Windows.
+        auto alpha_scalar = (!matmul_descr->pointermode && alpha)
+                            ? get_alpha_beta_scalar(alpha_type, alpha)
+                            : hipblaslt_complex_double{0.0, 0.0};
+        auto beta_scalar  = (!matmul_descr->pointermode && beta)
+                            ? get_alpha_beta_scalar(beta_type, beta)
+                            : hipblaslt_complex_double{0.0, 0.0};
+
+        log_trace(
+            __func__,
+            "A",
+            A,
+            "Adesc",
+            rocblaslt_matrix_layout_to_string(matA),
+            "B",
+            B,
+            "Bdesc",
+            rocblaslt_matrix_layout_to_string(matB),
+            "C",
+            C,
+            "Cdesc",
+            rocblaslt_matrix_layout_to_string(matC),
+            "D",
+            D,
+            "Ddesc",
+            rocblaslt_matrix_layout_to_string(matD),
+            "computeDesc",
+            rocblaslt_matmul_desc_to_string(matmul_descr),
+            "workSpace",
+            workspace,
+            "workSpaceSizeInBytes",
+            workspaceSizeInBytes,
+            (matmul_descr->pointermode) ? "alphaVector" : "alpha",
+            alpha_scalar, 
+            "beta",
+            beta_scalar,
+            "stream",
+            stream);
     }
     return rocblaslt_matmul_impl(handle,
                                  matmul_descr,
@@ -954,22 +1025,26 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         nullptr,
         lda,
         batch_stride_a,
+        0, // batch_offset_a,
         type_b,
         B,
         nullptr,
         ldb,
         batch_stride_b,
+        0, // batch_offset_b,
         beta,
         type_c,
         C,
         nullptr,
         ldc,
         batch_stride_c,
+        0, // batch_offset_c,
         type_d,
         D,
         nullptr,
         ldd,
         batch_stride_d,
+        0, // batch_offset_d,
         E,
         nullptr,
         lde,
@@ -1001,7 +1076,9 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
         handle->Synchronizer,
         swizzleA,
         swizzleB,
-        HIPBLASLT_BATCH_MODE_STRIDED};
+        HIPBLASLT_BATCH_MODE_STRIDED,
+        0,
+        0}; // streamk_tile_scheduling_ext: OFF (matches struct default)
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -1272,22 +1349,26 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         nullptr,
                                         lda[i],
                                         strideA[i],
+                                        0, // batch_offset_a
                                         type_b,
                                         B_vec[i],
                                         nullptr,
                                         ldb[i],
                                         strideB[i],
+                                        0, // batch_offset_b
                                         beta_vec[i],
                                         type_c,
                                         C_vec[i],
                                         nullptr,
                                         ldc[i],
                                         strideC[i],
+                                        0, // batch_offset_c
                                         type_d,
                                         D_vec[i],
                                         nullptr,
                                         ldd[i],
                                         strideD[i],
+                                        0, // batch_offset_d
                                         E_vec[i],
                                         nullptr,
                                         lde_vec[i],
@@ -1321,7 +1402,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                         (char*)handle->Synchronizer + (409600 * i * sizeof(int)),
                                         swizzleA,
                                         swizzleB,
-                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED});
+                                        hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
+                                        0,
+                                        0}); // streamk_tile_scheduling_ext: OFF (matches struct default)
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }
