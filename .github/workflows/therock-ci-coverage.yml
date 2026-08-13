@@ -189,6 +189,24 @@ jobs:
 
           echo "===== END BUILD VERIFICATION ====="
 
+      - name: Debug single fprofile entry
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          echo "===== SINGLE FPROFILE ENTRY DEBUG ====="
+          CC_FILE="TheRock/build-coverage/math-libs/hipRAND/build/compile_commands.json"
+          if [ -f "$CC_FILE" ]; then
+            echo "Entries with -fprofile-instr-generate:"
+            grep -B5 -A5 "fprofile-instr-generate" "$CC_FILE"
+            echo ""
+            echo "Total compile entries in $CC_FILE:"
+            jq '. | length' "$CC_FILE" 2>/dev/null || echo "jq not available"
+            echo ""
+            echo "Sample of first 3 entries (checking for coverage flags):"
+            jq '.[0:3] | .[] | {file: .file, command: .command}' "$CC_FILE" 2>/dev/null | head -50
+          fi
+          echo "===== END SINGLE FPROFILE DEBUG ====="
+
       - name: Report
         if: ${{ !cancelled() }}
         run: |
