@@ -189,6 +189,10 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"GlobalPrefetchB8", "global_prefetch_b8"},
         {"GlobalLoadTR8B64", "global_load_tr_b64"},
         {"GlobalLoadTR16B128", "global_load_tr_b128"},
+        {"GlobalStoreAsyncFromLdsB8", "global_store_async_from_lds_b8"},
+        {"GlobalStoreAsyncFromLdsB32", "global_store_async_from_lds_b32"},
+        {"GlobalStoreAsyncFromLdsB64", "global_store_async_from_lds_b64"},
+        {"GlobalStoreAsyncFromLdsB128", "global_store_async_from_lds_b128"},
         /* common.hpp */
         {"SAddF32", "s_add_f32"},
         {"SCvtF32U32", "s_cvt_f32_u32"},
@@ -332,6 +336,7 @@ inline void setRocisaToArchMap(GpuArch& registry) {
         {"VMovB64", "v_mov_b64"},
         {"_VMovB64", "v_mov_b64"},
         {"VSwapB32", "v_swap_b32"},
+        {"VPermlane16SwapB32", "v_permlane16_swap_b32"},
         {"VBfeI32", "v_bfe_i32"},
         {"VBfeU32", "v_bfe_u32"},
         {"VBfiB32", "v_bfi_b32"},
