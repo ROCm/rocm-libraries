@@ -238,7 +238,8 @@ RppStatus hip_exec_gamma_correction_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T*
                                            RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
                                            RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                            rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        roiTensorPtrSrc = hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
 
     int globalThreads_x = (256 + 7) >> 3;
     int globalThreads_y = handle.GetBatchSize();

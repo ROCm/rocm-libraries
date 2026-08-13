@@ -364,7 +364,7 @@ RppStatus hip_exec_resize_mirror_normalize_tensor(T* srcPtr, RpptDescPtr srcDesc
                                                   RpptRoiType roiType, rpp::Handle& handle) {
     if (interpolationType == RpptInterpolationType::BILINEAR) {
         if (roiType == RpptRoiType::XYWH)
-            hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
+            roiTensorPtrSrc = hip_exec_roi_conversion_xywh_to_ltrb(roiTensorPtrSrc, handle);
 
         int globalThreads_x = (dstDescPtr->strides.hStride + 7) >> 3;
         int globalThreads_y = dstDescPtr->h;

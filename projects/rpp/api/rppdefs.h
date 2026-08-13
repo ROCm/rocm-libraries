@@ -783,6 +783,7 @@ typedef struct {
 typedef struct {
     hipMemRpp32f scratchBufferHip;
     hipMemRpp32f scratchBufferPinned;
+    RpptROIPtr roiConversionScratchHip;
 } memGPU;
 
 /*! \brief RPP HIP-HOST memory management
