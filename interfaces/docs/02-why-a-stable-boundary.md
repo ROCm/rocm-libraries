@@ -89,8 +89,10 @@ wrong at runtime, intermittently, depending on load order.
 
 The fix is an explicit export allowlist - a version script that names the one symbol a
 provider may expose and hides everything else. Proven by `rocm_interfaces.exports`, which
-builds a fixed, manually maintained list of provider DSOs and asserts each exports exactly
-one symbol, not 176.
+derives every registered provider DSO and
+asserts each exports exactly one symbol, not 176. The independent
+`rocm_interfaces.exports_provider_list_complete` control requires that derived list to match
+the complete build-system recording-provider enumeration.
 
 ## Failure 3: two library majors in one process interpose each other
 

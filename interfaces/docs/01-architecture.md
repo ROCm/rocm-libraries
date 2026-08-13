@@ -155,11 +155,13 @@ So you add capability by appending to the end of a table and bumping `abi_minor`
 reorder, never insert in the middle, never change a field's meaning. Old callers keep
 working because the prefix they read is byte-for-byte the same.
 
-That is the intended contract for how tables grow. In the prototype today only the
-size-floor half runs, and it is keyed on the provider's response `dispatch_table_size`, not
-on the table's own header: loaders request the full current table size and reject any
-provider smaller than that, so an appended entry is not yet treated as optional and
-`abi_minor` is not read anywhere. See the implementation-status note in
+The prototype enforces this contract at selection through the provider response: the major
+must match, the provider minor must meet the runtime floor, and `dispatch_table_size` must
+cover the prefix requested by the loader. `rocm_interfaces.table_abi_negotiation` proves
+exact/exact and newer/larger acceptance plus old-minor and short-prefix rejection. Domain
+loaders still request their full current table, and no consumer reads the dispatch-table
+header, so per-domain optional tails are not yet consumed. See the implementation-status
+note in
 [03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype).
 
 ## How a provider gets picked

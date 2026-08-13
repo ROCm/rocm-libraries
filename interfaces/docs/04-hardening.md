@@ -38,16 +38,17 @@ the single symbol a provider may expose and sends everything else to `local: *`.
 `providers/recording/CMakeLists.txt`, so it covers all recording providers and the rocBLAS
 bridge target uniformly.
 
-**Proof.** `rocm_interfaces.exports` builds the provider DSOs on a fixed, manually
-maintained list (the `-D<NAME>_PROVIDER=` arguments in `tests/CMakeLists.txt` and the
-matching `foreach` in `tests/check_exports.cmake`) and asserts each exports exactly one
-defined, non-absolute dynamic symbol (`rocm_interfaces_provider_query_v1`) - the checker
+**Proof.** `rocm_interfaces.exports` derives its provider list from the global
+`ROCM_INTERFACES_RECORDING_PROVIDERS` build-system property populated by every
+`add_recording_provider()` call, then asserts that each DSO exports exactly
+one defined, non-absolute dynamic symbol (`rocm_interfaces_provider_query_v1`). The checker
 runs `nm -D --defined-only --with-symbol-versions` and ignores the absolute version-node
-entry, so it is one callable export, not 176. A provider not on that list is not inspected
-until it is added in both places (auto-derivation is COMMITTED-NEXT; see
-[07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)).
-Landed in commit `a929517` (`fix(interfaces): stop recording providers leaking libstdc++
-symbols`).
+entry, so it is one callable export, not 176. The independent
+`rocm_interfaces.exports_provider_list_complete` control enumerates every recording-provider
+`MODULE_LIBRARY` from the build system and requires that ground truth to equal the derived
+registry list, so a newly registered provider cannot silently escape inspection. The export
+allowlist landed in `a929517`; auto-derivation and its completeness control landed in
+`61f8dc9` (`test(interfaces): make provider export coverage fail closed`).
 
 ## 2. Give the exports names, so majors can coexist (ABI-03, named nodes)
 

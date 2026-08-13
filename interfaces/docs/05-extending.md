@@ -25,15 +25,14 @@ add one:
    providers do with `new`/`delete`. Do not retain any pointer from the request record
    after the call returns.
 
-**Lock it.** The `rocm_interfaces.exports` test asserts that each listed provider DSO
-exports only `rocm_interfaces_provider_query_v1` and carries the named version node. It
-does NOT auto-discover providers: it checks a fixed, manually maintained list. A new
-provider is covered only after you add it in two places - the `-D<NAME>_PROVIDER=`
-arguments to the test in `tests/CMakeLists.txt` and the matching
-`foreach(... IN ITEMS ...)` in `tests/check_exports.cmake`. Until both are edited the new
-DSO is never inspected and could leak symbols while the test stays green, so treat those
-two edits as the final step of this recipe. Auto-deriving the provider list is tracked in
-[07-status-and-roadmap.md](07-status-and-roadmap.md).
+**Lock it.** `rocm_interfaces.exports` derives its provider list from the global
+`ROCM_INTERFACES_RECORDING_PROVIDERS` build-system property populated by
+`add_recording_provider()` and asserts that every listed DSO exports only
+`rocm_interfaces_provider_query_v1` under the named version node. The independent
+`rocm_interfaces.exports_provider_list_complete` control enumerates recording-provider
+`MODULE_LIBRARY` targets from the build system and requires the two lists to match. Add new
+providers through `add_recording_provider()`; a registration/enumeration mismatch fails the
+completeness control instead of silently skipping export inspection.
 
 ## Recipe: add a version node (a new ABI major)
 
@@ -94,12 +93,10 @@ control, genuineness.
    `__tsan_` symbols) so a silent fallback cannot pass for the wrong reason.
 4. Write the check as a `cmake -P` driver (for build/link-shape checks) or a runtime test
    (for `dlvsym` resolution), matching whichever sibling is closest.
-   `abi05_cpp_mangled_version_node` is the complete template (positive plus three negative
-   controls). `abi04_three_line_order` is a partial template - its same-node negative control
-   is still COMMITTED-NEXT (see
-   [07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)) - so
-   when you copy it, add the discrete negative build this recipe requires rather than relying
-   on the internal cross-node-nil check alone.
+   `abi05_cpp_mangled_version_node` is one complete template (positive plus three negative
+   controls). The other is `abi04_three_line_order` paired with
+   `abi04_same_node_negative`; copy both halves so the same-node control remains discrete from
+   the positive ordering proof.
 5. Register it in `tests/CMakeLists.txt`. Gate it on a configure-time probe if it needs a
    linker or header the base toolchain may lack (see `ROCM_INTERFACES_HAVE_LLD` and
    `ROCM_INTERFACES_HAVE_ROCRAND_CPP`), so it never breaks a bare configure.
@@ -123,14 +120,13 @@ whether the public call ABI can stay identical.
    target (see [rocblas-provider-clusters.md](rocblas-provider-clusters.md)).
 5. Add the loader adapter and a recording-provider test. If the table must grow, append the
    new function pointer to the end (never touch the existing prefix), bump `abi_minor`, and
-   raise the loader's required table size. Note: today loaders request the full current
-   table size, so adding a required entry rejects every older provider - the optional-tail
-   negotiation that would let an older provider's prefix still be accepted is not
-   implemented (COMMITTED-NEXT; see
-   [07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)
-   and the implementation-status note in
-   [03](03-abi-and-versioning-contract.md#implementation-status-prototype)). Do not mark an
-   appended entry "optional" until tail negotiation lands.
+   raise the loader's required table size. The registry prefix and minor floors are proven by
+   `rocm_interfaces.table_abi_negotiation`, but current domain loaders request the full table
+   size, so adding a required entry still rejects every older provider. Per-domain
+   optional-tail consumption is not implemented; see the implementation-status note in
+   [03](03-abi-and-versioning-contract.md#implementation-status-prototype). Do not call an
+   appended entry optional until its loader requests only the stable prefix, checks the
+   reported tail size, and supplies a fallback.
 6. Run the policy, enum-invariant, export, DSO, and package-consumer tests.
 
 Adding a public function never changes an existing provider-table prefix. That is the whole

@@ -10,14 +10,13 @@ DONE, COMMITTED-NEXT, and ASPIRATIONAL.
 ## Contract shared by all domains
 
 Provider protocols are implementation contracts, not public client APIs. They are C ABI
-tables with a single exported bootstrap symbol. Every table and extensible record starts
-with `struct_size`, `abi_major`, and `abi_minor`. The target contract is that a consumer
-accepts a larger table with a compatible major and ignores its tail, rejecting a provider
-whose required entry falls outside the supplied size. In the current prototype only the size
-floor is enforced: loaders request the full current table size (`sizeof` the whole table)
-and reject any provider reporting a smaller `dispatch_table_size`. Embedded-header reading,
-`abi_minor`, and optional-tail negotiation are not yet implemented (see
-[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype)).
+tables with a single exported bootstrap symbol. Every table and extensible record starts with `struct_size`, `abi_major`, and `abi_minor`.
+Provider selection enforces an exact response major, a response minor floor, and a `dispatch_table_size` floor.
+`rocm_interfaces.table_abi_negotiation` proves that an exact table and a newer/larger table
+are accepted while an older minor or a short required prefix is rejected. Current domain
+loaders still request their full table, and no consumer reads the dispatch-table
+header, so per-domain optional-tail consumption is not implemented; see
+[03-abi-and-versioning-contract.md](03-abi-and-versioning-contract.md#implementation-status-prototype).
 
 Modules are opened with local symbol scope and remain pinned while any dispatch table,
 context, token, or loader object refers to them. Provider selection happens once at the
@@ -27,9 +26,10 @@ Manifests are strict JSON documents. Module paths are relative to the manifest a
 escape its directory. Entries name a provider, compatibility cohort, domain, query symbol,
 priority, and numeric gfx list; zero is the wildcard. An exact gfx match outranks a wildcard
 before priority is considered. A provider response is validated in two stages, not one. At
-selection the runtime checks the response's `abi_major` against `ROCM_INTERFACES_ABI_MAJOR`,
-that the requested domain and cohort match, and that `dispatch_table_size` is at least the
-required table size; a provider failing any of these is skipped. The individual required
+selection the runtime checks the response's `abi_major` against
+`ROCM_INTERFACES_ABI_MAJOR`, requires its `abi_minor` to meet the runtime floor, validates the
+requested domain and cohort, and requires `dispatch_table_size` to cover the requested table
+size; a provider failing any of these is skipped. The individual required
 entry points are null-checked by the domain loader after selection returns (for example
 `BlasContext::create`), which throws if a required pointer is null -- they are not inspected
 during selection. See the implementation-status note in

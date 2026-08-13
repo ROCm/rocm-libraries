@@ -35,31 +35,34 @@ The rule that falls out of this:
 > provider is incompatible - it is rejected, never called into garbage.
 
 So you grow a table by **appending** function pointers to the end and bumping `abi_minor`
-(the bump is recorded in the header but not yet read by any consumer; see the implementation
-status note). You never reorder a field, never insert in the middle, never repurpose a field's meaning.
+(the provider response's minor is enforced at selection, but the dispatch table's own
+embedded header is not yet read; see the implementation-status note). You never reorder a field,
+never insert in the middle, never repurpose a field's meaning.
 Old callers keep working because the prefix they read is byte-for-byte the same. This is the
 same discipline the response struct's `dispatch_table_size` enforces at selection time: a
 provider that reports a table too small for the required entries is skipped.
 
 ### Implementation status (prototype)
 
-Only the size-floor half of the boxed rule runs today, and
-it is keyed on the provider response, not on the dispatch table's own header. At selection
-(runtime/src/provider_registry.cpp, ProviderRegistry::query_entry) the runtime validates the
-response header's abi_major against ROCM_INTERFACES_ABI_MAJOR and skips any provider whose
-response.dispatch_table_size is smaller than the required_table_size the loader asked for; the
-loaders pass sizeof of the whole current table (for example blas_loader.cpp uses
-sizeof(rocm_blas_provider_v1)), then cast the returned table to that type and null-check the
-required entry points. Not yet implemented: no consumer reads the dispatch table's own embedded
-rocm_interfaces_abi_header, so the abi_major and abi_minor stamped into a table are never
-inspected and abi_minor is unused everywhere; and because required_table_size is always the full
-current sizeof, an appended entry cannot be treated as optional (adding one rejects every older
-provider rather than accepting its prefix). No ctest yet proves prefix-accept / tail-ignore
-across a size mismatch. Treat the boxed rule as the intended contract; the dispatch_table_size
-size floor is the only part the prototype enforces.
+The prototype enforces the selection-time prefix and minor floors through the provider
+response, rather than by reading the dispatch-table header. At selection
+(`runtime/src/provider_registry.cpp`, `ProviderRegistry::query_entry`), the runtime requires
+an exact `abi_major`, a provider `abi_minor` at least as new as
+`ROCM_INTERFACES_ABI_MINOR`, and a `dispatch_table_size` at least as large as the
+`required_table_size` requested by the loader. Domain loaders currently request `sizeof` the
+whole table (for example, `blas_loader.cpp` requests `sizeof(rocm_blas_provider_v1)`), cast
+the returned table to that type, and null-check required entry points.
+
+`rocm_interfaces.table_abi_negotiation` proves the registry rule in four discriminating
+cases: exact minor/exact size and newer minor/larger table are accepted; an older minor or a
+table shorter than the required prefix is rejected. What remains unimplemented is
+per-domain optional-tail use: no consumer reads the dispatch table's own embedded
+`rocm_interfaces_abi_header`, and current domain loaders require their whole current table.
+An optional appended entry therefore needs a loader that requests only the stable prefix,
+checks the reported size before reading the tail, and supplies a fallback.
 
 The base ABI is stamped in the header itself: `ROCM_INTERFACES_ABI_MAJOR` is `1`,
-`ROCM_INTERFACES_ABI_MINOR` is `0`.
+`ROCM_INTERFACES_ABI_MINOR` is `1`.
 
 ## Mechanism 2: ELF version nodes
 
@@ -158,11 +161,11 @@ step-by-step recipe lives in [05-extending.md](05-extending.md).)
 
 A test that asserts "the symbol carries version node X" is worthless if it would also pass
 when the versioning is broken. Every ABI proof in this tree is designed to fail when the thing
-it checks is absent - that is the non-vacuity discipline below. Most carry an explicit discrete
-negative-control build; a few (for example `abi04_three_line_order`) currently get their
-discrimination only from an internal cross-node-nil assertion, with the dedicated same-node
-negative build still COMMITTED-NEXT (see [04-hardening.md](04-hardening.md) and
-[07-status-and-roadmap.md](07-status-and-roadmap.md#committed-next-the-immediate-plan)). When
+it checks is absent - that is the non-vacuity discipline below. The core proofs carry
+explicit negative controls. For the three-line ordering proof,
+`abi04_three_line_order` is paired with `abi04_same_node_negative`: the control puts all
+three DSOs on the same `ROCBLAS_ABI_6` node and requires the `ABI_5` and `ABI_7` lookups to
+be nil everywhere. When
 you add a proof (see [05-extending.md](05-extending.md)), make it non-vacuous the same way:
 
 1. **Positive.** Build the DSO the correct way. Assert the exact node is present on the
@@ -177,7 +180,5 @@ you add a proof (see [05-extending.md](05-extending.md)), make it non-vacuous th
 
 The worked examples are in [04-hardening.md](04-hardening.md).
 `abi05_cpp_mangled_version_node` (positive plus node-dropped, RTTI-removed, and no-ODR-use
-negatives) is the fully worked template to copy. `abi04_three_line_order` shows the positive
-plus an internal cross-node-nil check; its dedicated same-node negative build is still future
-work (COMMITTED-NEXT), so copy its structure but add the discrete negative control this
-recipe requires.
+negatives) is one complete template. The other is `abi04_three_line_order` paired with
+`abi04_same_node_negative`; the `_lld` mirrors run the same positive/control pair under lld.
