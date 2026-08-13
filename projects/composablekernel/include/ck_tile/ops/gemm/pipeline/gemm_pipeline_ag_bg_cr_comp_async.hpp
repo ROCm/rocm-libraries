@@ -659,6 +659,12 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                            scale_b_tile_ping);
                 __builtin_amdgcn_sched_barrier(0);
             }
+            // Drain any in-flight async global->LDS writes before returning. The caller
+            // (e.g. CShuffleEpilogue) reuses this same shared memory, and block_sync_lds()
+            // only waits on lgkmcnt, so the tail prefetch into LDS window(0) issued by the
+            // last hot loop iteration would otherwise still be landing while the epilogue
+            // is shuffling C through the very same LDS.
+            block_sync_lds_direct_load();
             return c_block_tile;
         }
     };
