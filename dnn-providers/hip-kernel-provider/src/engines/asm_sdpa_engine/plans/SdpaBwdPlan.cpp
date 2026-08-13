@@ -396,11 +396,14 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
         if(a.nhead_stride_dq_acc * K_FP32_SIZE > K_U32_MAX
            || a.batch_stride_dq_acc * K_FP32_SIZE > K_U32_MAX)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("dq_acc byte strides overflow uint32_t "
-                                    "(nhead_stride="
-                                    << a.nhead_stride_dq_acc * K_FP32_SIZE
-                                    << ", batch_stride=" << a.batch_stride_dq_acc * K_FP32_SIZE
-                                    << ", max=" << K_U32_MAX << ")");
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+                "dq_acc byte strides overflow uint32_t "
+                "(nhead_stride="
+                    + std::to_string(a.nhead_stride_dq_acc * K_FP32_SIZE)
+                    + ", batch_stride=" + std::to_string(a.batch_stride_dq_acc * K_FP32_SIZE)
+                    + ", max=" + std::to_string(K_U32_MAX)
+                    + "); tensor is too large for the kernel's uint32_t stride fields");
         }
     }
 
