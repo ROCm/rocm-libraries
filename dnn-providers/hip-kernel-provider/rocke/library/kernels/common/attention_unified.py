@@ -641,15 +641,20 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     single-buffer on (no ring, no grouped_kv2, no FP8, V single-buffer). The
     cohort already satisfies these; the spec __post_init__ re-validates loudly.
 
-    GEOMETRY GUARD: K-single needs Q to fit the lone K slot, i.e.
-    ``block_m <= tile_size``. The cohort runs num_warps=2 / block_m_per_warp=32
-    -> block_m=64, with tile_size = 2*block_size, so this only holds for
-    ``block_size >= 32`` (T>=64). At block_size=16 (T=32) Q (64 rows) cannot fit
-    the single 32-token K slot and the __post_init__ validator rejects it
-    (use_q_direct_reg would lift this but is not wired on this path). Fall back
-    to the no-K-single small-tile config there.
+    GEOMETRY GUARD: K-single aliases Q into the lone K slot, so the spec
+    validator requires ``block_m <= tile_size``. Derive that from the geometry
+    selectors rather than proxying it as ``block_size >= 32`` -- that proxy
+    assumed num_warps=2 (block_m=64) and went stale when
+    ``_enable_softmax_mfma_interleave`` widened this same cohort to num_warps=4
+    (block_m=128 > T=64 at block_size=32 -> uncaught ValueError at launch;
+    block_size=64 survived only by coincidence, T=2*64=128==block_m).
     """
-    return _enable_d128_small_tile(problem) and problem.block_size >= 32
+    if not _enable_d128_small_tile(problem):
+        return False
+    # block_m <= tile_size, asked of the selectors that actually set the geometry
+    # (no recursion: none of these consult _enable_k_single_buffer).
+    block_m = _select_2d_num_warps(problem) * _select_2d_block_m_per_warp(problem)
+    return block_m <= _select_2d_tile_size(problem)
 
 
 def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
@@ -1879,7 +1884,14 @@ def _gfx942_bf16_wide_geometry(problem: UnifiedAttentionProblem) -> Tuple[int, b
         # (C-twin parity GREEN); only the selector routing changes.
         if _enable_gfx942_d128_smalltile_doublek(problem):
             return 2, False
-        return 2, True
+        # K-single requires block_m <= tile_size (Q aliases the lone K slot).
+        # Derive block_m from the nw this branch returns so a later nw bump can't
+        # silently stale the guard (the exact hazard this fix addresses); mw=32 is
+        # the 32x32x8 transposed MFMA's fixed M-per-warp, pinned at the
+        # supports_tiled_2d / _tiled_spec_from_problem call sites.
+        nw = 2
+        block_m = nw * 32
+        return nw, block_m <= _gfx942_bf16_wide_tile_size(problem)
     return 4, False
 
 
