@@ -98,9 +98,9 @@ if(HIPBLASLT_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
 
-# mxDataGenerator is used by hipblaslt clients and tensilelite client; default OFF on Windows
-cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Use mxDataGenerator for MX format data generation (clients/tests)." ON "NOT WIN32" OFF)
-message(STATUS "Enable mxDataGenerator for MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
+# MX host initialization is used by hipBLASLt and TensileLite clients; default OFF on Windows.
+cmake_dependent_option(HIPBLASLT_ENABLE_MXDATAGENERATOR "Enable MX format data generation for clients/tests." ON "NOT WIN32" OFF)
+message(STATUS "Enable MX format data generation: ${HIPBLASLT_ENABLE_MXDATAGENERATOR}")
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE CACHE BOOL "Build with install RPATH")
@@ -309,7 +309,7 @@ if(_hipblaslt_host_validation_enabled
                 "${_hipblaslt_host_validation_source}/CMakeLists.txt")
         set(_hipblaslt_shared_paths shared/host-validation)
         if(_hipblaslt_mxdatagen_enabled)
-            list(APPEND _hipblaslt_shared_paths shared/mxdatagenerator)
+            list(APPEND _hipblaslt_shared_paths shared/mx-layout-transforms)
         endif()
         hipblaslt_materialize_monorepo_paths(
             _hipblaslt_materialized_root

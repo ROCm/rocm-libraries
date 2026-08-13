@@ -36,7 +36,7 @@
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
-#include <mxDataGenerator/PreSwizzle.hpp>
+#include <roc/mx_layout_transforms/pre_swizzle.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -265,7 +265,7 @@ namespace rocRoller::Client::GEMMClient
                 sizes[0] /= packing;
                 preTileSize[0] /= packing;
             }
-            hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
+            hostBForKernel = roc::mx_layout_transforms::preSwizzle(hostB, sizes, {}, preTileSize);
         }
 
         // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
@@ -295,7 +295,8 @@ namespace rocRoller::Client::GEMMClient
             // The preSwizzle helper assumes column-major; so we swap sizes here.
             std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
             std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-            hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+            hostAForKernel                         = roc::mx_layout_transforms::preSwizzle(
+                hostA, swappedSizes, {}, swappedPreTileSize);
         }
 
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
@@ -364,10 +365,10 @@ namespace rocRoller::Client::GEMMClient
                 auto tmpScaleA = [&]() {
                     if(problemParams.types.scaleSkipPermlane
                        == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return DGen::preSwizzleScalesGFX950(
+                        return roc::mx_layout_transforms::preSwizzleScalesGFX950(
                             hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
                     else
-                        return DGen::preSwizzle(
+                        return roc::mx_layout_transforms::preSwizzle(
                             hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                 }();
                 deviceScaleA = copyToDevice(tmpScaleA);
@@ -414,10 +415,10 @@ namespace rocRoller::Client::GEMMClient
                 auto tmpScaleB = [&]() {
                     if(problemParams.types.scaleSkipPermlane
                        == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return DGen::preSwizzleScalesGFX950(
+                        return roc::mx_layout_transforms::preSwizzleScalesGFX950(
                             hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
                     else
-                        return DGen::preSwizzle(
+                        return roc::mx_layout_transforms::preSwizzle(
                             hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                 }();
                 deviceScaleB = copyToDevice(tmpScaleB);

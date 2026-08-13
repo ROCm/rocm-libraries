@@ -14,14 +14,6 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-if(NOT ROCM_LIBS_SUPERBUILD AND NOT TARGET roc::mxDataGenerator)
-    if(ROCROLLER_ENABLE_THEROCK)
-        find_package(mxDataGenerator REQUIRED)
-    else()
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-    endif()
-endif()
-
 add_executable(rocroller-tests)
 
 if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))

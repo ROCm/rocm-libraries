@@ -7,7 +7,6 @@
 
 // hipBLASLt MX generation adapter owned by shared host-validation.
 
-
 enum class MXScaleLayout
 {
     None    = 0,
@@ -24,7 +23,7 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 // Only Block_32_UE8M0_32_8_EXT uses GFX950 swizzle; gfx1250 uses GFX1250 for other
 // block formats; everything else stays natural-packed (None).
 MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
-                                     std::string_view       archName);
+                                     std::string_view         archName);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
@@ -62,12 +61,5 @@ void restrideMXScaleBufferKFast(uint8_t* buffer,
                                 size_t   compactKBlocks,
                                 size_t   paddedKBlocks,
                                 size_t   elemBytes);
-
-void applyMXScaleLayoutInPlace(uint8_t*      scale,
-                               size_t        scaleElemCount,
-                               MXScaleLayout scaleLayout,
-                               size_t        slowDim,
-                               size_t        fastDim,
-                               size_t        mxBlock);
 
 #endif

@@ -55,7 +55,7 @@ git sparse-checkout init --cone
 git sparse-checkout set \
     projects/hipblaslt \
     shared/host-validation \
-    shared/mxdatagenerator
+    shared/mx-layout-transforms
 git checkout develop # or the branch you are starting from
 ```
 

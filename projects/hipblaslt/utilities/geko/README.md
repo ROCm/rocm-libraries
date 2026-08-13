@@ -239,7 +239,7 @@ sudo apt install libtinfo-dev libzstd-dev libmsgpack-dev libgtest-dev libgmock-d
 git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
 cd rocm-libraries
 git sparse-checkout init --cone
-git sparse-checkout set projects/hipblaslt shared/origami shared/stinkytofu shared/mxdatagenerator cmake
+git sparse-checkout set projects/hipblaslt shared/origami shared/stinkytofu shared/mx-layout-transforms cmake
 git checkout develop
 ```
 
@@ -1317,5 +1317,4 @@ If you want to submit an issue, you can do so on
 ## License
 
 MIT License. Copyright (C) Advanced Micro Devices, Inc.
-
 
