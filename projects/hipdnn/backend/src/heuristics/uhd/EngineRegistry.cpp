@@ -6,6 +6,7 @@
 #include "FeatureExtractor.hpp"
 #include "ScoreTransform.hpp"
 #include "adapters/TreeDataAdapter.hpp"
+#include "adapters/TableAdapter.hpp"
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 
@@ -237,7 +238,16 @@ std::shared_ptr<IUhdAdapter>
             entry->cachedAdapter = std::move(adapter);
         }
     }
-    // TODO: Add table, onnx, custom_library adapters when implemented
+    else if(cfg.adapterType == "table")
+    {
+        // TableAdapter loads from model file
+        if(!cfg.modelArtifactPath.empty())
+        {
+            auto adapter = TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
+            entry->cachedAdapter = std::move(adapter);
+        }
+    }
+    // TODO: Add onnx, custom_library adapters when implemented
 
     return entry->cachedAdapter;
 }

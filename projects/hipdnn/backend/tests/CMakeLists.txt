@@ -126,6 +126,7 @@ add_executable(
     heuristics/TestJsonLogicEvaluator.cpp
     heuristics/TestFeatureExtractor.cpp
     heuristics/TestTreeDataAdapter.cpp
+    heuristics/TestTableAdapter.cpp
     heuristics/TestUhdBuiltIn.cpp
     heuristics/TestUhdSelectionFlow.cpp
     heuristics/uhd/TestUhdLoader.cpp
