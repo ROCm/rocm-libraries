@@ -21,31 +21,28 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-config.h provides the build-time feature configuration that
- * was baked in when the rocSPARSE library was compiled.
- *
- * The macros below are resolved by CMake at library build time and installed
- * alongside the library. Do NOT define them yourself: they describe how the
- * installed library was actually built, and overriding them makes the visible
- * API surface diverge from the compiled shared object.
- */
+#include "test.hpp"
 
-#ifndef ROCSPARSE_CONFIG_H
-#define ROCSPARSE_CONFIG_H
+#include "testing_sddmm_batched_csr.hpp"
 
-/* Build-time feature flags baked in at compile time. */
-
-/* rocSPARSE 5.1 */
-#cmakedefine ROCSPARSE_WITH_SPMAT_SCALE
-#cmakedefine ROCSPARSE_WITH_SDDMM_BATCHED
-
-/* rocSPARSE 5.0 */
-#cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
-#cmakedefine ROCSPARSE_WITH_U16_REMOVED
-
-/* rocSPARSE 4.7 */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
-
-#endif /* ROCSPARSE_CONFIG_H */
+TEST_ROUTINE_WITH_CONFIG(sddmm_batched_csr,
+                         level3,
+                         rocsparse_test_config_ijabct_sddmm,
+                         arg.M,
+                         arg.N,
+                         arg.K,
+                         arg.batch_count_A,
+                         arg.batch_count_B,
+                         arg.batch_count_C,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.beta,
+                         arg.betai,
+                         arg.transA,
+                         arg.transB,
+                         arg.baseA,
+                         arg.order,
+                         arg.orderB,
+                         arg.sddmm_alg,
+                         arg.matrix,
+                         arg.graph_test);
