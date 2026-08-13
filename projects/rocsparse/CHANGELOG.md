@@ -11,7 +11,7 @@ Documentation for rocSPARSE is available at
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
 
 ### Optimized
-* Architecture-aware launch-configuration tuning (launch-only, with no numerical or algorithmic changes) improves performance and performance-portability across RDNA (wave32) and CDNA (wave64) GPUs for several sparse level 2 and level 3 routines, including sparse matrix-vector multiplication (`rocsparse_spmv`) for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); the block-sparse `rocsparse_Xbsrmv` and `rocsparse_Xbsrxmv` routines; the `rocsparse_Xgemvi` and `rocsparse_Xgemmi` routines; and sparse matrix-matrix multiplication (`rocsparse_spmm`) for the COO and blocked-ELL formats.
+* Architecture-aware launch-configuration tuning (launch-only, with no numerical or algorithmic changes) improves performance and performance-portability across RDNA (wave32) and CDNA (wave64) GPUs for several sparse level 2 and level 3 routines, including sparse matrix-vector multiplication (`rocsparse_spmv`) for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); the block-sparse `rocsparse_Xbsrmv` and `rocsparse_Xbsrxmv` routines; the `rocsparse_Xgemvi` and `rocsparse_Xgemmi` routines; and sparse matrix-matrix multiplication (`rocsparse_spmm`) for the blocked-ELL format.
 
 ### Resolved issues
 * Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
