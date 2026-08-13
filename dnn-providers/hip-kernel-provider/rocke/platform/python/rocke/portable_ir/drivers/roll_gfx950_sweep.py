@@ -45,9 +45,14 @@ import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from rocke.portable_ir.drivers.roll_kernel import (
+    Kernel,
+    arch_refusals,
+    recipe_ops,
+    roll,
+)
 from rocke.portable_ir.src.recipe_bundle import cbor_encode
 from rocke.portable_ir.src.recording_builder import record_kernel
-from rocke.portable_ir.src.roll_nd import roll_nd
 from rocke.portable_ir.src.roll_regimes import legal_values
 
 ARCH = "gfx950"
@@ -122,7 +127,15 @@ _K = 2
 
 
 class Family:
-    """One build entry point, with everything needed to sweep it."""
+    """One build entry point, with everything needed to sweep it.
+
+    The spec-making, gating and building are handed to a ``roll_kernel.Kernel``,
+    which is the same binding the generic driver rolls through. These kernels do
+    not follow the conventions that driver's module lookup assumes -- they gate
+    through ``supports_*`` taking a dozen keyword arguments, and one of them
+    builds its spec out of another kernel's spec -- so the binding is written
+    out here rather than discovered. What matters is that it is written out
+    once: every phase below then asks the same questions the same way."""
 
     def __init__(
         self,
@@ -143,6 +156,13 @@ class Family:
         # Constraints the kernel does NOT enforce but that its emitted code
         # depends on -- see the note on num_kv_heads in the module docstring.
         self.coherent = coherent
+        self.kernel = Kernel(
+            label=label,
+            make_spec=make_spec,
+            build_at=build,
+            gate=admits,
+            coherent=coherent,
+        )
 
     def legal_point(self, point: Dict[str, Any], *, build: bool = True) -> bool:
         """Is this whole combination legal, not just each value on its own?
@@ -156,19 +176,8 @@ class Family:
         gates. That is the cheap form, used when scanning many combinations to
         choose a grid -- coupling between axes is declared there, while what the
         build probe adds is per-value constraints already covered in phase 1."""
-        if self.coherent and not self.coherent(point):
+        if arch_refusals(self.kernel, lambda p: p, [point], ARCH):
             return False
-        try:
-            spec = self.make_spec(**point)
-        except Exception:
-            return False
-        if self.admits is not None:
-            try:
-                verdict = self.admits(spec)
-            except Exception:
-                return False
-            if not (verdict[0] if isinstance(verdict, tuple) else verdict):
-                return False
         if build:
             try:
                 self.build(**point)
@@ -535,17 +544,6 @@ class CrossResult:
         return 100.0 * (self.cbor - self.mean) / max(1, self.mean)
 
 
-def _deep(prog: List[Dict[str, Any]]) -> int:
-    n = 0
-    for i in prog:
-        if i.get("op") != "param":
-            n += 1
-        for k in ("body", "then", "else"):
-            if k in i:
-                n += _deep(i[k])
-    return n
-
-
 def _samples(vals: List[int], k: Optional[int] = None) -> Tuple[List[int], List[int]]:
     """Sample points and one extrapolated holdout, spread over the legal domain.
 
@@ -598,20 +596,18 @@ def phase_axis(
         samples, hold = _samples(vals)
         t0 = time.time()
         pts = nb = cb = 0
-        try:
-            r = roll_nd(
-                fam.build,
-                axes={axis: samples},
-                holdout_points=[{axis: h} for h in hold],
-            )
-            ok, why = r.ok, ("" if r.ok else r.reason)
-            if ok:
-                pts = len(r.points)
-                nb = len(cbor_encode(r.recipe))
-                sizes = [len(cbor_encode(t)) for t in r.traces.values()]
-                cb = sum(sizes) // max(1, len(sizes))
-        except Exception as e:  # a builder assert inside an untested combination
-            ok, why = False, f"{type(e).__name__}: {e}"
+        r = roll(
+            kernel=fam.kernel,
+            arch=ARCH,
+            axes={axis: samples},
+            holdout={axis: hold} if hold else None,
+            quiet=True,
+        )
+        ok, why = r.rolled, ("" if r.rolled else r.reason)
+        if ok:
+            pts = len(r.points)
+            nb = len(r.cbor or b"")
+            cb = sum(r.trace_bytes) // max(1, len(r.trace_bytes))
         out[axis] = AxisResult(ok, why, samples, pts, nb, cb)
         if verbose:
             dt = time.time() - t0
@@ -692,24 +688,20 @@ def phase_cross(
         if verbose:
             print("    no jointly-legal axis grid; nothing to cover")
         return None
-    build = fam.build
-    if overrides:
-        base = fam.build
 
-        def build(**point):  # noqa: F811 -- deliberate shadow, same signature
-            return base(**{**overrides, **point})
-
+    # A feature flag is just a spec field pinned for the whole roll, which is
+    # what `fixed` means to the roller.
     t0 = time.time()
-    try:
-        r = roll_nd(build, axes=grid, holdout_points=[hold])
-    except Exception as e:
-        if reasons is not None:
-            reasons.append(f"{type(e).__name__}: {e}")
-        if verbose:
-            print(f"    cross product raised {type(e).__name__}: {str(e)[:60]}")
-        return None
+    r = roll(
+        kernel=fam.kernel,
+        arch=ARCH,
+        axes=grid,
+        fixed=dict(overrides or {}),
+        holdout={a: [v] for a, v in hold.items()},
+        quiet=True,
+    )
     dt = time.time() - t0
-    if not r.ok:
+    if not r.rolled:
         if reasons is not None:
             reasons.append(r.reason)
         if verbose:
@@ -719,9 +711,9 @@ def phase_cross(
     out = CrossResult(
         points=len(r.points),
         traces=r.n_recorded,
-        ops=_deep(r.recipe["program"]),
-        cbor=len(cbor_encode(r.recipe)),
-        trace_bytes=[len(cbor_encode(t)) for t in r.traces.values()],
+        ops=recipe_ops(r.recipe),
+        cbor=len(r.cbor or b""),
+        trace_bytes=list(r.trace_bytes),
     )
     if verbose:
         print(f"    {len(grid)} axes {','.join(grid)}")
@@ -765,7 +757,7 @@ def phase_feature(
         got = phase_cross(fam, g, h, overrides=over, verbose=False, reasons=why)
         held += 1 if got else 0
         if verbose:
-            n = _deep(recipe["program"])
+            n = recipe_ops(recipe)
             kib = len(cbor_encode(recipe)) / 1024
             verdict = (
                 f"cross-roll {got.points:>4} pts / {got.traces:>2} traces  "

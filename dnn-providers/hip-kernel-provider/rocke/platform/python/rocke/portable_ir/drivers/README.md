@@ -43,6 +43,7 @@ loudly when it stops being true.
 | `roll_nd_coverage` | Can one recipe cover a family's axis cross product? | `--ll`, `--slow` |
 | `roll_coverage` | Tiered single-axis roll status | — |
 | `roll_gfx950_sweep` | Every family in `kernels/gfx950`, every axis, every flag, plus CBOR bytes | `--family`, `--phase`, `--samples` |
+| | *both roll through `roll_kernel`; see [one way in](#one-way-in)* | |
 | `verify_recording_production` | Recorder against hand-picked production kernels | — |
 
 **Tools.** Point these at your own work.
@@ -90,25 +91,183 @@ record -> roll (N axes) -> verify .ll/HSACO vs the Python oracle
        -> derive guard -> stamp ABI -> write a CBOR bundle
 ```
 
+<a name="one-way-in"></a>
+It is also the one way in. `roll_coverage` and `roll_gfx950_sweep` used to carry
+their own copies of this plumbing — make the spec from a base plus a point, ask
+the kernel's gate, build, record, roll — and each copy answered slightly
+differently. In particular a point the *kernel* refused and an axis the *roller*
+declined both surfaced as one undifferentiated "refused", which is exactly the
+distinction those surveys exist to report. They now call `roll()` with
+`quiet=True` and print their own tables from the `RollResult`.
+
 | Flag | Meaning |
 |---|---|
 | `--kernel`, `--arch` | Module path (e.g. `kernels.gfx1151.wmma_fmha_fwd`) and target arch |
 | `--build`, `--spec` | Only needed if the module exposes more than one builder or spec class |
-| `--fixed NAME=V` | Spec fields held constant and baked into the recipe |
-| `--axis NAME=V1,V2` | A free axis and its sample values (≥2). Repeatable — that is the multi-axis case |
-| `--holdout NAME=V` | Values never used for fitting, verified afterwards |
+| `--fixed PATH=V` | Spec fields held constant and baked into the recipe |
+| `--axis PATH=V1,V2` | A free integer axis and its sample values (≥2). Repeatable — that is the multi-axis case |
+| `--holdout PATH=V` | Values never used for fitting, verified afterwards |
 | `--structural NAME` | The one axis allowed to change the program's *shape* |
 | `--domain NAME=V1,..` | Every value the guard should admit (see the pitfalls below) |
 | `--probe` | Per-axis triage, then stop |
 | `--verify`, `--hsaco` | Replay each point and diff `.ll`, then HSACO bytes |
 | `--guard`, `--out` | Derive an admission guard; write the bundle |
 
-It exits non-zero if a requested stage fails, so it drops straight into CI.
-`--probe` is the one deliberate exception: a **declining** axis exits 0, because
-a refusal costs coverage rather than correctness and some axes will decline
-until the roller grows — failing there would leave a job permanently red for a
-known gap. A **vacuous** axis exits 1, because that is an authoring mistake
-claiming coverage it does not have.
+### From Python, with dictionaries
+
+The command line and `roll()` run the same code. The CLI is quicker for a flat
+spec; the function is the sane one for a nested spec, where the equivalent
+invocation is a wall of `--fixed` flags:
+
+```python
+from rocke.portable_ir.drivers.roll_kernel import roll
+
+r = roll(
+    kernel="rocke.instances.common.gemm_universal", arch="gfx950",
+    fixed={"name": "gemm", "tile": {"tile_m": 16, "tile_k": 16},
+           "data.dtype_a": "bf16", "block_size": 64},
+    axes={"tile": {"tile_n": [32, 64]}}, structural="tile_n",
+    holdout={"tile_n": [128]}, verify=True, guard=True, out="gemm.cbor",
+)
+if r:                      # truthy only when everything asked for passed
+    publish(r.cbor)
+elif r.refused:            # code 3: not this arch, and it names the ones it is
+    skip(f"{r.reason} — builds on {', '.join(r.elsewhere)}")
+```
+
+`fixed` and `axes` take nested dicts, dotted keys, or both mixed. `holdout` and
+`domain` are keyed by axis and take a list (or a lone value). `fixed` also takes
+a spec **instance**, which is usually what a kernel author already has — build
+it the normal way, then name the fields to vary and they override that base:
+
+```python
+base = UniversalGemmSpec(name="g", tile=TileSpec(tile_m=16, tile_n=32, ...), ...)
+r = roll(kernel=GEMM, arch="gfx950", fixed=base, axes={"tile.tile_n": [32, 64]},
+         structural="tile_n")
+```
+
+`RollResult` carries `code` (the exit status), `recipe`, `points`, `cbor`,
+`n_recorded`, `trace_bytes`, `parity`, and for a refusal `reason`, `refusals`
+and `elsewhere`. A malformed request raises `UsageError` rather than exiting the
+interpreter underneath you; a refusal by the kernel comes back as a value, since
+it is an answer rather than an accident.
+
+### Kernels that do not follow the conventions
+
+`--kernel some.module` works by looking for a spec dataclass, a `build*`
+function and an `is_valid_spec` / `supports_*` gate. Plenty of real kernels do
+not fit: `attention_dense` gates through `supports_*` taking a dozen keyword
+arguments rather than a spec, `fastkv_regp` builds its spec out of another
+kernel's spec, and the examples `qk_block` and `export_mha` have no spec
+dataclass at all. Those describe themselves with a `Kernel` instead:
+
+```python
+from rocke.portable_ir.drivers.roll_kernel import Kernel, roll
+
+fastkv = Kernel(
+    label="fastkv_regp",
+    make_spec=lambda **kw: make_fastkv_register_p_spec(Tiled2DSpec(**{**T2D, **kw})),
+    build_at=lambda **point: build_fastkv(fastkv_spec(**point), arch="gfx950"),
+    gate=lambda spec: supports_tiled_2d(head_size=spec.head_size, ...),
+    coherent=lambda point: point["num_query_heads"] % point["num_kv_heads"] == 0,
+)
+r = roll(kernel=fastkv, arch="gfx950", axes={"num_seqs": [16, 32]}, quiet=True)
+```
+
+A bare callable is shorthand for `Kernel(build_at=...)`, so an example kernel or
+an ad-hoc closure can be rolled directly: `roll(kernel=lambda D:
+build_qk_block(D, "f16"), axes={"D": [64, 128]}, structural="D", ...)`.
+
+`coherent` is for a constraint the kernel's own gate does not enforce but its
+emitted code depends on — the tiled kernels accept a `num_kv_heads` that does
+not divide `num_query_heads` and then bake in a group size that means nothing.
+Points it rejects are reported as refusals like any other.
+
+### Flat and nested specs
+
+`PATH` is a field name for a flat spec and a **dotted path** for a nested one.
+`WmmaFmhaFwdSpec` is flat, so `--fixed head_size=64`. `UniversalGemmSpec` nests
+`TileSpec`, `TraitSpec` and `DataSpec`, so `--fixed tile.tile_m=16` and
+`--axis tile.tile_n=32,64`.
+
+Values are converted using the field's *declared* type rather than guessed, so a
+`str` field holding digits stays a string. A nested spec with no required fields
+of its own is filled in from its defaults, so reaching `tile` does not oblige
+you to spell out `trait` and `data`. An axis is named by its **leaf** — `tile.tile_n`
+rolls as `tile_n` — which matches what the gates already declare, and is forced
+anyway: an axis name reaches `kernel_name_fmt` as a `{placeholder}`, and a dot
+there means attribute access to Python's formatter. Two axes with the same leaf
+are rejected rather than silently merged.
+
+```bash
+python3 -m rocke.portable_ir.drivers.roll_kernel \
+    --kernel rocke.instances.common.gemm_universal --arch gfx950 \
+    --spec UniversalGemmSpec --fixed name=gemm_probe \
+    --fixed tile.tile_m=16 --fixed tile.tile_k=16 \
+    --fixed tile.warp_m=1 --fixed tile.warp_n=1 --fixed block_size=64 \
+    --axis tile.tile_n=32,64 --structural tile_n --holdout tile.tile_n=128 \
+    --verify --hsaco
+```
+
+```
+name_fmt : gemm_probe_fp16_t16x{tile_n}x16_w1x1x1_wt16x16x16_compv4_intrawave_cshuffle
+CBOR     : 17.5 KiB parametric vs 95.3 KiB for the same points concrete
+tile_n=32    EXACT  8667c33e9fd7   715504063bba (6336 B)
+tile_n=64    EXACT  cb1c0bc0c89b   aa9a882a650c (6848 B)
+tile_n=128   EXACT  0f0ddf07bcb5   463466a9b0c1 (7880 B)
+```
+
+### Targeting an architecture
+
+**Choosing the target is the caller's job; deciding whether the kernel serves it
+is the kernel's.** Before recording anything, `roll_kernel` puts every point it
+is about to touch through the module's own `is_valid_spec` / `supports_*` and
+relays the answer verbatim:
+
+```
+REFUSED on gfx950: the kernel's own gate rejects every point.
+
+   {'num_query_heads': 8}
+      WMMA wmma_f32_16x16x16_f16 atom absent on gfx950 (WMMA is an RDNA
+      gfx11/gfx12 instruction; this kernel needs a wave32 RDNA target)
+```
+
+A partial refusal is reported the same way (`rejects 1/2`) and names the
+offending values, so `head_size=100` is an early "must be a multiple of 16"
+rather than a traceback from inside the builder. If the module exposes no gate
+at all, the run says so instead of implying the arch was checked.
+
+A refusal alone does not say *which* mistake you made, so the driver re-asks the
+gate on the other `known_arches()`. A spec accepted somewhere else is a target
+you aimed wrong at, and the report names the arches that would take it. A spec
+refused everywhere is not about the target at all:
+
+```
+   {'tile_n': 32}
+      tile_m not divisible by warp_m * warp_tile_m
+
+This is the spec, not the target: the same points are refused on
+every other known arch too. Fix the flags rather than the matrix.
+```
+
+That distinction is the whole point of the exit codes below — a mistyped tile
+config must not quietly "skip" every arch in the matrix.
+
+### Exit status
+
+| | |
+|---|---|
+| `0` | every requested stage passed |
+| `1` | a stage failed: parity mismatch, or `--probe` found a vacuous axis |
+| `2` | usage error: unknown arch, missing or misspelled field, or a spec refused on every known arch |
+| `3` | refused: the kernel does not serve *this* arch, though it serves others |
+
+`3` is not a failure, which is what makes a per-arch matrix workable: a kernel
+that only exists on RDNA should *skip* on gfx950, not go red. `--probe` draws
+the same distinction internally — a **declining** axis exits 0, because a
+refusal costs coverage rather than correctness and some axes will decline until
+the roller grows, while a **vacuous** axis exits 1 because that is an authoring
+mistake claiming coverage it does not have.
 
 ### 1. Triage the axes first
 
@@ -243,3 +402,44 @@ invoking any of this; the gate script has to be run deliberately.
 decline: it pins the current verdict, so the day someone makes `sliding_window`
 real, or the roller learns parametric `scf.for` iter-args and `head_size`
 starts rolling, the table changes and you find out.
+
+## Building artifacts per architecture
+
+Recording rebinds `IRBuilder` process-wide, so **fan out by process, not by
+thread** — eight concurrent recordings in a thread pool lose six to that race,
+while the same eight in a process pool all pass. A per-arch matrix is the
+natural unit, and one job per arch is what the artifact layout wants anyway:
+
+```yaml
+strategy:
+  matrix: { arch: [gfx942, gfx950, gfx1151, gfx1201] }
+steps:
+  - run: |
+      python3 -m rocke.portable_ir.drivers.roll_kernel \
+        --kernel $KERNEL --arch ${{ matrix.arch }} $AXES \
+        --verify --hsaco --guard --out out/${{ matrix.arch }}.cbor
+      status=$?
+      [ $status -eq 3 ] && echo "not applicable on ${{ matrix.arch }}" && exit 0
+      exit $status
+```
+
+Artifacts are byte-reproducible for identical inputs, so they cache and diff
+cleanly. No target hardware is needed: comgr cross-compiles, and a gfx950 host
+produces verified HSACO for gfx1151 and gfx1201. Only `gpu_replay`, which checks
+numerics, needs a real device.
+
+Per-arch bundles merge into one multi-arch artifact by concatenating entries and
+rebuilding, which re-derives the ABI `min_reader` over the merged set:
+
+```python
+entries = []
+for arch in arches:
+    entries += recipe_bundle.cbor_decode(open(f"out/{arch}.cbor","rb").read())["entries"]
+merged = recipe_bundle.build_bundle(entries)
+```
+
+Merging is also the *safe* way to combine them. A recipe carries no arch of its
+own — the bundle entry is what binds one to an architecture, and
+`bundle_contains(key, arch)` is what checks it. Replaying a recipe under the
+wrong arch does not raise; it silently returns `.ll` that is neither build. So
+keep recipes inside bundles rather than pairing loose CBORs by filename.

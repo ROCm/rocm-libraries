@@ -12,15 +12,24 @@
 # so a fallback is "not compressed", never "wrong".
 #
 #   T1 small op       : qk_block (vec8 head dot)              over head_size D
-#   T2 GEMM           : gemm_universal (k-atom nest)          over tile_k
+#   T2 GEMM           : gemm_universal (k-atom nest)          over tile_n
 #   T3 attention      : unified-attention 2D (the Section-3 kernel) over head_size
 #   T4 deep fused conv: deep_fused_conv_pool (conv0->conv1->pool) over pool tile
 #
 #   python3 -m rocke.portable_ir.drivers.roll_coverage
+#
+# The four tiers differ in how their kernel is reached, and that is the point of
+# running them together: T2 and T4 are spec-driven production kernels, while T1
+# and T3 are example builders taking plain arguments with no spec dataclass at
+# all. All four go through the same roll_kernel entry point, which is the driver
+# every other one here is built on, so this doubles as the check that it fits
+# kernels that do not follow the conventions its module lookup assumes.
 
 from typing import Any, Dict, List
 
-from rocke.portable_ir.src.roll import roll, roll_report
+from rocke.portable_ir.drivers.roll_kernel import Kernel, recipe_ops, roll
+
+ARCH = "gfx950"
 
 
 def _tiers():
@@ -37,21 +46,25 @@ def _tiers():
     )
     from rocke.portable_ir.examples import export_mha, qk_block
 
-    def gemm_tn(tn):
-        # CShuffle GEMM over tile_n: the mfma accumulator fan + CShuffle epilogue
-        # scale with tile_n (rolled via lane-label segmentation + type params).
-        spec = UniversalGemmSpec(
-            name=f"g{tn}",
-            tile=TileSpec(16, tn, 16, 1, 1, 1, 16, 16, 16),
+    # T2's name carries its own axis, so the roller has to fit the kernel symbol
+    # as well as the constants -- `name=f"g{tn}"` is what makes that non-trivial.
+    gemm = Kernel(
+        label="gemm_universal",
+        spec_cls=UniversalGemmSpec,
+        build_fn=build_universal_gemm,
+        make_spec=lambda **kw: UniversalGemmSpec(
+            name=f"g{kw['tile_n']}",
+            tile=TileSpec(16, kw["tile_n"], 16, 1, 1, 1, 16, 16, 16),
             trait=TraitSpec(pipeline="compv4", epilogue="cshuffle"),
             data=DataSpec(),
             wave_size=64,
             block_size=64,
-        )
-        return build_universal_gemm(spec, arch="gfx950")
-
-    def conv_pool_pw(pw):
-        spec = make_deep_fused_conv_pool_spec(
+        ),
+    )
+    conv_pool = Kernel(
+        label="deep_fused_conv_pool",
+        build_fn=build_deep_fused_conv_pool,
+        make_spec=lambda **kw: make_deep_fused_conv_pool_spec(
             n=1,
             h=64,
             w=128,
@@ -61,7 +74,7 @@ def _tiers():
             r=3,
             s=3,
             pool_tile_h=4,
-            pool_tile_w=pw,
+            pool_tile_w=kw["pool_tile_w"],
             tile_n=16,
             tile_k=16,
             warp_m=2,
@@ -70,20 +83,17 @@ def _tiers():
             warp_tile_n=16,
             warp_tile_k=16,
             wave_size=64,
-        )
-        return build_deep_fused_conv_pool(spec, arch="gfx950")
-
-    dstr = [{"name": "D", "kind": "int"}, {"name": "dtype", "kind": "str"}]
+        ),
+    )
     return [
         (
             "T1",
             "qk_block",
             dict(
-                build_at=lambda D: qk_block.build_qk_block(D, "f16"),
-                axis="D",
-                sample_points=[64, 128],
-                holdout_points=[256, 192, 96],
-                spec_decl=dstr,
+                kernel=lambda D: qk_block.build_qk_block(D, "f16"),
+                axes={"D": [64, 128]},
+                holdout={"D": [256, 192, 96]},
+                structural="D",
                 extra_spec={"dtype": "f16"},
             ),
         ),
@@ -91,21 +101,20 @@ def _tiers():
             "T2",
             "gemm_universal (CShuffle)",
             dict(
-                build_at=gemm_tn,
-                axis="TN",
-                sample_points=[32, 64],
-                holdout_points=[128, 256],
+                kernel=gemm,
+                axes={"tile_n": [32, 64]},
+                holdout={"tile_n": [128, 256]},
+                structural="tile_n",
             ),
         ),
         (
             "T3",
             "unified-attention-2d",
             dict(
-                build_at=lambda D: export_mha.build("fp16", D, 2048, 1, 32, 1),
-                axis="D",
-                sample_points=[64, 128],
-                holdout_points=[256, 192, 96, 512],
-                spec_decl=dstr,
+                kernel=lambda D: export_mha.build("fp16", D, 2048, 1, 32, 1),
+                axes={"D": [64, 128]},
+                holdout={"D": [256, 192, 96, 512]},
+                structural="D",
                 extra_spec={"dtype": "fp16"},
             ),
         ),
@@ -113,26 +122,39 @@ def _tiers():
             "T4",
             "deep_fused_conv_pool",
             dict(
-                build_at=conv_pool_pw,
-                axis="pool_tile_w",
-                sample_points=[4, 8],
-                holdout_points=[16],
+                kernel=conv_pool,
+                axes={"pool_tile_w": [4, 8]},
+                holdout={"pool_tile_w": [16]},
+                structural="pool_tile_w",
             ),
         ),
     ]
+
+
+def _report(r) -> str:
+    """One line per tier: what the recipe covers, and what it saved to cover it."""
+    if not r.rolled:
+        return f"FALLBACK: {r.reason}"
+    kib = len(r.cbor or b"") / 1024
+    concrete = sum(r.trace_bytes) / 1024
+    return (
+        f"ROLLED  {recipe_ops(r.recipe)} ops covers {len(r.points)} shapes "
+        f"from {r.n_recorded} traces; {kib:.1f}KiB vs {concrete:.1f}KiB concrete "
+        f"({concrete / max(kib, 1e-9):.0f}x)"
+    )
 
 
 def run_coverage() -> List[Dict[str, Any]]:
     rows = []
     for tier, label, kw in _tiers():
         try:
-            r = roll(**kw)
+            r = roll(arch=ARCH, quiet=True, **kw)
             rows.append(
                 {
                     "tier": tier,
                     "label": label,
-                    "ok": r.ok,
-                    "report": roll_report(r),
+                    "ok": r.rolled,
+                    "report": _report(r),
                     "result": r,
                     "error": None,
                 }
