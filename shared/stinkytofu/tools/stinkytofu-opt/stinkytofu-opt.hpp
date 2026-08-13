@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
@@ -86,6 +87,11 @@ inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
+    // HazardGapAnalysisPass accepts optional arg: verbose
+    {"HazardGapAnalysisPass",
+     [](const std::vector<std::string>& args) {
+         return createHazardGapAnalysisPass(hasPassArg(args, "verbose"));
+     }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
@@ -110,7 +116,7 @@ const std::vector<PassInfo> availablePasses = {
     //   profile — print the xcnt drain summary (per rule and drain site) to stderr
     {"Gfx1250HazardPass",
      [](const std::vector<std::string>& args) {
-         return createGfx1250HazardPass({}, hasPassArg(args, "profile"));
+         return createGfx1250HazardPass(hasPassArg(args, "profile"));
      }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
