@@ -35,6 +35,118 @@
     }),
   ])
 # ---
+# name: test_setcover_streamk_emits_golden[sk_dynamic]
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32FkGlKKVn2cf62_DRHBFa28iEFZwbNCoaKFxxHReRM2c=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT192x192x16_MI32x3266cQVNkLk-iOyGn1bXf3Tan3m07gkE0wUH74cal5W0c=',
+      'err': -2,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x128x16_MI16x16Iyy_vLNCEy0K2GHlKhudtD1jfbkXONGFXLK3TwPakKk=',
+      'err': -2,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x256x16_MI16x16pFDkxbXNn4Rk5eH8B1ilp7cGKZylHW5u2-JsZjTDmm0=',
+      'err': -2,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x256x16_MI32x32iUO7f7JIpxjDgHDBgcKsnZLvni-qFTSEjr_VrGSk6S4=',
+      'err': -2,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x32x16_MI16x16xPqIUJg0JBkgyZthWF4l-7JVXJd7t2W547YIqoOg5rzI=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT256x64x16_MI16x16x-FHA5ne8KeVG1ojppVhgdjBT65d0_Duq4jrPFI8iRHg=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI32x32x1mwny18fUam-j8krQIqxJscGA6-BqfcDz6zlZSdvkXmc=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_setcover_streamk_emits_golden[sk_dynamic_work_stealing]
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32FkGlKKVn2cf62_DRHBFa28iEFZwbNCoaKFxxHReRM2c=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32iqhyjqMAnUPmZgMI8ZQgRywWaUiRB9A29xVL3b9mewU=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1GoyUc84Peskq_HFD7Rl-92JUUVOLNpEhjYhB5uYkc90=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1NMk8m8KiNGaDcgppPmRudo-4Ld9pA73XQ83zHFI7pBk=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_setcover_streamk_emits_golden[sk_halfplr_f8gemm_tdm]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_MVh5BmMbkqHaZgwaWxZBwQnTbqD4ZjPE7Buiw6ZjMN7U=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT128x128x256_Mx0OxzkFUl6JtKleXlDvN-w63M2wsPH2VHD5SdGAuk_k=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT256x256x256_ML3FDV5YWYHMDY2AtJOgSM-72Sb_jOpmXcSLk6q5ZdHs=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT256x256x256_MUsZrtpEsUJ6XbjhXfFH3X96NJuEAwNt2vvZUMJz6d7M=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI14VN1BEKqwB6O5tLeNP4iXuwM2sR_Ue52ox5NjclvMpE=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1CzCFqNBlcrlaStHzfks4gKhzSedXcMwxBRafQyGSm94=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1FkJfhmG-3eMWNE9UJkkEYB5mA2t_mHBUUAlRD80l3pM=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8F8S_BH_UserArgs_MT64x64x256_MI1dh-TeU3NwPUhjrbXg8BAcJM_Q-23A1VYTiylkUUWAkg=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_setcover_streamk_emits_golden[sk_hybrid_work_stealing]
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32ZsbvbcXpZsSK-17j-A_WNg0QJ08yGxYZtcwzc0nDfmk=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT128x128x16_MI32x32yptfdxUK01G33iZ3Fw3Y-_k3DntCrvPUbAL-Jp1opPw=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x14-WH-5hCcPvEF_DL_QoOdt_d9nSPQJ5PoTd_d54phzg=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x64x16_MI16x16x1UgkP-9uX8VSR0XjLhn8WH4hNCX1BekE1EuySBQbifbk=',
+      'err': 0,
+    }),
+  ])
+# ---
 # name: test_setcover_streamk_emits_golden[sk_mx32f4_quick]
   list([
     dict({
