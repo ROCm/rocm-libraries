@@ -40,7 +40,6 @@ def clone(remote: str | Path, repo: Path) -> None:
             "set",
             "shared/rocroller",
             "shared/host-validation",
-            "shared/mx-layout-transforms",
         ],
         cwd=str(repo),
         check=True,

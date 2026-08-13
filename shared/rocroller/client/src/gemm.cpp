@@ -36,7 +36,7 @@
 #include "client/RotatingBuffer.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
-#include <roc/mx_layout_transforms/pre_swizzle.hpp>
+#include <roc/host_validation/amd_gpu_layout/mx.hpp>
 
 #include <CLI/CLI.hpp>
 
@@ -265,7 +265,8 @@ namespace rocRoller::Client::GEMMClient
                 sizes[0] /= packing;
                 preTileSize[0] /= packing;
             }
-            hostBForKernel = roc::mx_layout_transforms::preSwizzle(hostB, sizes, {}, preTileSize);
+            hostBForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
+                hostB, sizes, {}, preTileSize);
         }
 
         // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
@@ -295,7 +296,7 @@ namespace rocRoller::Client::GEMMClient
             // The preSwizzle helper assumes column-major; so we swap sizes here.
             std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
             std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
-            hostAForKernel                         = roc::mx_layout_transforms::preSwizzle(
+            hostAForKernel = roc::host_validation::amd_gpu_layout::preSwizzle(
                 hostA, swappedSizes, {}, swappedPreTileSize);
         }
 
@@ -365,10 +366,10 @@ namespace rocRoller::Client::GEMMClient
                 auto tmpScaleA = [&]() {
                     if(problemParams.types.scaleSkipPermlane
                        == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return roc::mx_layout_transforms::preSwizzleScalesGFX950(
+                        return roc::host_validation::amd_gpu_layout::preSwizzleScalesGFX950(
                             hostScaleA, {descScaleA.sizes()[1], descScaleA.sizes()[0]});
                     else
-                        return roc::mx_layout_transforms::preSwizzle(
+                        return roc::host_validation::amd_gpu_layout::preSwizzle(
                             hostScaleA, descScaleA.sizes(), preSwizzleSize, preTileSize);
                 }();
                 deviceScaleA = copyToDevice(tmpScaleA);
@@ -415,10 +416,10 @@ namespace rocRoller::Client::GEMMClient
                 auto tmpScaleB = [&]() {
                     if(problemParams.types.scaleSkipPermlane
                        == rocRoller::ScaleSkipPermlaneMode::PreSwizzleScaleGFX950)
-                        return roc::mx_layout_transforms::preSwizzleScalesGFX950(
+                        return roc::host_validation::amd_gpu_layout::preSwizzleScalesGFX950(
                             hostScaleB, {descScaleB.sizes()[1], descScaleB.sizes()[0]});
                     else
-                        return roc::mx_layout_transforms::preSwizzle(
+                        return roc::host_validation::amd_gpu_layout::preSwizzle(
                             hostScaleB, descScaleB.sizes(), preSwizzleSize, preTileSize);
                 }();
                 deviceScaleB = copyToDevice(tmpScaleB);

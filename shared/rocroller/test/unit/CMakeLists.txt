@@ -27,7 +27,7 @@ target_link_libraries(
 target_link_libraries(rocroller-tests
     PRIVATE
         rocroller::common-test-utilities
-        roc::mx-layout-transforms
+        roc::host-validation-amd-gpu-layout
         GTest::gtest_main
         GTest::gmock
         libdivide::libdivide
