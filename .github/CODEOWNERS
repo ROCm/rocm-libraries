@@ -79,6 +79,7 @@
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
+/shared/host-validation/                            @ROCm/hipblaslt-reviewers @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
@@ -99,6 +100,9 @@
 
 /shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+
+/shared/host-validation/**/*.cmake                  @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers @ROCm/rocroller-developers
+/shared/host-validation/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers @ROCm/rocroller-developers
 
 /shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
 /shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
