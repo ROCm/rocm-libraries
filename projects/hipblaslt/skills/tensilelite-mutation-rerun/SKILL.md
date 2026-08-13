@@ -28,6 +28,14 @@ ordinary TensileLite builds and tests do not depend on them.
 4. Do not push, edit pull requests, or update external trackers unless the user
    explicitly authorizes that action.
 
+## Choose the next target
+
+When the target is not already specified, read
+[references/prioritization.md](references/prioritization.md). Build a fixed,
+reviewed candidate universe; use measured coverage and mutation evidence; keep
+missing inputs explicitly pending; and record the human rationale for the next
+module. Do not present an arbitrary weighted proxy as an objective ranking.
+
 ## Run one investigation
 
 1. Define the slice, following
