@@ -49,10 +49,8 @@ The fastest way to get started with hipDNN is to follow the [quick start steps i
 - **[Roadmap](./docs/Roadmap.md)** - Feature priorities and development plans
 
 ### Testing
-- **[Testing](./docs/Testing.md)** - Synopsis of testing information
-- **[Testing Strategy](./docs/testing/TestingStrategy.md)** - Specific testing approach
-- **[Test Plan](./docs/testing/TestPlan.md)** - Detailed test planning
-- **[Test Run Template](./docs/testing/TestRunTemplate.md)** - Guidelines for test execution
+- **[Testing Strategy](./docs/TESTING.md)** - Validation model, testing layers, CI signals, release procedures, and known gaps
+- **[Testing Commands](./docs/Testing.md)** - Local build, CTest, check-target, and test-authoring reference
 
 ---
 

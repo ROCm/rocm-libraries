@@ -269,9 +269,9 @@ cmake --build build/release --target coverage
 Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
 > [!IMPORTANT]
-> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
-> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
+> Standalone ASAN is a manual build-and-test flow. Automated coverage differs:
+> - **Linux** has an opt-in pull-request workflow that currently builds sanitizer variants without running their tests, plus a scheduled full-ASAN nightly. Standalone full ASAN requires an ASAN-enabled ROCm / TheRock build.
+> - **Windows** supports standalone ASAN but has no ASAN CI lane. It instruments code compiled in this build, not installed ROCm libraries.
 
 Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
 
@@ -282,14 +282,11 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing § Test Categories](./Testing.md#test-categories) for what each tier covers.
+> Any enabled tier should run without ASAN findings. `standard` is the recommended standalone check. See [Testing § Test Categories](./Testing.md#test-categories) for current tier contents.
 
-**Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
+Sanitizer exclusions are not passing evidence. The backend logging shutdown test is not registered under standalone ASAN, TheRock ASAN, or HOST_ASAN because it intentionally performs an unclean threaded shutdown. Standalone `BUILD_ADDRESS_SANITIZER` disables four sample tests on Windows and seven on Linux; the three additional Linux exclusions are fused-convolution tests. These exclusions do not currently cover every TheRock sanitizer mode. See [Testing Strategy § ASAN, TSAN, and Sanitizer Coverage](TESTING.md#asan-tsan-and-sanitizer-coverage) for the complete current-state matrix and known gaps.
 
-**Current status:**
-
-- **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
-- **Windows** - ASAN is supported and builds/runs, but a few issues remain that are expected to be resolved soon, so a fully clean ASAN run is not yet available on Windows.
+Do not infer a clean platform baseline from build support. Current repository documentation and workflows provide no dated clean Windows ASAN run or component-owned failure inventory.
 
 #### Windows notes
 

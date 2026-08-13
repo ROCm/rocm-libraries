@@ -15,7 +15,7 @@ Before contributing, please review these essential documents to understand the p
 - **[Design](./docs/Design.md)** - Understand hipDNN's architecture and component design
 - **[Building](./docs/Building.md)** - Learn how to build hipDNN on your system
 - **[How-To](./docs/HowTo.md)** - Using hipDNN components and common approaches for extending functionality
-- **[TestingStrategy](./docs/testing/TestingStrategy.md)** - Understand our testing approach and requirements
+- **[Testing Strategy](./docs/TESTING.md)** - Understand testing layers, validation gates, release procedures, and known gaps
 - **[Roadmap](./docs/Roadmap.md)** - Check planned features and find contribution opportunities
 - **[Coding Style and Naming Guidelines](./docs/CodingStyleAndNamingGuidelines.md)** - Follow our coding conventions for consistency
 

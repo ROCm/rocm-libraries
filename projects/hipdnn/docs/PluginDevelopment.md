@@ -629,7 +629,7 @@ This function uses a two-call pattern:
 
 ### Test Structure
 
-Following the [Testing Strategy](./testing/TestingStrategy.md), plugins should organize tests as follows:
+Following the [Testing Strategy](./TESTING.md#detailed-testing-layer-reference), plugins should organize tests as follows:
 
 ```
 your_kernel_plugin_project/
@@ -672,7 +672,7 @@ Integration tests validate end-to-end functionality of your plugin:
 
 For a comprehensive example of an integration test, see: [`dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
 
-Moreover, see our [general testing requirements](./testing/TestingStrategy.md#general-testing-requirements).
+Moreover, see our [general testing requirements](./TESTING.md#3-general-testing-requirements).
 
 ## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 

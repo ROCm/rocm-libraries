@@ -111,7 +111,7 @@ Copy-paste this into your PR description.
 - [ ] `ninja format` + `ninja check_format` pass
 - [ ] ASAN build (`cmake -DBUILD_ADDRESS_SANITIZER=ON ..` + `ninja check`) clean
 - [ ] No clang-tidy errors, no compiler warnings
-- [ ] Test coverage ≥80% (no regression)
+- [ ] Coverage impact reviewed against the 80% target; no regression
 ```
 
 ---
@@ -264,7 +264,7 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 > See [Building.md](./Building.md) for the full toolchain invocation.
 
 > [!IMPORTANT]
-> Test coverage must remain ≥80% per [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+> The project targets 80% overall and per-component coverage, and new code should not decrease the measured baseline. No checked-in workflow enforces an 80% floor; see [TESTING.md § Coverage](TESTING.md#coverage).
 
 ---
 

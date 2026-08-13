@@ -1,6 +1,6 @@
 # hipDNN Testing
 
-This document is the hub for hipDNN's testing approach: how to run tests, how the ctest/check targets relate, what you need to build, and what is expected of tests you write.
+This document is the developer reference for running and writing hipDNN tests: local commands, CTest/check targets, build requirements, categories, naming, and authoring patterns. For current validation governance, CI signals, ownership, supported configurations, release procedures, and known gaps, see the project [Testing Strategy](TESTING.md).
 
 ## Running Tests
 
@@ -68,10 +68,9 @@ Standalone creates **unprefixed** aliases in addition to the prefixed targets:
 
 ### Address Sanitizer
 
-Add `-DBUILD_ADDRESS_SANITIZER=ON` to the configure step, then run `ctest -L standard` (the recommended ASAN check; any tier is expected to be error-free under ASAN). ASAN requires an ASAN-capable ROCm build and is a manual process today (not yet in CI); see [Building § Address Sanitizer Build](./Building.md#address-sanitizer-build) for prerequisites, the per-architecture skip behavior, and current Linux/Windows status.
+Add `-DBUILD_ADDRESS_SANITIZER=ON` to a standalone configure step, then run `ctest -L standard`; see [Building § Address Sanitizer Build](./Building.md#address-sanitizer-build) for platform prerequisites and commands.
 
-> [!NOTE]
-> Tests that cannot run under ASAN on a given architecture are skipped (via the `SKIP_IF_ASAN()` macro or by disabling their ctest registration in an ASAN build), not failed.
+The current trusted ASAN signal is a manually run standalone check. A Linux pull-request workflow exists but is opt-in and currently builds sanitizer variants without running their tests; a scheduled Linux full-ASAN workflow also exists but is not yet an owned hipDNN signal. Windows ASAN is manual and has no CI lane. See [Testing Strategy § ASAN, TSAN, and Sanitizer Coverage](TESTING.md#asan-tsan-and-sanitizer-coverage) for current scope, exclusions, and tracked gaps.
 
 ## ctest vs. check targets
 
@@ -246,9 +245,9 @@ TYPED_TEST(MyTypedTest, Correctness)
 
 - **Coverage Target**: 80% overall is the goal, with each component aiming for >80% individually (a target, not machine-enforced)
 - **GPU Tests**: Must be marked with the `SKIP_IF_NO_DEVICES()` macro
-- **Platform Support**: All tests must work on Windows and Linux
+- **Platform Support**: Tests target Windows and Linux, but automated configurations and platform exclusions differ; see the [validated configuration matrix](TESTING.md#supported-and-validated-configurations)
 - **Performance**: Unit tests must execute quickly
-- **CI**: All CI pipelines must pass on every PR
+- **CI**: All applicable triggered checks must be inspected; a skipped workflow is not passing evidence
 
 ## Expectations During Development
 
@@ -260,7 +259,7 @@ Tests are a merge gate, not an afterthought. The following expectations apply to
 - Product-code changes carry a test, a safe-default flag, or a written waiver - no behavior change ships unverified.
 - Never disable/skip/weaken a test to green CI (no waiver) - greening by removing coverage hides real failures.
 - Tests must assert real behavior - a test no source change could break is coverage padding, not coverage.
-- ASAN/leak-clean - sanitizer checks are run manually today (CI coverage is planned); write RAII / failure-path cleanup so a leak does not surface later.
+- ASAN/leak-clean by design - Linux full-ASAN runs nightly and standalone checks are available, but no sanitizer test currently gates pull requests; write RAII / failure-path cleanup and record any sanitizer validation actually run.
 - PR body carries an honest Testing Summary + Checklist - `[x]` only for validation that actually passed, with the exact command.
 
 **SHOULD:**
@@ -270,17 +269,15 @@ Tests are a merge gate, not an afterthought. The following expectations apply to
 - Provider/support-surface changes (`dnn-providers/**`) need multi-arch coverage - a family that builds but skips tests is uncovered, not covered.
 - Verify negative/error paths - unsupported op/layout/dtype combinations must fail predictably, not run a wrong path.
 
-## Testing Strategy
+## Testing Strategy and Governance
 
-To understand **how to design and create tests** in hipDNN (what to test, at which layer, and to what coverage), the authoritative reference is:
+The authoritative component strategy is [TESTING.md](TESTING.md). It records the current validation model, testing layers, CI classifications, coverage scope, supported configurations, sanitizer status, ownership handoffs, release procedures, improvement roadmap, and known risks and gaps.
 
-- **[Testing Strategy](./testing/TestingStrategy.md)** - the primary guide for contributors writing tests: white-box unit, black-box API, and end-to-end integration testing; per-component test categories; GPU-skip rules; coverage expectations; and the performance-testing roadmap.
-
-The Quick Reference patterns above (TYPED_TEST / TEST_P, TypePair) are the day-to-day authoring shortcuts; the strategy doc is the fuller treatment. Contributors should read it before adding tests.
+The [Detailed Testing Layer Reference](TESTING.md#detailed-testing-layer-reference) covers white-box unit, black-box API, and end-to-end integration layers. The Quick Reference patterns above remain the day-to-day authoring guide.
 
 ## Release / Milestone Verification
 
-The following docs are for **hipDNN milestone and release verification**: validating a release build and capturing evidence for sign-off. They are **not** part of the per-PR development workflow; day-to-day contributors do not need them (see [Expectations During Development](#expectations-during-development) above for the PR-time bar).
+The following sections of [TESTING.md](TESTING.md) cover **hipDNN milestone and release verification**: validating a release build and capturing evidence for sign-off. They are **not** part of the per-PR development workflow; day-to-day contributors do not need them (see [Expectations During Development](#expectations-during-development) above for the PR-time bar).
 
-- [Test Plan](./testing/TestPlan.md) - the release verification checklist and expected results.
-- [Test Run Template](./testing/TestRunTemplate.md) - template for recording a release validation run and capturing evidence.
+- [Release and Milestone Test Plan](TESTING.md#release-and-milestone-test-plan) - release verification checklist and expected results.
+- [Test Run Record Template](TESTING.md#test-run-record-template) - release validation evidence template.

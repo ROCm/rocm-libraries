@@ -417,7 +417,7 @@ Testing is crucial for ensuring plugin reliability and correctness. Plugins shou
 Test structure
 --------------
 
-Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md>`_, plugins should organize tests as follows:
+Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/TESTING.md#detailed-testing-layer-reference>`_, plugins should organize tests as follows:
 
 .. code::
 
