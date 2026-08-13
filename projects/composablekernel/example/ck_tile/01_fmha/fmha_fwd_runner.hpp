@@ -2293,6 +2293,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
                             mask.type == mask_enum::mask_top_left));
             }
             const ck_tile::HostTensor<SaccDataType> masked_s_host_ref = s_host_ref;
+            // Softmax is kept in fp32 first, then narrowed to PDataType. The per-tensor path
+            // below consumes the fp32 copy directly, see the comment at its GEMM call.
+            ck_tile::HostTensor<SMPLComputeDataType> p_host_ref_f32(
+                {nhead, real_seqlen_q, real_seqlen_k});
             if(init_sink_value != 0)
             {
                 // Create extended tensor with sink token
@@ -2304,26 +2308,26 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     s_host_ref, sink_host, s_with_sinks_ref, nhead, real_seqlen_q, real_seqlen_k);
 
                 // Compute softmax on extended tensor
-                ck_tile::HostTensor<PDataType> p_extended(
+                ck_tile::HostTensor<SMPLComputeDataType> p_extended(
                     {nhead, real_seqlen_q, real_seqlen_k + 1});
 
                 if(lse)
                 {
                     ck_tile::reference_batched_softmax<SMPLComputeDataType,
                                                        SMPLComputeDataType,
-                                                       PDataType>(
+                                                       SMPLComputeDataType>(
                         s_with_sinks_ref, p_extended, p_compute_element_func, lse_host_ref);
                 }
                 else
                 {
                     ck_tile::reference_batched_softmax<SMPLComputeDataType,
                                                        SMPLComputeDataType,
-                                                       PDataType>(
+                                                       SMPLComputeDataType>(
                         s_with_sinks_ref, p_extended, p_compute_element_func);
                 }
 
                 // Extract only the original columns (exclude sink token column)
-                p_host_ref.ForEach(
+                p_host_ref_f32.ForEach(
                     [&](auto& self, auto idx) { self(idx) = p_extended(idx[0], idx[1], idx[2]); });
             }
             else
@@ -2333,17 +2337,20 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 {
                     ck_tile::reference_batched_softmax<SMPLComputeDataType,
                                                        SMPLComputeDataType,
-                                                       PDataType>(
-                        s_host_ref, p_host_ref, p_compute_element_func, lse_host_ref);
+                                                       SMPLComputeDataType>(
+                        s_host_ref, p_host_ref_f32, p_compute_element_func, lse_host_ref);
                 }
                 else
                 {
                     ck_tile::reference_batched_softmax<SMPLComputeDataType,
                                                        SMPLComputeDataType,
-                                                       PDataType>(
-                        s_host_ref, p_host_ref, p_compute_element_func);
+                                                       SMPLComputeDataType>(
+                        s_host_ref, p_host_ref_f32, p_compute_element_func);
                 }
             }
+            p_host_ref.ForEach([&](auto& self, auto idx) {
+                self(idx) = ck_tile::type_convert<PDataType>(p_host_ref_f32(idx));
+            });
             if(lse)
             {
                 ck_tile::HostTensor<SMPLComputeDataType> lse_host_result({nhead, real_seqlen_q});
@@ -2505,6 +2512,24 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                                       std::get<2>(idx) / block_scale_size_kv_);
                         },
                         ck_tile::idx_identity{});
+            }
+            else if(qscale.type == quant_scale_enum::pertensor && !(p_drop > 0))
+            {
+                // Same reasoning as the mx branch above: quantizing P on the host makes the
+                // reference *less* precise than the device. The kernel quantizes exp(s - m),
+                // whose row maximum is 1 and therefore maps onto the top of the fp8 range,
+                // while the host would quantize the already normalized softmax, whose maximum
+                // is only 1/l of that range. The two land on different fp8 grid points, so with
+                // a peaked softmax (narrow sliding window) their rounding disagrees by several
+                // percent per weight and nothing averages it out.
+                ck_tile::
+                    reference_batched_gemm<SMPLComputeDataType, VDataType, OaccDataType, ODataType>(
+                        p_host_ref_f32,
+                        v_host_ref,
+                        o_host_ref,
+                        ck_tile::identity{},
+                        ck_tile::identity{},
+                        oacc_element_func);
             }
             else
             {
