@@ -471,3 +471,74 @@ stable and self-invalidating. Motivating context: ROCM-7144.
 and must be confirmed byte-identical via `--snapshot-update` in a build
 environment; the `-m unit` lane needs the compiled rocisa module, which is not
 available where this change was authored.
+## D21 — LibraryIO characterization: add-only mutation-kill snapshot cases
+**Decision:** The LibraryIO mutation-hardening slice pins additional *current*
+LibraryIO behavior by appending new syrupy cases to three existing goldens
+(`test_parse_integration_char.ambr`, `test_serializers_char.ambr`,
+`test_writesolutions_char.ambr`); no existing snapshot value is re-recorded.
+**Classification:** category (a) intended behavior capture -- new cases pinning
+previously-unsnapshotted read/write/parse behavior to raise mutation kill power,
+not a change to any pinned behavior. The diffs are insertion-only (+258/-0,
++9/-0, +54/-0) and confined to the LibraryIO node, so no ADR is required (nothing
+behavior-changing or known-wrong is pinned); this registry line is the record.
+The parse_integration additions begin in the mutation infra base and continue
+in this slice.
+**Re-run:** goldens byte-identical on two further no-update runs; `-m unit` green.
+
+## D22 — Solution.py mutation kill: pickle-free `.ambr` derivation golden
+**Decision:** Kill the `Solution.assignDerivedParameters` mutant giant with a
+syrupy `.ambr` full-derived-state golden regenerated from in-tree designed YAML
+configs, committing no pickle. See ADR 0003.
+**Why:** the giant (~18820 mutants across the `depthU`/`adp` families) is only
+observable by asserting the complete derived `_state`; a pickle golden is opaque,
+version-coupled, and undiffable, against the suite's add-only diffable-golden
+discipline. Unlike the LibraryIO add-only cases in D21, this introduces a new
+golden *vehicle* with a non-obvious regeneration mechanism, so it lands with an
+ADR (0003), not just this registry line.
+**Equivalence evidence:** verified kill-equivalent to the interim pickle corpus
+over 8 stratified windows (lines 1567-2857, 684 mutants, 0 per-key exit-code
+divergence). Byte-stability confirmed by two further no-update runs.
+**Harness fixes (not source):** derivation moved out of collection (a
+collection-time try/except was swallowing raising mutants); `_sanitize` now
+recurses into any `Mapping` so `ProblemType` is deep-compared, closing 4
+`MirrorDimsMetadata` mutants a `str()`-only render missed.
+**Regeneration:** on an intentional derivation/config change, rerun with
+`--snapshot-update`, confirm byte-stability with two clean runs, and log the
+regeneration here.
+
+## D23 — Per-file ratchet baseline refresh after wave-2 (r8 + HUX crossover)
+**Decision:** Refresh `coverage-baseline.json` (158 files, tolerance 1.0) from the
+combined `coverage-unit` lane on branch `users/davidd-amd/mut-v2-coverage`
+(HEAD e69017042cf, coverage.py 7.15.4, branch=True). The prior baseline was the
+stale #9123 (`f90130fb37d`) snapshot that predated the whole mutation stack. The
+refresh locks in 31 upward floors and accepts 3 sub-tolerance downward moves, each
+with an evidence-backed disposition below.
+**Why:** the #9123 floors understated real coverage (e.g. Solution.py 70.55,
+SubtileGREmit.py 73.39), so a blind ratchet was impossible without either gaming
+or losing the mut-stack gains. `coverage_ratchet.py check` was clean (0 regression,
+tol 1 pp) before `update`; `tox -e coverage-gate` exits 0 after (TOTAL 78.76% ->
+79.11%).
+**Upward floors locked (top):** WaitAluInsertion 18.81->69.31, SubtileGREmit
+73.39->88.44 (r8, MUTCOV-002), Configuration 91.18->99.25, MAC_F32C 14.58->22.50,
+segment_interleave 93.57->100.00, MAC_F64C 16.33->22.73, Solution 70.55->74.58,
+TensorDataMover 71.68->74.95, SubtileLREmit 85.49->88.60, BenchmarkSplitter
+97.92->100.00.
+**Downward dispositions (all sub-tolerance, < 1 pp; ratchet check passed):**
+- `KernelHelperNaming.py` 97.10 -> 96.20 (-0.90): source UNCHANGED since the
+  baseline commit (`git diff f90130fb37d..HEAD` = 0 lines). Arc/branch-accounting
+  noise, not a coverage loss. Disposition: accept, noise.
+- `TensileLogic/Run.py` 89.90 -> 89.15 (-0.75): source UNCHANGED since baseline
+  (0 lines). Arc noise. Disposition: accept, noise.
+- `KernelWriter.py` 78.05 -> 77.72 (-0.33): source CHANGED (+177 lines) by 9
+  develop-side GPU-feature commits merged after the baseline (#9410 TDM iterate,
+  #10104 gfx1250 replay-hazard, #10209 segment-conflict, #9851 XFP32, #10298,
+  #10217, #10210, #10213, staggerU-disable). This is real feature dilution from
+  GPU paths the CPU-only char lane cannot reach; NOT caused by the mut stack.
+  Disposition: accept as documented feature dilution; the coverage gap belongs to
+  those features' owners (author GPU char coverage is out of scope for a
+  test/config-only change).
+**crossover.py:** stays 100% (now deterministic via MUTCOV-003); per MUTCOV-004
+scope it is NOT recorded as a new rise.
+**Classification:** baseline-maintenance only; no behavior pinned, so no ADR. The
+baseline write and this DECISIONS entry land as two separate atomic commits per
+the MUTCOV-004 delivery rule. No push; David reviews the baseline diff.
