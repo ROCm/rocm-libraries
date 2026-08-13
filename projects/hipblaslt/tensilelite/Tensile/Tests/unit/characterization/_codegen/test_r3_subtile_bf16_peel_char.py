@@ -15,6 +15,12 @@ Guards the 16bit subtile store fast-path in ``Tensile/Components/GlobalWriteBatc
             outer module instead it is emitted *before* the stores, the branch becomes
             BACKWARD, and ragged-M tiles hang / scramble control flow.
 
+Target: Tensile/Components/GlobalWriteBatch.py, the ranges this change adds:
+  2304-2355  peel emit — interior test, boundary/end labels, and the selection between
+             the interior body and the guarded body
+  2465-2476  ``_flushNGroupSkipLabel`` — the routing helper shared by the three emit sites
+  2683-2750  ``_buildSubtileInteriorStores`` — the guard-free/mask-free interior body
+
 The routing check is deliberately an *ordering* assertion, not a presence assertion: under
 the routing bug the label is still defined, just in the wrong place, so "is it defined"
 cannot detect the regression.
@@ -205,3 +211,18 @@ def test_ngroup_skip_label_is_colocated_with_stores(peel_kernels):
         "no N-group skip label was emitted anywhere in the sweep, so the routing invariant "
         "was never exercised -- the guarded (N-guard) store path did not engage"
     )
+
+
+def test_r3_subtile_bf16_peel_gfx950_golden(emitted, snapshot):
+    """Order-invariant golden: pin {basename, err} for every kernel of the fork sweep.
+
+    Catches a fork permutation silently dropping out of the sweep, which would leave the
+    structural assertions above passing over a smaller set. The assembly TEXT is
+    deliberately not hashed: it is order-coupled through process-global rocisa scheduler
+    state (see characterization/README.md).
+    """
+    digest = sorted(
+        ({"basename": b, "err": e} for (b, _s, e) in emitted),
+        key=lambda d: d["basename"],
+    )
+    assert digest == snapshot
