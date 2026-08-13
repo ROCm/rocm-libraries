@@ -4,7 +4,7 @@
   "src_commit": "5d6478a6d80b93a32373ad637bc4a1a6b96d1690",
   "container": "tl-mut",
   "total_loc": 5765,
-  "notes": "Region model for slice-10 sub-slicing. mutmut only_mutate is whole-file, so each region is realized by # pragma: no mutate fencing (NOT only_mutate). Per the spike (spikes/solution-subslicing.md, Proof 3), pragma fencing is only safe when both fence boundaries are same-block-level siblings; same_level_fence records this, and a mandatory PragmaVisitor dry-parse gate must pass before any live mutmut run. Budget numbers use the plan sizing FLOOR (0.78 mutants/LOC, 20% survive) until slice-8 calibration lands measured mpl/rate/srate. covering_test_selection on EVERY region is the whole-module covering set as a PLACEHOLDER; per-region narrowing needs --cov-context=test tooling not yet in covering-set-discover.sh. same_level_fence=true describes the outer fence's fenceability, not mutation-readiness (the dry-parse gate + calibration gate a live run).",
+  "notes": "Region model for Solution.py sub-slicing. mutmut only_mutate is whole-file, so live per-region runs require temporary mutation fences. Apply fences only when both boundaries are same-block-level siblings and a PragmaVisitor dry-parse gate passes. Budget estimates are provisional until calibrated. Revalidate each module-level covering_test_selection with the tensilelite-mutation-rerun skill; per-region narrowing requires coverage contexts. same_level_fence describes structural fenceability, not mutation readiness. Always back up and restore source.",
   "source_safety": "Single serial actor. Backup Solution.py, trap restore on EXIT INT TERM, clear mutmut mutants/ between regions, require `git -C projects/hipblaslt/tensilelite diff --quiet -- Tensile/SolutionStructs/Solution.py` before the next region and before any commit. Never leave fences in tracked source.",
   "regions": [
     {
@@ -19,7 +19,13 @@
         "Tensile/Tests/unit/characterization/SolutionClass",
         "Tensile/Tests/unit/characterization/SolutionDerivationSweep"
       ],
-      "budget": {"est_mutants": 157, "est_survivors": 31, "abort_gate_x": 2, "oversized": false, "measured": false},
+      "budget": {
+        "est_mutants": 157,
+        "est_survivors": 31,
+        "abort_gate_x": 2,
+        "oversized": false,
+        "measured": false
+      },
       "note": "Known-safe proof region from the spike (all direct children of the module body)."
     },
     {
@@ -34,8 +40,14 @@
         "Tensile/Tests/unit/characterization/SolutionClass",
         "Tensile/Tests/unit/characterization/SolutionDerivationSweep"
       ],
-      "budget": {"est_mutants": 105, "est_survivors": 21, "abort_gate_x": 2, "oversized": false, "measured": false},
-      "note": "Module-level; covering_test_selection is a placeholder (whole-module covering dirs) pending per-region narrowing."
+      "budget": {
+        "est_mutants": 105,
+        "est_survivors": 21,
+        "abort_gate_x": 2,
+        "oversized": false,
+        "measured": false
+      },
+      "note": "Module-level covering directories; revalidate with the tensilelite-mutation-rerun skill before a live region run."
     },
     {
       "id": "r03",
@@ -49,7 +61,13 @@
         "Tensile/Tests/unit/characterization/SolutionClass",
         "Tensile/Tests/unit/characterization/SolutionDerivationSweep"
       ],
-      "budget": {"est_mutants": 80, "est_survivors": 16, "abort_gate_x": 2, "oversized": false, "measured": false},
+      "budget": {
+        "est_mutants": 80,
+        "est_survivors": 16,
+        "abort_gate_x": 2,
+        "oversized": false,
+        "measured": false
+      },
       "note": "Module-level; ends just before `class Solution` (line 499)."
     },
     {
@@ -64,7 +82,13 @@
         "Tensile/Tests/unit/characterization/SolutionClass",
         "Tensile/Tests/unit/characterization/SolutionDerivationSweep"
       ],
-      "budget": {"est_mutants": 4108, "est_survivors": 822, "abort_gate_x": 2, "oversized": true, "measured": false},
+      "budget": {
+        "est_mutants": 4108,
+        "est_survivors": 822,
+        "abort_gate_x": 2,
+        "oversized": true,
+        "measured": false
+      },
       "note": "Whole class is trivially fenceable (single leading fence [1..498], region runs to EOF). But at ~4108 est mutants it far exceeds a single region budget and MUST be internally sub-sliced. Internal sub-regions inside its large methods (e.g. the 1731-line evaluateStinkyTofuESM2 @2803) are the Proof-3 hard case: they must be carved at same-level statement boundaries and pass the PragmaVisitor dry-parse gate, or the method must be restructured first. A nested-region model for r04 is future work."
     }
   ]
