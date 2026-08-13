@@ -127,6 +127,7 @@ add_executable(
     heuristics/TestFeatureExtractor.cpp
     heuristics/TestTreeDataAdapter.cpp
     heuristics/TestTableAdapter.cpp
+    heuristics/TestOnnxAdapter.cpp
     heuristics/TestCustomLibraryAdapter.cpp
     heuristics/TestUhdBuiltIn.cpp
     heuristics/TestUhdSelectionFlow.cpp
