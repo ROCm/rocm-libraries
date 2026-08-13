@@ -119,6 +119,20 @@ inline std::optional<std::filesystem::path>
     return std::nullopt;
 }
 
+// Resolve one provenance field: CLI value wins, then the named env var, then
+// empty. Empty means "not recorded" and is not an error — the harvest consumer
+// never reads provenance, so a CI job that forgot to set ROCM_VERSION loses
+// traceability on its records rather than the records themselves.
+inline std::string resolveProvenanceField(const std::optional<std::string>& cliValue,
+                                          const char* envName)
+{
+    if(cliValue.has_value() && !cliValue->empty())
+    {
+        return *cliValue;
+    }
+    return hipdnn_data_sdk::utilities::getEnv(envName);
+}
+
 struct TestConfigOptions
 {
     std::optional<std::filesystem::path> articlePath;
@@ -133,6 +147,13 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
+    // Where to append the harvest JSONL (RFC 0015 §12.1). Unset = no harvest.
+    std::optional<std::filesystem::path> supportObservationsPath;
+    // Stamped onto every harvest record so a claim proposed months later can be
+    // traced back to the run that observed it. Each falls back to an env var.
+    std::optional<std::string> rocmVersion;
+    std::optional<std::string> runId;
+    std::optional<std::string> commitSha;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -227,6 +248,15 @@ public:
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
+
+        // Deliberately not forced to imply --allow-bundles, unlike the write
+        // path above. Harvest rides along on whatever the run was already
+        // going to do; turning extra tests on would change the exit code, and
+        // a side effect that can fail the build is not a side effect.
+        instance._supportObservationsPath = std::move(opts.supportObservationsPath);
+        instance._rocmVersion = resolveProvenanceField(opts.rocmVersion, "ROCM_VERSION");
+        instance._runId = resolveProvenanceField(opts.runId, "CI_RUN_ID");
+        instance._commitSha = resolveProvenanceField(opts.commitSha, "CI_COMMIT_SHA");
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -428,6 +458,43 @@ public:
         return _captureDir.value();
     }
 
+    bool hasSupportObservationsPath() const
+    {
+        throwIfNotInitialized();
+        return _supportObservationsPath.has_value();
+    }
+
+    const std::filesystem::path& getSupportObservationsPath() const
+    {
+        throwIfNotInitialized();
+        if(!_supportObservationsPath.has_value())
+        {
+            throw std::runtime_error("getSupportObservationsPath() called but "
+                                     "--emit-support-observations was not provided");
+        }
+        return _supportObservationsPath.value();
+    }
+
+    // Provenance fields. Empty means "not recorded"; there is no has*() pair
+    // because no caller may branch on their absence.
+    const std::string& getRocmVersion() const
+    {
+        throwIfNotInitialized();
+        return _rocmVersion;
+    }
+
+    const std::string& getRunId() const
+    {
+        throwIfNotInitialized();
+        return _runId;
+    }
+
+    const std::string& getCommitSha() const
+    {
+        throwIfNotInitialized();
+        return _commitSha;
+    }
+
 private:
     TestConfig() = default;
 
@@ -446,6 +513,10 @@ private:
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
     std::optional<std::filesystem::path> _captureDir;
+    std::optional<std::filesystem::path> _supportObservationsPath;
+    std::string _rocmVersion;
+    std::string _runId;
+    std::string _commitSha;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

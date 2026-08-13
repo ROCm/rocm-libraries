@@ -131,7 +131,17 @@ protected:
         return _inputFillRecipes;
     }
 
-    void observeSupportOnly();
+    // Queries the graph's ranked engine list and records one observation per
+    // loaded engine into the process-wide SupportObservationLog. Runs nothing
+    // and issues no verdict. An unresolvable query records UNKNOWN rather than
+    // nothing, so "we asked and it broke" stays distinguishable from "nobody
+    // asked".
+    void recordSupportObservations();
+
+    // The same, with everything it can throw swallowed. Used on the harvest
+    // path, where observing is a side effect of a test that must keep its own
+    // pass/fail.
+    void recordSupportObservationsQuietly();
 
 private:
     bool _requiresDevice;

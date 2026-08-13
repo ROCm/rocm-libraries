@@ -28,6 +28,7 @@
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
+#include "harness/bundle/SupportObservationEmitter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
@@ -159,6 +160,18 @@ int main(int argc, char** argv) noexcept
                   "Requires --test-article (mode B: all engines, or mode C with "
                   "--test-engine). Implies --allow-bundles, since bundles are what "
                   "carry the claims. Idempotent: no support change = zero git diff.");
+        parser.add_argument("--emit-support-observations")
+            .help("Append observed engine support to the given JSONL file, one record "
+                  "per (bundle, case, engine, arch, platform), and mirror each line to "
+                  "stdout behind [[HIPDNN_SUPPORT_OBS]]. Pure side effect: it observes "
+                  "what the run was going to do anyway and never changes the verdict. "
+                  "Feed the file to scripts/harvest_support_observations.py.");
+        parser.add_argument("--rocm-version")
+            .help("Provenance stamped on emitted observations. Falls back to $ROCM_VERSION.");
+        parser.add_argument("--run-id")
+            .help("Provenance stamped on emitted observations. Falls back to $CI_RUN_ID.");
+        parser.add_argument("--commit-sha")
+            .help("Provenance stamped on emitted observations. Falls back to $CI_COMMIT_SHA.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -313,6 +326,34 @@ int main(int argc, char** argv) noexcept
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
+        if(parser.is_used("--emit-support-observations"))
+        {
+            opts.supportObservationsPath = parser.get<std::string>("--emit-support-observations");
+        }
+        if(parser.is_used("--rocm-version"))
+        {
+            opts.rocmVersion = parser.get<std::string>("--rocm-version");
+        }
+        if(parser.is_used("--run-id"))
+        {
+            opts.runId = parser.get<std::string>("--run-id");
+        }
+        if(parser.is_used("--commit-sha"))
+        {
+            opts.commitSha = parser.get<std::string>("--commit-sha");
+        }
+
+        // The write path drains the same log into sidecars and diverts every
+        // bundle away from actually running. Harvesting from that run would
+        // record real observations, but of a run that verified nothing — and
+        // the two flags disagree about what the binary is for.
+        if(opts.writeSupportClaims && opts.supportObservationsPath.has_value())
+        {
+            std::cerr << "--write-support-claims and --emit-support-observations are "
+                      << "mutually exclusive.\n";
+            return 1;
+        }
+
         if(opts.writeSupportClaims && !opts.articlePath.has_value())
         {
             std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
@@ -448,6 +489,45 @@ int main(int argc, char** argv) noexcept
             {
                 exitCode = 1;
             }
+        }
+
+        if(hipdnn_integration_tests::TestConfig::get().hasSupportObservationsPath())
+        {
+            namespace bundle_ns = hipdnn_integration_tests::bundle;
+            const auto& config = hipdnn_integration_tests::TestConfig::get();
+
+            const bundle_ns::ObservationProvenance provenance{config.getRocmVersion(),
+                                                              config.getCommitSha(),
+                                                              config.getRunId(),
+                                                              bundle_ns::currentUtcTimestamp()};
+
+            const auto emitSummary
+                = bundle_ns::emitSupportObservations(bundle_ns::SupportObservationLog::get().all(),
+                                                     config.getSupportObservationsPath(),
+                                                     bundle_ns::resolveDataDir(),
+                                                     provenance,
+                                                     std::cout);
+
+            std::cerr << "\n==== SUPPORT OBSERVATION EMIT SUMMARY ====\n"
+                      << "  records: " << emitSummary.recordsEmitted
+                      << "  errors: " << emitSummary.errors.size() << "\n";
+            for(const auto& error : emitSummary.errors)
+            {
+                std::cerr << "  ERROR: " << error << "\n";
+            }
+            if(emitSummary.recordsEmitted == 0)
+            {
+                std::cerr << "  WARNING: nothing was observed. The harvest consumer cannot tell "
+                             "this apart\n"
+                             "           from a shard that was never scheduled — it will report "
+                             "0% coverage\n"
+                             "           either way. Check --allow-bundles and --gtest_filter.\n";
+            }
+
+            // exitCode is deliberately untouched, errors and all. Harvesting is
+            // a side effect of the run (RFC 0015 §12.1); a full disk must not
+            // turn a green enforcement result red. The loud stderr above is the
+            // signal, and the consumer's coverage report is the backstop.
         }
 
         if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims()

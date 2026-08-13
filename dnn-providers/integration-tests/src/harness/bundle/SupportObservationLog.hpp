@@ -7,10 +7,38 @@
 #include <string>
 #include <vector>
 
+#include "harness/BundleMetadata.hpp"
 #include "harness/bundle/SupportClaims.hpp"
 
 namespace hipdnn_integration_tests::bundle
 {
+
+// What the machine said about one cell, before any sidecar is consulted
+// (RFC 0015 §5.2). Three values, because "the query broke" is not a third
+// shade of no: DECLINED is a fact about the engine, UNKNOWN is a fact about
+// the run. Collapsing them to a bool is what would let a driver fault erase a
+// claim, so the distinction is carried in the type rather than in a comment.
+enum class ObservedSupport
+{
+    SUPPORTED, ///< query resolved, engine in the ranked list
+    DECLINED, ///< query resolved, engine absent
+    UNKNOWN, ///< query did not resolve; evidence of nothing
+};
+
+inline const char* toString(ObservedSupport support)
+{
+    switch(support)
+    {
+    case ObservedSupport::SUPPORTED:
+        return "supported";
+    case ObservedSupport::DECLINED:
+        return "declined";
+    case ObservedSupport::UNKNOWN:
+        return "unknown";
+    default:
+        return "unknown";
+    }
+}
 
 // One (graph, engine, arch, platform) cell of observed support, as seen on the
 // hardware the run happened on.
@@ -23,14 +51,30 @@ struct SupportObservation
     std::string engineName;
     std::string arch;
     std::string platform;
-    bool engineIsSupported = false; // resolved + in ranked list
+    ObservedSupport support = ObservedSupport::UNKNOWN;
+    // The rung this bundle is checked at. Not used to decide the observation —
+    // it is carried so the harvest emitter can stamp it on the record without
+    // needing the bundle back, long after the test object is gone.
+    EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
+
+    bool engineIsSupported() const
+    {
+        return support == ObservedSupport::SUPPORTED;
+    }
+    bool isResolved() const
+    {
+        return support != ObservedSupport::UNKNOWN;
+    }
 };
 
-// Process-wide log of resolved support observations. Populated during
-// --write-support-claims runs and drained once after RUN_ALL_TESTS() to
-// produce .support.json sidecars. Only resolved queries (OK or
-// GRAPH_NOT_SUPPORTED) are recorded; unresolved queries are not
-// observations of "unsupported" and must never null an existing claim.
+// Process-wide log of support observations. Populated during
+// --write-support-claims and --emit-support-observations runs and drained once
+// after RUN_ALL_TESTS().
+//
+// Unresolved queries are recorded too, as UNKNOWN — the harvest emitter reports
+// them, because a target that keeps erroring is worth seeing. They are not
+// observations of "unsupported", so every consumer that removes claims must
+// filter them out first; writeObservedSupportClaims() does exactly that.
 class SupportObservationLog
 {
 public:
