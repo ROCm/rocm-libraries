@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "compilation/KernelCompileOptions.hpp"
+#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
@@ -150,9 +151,11 @@ void PointwiseAddDispatchHandler::launch(const Handle& handle,
     preparedAdd.kernel().launch(handle.getStream(), inputA.ptr, inputB.ptr, output.ptr);
 }
 
-void registerPointwiseAddDispatch(const PointwiseAddDispatchHandler& handler)
+const PointwiseAddDispatchHandler& pointwiseAddDispatchHandler()
 {
-    DispatchRegistry<Handle>::registerSymbol(std::string(DISPATCH_SYMBOL), &handler);
+    static const HipMlopsKernelCompiler s_kernelCompiler;
+    static const PointwiseAddDispatchHandler s_dispatchHandler(s_kernelCompiler);
+    return s_dispatchHandler;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

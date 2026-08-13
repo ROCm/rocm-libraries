@@ -16,6 +16,7 @@
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "core/Utils.hpp"
+#include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -221,37 +222,12 @@ PointwiseAddBinding pointwiseAddBinding(const BoundTokens& bound)
     return {read(INPUT_A_TOKEN), read(INPUT_B_TOKEN), read(OUTPUT_TOKEN)};
 }
 
-void registerPointwiseAddMatchers()
+void registerPointwiseAddSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope)
 {
-    GraphMatcherRegistry::registerSymbol(std::string(GRAPH_MATCHER_SYMBOL),
-                                         &pointwiseAddGraphMatches);
-    try
-    {
-        KernelMatcherRegistry::registerSymbol(std::string(KERNEL_MATCHER_SYMBOL),
-                                              &pointwiseAddKernelMatches);
-    }
-    catch(...)
-    {
-        GraphMatcherRegistry::unregisterSymbol(std::string(GRAPH_MATCHER_SYMBOL));
-        throw;
-    }
-    try
-    {
-        ScoreRegistry::registerSymbol(std::string(SCORE_SYMBOL), &pointwiseAddScore);
-    }
-    catch(...)
-    {
-        GraphMatcherRegistry::unregisterSymbol(std::string(GRAPH_MATCHER_SYMBOL));
-        KernelMatcherRegistry::unregisterSymbol(std::string(KERNEL_MATCHER_SYMBOL));
-        throw;
-    }
-}
-
-void unregisterPointwiseAddMatchers()
-{
-    GraphMatcherRegistry::unregisterSymbol(std::string(GRAPH_MATCHER_SYMBOL));
-    KernelMatcherRegistry::unregisterSymbol(std::string(KERNEL_MATCHER_SYMBOL));
-    ScoreRegistry::unregisterSymbol(std::string(SCORE_SYMBOL));
+    scope.add(std::string(GRAPH_MATCHER_SYMBOL), &pointwiseAddGraphMatches);
+    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &pointwiseAddKernelMatches);
+    scope.add(std::string(SCORE_SYMBOL), &pointwiseAddScore);
+    scope.add(std::string(DISPATCH_SYMBOL), &pointwiseAddDispatchHandler());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

@@ -24,42 +24,14 @@ namespace hip_kernel_provider::kernel_ingestor_engine
  * Stands in for what a loader will produce from installed files: one engine (UED),
  * its metadata schema (KMD) and heuristic (UHD), two matchers (UMDs), one dispatch
  * descriptor (UDD), and one pack (KDP) binding them over three kernels (UKDs).
+ *
+ * ALMIOPEN-2401 deletes this file: a descriptor set becomes parsed data rather than
+ * code. Nothing outside it depends on that distinction, since it returns the same
+ * generic DescriptorSet a loader will.
  */
-
-/// A pack plus every descriptor it references by id, ready to construct a state manager.
-struct PointwiseAddDescriptorSet
-{
-    hipdnn_plugin_sdk::ingestor::EngineDescriptor engine;
-    hipdnn_plugin_sdk::ingestor::MetadataSchema schema;
-    std::vector<hipdnn_plugin_sdk::ingestor::MatchDescriptor> matchers;
-    std::vector<hipdnn_plugin_sdk::ingestor::DispatchDescriptor> dispatches;
-    std::vector<hipdnn_plugin_sdk::ingestor::KernelDescriptorPack> packs;
-    hipdnn_plugin_sdk::ingestor::HeuristicDescriptor heuristic;
-};
 
 /// @brief Builds this pack's descriptor set.
-PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet();
-
-/**
- * @brief This engine's hipDNN engine id, registering its name on first call.
- *
- * The id is the UED name hashed into hipDNN's engine-id space, registered at run time
- * since the engine is defined by data. A function-local static, not a namespace-scope
- * object: the registrar throws on a collision, which from a global constructor during
- * dlopen() would terminate the process.
- */
-int64_t pointwiseAddEngineId();
-
-/**
- * @brief Builds the state manager backing this pack, from an already-built
- *        descriptor set.
- *
- * Takes @p set by value so a caller building both the engine and its state manager
- * calls buildPointwiseAddDescriptorSet() once. @p set's UED is ignored; the engine
- * owns it.
- */
-std::unique_ptr<hipdnn_plugin_sdk::ingestor::KernelIngestorStateManager<Handle>>
-    makePointwiseAddStateManager(PointwiseAddDescriptorSet set);
+hipdnn_plugin_sdk::ingestor::DescriptorSet buildPointwiseAddDescriptorSet();
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

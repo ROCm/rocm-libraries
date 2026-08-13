@@ -53,9 +53,9 @@ KernelDescriptor makeKernel(const DescriptorId& id,
 
 } // namespace
 
-PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
+hipdnn_plugin_sdk::ingestor::DescriptorSet buildPointwiseAddDescriptorSet()
 {
-    PointwiseAddDescriptorSet set;
+    hipdnn_plugin_sdk::ingestor::DescriptorSet set;
 
     set.schema.id = SCHEMA_ID;
     set.schema.name = "pointwise add variant fields";
@@ -111,24 +111,6 @@ PointwiseAddDescriptorSet buildPointwiseAddDescriptorSet()
     set.packs = {std::move(pack)};
 
     return set;
-}
-
-int64_t pointwiseAddEngineId()
-{
-    // Registers the engine name against its id on first call; see the header for why
-    // this is a function-local static.
-    static const hipdnn_data_sdk::utilities::EngineRegistrar s_registrar{ENGINE_NAME};
-    return hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME);
-}
-
-std::unique_ptr<KernelIngestorStateManager<Handle>>
-    makePointwiseAddStateManager(PointwiseAddDescriptorSet set)
-{
-    return std::make_unique<KernelIngestorStateManager<Handle>>(std::move(set.schema),
-                                                                std::move(set.matchers),
-                                                                std::move(set.dispatches),
-                                                                std::move(set.packs),
-                                                                makeKernelHeuristic(set.heuristic));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

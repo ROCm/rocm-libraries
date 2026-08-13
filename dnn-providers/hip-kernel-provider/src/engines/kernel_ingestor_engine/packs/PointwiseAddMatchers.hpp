@@ -7,6 +7,9 @@
 
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
+
+#include "core/Handle.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -48,15 +51,16 @@ struct PointwiseAddBinding
  */
 PointwiseAddBinding pointwiseAddBinding(const hipdnn_plugin_sdk::ingestor::BoundTokens& bound);
 
-/// @brief Registers this pack's matchers and scorer under their symbol names.
-///
-/// Called once, from the pack's translation unit. Atomic: if one symbol is already
-/// taken, any symbols this call already installed are unregistered before it rethrows.
-void registerPointwiseAddMatchers();
-
-/// @brief Undoes registerPointwiseAddMatchers(), for a caller rolling this pack back
-/// after a later registration step of its own fails.
-void unregisterPointwiseAddMatchers();
+/**
+ * @brief Registers this pack's native symbols into @p scope.
+ *
+ * Named in IngestorPacks.cpp's table, which is what keeps this translation unit out of
+ * the linker's dead-strip set when the provider is linked as a static archive.
+ *
+ * @throws std::runtime_error if a symbol is already registered. @p scope rolls back
+ *         this pack's partial registration; other packs are unaffected.
+ */
+void registerPointwiseAddSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

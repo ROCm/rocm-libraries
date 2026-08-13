@@ -5,39 +5,57 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <memory>
+#include <cstdint>
+#include <string>
+#include <vector>
 
-#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
+#include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
-#include "core/Context.hpp"
-#include "core/Handle.hpp"
-#include "core/Settings.hpp"
+#include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
 /**
- * @brief Registers every native matcher, scorer, and dispatch handler this provider's
- *        ingestor packs resolve through, exactly once for the life of the process.
+ * @brief Registers every ingestor pack's native matchers, scorers, and dispatch
+ *        handlers, exactly once for the life of the process.
  *
- * Called from Container's constructor, so a UED loaded from a descriptor file with no
- * compile-time link to the symbol's translation unit still finds it. Idempotent.
+ * Called from Container's constructor, before any descriptor-backed engine resolves the
+ * symbols its descriptors name. Idempotent.
+ *
+ * Does not throw on a pack failing: that pack is logged, excluded from
+ * discoverDescriptorSets(), and the rest still register.
  */
 void registerNativeIngestorSymbols();
 
-/// The once_flag-guarded body of registerNativeIngestorSymbols(), callable directly so
-/// a test can force and observe a partial-failure/rollback cycle.
-void registerNativeIngestorSymbolsOnce();
+/**
+ * @brief Every descriptor set this provider serves.
+ *
+ * **The one function ALMIOPEN-2401 replaces.** Its body is the C++ stand-in for a
+ * descriptor-file scan; the return type is already what a loader produces.
+ *
+ * Safe to call for enumeration alone, before registerNativeIngestorSymbols(): it
+ * builds plain data and touches no registry. Container::copyEngineIds depends on that,
+ * being static and running before any Container exists.
+ *
+ * Reads the inventory once per process and memoizes, so every caller sees the same
+ * set.
+ */
+std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> discoverDescriptorSets();
 
 /**
- * @brief Builds the descriptor-backed pointwise-add engine.
+ * @brief Hashes @p name into hipDNN's engine-id space, registering it on first call.
  *
- * The device resolver and dispatch handler its kernels need are process-lifetime
- * statics (see KernelIngestorEngine.cpp), not members.
- *
- * Requires registerNativeIngestorSymbols() to have run first.
+ * A descriptor-backed engine is defined by data, so its name is registered at run time
+ * rather than by EngineNames.hpp's compile-time macro. Idempotent and thread-safe;
+ * never called at static-init, where the registrar's throw would be fatal.
  */
-std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePointwiseAddEngine();
+int64_t registerEngineName(const std::string& name);
+
+/// @brief The device resolver every descriptor-backed engine in this provider shares.
+///
+/// Process-lifetime: a device-property cache with no engine-specific state.
+const HandleDeviceResolver& deviceResolver();
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

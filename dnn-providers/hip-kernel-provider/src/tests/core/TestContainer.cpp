@@ -143,7 +143,9 @@ TEST(TestContainer, GetApplicableEngineIdsPointwiseAddGraph)
 
     auto applicableEngines = engineManager.getApplicableEngineIds(handle, graphWrapper);
 
-    EXPECT_NE(std::find(applicableEngines.begin(), applicableEngines.end(), pointwiseAddEngineId()),
+    EXPECT_NE(std::find(applicableEngines.begin(),
+                        applicableEngines.end(),
+                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
               applicableEngines.end());
 }
 #endif

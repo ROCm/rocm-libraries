@@ -21,8 +21,9 @@
 #endif
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
+
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
 #endif
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
@@ -36,53 +37,71 @@ using namespace hipdnn_data_sdk::utilities;
 
 const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions()
 {
-    static const std::vector<EngineDefinition> s_engineDefinitions = {
-    // HIP_MLOPS_ENGINE
+    static const std::vector<EngineDefinition> s_engineDefinitions = [] {
+        std::vector<EngineDefinition> definitions = {
+        // HIP_MLOPS_ENGINE
 #ifdef HIPDNN_ENGINE_HIP_MLOPS
-        {HIP_MLOPS_ENGINE_ID,
-         [](const device::IDevicePropertyProvider& devicePropertyProvider)
-             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-             auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
-             const compilation::IKernelCompiler& kernelCompiler = engine->getKernelCompiler();
-             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<layernorm::LayernormPlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             engine->addPlanBuilder(std::make_unique<resample::ResamplePlanBuilder>(
-                 kernelCompiler, devicePropertyProvider));
-             return engine;
-         }},
+            {HIP_MLOPS_ENGINE_ID,
+             [](const device::IDevicePropertyProvider& devicePropertyProvider)
+                 -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+                 auto engine = std::make_unique<HipMlopsEngine>(HIP_MLOPS_ENGINE_ID);
+                 const compilation::IKernelCompiler& kernelCompiler = engine->getKernelCompiler();
+                 engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
+                 engine->addPlanBuilder(
+                     std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
+                         kernelCompiler, devicePropertyProvider));
+                 engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
+                 engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
+                 engine->addPlanBuilder(std::make_unique<layernorm::LayernormPlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
+                 engine->addPlanBuilder(std::make_unique<resample::ResamplePlanBuilder>(
+                     kernelCompiler, devicePropertyProvider));
+                 return engine;
+             }},
 #endif
 #ifdef HIPDNN_ENGINE_ASM_SDPA
-        // ASM_SDPA_ENGINE
-        {ASM_SDPA_ENGINE_ID,
-         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
-             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-             auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
-             engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
-             return engine;
-         }},
+            // ASM_SDPA_ENGINE
+            {ASM_SDPA_ENGINE_ID,
+             [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                 -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+                 auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
+                 engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
+                 engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
+                 return engine;
+             }},
 #endif
+        };
+
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-        // The kernel ingestor's engine (RFC 0017). Registered statically here; runtime
-        // loading of engine descriptors will replace this entry with one built per
-        // installed UED file.
-        {kernel_ingestor_engine::pointwiseAddEngineId(),
-         [](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
-             -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-             // Device facts are resolved per call from the handle, not from the
-             // construction-time provider.
-             return kernel_ingestor_engine::makePointwiseAddEngine();
-         }},
+        // The kernel ingestor's engines (RFC 0017), one per discovered descriptor set.
+        //
+        // This block is the stand-in for runtime descriptor-file loading: ALMIOPEN-2401
+        // replaces discoverDescriptorSets()'s body with a per-UED directory scan and
+        // this loop keeps working unchanged. It is the last hand-maintained engine
+        // inventory, and it is a loop rather than a row per engine, so adding one costs
+        // no edit here.
+        for(auto& set : kernel_ingestor_engine::discoverDescriptorSets())
+        {
+            // Registered at enumeration, where a collision is catchable and can name the
+            // engine; the id is what hipDNN identifies it by.
+            const auto engineId = kernel_ingestor_engine::registerEngineName(set.engine.name);
+            definitions.push_back(
+                {engineId,
+                 [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                     -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+                     // Device facts are resolved per call from the handle, not from the
+                     // construction-time provider.
+                     return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
+                         set, kernel_ingestor_engine::deviceResolver());
+                 }});
+        }
 #endif
-    };
+
+        return definitions;
+    }();
 
     return s_engineDefinitions;
 }

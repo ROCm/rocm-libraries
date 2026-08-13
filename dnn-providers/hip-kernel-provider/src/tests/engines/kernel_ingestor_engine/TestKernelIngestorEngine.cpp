@@ -14,6 +14,7 @@
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
@@ -55,7 +56,8 @@ GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 void stubAsThisEnginesConfig(MockEngineConfig& config)
 {
     EXPECT_CALL(config, isValid()).WillRepeatedly(::testing::Return(false));
-    EXPECT_CALL(config, engineId()).WillRepeatedly(::testing::Return(pointwiseAddEngineId()));
+    EXPECT_CALL(config, engineId())
+        .WillRepeatedly(::testing::Return(hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)));
 }
 
 // ---------------------------------------------------------------------------
@@ -71,47 +73,60 @@ TEST(TestKernelIngestorEngine, RegisterNativeIngestorSymbolsIsIdempotentAcrossRe
     EXPECT_NO_THROW(registerNativeIngestorSymbols());
 }
 
-TEST(TestKernelIngestorEngine, RegistrationFailureReportsTheSameCauseOnRetryAfterRollback)
+TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOthersAlone)
 {
-    using hipdnn_plugin_sdk::ingestor::DispatchRegistry;
+    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::ScoreRegistry;
+    using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
-    // Unregisters to drive controlled attempts; every other test relies on these
-    // symbols for matching and dispatch, so always restore.
-    unregisterPointwiseAddMatchers();
-    DispatchRegistry<Handle>::unregisterSymbol(std::string(DISPATCH_SYMBOL));
-    struct RestoreGuard
+    // A neighbour pack's symbol, registered and committed before the failing pack runs.
+    const std::string neighbourSymbol = "test.neighbour.graph_match";
+    SymbolScope<Handle> neighbour;
+    neighbour.add(neighbourSymbol, &pointwiseAddGraphMatches);
+    neighbour.commit();
+
+    // Occupies the symbol the failing pack will try second, so its registration fails
+    // partway -- the shape rollback exists for.
+    const std::string contendedSymbol = "test.contended.score";
+    SymbolScope<Handle> squatter;
+    squatter.add(contendedSymbol, &pointwiseAddScore);
+    squatter.commit();
+
+    const std::string firstSymbol = "test.failing.graph_match";
     {
-        ~RestoreGuard()
-        {
-            registerNativeIngestorSymbolsOnce();
-        }
-    } const restoreGuard;
+        SymbolScope<Handle> failing;
+        failing.add(firstSymbol, &pointwiseAddGraphMatches);
+        EXPECT_THROW(failing.add(contendedSymbol, &pointwiseAddScore), std::runtime_error);
+        // Never committed: the destructor rolls this pack back.
+    }
 
-    // Occupies the dispatch symbol so registration succeeds on every matcher and fails
-    // only on dispatch -- the partial-failure shape rollback exists for.
-    DispatchRegistry<Handle>::registerSymbol(std::string(DISPATCH_SYMBOL), nullptr);
+    // The failing pack's own symbol is gone...
+    EXPECT_THROW(GraphMatcherRegistry::resolve(firstSymbol), std::runtime_error);
+    // ...while the neighbour's survives, which is what "one pack failing must not
+    // unregister everyone else's symbols" means.
+    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(neighbourSymbol));
+    // The contended symbol still belongs to its original owner, not the failed pack.
+    EXPECT_NO_THROW(ScoreRegistry::resolve(contendedSymbol));
 
-    const auto attempt = [] {
-        try
-        {
-            registerNativeIngestorSymbolsOnce();
-        }
-        catch(const std::runtime_error& e)
-        {
-            return std::string(e.what());
-        }
-        ADD_FAILURE() << "expected a duplicate-symbol throw";
-        return std::string();
-    };
+    GraphMatcherRegistry::unregisterSymbol(neighbourSymbol);
+    ScoreRegistry::unregisterSymbol(contendedSymbol);
+}
 
-    const auto firstMessage = attempt();
-    const auto secondMessage = attempt();
+TEST(TestKernelIngestorEngine, ACommittedScopeKeepsItsSymbols)
+{
+    using hipdnn_plugin_sdk::ingestor::GraphMatcherRegistry;
+    using hipdnn_plugin_sdk::ingestor::SymbolScope;
 
-    // Without rollback, the first attempt's matcher symbols stay registered and the
-    // second attempt fails on a different, misleading cause.
-    EXPECT_EQ(firstMessage, secondMessage);
+    const std::string symbol = "test.committed.graph_match";
+    {
+        SymbolScope<Handle> scope;
+        scope.add(symbol, &pointwiseAddGraphMatches);
+        scope.commit();
+    }
 
-    DispatchRegistry<Handle>::unregisterSymbol(std::string(DISPATCH_SYMBOL));
+    EXPECT_NO_THROW(GraphMatcherRegistry::resolve(symbol));
+
+    GraphMatcherRegistry::unregisterSymbol(symbol);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,10 +138,12 @@ TEST(TestKernelIngestorEngine, MakePointwiseAddEngineIsReachableWithTheDescripto
     Container container;
     auto& engineManager = container.getEngineManager();
 
-    // pointwiseAddEngineId() registers the engine's name on first call;
+    // hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME) registers the engine's name on first call;
     // getAllEngineIds() proves the factory installed it, not just compiled.
     const auto allEngineIds = engineManager.getAllEngineIds();
-    EXPECT_NE(std::find(allEngineIds.begin(), allEngineIds.end(), pointwiseAddEngineId()),
+    EXPECT_NE(std::find(allEngineIds.begin(),
+                        allEngineIds.end(),
+                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
               allEngineIds.end());
 }
 
@@ -143,7 +160,9 @@ TEST(TestKernelIngestorEngine, IsApplicableAcceptsAGraphThisPacksMatchersAccept)
     const auto graph = buildPointwiseGraph();
     const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
 
-    EXPECT_NE(std::find(applicable.begin(), applicable.end(), pointwiseAddEngineId()),
+    EXPECT_NE(std::find(applicable.begin(),
+                        applicable.end(),
+                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
               applicable.end());
 }
 
@@ -158,7 +177,8 @@ TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 
     const auto graph = buildPointwiseGraph();
     hipdnnPluginConstData_t details{};
-    engineManager.getEngineDetails(handle, wrap(graph), pointwiseAddEngineId(), details);
+    engineManager.getEngineDetails(
+        handle, wrap(graph), hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME), details);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper wrapper(details.ptr,
                                                                                      details.size);
@@ -227,7 +247,9 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphThisPacksMatchersRefuse)
         = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL);
     const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
 
-    EXPECT_EQ(std::find(applicable.begin(), applicable.end(), pointwiseAddEngineId()),
+    EXPECT_EQ(std::find(applicable.begin(),
+                        applicable.end(),
+                        hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME)),
               applicable.end());
 }
 

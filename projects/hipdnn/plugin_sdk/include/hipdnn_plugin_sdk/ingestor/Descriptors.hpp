@@ -265,6 +265,27 @@ struct KernelDescriptorPack
     std::vector<KernelDescriptor> kernels;
 };
 
+/**
+ * @brief One engine and every descriptor it references by id: what a loader produces
+ *        from one installed descriptor set, and what an engine is built from.
+ *
+ * Ids are resolved within a set, so a set is self-contained. ALMIOPEN-2401 replaces the
+ * C++ that builds these with a directory scan producing the same type; nothing
+ * downstream of it changes.
+ *
+ * A set is not a file: one engine's packs may be authored across several files, and a
+ * loader is free to merge them into one set before handing it over.
+ */
+struct DescriptorSet
+{
+    EngineDescriptor engine;
+    MetadataSchema schema;
+    HeuristicDescriptor heuristic;
+    std::vector<MatchDescriptor> matchers;
+    std::vector<DispatchDescriptor> dispatches;
+    std::vector<KernelDescriptorPack> packs;
+};
+
 } // namespace hipdnn_plugin_sdk::ingestor
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

@@ -67,10 +67,14 @@ private:
     const compilation::IKernelCompiler& _kernelCompiler;
 };
 
-/// @brief Registers @p handler under this pack's dispatch symbol.
-///
-/// The handler is registered by pointer and must outlive every plan built from it.
-void registerPointwiseAddDispatch(const PointwiseAddDispatchHandler& handler);
+/**
+ * @brief This pack's dispatch handler.
+ *
+ * Process-lifetime: the registry holds a non-owning pointer to it while a provider's
+ * Container is created and destroyed per handle, so it must outlive every Container.
+ * The compiler it holds is a static for the same reason.
+ */
+const PointwiseAddDispatchHandler& pointwiseAddDispatchHandler();
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

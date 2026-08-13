@@ -5,17 +5,18 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
-#include <memory>
+#include <deque>
 #include <mutex>
+#include <string>
+#include <unordered_set>
 #include <utility>
 
-#include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
 
-#include "engines/hip_mlops_engine/HipMlopsKernelCompiler.hpp"
 #include "engines/kernel_ingestor_engine/HandleDeviceResolver.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddDispatchHandler.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddMatchers.hpp"
-#include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -23,65 +24,104 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 namespace
 {
 
-/**
- * @brief The dispatch handler this pack's UDD resolves to.
- *
- * Process-lifetime: DispatchRegistry stores a non-owning pointer to it, while a
- * provider's Container is created and destroyed per handle (see
- * SharedContainerManager). The compiler it holds is a static for the same reason.
- */
-const PointwiseAddDispatchHandler& dispatchHandler()
+/// Labels of packs whose symbol registration failed. Read by discoverDescriptorSets()
+/// so a pack that could not register is excluded at startup rather than failing lazily
+/// at its first query.
+std::unordered_set<std::string>& failedPackLabels()
 {
-    static const HipMlopsKernelCompiler s_kernelCompiler;
-    static const PointwiseAddDispatchHandler s_dispatchHandler(s_kernelCompiler);
-    return s_dispatchHandler;
+    static std::unordered_set<std::string> s_failed;
+    return s_failed;
 }
 
-/**
- * @brief The device resolver every descriptor-backed engine in this provider shares.
- *
- * Container/process-lifetime, not per-engine: it is a device-property cache with no
- * engine-specific state (see HandleDeviceResolver's doc).
- */
+/// Registers every pack's native symbols, one SymbolScope per pack.
+///
+/// A pack that throws is rolled back and skipped; the sweep carries on, because one
+/// pack's duplicate symbol must not unregister every other pack's. Runs under
+/// call_once, where a throw is catchable and reportable -- never at static-init, where
+/// it would terminate the process during dlopen().
+void registerNativeIngestorSymbolsOnce()
+{
+    for(const auto& pack : ingestorPacks())
+    {
+        hipdnn_plugin_sdk::ingestor::SymbolScope<Handle> scope;
+        try
+        {
+            pack.registerSymbols(scope);
+            scope.commit();
+        }
+        catch(const std::exception& error)
+        {
+            failedPackLabels().emplace(pack.label);
+            HIPDNN_PLUGIN_LOG_ERROR("ingestor: pack '"
+                                    << pack.label
+                                    << "' failed to register its native symbols and is excluded: "
+                                    << error.what());
+        }
+    }
+}
+
+} // namespace
+
 const HandleDeviceResolver& deviceResolver()
 {
     static const HandleDeviceResolver s_deviceResolver;
     return s_deviceResolver;
 }
 
-} // namespace
-
-/// Runs the body of registerNativeIngestorSymbols() at most once per process; broken
-/// out so a test can drive it directly and observe rollback on a forced conflict.
-void registerNativeIngestorSymbolsOnce()
-{
-    registerPointwiseAddMatchers();
-    try
-    {
-        registerPointwiseAddDispatch(dispatchHandler());
-    }
-    catch(...)
-    {
-        unregisterPointwiseAddMatchers();
-        throw;
-    }
-}
-
 void registerNativeIngestorSymbols()
 {
-    // call_once leaves the flag unset on a throw, so a retry re-runs the body.
     static std::once_flag s_registered;
     std::call_once(s_registered, registerNativeIngestorSymbolsOnce);
 }
 
-std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> makePointwiseAddEngine()
+std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> discoverDescriptorSets()
 {
-    auto set = buildPointwiseAddDescriptorSet();
-    // Moved out of `set` in its own statement, fully sequenced before the move of the
-    // remainder below.
-    auto engine = std::move(set.engine);
-    return std::make_unique<hipdnn_plugin_sdk::ingestor::GenericEngine<Handle, Settings, Context>>(
-        std::move(engine), makePointwiseAddStateManager(std::move(set)), deviceResolver());
+    // The C++ stand-in for a descriptor-file scan. ALMIOPEN-2401 replaces this body
+    // with a directory scan; nothing downstream changes.
+    //
+    // Memoized because this has two callers at different times -- Container's static
+    // engine-id enumeration and Container's constructor -- and "the inventory is read
+    // once at startup" has to mean once, not once per caller. Post-2401 that is also
+    // what keeps two filesystem scans from disagreeing.
+    static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
+        std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
+        for(const auto& pack : ingestorPacks())
+        {
+            if(failedPackLabels().count(std::string(pack.label)) != 0)
+            {
+                continue;
+            }
+            sets.push_back(pack.buildDescriptorSet());
+        }
+        return sets;
+    }();
+
+    return s_sets;
+}
+
+int64_t registerEngineName(const std::string& name)
+{
+    // Registered here rather than at namespace scope: EngineRegistrar throws on a
+    // duplicate name or hash collision, and a throw from a namespace-scope constructor
+    // during dlopen() terminates the process (measured, not assumed).
+    static std::mutex s_mutex;
+    const std::lock_guard<std::mutex> lock(s_mutex);
+
+    if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(name))
+    {
+        // EngineNames.hpp keeps std::string_view, not std::string: every other caller
+        // registers a string literal through HIPDNN_REGISTER_ENGINE, so the storage is
+        // static and nobody had to think about it. A descriptor-backed name is built at
+        // run time, so it must be interned somewhere that outlives the registry or the
+        // map is left holding a dangling view. This is the one thing a loader
+        // registering names from parsed files must not get wrong.
+        static std::deque<std::string> s_names;
+        static std::vector<hipdnn_data_sdk::utilities::EngineRegistrar> s_registrars;
+        // deque, not vector: reallocation would move the strings a registered view
+        // points at, and a deque never relocates existing elements.
+        s_registrars.emplace_back(s_names.emplace_back(name));
+    }
+    return hipdnn_data_sdk::utilities::engineNameToId(name);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

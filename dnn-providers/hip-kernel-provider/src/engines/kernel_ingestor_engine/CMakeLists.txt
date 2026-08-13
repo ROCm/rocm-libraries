@@ -9,6 +9,7 @@ add_kernels_for_embedding(
 )
 
 target_sources(hip_kernel_provider_impl PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/IngestorPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/KernelIngestorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/PointwiseAddMatchers.cpp

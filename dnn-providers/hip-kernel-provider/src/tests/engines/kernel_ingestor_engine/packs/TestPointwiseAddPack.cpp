@@ -10,6 +10,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
+#include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddPack.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseAddSymbols.hpp"
 
@@ -131,20 +132,26 @@ TEST(TestPointwiseAddPack, MatchersCoverBothScopes)
 
 TEST(TestPointwiseAddPack, EngineIdIsTheHashOfItsScopedName)
 {
-    // A descriptor-backed engine's id comes from its UED name.
-    EXPECT_EQ(pointwiseAddEngineId(), hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME));
+    // A descriptor-backed engine's id comes from its UED name, so the provider and
+    // hipDNN derive the same id without sharing a table.
+    EXPECT_EQ(registerEngineName(std::string(ENGINE_NAME)),
+              hipdnn_data_sdk::utilities::engineNameToId(ENGINE_NAME));
 }
 
-TEST(TestPointwiseAddPack, EngineIdIsStableAcrossCalls)
+TEST(TestPointwiseAddPack, RegisteringTheEngineNameTwiceIsIdempotent)
 {
-    // The id keys the engine in hipDNN's registry and this provider's engine table.
-    EXPECT_EQ(pointwiseAddEngineId(), pointwiseAddEngineId());
+    // Called once per discovered set per process, but Containers come and go; a second
+    // call must return the same id rather than throwing on a duplicate registration.
+    const auto first = registerEngineName(std::string(ENGINE_NAME));
+    const auto second = registerEngineName(std::string(ENGINE_NAME));
+
+    EXPECT_EQ(first, second);
 }
 
 TEST(TestPointwiseAddPack, RegistersTheEngineNameForDiagnostics)
 {
     // Registered at run time so a log line or collision report can name the engine.
-    const auto id = pointwiseAddEngineId();
+    const auto id = registerEngineName(std::string(ENGINE_NAME));
 
     EXPECT_EQ(hipdnn_data_sdk::utilities::getEngineNameFromId(id), ENGINE_NAME);
 }
