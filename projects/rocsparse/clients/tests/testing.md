@@ -380,10 +380,9 @@ device configurations are not ASAN-covered.
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo `rocsparse-bench-regression.py` for manual checks |
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
 | Device-code coverage not captured (host-side instrumentation only) | Medium | Medium | Codecov reports host paths; device coverage untracked |
-| No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Medium | Medium | `*known_bug*` excluded from gating; linkage is ad-hoc |
+| No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | No separate host-only unit-test binary | Low | Medium | `*bad_arg*` / auxiliary cases cover host paths inside `rocsparse-test` |
 | No TSAN/UBSAN/MSAN | Low | Medium | ASAN only |
-| Windows coverage thinner than Linux; multi-GPU unvalidated | Medium | Medium | Documented as not guaranteed |
 
 ---
 

@@ -365,12 +365,11 @@ a build/compile check of the Fortran bindings rather than a correctness test sui
 |---|---|---|---|
 | No public/TheRock perf regression gate (PR or nightly) in this repo | Low | Low | Backend (rocSPARSE) perf regression is tracked outside this repo; in-repo `hipsparse-bench` for manual checks |
 | CUDA-backend PR lane is narrow (`*checkin*csrmv*`) | Medium | Medium | Broader CUDA coverage only on demand |
-| No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Medium | Medium | `*known_bug*` excluded from gating; linkage is ad-hoc |
+| No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
 | `stress` tier instantiated but empty in YAML | Low | Low | No stress cases today |
 | Coverage preset flag mismatch (`HIPSPARSE_BUILD_COVERAGE` vs `HIPSPARSE_ENABLE_COVERAGE`) | Low | Low | Use the enable flag / `install.sh` |
 | Fortran bindings are compile-checked only, not correctness-tested | Low | Medium | Samples build; no assertion suite |
 | No TSAN/UBSAN/MSAN | Low | Medium | ASAN only; ASAN excludes Fortran |
-| Windows/multi-GPU coverage thin | Medium | Medium | Documented as not guaranteed |
 
 ---
 
