@@ -50,8 +50,9 @@ namespace TensileLite
                                                        ContractionInputs const&      inputs,
                                                        size_t elementsToValidate);
 
-        // Product-private descriptor adapters. Returns false without modifying
-        // outputs when a descriptor is not representable.
+        // Compatibility wrappers around the structured product-private
+        // GemmProblemAdapter. Returns false without modifying outputs when
+        // descriptor translation or the requested backend is unsupported.
         bool tryRuntimeCanonicalGemm(ContractionProblemGemm const& problem,
                                      ContractionInputs const&      inputs,
                                      size_t                        elementsToValidate);
