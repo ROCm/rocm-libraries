@@ -46,7 +46,8 @@ ordinary TensileLite builds and tests do not depend on them.
 5. Restore `pyproject.toml` and require `assert-clean` before survivor
    verification.
 6. For a meaningful survivor, add a focused characterization test that passes
-   on unchanged source and fails on the changed behavior. A new untracked test
+   on unchanged source and fails on the changed behavior, following
+   [references/test-authoring.md](references/test-authoring.md). A new untracked test
    file can be verified directly; when an existing tracked test must change,
    use a separate clean worktree or a deliberate local commit first.
 7. Verify that evidence with `scripts/mutmut-verify.sh`. Collection, usage,
