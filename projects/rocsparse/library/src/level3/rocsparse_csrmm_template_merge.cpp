@@ -28,6 +28,7 @@
 #include "csrmm/merge_path/kernel_declarations.h"
 #include "csrmm_device_merge.h"
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csrmm.hpp"
 
 namespace rocsparse
@@ -79,6 +80,8 @@ namespace rocsparse
                                                    J                         n,
                                                    J                         k,
                                                    I                         nnz,
+                                                   int64_t                   batch_count,
+                                                   int64_t                   offsets_batch_stride_A,
                                                    const rocsparse_mat_descr descr,
                                                    const A*                  csr_val,
                                                    const I*                  csr_row_ptr,
@@ -100,19 +103,34 @@ namespace rocsparse
             const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
             const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
 
+            // Reserve a contiguous coordinate block (rounded up to 256) per coordinate
+            // set. When the batches use distinct row pointers (offsets_batch_stride_A
+            // != 0) each batch needs its own merge coordinates; otherwise every batch
+            // shares identical row pointer data and a single set is sufficient. This
+            // layout must match the compute dispatch and stays within the
+            // batch_count_C over-allocation done in csrmm_buffer_size.
+            const uint32_t coords_per_batch
+                = static_cast<uint32_t>(((block_count - 1) / 256 + 1) * 256);
+            const int64_t num_coord_sets
+                = (offsets_batch_stride_A != 0 && batch_count > 1) ? batch_count : 1;
+
             char*                   ptr    = reinterpret_cast<char*>(temp_buffer);
             coordinate_t<uint32_t>* coord0 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
-            ptr += sizeof(coordinate_t<uint32_t>) * ((block_count - 1) / 256 + 1) * 256;
+            ptr += sizeof(coordinate_t<uint32_t>) * static_cast<size_t>(coords_per_batch)
+                   * static_cast<size_t>(num_coord_sets);
             coordinate_t<uint32_t>* coord1 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
 
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::csrmmnn_merge_compute_coords<1, ITEM_PER_THREAD>),
-                dim3(block_count),
+                dim3(block_count, get_batch_grid_size<int64_t>(num_coord_sets)),
                 dim3(1),
                 0,
                 handle->stream,
                 m,
                 nnz,
+                num_coord_sets,
+                offsets_batch_stride_A,
+                coords_per_batch,
                 csr_row_ptr,
                 coord0,
                 coord1,
@@ -131,7 +149,8 @@ namespace rocsparse
 #define LAUNCH_CSRMMNN_MERGE_KERNEL(CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD)                \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                   \
         (rocsparse::csrmmnn_merge_path_kernel<CSRMMNN_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3((block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1),                            \
+        dim3((block_count - 1) / (CSRMMNN_DIM / WF_SIZE) + 1,                             \
+             get_batch_grid_size<J>(batch_count_C)),                                      \
         dim3(CSRMMNN_DIM),                                                                \
         0,                                                                                \
         handle->stream,                                                                   \
@@ -141,7 +160,10 @@ namespace rocsparse
         n,                                                                                \
         k,                                                                                \
         nnz,                                                                              \
+        batch_count_C,                                                                    \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                     \
+        offsets_batch_stride_A,                                                           \
+        columns_values_batch_stride_A,                                                    \
         csr_row_ptr,                                                                      \
         csr_col_ind,                                                                      \
         csr_val,                                                                          \
@@ -149,9 +171,11 @@ namespace rocsparse
         coord1,                                                                           \
         dense_B,                                                                          \
         ldb,                                                                              \
+        batch_stride_B,                                                                   \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                      \
         dense_C,                                                                          \
         ldc,                                                                              \
+        batch_stride_C,                                                                   \
         order_C,                                                                          \
         descr->base,                                                                      \
         handle->pointer_mode == rocsparse_pointer_mode_host)
@@ -170,6 +194,8 @@ namespace rocsparse
                                             J                         n,
                                             J                         k,
                                             I                         nnz,
+                                            int64_t                   offsets_batch_stride_A,
+                                            int64_t                   columns_values_batch_stride_A,
                                             const T*                  alpha_device_host,
                                             const rocsparse_mat_descr descr,
                                             const A*                  csr_val,
@@ -177,25 +203,38 @@ namespace rocsparse
                                             const J*                  csr_col_ind,
                                             const B*                  dense_B,
                                             int64_t                   ldb,
+                                            int64_t                   batch_stride_B,
                                             const T*                  beta_device_host,
                                             C*                        dense_C,
                                             int64_t                   ldc,
+                                            J                         batch_count_C,
+                                            int64_t                   batch_stride_C,
                                             rocsparse_order           order_C,
                                             void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Scale C with beta
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::scale_2d_array(handle, m, n, ldc, 1, 0, beta_device_host, dense_C, order_C));
+        // Scale C with beta (all batches)
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_2d_array(
+            handle, m, n, ldc, batch_count_C, batch_stride_C, beta_device_host, dense_C, order_C));
 
         constexpr uint32_t ITEM_PER_THREAD = 256;
         const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
         const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
 
+        // Per-batch coordinate layout must match csrmm_analysis_template_merge: coord0
+        // holds num_coord_sets contiguous blocks of coords_per_batch coordinates,
+        // followed by the coord1 region with the same layout. A single set is shared
+        // by all batches unless the batches use distinct row pointers.
+        const uint32_t coords_per_batch
+            = static_cast<uint32_t>(((block_count - 1) / 256 + 1) * 256);
+        const int64_t num_coord_sets
+            = (offsets_batch_stride_A != 0 && batch_count_C > 1) ? batch_count_C : 1;
+
         char*                   ptr    = reinterpret_cast<char*>(temp_buffer);
         coordinate_t<uint32_t>* coord0 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
-        ptr += sizeof(coordinate_t<uint32_t>) * ((block_count - 1) / 256 + 1) * 256;
+        ptr += sizeof(coordinate_t<uint32_t>) * static_cast<size_t>(coords_per_batch)
+               * static_cast<size_t>(num_coord_sets);
         coordinate_t<uint32_t>* coord1 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
 
         if(n <= 16)
@@ -221,7 +260,7 @@ namespace rocsparse
 #define LAUNCH_CSRMMNT_MERGE_MAIN_KERNEL(WF_SIZE, ITEM_PER_THREAD, LOOPS)                \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                  \
         (rocsparse::csrmmnt_merge_path_main_kernel<WF_SIZE, ITEM_PER_THREAD, LOOPS, T>), \
-        dim3(block_count),                                                               \
+        dim3(block_count, get_batch_grid_size<J>(batch_count_C)),                        \
         dim3(WF_SIZE),                                                                   \
         0,                                                                               \
         handle->stream,                                                                  \
@@ -233,7 +272,10 @@ namespace rocsparse
         n,                                                                               \
         k,                                                                               \
         nnz,                                                                             \
+        batch_count_C,                                                                   \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                    \
+        offsets_batch_stride_A,                                                          \
+        columns_values_batch_stride_A,                                                   \
         csr_row_ptr,                                                                     \
         csr_col_ind,                                                                     \
         csr_val,                                                                         \
@@ -241,9 +283,11 @@ namespace rocsparse
         coord1,                                                                          \
         dense_B,                                                                         \
         ldb,                                                                             \
+        batch_stride_B,                                                                  \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                     \
         dense_C,                                                                         \
         ldc,                                                                             \
+        batch_stride_C,                                                                  \
         order_C,                                                                         \
         descr->base,                                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host)
@@ -252,7 +296,8 @@ namespace rocsparse
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                      \
         (rocsparse::                                                                         \
              csrmmnt_merge_path_remainder_kernel<CSRMMNT_DIM, WF_SIZE, ITEM_PER_THREAD, T>), \
-        dim3((block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1),                               \
+        dim3((block_count - 1) / (CSRMMNT_DIM / WF_SIZE) + 1,                                \
+             get_batch_grid_size<J>(batch_count_C)),                                         \
         dim3(CSRMMNT_DIM),                                                                   \
         0,                                                                                   \
         handle->stream,                                                                      \
@@ -263,7 +308,10 @@ namespace rocsparse
         n,                                                                                   \
         k,                                                                                   \
         nnz,                                                                                 \
+        batch_count_C,                                                                       \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                        \
+        offsets_batch_stride_A,                                                              \
+        columns_values_batch_stride_A,                                                       \
         csr_row_ptr,                                                                         \
         csr_col_ind,                                                                         \
         csr_val,                                                                             \
@@ -271,9 +319,11 @@ namespace rocsparse
         coord1,                                                                              \
         dense_B,                                                                             \
         ldb,                                                                                 \
+        batch_stride_B,                                                                      \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                         \
         dense_C,                                                                             \
         ldc,                                                                                 \
+        batch_stride_C,                                                                      \
         order_C,                                                                             \
         descr->base,                                                                         \
         handle->pointer_mode == rocsparse_pointer_mode_host)
@@ -292,6 +342,8 @@ namespace rocsparse
                                             J                         n,
                                             J                         k,
                                             I                         nnz,
+                                            int64_t                   offsets_batch_stride_A,
+                                            int64_t                   columns_values_batch_stride_A,
                                             const T*                  alpha_device_host,
                                             const rocsparse_mat_descr descr,
                                             const A*                  csr_val,
@@ -299,25 +351,38 @@ namespace rocsparse
                                             const J*                  csr_col_ind,
                                             const B*                  dense_B,
                                             int64_t                   ldb,
+                                            int64_t                   batch_stride_B,
                                             const T*                  beta_device_host,
                                             C*                        dense_C,
                                             int64_t                   ldc,
+                                            J                         batch_count_C,
+                                            int64_t                   batch_stride_C,
                                             rocsparse_order           order_C,
                                             void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        // Scale C with beta
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::scale_2d_array(handle, m, n, ldc, 1, 0, beta_device_host, dense_C, order_C));
+        // Scale C with beta (all batches)
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_2d_array(
+            handle, m, n, ldc, batch_count_C, batch_stride_C, beta_device_host, dense_C, order_C));
 
         constexpr uint32_t ITEM_PER_THREAD = 256;
         const uint64_t     total_work      = static_cast<uint64_t>(m) + nnz;
         const uint64_t     block_count     = (total_work - 1) / ITEM_PER_THREAD + 1;
 
+        // Per-batch coordinate layout must match csrmm_analysis_template_merge: coord0
+        // holds num_coord_sets contiguous blocks of coords_per_batch coordinates,
+        // followed by the coord1 region with the same layout. A single set is shared
+        // by all batches unless the batches use distinct row pointers.
+        const uint32_t coords_per_batch
+            = static_cast<uint32_t>(((block_count - 1) / 256 + 1) * 256);
+        const int64_t num_coord_sets
+            = (offsets_batch_stride_A != 0 && batch_count_C > 1) ? batch_count_C : 1;
+
         char*                   ptr    = reinterpret_cast<char*>(temp_buffer);
         coordinate_t<uint32_t>* coord0 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
-        ptr += sizeof(coordinate_t<uint32_t>) * ((block_count - 1) / 256 + 1) * 256;
+        ptr += sizeof(coordinate_t<uint32_t>) * static_cast<size_t>(coords_per_batch)
+               * static_cast<size_t>(num_coord_sets);
         coordinate_t<uint32_t>* coord1 = reinterpret_cast<coordinate_t<uint32_t>*>(ptr);
 
         J main      = 0;
@@ -381,6 +446,8 @@ namespace rocsparse
          n,                                            \
          k,                                            \
          nnz,                                          \
+         offsets_batch_stride_A,                       \
+         columns_values_batch_stride_A,                \
          alpha_device_host,                            \
          descr,                                        \
          csr_val,                                      \
@@ -388,9 +455,12 @@ namespace rocsparse
          csr_col_ind,                                  \
          dense_B,                                      \
          ldb,                                          \
+         batch_stride_B,                               \
          beta_device_host,                             \
          dense_C,                                      \
          ldc,                                          \
+         batch_count_C,                                \
+         batch_stride_C,                               \
          order_C,                                      \
          temp_buffer);
 
@@ -402,6 +472,8 @@ namespace rocsparse
                                           J                         n,
                                           J                         k,
                                           I                         nnz,
+                                          int64_t                   offsets_batch_stride_A,
+                                          int64_t                   columns_values_batch_stride_A,
                                           const T*                  alpha_device_host,
                                           const rocsparse_mat_descr descr,
                                           const A*                  csr_val,
@@ -409,10 +481,13 @@ namespace rocsparse
                                           const J*                  csr_col_ind,
                                           const B*                  dense_B,
                                           int64_t                   ldb,
+                                          int64_t                   batch_stride_B,
                                           rocsparse_order           order_B,
                                           const T*                  beta_device_host,
                                           C*                        dense_C,
                                           int64_t                   ldc,
+                                          J                         batch_count_C,
+                                          int64_t                   batch_stride_C,
                                           rocsparse_order           order_C,
                                           void*                     temp_buffer,
                                           bool                      force_conj_A)
@@ -504,6 +579,8 @@ INSTANTIATE_BUFFER_SIZE(float, int64_t, int64_t, rocsparse_bfloat16);
         JTYPE                     n,                                    \
         JTYPE                     k,                                    \
         ITYPE                     nnz,                                  \
+        int64_t                   batch_count,                          \
+        int64_t                   offsets_batch_stride_A,               \
         const rocsparse_mat_descr descr,                                \
         const ATYPE*              csr_val,                              \
         const ITYPE*              csr_row_ptr,                          \
@@ -545,6 +622,8 @@ INSTANTIATE_ANALYSIS(int64_t, int64_t, rocsparse_bfloat16);
         JTYPE                     n,                                  \
         JTYPE                     k,                                  \
         ITYPE                     nnz,                                \
+        int64_t                   offsets_batch_stride_A,             \
+        int64_t                   columns_values_batch_stride_A,      \
         const TTYPE*              alpha_device_host,                  \
         const rocsparse_mat_descr descr,                              \
         const ATYPE*              csr_val,                            \
@@ -552,10 +631,13 @@ INSTANTIATE_ANALYSIS(int64_t, int64_t, rocsparse_bfloat16);
         const JTYPE*              csr_col_ind,                        \
         const BTYPE*              dense_B,                            \
         int64_t                   ldb,                                \
+        int64_t                   batch_stride_B,                     \
         rocsparse_order           order_B,                            \
         const TTYPE*              beta_device_host,                   \
         CTYPE*                    dense_C,                            \
         int64_t                   ldc,                                \
+        JTYPE                     batch_count_C,                      \
+        int64_t                   batch_stride_C,                     \
         rocsparse_order           order_C,                            \
         void*                     temp_buffer,                        \
         bool                      force_conj_A)

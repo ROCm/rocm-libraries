@@ -188,11 +188,11 @@ reduction pass merges the partials across chunks (the standard
 max-rescale-and-combine that makes online softmax associative). This exposes
 parallelism along the sequence dimension that decode otherwise lacks.
 
-### The one lever: `num_sms`
-`num_sms` is how many CTAs participate in the split — the chunk count. It is a
+### The one lever: `num_cus`
+`num_cus` is how many CTAs participate in the split — the chunk count. It is a
 direct parallelism-vs-overhead tradeoff: too few CTAs strand compute on idle CUs;
 too many make the merge pass dominate. `03` sweeps
-`num_sms ∈ {30, 60, 80, 120, 152, 304}` and keeps the fastest (`07` sweeps a
+`num_cus ∈ {30, 60, 80, 120, 152, 304}` and keeps the fastest (`07` sweeps a
 smaller `{30, 60, 80, 120}` for speed).
 
 ### Why this layer is *parity*, not a win

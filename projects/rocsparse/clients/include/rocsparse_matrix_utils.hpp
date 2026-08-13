@@ -804,8 +804,9 @@ struct rocsparse_matrix_utils
         }
 
         nnz = 0;
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
         {
+        case rocsparse_fill_mode_lower:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -819,9 +820,8 @@ struct rocsparse_matrix_utils
                     }
                 }
             }
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -835,6 +835,7 @@ struct rocsparse_matrix_utils
                     }
                 }
             }
+            break;
         }
 
         csr_row_ptr.resize(M + 1, 0);
@@ -844,8 +845,9 @@ struct rocsparse_matrix_utils
         I index        = 0;
         csr_row_ptr[0] = base;
 
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
         {
+        case rocsparse_fill_mode_lower:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -863,9 +865,8 @@ struct rocsparse_matrix_utils
 
                 csr_row_ptr[i + 1] = index + base;
             }
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             for(J i = 0; i < M; i++)
             {
                 I start = ptr[i] - base;
@@ -883,6 +884,7 @@ struct rocsparse_matrix_utils
 
                 csr_row_ptr[i + 1] = index + base;
             }
+            break;
         }
     }
 
@@ -915,7 +917,9 @@ struct rocsparse_matrix_utils
 
         int64_t old_nnz = nnz;
         int64_t new_nnz = 0;
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
+        {
+        case rocsparse_fill_mode_lower:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -930,8 +934,9 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
         }
-        else
+        case rocsparse_fill_mode_upper:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -946,6 +951,8 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
+        }
         }
 
         coo_row_ind.resize(new_nnz, 0);
@@ -953,7 +960,9 @@ struct rocsparse_matrix_utils
         coo_val.resize(new_nnz, static_cast<T>(0));
 
         nnz = 0;
-        if(uplo == rocsparse_fill_mode_lower)
+        switch(uplo)
+        {
+        case rocsparse_fill_mode_lower:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -971,8 +980,9 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
         }
-        else
+        case rocsparse_fill_mode_upper:
         {
             int64_t index = 0;
             for(I i = 0; i < M; i++)
@@ -990,6 +1000,8 @@ struct rocsparse_matrix_utils
                     index++;
                 }
             }
+            break;
+        }
         }
     }
 
