@@ -88,15 +88,14 @@ st.func @valu_no_delay_needed() {
   v3 = "st.v_sub_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- SALU cycle delay: s_add writes s0, s_mul reads s0
-# CHECK-LABEL: @salu_cycle_1
+#--- SALU 1-cycle dep: not emitted. A 2-stage SALU needs only a single wait
+#    state which it inserts itself, so SALU_CYCLE_1 is a low-value hint we skip.
+# CHECK-LABEL: @salu_cycle_1_skipped
 # CHECK: s_add_u32
-# CHECK-NEXT: s_delay_alu
-# CHECK-SAME: instid0Type = "SALU"
-# CHECK-SAME: instid0Distance = 1
+# CHECK-NOT: s_delay_alu
 # CHECK: s_mul_i32
 
-st.func @salu_cycle_1() {
+st.func @salu_cycle_1_skipped() {
 ^entry:
   s0 = "st.s_add_u32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
   s3 = "st.s_mul_i32"(s0, s4) { issueCycles = 1, latencyCycles = 2 }
@@ -319,13 +318,14 @@ st.func @trans_dep_only_valu_expired() {
   v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- Dual dep: VALU + SALU on same instruction
+#--- Dual dep: VALU + SALU on same instruction. The 1-cycle SALU dep is skipped
+#    (see @salu_cycle_1_skipped), leaving only the VALU dep in the hint.
 # CHECK-LABEL: @dual_dep_valu_salu_same
 # CHECK: v_add_f32
 # CHECK: s_add_u32
 # CHECK-NEXT: s_delay_alu
 # CHECK-SAME: instid0Type = "VALU"
-# CHECK-SAME: instid1Type = "SALU"
+# CHECK-NOT: instid1Type = "SALU"
 # CHECK: v_mul_f32
 
 st.func @dual_dep_valu_salu_same() {

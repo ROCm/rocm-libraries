@@ -283,8 +283,8 @@ class InsertDelayAluPassImpl : public Pass {
             }
         }
 
-        // SALU dep -> fills remaining slot
-        if (delay.SALUCycles > 0) {
+        // SALU dep -> fills remaining slot. Skip the SALU_CYCLE_1 case.
+        if (delay.SALUCycles > 1) {
             assert(delay.SALUCycles < DelayInfo::SALU_CYCLES_MAX);
             if (hasId1) {
                 // Both slots used (TRANS + VALU), drop SALU
