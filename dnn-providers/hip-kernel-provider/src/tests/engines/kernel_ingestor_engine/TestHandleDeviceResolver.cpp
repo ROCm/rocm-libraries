@@ -159,7 +159,7 @@ TEST(TestHandleDeviceResolver, ReferencesStayValidAcrossCacheGrowth)
 
     const auto& sameEntryAfterGrowth = resolver.deviceProperties(1000);
     EXPECT_EQ(&firstInserted, &sameEntryAfterGrowth);
-    // Value must match too -- a surviving address alone is not sufficient proof.
+    // Value must match too: a surviving address alone is not sufficient proof.
     EXPECT_EQ(sameEntryAfterGrowth.warpSize, 1000);
 }
 
@@ -171,7 +171,7 @@ TEST(TestHandleDeviceResolver, RefusesAndDoesNotCacheAFailedPropertyQuery)
 
     EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
-    // Still refused on the second ask -- the failure was not remembered as an answer.
+    // Still refused on the second ask: the failure was not remembered as an answer.
     EXPECT_THROW(static_cast<void>(resolver.deviceProperties(7)),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }

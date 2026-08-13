@@ -345,10 +345,8 @@ TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity
 TEST(TestKernelIngestorStateManager, ServesACachedRankingWithoutRematching)
 {
     // The single-threaded half of D3: once a key is ranked, neither accessor rematches
-    // or re-ranks it. The concurrent half -- an unsorted write clobbering a sorted
-    // entry installed by another thread -- cannot be reached from one thread, because
-    // catalogFor() returns on the cache hit and never reaches its write. It is covered
-    // by ARankingSurvivesAConcurrentUnsortedAccess in the concurrency suite.
+    // or re-ranks it. The concurrent half needs two threads and lives in the concurrency
+    // suite as ARankingSurvivesAConcurrentUnsortedAccess.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
     const auto manager = makeStateManager();
     const TestGraph graph(makeGraphId(0x5D));
@@ -559,8 +557,8 @@ struct StateManagerConstructionThrowCase
     std::string name;
     /// Substring the failure must contain. Asserting the type alone cannot tell a
     /// rejected descriptor apart from an unrelated bug that happens to throw the same
-    /// type -- and after ALMIOPEN-2401 these messages are what an operator gets
-    /// instead of a compiler error, so they are part of the contract.
+    /// type. After ALMIOPEN-2401 these messages are what an operator gets instead of a
+    /// compiler error, so they are part of the contract.
     std::string expectedMessageSubstring;
     std::function<std::unique_ptr<StateManager>()> construct;
 };

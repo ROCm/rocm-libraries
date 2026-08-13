@@ -51,8 +51,8 @@ GraphWrapper wrap(const flatbuffers::FlatBufferBuilder& builder)
 
 // Stand-ins for the SymbolScope tests below. Those assert the scope's all-or-nothing
 // behaviour, which is indifferent to what a symbol points at, so they use trivial
-// functions rather than reaching for a pack's -- which are internal to their native
-// file and correctly unreachable from here.
+// functions rather than a pack's, which are internal to their native file and
+// correctly unreachable from here.
 bool acceptAnyGraph(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
                     hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/)
 {
@@ -101,7 +101,7 @@ TEST(TestKernelIngestorEngine, AFailedPackUnregistersItsOwnSymbolsAndLeavesOther
     neighbour.commit();
 
     // Occupies the symbol the failing pack will try second, so its registration fails
-    // partway -- the shape rollback exists for.
+    // partway, the shape rollback exists for.
     const std::string contendedSymbol = "test.contended.score";
     SymbolScope<Handle> squatter;
     squatter.add(contendedSymbol, &scoreNothing);
@@ -206,7 +206,7 @@ TEST(TestKernelIngestorEngine, GetEngineDetailsReportsTheBlockSizeKnob)
 
 TEST(TestKernelIngestorEngine, GetMaxWorkspaceSizeReportsTheLargerBlocksRequirement)
 {
-    // Sizes a workspace from the kernels the graph matched -- none, without a device.
+    // Sizes a workspace from the kernels the graph matched: none, without a device.
     SKIP_IF_NO_DEVICES();
 
     Container container;
@@ -243,7 +243,7 @@ TEST(TestKernelIngestorEngine, InitializeExecutionContextBuildsAPlanForTheTopRan
     ASSERT_TRUE(context.hasValidPlan());
 
     // pointwiseAddScore ranks on block size and both FLOAT kernels are admitted, so 256
-    // is the defined winner -- hasValidPlan() alone would not catch a wrong selection.
+    // is the defined winner; hasValidPlan() alone would not catch a wrong selection.
     const auto& plan
         = dynamic_cast<const hipdnn_plugin_sdk::ingestor::GenericPlan<Handle>&>(context.plan());
     EXPECT_EQ(plan.kernel().getIntMetadata(std::string(BLOCK_SIZE_FIELD)), 256);

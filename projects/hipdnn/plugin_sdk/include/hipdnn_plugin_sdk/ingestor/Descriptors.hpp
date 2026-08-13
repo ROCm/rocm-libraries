@@ -138,7 +138,7 @@ enum class HeuristicKind
     MODEL,
 };
 
-/// UHD: the kernel-selection model for one engine — chooses which kernel within an
+/// UHD: the kernel-selection model for one engine. Chooses which kernel within an
 /// engine to run, given the kernels that fit the graph.
 struct HeuristicDescriptor
 {
@@ -213,7 +213,7 @@ struct MatchDescriptor
     std::string matchSymbol;
 };
 
-/// UDD: how to invoke a kernel — the dispatch ABI, shared by every kernel in a pack.
+/// UDD: how to invoke a kernel: the dispatch ABI, shared by every kernel in a pack.
 /// A kernel with a different argument list or launch-formula shape belongs in
 /// another pack with its own UDD (RFC 0017 §6).
 struct DispatchDescriptor
@@ -252,7 +252,7 @@ struct KernelSource
     std::string entryPoint;
 };
 
-/// UKD: one launchable kernel — a source plus concrete values for its engine KMD's
+/// UKD: one launchable kernel: a source plus concrete values for its engine KMD's
 /// fields. Matchers, engine, and dispatch are inherited from its pack.
 struct KernelDescriptor
 {

@@ -31,11 +31,9 @@ namespace hip_kernel_provider::kernel_ingestor_engine::testing
  * @brief One pack's contract as the test side sees it: the strings its descriptors
  *        carry and its native file implements.
  *
- * Restated here rather than shared with either half through a header, exactly as those
- * two halves restate it to each other. After ALMIOPEN-2401 the descriptors are a data
- * file, so a test asserting a pack's behaviour has to name these strings itself, the
- * same way an operator authoring a descriptor would. A mismatch fails at resolve()
- * with the descriptor named.
+ * Restated here rather than shared through a header, as the two halves restate it to
+ * each other. After ALMIOPEN-2401 descriptors are data, so a test names these strings
+ * itself the way an operator authoring a descriptor would.
  */
 struct PackSymbols
 {
@@ -72,14 +70,14 @@ inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:PointwiseSub",
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 
-/// A pack's native functions, reached the only way anything reaches them now: by the
-/// symbol name its descriptors carry. Each registers the provider's packs first, which
-/// is idempotent and is exactly what Container's constructor does, so a test needs no
-/// fixture and no ordering discipline to reach a matcher.
+/// A pack's native functions, reached the only way anything reaches them: by the symbol
+/// name its descriptors carry. Each registers the provider's packs first, which is
+/// idempotent and is what Container's constructor does, so a test needs no fixture or
+/// ordering discipline.
 ///
-/// Resolving rather than calling a declared function is also what keeps these tests
-/// honest after ALMIOPEN-2401: a descriptor naming a symbol nothing implements is the
-/// failure mode the string-valued contract introduces, and it surfaces here.
+/// Resolving rather than calling a declared function is also what surfaces the failure
+/// mode the string-valued contract introduces: a descriptor naming a symbol nothing
+/// implements.
 inline hipdnn_plugin_sdk::ingestor::GraphMatcherFn graphMatcher(const PackSymbols& pack)
 {
     registerNativeIngestorSymbols();

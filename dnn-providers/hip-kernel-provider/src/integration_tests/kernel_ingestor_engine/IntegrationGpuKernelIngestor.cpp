@@ -39,10 +39,10 @@ using namespace hip_kernel_provider::test_utilities;
  * @file IntegrationGpuKernelIngestor.cpp
  * @brief The kernel ingestor pack, end to end through the hipDNN frontend API.
  *
- * Drives the same path a real caller takes -- Graph::pointwise(),
- * get_ranked_engine_ids(), get_knobs_for_engine(), get_workspace_size(), execute() --
- * so the descriptor set, the matchers, the heuristic, and the dispatch handler are
- * exercised as they compose in production.
+ * Drives the same path a real caller takes: Graph::pointwise(),
+ * get_ranked_engine_ids(), get_knobs_for_engine(), get_workspace_size(), execute().
+ * The descriptor set, matchers, heuristic, and dispatch handler are exercised as they
+ * compose in production.
  *
  * Exception: `hipdnnEnginePluginGetAllEngineIds` enumerates every engine a plugin
  * exports independent of any graph, and has no frontend equivalent, so that one
@@ -431,7 +431,7 @@ TEST_F(IntegrationGpuKernelIngestor, ExecutesASubtractGraphThroughItsOwnPack)
 
 // Both packs' catalogs are cached under (graph, device) keys in per-engine state
 // managers. Executing one after the other proves neither engine's catalog or bound
-// token state reaches the other -- the failure mode that only exists once a provider
+// token state reaches the other, a failure mode that only exists once a provider
 // serves more than one descriptor set.
 TEST_F(IntegrationGpuKernelIngestor, ExecutesBothPacksInOneProcessWithoutInterference)
 {

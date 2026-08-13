@@ -35,17 +35,15 @@
  * @brief The pointwise-add pack's native half: matching, scoring, dispatch, and the
  *        one function that registers them.
  *
- * The permanent side of the seam. Everything a descriptor cannot express as data lives
- * here, so ALMIOPEN-2401 -- which turns PointwiseAddDescriptors.cpp into a parsed file
- * -- does not touch this file at all.
+ * The permanent side of the seam: everything a descriptor cannot express as data.
+ * ALMIOPEN-2401 turns PointwiseAddDescriptors.cpp into a parsed file and leaves this
+ * one alone.
  *
- * That is also why the symbol names below are re-declared rather than shared with the
- * descriptor side through a header: once descriptors are data, a native file has no
- * header to include from them. The two sides agree by string value. A typo is
- * therefore not a compile error, which is safe only because both matcher symbols and
- * the scorer resolve when the state manager is constructed -- so a name that does not
- * match excludes this engine at load with a message naming the descriptor, rather than
- * throwing at plan build.
+ * The symbol names below are restated rather than shared through a header, because a
+ * descriptor file cannot export a constant to C++. The two sides agree by string
+ * value, so a typo is not a compile error. That is safe only because matcher and
+ * scorer symbols resolve when the state manager is constructed, making a mismatch a
+ * load-time exclusion that names the descriptor.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -56,15 +54,13 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-// The symbol names this file implements. PointwiseAddDescriptors.cpp declares the same
-// strings; they are the contract between the two halves.
+// The contract with PointwiseAddDescriptors.cpp, which restates these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.pointwise_add.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.pointwise_add.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.pointwise_add.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.pointwise_add.dispatch";
 
-// KMD fields this pack's kernels vary along, and the tokens matching binds for dispatch
-// to read back. Same contract, same reason.
+// KMD fields this pack varies along, and the tokens matching binds for dispatch.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view INPUT_A_TOKEN = "pointwise_add.input_a.uid";
@@ -174,8 +170,8 @@ std::string dataTypeName(data_objects::DataType dataType)
  */
 bool pointwiseAddGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    // No device, no launch: every fact this matcher would select on -- including the
-    // device properties the compile is configured from -- is meaningless without one.
+    // No device, no launch. Every fact this matcher selects on, including the device
+    // properties the compile is configured from, is meaningless without one.
     if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
     {
         return false;

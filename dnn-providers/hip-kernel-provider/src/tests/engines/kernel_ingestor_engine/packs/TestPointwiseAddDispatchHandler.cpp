@@ -153,15 +153,14 @@ TEST(TestPointwiseAddDispatch, ReportsWorkspaceWithoutSeeingTheRestOfTheCatalog)
 }
 
 // ---------------------------------------------------------------------------
-// Prepare: unhappy paths -- CPU-only, since each fails before reaching a compiler.
+// Prepare: unhappy paths, CPU-only, since each fails before reaching a compiler.
 // ---------------------------------------------------------------------------
 //
-// prepare()'s compile options are no longer asserted against a mock compiler. The
-// handler is internal to PointwiseAddNative.cpp and reachable only as the
-// process-lifetime instance the registry holds, so there is no seam to inject one
-// through. What those options produce is covered where it is observable: the HALF
-// launch below fails if the dtype option is wrong, and the E2E suite fails if the
-// kernel does not compile at all. Both need a device.
+// prepare()'s compile options are not asserted against a mock compiler: the handler is
+// internal to PointwiseAddNative.cpp, reachable only as the process-lifetime instance
+// the registry holds, so there is no seam to inject one through. The HALF launch below
+// fails if the dtype option is wrong, and the E2E suite fails if the kernel does not
+// compile. Both need a device.
 
 TEST(TestPointwiseAddDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 {

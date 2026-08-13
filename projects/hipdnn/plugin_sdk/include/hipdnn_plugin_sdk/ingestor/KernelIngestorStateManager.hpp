@@ -59,7 +59,7 @@ struct ResolvedMatcher
  * | Host call                    | Answered by                                    |
  * |------------------------------|------------------------------------------------|
  * | isApplicable                 | unsortedDefinitions() is non-empty             |
- * | getDetails (knobs)           | sortedDefinitions() — value sets and defaults  |
+ * | getDetails (knobs)           | sortedDefinitions(): value sets and defaults   |
  * | getMaxWorkspaceSize          | getDispatchDetails() per survivor, then max    |
  * | initializeExecutionContext   | sortedDefinitions().front(), getDispatchDetails() |
  *
@@ -94,8 +94,8 @@ public:
      * Eagerly validates every pack and kernel at plugin load (validateAndIndexPacks())
      * and resolves every matcher symbol here, so a descriptor naming a behaviour that
      * does not exist excludes this engine at load rather than throwing from inside a
-     * later isApplicable() -- which RFC 0017 §8.6 has already turned into a promise by
-     * that point. Kernel source compilation stays lazy until a graph needs it.
+     * later isApplicable(), which RFC 0017 §8.6 has already turned into a promise by
+     * then. Kernel source compilation stays lazy until a graph needs it.
      */
     KernelIngestorStateManager(MetadataSchema schema,
                                std::vector<MatchDescriptor> matchers,
@@ -391,8 +391,8 @@ private:
         {
             // putIfAbsent, not put: two threads can miss this key together, and while
             // they matched, one of them may have ranked and installed a *sorted*
-            // catalog. Overwriting that with this unsorted one is never a wrong answer
-            // -- both describe the same kernels -- but it throws away the ranking, so a
+            // catalog. Overwriting that with this unsorted one is never a wrong answer,
+            // since both describe the same kernels, but it throws away the ranking, so a
             // hot key can thrash between sorted and unsorted and never converge. The
             // loser of the race keeps its own copy and discards only the write.
             _catalogCache.putIfAbsent(*key, catalog);

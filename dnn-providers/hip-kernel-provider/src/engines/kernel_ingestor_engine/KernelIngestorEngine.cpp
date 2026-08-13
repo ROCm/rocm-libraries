@@ -37,8 +37,8 @@ std::unordered_set<std::string>& failedPackLabels()
 ///
 /// A pack that throws is rolled back and skipped; the sweep carries on, because one
 /// pack's duplicate symbol must not unregister every other pack's. Runs under
-/// call_once, where a throw is catchable and reportable -- never at static-init, where
-/// it would terminate the process during dlopen().
+/// call_once, where a throw is catchable; at static-init it would terminate the
+/// process during dlopen().
 void registerNativeIngestorSymbolsOnce()
 {
     for(const auto& pack : ingestorPacks())
@@ -79,10 +79,10 @@ std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> discoverDescriptorSets()
     // The C++ stand-in for a descriptor-file scan. ALMIOPEN-2401 replaces this body
     // with a directory scan; nothing downstream changes.
     //
-    // Memoized because this has two callers at different times -- Container's static
-    // engine-id enumeration and Container's constructor -- and "the inventory is read
-    // once at startup" has to mean once, not once per caller. Post-2401 that is also
-    // what keeps two filesystem scans from disagreeing.
+    // Memoized because two callers read it at different times: Container's static
+    // engine-id enumeration and Container's constructor. "Read once at startup" has
+    // to mean once, not once per caller, and post-2401 it stops two filesystem scans
+    // from disagreeing.
     static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
         std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> sets;
         for(const auto& pack : ingestorPacks())

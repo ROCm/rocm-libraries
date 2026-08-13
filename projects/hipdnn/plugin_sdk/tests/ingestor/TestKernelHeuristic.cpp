@@ -31,7 +31,7 @@ TEST(TestIngestorKernelHeuristic, RefusesToConstructAgainstAnUnregisteredSymbol)
 {
     // The inverse of what this asserted before eager resolution. Resolving on first
     // score() means a UHD naming a scorer this build does not ship survives load and
-    // survives isApplicable(), then throws at plan build -- past the point RFC 0017
+    // survives isApplicable(), then throws at plan build, past the point RFC 0017
     // §8.6 makes applicability a promise the engine must keep. Failing here instead
     // turns that into a load-time exclusion.
     EXPECT_THROW(NativeKernelHeuristic("hipdnn.kernel_ingestor.test.not_yet_registered"),

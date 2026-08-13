@@ -82,28 +82,24 @@ public:
  * The UHD escape hatch: the descriptor names a symbol, this resolves it at
  * construction.
  *
- * **Eager because the check is a fact about the build, not the environment.** Symbol
- * resolution is a lookup in a registry the provider fully populates before any state
- * manager exists and never mutates afterwards, so passing it once means passing it
- * forever, and failing it means this binary does not ship the behaviour the descriptor
- * names. Deferring that to the first score() runs it *after* isApplicable() answered
- * true off the unsorted catalog, so the engine has already promised a graph it cannot
- * serve -- past the point RFC 0017 §8.6 makes that promise binding. Checking at
- * construction turns it into a load-time exclusion naming the descriptor, and drops a
+ * Eager because the check is a fact about the build. The registry is fully populated
+ * before any state manager exists and never mutates, so passing once means passing
+ * forever, and failing means this binary does not ship what the descriptor names.
+ * Resolving on first score() instead would run after isApplicable() already answered
+ * true, past the point RFC 0017 §8.6 makes that a binding promise. It also drops a
  * mutexed lookup and a once_flag from every ranking call.
  *
- * **This argument does not extend to loading a model artifact** (HeuristicKind::MODEL,
- * the UHD follow-up RFC). That is a fact about the environment: it is I/O, it can cost
- * megabytes against §3/§8.1's cheap-construction rule, and a file present at load can
- * be gone by the first rank(), so no eager check makes it safe. Such an adapter should
- * validate its *descriptor* eagerly and load its *artifact* lazily.
+ * That argument does not extend to loading a model artifact (HeuristicKind::MODEL).
+ * An artifact is a fact about the environment: I/O, potentially large against §3/§8.1's
+ * cheap-construction rule, and removable between load and first rank(). Such an adapter
+ * should validate its descriptor eagerly and load its artifact lazily.
  *
- * A failure to rank is also not a failure to serve. Ranking runs only from
- * sortedDefinitions() -- the knob-query and plan-build paths -- over a catalog whose
- * entries have all already passed every matcher, so each one is launchable. An adapter
- * whose artifact will not load should degrade to rank()'s existing priority-then-id
- * order (RFC 0017 §9.2's `static_order`) and log once, rather than fail a plan: losing
- * the best kernel is a performance regression, losing the plan is an outage.
+ * Nor is a failure to rank a failure to serve. Ranking runs only from
+ * sortedDefinitions(), over a catalog whose entries already passed every matcher, so
+ * each is launchable. An adapter whose artifact will not load should degrade to
+ * rank()'s priority-then-id order (§9.2's `static_order`) and log once rather than fail
+ * a plan: losing the best kernel is a performance regression, losing the plan is an
+ * outage.
  */
 class NativeKernelHeuristic : public IKernelHeuristic
 {
@@ -135,9 +131,9 @@ private:
  * @throws std::runtime_error if a NATIVE descriptor names a scorer this build does not
  *         ship.
  *
- * Both are descriptor errors and both fail here rather than at the first rank(). An
- * adapter that also needs an artifact from disk should not follow them in loading it
- * here; see NativeKernelHeuristic's note on why that boundary is where it is.
+ * Both are descriptor errors, and both fail here rather than at the first rank(). An
+ * adapter needing an artifact from disk should not load it here; see
+ * NativeKernelHeuristic for why that boundary sits where it does.
  */
 inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(const HeuristicDescriptor& descriptor)
 {

@@ -34,16 +34,14 @@
  * @brief The pointwise-subtract pack's native half: matching, scoring, dispatch, and
  *        the one function that registers them.
  *
- * The second pack, and the reason it exists: a new engine must cost its own two files
- * and one row in IngestorPacks.cpp's table, and nothing else. If adding this had needed
- * an edit to any shared file, the seam would be wrong.
+ * The second pack, and the reason it exists: a new engine must cost its own files plus
+ * one row in IngestorPacks.cpp's table, and nothing else.
  *
  * Deliberately a near-copy of PointwiseAddNative.cpp differing in operation, symbol
- * names, and kernel. The duplication is real and is the floor RFC 0017 §6's expression
- * language removes: matching and dispatch are the two escape hatches a descriptor
- * cannot yet express, so every pack restates them until it can. Nothing here is shared
- * with the add pack, because after ALMIOPEN-2401 an installed descriptor set has no way
- * to share code with another one.
+ * names, and kernel. That duplication is the floor RFC 0017 §6's expression language
+ * removes: matching and dispatch are the escape hatches a descriptor cannot yet
+ * express, so every pack restates them. Nothing is shared with the add pack, because
+ * after ALMIOPEN-2401 an installed descriptor set cannot share code with another.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -54,15 +52,13 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace
 {
 
-// The symbol names this file implements. PointwiseSubDescriptors.cpp declares the same
-// strings; they are the contract between the two halves.
+// The contract with PointwiseSubDescriptors.cpp, which restates these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL_NAME = "hipkernel.pointwise_sub.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL_NAME = "hipkernel.pointwise_sub.kernel_match";
 constexpr std::string_view SCORE_SYMBOL_NAME = "hipkernel.pointwise_sub.score";
 constexpr std::string_view DISPATCH_SYMBOL_NAME = "hipkernel.pointwise_sub.dispatch";
 
-// KMD fields this pack's kernels vary along, and the tokens matching binds for dispatch
-// to read back.
+// KMD fields this pack varies along, and the tokens matching binds for dispatch.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view INPUT_A_TOKEN = "pointwise_sub.input_a.uid";
@@ -176,8 +172,8 @@ std::string dataTypeName(data_objects::DataType dataType)
  */
 bool pointwiseSubGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    // No device, no launch: every fact this matcher would select on -- including the
-    // device properties the compile is configured from -- is meaningless without one.
+    // No device, no launch. Every fact this matcher selects on, including the device
+    // properties the compile is configured from, is meaningless without one.
     if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
     {
         return false;
@@ -243,9 +239,8 @@ bool pointwiseSubGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // Binds operand uids in minuend-then-subtrahend order. Getting these the wrong way
-    // round is silently wrong rather than a failure, which is why the E2E test compares
-    // against a CPU reference rather than only asserting the engine was selected.
+    // Minuend then subtrahend. Swapping them is silently wrong rather than a failure,
+    // which is why the E2E test compares against a CPU reference.
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
@@ -283,8 +278,7 @@ double pointwiseSubScore(const KernelDefinition& kernel, const MatchContext& /*c
 PointwiseSubBinding pointwiseSubBinding(const BoundTokens& bound)
 {
     // Every token was written by the graph matcher that admitted this graph; a missing
-    // one means the catalog was built by a matcher other than ours. With two packs in
-    // the provider that is a live possibility rather than a theoretical one.
+    // one means another pack's matcher built the catalog. Live now there are two.
     const auto read = [&bound](std::string_view token) {
         const auto value = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, token);
         if(!value.has_value())

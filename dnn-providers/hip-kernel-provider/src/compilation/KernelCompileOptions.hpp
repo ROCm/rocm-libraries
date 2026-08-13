@@ -32,8 +32,7 @@ public:
     /// `gcnArchName` is the only field this class reads, and the kernel ingestor's
     /// device facts are a plain struct rather than HIP's (ingestor/DeviceProperties.hpp).
     ///
-    /// @param archName Raw gcnArchName, suffix intact -- `--offload-arch` wants exactly
-    ///        that string.
+    /// @param archName Raw gcnArchName, suffix intact, as `--offload-arch` wants.
     KernelCompileOptions(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
         const std::string& archName)

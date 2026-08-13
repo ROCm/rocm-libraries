@@ -42,7 +42,7 @@ KernelDispatcher<StubHandle> makeDispatcher(const MockKernelDispatchHandler& han
 TEST(TestIngestorGenericPlan, ConstructorThrowsInternalErrorWhenPrepareReturnsNull)
 {
     // prepare() returning null means dispatch resolved no launch for a kernel that
-    // applicability already accepted -- an internal inconsistency, not a caller error.
+    // applicability already accepted: an internal inconsistency, not a caller error.
     const MockKernelDispatchHandler handler;
     EXPECT_CALL(handler, workspaceBytes(_, _, _)).WillOnce(Return(0));
     EXPECT_CALL(handler, prepare(_, _, _)).WillOnce(Return(nullptr));

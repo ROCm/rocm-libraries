@@ -27,10 +27,9 @@ using namespace hip_kernel_provider::core;
 /// Engines the provider exposes: one per compiled-in native engine, plus one per
 /// discovered descriptor set.
 ///
-/// The ingestor's contribution is read from the inventory rather than written as a
-/// literal `+ 1`. A hardcoded count silently becomes wrong the moment a second pack
-/// ships, and the count is the only thing standing between "the pack table was
-/// dead-stripped out of this binary" and a green run -- so it has to track the table.
+/// The ingestor's contribution is read from the inventory rather than hardcoded. A
+/// literal count goes wrong the moment a second pack ships, and it is the only thing
+/// standing between a dead-stripped pack table and a green run.
 static uint32_t expectedEngines()
 {
     uint32_t expected = 0;

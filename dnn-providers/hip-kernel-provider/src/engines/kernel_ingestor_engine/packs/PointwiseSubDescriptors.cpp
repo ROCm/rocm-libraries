@@ -20,12 +20,11 @@
  * @brief The pointwise-subtract descriptor set, built in memory.
  *
  * A second engine, described entirely by data. Every id here is distinct from the add
- * pack's -- descriptors reference each other by id and both sets are loaded into one
- * provider, so a shared id would silently make two engines one.
+ * pack's: descriptors reference each other by id and both sets load into one provider,
+ * so a shared id would silently make two engines one.
  *
  * ALMIOPEN-2401 deletes this file along with the add pack's: both become installed
- * files the same scan produces, which is the property the two-pack topology exists to
- * make testable before that ticket starts.
+ * files from one scan, which is what the two-pack topology exists to make testable.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {

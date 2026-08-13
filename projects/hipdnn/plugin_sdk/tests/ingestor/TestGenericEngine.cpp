@@ -155,7 +155,7 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
 
 TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
 {
-    // No dispatch symbol is registered, so getDispatchDetails() throws -- proving
+    // No dispatch symbol is registered, so getDispatchDetails() throws, proving
     // the call reached the plan builder rather than returning a stub zero.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;
@@ -170,7 +170,7 @@ TEST(TestIngestorGenericEngine, GetMaxWorkspaceSizeDelegatesToThePlanBuilder)
 
 TEST(TestIngestorGenericEngine, InitializeExecutionContextDelegatesToThePlanBuilder)
 {
-    // No dispatch handler is registered, so buildPlan()'s lookup throws -- proving
+    // No dispatch handler is registered, so buildPlan()'s lookup throws, proving
     // this reached the plan builder.
     const ScopedTestSymbols symbols;
     const StubDeviceResolver resolver;

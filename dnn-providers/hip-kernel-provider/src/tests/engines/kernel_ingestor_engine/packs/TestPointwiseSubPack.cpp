@@ -28,13 +28,11 @@
  * @brief The second reference pack: what its matchers accept and refuse, how it ranks,
  *        and that it subtracts in the right direction.
  *
- * Deliberately smaller than the add pack's suite. That pack owns the exhaustive
- * refusal matrix for the shape both packs share -- rank, layout, arity, virtual and
- * pass-by-value operands -- and duplicating all eleven cases here would assert the
- * same code path twice. What is tested here is what is genuinely this pack's own: that
- * it claims SUB and declines ADD, that its bindings are ordered (subtraction does not
- * commute), and that the shared refusals it inherited actually made it into this
- * matcher rather than being assumed.
+ * Deliberately smaller than the add pack's suite, which owns the exhaustive refusal
+ * matrix for the shape both share. Repeating all eleven cases would assert one code
+ * path twice. What is here is this pack's own: that it claims SUB and declines ADD,
+ * that its bindings are ordered since subtraction does not commute, and that the
+ * inherited refusals reached this matcher rather than being assumed.
  */
 namespace
 {
@@ -194,7 +192,7 @@ TEST(TestPointwiseSubBinding, BindsTheMinuendAndSubtrahendInGraphOrder)
     ASSERT_TRUE(matchesGraph(POINTWISE_SUB, fixture.context(), bound));
 
     // Swapping these computes b-a, which is a plausible answer of the wrong sign rather
-    // than a failure -- so it is asserted directly here and again numerically on device.
+    // than a failure, so it is asserted here and again numerically on device.
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputAToken),
               INPUT_A_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputBToken),
@@ -206,7 +204,7 @@ TEST(TestPointwiseSubBinding, BindsTheMinuendAndSubtrahendInGraphOrder)
 TEST(TestPointwiseSubBinding, BindsUnderItsOwnTokenNamesNotItsSiblings)
 {
     // Both packs bind three operand uids. If they shared token names, mergeBound would
-    // see two packs binding one token -- agreeing here by luck, and conflicting the
+    // see two packs binding one token, agreeing here by luck and conflicting the
     // moment a graph gives them different operands.
     const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
 

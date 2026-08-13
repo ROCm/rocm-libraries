@@ -217,11 +217,10 @@ thread_local bool holdUntilRanked = false;
 
 TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAccess)
 {
-    // D3, and the only interleaving that reaches it. Both threads must miss one key
-    // and be inside buildCatalog() together -- if either finishes first the other takes
-    // the cache hit and returns before it can write -- and the unsorted writer must
-    // land *after* the ranking is installed. Single-threaded the defect is unreachable,
-    // which is why the state-manager suite only covers the half of D3 it can see.
+    // D3, and the only interleaving that reaches it. Both threads must miss one key and
+    // be inside buildCatalog() together, and the unsorted writer must land after the
+    // ranking is installed. Single-threaded the defect is unreachable, which is why the
+    // state-manager suite covers only the half of D3 it can see.
     //
     // Both conditions are forced rather than raced for, so this fails every run against
     // the defect instead of occasionally.
@@ -245,7 +244,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
             }
 
             // The unsorted thread then waits for the ranking to be installed, so its
-            // own write is the one that lands last -- the case that used to clobber.
+            // own write is the one that lands last, the case that used to clobber.
             while(holdUntilRanked && !s_ranked.load(std::memory_order_acquire))
             {
                 std::this_thread::yield();
@@ -299,7 +298,7 @@ TEST(TestIngestorStateManagerConcurrency, ARankingSurvivesAConcurrentUnsortedAcc
 
     // Asserting isSorted here would prove nothing: sortedCatalog() ranks on demand, so
     // it reads true whether or not the cached entry survived. Whether the scorer runs
-    // again is the observable difference -- and re-ranking every query is exactly the
+    // again is the observable difference, and re-ranking every query is exactly the
     // thrash D3 describes.
     const auto callsAfterRace = scoreCalls().load(std::memory_order_relaxed);
     static_cast<void>(manager.sortedCatalog(context));
