@@ -12,6 +12,7 @@ on:
       - reopened
       - labeled
       - unlabeled
+      - ready_for_review
   workflow_dispatch:
     inputs:
       projects:
@@ -42,6 +43,12 @@ jobs:
   setup:
     name: "Setup"
     runs-on: ubuntu-24.04
+    # Skip on draft PRs so every push doesn't burn full Linux/Windows CI
+    # capacity while a PR is still a work in progress. Non-PR triggers
+    # (push, workflow_dispatch, workflow_call) are unaffected. When a draft is
+    # marked "Ready for review", the `ready_for_review` event above fires this
+    # workflow immediately rather than waiting for the next push.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
@@ -145,7 +152,7 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.linux_projects != '[]' }}
+    if: ${{ needs.setup.result == 'success' && needs.setup.outputs.linux_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -173,7 +180,7 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.windows_projects != '[]' }}
+    if: ${{ needs.setup.result == 'success' && needs.setup.outputs.windows_projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
