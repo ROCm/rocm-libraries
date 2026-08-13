@@ -36,8 +36,9 @@ constexpr int THREAD_COUNT = 8;
 constexpr int ITERATIONS_PER_THREAD = 200;
 
 /// Ceiling on every wait in this file: bounds a hang to a named assertion instead of a
-/// killed binary with no diagnosis.
-constexpr auto WAIT_TIMEOUT = std::chrono::seconds(30);
+/// killed binary with no diagnosis. Named MAX_WAIT because winerror.h makes
+/// WAIT_TIMEOUT a macro.
+constexpr auto MAX_WAIT = std::chrono::seconds(30);
 
 class Gate
 {
@@ -45,7 +46,7 @@ public:
     bool wait()
     {
         std::unique_lock<std::mutex> lock(_mutex);
-        return _cv.wait_for(lock, WAIT_TIMEOUT, [this] { return _open; });
+        return _cv.wait_for(lock, MAX_WAIT, [this] { return _open; });
     }
 
     void open()
@@ -229,13 +230,13 @@ public:
         std::unique_lock<std::mutex> lock(_mutex);
         ++_arrived;
         _cv.notify_all();
-        return _cv.wait_for(lock, WAIT_TIMEOUT, [this] { return _arrived >= 2; });
+        return _cv.wait_for(lock, MAX_WAIT, [this] { return _arrived >= 2; });
     }
 
     bool waitForRanked()
     {
         std::unique_lock<std::mutex> lock(_mutex);
-        return _cv.wait_for(lock, WAIT_TIMEOUT, [this] { return _ranked; });
+        return _cv.wait_for(lock, MAX_WAIT, [this] { return _ranked; });
     }
 
     void markRanked()
