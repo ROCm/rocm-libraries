@@ -8466,8 +8466,7 @@ TEST_F(TestGraph, DeselectEnginesNoOp)
 // Engine name resolution tests
 // ---------------------------------------------------------------------------
 
-// An engine ID absent from the built-in engine name registry, standing in for a
-// plugin-supplied engine. The ID-only chain renders it as "0x0000000000001A2B".
+// An engine ID absent from the built-in engine name registry, rendered as hex.
 static constexpr int64_t ENGINE_ID_WITHOUT_REGISTRY_NAME = 0x1A2B;
 
 // Sets up the two-call HIPDNN_ATTR_ENGINE_NAME_EXT read (count query, then data
@@ -8553,9 +8552,8 @@ TEST_F(TestGraph, ResolveEngineNameWithNullDescriptorSkipsBackend)
               "MIOPEN_ENGINE");
 }
 
-// Graph::engineNameFor() is private, so the graph-level behaviour is exercised
-// through get_plan_name_at_index(), which reports the name of a compiled plan's
-// engine and is the shortest public path to it.
+// Graph::engineNameFor() is private; the behaviour is exercised through
+// get_plan_name_at_index().
 
 TEST_F(TestGraph, PlanNameAtIndexReportsBackendEngineName)
 {
@@ -8571,10 +8569,8 @@ TEST_F(TestGraph, PlanNameAtIndexReportsBackendEngineName)
 
 TEST_F(TestGraph, PlanNameAtIndexResolvesEachEngineOnlyOnce)
 {
-    // Naming an engine costs a full engine-descriptor build and finalize, which
-    // polls every loaded plugin, so the answer is memoised per engine ID. Both
-    // engineDescTimes and the single-shot name query below would fail if a repeat
-    // query reached the backend.
+    // The name is memoised per engine ID: a repeat query reaching the backend
+    // would fail engineDescTimes and the single-shot name query below.
     hipdnn_frontend::GraphTestUtils graph;
     buildGraphAndMockEngine(_mockBackend, graph, _handle, /*engineDescTimes=*/1);
     expectEngineNameQuery(*_mockBackend, "EXAMPLE_PROVIDER_RELU_ENGINE");
@@ -8589,11 +8585,9 @@ TEST_F(TestGraph, PlanNameAtIndexResolvesEachEngineOnlyOnce)
     EXPECT_EQ(secondName, firstName);
 }
 
-// Sets up the two-call HIPDNN_ATTR_ENGINE_NAME_EXT read to answer with a
-// different name on each successive resolution, so a served-from-cache answer
-// is distinguishable from a fresh one. The count query reports the longest
-// name's byte count; the frontend zero-fills its buffer, so a shorter name
-// still arrives null-terminated.
+// Answers the two-call HIPDNN_ATTR_ENGINE_NAME_EXT read with a different name on
+// each successive resolution, so a cached answer is distinguishable from a fresh
+// one. The count query reports the longest name's byte count.
 static void expectEngineNameQuerySequence(::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
                                           const std::vector<std::string>& engineNames)
 {
@@ -8611,8 +8605,6 @@ static void expectEngineNameQuerySequence(::testing::NiceMock<Mock_hipdnn_backen
         .Times(callCount)
         .WillRepeatedly(DoAll(SetArgPointee<4>(byteCount), Return(HIPDNN_STATUS_SUCCESS)));
 
-    // One WillOnce per name, consumed in order, so successive resolutions of the
-    // same engine see different answers.
     auto& dataQuery
         = EXPECT_CALL(mockBackend,
                       backendGetAttribute(
@@ -8635,10 +8627,8 @@ static void expectEngineNameQuerySequence(::testing::NiceMock<Mock_hipdnn_backen
 
 TEST_F(TestGraph, PlanNameAtIndexReresolvesAfterGraphDescriptorIsReplaced)
 {
-    // Every cached name was resolved against the graph descriptor current at the
-    // time, so replacing that descriptor must drop the cache. The mock reports a
-    // different name on the second resolution: a stale cache would return the
-    // first name again.
+    // Replacing the graph descriptor must drop the cache. The mock reports a
+    // different name on the second resolution: a stale cache would repeat the first.
     hipdnn_frontend::GraphTestUtils graph;
     buildGraphAndMockEngine(_mockBackend, graph, _handle, /*engineDescTimes=*/2);
     expectEngineNameQuerySequence(*_mockBackend,
@@ -8649,7 +8639,6 @@ TEST_F(TestGraph, PlanNameAtIndexReresolvesAfterGraphDescriptorIsReplaced)
     ASSERT_TRUE(graph.get_plan_name_at_index(0, firstName).is_good());
     EXPECT_EQ(firstName, "PLUGIN_ENGINE_NAME_ONE");
 
-    // Re-lowering replaces the graph descriptor and clears the compiled plans.
     ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
     ASSERT_EQ(graph.getCompiledPlansCount(), 0u);
     graph.injectCompiledPlan(ENGINE_ID_WITHOUT_REGISTRY_NAME, /*workspaceSize=*/0);

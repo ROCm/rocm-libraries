@@ -22,9 +22,8 @@ public:
     // Mock all public methods from EnginePlugin
     MOCK_METHOD(hipdnnEnginePluginHandle_t, createHandle, (), (const));
     MOCK_METHOD(std::vector<int64_t>, getAllEngineIds, (), (const));
-    // Left unset, gmock's default makes hasEngineName() false, which is the
-    // "plugin exports no engine names" case: name resolution skips tier 1, so
-    // tests predating engine naming keep resolving to the hexadecimal fallback.
+    // Left unstubbed, gmock returns false: the "plugin exports no engine names"
+    // case, which resolves to the hexadecimal fallback.
     MOCK_METHOD(bool, hasEngineName, (), (const));
     MOCK_METHOD(std::optional<std::string>, getEngineName, (int64_t engineId), (const));
     MOCK_METHOD(void, destroyHandle, (hipdnnEnginePluginHandle_t handle), (const));

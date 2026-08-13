@@ -503,14 +503,10 @@ bool run(F&& f)
 // ENGINE SELECTION
 
 // Applies the engine preference from `config` (--engine-id or --engine-name) to `graph`.
-// The name is handed to the graph as a string rather than resolved here, so that it is
-// matched against the names the candidate engines actually display under. That is what
-// reaches an engine supplied by an engine plugin, whose engine ID need not be the hash of
-// the name it reports. The preference is soft: one that matches no engine config is
-// discarded when the graph is built and the heuristic's pick runs instead, so a typo is
-// only detectable after the fact, by comparing getEngineName() on the plan's engine against
-// what was asked for. Centralized here so every sample selects engines the same way instead
-// of duplicating this logic.
+// The name is handed to the graph as a string rather than resolved here, so it is matched
+// against the names the candidate engines actually display under. The preference is soft:
+// one that matches no engine config is discarded when the graph is built and the
+// heuristic's pick runs instead.
 inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Config& config)
 {
     if(config.engineId != -1)
@@ -532,11 +528,10 @@ inline void setPreferredEngine(const std::shared_ptr<hipdnn_frontend::graph::Gra
     setPreferredEngine(*graph, config);
 }
 
-// Resolves `engineId` to the name the backend reports for it against `graph`, which is the
-// only way to name an engine supplied by an engine plugin: the frontend's built-in registry
-// never sees those. `graph` must already be built (build_operation_graph()). Falls back to
-// the frontend's own registry/hex rendering when the engine is not among the graph's engine
-// configs, so callers always get a printable name and never an exception.
+// Resolves `engineId` to the name the backend reports for it against `graph`, which must
+// already be built (build_operation_graph()). Falls back to the frontend's registry/hex
+// rendering when the engine is not among the graph's engine configs, so callers always get
+// a printable name.
 inline std::string getEngineName(hipdnn_frontend::graph::Graph& graph, int64_t engineId)
 {
     std::vector<hipdnn_frontend::EngineConfigInfo> engineConfigs;

@@ -61,10 +61,7 @@ struct HasCopyEngineIds<
 /**
  * @brief Check for static getEngineName method.
  *
- * This member is optional. Containers that provide it supply human-readable
- * engine names through hipdnnEnginePluginGetEngineName; containers that omit it
- * still export the entry point, which reports
- * HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE.
+ * Optional; see hipdnnEnginePluginGetEngineName.
  */
 template <typename T, typename = void>
 struct HasGetEngineName : std::false_type

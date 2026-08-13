@@ -803,8 +803,7 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
  * named by its plugin resolves even when the name does not hash to the engine ID.
  *
  * Engine names are display labels, not keys, and need not be unique. When several engines
- * share a name, the first in hipdnnGetEngineInfo_ext order wins; that order is stable
- * across runs.
+ * share a name, the first in hipdnnGetEngineInfo_ext order wins.
  *
  * @param[in]  handle       A valid hipDNN handle.
  * @param[in]  engineName   Null-terminated engine name to resolve.

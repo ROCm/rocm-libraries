@@ -65,9 +65,7 @@ void ExampleProviderEngine::getDetails(
 
     auto knobs = builder.CreateVector(knobsVector);
 
-    // Graph-scoped echo of the canonical engine name. The authoritative source
-    // is hipdnnEnginePluginGetEngineName; an unnamed engine leaves the field
-    // unset rather than writing an empty string.
+    // An unnamed engine leaves the field unset rather than writing an empty string.
     flatbuffers::Offset<flatbuffers::String> name;
     if(!_name.empty())
     {

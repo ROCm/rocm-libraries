@@ -156,13 +156,10 @@ inline bool tensorSignaturesMatch(const nlohmann::json& existing, const nlohmann
            && tensorsMatchByIdIgnoringOrder(existing, replacement);
 }
 
-// Select the string that is safe to persist as an entry's engine_name.
-// engine_name is a routing key: the heuristics config reader hashes it back to
-// an engine ID with engineNameOrIdToId. A name that does not hash back to the
-// engine ID that was benchmarked would silently route to a different engine, so
-// such a name must not be written. The hexadecimal rendering of the ID is
-// accepted by that function's numeric branch and round-trips exactly, so it is
-// used whenever the name itself does not.
+// Select the string safe to persist as an entry's engine_name. The heuristics
+// config reader hashes it back with engineNameOrIdToId, so a name that does not
+// hash back to the benchmarked ID would silently route elsewhere; the hexadecimal
+// rendering round-trips exactly and is used instead.
 inline std::string engineRoutingKey(const std::string& engineName, int64_t engineId)
 {
     if(!engineName.empty()
@@ -231,8 +228,6 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
     metadata["workspace_size"] = result.workspaceSize;
     if(nameNotPersisted)
     {
-        // Informational only: the reader never consults autotune_metadata, so
-        // recording the engine's own name here cannot affect routing.
         metadata["resolved_engine_name"] = result.engineName;
     }
 
@@ -316,13 +311,11 @@ inline nlohmann::json buildOverrideEntry(const AutotuneResult& result,
 // sdpa_fwd, batchnorm_training, layernorm, pointwise, etc.). criteria is
 // present only when the graph supplies discriminating criteria. Per tensor,
 // tensor_id is required for the v2 named-id format and stride is present when
-// strides are supplied. engine_name is the routing key the heuristics config
-// reader hashes back to an engine ID, so it holds the engine's own name only
-// when that name hashes to the benchmarked ID, and the hexadecimal ID
-// otherwise. In autotune_metadata, converged is present only for the
+// strides are supplied. engine_name is the routing key produced by
+// engineRoutingKey(). In autotune_metadata, converged is present only for the
 // run_until_stable strategy, knobs is omitted entirely for default-knob
-// entries, and resolved_engine_name records the engine's own name for human
-// readers when engine_name could not hold it.
+// entries, and resolved_engine_name records the engine's own name when
+// engine_name could not hold it.
 //
 // Writes a single entry: the rank-0 winner (the first succeeded result in the
 // rank-ordered input). If no result succeeded, nothing is written and OK is

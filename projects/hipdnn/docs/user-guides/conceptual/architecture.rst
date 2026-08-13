@@ -121,7 +121,7 @@ The Data SDK contains shared types and utilities used across hipDNN.
 
   - Logging utilities and type helpers (for example, ``half`` and ``bfloat16``).
   - Tensor and memory utilities.
-  - Engine name registry (``EngineNames.hpp``), which supplies the name-to-ID hash and names the engines built into hipDNN.
+  - Engine name registry (``EngineNames.hpp``).
 
 .. _flatbuffers-sdk:
 

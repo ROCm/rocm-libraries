@@ -445,10 +445,8 @@ TEST(TestAutotune, RankAndSelectWinnerSortsSucceededAndSelectsFastest)
 // ============================================================================
 // AutotuneResult factories
 //
-// Every factory ends in a run of same-typed string parameters (errorMessage,
-// exhaustiveNotRunReason, engineName), so transposing two of them compiles
-// cleanly. Each case therefore passes a distinct self-identifying value for
-// every string argument and asserts the exact field it lands in.
+// The trailing string parameters are same-typed, so each case passes a distinct
+// self-identifying value and asserts the exact field it lands in.
 // ============================================================================
 
 namespace
@@ -583,7 +581,6 @@ TEST(TestAutotune, MakeCompileFailedResultAssignsEveryField)
     expectNonBenchmarkedCommonFields(result);
     EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
     EXPECT_EQ(result.estimatedWorkspaceSize, ESTIMATED_WORKSPACE);
-    // Never compiled, so there is no compiled workspace size.
     EXPECT_EQ(result.workspaceSize, -1);
 }
 
@@ -600,7 +597,6 @@ TEST(TestAutotune, MakeFinalizeFailedResultAssignsEveryField)
 
     expectNonBenchmarkedCommonFields(result);
     EXPECT_EQ(result.errorMessage, ERROR_MESSAGE_VALUE);
-    // Neither workspace size applies to a plan that never finalized.
     EXPECT_EQ(result.estimatedWorkspaceSize, -1);
     EXPECT_EQ(result.workspaceSize, -1);
 }

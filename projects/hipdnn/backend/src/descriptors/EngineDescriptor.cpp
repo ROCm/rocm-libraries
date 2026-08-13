@@ -50,10 +50,8 @@ void EngineDescriptor::finalize()
     _engineDetails = plugin::EnginePluginResourceManager::getEngineDetails(
         pluginResourceManager, _engineId, _graph.get());
 
-    // Tier-2 candidate for the name resolution below. Declared here so its
-    // storage outlives the resolveEngineName() call, which takes a view of it.
-    // It stays disengaged when this engine has no details at all, and holds an
-    // empty string when the details carry no name field.
+    // Declared here so its storage outlives the resolveEngineName() call below,
+    // which takes a view of it.
     std::optional<std::string> detailsName;
 
     auto engineDetailsPtr = _engineDetails->get();
@@ -104,8 +102,6 @@ void EngineDescriptor::finalize()
         }
     }
 
-    // Resolved unconditionally: the plugin entry point, the static registry and
-    // the hexadecimal fallback all name an engine that has no details at all.
     _engineName = pluginResourceManager->resolveEngineName(
         _engineId, detailsName ? std::optional<std::string_view>(*detailsName) : std::nullopt);
 

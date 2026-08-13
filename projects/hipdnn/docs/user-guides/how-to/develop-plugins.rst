@@ -86,20 +86,19 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 Engine IDs
 ==========
 
-Every engine used by hipDNN requires a unique engine ID. Plugins that provide more than one engine must have a unique ID for each engine provided by the plugin.
+Every engine used by hipDNN requires an engine ID that is unique among all loaded engines. Plugins that provide more than one engine must have a unique ID for each engine provided by the plugin. hipDNN does not enforce this: two plugins claiming the same ID are not rejected at load time.
 
 hipDNN uses a deterministic hash-based system for managing engine IDs. This system converts human-readable engine names to ``int64_t`` identifiers.
-Uniqueness is not enforced across separately built plugins: a plugin may report any ``int64_t`` it likes, and two plugins claiming the same ID are not rejected at load time.
 
 When creating a new engine, select a unique descriptive name.
 During development, add the ``HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)`` macro to a source file in your project.
-This verifies that the new plugin name doesn't conflict with plugin names from the official distribution and creates variables that can be used to retrieve the unique ID for this engine.
+This creates variables such as ``MY_CUSTOM_ENGINE_ID`` for retrieving the engine's unique ID, and checks the name against other engine names registered in the same module.
 
 Benefits
 --------
 
 - **Deterministic**: The same name always produces the same ID.
-- **No collisions**: Hash algorithm minimizes collision risk.
+- **Collision-resistant**: Hash algorithm minimizes collision risk.
 - **Human-readable**: Debug logs can show meaningful engine names.
 - **Forward compatible**: New engines can be used without registry updates.
 
@@ -136,9 +135,9 @@ Engines that are built into the hipDNN tree are listed in `data_sdk/include/hipd
 
   HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)
 
-Registration adds a startup check that the name doesn't collide with another in-tree engine name, and it lets hipDNN name the engine even when the plugin that provides it doesn't report a name of its own. The check runs during static initialization and throws on a collision, so it fires when the library loads rather than when it compiles.
+Registration lets hipDNN name the engine even when the plugin that provides it doesn't report a name of its own.
 
-Test it locally. You can use unregistered names during development, and you can keep the ``HIPDNN_REGISTER_ENGINE()`` macro in your plugin after the name is added to the registry: plugins are built with hidden visibility, so each module gets its own copy of the registry and the duplicate check never sees across that boundary.
+Test it locally. You can use unregistered names during development, and you can keep the ``HIPDNN_REGISTER_ENGINE()`` macro in your plugin after the name is added to the registry.
 
 .. _engine-names:
 
@@ -167,12 +166,10 @@ Add a static ``getEngineName`` member to your container type. The plugin SDK det
 
       if(engineId == MY_CUSTOM_ENGINE_ID)
       {
-          // A string literal has static storage, so it outlives the call.
           *name = MY_CUSTOM_ENGINE_NAME;
           return HIPDNN_PLUGIN_STATUS_SUCCESS;
       }
 
-      // Not an engine this plugin provides.
       return HIPDNN_PLUGIN_STATUS_BAD_PARAM;
   }
 
@@ -184,34 +181,32 @@ The status contract is:
 
 Other requirements:
 
-- The string is owned by the plugin and must stay valid for the lifetime of the loaded library. Use a string literal or an entry in a static table. Returning a stack buffer is a use-after-free: hipDNN copies the string before returning to its caller, and the buffer is already dangling by then.
-- On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, ``*name`` is unspecified and hipDNN doesn't read it. Leaving it untouched is fine.
-- The name is an opaque, plugin-chosen string. hipDNN doesn't parse it or require any particular format, and doesn't require it to be unique — two plugins may report the same name, and one plugin may report the same name for several engines.
-- The implementation must be thread-safe. hipDNN calls it from whichever thread needs a name and serializes nothing on the plugin's behalf.
+- The string is owned by the plugin and must stay valid for the lifetime of the loaded library. Use a string literal or an entry in a static table; returning a stack buffer is a use-after-free.
+- On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, hipDNN doesn't read ``*name``.
+- The name is an opaque, plugin-chosen string. hipDNN doesn't parse it or require it to be unique — two plugins may report the same name, and one plugin may report the same name for several engines.
+- The implementation must be thread-safe.
 
-``getEngineName`` is optional. ``EnginePluginImpl.inl`` emits the ``hipdnnEnginePluginGetEngineName`` entry point whether or not your container defines the member. When the member is absent, the generated body reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
+``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
 
 The entry point is available to build against from Plugin SDK engine API version 1.4.0 onward. hipDNN calls it whenever the symbol is exported, regardless of the API version your plugin reports.
 
 Name resolution
 ---------------
 
-When your plugin supplies no name for an engine, hipDNN names it from the built-in registry in ``EngineNames.hpp``, and failing that from a zero-padded uppercase hexadecimal rendering of the engine ID, such as ``0x000000000000001A``. A resolved name is therefore never empty.
+Resolving against a graph — the engine-descriptor path behind ``HIPDNN_ATTR_ENGINE_NAME_EXT`` and the frontend's per-engine reporting — tries ``hipdnnEnginePluginGetEngineName``, then the ``name`` field of the engine's ``EngineDetails`` payload, then the registry in ``EngineNames.hpp``, then a zero-padded uppercase hexadecimal rendering of the engine ID, such as ``0x000000000000001A``. A resolved name is therefore never empty.
 
-The full order depends on whether a graph is in hand. Resolving against a graph — the engine-descriptor path behind ``HIPDNN_ATTR_ENGINE_NAME_EXT`` and the frontend's per-engine reporting — tries ``hipdnnEnginePluginGetEngineName``, then the ``name`` field of the engine's ``EngineDetails`` payload, then the registry, then the hexadecimal ID. Enumeration — ``hipdnnGetEngineInfo_ext`` and the APIs built on it — has no graph and therefore no ``EngineDetails``, so it tries only the entry point, the registry, and the hexadecimal ID.
+Enumeration — ``hipdnnGetEngineInfo_ext`` and the APIs built on it — has no graph and therefore no ``EngineDetails``, so it tries only the entry point, the registry, and the hexadecimal ID. Implementing ``hipdnnEnginePluginGetEngineName`` is therefore what makes a name visible on every surface; a name supplied only through ``EngineDetails.name`` is absent from the enumeration APIs and from ``hipdnnGetEngineIdByName_ext``.
 
-Implementing ``hipdnnEnginePluginGetEngineName`` is therefore what makes a name visible on every surface; a name supplied only through ``EngineDetails.name`` is absent from the enumeration APIs and from ``hipdnnGetEngineIdByName_ext``.
-
-If a plugin reports a name through both ``hipdnnEnginePluginGetEngineName`` and the ``name`` field of its ``EngineDetails`` payload and the two disagree, hipDNN uses the entry point's name and logs a warning naming the plugin, the engine ID, and both strings.
+When the two sources disagree, hipDNN uses the entry point's name and logs a warning naming the plugin, the engine ID, and both strings.
 
 hipDNN also hashes the reported name and compares the result against the engine ID the plugin reported. A mismatch is logged as a warning only: the plugin isn't rejected, and the plugin-reported ID stays canonical for routing and serialization.
 
 Addressing an engine by name
 ----------------------------
 
-Name lookup doesn't go through that hash. ``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under. Either way your engine is addressable by the name you report whatever engine ID you chose for it.
+Name lookup doesn't go through that hash. ``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under.
 
-Where several engines share a name, the backend lookup returns the first in enumeration order, ``deselect_engines`` bars all of them, and ``set_preferred_engine_id_ext`` prefers whichever the heuristics ranked highest. A name matching no candidate engine changes nothing and is reported once as a warning when the plans are built.
+Where several engines share a name, the backend lookup returns the first in enumeration order, ``deselect_engines`` bars all of them, and ``set_preferred_engine_id_ext`` prefers whichever the heuristics ranked highest. A name matching no candidate engine changes nothing: ``deselect_engines`` reports it once as a warning when the plans are built, and ``set_preferred_engine_id_ext`` falls back silently to the heuristics' top pick.
 
 The heuristic policy surfaces are the exception. A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so it can't reach the resolver: the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable is hashed inside the policy, and the engine override rules in the heuristic config file resolve their names when the config loads, before any handle exists. Derive your engine IDs the way ``HIPDNN_REGISTER_ENGINE`` does if you want them addressable from those surfaces.
 

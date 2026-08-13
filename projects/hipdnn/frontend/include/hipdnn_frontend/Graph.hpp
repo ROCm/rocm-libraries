@@ -206,21 +206,16 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
 
-    // Engine ID -> display name, memoised for the lifetime of _graphDesc.
-    // Resolving a name asks the backend through a throwaway engine descriptor whose
-    // finalization polls every loaded plugin, and the same engine is named many
-    // times over an autotune run. Entries are resolved against the current
-    // _graphDesc, so the cache is dropped whenever that descriptor is replaced.
-    // Written by const accessors, so every access goes through
-    // _engineNameCacheMutex and a shared const reference stays safe to use from
-    // several threads.
+    // Engine ID -> display name, memoised for the lifetime of _graphDesc. Entries
+    // are resolved against the current _graphDesc, so the cache is dropped
+    // whenever that descriptor is replaced. Written by const accessors, so every
+    // access goes through _engineNameCacheMutex and a shared const reference
+    // stays safe to use from several threads.
     mutable std::unordered_map<int64_t, std::string> _engineNameCache;
 
     // Held only across the map operations themselves, never across the descriptor
     // build that resolves a name. Indirected through a pointer so that Graph keeps
-    // its defaulted move operations, which a std::mutex member would delete; a
-    // moved-from Graph has no mutex and, like any moved-from object, must not be
-    // used again.
+    // its defaulted move operations, which a std::mutex member would delete.
     mutable std::unique_ptr<std::mutex> _engineNameCacheMutex = std::make_unique<std::mutex>();
 
 protected:
@@ -261,11 +256,9 @@ protected:
         // Set by deselect_engines().
         // Accumulates across calls.
 
-    // Engine name exclusion set, matched against the display name of each
-    // candidate engine rather than against a hash of the name. This is what
-    // reaches a plugin engine whose engine ID is not the hash of the name it
-    // reports. Populated alongside _barredEngineIds by the string overload of
-    // deselect_engines(), and cleared with it.
+    // Engine name exclusion set. Populated alongside _barredEngineIds by the
+    // string overload of deselect_engines(), and cleared with it. See
+    // isEngineBarred().
     std::unordered_set<std::string> _barredEngineNames;
 
     // Barred names that have already been reported as matching no candidate
@@ -521,9 +514,9 @@ protected:
 private:
     std::optional<int64_t> _preferredEngineId;
 
-    // Preferred engine expressed as a display name, matched against the name of
-    // each candidate engine. Takes precedence over _preferredEngineId when it
-    // matches a candidate; on no match the engine ID search runs unchanged.
+    // Preferred engine as a display name. Takes precedence over
+    // _preferredEngineId when it matches a candidate. See
+    // findPreferredEngineByName().
     std::optional<std::string> _preferredEngineName;
 
     bool _isOverrideShapeEnabled = false;
@@ -796,8 +789,6 @@ private:
         clearEngineNameCache();
     }
 
-    /// Drop every memoised name, because they were resolved against a graph
-    /// descriptor that is no longer the current one.
     void clearEngineNameCache()
     {
         const std::lock_guard<std::mutex> guard(*_engineNameCacheMutex);
@@ -845,12 +836,8 @@ private:
     }
 
     /// The name the backend reports for an engine descriptor built against this
-    /// graph, or nullopt when no such descriptor can be built right now.
-    ///
-    /// This is the only way to name an engine supplied by an engine plugin, so it
-    /// is preferred over the static registry wherever it is available. Building the
-    /// descriptor polls every loaded plugin, so a call that misses the cache is not
-    /// cheap.
+    /// graph, or nullopt when no such descriptor can be built right now. Building
+    /// the descriptor polls every loaded plugin, so this is not cheap.
     std::optional<std::string> backendEngineName(int64_t engineId) const
     {
         if(!hasReadyGraphDesc())
@@ -869,7 +856,6 @@ private:
         return detail::resolveEngineName(engineDesc.get(), engineId);
     }
 
-    /// Look up @p engineId in the name cache, if it is there.
     std::optional<std::string> cachedEngineName(int64_t engineId) const
     {
         const std::lock_guard<std::mutex> guard(*_engineNameCacheMutex);
@@ -885,16 +871,12 @@ private:
     /// Resolve an engine ID to the display name to report for it, memoising the
     /// backend's answer for the lifetime of _graphDesc.
     ///
-    /// Only the backend's answer is memoised. The registry/hex fallback is the best
-    /// available while the graph is unbuilt or the engine has no descriptor, but
-    /// caching it would short-circuit a later call that could reach the backend into
-    /// repeating the fallback forever.
+    /// Only the backend's answer is memoised: caching the registry/hex fallback
+    /// would keep a later call that could reach the backend repeating the
+    /// fallback forever.
     ///
     /// Resolution runs outside the cache lock, so two threads racing on the same
-    /// unseen engine may both ask the backend. Both resolve against the same graph
-    /// descriptor and so arrive at the same name, making the duplicated work wasted
-    /// rather than incorrect. Holding the lock across the descriptor build would
-    /// serialize every caller behind a plugin poll to avoid only that waste.
+    /// unseen engine may both ask the backend and arrive at the same name.
     std::string engineNameFor(int64_t engineId) const
     {
         if(auto cached = cachedEngineName(engineId))
@@ -927,14 +909,9 @@ private:
 
     /// Whether an engine is excluded, by ID or by the name it displays under.
     ///
-    /// Name matching resolves the candidate's name and compares it, rather than
-    /// hashing the barred name and comparing IDs. That is what reaches an engine
-    /// whose ID is not the hash of its name, which a plugin is free to report.
-    /// Every barred name that matches is honoured, so a name shared by several
-    /// engines bars all of them.
-    ///
-    /// Graphs that never bar by name take the ID-only path and never resolve a
-    /// name, which on a cache miss costs a throwaway engine descriptor build.
+    /// Name matching resolves the candidate's name and compares it, so a name
+    /// shared by several engines bars all of them. Graphs that never bar by name
+    /// take the ID-only path and never resolve a name.
     bool isEngineBarred(int64_t engineId) const
     {
         if(_barredEngineIds.count(engineId) > 0)
@@ -955,8 +932,7 @@ private:
     }
 
     /// Report each barred name that matched none of the engines considered, once
-    /// per name. A name that reaches nothing is indistinguishable from a typo at
-    /// the point it is supplied, because the candidate engines are not known yet.
+    /// per name.
     void warnOnUnmatchedBarredEngineNames(const std::vector<int64_t>& consideredEngineIds) const
     {
         if(_barredEngineNames.empty())
@@ -988,8 +964,6 @@ private:
 
     /// Index into @p engineIds of the first engine whose display name matches the
     /// preferred name, or nullopt when no name is preferred or none matches.
-    /// First match wins, so a name shared by several engines selects the one the
-    /// heuristics ranked highest.
     std::optional<size_t> findPreferredEngineByName(const std::vector<int64_t>& engineIds) const
     {
         if(!_preferredEngineName.has_value())
@@ -2933,8 +2907,6 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
-        // The serialized graph carries only the engine ID, so any preference
-        // expressed as a name belongs to the state just replaced.
         _preferredEngineName.reset();
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
@@ -3213,8 +3185,6 @@ public:
         _sub_nodes = std::move(tempNodes);
         graph_attributes = std::move(tempAttrs);
         _preferredEngineId = tempEngineId;
-        // The serialized graph carries only the engine ID, so any preference
-        // expressed as a name belongs to the state just replaced.
         _preferredEngineName.reset();
         _isOverrideShapeEnabled = tempOverrideShapeEnabled;
         setGraphDesc(std::move(graphDesc), handle != nullptr);
@@ -3566,8 +3536,6 @@ public:
                                                                 << engineDescErr.get_message());
             }
 
-            // Ask the backend for the engine name, which covers plugin-supplied
-            // engines; registry and hex fallbacks apply for anything unnamed.
             // Only a backend-derived name is cached — seeding the cache with a fallback computed
             // after a failed describe would poison get_plan_name_at_index() for that engine.
             if(engineDescErr.is_good())
@@ -4302,11 +4270,10 @@ public:
      *
      * Constructs a human-readable name from the plan's engine ID.
      *
-     * The resolved name is memoised per engine ID, so this method mutates
-     * internal state despite being const and is not safe to call concurrently
-     * on a shared Graph instance. A cache miss builds and finalizes a backend
-     * engine descriptor, which polls every loaded plugin, so the first call for
-     * a given engine is not cheap.
+     * The resolved name is memoised per engine ID under a mutex, so this is safe
+     * to call on a shared const Graph. A cache miss builds and finalizes a
+     * backend engine descriptor, so the first call for a given engine is not
+     * cheap.
      *
      * @param plan_index Zero-based index into the compiled plan vector
      * @param[out] name Output parameter for the plan name (resolved backend engine
@@ -4326,8 +4293,6 @@ public:
 
         const auto& plan = _compiledPlans[static_cast<size_t>(plan_index)];
 
-        // Ask the backend for the engine name, which covers plugin-supplied
-        // engines; registry and hex fallbacks apply for anything unnamed.
         name = engineNameFor(plan.engineId);
 
         return {ErrorCode::OK, ""};
@@ -4433,13 +4398,10 @@ public:
      * along with the rest of the filter state by @c create_execution_plans().
      *
      * Matching happens at plan-build time against the name each candidate engine
-     * displays under, so this reaches a plugin engine whose engine ID is not the
-     * hash of the name it reports. Every engine carrying the name is barred, so a
-     * name shared by several engines bars all of them.
-     *
-     * Each name is also hashed to an engine ID and added to the barred engine ID
-     * set, which keeps built-in and hex-form names working before any candidate
-     * engine is known.
+     * displays under, so every engine carrying the name is barred. Each name is
+     * also hashed to an engine ID and added to the barred engine ID set, which
+     * keeps built-in and hex-form names working before any candidate engine is
+     * known.
      *
      * A name that matches no candidate bars nothing and is reported once as a
      * warning when the plans are built.
@@ -4820,8 +4782,8 @@ public:
 
     /// @brief Get the preferred engine ID, if set
     ///
-    /// When the preference was set by name this is the hash of that name, which is
-    /// the fallback rather than the engine a candidate name match would select.
+    /// When the preference was set by name this is the hash of that name, not
+    /// necessarily the engine a name match selects.
     // NOLINTBEGIN(readability-identifier-naming)
     std::optional<int64_t> get_preferred_engine_id_ext() const
     // NOLINTEND(readability-identifier-naming)
@@ -6306,15 +6268,10 @@ public:
      * @brief Set the preferred engine by name
      *
      * The name is matched at plan-build time against the name each candidate
-     * engine displays under, so this reaches a plugin engine whose engine ID is
-     * not the hash of the name it reports. The first candidate carrying the name
-     * wins, which for a name shared by several engines is the one the heuristics
-     * ranked highest. If no candidate carries the name, selection falls back to
-     * the engine whose ID is the hash of the name, and then to the heuristics'
-     * own top choice.
-     *
-     * The hashed ID is also stored, so @c get_preferred_engine_id_ext() returns a
-     * value as soon as this returns.
+     * engine displays under; the first match wins. If no candidate carries the
+     * name, selection falls back to the engine whose ID is the hash of the name,
+     * then to the heuristics' own top choice. The hashed ID is stored, so
+     * @c get_preferred_engine_id_ext() returns a value as soon as this returns.
      *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining

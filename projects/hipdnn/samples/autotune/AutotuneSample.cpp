@@ -235,8 +235,6 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
     {
         const std::string rankStr = result.rank >= 0 ? std::to_string(result.rank) : "FAIL";
 
-        // autotune() resolves engineName through the backend, so plugin-supplied
-        // engines are named here and unnamed ones already carry a hex rendering.
         std::cout << "  " << std::left << std::setw(6) << rankStr << std::setw(30)
                   << result.engineName;
 
@@ -318,8 +316,6 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
     std::cout << "  Discovered " << configs.size() << " engine(s):\n";
     for(const auto& cfg : configs)
     {
-        // get_engine_configs() resolves engineName through the backend, so
-        // plugin-supplied engines are named rather than shown as a bare ID.
         std::cout << "    " << cfg.engineName << " (workspace=" << cfg.estimatedWorkspaceSize
                   << ", exhaustive=" << (cfg.supportsExhaustive ? "yes" : "no")
                   << ", knobs=" << cfg.knobs.size() << ")\n";
@@ -490,8 +486,6 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
     {
         const auto& result = results[i];
 
-        // autotune() resolves engineName through the backend, so plugin-supplied
-        // engines are named here and unnamed ones already carry a hex rendering.
         std::cout << "  " << std::left << std::setw(6) << i << std::setw(30) << result.engineName
                   << std::setw(14) << result.workspaceSize;
 

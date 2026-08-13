@@ -37,9 +37,7 @@ typedef enum
     HIPDNN_PLUGIN_STATUS_INVALID_VALUE = 2,
     HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR = 3,
     HIPDNN_PLUGIN_STATUS_ALLOC_FAILED = 4,
-    // The call is well-formed but the plugin has nothing to supply. Used by a
-    // heuristic policy that does not apply, and by an engine plugin that exposes
-    // the engine but supplies no name for it.
+    // The call is well-formed but the plugin has nothing to supply.
     HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE = 5,
     HIPDNN_PLUGIN_STATUS_NOT_INITIALIZED = 6, // Object not initialized
 } hipdnnPluginStatus_t;

@@ -21,7 +21,6 @@ namespace example_provider
 //     ReluPlanBuilder/ConvFwdPlanBuilder. Each entry pairs the generated _ID and _NAME
 //     constants, so an engine's ID and its reported name cannot drift apart.
 // (3) Keep ExampleProviderContainer::getEngineName() as-is; it serves the whole table.
-//     Omitting the method entirely is also valid — the host then names your engines itself.
 //
 // The s_engineDefinitions vector is one approach to reduce coupling between creating
 // engines (in the ExampleProviderContainer constructor) and returning the list of engine

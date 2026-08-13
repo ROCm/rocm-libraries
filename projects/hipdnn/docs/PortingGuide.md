@@ -154,8 +154,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 **Fix**: Use a combination of `graph::get_ranked_engine_ids()` and `graph::set_preferred_engine_id_ext()` if you need more detailed control over engine selection.
 
-Both `graph::set_preferred_engine_id_ext()` and `graph::deselect_engines()` also accept engine names, which is usually more readable than a numeric ID. A name is matched against the names the graph's candidate engines display under, so it reaches a plugin-supplied engine whatever engine ID that plugin chose. Run `hipdnn_list_engines` to see the names available on your system.
-
 ### 3. Device Memory Utilities
 
 **Error**: Different memory utilities for allocating device memory.

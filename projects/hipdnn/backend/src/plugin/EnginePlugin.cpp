@@ -100,8 +100,6 @@ void EnginePlugin::resolveSymbols()
                                 "(hipdnnEnginePluginExecuteOpGraphWithOverrides not exported)");
     }
 
-    // Optional symbol, engine plugin API 1.4.0 and newer; absence means the
-    // host names this plugin's engines itself.
     if(!tryAssignSymbol(_funcGetEngineName, "hipdnnEnginePluginGetEngineName"))
     {
         HIPDNN_BACKEND_LOG_INFO("Plugin does not supply engine names "
@@ -167,9 +165,7 @@ std::optional<std::string> EnginePlugin::getEngineName(int64_t engineId) const
     const auto status = _funcGetEngineName(engineId, &name);
 
     // Any non-success status means the plugin has no name to give for this
-    // engine. HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE in particular is the normal
-    // answer from a plugin whose container supplies no names at all, so this
-    // path is silent rather than an error.
+    // engine, so this path is silent rather than an error.
     if(status != HIPDNN_PLUGIN_STATUS_SUCCESS || name == nullptr || *name == '\0')
     {
         return std::nullopt;

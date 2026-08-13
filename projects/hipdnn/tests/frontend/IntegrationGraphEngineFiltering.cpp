@@ -262,9 +262,8 @@ protected:
     }
 };
 
-// Engine filtering driven by engine names rather than raw engine IDs. The
-// engines here come from the two loaded test plugins, so the names under test
-// are plugin-supplied and absent from the frontend's built-in name registry.
+// Engine filtering driven by engine names rather than raw engine IDs. The names
+// under test are plugin-supplied and absent from the built-in name registry.
 class IntegrationGraphEngineNameFiltering : public EngineFilteringTestBase
 {
 protected:
@@ -284,9 +283,6 @@ protected:
         return s_hashedPluginEngineName;
     }
 
-    // Adds the hashed-name plugin to the suite's usual load set, so a graph can
-    // be offered both an engine that a name filter can reach and engines it
-    // must leave alone.
     static std::vector<const char*> pluginPathsWithHashedNameEngine()
     {
         auto paths = defaultEnginePluginPaths();
@@ -343,11 +339,9 @@ TEST_P(IntegrationGraphEngineFiltering, EngineSelection)
     runTest();
 }
 
-// The headline capability: an engine whose ID is unrelated to the name it
-// reports is still removed from consideration by that name alone.
-// TestExecuteFailsPlugin hardcodes its engine ID rather than deriving it with
-// HIPDNN_REGISTER_ENGINE, so hashing its name reaches nothing -- matching has to
-// go through the names the candidate engines display under.
+// An engine whose ID is unrelated to the name it reports is still removed from
+// consideration by that name alone. TestExecuteFailsPlugin hardcodes its engine
+// ID, so hashing its name reaches nothing.
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(pluginEngineName()));
@@ -355,8 +349,6 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     auto graph = buildGraph("DeselectByPluginSuppliedEngineName", dims);
 
-    // The frontend surfaces the plugin-supplied name for the plugin's engine,
-    // which is what makes the name available to deselect_engines() at all.
     std::vector<EngineConfigInfo> configs;
     auto result = graph->get_engine_configs(configs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -410,15 +402,12 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
 
-    // A plan from an engine carrying a different name still builds, so the
-    // failure above is the name filter and not a graph-wide problem.
     result = graph->build_plan_at_index(otherPlanIndex);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
 // A name matching none of the candidate engines bars nothing and leaves every
-// plan buildable, so a typo degrades to the unfiltered result rather than to an
-// empty plan set.
+// plan buildable.
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectByUnmatchedEngineNameBarsNothing)
 {
     const std::string unmatchedName = "NO_SUCH_ENGINE_NAME_AICK1901";
@@ -443,9 +432,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByUnmatchedEngineNameBarsNot
     }
 }
 
-// create_execution_plans() resets the name filter as well as the engine ID
-// filter, so a deselection applied before the plans exist does not survive into
-// them.
+// create_execution_plans() resets the name filter as well as the engine ID filter.
 TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
@@ -477,8 +464,8 @@ TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
-// A preference expressed as a plugin-supplied name selects that engine even
-// though hashing the name reaches a different ID entirely.
+// A preference expressed as a plugin-supplied name selects that engine even though
+// hashing the name reaches a different ID entirely.
 TEST_F(IntegrationGraphEngineNameFiltering, PreferByPluginSuppliedEngineName)
 {
     const int64_t failingEngineId = hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>();
@@ -514,8 +501,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByPluginSuppliedEngineName)
     EXPECT_EQ(activePlanName, pluginEngineName());
 }
 
-// Preferring an engine ID discards a preference previously given as a name, so
-// the last call wins rather than the name silently outranking the ID.
+// Preferring an engine ID discards a preference previously given as a name.
 TEST_F(IntegrationGraphEngineNameFiltering, PreferByIdAfterNameDiscardsTheName)
 {
     const int64_t goodEngineId = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
@@ -542,9 +528,8 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByIdAfterNameDiscardsTheName)
     EXPECT_EQ(selectedEngineId, goodEngineId);
 }
 
-// The plan belonging to a plugin engine is identified by the plugin-supplied
-// name and then barred by engine ID, covering the name-to-plan association and
-// ID-keyed barring.
+// The plan belonging to a plugin engine is identified by the plugin-supplied name
+// and then barred by engine ID.
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectBarsPluginEnginePlan)
 {
     const std::vector<int64_t> dims = {1, 3, 4, 4};
@@ -578,21 +563,16 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectBarsPluginEnginePlan)
     EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
 }
 
-// The other half of the name-matching contract: a plugin whose engine ID is the
-// hash of its name -- the identity HIPDNN_REGISTER_ENGINE gives production
-// plugins and test_hashed_name_plugin reproduces -- is still deselectable by
-// that name. Name matching must not have displaced the hashed-ID path that
-// built-in and hex-form names rely on.
+// A plugin whose engine ID is the hash of its name -- the identity
+// HIPDNN_REGISTER_ENGINE gives production plugins -- is still deselectable by that
+// name, so name matching has not displaced the hashed-ID path.
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngineName)
 {
-    // Guards against drift between the name and the hardcoded engine ID literal
-    // in TestPluginEngineIdMap.hpp. Without the identity this test would cover
-    // the same ground as DeselectByPluginSuppliedEngineName.
+    // Guards against drift between the name and the hardcoded engine ID literal in
+    // TestPluginEngineIdMap.hpp; without the identity this test covers nothing new.
     ASSERT_EQ(hipdnn_tests::plugin_constants::engineId<HashedNamePlugin>(),
               hipdnn_data_sdk::utilities::engineNameToId(hashedPluginEngineName()));
 
-    // The name is plugin-supplied, not one the frontend's built-in registry
-    // knows, which is the case deselect_engines() has to handle.
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(hashedPluginEngineName()));
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
@@ -613,8 +593,6 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     ASSERT_NE(hashedConfig, configs.end()) << "Hashed-name plugin engine not among candidates";
     ASSERT_EQ(hashedConfig->engineName, hashedPluginEngineName());
 
-    // create_execution_plans() clears the barred-engine set, so the deselection
-    // has to be applied after the plans exist.
     result = graph->create_execution_plans();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 
@@ -640,7 +618,6 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     ASSERT_GE(hashedPlanIndex, 0) << "No plan reported the hashed plugin-supplied engine name";
     ASSERT_GE(otherPlanIndex, 0) << "No plan from another engine to use as a control";
 
-    // Deselect by the name string alone. No engine ID is ever mentioned.
     const Graph& chained
         = graph->deselect_engines(std::vector<std::string>{hashedPluginEngineName()});
     EXPECT_EQ(&chained, graph.get());
@@ -649,8 +626,6 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngine
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
     EXPECT_NE(result.err_msg.find("barred"), std::string::npos) << result.err_msg;
 
-    // A plan from an engine carrying a different name still builds, so the
-    // failure above is the name filter and not a graph-wide problem.
     result = graph->build_plan_at_index(otherPlanIndex);
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }

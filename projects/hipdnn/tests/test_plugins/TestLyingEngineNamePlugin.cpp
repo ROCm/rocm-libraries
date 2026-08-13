@@ -19,11 +19,9 @@ thread_local char
 // EnginePlugin::getEngineName rejects all three and reports no name, so the
 // backend falls through to the next tier of the name-resolution chain.
 //
-// Only the first id belongs to an engine this plugin publishes; the other two
-// are ids it does not expose. The entry point is keyed by engine id and the
-// host applies the same rejection test whichever id it asked about, so one
-// loaded plugin can present all three answers without publishing three sets of
-// engine details.
+// Only the first id belongs to an engine this plugin publishes; the other two are
+// ids it does not expose. The entry point is keyed by engine id, so one loaded
+// plugin can present all three answers without publishing three sets of details.
 class LyingEngineNamePlugin : public TestPluginBase
 {
 public:
@@ -46,10 +44,8 @@ public:
         return hipdnn_tests::plugin_constants::engineId<LyingEngineNamePlugin>();
     }
 
-    // getEngineName is deliberately not overridden: the base returns nullptr,
-    // which leaves EngineDetails.name unset. With the entry point also refusing
-    // to produce a usable name, both plugin-supplied tiers come up empty and
-    // resolution has to reach the host-side fallback.
+    // getEngineName is deliberately not overridden, so EngineDetails.name is unset
+    // and resolution has to reach the host-side fallback.
 
     uint32_t getNumEngines() const override
     {
@@ -96,15 +92,13 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 
     if(engineId == constants::engineId<LyingEngineNamePluginEmptyName>())
     {
-        // Claims success with a name that carries no information.
         *name = "";
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }
 
     if(engineId == constants::engineId<LyingEngineNamePluginErrorStatus>())
     {
-        // Writes a perfectly usable name and then fails. The host must honour
-        // the status and discard the name.
+        // The host must honour the status and discard the name.
         *name = constants::K_LYING_ENGINE_NAME_UNUSABLE_NAME;
         return HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR;
     }

@@ -33,14 +33,10 @@ public:
      * @brief Reports whether this plugin exports the optional engine-name
      *        symbol (`hipdnnEnginePluginGetEngineName`).
      *
-     * Plugins built against engine plugin API < 1.4.0 do not export it. A
-     * plugin that does export it may still have no name for a given engine,
-     * which it reports as `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`; both cases are
-     * normal and both fall through to the host's own naming.
-     *
-     * This is the sole predicate for consulting the plugin about names — the
-     * version a plugin reports through `apiVersion()` is not consulted, because
-     * it is self-declared and most plugins leave it at the 1.0.0 baseline.
+     * Plugins built against engine plugin API < 1.4.0 do not export it. Symbol
+     * presence is the sole predicate for consulting the plugin about names: the
+     * version a plugin reports is self-declared, and most plugins leave it at
+     * the 1.0.0 baseline.
      */
     virtual bool hasEngineName() const;
 
@@ -48,10 +44,8 @@ public:
      * @brief Queries the plugin for the canonical name of an engine.
      *
      * Never throws. Returns `std::nullopt` when the symbol is absent, when the
-     * plugin reports any non-success status (including
-     * `HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`, the normal answer from a plugin
-     * whose container supplies no names), or when the returned string is null
-     * or empty.
+     * plugin reports any non-success status, or when the returned string is
+     * null or empty.
      *
      * @param engineId Engine ID as reported by `getAllEngineIds()`.
      */
@@ -207,8 +201,7 @@ private:
                                                              const int64_t* const*)
         = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
 
-    // Optional engine-name symbol, engine plugin API 1.4.0 and newer. Resolved
-    // via tryAssignSymbol; nullptr when the plugin does not export it.
+    // Optional engine-name symbol, engine plugin API 1.4.0 and newer.
     hipdnnPluginStatus_t (*_funcGetEngineName)(int64_t, const char**)
         = nullptr; ///< Default nullptr is load-bearing: tryAssignSymbol leaves this untouched when the symbol is absent.
 

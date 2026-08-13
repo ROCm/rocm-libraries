@@ -230,10 +230,8 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
 # libhipdnn_test_engine_plugin1.so or hipdnn_test_engine_plugin1.dll (used by
 # TestEnginePluginResourceManager.cpp)
 #
-# The only consumer of EnginePluginImpl.inl inside the main build. Its container
-# omits the optional getEngineName member, so compiling this target is itself the
-# assertion that engine naming stayed optional for containers, and loading it
-# proves the generated entry point is exported and reports NOT_APPLICABLE.
+# The only consumer of EnginePluginImpl.inl inside the main build; see
+# plugins/codegen_fixture/CodegenFixturePlugin.hpp for what it pins.
 #
 # It lives in its own codegen_fixture/ subdirectory rather than beside the flat
 # test plugins above: this is a real, loadable engine plugin, and the plugins in

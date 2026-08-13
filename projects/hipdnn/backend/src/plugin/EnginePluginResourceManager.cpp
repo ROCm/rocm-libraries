@@ -91,8 +91,7 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
 
 /// Records the (plugin, engine ID) pairs already warned about by
 /// warnOnEngineNameIdMismatch, with its own mutex because name resolution runs
-/// on every EngineDescriptor::finalize() and those can be concurrent. The lock
-/// is held only across the set lookup, never across logging.
+/// on every EngineDescriptor::finalize() and those can be concurrent.
 std::mutex gEngineNameWarningMutex;
 std::set<std::pair<std::string, int64_t>> gWarnedEngineNameMismatches;
 
@@ -105,14 +104,10 @@ bool shouldWarnOnEngineNameIdMismatch(std::string_view pluginName, int64_t engin
 
 /// Checks a plugin-supplied engine name against the RFC 0003 name-to-ID hash.
 ///
-/// Log-and-continue by design: the plugin-reported ID stays canonical because
-/// routing, `preferred_engine_id`, and serialized graphs all key on it, while
-/// the reported name is still used for display. A cosmetic naming defect in a
-/// third-party engine pack must not make that vendor's kernels unavailable.
-///
-/// The warning fires once per (plugin, engine ID). The defect is static for the
-/// lifetime of the process, while resolution repeats on every engine descriptor
-/// finalize, so repeating it would bury every other diagnostic in the log.
+/// Log-and-continue by design: the plugin-reported ID stays canonical for
+/// routing and serialization, while the reported name is still used for
+/// display. The warning fires once per (plugin, engine ID), since the defect is
+/// static but resolution repeats on every engine descriptor finalize.
 void warnOnEngineNameIdMismatch(std::string_view pluginName,
                                 int64_t engineId,
                                 std::string_view engineName)
@@ -226,28 +221,23 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
             info.type = pluginType;
             info.pluginName = pluginName;
 
-            // Schema-less context: there is no graph and therefore no
-            // EngineDetails, so the tier-2 candidate is unavailable here.
+            // No graph here, so no EngineDetails candidate.
             info.engineName = resolveEngineName(id, std::nullopt);
 
             infos.push_back(std::move(info));
         }
     }
 
-    // Alphabetical by resolved name is the documented contract. Engine names are
-    // display labels and need not be unique, and neither are engine IDs across
-    // plugins, so the ID and the owning plugin's name break ties: without them
-    // the comparator is only a partial order and std::sort leaves the relative
-    // order of equal-named rows unspecified from run to run.
+    // Alphabetical by resolved name is the documented contract. Names are not
+    // unique, and neither are engine IDs across plugins, so both break ties to
+    // make the comparator a total order and the enumeration stable across runs.
     std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
         return std::tie(a.engineName, a.engineId, a.pluginName)
                < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
-    // The reverse index is built from the sorted vector, so it agrees with the
-    // enumeration by construction. emplace() keeps the first row for a repeated
-    // name, and the sort above is a total order, so the winner is the same on
-    // every run.
+    // Built from the sorted vector, so it agrees with the enumeration by
+    // construction: emplace() keeps the first row for a repeated name.
     auto& idsByName = _cachedEngineIdsByName.emplace();
     idsByName.reserve(infos.size());
     for(const auto& info : infos)
@@ -286,16 +276,7 @@ std::string EnginePluginResourceManager::resolveEngineName(
                                             : std::string_view("<unknown>");
 
     // Tier 1: the owning plugin's hipdnnEnginePluginGetEngineName entry point.
-    //
-    // Symbol presence is the whole predicate. The plugin's self-reported API
-    // version is deliberately NOT consulted: it is a string the plugin chooses,
-    // most plugins in and out of tree either omit it or hardcode an older value,
-    // and gating on it would deny naming to every one of them. Symbol presence
-    // is decided instead by the SDK headers the plugin compiled against, so it
-    // cannot disagree with reality. The name is display-only (nothing dispatches
-    // on it), and `hipdnnEnginePluginGetEngineName` is a new name inside the
-    // reserved `hipdnnEnginePlugin*` prefix, so there is no older symbol whose
-    // semantics could be mistaken for this one.
+    // Symbol presence is the whole predicate; see EnginePlugin::hasEngineName().
     std::optional<std::string> entryPointName;
     if(owningPlugin != nullptr && owningPlugin->hasEngineName())
     {
@@ -304,9 +285,8 @@ std::string EnginePluginResourceManager::resolveEngineName(
 
     if(entryPointName.has_value())
     {
-        // The entry point is authoritative; EngineDetails.name is a graph-scoped
-        // echo of it. A disagreement is a plugin defect worth reporting, not
-        // worth failing over.
+        // The entry point is authoritative; a disagreement is a plugin defect
+        // worth reporting, not worth failing over.
         if(detailsName.has_value() && !detailsName->empty() && *detailsName != *entryPointName)
         {
             HIPDNN_BACKEND_LOG_WARN(
@@ -323,8 +303,7 @@ std::string EnginePluginResourceManager::resolveEngineName(
         return *entryPointName;
     }
 
-    // Tier 2: the EngineDetails.name candidate. Unavailable in schema-less
-    // contexts such as getEngineInfos(), which pass std::nullopt.
+    // Tier 2: the EngineDetails.name candidate, absent when there is no graph.
     if(detailsName.has_value() && !detailsName->empty())
     {
         warnOnEngineNameIdMismatch(pluginName, engineId, *detailsName);

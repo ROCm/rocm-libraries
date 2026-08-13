@@ -844,8 +844,6 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t 
         const auto resolved = handle->findEngineIdByName(engineName);
         if(!resolved.has_value())
         {
-            // Well-formed request, nothing satisfies it: no loaded engine carries
-            // this name. BAD_PARAM is reserved for malformed arguments.
             throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                                   std::string("No loaded engine is named '") + engineName + "'.");
         }

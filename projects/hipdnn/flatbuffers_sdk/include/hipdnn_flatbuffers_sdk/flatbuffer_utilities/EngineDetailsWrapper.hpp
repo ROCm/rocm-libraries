@@ -33,8 +33,7 @@ public:
         getKnobByName(const std::string& knobName) const
         = 0;
 
-    /// An empty string means the engine details carry no name, which leaves the
-    /// caller to fall back to the engine ID.
+    /// Empty when the engine details carry no name.
     virtual std::string name() const
     {
         return {};

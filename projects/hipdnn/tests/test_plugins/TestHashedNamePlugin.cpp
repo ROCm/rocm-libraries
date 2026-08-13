@@ -9,11 +9,9 @@ thread_local char
     hipdnn_plugin_sdk::PluginLastErrorManager::s_lastError[HIPDNN_PLUGIN_ERROR_STRING_MAX_LENGTH]
     = "";
 
-// A well-behaved plugin whose engine id is the hash of its own engine name.
-// Production plugins get that identity from HIPDNN_REGISTER_ENGINE, which
-// derives the id from the name; the other fake plugins hardcode unrelated ids.
-// Without a fake that honours the identity, no test can exercise a filter that
-// resolves an engine name by hashing it, such as deselect_engines(names).
+// A well-behaved plugin whose engine id is the hash of its own engine name, the
+// identity HIPDNN_REGISTER_ENGINE gives production plugins. The other fake plugins
+// hardcode unrelated ids, so only this one exercises a name-hashing filter.
 class HashedNamePlugin : public TestPluginBase
 {
 public:
@@ -55,8 +53,5 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<HashedNamePlugin>());
 }
 
-// Register all standard plugin API functions PLUS the optional engine-name
-// entry point, so the engine name reaches the backend through tier 1 of the
-// name-resolution chain as well as through EngineDetails.name.
 REGISTER_TEST_PLUGIN_API()
 REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

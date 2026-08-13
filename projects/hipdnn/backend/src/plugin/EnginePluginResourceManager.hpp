@@ -133,13 +133,13 @@ public:
     virtual size_t getEngineCount() const;
     virtual std::vector<EngineInfo> getEngineInfos() const;
 
-    /// @brief Resolves the display name for an engine using the canonical four-tier
-    /// chain: plugin entry point -> EngineDetails.name -> static registry -> hex ID.
+    /// @brief Resolves the display name for an engine: plugin entry point ->
+    /// EngineDetails.name -> static registry -> hex ID.
     /// Never throws; always returns a non-empty string.
     /// @param engineId    Engine ID as reported by the owning plugin.
-    /// @param detailsName Tier-2 candidate from EngineDetails.name, or std::nullopt
-    ///                    in schema-less contexts such as getEngineInfos(). The
-    ///                    referenced storage must outlive this call.
+    /// @param detailsName Candidate from EngineDetails.name, or std::nullopt when
+    ///                    there is no graph. The referenced storage must outlive
+    ///                    this call.
     [[nodiscard]] virtual std::string
         resolveEngineName(int64_t engineId, std::optional<std::string_view> detailsName) const;
 
@@ -150,15 +150,10 @@ public:
     /// a plugin-supplied name whose FNV-1a hash is not the engine ID resolves
     /// here, whereas hipdnn_data_sdk::utilities::engineNameToId() cannot find it.
     ///
-    /// Engine names are display labels, not keys, and need not be unique. When
-    /// several engines share a name the first in getEngineInfos() order wins,
-    /// which is stable because that order is a total sort on
-    /// (engineName, engineId, pluginName).
-    ///
-    /// Names come from the schema-less resolution path, so tier 2 of
-    /// resolveEngineName() (EngineDetails.name) is not represented: an engine
-    /// named only through EngineDetails is indexed under its registry or hex
-    /// name instead. This is the same limitation getEngineInfos() carries.
+    /// Engine names need not be unique. When several engines share a name the
+    /// first in getEngineInfos() order wins. An engine named only through
+    /// EngineDetails.name is indexed under its registry or hex name instead,
+    /// the same limitation getEngineInfos() carries.
     ///
     /// @param engineName Name to resolve. An empty name never matches.
     /// @return The owning engine ID, or std::nullopt when no loaded engine

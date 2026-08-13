@@ -60,9 +60,8 @@ inline const std::string& testExecuteFailsPluginPath()
 }
 
 // The hashed-name plugin is consumed only by the frontend engine-filtering
-// integration tests, so only targets that define TEST_HASHED_NAME_PLUGIN_NAME
-// get this accessor. Its engine id is the hash of its engine name, which is
-// what lets a name-hashing filter select or bar its engine.
+// integration tests, so only targets that define TEST_HASHED_NAME_PLUGIN_NAME get
+// this accessor.
 #ifdef TEST_HASHED_NAME_PLUGIN_NAME
 inline const std::string& testHashedNamePluginPath()
 {

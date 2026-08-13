@@ -71,8 +71,7 @@ AutotuneResult makeResult(const std::string& engineName,
                           int rank = 0)
 {
     AutotuneResult r;
-    // The ID is derived from the name so the pair round-trips the way a real
-    // backend's does: reading the name back yields exactly this ID.
+    // The ID is derived from the name so the pair round-trips.
     r.engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(engineName);
     r.engineName = engineName;
     r.minTimeMs = minTime;
@@ -549,7 +548,6 @@ TEST(TestAutotuneFileWriter, BuildOverrideEntryFallsBackToHexForEmptyEngineName)
 
     EXPECT_EQ(entry[config_json::ENGINE_NAME], formatEngineIdHex(ENGINE_ID));
     ASSERT_TRUE(entry.contains("autotune_metadata"));
-    // There is no name to record when the engine did not report one.
     EXPECT_FALSE(entry["autotune_metadata"].contains("resolved_engine_name"));
 }
 

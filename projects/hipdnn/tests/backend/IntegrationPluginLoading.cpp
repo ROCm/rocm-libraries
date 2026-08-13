@@ -514,9 +514,8 @@ TEST_F(IntegrationPluginLoading, PluginWithIncompatibleApiVersion)
     EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 0);
 }
 
-// End-to-end regression coverage for ALMIOPEN-1782: a plugin that exports
-// hipdnnEnginePluginGetEngineName must have that name surfaced verbatim by
-// hipdnnGetEngineInfo_ext, which is the same query tools/ListEngines.cpp prints from.
+// A plugin that exports hipdnnEnginePluginGetEngineName must have that name
+// surfaced verbatim by hipdnnGetEngineInfo_ext.
 TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameIsReportedByGetEngineInfo)
 {
     const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
@@ -543,9 +542,8 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameIsReportedByGetEngineIn
         << describeReportedEngines(engines);
 }
 
-// The reverse of the query above: a name read out of hipdnnGetEngineInfo_ext must resolve back to
-// its engine through hipdnnGetEngineIdByName_ext. The plugin-supplied name deliberately does not
-// hash to the plugin's engine id, so a hash of the name cannot produce this answer.
+// The reverse of the query above. The plugin-supplied name deliberately does not hash to the
+// plugin's engine id, so a hash of the name cannot produce this answer.
 TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameResolvesToItsEngineId)
 {
     const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
@@ -618,9 +616,7 @@ TEST_F(IntegrationPluginLoading, GetEngineIdByNameRejectsNullArguments)
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 }
 
-// A plugin that exports neither hipdnnEnginePluginGetEngineName nor an EngineDetails.name, and
-// whose id is absent from the static registry, falls through to the zero-padded uppercase
-// hexadecimal rendering of its engine id.
+// A plugin with no name from any source falls through to the hexadecimal rendering of its id.
 TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointFallsBackToHexId)
 {
     ASSERT_NO_FATAL_FAILURE(
@@ -646,8 +642,7 @@ TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointFallsBackToHex
                                                         << describeReportedEngines(engines);
 }
 
-// test_mismatched_name_plugin carries a hardcoded engine id that its name deliberately does not
-// hash back to, so name resolution reports the disagreement while keeping the plugin-reported id.
+// test_mismatched_name_plugin's name deliberately does not hash back to its hardcoded engine id.
 // The warning is raised once per (plugin, engine id) per process, which is why this is the only
 // test that loads that plugin.
 TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarning)

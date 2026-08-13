@@ -32,17 +32,8 @@ set(TEST_GOOD_DEFAULT_PLUGIN_NAME "test_good_default_plugin")
 set(TEST_KNOBS_PLUGIN_NAME "test_knobs_plugin")
 set(TEST_KNOB_CONSTRAINT_VALIDATION_PLUGIN_NAME "test_knob_constraint_validation_plugin")
 set(TEST_INCOMPATIBLE_VERSION_PLUGIN_NAME "test_incompatible_version_plugin")
-
-# Hashed-name fake: its engine id is the hash of its own engine name, so
-# name-hashing filters such as deselect_engines(names) reach its engine.
 set(TEST_HASHED_NAME_PLUGIN_NAME "test_hashed_name_plugin")
-
-# Lying-engine-name fake: answers the optional engine-name entry point with
-# malformed results that the host must reject, one per engine id.
 set(TEST_LYING_ENGINE_NAME_PLUGIN_NAME "test_lying_engine_name_plugin")
-
-# Mismatched-name fake: names its engine well but hardcodes an id the name does
-# not hash back to.
 set(TEST_MISMATCHED_NAME_PLUGIN_NAME "test_mismatched_name_plugin")
 
 # Override-execute fake plugin names

@@ -215,8 +215,6 @@ int main(int argc, char* argv[])
 
         const int64_t engineId = rankedEngineIds[0];
 
-        // Resolved once from the backend so plugin-supplied engines are named correctly;
-        // the built-in registry has no entry for them.
         const std::string engineName = getEngineName(*graph, engineId);
 
         demonstrateKnobQuery(engineId, engineName, *graph);

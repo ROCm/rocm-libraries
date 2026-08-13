@@ -798,15 +798,11 @@ for (const auto& path : paths) {
 
 ### Engine Names
 
-The plugin names its own engines. `ExampleProviderContainer::getEngineName()`
-maps each engine ID to a string, and `EnginePluginImpl.inl` exports that as the
-`hipdnnEnginePluginGetEngineName` entry point. hipDNN calls it whenever it needs
-a display name, so `hipdnn_list_engines`, frontend logging, and the
-`HIPDNN_ATTR_ENGINE_NAME_EXT` engine-descriptor attribute all show
+The plugin names its own engines: `ExampleProviderContainer::getEngineName()`
+maps each engine ID to a string, so hipDNN displays
 `EXAMPLE_PROVIDER_RELU_ENGINE` rather than a hexadecimal engine ID.
 
-See "Engine names" in `docs/user-guides/how-to/develop-plugins.rst` for the full
-status contract.
+See "Engine names" in `docs/user-guides/how-to/develop-plugins.rst`.
 
 ### Engine Selection
 

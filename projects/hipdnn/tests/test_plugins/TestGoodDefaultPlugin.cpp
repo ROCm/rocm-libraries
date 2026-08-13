@@ -49,8 +49,7 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<GoodDefaultPlugin>());
 }
 
-// Register all standard plugin API functions PLUS the optional engine-name
-// entry point. This is the only plugin installed to test_plugins/default, so it
-// is the one discovered by directory scans that need a named engine.
+// The only plugin installed to test_plugins/default, so it is the one discovered by
+// directory scans that need a named engine.
 REGISTER_TEST_PLUGIN_API()
 REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

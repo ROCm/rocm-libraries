@@ -88,8 +88,6 @@ public:
     void makeEngineFinalized() const
     {
         expectFinalizeCalls(ENGINE_ID);
-        // The mock resolves to the hexadecimal rendering of the engine ID by
-        // default, matching the resolver's last-resort answer.
         EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _));
         ASSERT_NO_THROW(getEngineDescriptor()->finalize());
     }
@@ -610,13 +608,8 @@ TEST_F(TestEngineDescriptor, GetEngineIdReturnsValueIfFinalized)
     ASSERT_EQ(engineId, 0);
 }
 
-// HIPDNN_ATTR_ENGINE_NAME_EXT cases.
-//
-// EnginePluginResourceManager::resolveEngineName() is mocked here. What these
-// cases pin is the descriptor's half of the contract: the candidate name it
-// derives from the engine details and hands over, and its publishing of
-// whatever name comes back. Resolution itself is covered in
-// TestEnginePluginResourceManager.cpp.
+// HIPDNN_ATTR_ENGINE_NAME_EXT. The resolver is mocked; these pin the candidate
+// the descriptor derives and the name it publishes.
 
 TEST_F(TestEngineDescriptor, GetEngineNameFromEngineDetails)
 {
@@ -626,9 +619,6 @@ TEST_F(TestEngineDescriptor, GetEngineNameFromEngineDetails)
     expectResolveEngineName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
 
-    // The engine details supplied a name, so the descriptor offers it as the
-    // candidate. Handing it over intact is the assertion; that the resolver
-    // then answers with it is a stub, not a finding.
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_EQ(*_capturedDetailsName, "EXAMPLE_PROVIDER_RELU_ENGINE");
@@ -647,15 +637,10 @@ TEST_F(TestEngineDescriptor, GetEngineNamePublishesResolverAnswerNotItsOwnCandid
     expectResolveEngineName(registeredEngineId, "PACK_SUPPLIED_ENGINE");
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
 
-    // The descriptor still hands over the candidate it holds even though the
-    // resolver overrules it, because the resolver needs it to detect exactly
-    // this disagreement.
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_EQ(*_capturedDetailsName, "DETAILS_ENGINE");
 
-    // What the descriptor publishes is the resolver's answer, never the name it
-    // read out of the engine details and never the registry's.
     EXPECT_EQ(getEngineName(), "PACK_SUPPLIED_ENGINE");
     EXPECT_NE(getEngineName(), "DETAILS_ENGINE");
     EXPECT_NE(getEngineName(), hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
@@ -663,9 +648,7 @@ TEST_F(TestEngineDescriptor, GetEngineNamePublishesResolverAnswerNotItsOwnCandid
 
 TEST_F(TestEngineDescriptor, GetEngineNameWithoutNameInEngineDetails)
 {
-    // The default fixture buffer carries an engine ID and nothing else, so the
-    // candidate the descriptor derives is present but empty. The stub stands in
-    // for a resolver that found no name anywhere.
+    // Default fixture buffer: engine ID only, so the candidate is present but empty.
     expectFinalizeCalls(ENGINE_ID);
     expectResolveEngineName(ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
@@ -685,8 +668,6 @@ TEST_F(TestEngineDescriptor, GetEngineNameForUnknownEngineIdUsesHex)
     expectResolveEngineName(UNREGISTERED_ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
 
-    // A hexadecimal name is published verbatim, zero padding and all: the
-    // descriptor applies no formatting of its own to what it is handed.
     EXPECT_TRUE(_resolverCalled);
     EXPECT_EQ(getEngineName(), "0x0123456789ABCDEF");
 }
@@ -699,9 +680,8 @@ TEST_F(TestEngineDescriptor, GetEngineNameEmptyNameInEngineDetails)
     expectResolveEngineName(ENGINE_ID, std::nullopt);
     ASSERT_NO_THROW(getEngineDescriptor()->finalize());
 
-    // An unset schema string reads back as an empty one, and the descriptor
-    // forwards it as an engaged candidate rather than suppressing it. Deciding
-    // that empty means absent is the resolver's job, not the descriptor's.
+    // An unset schema string reads back as an empty one and is forwarded as an
+    // engaged candidate.
     EXPECT_TRUE(_resolverCalled);
     ASSERT_TRUE(_capturedDetailsName.has_value());
     EXPECT_TRUE(_capturedDetailsName->empty());
@@ -723,8 +703,6 @@ TEST_F(TestEngineDescriptor, FinalizeFailsBeforeNameResolutionWhenEngineDetailsM
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
         .WillOnce(Return(std::vector<int64_t>{ENGINE_ID}));
 
-    // No action: the out parameter is left null, as a plugin that has nothing to
-    // report would leave it.
     EXPECT_CALL(*_mockEnginePluginResourceManager, getEngineDetails(_, _, _));
     EXPECT_CALL(*_mockEnginePluginResourceManager, resolveEngineName(_, _)).Times(0);
 
@@ -760,7 +738,6 @@ TEST_F(TestEngineDescriptor, SetEngineNameIsRejected)
     auto engine = getEngineDescriptor();
     const char* name = "USER_SUPPLIED_ENGINE";
 
-    // The name is backend-provided; the attribute is read-only.
     ASSERT_THROW_HIPDNN_STATUS(engine->setAttribute(HIPDNN_ATTR_ENGINE_NAME_EXT,
                                                     HIPDNN_TYPE_CHAR,
                                                     static_cast<int64_t>(std::strlen(name)),

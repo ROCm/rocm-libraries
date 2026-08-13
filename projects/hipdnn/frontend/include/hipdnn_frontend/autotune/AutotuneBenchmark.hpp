@@ -99,10 +99,8 @@ inline Error
 // Initializes an AutotuneResult with the sub-set identity and config fields known
 // before a candidate is benchmarked. The benchmark loop fills the timing, succeeded,
 // rank, and compiledPlanIndex fields during/after timing.
-// engineName is the caller-resolved display name for engineId. Resolving it is the
-// caller's job because naming a plugin-supplied engine requires an engine descriptor
-// built against the operation graph, which is expensive enough to be worth resolving
-// once per engine rather than once per result.
+// engineName is the caller-resolved display name for engineId; the caller resolves
+// it once per engine rather than once per result.
 inline AutotuneResult makeBenchmarkResult(int64_t engineId,
                                           const std::vector<KnobSetting>& knobSettings,
                                           int64_t estimatedWorkspaceSize,
@@ -127,8 +125,6 @@ inline AutotuneResult makeBenchmarkResult(int64_t engineId,
 // workspace sizes and the error message; everything else is the common
 // non-benchmarked values (succeeded==false, rank==-1, compiledPlanIndex==-1).
 // A workspace size of -1 means "not applicable / never compiled".
-// engineName is the caller-resolved display name for engineId, for the same reason
-// as in makeBenchmarkResult().
 inline AutotuneResult makeNonBenchmarkedResult(int64_t engineId,
                                                const std::vector<KnobSetting>& knobSettings,
                                                int64_t estimatedWorkspaceSize,

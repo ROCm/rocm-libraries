@@ -35,8 +35,7 @@ class ExampleProviderEngine : public hipdnn_plugin_sdk::IEngine<ExampleProviderH
 public:
     /// @param id   Engine ID, as reported through copyEngineIds().
     /// @param name Canonical engine name, echoed into EngineDetails.name. An
-    ///             empty name leaves the field unset, which the host reads as
-    ///             "no name from this tier".
+    ///             empty name leaves the field unset.
     explicit ExampleProviderEngine(int64_t id, std::string_view name = {});
 
     int64_t id() const override;

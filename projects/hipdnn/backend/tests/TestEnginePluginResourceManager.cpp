@@ -1794,13 +1794,6 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosSinglePlugin)
 
         ASSERT_EQ(infos.size(), 2);
 
-        // hasEngineName() is left unstubbed, so gmock returns false and the plugin
-        // is treated as one that exports no engine names. Name resolution therefore
-        // skips the plugin entry point, finds no EngineDetails in this schema-less
-        // context and no registry entry for these IDs, and lands on the hexadecimal
-        // fallback. GetEngineInfosUsesPluginSuppliedEngineName covers the opposite
-        // case.
-        //
         // Results are sorted by engineName. formatEngineIdHex(100) = "0x0000000000000064",
         // formatEngineIdHex(101) = "0x0000000000000065"
         EXPECT_EQ(infos[0].engineId, 100);
@@ -1853,12 +1846,6 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosMultiplePlugins)
 
         ASSERT_EQ(infos.size(), 2);
 
-        // Neither plugin stubs hasEngineName(), so both resolve to the hexadecimal
-        // fallback and the name order happens to coincide with the ID order. That
-        // coincidence is what makes this test a poor probe of the sort key, so
-        // GetEngineInfosSortsByResolvedNameNotEngineId exists alongside it with the
-        // two orders deliberately opposed.
-        //
         // Sorted by engineName: "0x0000000000000064" (100) < "0x00000000000000C8" (200)
         EXPECT_EQ(infos[0].engineId, 100);
         EXPECT_EQ(infos[0].engineName, "0x0000000000000064");
@@ -2862,11 +2849,8 @@ INSTANTIATE_TEST_SUITE_P(
     [](const auto& info) { return std::string(info.param.name); });
 
 // ---------------------------------------------------------------------------
-// Engine name resolution
-//
-// The tests below drive getEngineInfos(), the schema-less caller of
-// resolveEngineName(): it has no graph and therefore no EngineDetails, so the
-// EngineDetails.name candidate is never in play here.
+// Engine name resolution, driven through getEngineInfos() (no graph, so no
+// EngineDetails candidate).
 // ---------------------------------------------------------------------------
 
 namespace
@@ -2875,10 +2859,8 @@ namespace
 const auto K_HARNESS_HANDLE = hipdnnEnginePluginHandle_t(0xdeadbeef);
 const auto K_HARNESS_SECOND_HANDLE = hipdnnEnginePluginHandle_t(0xcafebabe);
 
-/// Wires one mock engine plugin behind a mock plugin manager, which is the least
-/// an EnginePluginResourceManager needs to map an engine ID back to its owning
-/// plugin. The plugin vector is a member because getPlugins() hands back a
-/// reference to it and the manager outlives the call.
+/// One mock engine plugin behind a mock plugin manager. The plugin vector is a
+/// member because getPlugins() hands back a reference to it.
 struct SingleEnginePluginHarness
 {
     explicit SingleEnginePluginHarness(int64_t engineId)
@@ -2912,10 +2894,8 @@ struct SingleEnginePluginHarness
     std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
 };
 
-/// The two-plugin counterpart, for the cases where the point is how rows from
-/// separate plugins land relative to each other. The handles differ because the
-/// resource manager drops a plugin whose handle collides with one already
-/// registered.
+/// Two-plugin counterpart. The handles differ because the resource manager drops
+/// a plugin whose handle collides with one already registered.
 struct DualEnginePluginHarness
 {
     DualEnginePluginHarness(int64_t firstEngineId, int64_t secondEngineId)
@@ -2999,10 +2979,8 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosUsesEngineNameRegardlessOfRe
     harness.stubIdentity("test-plugin", "1.0");
 
     // A plugin reporting the 1.0.0 baseline, which is what every plugin that omits
-    // HIPDNN_PLUGIN_API_VERSION reports and what the in-tree providers hardcode
-    // below. Tier 1 must still be taken: the predicate is symbol presence, and a
-    // version gate here would deny naming to essentially every plugin that exists.
-    // Regression guard — do not reintroduce a version check in resolveEngineName.
+    // HIPDNN_PLUGIN_API_VERSION reports. Tier 1 is still taken: the predicate is
+    // symbol presence, not API version.
     EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*harness.plugin, apiVersion())
         .WillRepeatedly(::testing::Return(hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE));
@@ -3213,11 +3191,8 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosOrdersEnginesSharingOneResol
 }
 
 // ---------------------------------------------------------------------------
-// Name -> ID resolution
-//
-// findEngineIdByName() inverts the names getEngineInfos() reports. It shares
-// that enumeration's blind spot: no graph means no EngineDetails, so a name that
-// exists only in tier 2 is not indexed.
+// Name -> ID resolution. findEngineIdByName() inverts getEngineInfos() and
+// shares its blind spot for tier-2-only names.
 // ---------------------------------------------------------------------------
 
 TEST(TestEnginePluginResourceManager, FindEngineIdByNameResolvesPluginSuppliedEngineName)
@@ -3356,13 +3331,8 @@ TEST(TestEnginePluginResourceManager, FindEngineIdByNameReturnsNulloptWhenNoEngi
 }
 
 // ---------------------------------------------------------------------------
-// Tier 2, the EngineDetails.name candidate
-//
-// getEngineInfos() cannot reach tier 2: it has no graph and so always passes
-// std::nullopt. resolveEngineName() is public and takes the candidate directly,
-// which is how these cases reach it without building a graph. This is the only
-// coverage of the tier-2 branch and of the entry-point-versus-details
-// disagreement — the descriptor-side tests run against a different chain.
+// Tier 2, the EngineDetails.name candidate. Reached by calling
+// resolveEngineName() directly, since getEngineInfos() always passes nullopt.
 // ---------------------------------------------------------------------------
 
 TEST(TestEnginePluginResourceManager, ResolveEngineNameUsesEngineDetailsNameWhenPluginSuppliesNone)
@@ -3458,11 +3428,8 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameTreatsEmptyEngineDetailsN
 }
 
 // ---------------------------------------------------------------------------
-// Full precedence and the disagreement diagnostic
-//
-// The cases above pit the entry point against one lower tier at a time. These
-// use an engine ID the in-tree registry already names, so tiers 1, 2 and 3 can
-// all answer and all answer differently.
+// Full precedence: an engine ID the in-tree registry names, so tiers 1, 2 and 3
+// all answer differently.
 // ---------------------------------------------------------------------------
 
 TEST(TestEnginePluginResourceManager, ResolveEngineNameFallsBackToStaticRegistryName)
@@ -3671,13 +3638,8 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameReportsNameIdMismatchOnly
 }
 
 // ---------------------------------------------------------------------------
-// Generated entry point, exercised against the real codegen fixture binary
-//
-// Everything above uses mocks and therefore says nothing about the code
-// EnginePluginImpl.inl emits. The fixture plugin is a real shared library whose
-// container omits the optional getEngineName member, so it is the only in-tree
-// check that the generated entry point exists, is exported, and answers
-// NOT_APPLICABLE instead of failing to compile or misbehaving at run time.
+// The generated entry point, against the real fixture binary. See
+// plugins/codegen_fixture/CodegenFixturePlugin.hpp.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -3748,14 +3710,8 @@ TEST(TestEnginePluginResourceManager, CodegenFixtureResolvesToHexThroughResource
 }
 
 // ---------------------------------------------------------------------------
-// Malformed plugin answers, exercised against a real misbehaving fixture
-//
-// EnginePlugin::getEngineName discards a plugin's answer when the status is not
-// SUCCESS, when the name pointer is null, or when the name is empty. None of
-// those branches is reachable any other way: the shared fixture implementation
-// is conforming by construction, and the mock-based tests above replace the
-// virtual so the real body never executes. The lying fixture supplies one
-// malformed answer per engine id.
+// Malformed plugin answers. The lying fixture supplies one malformed answer per
+// engine id; see tests/test_plugins/TestLyingEngineNamePlugin.cpp.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -3768,13 +3724,9 @@ const auto LYING_ENGINE_NAME_PLUGIN_PATH
       / hipdnn_data_sdk::utilities::getLibraryName(TEST_LYING_ENGINE_NAME_PLUGIN_NAME);
 // NOLINTEND(bugprone-throwing-static-initialization)
 
-// Mirrors the HIPDNN_MAP_TO_ID entries in tests/test_plugins/TestPluginEngineIdMap.hpp
-// and the name constant beside them. That header is deliberately not pulled in:
-// tests/test_plugins/ carries its own TestPluginConstants.hpp, so putting the
-// directory on this target's include path would let it shadow the one sitting
-// next to this file. Copying the values is safe because the fixture derives its
-// answers from the map, so any drift makes the assertions below fail rather
-// than pass quietly.
+// Mirrors TestPluginEngineIdMap.hpp. That header is not included because
+// tests/test_plugins/ carries its own TestPluginConstants.hpp, which would
+// shadow the one beside this file.
 constexpr int64_t K_LYING_NULL_NAME_ENGINE_ID = -26;
 constexpr int64_t K_LYING_EMPTY_NAME_ENGINE_ID = -27;
 constexpr int64_t K_LYING_ERROR_STATUS_ENGINE_ID = -28;

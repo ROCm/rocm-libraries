@@ -56,8 +56,7 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<ExecuteFailsPlugin>());
 }
 
-// Register all standard plugin API functions PLUS the optional engine-name
-// entry point. Paired with test_good_plugin, which omits it, this gives the
-// engine-filtering tests one named and one unnamed engine in the same load set.
+// Paired with test_good_plugin, which omits the engine-name entry point, this gives
+// the engine-filtering tests one named and one unnamed engine in the same load set.
 REGISTER_TEST_PLUGIN_API()
 REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

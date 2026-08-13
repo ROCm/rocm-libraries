@@ -54,7 +54,7 @@ The Data SDK contains shared types and utilities used across hipDNN. It includes
 
 - Type helpers (e.g., `half`, `bfloat16`)
 - Tensor and memory utilities
-- The engine name registry (`EngineNames.hpp`), which names the engines built into the hipDNN tree
+- The engine name registry (`EngineNames.hpp`)
 
 ### FlatBuffers SDK (`flatbuffers_sdk`)
 
@@ -101,7 +101,6 @@ hipDNN uses a deterministic hash-based system for managing engine IDs. This syst
 1. **Engine Names**: Define human-readable string names for your engines (e.g., "MIOPEN_PLUGIN", "MY_CUSTOM_ENGINE")
 2. **Hash Function**: The `hipdnn_data_sdk::utilities::engineNameToId()` function converts names to IDs using a FNV-1a hash algorithm
 3. **Registration**: Engine names built into the hipDNN tree are registered in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp` for discoverability
-4. **Lookup**: `hipdnnGetEngineIdByName_ext` resolves a loaded engine's displayed name back to its ID without hashing, so a plugin engine remains addressable by name even when its ID isn't the hash of that name
 
 ### Using Engine IDs
 
@@ -127,7 +126,7 @@ public:
 
 ### Registering New Engine Names
 
-Adding your engine name to the built-in registry is **optional**. A plugin that reports its own engine names is displayed correctly without being registered, so a drop-in plugin can ship without any change to hipDNN source. See [Engine names](./user-guides/how-to/develop-plugins.rst) for how a plugin reports them.
+Registering an engine name is optional — a plugin can report its own names instead. See "Engine names" in [Develop plugins](./user-guides/how-to/develop-plugins.rst).
 
 Engines built into the hipDNN tree are registered as follows:
 
@@ -140,8 +139,6 @@ Engines built into the hipDNN tree are registered as follows:
    HIPDNN_REGISTER_ENGINE(MY_NEW_ENGINE)
    ```
 
-3. **Test Locally First**: You can use unregistered names during development
-
 ### Benefits
 
 - **Deterministic**: Same name always produces same ID
@@ -150,7 +147,7 @@ Engines built into the hipDNN tree are registered as follows:
 - **Forward Compatible**: New engines can be used without registry updates
 
 > [!TIP]
-> 💡 Engine IDs are not enforced unique across separately built plugins — a plugin may report any `int64_t`, and two plugins claiming the same ID are not rejected at load time. You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
+> 💡 You can query registered engines using `hipdnn_data_sdk::utilities::getAllEngineNames()` and check for name collisions using the provided test utilities.
 
 ## Creating a Kernel Engine Plugin
 
@@ -766,5 +763,3 @@ nm -gD your_plugin.so | grep " T "
 ```
 
 If you see many internal symbols exported, your visibility settings are incorrect.
-
-`hipdnnEnginePluginGetEngineName` is present even if your container doesn't implement `getEngineName` — see [Engine names](./user-guides/how-to/develop-plugins.rst).

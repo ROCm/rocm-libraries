@@ -58,7 +58,5 @@ __attribute__((constructor)) static void initializePlugin()
     TestPluginBase::setInstance(std::make_unique<MismatchedNamePlugin>());
 }
 
-// The optional engine-name entry point is registered alongside the standard
-// surface: tier 1 is where the warning is raised from.
 REGISTER_TEST_PLUGIN_API()
 REGISTER_TEST_PLUGIN_ENGINE_NAME_API()

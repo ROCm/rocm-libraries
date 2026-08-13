@@ -36,18 +36,10 @@ public:
     /// copied. Returns: Total number of available engines (regardless of maxEngines value).
     static uint32_t copyEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t& numEngines);
 
-    /// Reports the canonical name of one engine.
-    ///
-    /// Optional member of the container concept: EnginePluginImpl.inl detects
-    /// it and routes hipdnnEnginePluginGetEngineName here. A container that
-    /// omits it still exports the entry point, which then reports
-    /// HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE.
-    ///
-    /// The string written to *name must outlive the call; it points at the
-    /// static storage created by HIPDNN_REGISTER_ENGINE.
-    ///
-    /// Returns HIPDNN_PLUGIN_STATUS_BAD_PARAM when engineId is not one of this
-    /// plugin's engines.
+    /// Reports the canonical name of one engine. Optional member of the
+    /// container concept; see the "Engine names" section of
+    /// docs/user-guides/how-to/develop-plugins.rst for the status contract.
+    /// Returns HIPDNN_PLUGIN_STATUS_BAD_PARAM for an unknown engine ID.
     static hipdnnPluginStatus_t getEngineName(int64_t engineId, const char** name);
 
     hipdnn_plugin_sdk::
@@ -59,8 +51,7 @@ private:
     {
         int64_t id;
         /// Points at the HIPDNN_REGISTER_ENGINE-generated _NAME constant, which
-        /// has static storage duration and therefore satisfies the plugin API's
-        /// lifetime requirement for the name it hands back to the host.
+        /// has static storage duration.
         const char* name;
         std::function<ExampleProviderEnginePtr(const IKernelCompiler&)> createEngine;
     };

@@ -36,11 +36,7 @@
  *    - Must have: EngineManager<...>& getEngineManager()
  *    - Must have: static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
  *    - May have (optional): static hipdnnPluginStatus_t getEngineName(int64_t, const char**)
- *      Supplies human-readable engine names. The hipdnnEnginePluginGetEngineName
- *      entry point is exported either way; when the member is absent it reports
- *      HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE and the host falls back to its own
- *      naming. The returned string must remain valid for the lifetime of the
- *      loaded library.
+ *      See hipdnnEnginePluginGetEngineName.
  *
  * ## Usage Example
  *
@@ -293,8 +289,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
     }
 
     // NOT_APPLICABLE is the ordinary answer for a container that supplies no name for this engine,
-    // including every container that does not implement getEngineName at all. The host falls back
-    // to its own naming, so this is neither an error nor a success worth reporting as one.
+    // so it is neither an error nor a success worth reporting as one.
     if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
     {
         HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << __func__ << "] engineId=" << engineId);

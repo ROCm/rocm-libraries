@@ -12,19 +12,15 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # own engine name rather than a hexadecimal fallback.
 #
 # Discovery is pointed at ${HIPDNN_TEST_PLUGIN_DIR}/default via HIPDNN_PLUGIN_DIR. The /default
-# suffix is required: plugin discovery is non-recursive, the flat test-plugin directory and its
-# custom/ subdirectory both hold deliberate load-rejection fixtures, and default/ holds exactly one
-# plugin, ${TEST_GOOD_DEFAULT_PLUGIN_NAME}, which reports the engine name asserted below.
+# suffix is required: discovery is non-recursive, and default/ holds exactly one plugin,
+# ${TEST_GOOD_DEFAULT_PLUGIN_NAME}, which reports the engine name asserted below.
 if(NOT HIPDNN_SKIP_TESTS AND TARGET ${TEST_GOOD_DEFAULT_PLUGIN_NAME})
-    # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME in tests/test_plugins/TestPluginEngineIdMap.hpp and
-    # the engine ID mapped to GoodDefaultPlugin in the same header, rendered by ListEngines.cpp as a
-    # zero-padded uppercase 64-bit hexadecimal value.
+    # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME and the engine ID mapped to GoodDefaultPlugin, both
+    # in tests/test_plugins/TestPluginEngineIdMap.hpp.
     set(HIPDNN_LIST_ENGINES_SMOKE_EXPECTED "TEST_GOOD_DEFAULT_ENGINE (0xFFFFFFFFFFFFFFFD)")
 
     # The tool is a plain CLI, not a gtest binary, so the checks live in a driver script: it asserts
-    # a zero exit status, an explicitly non-empty engine list, and the expected name anywhere in the
-    # output. The substring search keeps the assertion independent of the listing order, which
-    # varies with the engine names present.
+    # a zero exit status, a non-empty engine list, and the expected name anywhere in the output.
     # cmake-format: off
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ListEnginesSmokeTest.cmake" [[
 if(NOT DEFINED HIPDNN_LIST_ENGINES_TOOL OR NOT DEFINED HIPDNN_LIST_ENGINES_EXPECTED)
@@ -72,11 +68,8 @@ endif()
     # CMake driver script instead, so its two run-time prerequisites -- the tool binary and the
     # plugin it discovers -- are appended to CHECK_DEPENDS_GLOBAL by hand.
     #
-    # CHECK_EXECUTABLE_PATHS_GLOBAL is deliberately not touched: it feeds
-    # cmake/scripts/test_name_validator.py, which drives --gtest_list_tests, and neither the tool
-    # nor the plugin answers that. HIPDNN_TEST_TARGETS is likewise skipped, since
-    # install_hipdnn_ctest_files() would emit `add_test(<name> "../<name>")` for it, which is not
-    # how this test is invoked.
+    # CHECK_EXECUTABLE_PATHS_GLOBAL and HIPDNN_TEST_TARGETS are deliberately not touched: both
+    # assume a gtest executable installed under its own test name.
     set(CHECK_DEPENDS_GLOBAL ${CHECK_DEPENDS_GLOBAL} hipdnn_list_engines
                              ${TEST_GOOD_DEFAULT_PLUGIN_NAME}
         CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE
