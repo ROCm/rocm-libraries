@@ -1412,10 +1412,29 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
             resolvable = false;
         }
 
-        // A name hashing onto an engine someone else already registered is dropped:
-        // EngineManager::addEngine emplace-drops the loser silently while
-        // Container::copyEngineIds still advertises its id. Skipped for a name this loader
-        // itself registered, because reloading the same directory must be idempotent.
+        // A name hashing onto an engine someone else already registered is dropped, and
+        // the incumbent stands: RFC 0020 §10.2.1's drop-all applies to the UEDs in a
+        // collision, and a hand-written engine is not one of them. Skipped for a name this
+        // loader itself registered, because reloading a directory must be idempotent.
+        //
+        // Rarely reachable by design: §4.2 requires a scoped `namespace:local` name and
+        // every built-in is unscoped (HIP_MLOPS_ENGINE, MIOPEN_ENGINE), so a literal
+        // collision cannot be authored -- this fires on an FNV-1a collision between the
+        // two spellings.
+        //
+        // Scope: the registry behind getEngineIdToNameMap() is process-wide but private to
+        // one plugin, which is built with hidden visibility and --exclude-libs=ALL. Two
+        // plugins can therefore claim one engine id without either seeing the other, and
+        // the backend does not adjudicate it: EnginePluginManager::validateBeforeAdding
+        // checks the API version string and ABI major only, with no id dedup (the
+        // heuristic plugin manager has that check; the engine one never grew it). Nothing
+        // a loader can fix -- neither side is visible from here -- so cross-plugin
+        // uniqueness is a backend concern. Descriptors raise the odds of tripping it,
+        // since a UED name comes from a file rather than a curated macro list.
+        //
+        // In-process pairs this cannot see -- two hand-written engines, or anything
+        // registering after the load -- are caught by EngineManager::addEngine, which logs
+        // the duplicate rather than letting the map discard it in silence.
         const auto& registered = hipdnn_data_sdk::utilities::getEngineIdToNameMap();
         const auto claimed
             = registered.find(hipdnn_data_sdk::utilities::engineNameToId(set.engine.name));
