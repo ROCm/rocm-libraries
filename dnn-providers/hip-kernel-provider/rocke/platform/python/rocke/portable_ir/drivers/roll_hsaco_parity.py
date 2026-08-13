@@ -102,7 +102,10 @@ def _conv(**over):
         warp_tile_n=16,
         warp_tile_k=16,
         pipeline="mem",
-        epilogue="default",
+        # Not "default": the K axis this lane rolls drives an auto-derived
+        # vector_size_c of 8, and the conv gate refuses the default epilogue
+        # for any store wider than one element.
+        epilogue="cshuffle",
     )
     for k, v in over.items():
         (prob if k in prob else geom)[k] = v
