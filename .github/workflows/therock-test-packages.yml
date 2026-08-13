@@ -28,7 +28,10 @@ permissions:
 jobs:
   configure_test_matrix:
     name: "Configure test matrix"
-    runs-on: ${{ inputs.test_runs_on }}
+    # This job only checks out sources and runs a Python script to compute the
+    # test matrix; it does not need a GPU. Matches the equivalent job in
+    # TheRock's own test_artifacts.yml, which already uses a standard runner.
+    runs-on: ubuntu-24.04
     if: ${{ inputs.test_runs_on != '' }}
     outputs:
       components: ${{ steps.configure.outputs.components }}
