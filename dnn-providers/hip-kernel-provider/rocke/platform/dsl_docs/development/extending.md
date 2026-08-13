@@ -13,7 +13,17 @@ Each recipe is a concrete checklist. Tests in `tests/test_rocke.py` are pinned t
 
 ## 1. Adding A New IR Operation
 
-Layer order matters.
+Layer order matters. A new op has seven touchpoints; do them in this order:
+
+1. **Python IRBuilder + purity** — the builder method and, for a pure op, the `PURE_OP_NAMES` entry in `core/ir.py` (§1.1).
+2. **C++ IRBuilder + opcode tables** — `rocke_b_<op>` in `cpp/core/ir/*.cpp`, the extern-C decl and the `rocke_opcode_t` enumerator in `cpp/include/rocke/ir.h`, plus the three parallel per-opcode tables: the name and purity tables in `cpp/core/ir/core_types.cpp` and the arity classifier in `cpp/core/verify.cpp` (§1.2).
+3. **Python LLVM lowering** — the `_op_<name>` handler (and any intrinsic decl) in `core/lower_llvm.py` (§1.4).
+4. **C++ LLVM lowering** — the mirrored handler, intrinsic decl in `cpp/core/lower_llvm/data.cpp`, and dispatch registration under `cpp/core/lower_llvm/` (§1.4).
+5. **Optional HIP debug lowering** — `core/lower_hip.py` (§1.5).
+6. **Serialization** — nothing to do; the serializer is generic and walks ops/attrs by shape, so a new op round-trips for free (it round-trips through the `rocke_opcode_names[]` string added in touchpoint 2).
+7. **Tests + byte-identity** — `tests/test_rocke.py` plus the `tools/check_byte_identity.py` differential (§1.6).
+
+Both IRBuilders (Python and C++) must be able to author the op, and both LLVM lowerers must emit byte-identical IR, or the differential byte-identity check fails.
 
 ### 1.1 Builder method in `core/ir.py`
 
@@ -35,13 +45,48 @@ def my_op(self, a: Value) -> Value:
     ).result
 ```
 
-For side-effecting (e.g. a new memory op), do not assign `is_pure` truthy via `attrs["pure"] = True`. The default classifier picks side-effecting names automatically; if the name is non-obvious, override with `attrs["pure"] = False` for clarity.
+**Purity is an allowlist, not an inference.** `Op.is_pure` honors an explicit `attrs["pure"]` if present, otherwise falls back to `is_pure_op_name(name)` — membership in the `PURE_OP_NAMES` set near the bottom of `core/ir.py`. A name absent from the set is treated as side-effecting. So:
 
-### 1.2 Optional textual printer in `core/ir_print.py`
+- **Pure op** (most math/arith): add its dotted name to `PURE_OP_NAMES`, or it will be conservatively treated as side-effecting (blocking DCE / reordering). This is a required touchpoint for pure ops, and it has a C++ mirror (`rocke_opcode_pure[]`, §1.2).
+- **Side-effecting op** (e.g. a new memory op): add nothing — absence from the set already means side-effecting. Set `attrs["pure"] = False` only if you want it explicit at the call site.
+
+### 1.2 C++ IRBuilder method in `cpp/core/ir/`
+
+The C++ engine has its own IRBuilder, and it must author the same op or the byte-identity differential (§1.4) has nothing to compare against. Add an extern-C `rocke_b_<op>` function that mirrors the Python builder method from §1.1 and delegates to the generic op constructor.
+
+- **Implementation** goes in the matching bucket file under `cpp/core/ir/`: `ir_arith.cpp` for arith/math, `ir_mem.cpp` for memory ops, `ir_tile.cpp` for tile ops, and so on.
+- **Declaration** goes in `cpp/include/rocke/ir.h`, next to the peer op decls.
+
+Most scalar ops reduce to the `rocke_i_unop` / `rocke_i_binop` shorthands, which wrap the generic constructor:
+
+```cpp
+// cpp/core/ir/ir_arith.cpp
+rocke_value_t* rocke_b_my_op(rocke_ir_builder_t* b, rocke_value_t* a)
+{
+    return rocke_i_unop(b, ROCKE_OP_MATH_MY_OP, a, "my");
+}
+```
+
+```c
+/* cpp/include/rocke/ir.h */
+rocke_value_t* rocke_b_my_op(rocke_ir_builder_t* b, rocke_value_t* a);
+```
+
+For ops with no unop/binop shorthand (extra operands, attrs, or multiple results), call the generic `rocke_b_op` directly — it is the C++ mirror of Python's `IRBuilder._op` and creates the result Values, builds the Op, and emits it. Add the opcode to the `rocke_opcode_t` enum in `cpp/include/rocke/ir.h` if it does not already exist. Guard against a failed/NULL builder with `rocke_i_live(b)` exactly as the surrounding methods do.
+
+**Three parallel per-opcode tables must be kept in enumerator order.** The C++ engine indexes several arrays directly by the `rocke_opcode_t` value, so a new enumerator has to be inserted at the *same relative position* in each table — a position mismatch silently returns a neighbor's entry rather than erroring:
+
+- `cpp/core/ir/core_types.cpp` — `rocke_opcode_names[]`: the dotted op-name string. It **must** be byte-identical to the Python `op.name`; the serializer round-trips through `rocke_opcode_name()` (this is what makes serialization "free" — touchpoint 6).
+- `cpp/core/ir/core_types.cpp` — `rocke_opcode_pure[]`: the C++ mirror of Python's `PURE_OP_NAMES` (`true` for a pure op). Consumed by `rocke_opcode_is_pure()`.
+- `cpp/core/verify.cpp` — the arity classifier. Add the enumerator to the matching `case` list (e.g. the unary group for a one-operand op) or the verifier rejects the op.
+
+These three tables plus the enum are why touchpoint 2 is more than "one builder method": all four are indexed by the same enumerator and drift silently if any is missed. The byte-identity differential (§1.4) catches most drift, but only for ops actually exercised by a parity family.
+
+### 1.3 Optional textual printer in `core/ir_print.py`
 
 If you want a clean MLIR-style print, add an entry to the op-name dispatcher. Not required for compilation; only for inspection.
 
-### 1.3 LLVM lowering in `core/lower_llvm.py`
+### 1.4 LLVM lowering in `core/lower_llvm.py` (and its C++ mirror)
 
 Two things to add:
 
@@ -71,11 +116,11 @@ The dispatch picks `_op_<op.name.replace(".", "_")>`. Missing handlers raise `No
 
 There are two peer lowering engines: the native Python lowerer in `core/lower_llvm.py` and a C++ engine under `cpp/` (which mirrors this tree, e.g. `cpp/core/lower_llvm/`). They are required to emit byte-identical LLVM-IR, and the C++ engine is the default backend (`ROCKE_BACKEND=cpp`; it auto-falls back to the Python lowerer if its extension is not built). A new op/intrinsic must be added to **both** engines, or the differential byte-identity check (`ROCKE_BACKEND=both`, and the harness under `tests/instances/differential/`) will fail. Add the Python handler here, mirror it in the C++ engine, and confirm with `tools/check_byte_identity.py`.
 
-### 1.4 Optional HIP debug lowering in `core/lower_hip.py`
+### 1.5 Optional HIP debug lowering in `core/lower_hip.py`
 
 Add a matching handler. Use `__builtin_amdgcn_*` if available; otherwise emit a shim in the `HIP_PROLOGUE` (`include_prologue=True`).
 
-### 1.5 Tests
+### 1.6 Tests
 
 Add at least:
 
@@ -93,6 +138,8 @@ def test_my_op_lowers_to_llvm(self):
     ll = lower_kernel_to_llvm(b.kernel)
     self.assertIn("@llvm.amdgcn.my.op", ll)
 ```
+
+Then run `tools/check_byte_identity.py` (or the `tests/instances/differential/` harness with `ROCKE_BACKEND=both`) to confirm the Python and C++ engines emit byte-identical IR for a kernel exercising the new op. Serialization needs no test of its own — it is generic (see touchpoint 6).
 
 ## 2. Adding A New Helper
 
@@ -139,8 +186,8 @@ This is the most common extension. The recipe is exactly what every shipped inst
 
 ```text
 instances/my_op.py
-example/ck_tile/dsl/<NN>_my_op/gen.py          # optional, if you want CK-Tile parity tests
-example/ck_tile/dsl/<NN>_my_op/expected.json   # optional, for test_rocke_examples.py gate
+python/rocke/examples/<NN>_my_op/gen.py          # optional, if you want CK-Tile parity tests
+python/rocke/examples/<NN>_my_op/expected.json   # optional, for test_rocke_examples.py gate
 ```
 
 ### 3.2 Spec dataclass
@@ -238,7 +285,7 @@ def test_my_op_builds(self):
 
 ### 3.9 Optional CK Tile parity example
 
-For end-to-end gating, add `example/ck_tile/dsl/<NN>_my_op/gen.py`:
+For end-to-end gating, add `python/rocke/examples/<NN>_my_op/gen.py`:
 
 ```python
 import argparse
