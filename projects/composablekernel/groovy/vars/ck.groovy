@@ -74,42 +74,28 @@ def gitNetRetry(String label, Closure body) {
 
 def cloneUpdateRefRepo() {
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
-    // Several agents share one machine, so the lock must name the machine that
-    // owns the directory rather than the agent that happens to be using it,
-    // otherwise siblings hold different locks over the same path.
-    def hostId = sh(returnStdout: true, script: 'hostname -s').trim()
-    def lockLabel = "git ref repo lock - ${hostId}"
+    def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
+    def folderExists = sh(
+        script: "test -d ${refRepoPath}/refs",
+        returnStatus: true
+    ) == 0
 
-    echo "locking on label: ${lockLabel}"
-    lock(lockLabel) {
-        // Checked inside the lock: a sibling may have published the mirror
-        // while this build was queued for it.
-        def folderExists = sh(
-            script: "test -d ${refRepoPath}/refs",
-            returnStatus: true
-        ) == 0
-
-        if (!folderExists) {
-            echo "rocm-libraries repo does not exist at ${refRepoPath}, creating mirror clone..."
-            // Clone into a private directory and publish with a rename so a
-            // partial mirror is never visible at the shared path.
+    if (!folderExists) {
+        echo "rocm-libraries repo does not exist at ${refRepoPath}, creating mirror clone..."
+        echo "locking on label: ${lockLabel}"
+        lock(lockLabel) {
             def cloneCommand = """
                 set -ex
-                mkdir -p \$(dirname ${refRepoPath})
-                find \$(dirname ${refRepoPath}) -maxdepth 1 -name "\$(basename ${refRepoPath}).tmp-*" -mtime +1 -exec rm -rf {} +
-                tmp=\$(mktemp -d ${refRepoPath}.tmp-XXXXXX)
-                trap 'rm -rf "\$tmp"' EXIT
-                git clone --mirror https://github.com/ROCm/rocm-libraries.git "\$tmp"
-                rm -rf ${refRepoPath}
-                mv "\$tmp" ${refRepoPath}
+                rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
+                git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
             """
             gitNetRetry("clone ref repo") { sh(script: cloneCommand, label: "clone ref repo") }
-            echo "Completed git clone"
         }
-        else {
-            echo "rocm-libraries repo exists at ${refRepoPath}, performing git remote update..."
-        }
-
+        echo "Completed git clone, lock released"
+    }
+    echo "rocm-libraries repo exists at ${refRepoPath}, performing git remote update..."
+    echo "locking on label: ${lockLabel}"
+    lock(lockLabel) {
         def fetchCommand = """
             set -ex
             cd ${refRepoPath}
