@@ -255,6 +255,8 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
                 // read-modify-writing c_buf.at(0) through the buffer reference each iteration
                 // reproduces the legacy ACC-VGPR allocation (this covers both the single-fragment
                 // FragsK == 1 case and the K-composed FragsK > 1 / IterateK case).
+                // For some unknown reason the outer lambda with parameters is important to get the
+                // same assembly even though it does nothing (a separate function also works).
                 using AVec1 = ext_vector_t<ADataType, ATensor::get_thread_buffer_size()>;
                 using BVec1 = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
 
@@ -262,12 +264,14 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
                 const auto b_buf1 = b.get_thread_buffer().template get_as<BVec1>();
 
                 auto c_vec = c_buf.at(0);
-                static_for<0, FragsK, 1>{}([&](auto bk) {
-                    c_vec = MmaOp::template exec<Params...>(
-                        a_buf1.template get_as<typename MmaOp::AVecType>().at(bk),
-                        b_buf1.template get_as<typename MmaOp::BVecType>().at(bk),
-                        c_vec);
-                });
+                [](const auto& a_buf2, const auto& b_buf2, auto& c_vec2) {
+                    static_for<0, FragsK, 1>{}([&](auto bk) {
+                        c_vec2 = MmaOp::template exec<Params...>(
+                            a_buf2.template get_as<typename MmaOp::AVecType>().at(bk),
+                            b_buf2.template get_as<typename MmaOp::BVecType>().at(bk),
+                            c_vec2);
+                    });
+                }(a_buf1, b_buf1, c_vec);
                 c_buf.at(0) = c_vec;
             }
             else

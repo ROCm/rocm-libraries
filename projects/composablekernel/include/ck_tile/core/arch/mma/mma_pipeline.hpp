@@ -44,7 +44,7 @@ struct MmaPipelineBase
      * @return The output WaveTile D after accumulation and post-transform.
      */
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
-    CK_TILE_DEVICE static decltype(auto) exec(ATensor& a, BTensor& b, CTensor& accum)
+    CK_TILE_DEVICE static decltype(auto) exec(const ATensor& a, const BTensor& b, CTensor& accum)
     {
         if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsSupported)
         {
