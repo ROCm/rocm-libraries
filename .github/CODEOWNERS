@@ -80,6 +80,7 @@
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
 /shared/host-validation/                            @ROCm/hipblaslt-reviewers @ROCm/rocroller-developers
+/shared/mxdatagenerator/                            @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
 /shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
