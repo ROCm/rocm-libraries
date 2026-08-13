@@ -445,3 +445,43 @@ a run reliably.
 | `provider_ready()==True` but census `aot=0`, no `[hipdnn aot-catalog]` trace (esp. Windows) | a prebuilt `hip_kernel_provider` shipped beside the backend shadows your local build (last-writer-wins engine-id) | use `absolute` plugin mode (`bootstrap.py` default; `HIPDNN_TORCH_PLUGIN_MODE`) so your provider replaces the auto-discovered set | 9 |
 | backend/provider `.dll` fails to load on Windows despite being on `PATH` | secure DLL search ignores `PATH`; split SDK (`_rocm_sdk_core` vs `_rocm_sdk_libraries`) | `bootstrap.py` `add_dll_directory`s all sibling `_rocm_sdk_*\bin`; override with `HIPDNN_TORCH_DLL_DIRS` | 9 |
 | exact-erf `F.gelu` falls back | submitted, but no loaded engine serves it yet (hipDNN-origin decline, not a pre-gate) | use `approximate="tanh"`, or accept the fallback until a builder lands | 6 |
+
+## 11. Reproducing on another machine (share this)
+
+Hand this section to anyone with a working ROCm/hipDNN dev setup who wants to stand
+the stack up on their own GPU. It is deliberately **goal-oriented, not a pinned
+recipe** — environments vary too much (gfx942/gfx950 CDNA infra boxes and gfx1151;
+native Windows, native Linux, or WSL2). Everything OS-specific lives in §9; the arch
+target is a build flag. Follow §§1–8 for the build, §9 for your OS, and use the list
+below as the invariants-and-acceptance checklist.
+
+**The three PRs** (build separately, combine only at *runtime* — see §1):
+- **#10556** `users/brpepers/aot-catalog-engine` — AOT catalog engine in `hip-kernel-provider`; rocKE AOT-creates kernels for your arch.
+- **#10600** `users/sareeder/hipdnn-python-graph-bindings` — the hipDNN Python graph bindings the injection depends on.
+- **#10562** `users/brpepers/hipdnn-torch-injection` — the `hipdnn_torch` injection package, this runbook, the pytest suite, model samples.
+
+**Invariants (get these right or it silently no-ops):**
+1. **Probe the GPU first** on your candidate nightly (one `cuda` matmul) before building — nightly×driver pairing is not portable (§9, and §2/Phase 0).
+2. Configure the engine with **`-DHIPDNN_ENABLE_SDPA=ON`** and **`-DGPU_TARGETS=<your arch>`** (§3a). SDPA-ON here also propagates to #10600's bindings.
+3. Put the engine **`build/` dir FIRST** on the frontend's `CMAKE_PREFIX_PATH` (§3b) — first match wins.
+4. **One-backend rule** (§4): the frontend must bind the same `hipdnn_backend` torch loads.
+5. Point **`HIPDNN_AOT_CATALOG_DIR` at `arch_content/aot_catalog/<arch>`**, not the 4-family `engines/aot_catalog` (§3a, §5).
+6. Plugin loading is **ABSOLUTE by default** (`bootstrap.py`): your built provider replaces the backend's auto-discovered plugins so an SDK-shipped copy can't shadow it. `provider_ready()==True` + census `aot=0` is the shadowing symptom (§9, §10).
+
+**Two test modes** (§8) — never confuse them:
+- **`default` + all providers co-loaded = the pass/fail gate** ("did hipDNN route this graph through *any* engine"). Run `tests/` here.
+- **`force` (pin `AOT_CATALOG_ENGINE`) = attribution only.** Its failures are known AOT POC gaps (NCHW/3-D conv, 2-D-only norms/gemm, non-causal SDPA), not defects. Never gate on it.
+
+**Acceptance — structural, because exact counts are arch-specific:**
+- `hipdnn_torch.provider_ready()` → `True`.
+- `HIPDNN_AOT_DEBUG=1 python samples/minimal_block.py` resolves the catalog to *your* `HIPDNN_AOT_CATALOG_DIR` and prints `loaded N family(ies)` for your arch (7 on gfx1151; may differ on CDNA).
+- `pytest tests/ -q` in **default + all-providers** is green, with a handful of `xfailed` for graphs no engine covers on your arch (the gfx1151 set: weightless 3-D `layer_norm`, N-D `linear`+bias, causal SDPA `H=8`, 3-D `rms_norm`).
+- A sample shows routed ops with `native=0` and parity within dtype tol.
+
+**What "replicate" means for you:** on another **gfx1151** you should match closely. The
+AOT/rocKE kernels are **arch-specific** — the validated families are RDNA/WMMA
+(`fmha_wmma`, `gemm_wmma`, …). On **CDNA** (gfx942/gfx950, MFMA/XDL) rocKE may build a
+different/smaller set or none; that's expected. There the portable result is that the
+**injection stands up and `default` mode routes ops through hipDNN** (MIOpen/hipblaslt
+serving), with AOT coverage best-effort. Report back your `loaded N families`, the
+default-gate pass/xfail split, and any arch-specific decline reasons.
