@@ -531,13 +531,12 @@ inside the required core package. [Core public module](https://github.com/ROCm/T
 
 Conceptually, the replacement is:
 
-```python
-from rocm_sdk_core import get_core_root, get_rocm_version
-
-core_root = get_core_root()
-actual_base = get_rocm_version()
-# Compare actual_base to the X.Y.Z extracted from tensilelite's +rocm tag.
-```
+The later two-adapter runtime design supersedes this physical-core-root example.
+For a Python SDK package installation, TensileLite validates the active
+`rocm_sdk_core.__version__` directly and runs compiler/toolchain commands through
+the active interpreter's `rocm-sdk-core` console-script trampolines. It does not
+import a core-root helper. A conventional ROCm prefix continues to use its
+root-relative tools and `.info/version` base compatibility value.
 
 This removes the version-validation reason to call `rocm_sdk path --root` while
 retaining core's `.info/version` as the native compatibility authority.

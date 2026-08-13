@@ -79,14 +79,14 @@ def test_exe_exists_true_false(tmp_path):
 # ---------------------------------------------------------------------------
 def test_posix_search_paths_defaults(monkeypatch):
     root = Path("/selected/rocm")
-    monkeypatch.setattr(V, "_selectedRoot", lambda: root)
+    monkeypatch.setattr(V, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
     paths = V._posixSearchPaths()
     assert paths == [root / "bin", root / "lib" / "llvm" / "bin"]
 
 
 def test_posix_search_paths_with_rocm_and_path(monkeypatch):
     root = Path("/selected/rocm")
-    monkeypatch.setattr(V, "_selectedRoot", lambda: root)
+    monkeypatch.setattr(V, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
     monkeypatch.setenv("ROCM_PATH", "/custom/rocm")
     monkeypatch.setenv("PATH", "/binA" + os.pathsep + "/binB")
     paths = V._posixSearchPaths()
@@ -187,7 +187,7 @@ def test_oss_select_posix():
 # ---------------------------------------------------------------------------
 def test_windows_search_paths_direct(monkeypatch):
     root = Path("/selected/rocm")
-    monkeypatch.setattr(V, "_selectedRoot", lambda: root)
+    monkeypatch.setattr(V, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
     paths = V._windowsSearchPaths()
     assert paths == [root / "bin", root / "lib" / "llvm" / "bin"]
 

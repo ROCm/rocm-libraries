@@ -701,8 +701,16 @@ Final contract:
 
 1. If keyed per-user binding metadata exists, use only its exact client and
    never fall back.
-2. Otherwise resolve only the standard client under the selected `ROCM_PATH`.
-3. Do not search PATH.
+2. For a Python SDK package installation, the interim implementation reports
+   that the client is unavailable: `rocm-sdk-libraries` does not yet ship the
+   native client. The final state uses that package's exact
+   `tensilelite-client` console script from the active Python environment.
+   That trampoline owns resolution of the library payload; TensileLite does
+   not inspect a core or library payload directory.
+3. For a conventional-prefix installation, resolve only the standard client
+   under the selected `ROCM_PATH`-style root.
+4. Do not perform a broad client search on PATH. The interpreter-local console
+   script in item 2 is an explicit package entry point, not PATH discovery.
 
 ### Q053 — Does TheRock have a usable ROCm root before hipBLASLt code generation?
 
@@ -2281,9 +2289,17 @@ removing the client dependency.
 For a TheRock wheel installation, TensileLite must not install or expand
 `rocm[devel]` merely to validate that the Python wheel and ROCm release match.
 The compatibility check uses `rocm_sdk_core.__version__` as the authoritative
-full Python publication identity and `rocm_sdk_core.get_core_root()` to locate
-the matching core payload. It does not resolve a devel root solely to read its
-version file.
+full Python publication identity. Compiler, assembler, bundler, and
+device-enumerator commands are resolved through the active Python
+environment's `rocm-sdk-core` console-script trampolines; TensileLite does not
+need `rocm_sdk_core.get_core_root()` or a physical SDK root for this model.
+
+If a client-capable workflow requests `tensilelite-client`, the interim Python
+SDK package implementation fails clearly because `rocm-sdk-libraries` does not
+yet ship the client. The final state uses that package's console-script
+trampoline. The library package owns the native payload and the trampoline
+locates it; the core package neither owns the client nor provides a synthetic
+combined prefix.
 
 When no active Python core SDK is installed, the selected native ROCm root's
 `.info/version` is temporarily authoritative. It contains only the base
@@ -2291,24 +2307,25 @@ compatibility value, so this fallback cannot distinguish different nightly, RC,
 or CI publications on the same base release line. Keep that limitation visible
 until native ROCm roots expose an equivalent full publication identity.
 
-This changes only the Python package runtime dependency. It does not change the
-separate standalone `ROCM_PATH` contract, the build-time TheRock toolchain root,
+This changes only the Python SDK package runtime model. It does not change the
+separate conventional-prefix contract, the build-time TheRock toolchain root,
 or the client-free generation boundary in Q115.
 
 **Rationale:** `rocm-sdk-core` is already installed by `rocm` and
 `rocm[libraries]`. Pulling the large devel archive solely for a version comparison
-adds an unrelated package dependency. The compiler/bundler payload is core-owned;
-the native client is resolved only when benchmark/retune execution needs it.
+adds an unrelated package dependency. The core and libraries packages already
+provide their own tool and client trampolines, while the native client remains
+capability-specific.
 
 ### Q129 — Where will `tensilelite-client` eventually be delivered?
 
-**Decision: Accepted — eventually through the production BLAS runtime artifact
-(`blas_lib`) and `rocm[libraries]`; not now.**
+**Decision: Accepted final state — through the production BLAS runtime artifact
+(`blas_lib`) and `rocm[libraries]`.**
 
-Q117 remains the current implementation policy: until the Python package and
-client meet the agreed promotion threshold, the non-Windows client stays in
-`blas_test`. This decision does not change current CMake installation,
-TheRock artifact selection, or test-artifact ownership.
+Q117 describes the transitional `blas_test` ownership. The final state replaces
+it after the production artifact and Python package changes land; this decision
+records the target contract without claiming that the current artifact layout
+has already changed.
 
 When promoted, install the client at:
 
@@ -2318,6 +2335,13 @@ When promoted, install the client at:
 
 in `blas_lib`, which delivers it through `rocm-sdk-libraries` and
 `rocm[libraries]`.
+
+The `rocm-sdk-libraries` wheel installs an interpreter-local
+`tensilelite-client` console-script trampoline. The trampoline executes the
+library-owned client below its own platform payload and forwards arguments,
+including `--version`, unchanged. TensileLite's Python SDK adapter invokes this
+known entry point when client capability is requested; it does not search PATH
+or inspect a package payload directory.
 
 **Why not `rocm-sdk-core`:** the client is built by hipBLASLt and has a
 BLAS-side runtime closure. Making mandatory core own it would invert the
@@ -2332,6 +2356,28 @@ run, and devel must not own a second copy.
 `TensileCreateLibrary`, and hipBLASLt device-library generation do not require
 or validate the client. Benchmark and retune execution resolve and validate the
 client only when they actually launch it.
+
+### Q130 — How do Python SDK packages and conventional ROCm prefixes coexist?
+
+**Decision: Accepted — use two installation adapters with no path borrowing.**
+
+The Python SDK package adapter and the conventional-prefix adapter are distinct
+runtime models:
+
+| Concern | Python SDK packages | Conventional prefix |
+| --- | --- | --- |
+| ROCm identity | `rocm_sdk_core.__version__` (exact full publication identity) | `<root>/.info/version` (base `A.B.C` only) |
+| Toolchain | active interpreter's `rocm-sdk-core` console-script trampolines | `<root>/bin` and `<root>/lib/llvm/bin` |
+| Client | Interim: clear unavailable-client error. Final: active interpreter's `rocm-sdk-libraries` `tensilelite-client` trampoline | `<root>/libexec/hipblaslt/tensilelite/tensilelite-client[.exe]` |
+| Root discovery | none; package trampolines own package payload resolution | explicit `ROCM_PATH`, `/opt/rocm`, or a ROCm tool discovered on PATH |
+
+For ROCm identity, compiler/toolchain, and client resolution, an active Python
+SDK installation never falls back to `ROCM_PATH`, `/opt/rocm`, or an ambient
+tool. Conversely, the conventional-prefix adapter does not import or inspect
+Python SDK package payloads. The prefix adapter's base-only identity comparison
+deliberately cannot distinguish nightly, RC, or CI publications sharing the
+same `A.B.C` line. This does not redefine optional benchmark conveniences such
+as the separate `amd-smi` clock-pinning probe.
 
 ## Confirmed TheRock build/test facts
 

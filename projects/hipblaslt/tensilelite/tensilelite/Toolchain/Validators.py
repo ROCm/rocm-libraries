@@ -32,16 +32,15 @@ from tensilelite.Common.Utilities import isRhel8, print2
 osSelect = lambda linux, windows: linux if os.name != "nt" else windows
 
 
-def _selectedRoot() -> Path:
-    """Return the ROCm root frozen during TensileLite initialization."""
+def _toolchainSearchPaths() -> List[Path]:
+    """Return the paths provided by the frozen ROCm installation model."""
     from tensilelite import _runtime
 
-    return _runtime.rocm_root()
+    return list(_runtime.toolchain_search_paths())
 
 
 def _windowsSearchPaths() -> List[Path]:
-    root = _selectedRoot()
-    return [root / "bin", root / "lib" / "llvm" / "bin"]
+    return _toolchainSearchPaths()
 
 
 def _windowsWithExtensions(exe: str) -> List[str]:
@@ -53,8 +52,7 @@ def _windowsWithExtensions(exe: str) -> List[str]:
 
 
 def _posixSearchPaths() -> List[Path]:
-    root = _selectedRoot()
-    return [root / "bin", root / "lib" / "llvm" / "bin"]
+    return _toolchainSearchPaths()
 
 
 class ToolchainDefaults(NamedTuple):
@@ -237,6 +235,6 @@ def deviceEnumeratorCandidates(explicit: str | None = None) -> tuple[str, ...]:
     if paths:
         return tuple(paths)
     raise FileNotFoundError(
-        "No supported device enumerator is executable below the selected root: "
-        f"{_selectedRoot()}"
+        "No supported device enumerator is executable in the selected tool paths: "
+        f"{':'.join(map(str, _toolchainSearchPaths()))}"
     )

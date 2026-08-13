@@ -20,6 +20,7 @@ from ._rocm import TensileLiteRuntimeError, validate_distribution
 _client: Path | None = None
 _root: Path | None = None
 _root_source: str | None = None
+_toolchain_paths: tuple[Path, ...] | None = None
 _distribution_version: str | None = None
 
 
@@ -36,13 +37,14 @@ def _require_rocisa() -> None:
 
 def initialize(distribution_version: str) -> None:
     """Validate generator prerequisites without requiring the optional client."""
-    global _client, _root, _root_source, _distribution_version
+    global _client, _root, _root_source, _toolchain_paths, _distribution_version
 
     _require_rocisa()
     validated = validate_distribution("tensilelite", distribution_version)
     _client = None
     _root = validated.root
     _root_source = validated.source
+    _toolchain_paths = validated.toolchain_paths
     _distribution_version = distribution_version
 
 
@@ -52,8 +54,14 @@ def client_executable() -> Path:
 
     if _client is not None:
         return _client
-    if _root is None or _root_source is None or _distribution_version is None:
+    if _root_source is None or _distribution_version is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
+    if _root is None:
+        raise TensileLiteRuntimeError(
+            "tensilelite-client is unavailable for a Python ROCm SDK installation.\n"
+            "  selected by: active Python rocm_sdk_core\n"
+            "The client is not yet shipped by rocm-sdk-libraries; use a conventional ROCm prefix or configure a source-development client."
+        )
 
     try:
         selected, custom = selected_client(_root)
@@ -67,9 +75,8 @@ def client_executable() -> Path:
     _client = selected
     return _client
 
-
-def rocm_root() -> Path:
-    """Return the ROCm root frozen during package initialization."""
-    if _root is None:
+def toolchain_search_paths() -> tuple[Path, ...]:
+    """Return the tool locations for the frozen ROCm installation model."""
+    if _toolchain_paths is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
-    return _root
+    return _toolchain_paths

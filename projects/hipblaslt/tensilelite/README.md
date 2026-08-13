@@ -4,14 +4,21 @@
 # TensileLite
 
 TensileLite is hipBLASLt's Python generator, logic validator, and tuning
-workflow. Released Python wheels are part of a matched ROCm SDK: the wheel's
-`+rocm<identity>` tag must match the active Python core SDK's `__version__` when
-that package is installed. Otherwise its base `A.B.C` must match the selected
-root's `.info/version`, which is authoritative only for that base compatibility
-line and cannot distinguish nightly, RC, or CI publications on the same line.
-ROCm owns `tensilelite-client`. The root comes from the active Python's TheRock
-SDK when present, otherwise `ROCM_PATH`, otherwise `/opt/rocm` on non-Windows.
-`rocisa` is a
+workflow. Released Python wheels are part of a matched ROCm SDK. The final
+runtime contract has two installation models:
+
+- **Python SDK packages:** the active `rocm-sdk-core.__version__` is the full
+  ROCm publication identity. Core tool trampolines from that Python
+  environment run the compiler and toolchain commands. The final client model
+  uses a `rocm-sdk-libraries` trampoline for its library-owned native payload.
+  Until that payload ships, a client request reports that it is unavailable.
+- **Conventional prefix:** an explicitly selected prefix from `ROCM_PATH`,
+  `/opt/rocm`, or a ROCm tool discovered on `PATH` supplies root-relative
+  tools and the native client. Its `.info/version` is authoritative only for
+  the base `A.B.C` compatibility line, so it cannot distinguish nightly, RC,
+  or CI publications on that line.
+
+The two models do not borrow paths from each other. `rocisa` is a
 separately prepared Python dependency; TensileLite requires it to be importable
 but does not prescribe its ABI or native-artifact layout.
 
@@ -32,8 +39,8 @@ The default wheel exposes `import tensilelite`; it does not provide the legacy
 
 ## Released installation
 
-Use the wheel index delivered with the target ROCm release, then select that
-same ROCm installation:
+For a conventional ROCm prefix, use the wheel index delivered with the target
+release and select that same prefix:
 
 ```bash
 export ROCM_PATH=/opt/rocm
@@ -43,8 +50,8 @@ python -c 'import tensilelite, rocisa; print(tensilelite.__version__)'
 
 With TheRock's Python SDK, install the matching core, libraries, and device
 payload in the same Python environment before installing TensileLite. TensileLite
-uses the core package's full Python distribution version and compiler/tool
-payload; it does not require `rocm[devel]` merely to initialize:
+uses the core package's full Python distribution version and its interpreter's
+tool trampolines; it does not require `rocm[devel]` or a synthetic ROCm prefix:
 
 ```bash
 python -m pip install --index-url <rocm-wheel-index> \
@@ -54,10 +61,14 @@ python -m pip install --index-url <rocm-wheel-index> tensilelite
 
 Import fails deliberately when the wheel and ROCm release differ or when rocisa
 cannot be imported. The client is resolved and validated only when a
-benchmark/validation workflow requests its path. Released wheels are unbound
-and resolve only
+benchmark/validation workflow requests its path. A configured client binding
+always wins for a conventional-prefix installation. The Python SDK model
+currently reports that the client is unavailable because `rocm-sdk-libraries`
+does not yet ship it; its final state uses that package's exact
+`tensilelite-client` console script from the active Python environment. The
+conventional-prefix model uses
 `$ROCM_PATH/libexec/hipblaslt/tensilelite/tensilelite-client` (with `.exe` on
-Windows); `PATH` is never searched.
+Windows). Neither model performs a broad client search on `PATH`.
 
 Optional runtime capabilities remain available as extras:
 

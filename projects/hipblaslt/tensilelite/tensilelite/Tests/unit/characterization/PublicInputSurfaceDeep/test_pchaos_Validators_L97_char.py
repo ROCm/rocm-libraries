@@ -26,7 +26,7 @@ def _search_paths():
 def test_real_function_uses_only_the_frozen_root(monkeypatch):
     validators, posix_search_paths = _search_paths()
     root = Path("/selected/rocm")
-    monkeypatch.setattr(validators, "_selectedRoot", lambda: root)
+    monkeypatch.setattr(validators, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
     monkeypatch.setenv("ROCM_PATH", "/stale/rocm")
     monkeypatch.setenv("PATH", "/stale/bin")
 
@@ -46,7 +46,7 @@ def test_relative_tool_does_not_fall_back_outside_frozen_root(tmp_path, monkeypa
     stale_tool = stale_bin / "amdclang++"
     stale_tool.write_text("#!/bin/sh\n", encoding="utf-8")
     stale_tool.chmod(0o755)
-    monkeypatch.setattr(validators, "_selectedRoot", lambda: root)
+    monkeypatch.setattr(validators, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
     monkeypatch.setenv("PATH", str(stale_bin))
 
     with pytest.raises(FileNotFoundError):

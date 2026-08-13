@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 import sys
+import sysconfig
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
@@ -20,9 +23,10 @@ class TensileLiteRuntimeError(ImportError):
 
 @dataclass(frozen=True)
 class ValidatedRocm:
-    root: Path
+    root: Path | None
     version: str
     source: str
+    toolchain_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True)
@@ -82,43 +86,63 @@ def _validated_root(root: Path, source: str) -> ResolvedRocmRoot:
     return ResolvedRocmRoot(root.resolve(), source)
 
 
-def _python_core_metadata() -> tuple[ResolvedRocmRoot, str] | None:
+def _python_sdk_version() -> str | None:
     try:
         import rocm_sdk_core
     except ModuleNotFoundError:
         return None
 
     try:
-        root = rocm_sdk_core.get_core_root()
-        version = rocm_sdk_core.__version__
+        return rocm_sdk_core.__version__
     except Exception as exc:
         raise TensileLiteRuntimeError(
-            "The active Python ROCm core package could not resolve its runtime metadata.\n"
+            "The active Python ROCm core package could not resolve its publication identity.\n"
             "  selected by: active Python rocm_sdk_core\n"
             "Install the matching rocm core package."
         ) from exc
-    return _validated_root(root, "active Python rocm_sdk_core"), version
 
 
-def _python_core_root() -> ResolvedRocmRoot | None:
-    metadata = _python_core_metadata()
-    return metadata[0] if metadata is not None else None
+def _python_sdk_toolchain_paths() -> tuple[Path, ...]:
+    scripts = sysconfig.get_path("scripts")
+    if not scripts:
+        raise TensileLiteRuntimeError(
+            "The active Python ROCm SDK has no scripts directory for its tool trampolines.\n"
+            "  selected by: active Python rocm_sdk_core"
+        )
+    return (Path(scripts).resolve(),)
+
+
+def _path_rocm_root() -> ResolvedRocmRoot | None:
+    hipconfig = shutil.which("hipconfig")
+    if hipconfig is None:
+        return None
+    try:
+        result = subprocess.run(
+            [hipconfig, "--rocmpath"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    root = result.stdout.strip()
+    return _validated_root(Path(root), "hipconfig on PATH") if root else None
 
 
 def resolve_rocm_root() -> ResolvedRocmRoot:
-    python_core = _python_core_root()
-    if python_core is not None:
-        return python_core
-
     explicit = os.environ.get("ROCM_PATH")
     if explicit:
         return _validated_root(Path(explicit).expanduser(), "explicit ROCM_PATH")
-    if sys.platform != "win32":
+    if sys.platform != "win32" and Path("/opt/rocm").is_dir():
         return _validated_root(Path("/opt/rocm"), "/opt/rocm")
+    path_root = _path_rocm_root()
+    if path_root is not None:
+        return path_root
     raise TensileLiteRuntimeError(
         "ROCm installation not found.\n"
-        "  selected by: no active Python rocm_sdk_core or explicit ROCM_PATH\n"
-        "Install the matching rocm[libraries,device-...] SDK or set ROCM_PATH."
+        "  selected by: no explicit ROCM_PATH, /opt/rocm, or hipconfig on PATH\n"
+        "Set ROCM_PATH to the matching conventional ROCm installation."
     )
 
 
@@ -126,11 +150,13 @@ def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
     expected = expected_rocm_version(distribution, distribution_version)
-    python_core = _python_core_metadata()
-    if python_core is not None:
-        resolved, core_version = python_core
-        actual = canonical_rocm_version(core_version)
+    python_sdk_version = _python_sdk_version()
+    if python_sdk_version is not None:
+        actual = canonical_rocm_version(python_sdk_version)
         expected_for_comparison = expected
+        root = None
+        source = "active Python rocm_sdk_core"
+        toolchain_paths = _python_sdk_toolchain_paths()
     else:
         resolved = resolve_rocm_root()
         version_file = resolved.root / ".info" / "version"
@@ -144,15 +170,19 @@ def validate_distribution(
                 f"  expected file: {version_file}"
             ) from exc
         expected_for_comparison = rocm_base_version(expected)
+        root = resolved.root
+        source = resolved.source
+        toolchain_paths = (root / "bin", root / "lib" / "llvm" / "bin")
     if actual != expected_for_comparison:
         shown_version = distribution_version or package_version(distribution)
+        selected = f"  selected root: {root}\n" if root is not None else ""
         raise TensileLiteRuntimeError(
             f"{distribution} and ROCm release mismatch.\n"
             f"  {distribution} version: {shown_version}\n"
             f"  expected ROCm: {expected_for_comparison}\n"
             f"  found ROCm: {actual}\n"
-            f"  selected root: {resolved.root}\n"
-            f"  selected by: {resolved.source}\n"
+            f"{selected}"
+            f"  selected by: {source}\n"
             "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
         )
-    return ValidatedRocm(resolved.root, actual, resolved.source)
+    return ValidatedRocm(root, actual, source, toolchain_paths)
