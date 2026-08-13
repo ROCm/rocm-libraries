@@ -40,6 +40,11 @@ namespace TensileLite
 {
     namespace Client
     {
+        /** Returns freq.frequency[freq.current], or UINT64_MAX if `current` is not a
+        * valid index (e.g. AMDSMI_STATUS_SUCCESS with current == (uint32_t)-1 when a
+        * clock domain is power-gated). Exposed for unit testing. */
+        uint64_t getValidatedFrequency(const amdsmi_frequencies_t& freq);
+
         /**
         * Monitors properties of a particular GPU in a separate thread.
         *
