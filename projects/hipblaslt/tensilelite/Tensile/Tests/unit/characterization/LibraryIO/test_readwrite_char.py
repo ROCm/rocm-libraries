@@ -181,3 +181,53 @@ def test_strict_type_loader_types(snapshot):
     doc = "a: 1\nb: 0\nc: true\nd: false\ne: yes\nf: no\n"
     parsed = yaml.load(doc, L.StrictTypeLoader)
     assert {k: type(v).__name__ for k, v in parsed.items()} == snapshot
+
+
+def test_write_yaml_uses_safe_dumper(tmp_path):
+    path = tmp_path / "tuple.yaml"
+    L.writeYAML(str(path), {"t": (1, 2)})
+    assert path.read_text() == "---\nt: [1, 2]\n...\n"
+
+
+def test_write_json_stdlib_fallback(tmp_path, monkeypatch):
+    import json as stdjson
+    import sys
+
+    monkeypatch.delitem(sys.modules, "orjson", raising=False)
+
+    monkeypatch.setattr(L, "json", stdjson)
+    path = tmp_path / "out.json"
+    L.writeJson(str(path), _DATA)
+    assert path.read_text() == stdjson.dumps(_DATA, indent=2)
+
+
+def test_write_dispatch_defaults_to_yaml(tmp_path):
+    base = tmp_path / "artifact"
+    L.write(str(base), _DATA)
+    assert L.readYAML(str(tmp_path / "artifact.yaml")) == _DATA
+
+
+@pytest.mark.parametrize(
+    "operation,expected",
+    [
+        (lambda path: L.write(str(path), _DATA, format="xml"),
+         "Tensile::FATAL: Unrecognized write format xml\n"),
+        (lambda path: L.read(str(path)),
+         "Tensile::FATAL: Unrecognized read format .txt\n"),
+    ],
+    ids=["write", "read"],
+)
+def test_dispatch_rejects_unknown_formats(tmp_path, capsys, operation, expected):
+    path = tmp_path / "document.txt"
+    path.write_text("unused")
+    with pytest.raises(SystemExit):
+        operation(path)
+    assert capsys.readouterr().out == expected
+
+
+def test_default_yaml_reader_preserves_timestamp_type(tmp_path):
+    import datetime
+
+    path = tmp_path / "document.yaml"
+    path.write_text("date: 2024-01-01\n")
+    assert L.read(str(path)) == {"date": datetime.date(2024, 1, 1)}
