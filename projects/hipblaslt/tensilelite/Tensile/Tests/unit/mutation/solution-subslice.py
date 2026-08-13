@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""solution-subslice.py - Issue 14: repeatable Solution.py sub-slicing.
+"""Repeatable Solution.py mutation sub-slicing.
 
-Turns the accepted sub-slicing spike (spikes/solution-subslicing.md) into a
-region model + validator + region-config emitter. It does NOT run mutmut and does
-NOT edit production source; it validates region metadata and emits a per-region
-config consumable by mutmut-slice.js --dry-run.
+Provides a region model, validator, and slice-record emitter. It does NOT run
+mutmut or edit production source. The emitted record is consumed by the
+tensilelite-mutation-rerun skill.
 
-The region model reflects the spike's verified constraints:
+The region model enforces these constraints:
   - mutmut 3.6.0 only_mutate is whole-file (path glob), so a region config's
     only_mutate is the WHOLE Solution.py; the region is realized later by
     # pragma: no mutate fencing, NOT by only_mutate.
@@ -138,7 +137,7 @@ def validate_doc(doc):
 
 
 def build_region_config(doc, reg):
-    """Build a mutmut-slice.js-consumable config dict for one region.
+    """Build a mutation-rerun slice record for one region.
 
     only_mutate is the WHOLE file (mutmut has no sub-file targeting); the region is
     realized by pragma fencing, recorded here as metadata + a mandatory fence gate.
@@ -169,7 +168,7 @@ def build_region_config(doc, reg):
         "container": container,
         "group_by": "module_function",
         "test_file_owner": "one_file_per_function",
-        # --- region + safety metadata (ignored by mutmut-slice.js; used by the fencer) ---
+        # --- region + safety metadata consumed by the rerun workflow/fencer ---
         "region": {
             "id": rid,
             "start_line": start,
@@ -262,7 +261,7 @@ def main(argv=None):
     pv = sub.add_parser("validate", help="validate a regions.json")
     pv.add_argument("--regions", required=True)
     pe = sub.add_parser(
-        "emit-config", help="emit a mutmut-slice.js config for one region"
+        "emit-config", help="emit a mutation-rerun slice record for one region"
     )
     pe.add_argument("--regions", required=True)
     pe.add_argument("--region", required=True)

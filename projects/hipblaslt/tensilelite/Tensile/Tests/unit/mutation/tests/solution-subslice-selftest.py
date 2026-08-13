@@ -179,7 +179,7 @@ try:
 except ValueError:
     ok("emit: raises on non-string covering_test_selection member")
 
-# --- build_region_config emits a mutmut-slice-valid config ---
+# --- build_region_config emits a valid mutation-rerun slice record ---
 cfg = mod.build_region_config(real, r01)
 check(
     bool(cfg.get("only_mutate")) and isinstance(cfg["only_mutate"], list),
