@@ -1,14 +1,12 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-from pathlib import Path
-import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from tensilelite import _rocm, _runtime
-
 
 pytestmark = pytest.mark.unit
 
@@ -34,14 +32,17 @@ def test_expected_rocm_version_rejects_unmatched_distribution(version):
         _rocm.expected_rocm_version("tensilelite", version)
 
 
-def test_validate_distribution_exact_match(tmp_path, monkeypatch):
-    root = _root(tmp_path)
+def test_validate_distribution_uses_base_info_version_without_python_core(tmp_path, monkeypatch):
+    root = _root(tmp_path, "10.1.0")
+    monkeypatch.setattr(_rocm, "_python_core_metadata", lambda: None)
     monkeypatch.setattr(_rocm, "resolve_rocm_root", lambda: _resolved(root))
 
-    result = _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.2.4")
+    result = _rocm.validate_distribution(
+        "tensilelite", "5.0.0+rocm10.1.0a20260813"
+    )
 
     assert result.root == root
-    assert result.version == "7.2.4"
+    assert result.version == "10.1.0"
     assert result.source == "test"
 
 
@@ -58,7 +59,7 @@ def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
 
 def test_resolve_rocm_root_prefers_environment(tmp_path, monkeypatch):
     root = _root(tmp_path)
-    monkeypatch.setattr(_rocm, "find_spec", lambda name: None)
+    monkeypatch.setattr(_rocm, "_python_core_root", lambda: None)
     monkeypatch.setenv("ROCM_PATH", str(root))
 
     result = _rocm.resolve_rocm_root()
@@ -67,49 +68,90 @@ def test_resolve_rocm_root_prefers_environment(tmp_path, monkeypatch):
     assert result.source == "explicit ROCM_PATH"
 
 
-def test_resolve_rocm_root_prefers_active_python_sdk(tmp_path, monkeypatch):
+def test_resolve_rocm_root_prefers_active_python_core(tmp_path, monkeypatch):
     sdk_root = _root(tmp_path / "sdk")
     fallback_root = _root(tmp_path / "fallback")
-    commands = []
 
-    monkeypatch.setattr(_rocm, "find_spec", lambda name: object())
     monkeypatch.setenv("ROCM_PATH", str(fallback_root))
-
-    def run(command, **kwargs):
-        commands.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout=str(sdk_root), stderr="")
-
-    monkeypatch.setattr(_rocm.subprocess, "run", run)
+    monkeypatch.setattr(
+        _rocm,
+        "_python_core_root",
+        lambda: _resolved(sdk_root, "active Python rocm_sdk_core"),
+    )
 
     result = _rocm.resolve_rocm_root()
 
     assert result.root == sdk_root.resolve()
-    assert result.source == "active Python rocm_sdk"
-    assert commands == [
-        (
-            [_rocm.sys.executable, "-m", "rocm_sdk", "path", "--root"],
-            {"check": True, "capture_output": True, "text": True, "timeout": 10},
-        )
-    ]
+    assert result.source == "active Python rocm_sdk_core"
 
 
-def test_resolve_rocm_root_does_not_fall_back_from_broken_python_sdk(tmp_path, monkeypatch):
+def test_resolve_rocm_root_does_not_fall_back_from_broken_python_core(tmp_path, monkeypatch):
     fallback_root = _root(tmp_path / "fallback")
-    monkeypatch.setattr(_rocm, "find_spec", lambda name: object())
     monkeypatch.setenv("ROCM_PATH", str(fallback_root))
     monkeypatch.setattr(
-        _rocm.subprocess,
-        "run",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            subprocess.CalledProcessError(1, args[0], stderr="missing rocm[devel]")
+        _rocm,
+        "_python_core_root",
+        lambda: (_ for _ in ()).throw(
+            _rocm.TensileLiteRuntimeError("missing rocm-sdk-core metadata")
         ),
     )
 
     with pytest.raises(
         _rocm.TensileLiteRuntimeError,
-        match="selected by: active Python rocm_sdk",
+        match="missing rocm-sdk-core metadata",
     ):
         _rocm.resolve_rocm_root()
+
+
+def test_python_core_metadata_uses_distribution_version(tmp_path, monkeypatch):
+    core_root = tmp_path / "core"
+    core_root.mkdir()
+    core_version = "10.1.0a20260813"
+
+    class Core:
+        __version__ = core_version
+
+        @staticmethod
+        def get_core_root():
+            return core_root
+
+    monkeypatch.setitem(sys.modules, "rocm_sdk_core", Core)
+
+    resolved, version = _rocm._python_core_metadata()
+
+    assert resolved.root == core_root.resolve()
+    assert resolved.source == "active Python rocm_sdk_core"
+    assert version == core_version
+
+
+def test_expected_rocm_version_parses_development_tag():
+    assert (
+        _rocm.expected_rocm_version(
+            "tensilelite", "5.0.0+devrocm10.1.0.dev0.0123456789abcdef"
+        )
+        == "10.1.0.dev0.0123456789abcdef"
+    )
+
+
+def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeypatch):
+    core_root = tmp_path / "core"
+    core_root.mkdir()
+    monkeypatch.setattr(
+        _rocm,
+        "_python_core_metadata",
+        lambda: (
+            _resolved(core_root, "active Python rocm_sdk_core"),
+            "10.1.0a20260813",
+        ),
+    )
+
+    result = _rocm.validate_distribution(
+        "tensilelite", "5.0.0+rocm10.1.0a20260813"
+    )
+
+    assert result.root == core_root.resolve()
+    assert result.version == "10.1.0a20260813"
+    assert result.source == "active Python rocm_sdk_core"
 
 
 def test_runtime_reports_external_rocisa_import_failure(monkeypatch):

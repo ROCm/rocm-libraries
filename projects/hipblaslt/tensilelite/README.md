@@ -5,9 +5,12 @@
 
 TensileLite is hipBLASLt's Python generator, logic validator, and tuning
 workflow. Released Python wheels are part of a matched ROCm SDK: the wheel's
-`+rocmA.B.C` version must match the selected root's `.info/version`, and ROCm
-owns `tensilelite-client`. The root comes from the active Python's TheRock SDK
-when present, otherwise `ROCM_PATH`, otherwise `/opt/rocm` on non-Windows.
+`+rocm<identity>` tag must match the active Python core SDK's `__version__` when
+that package is installed. Otherwise its base `A.B.C` must match the selected
+root's `.info/version`, which is authoritative only for that base compatibility
+line and cannot distinguish nightly, RC, or CI publications on the same line.
+ROCm owns `tensilelite-client`. The root comes from the active Python's TheRock
+SDK when present, otherwise `ROCM_PATH`, otherwise `/opt/rocm` on non-Windows.
 `rocisa` is a
 separately prepared Python dependency; TensileLite requires it to be importable
 but does not prescribe its ABI or native-artifact layout.
@@ -38,13 +41,14 @@ python -m pip install --index-url <rocm-wheel-index> tensilelite
 python -c 'import tensilelite, rocisa; print(tensilelite.__version__)'
 ```
 
-With TheRock's Python SDK, install the complete matching SDK in the same Python
-environment before installing TensileLite; its SDK root is selected
-automatically:
+With TheRock's Python SDK, install the matching core, libraries, and device
+payload in the same Python environment before installing TensileLite. TensileLite
+uses the core package's full Python distribution version and compiler/tool
+payload; it does not require `rocm[devel]` merely to initialize:
 
 ```bash
 python -m pip install --index-url <rocm-wheel-index> \
-  'rocm[libraries,devel,device-<target>]'
+  'rocm[libraries,device-<target>]'
 python -m pip install --index-url <rocm-wheel-index> tensilelite
 ```
 

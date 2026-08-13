@@ -12,11 +12,19 @@ pytestmark = pytest.mark.unit
 _SOURCE_ROOT = Path(__file__).resolve().parents[4]
 
 
-def test_distribution_version_comes_from_explicit_base_version():
+def test_distribution_version_comes_from_explicit_rocm_identity():
     metadata = runpy.run_path(str(_SOURCE_ROOT / "release_metadata.py"))
 
     assert metadata["component_version"]() == "5.0.0"
     assert metadata["distribution_version"]("7.2.4") == "5.0.0+rocm7.2.4"
+    assert (
+        metadata["distribution_version"]("10.1.0a20260813")
+        == "5.0.0+rocm10.1.0a20260813"
+    )
+    assert (
+        metadata["distribution_version"]("10.1.0.dev0+0123456789abcdef")
+        == "5.0.0+devrocm10.1.0.dev0.0123456789abcdef"
+    )
 
 
 def test_compatibility_setup_uses_canonical_metadata():

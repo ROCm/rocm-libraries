@@ -276,13 +276,12 @@ destination is therefore the production BLAS runtime:
 the pure-Python `tensilelite` wheel. Q117 remains the current implementation
 policy: the client stays in `blas_test` until it is promoted.
 
-`rocm[devel]` remains part of the documented full TensileLite workflow, but for
-a different reason: the current Python package resolves its complete ROCm root
-through `rocm_sdk path --root` and generation needs the SDK toolchain. It is not
-a native `tensilelite-client` dependency. A user who only executes the client
-against already-provided configuration and code objects needs the assembled
-runtime closure, not devel. The Python benchmark/tuning installation continues
-to use `rocm[libraries,devel,device-gfx<target>]`, and the executable remains at
+Q128 removes `rocm[devel]` from the TensileLite Python runtime. The package uses
+the core wheel's public metadata/root API for compatibility validation and
+compiler lookup; it is not a native `tensilelite-client` dependency. A user who
+only executes the client against already-provided configuration and code objects
+needs the assembled runtime closure, not devel. The Python installation uses
+`rocm[libraries,device-gfx<target>]`, and the executable remains at
 `libexec/hipblaslt/tensilelite/tensilelite-client`.
 [TensileLite installation contract](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/README.md#L30-L56)
 
@@ -323,7 +322,7 @@ Q129 records this future production-runtime ownership decision:
 native client artifact component: blas_lib
 public SDK destination:          rocm-sdk-libraries / rocm[libraries]
 runtime prerequisites:           rocm (core) + rocm[libraries]
-full Python tuning install:      rocm[libraries,devel,device-gfx<target>]
+Python runtime install:          rocm[libraries,device-gfx<target>]
 Python distribution:             tensilelite wheel remains client-free
 standard executable path:        <ROCm root>/libexec/hipblaslt/tensilelite/tensilelite-client
 initial platform scope:          non-Windows, until Windows client support is separately ready
@@ -340,7 +339,7 @@ This preserves the intended user experience:
 
 ```bash
 python -m pip install --index-url <rocm-wheel-index> \
-  'rocm[libraries,devel,device-gfx<target>]'
+  'rocm[libraries,device-gfx<target>]'
 python -m pip install --index-url <rocm-wheel-index> tensilelite
 
 # create-library remains client-free; benchmark/retune resolves the client
@@ -399,12 +398,10 @@ assets that a standalone client wheel can sensibly duplicate. [Client launch and
 configuration](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/ClientWriter.py#L208-L268)
 [per-GFX library and code-object selection](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/ClientWriter.py#L800-L832)
 
-The Python package adds a stronger, separate installation contract: it resolves
-the client only on first use and validates its version, but it obtains the
-active Python SDK root through the expanded devel tree. It therefore tells a
-wheel user to install the matching `rocm[libraries,devel,device-...]` set; it
-never searches an arbitrary `PATH`. This is why a full Python tuning workflow
-uses devel even though direct native-client execution does not.
+The Python package resolves the client only on first use and validates its
+version. Under Q128 it obtains the active Python SDK's core payload and version
+without expanding devel, so its wheel runtime requires the matching
+`rocm[libraries,device-...]` set and never searches an arbitrary `PATH`.
 [Deferred native lookup](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/_runtime.py#L37-L75)
 [Python-SDK root selection](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/_rocm.py#L77-L122)
 
@@ -486,12 +483,10 @@ into the config, then invokes the client. [CLI dispatch](https://github.com/ROCm
 
 Neither command has a devel-only native dependency in this code path. Their
 compiler and bundler lookups are constrained to `<selected-root>/bin` and
-`<selected-root>/lib/llvm/bin`; TheRock currently puts the AMD LLVM and HIP
-runtime/tool payload in `rocm-sdk-core`. The current wheel wrapper nevertheless
-requires `rocm[devel]` because it obtains `<selected-root>` by calling
-`python -m rocm_sdk path --root`, which is specifically the Python SDK's devel
-root API. Thus devel is a current **root-resolution/materialization policy**,
-not a `tensilelite-client`, `run`, or `create-library` payload dependency.
+`<selected-root>/lib/llvm/bin`; TheRock puts the AMD LLVM and HIP runtime/tool
+payload in `rocm-sdk-core`. Q128 resolves that root through the core package's
+public API, so devel is not a `tensilelite-client`, `run`, or
+`create-library` payload dependency.
 [tool lookup paths](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/Toolchain/Validators.py#L35-L57)
 [core tool payload selection](https://github.com/ROCm/TheRock/blob/6339d5fc2e8f924a7b3072a9c34623271c9626f7/build_tools/build_python_packages.py#L496-L535)
 
@@ -519,44 +514,33 @@ explicit `ROCM_PATH=${HIPBLASLT_BUILD_ROCM_ROOT}`. Neither path invokes the
 Python SDK CLI. [Wheel metadata build path](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/setup.py#L12-L50)
 [CMake installation and build environment](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/cmake/hipblaslt_python.cmake#L65-L95)
 
-The command is first reached after installation, when Python imports the
-installed `tensilelite` package: `__init__.py` calls runtime initialization,
-which validates the ROCm release and then resolves the active Python SDK root.
-Therefore release/artifact CI may exercise `rocm_sdk path --root` while testing
-an installed wheel, but the command is part of installed-package runtime
-initialization—not wheel construction or pip installation itself.
+Before Q128, the command was reached after installation when Python imported
+the installed `tensilelite` package. Q128 replaces that devel-root lookup with
+the core package's public API, so release/artifact CI no longer needs devel to
+exercise installed-package initialization.
 [Import initialization](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/__init__.py#L4-L20)
 [Python SDK root call](https://github.com/ROCm/rocm-libraries/blob/df51e32d0b4e9186333e94fa0ddec32bbee8c9e1/projects/hipblaslt/tensilelite/tensilelite/_rocm.py#L77-L105)
 
 ### Removing the devel dependency from version validation
 
-Yes: version comparison can use the required core wheel without expanding
-`rocm[devel]`. The public Python module is named `rocm_sdk_core` (not
-`rocm_core`) and exports `__version__`; the distribution generator writes the
-same generated version into every member of the exact-version ROCm wheel set.
-For a nightly or prerelease publication, parse that PEP 440 value and compare
-only its `release` tuple (`X.Y.Z`) with TensileLite's `+rocmX.Y.Z` compatibility
-tag. This preserves the existing base-release compatibility rule while accepting
-matching nightly/RC/dev publications. [Core public module](https://github.com/ROCm/TheRock/blob/6339d5fc2e8f924a7b3072a9c34623271c9626f7/build_tools/packaging/python/templates/rocm-sdk-core/src/rocm_sdk_core/__init__.py#L1-L4)
-[generated shared version](https://github.com/ROCm/TheRock/blob/6339d5fc2e8f924a7b3072a9c34623271c9626f7/build_tools/_therock_utils/py_packaging.py#L129-L170)
+Q128 uses the required core wheel without expanding `rocm[devel]`. The public
+Python module is named `rocm_sdk_core` (not `rocm_core`) and exposes the core
+payload root plus its base native ROCm version. This preserves the existing
+`.info/version` base-release compatibility policy while keeping the lookup
+inside the required core package. [Core public module](https://github.com/ROCm/TheRock/blob/6339d5fc2e8f924a7b3072a9c34623271c9626f7/build_tools/packaging/python/templates/rocm-sdk-core/src/rocm_sdk_core/__init__.py#L1-L4)
 
 Conceptually, the replacement is:
 
 ```python
-from packaging.version import Version
-from rocm_sdk_core import __version__ as core_publication_version
+from rocm_sdk_core import get_core_root, get_rocm_version
 
-actual_base = ".".join(map(str, Version(core_publication_version).release))
+core_root = get_core_root()
+actual_base = get_rocm_version()
 # Compare actual_base to the X.Y.Z extracted from tensilelite's +rocm tag.
 ```
 
-This removes the version-validation reason to call `rocm_sdk path --root`.
-It validates the installed ROCm **wheel set** rather than a native filesystem
-prefix. If the contract must continue to treat core's `.info/version` as the
-native authority, TheRock needs to expose a small public core-runtime-version
-API that reads that file from the core payload; `rocm_sdk_core` currently exports
-only `__version__` and no public core-root API. Either approach removes the
-devel expansion from the version comparison.
+This removes the version-validation reason to call `rocm_sdk path --root` while
+retaining core's `.info/version` as the native compatibility authority.
 
 It does not by itself locate the client after it moves into
 `rocm-sdk-libraries`: the current public SDK offers library lookup and a devel
