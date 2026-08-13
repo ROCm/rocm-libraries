@@ -975,9 +975,18 @@ rocke_attention_tiled_2d_spec_t
         s.use_i64_kv_addr = (cache_bytes > 0x80000000ULL);
     }
 
-    /* k_single_buffer: mirrors Python _enable_k_single_buffer --
-     * d128 small-tile cohort (enable_d128_small_tile) AND block_size >= 32. */
-    s.use_k_single_buffer = enable_d128_small_tile(p) && (p->block_size >= 32);
+    /* k_single_buffer: mirrors Python _enable_k_single_buffer -- d128 small-tile
+     * cohort AND the geometry invariant block_m <= tile_size, DERIVED from the
+     * selectors already assigned above (num_warps * block_m_per_warp vs tile_size)
+     * rather than the stale block_size>=32 proxy. The proxy assumed nw=2
+     * (block_m=64) and went stale when enable_softmax_mfma_interleave widened this
+     * cohort to nw=4 (block_m=128 > T=64 at block_size=32 -> uncaught ValueError at
+     * build; block_size=64 held only by coincidence, T=2*64=128==block_m). */
+    {
+        int block_m_ks = s.num_warps * s.block_m_per_warp;
+        int t_eff_ks = s.has_tile_size ? s.tile_size : s.block_size;
+        s.use_k_single_buffer = enable_d128_small_tile(p) && (block_m_ks <= t_eff_ks);
+    }
 
     /* fp8_mfma_qk: mirrors Python _enable_fp8_mfma_qk; requires _fp8_qk_loader_fits
      * which is not yet ported here. The field stays at its spec_default() value (false)
