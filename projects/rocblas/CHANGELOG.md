@@ -9,6 +9,10 @@ rocBLAS documentation is available at
 
 * Level 3 grouped batched GEMM functions `rocblas_sgemm_grouped_batched`, `rocblas_dgemm_grouped_batched`, and `rocblas_gemm_grouped_batched_ex` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
 
+### Resolved issues
+
+* Fix incorrect results from Level 1 `dot` and `dotc` batched and strided-batched forms, including their `_ex` forms, when `batch_count` is greater than 65535. Every batch item at index 65535 and beyond reduced an empty range and returned zero. The ILP64 (`_64`) forms were unaffected, as they chunk the batch dimension below that limit.
+
 ## rocBLAS 5.6.0
 
 ### Added

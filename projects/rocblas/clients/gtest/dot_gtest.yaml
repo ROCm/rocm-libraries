@@ -456,6 +456,12 @@ Tests:
       - dot_strided_batched_ex:   *double_precision_complex_real
       - dotc_strided_batched_ex:  *double_precision_complex_real
 
+# A batch_count past the grid z cap makes the kernel take its batch sweep more than
+# once. Only the int32 batched forms get there, since the _64 forms chunk the batch
+# below the cap, so these leave api unset. N of 3 does not reach a sweeping kernel at
+# all: at or below 1024 the launcher diverts to rocblas_dot_batched_4_kernel, which
+# grids over the batch. It keeps its own block, and with it the exact comparison it
+# has always had.
   - name: dot_large_batch
     category: stress
     arguments:
@@ -465,6 +471,62 @@ Tests:
       - dot_batched_ex: *half_precision
       - dot_strided_batched: *half_precision
       - dot_strided_batched_ex: *half_precision
+      - dot_batched: *single_precision_complex_real
+      - dot_strided_batched: *single_precision_complex_real
+      - dotc_batched: *single_precision_complex
+      - dotc_strided_batched: *single_precision_complex
+
+# N past 1024 does reach them, and the increments then select between three of the
+# seven affected instantiations: unit takes rocblas_dot_kernel_inc1by2, a larger or
+# negative one the general kernel, algo 1 rocblas_dot_kernel_magsq. 2049 leaves the
+# pairing an odd tail. The multi-block instantiations, including inc1 which is only
+# ever launched that way, need N above the single-block threshold and so about 8 GB of
+# vectors at this batch count; they are not covered here.
+#
+# hpl is set here and not above because rand_int draws from [1, 10] and a reference sum
+# over 1025 or more such products passes what half precision can represent. Without it
+# these rows would fail for a reason unrelated to the sweep.
+  - name: dot_large_batch
+    category: stress
+    arguments:
+      - { N: 1025, incx: 1, incy: 1, stride_x: 1025, stride_y: 1025, batch_count: *c_grid_yz_require_passes }
+      - { N: 2049, incx: 1, incy: 1, stride_x: 2049, stride_y: 2049, batch_count: *c_grid_yz_require_passes }
+      - { N: 1025, incx: 2, incy: 1, stride_x: 2050, stride_y: 1025, batch_count: *c_grid_yz_require_passes }
+      - { N: 1025, incx: -1, incy: 1, stride_x: 1025, stride_y: 1025, batch_count: *c_grid_yz_require_passes }
+      - { N: 1025, incx: 1, incy: 1, stride_x: 1025, stride_y: 1025, batch_count: *c_grid_yz_require_passes, algo: 1 }
+    initialization: hpl
+    function:
+      - dot_batched: *half_precision
+      - dot_batched_ex: *half_precision
+      - dot_strided_batched: *half_precision
+      - dot_strided_batched_ex: *half_precision
+      - dot_batched: *single_precision_complex_real
+      - dot_strided_batched: *single_precision_complex_real
+      - dotc_batched: *single_precision_complex
+      - dotc_strided_batched: *single_precision_complex
+
+# The same fault where PR validation will see it: dot_large_batch above is stress, a
+# tier that runs only when Math CI is asked for it, so alone it would not stand between
+# this defect and a merge. These are the smallest arguments still reaching a sweeping
+# kernel, f32 only so that the rand_int reference sum is exact.
+#
+# Up to 806 MB of device operand, the incx of 2 row striding dx to 537 MB on its own,
+# and mirrored on the host. Being the first case at this batch count outside stress,
+# what makes that safe is that a shortfall skips rather than fails: host_malloc refuses
+# a size that would need swap, and the guards raise LIMITED_RAM or LIMITED_VRAM.
+  - name: dot_batch_sweep_index
+    category: pre_checkin
+    arguments:
+      # unit increments with x != y: rocblas_dot_kernel_inc1by2
+      - { N: 1025, incx: 1, incy: 1, stride_x: 1025, stride_y: 1025, batch_count: *c_grid_yz_require_passes }
+      # increments differ: the general rocblas_dot_kernel
+      - { N: 1025, incx: 2, incy: 1, stride_x: 2050, stride_y: 1025, batch_count: *c_grid_yz_require_passes }
+      # x == y: rocblas_dot_kernel_magsq
+      - { N: 1025, incx: 1, incy: 1, stride_x: 1025, stride_y: 1025, batch_count: *c_grid_yz_require_passes, algo: 1 }
+    os_flags: [ LINUX ]
+    function:
+      - dot_batched: *single_precision
+      - dot_strided_batched: *single_precision
 
 # Tests for testing rocblas_dot_batched_4_kernel
   - name: dot_batched_kernel_test
