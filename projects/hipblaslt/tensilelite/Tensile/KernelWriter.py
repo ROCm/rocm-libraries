@@ -3020,7 +3020,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
 
       # WaveIdx already freed for subtile (before graWorkGroup above)
-      # TDM StaggerU also reads wave parity from WaveIdx
+      # TDM StaggerU reads wave parity from WaveIdx through calculateStagger below,
+      # so its release is deferred to releaseWaveIdxAfterStagger.
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
           and not kernel.get("UseSubtileImpl") \
           and not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
@@ -3080,6 +3081,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
         module.add(self.calculateStagger(kernel, tensorParametersB))
+
+      # WaveIdx sits at a very low physical index, and checkOutAligned scans the pool
+      # from 0, so holding it past the prologue both removes a slot and fragments the
+      # low pool for the unroll loop's aligned temps -- enough to push the tightest
+      # gfx1250 StreamK configs over MaxSgpr. Release it here: the stagger prologue
+      # above is its last cheap-parity consumer, everything later recomputes parity
+      # from vgpr("Serial").
+      module.add(self.releaseWaveIdxAfterStagger(kernel))
+
       # LRO and LWA as assigned
       # init lds read pointers before each unrolled loop
       module.addComment0("local read addresses: init pointers a")

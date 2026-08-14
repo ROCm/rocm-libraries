@@ -6586,18 +6586,30 @@ class KernelWriterAssembly(KernelWriter):
     return imod
 
   def releaseWaveIdxAfterStagger(self, kernel):
+    """Return the wave-separated TDM stagger's WaveIdx SGPR to the pool.
+
+    Primary call site is setupNewTile, right after the calculateStagger block that is
+    WaveIdx's last prologue consumer. removeStaggerAB also calls it as a backstop for
+    paths that never reach the setupNewTile site.
+    """
     module = Module("ReleaseWaveIdxAfterStagger")
     # The cluster barrier handshake reads WaveIdx for the whole kernel.
     if kernel["ClusterBarrier"]:
       return module
+    # Subtile releases WaveIdx before graWorkGroup; never double-release it here.
+    if kernel.get("UseSubtileImpl"):
+      return module
     if not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)):
       return module
-    # Idempotent: removeStaggerAB has two mutually exclusive call sites.
-    # Double undefineSgpr is a compiler error; double pool check-in corrupts the pool.
     if "WaveIdx" not in self.sgprs:
       return module
+    # Idempotent: setupNewTile and removeStaggerAB both call this, and either can be
+    # emitted more than once. undefineSgpr leaves the name in self.sgprs, so the latch
+    # is the only guard against a second checkIn corrupting the pool.
     if self.states.waveIdxReleasedAfterStagger:
       return module
+    assert self.sgprPool.getPool()[self.sgprs["WaveIdx"]].status == RegisterPool.Status.InUse, \
+        "WaveIdx SGPR was already returned to the pool before releaseWaveIdxAfterStagger"
     self.states.waveIdxReleasedAfterStagger = True
     module.add(self.undefineSgpr("WaveIdx"))
     return module

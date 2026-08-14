@@ -1554,7 +1554,7 @@ class StreamK(Component):
                 # are likely to be low-performing so likely not worth optimizing.
                 if shrinkDb:
                     print("WARNING: half requires at least two elements per batch")
-                self.overflowedResources = 3
+                writer.states.overflowedResources = 3
         #elif kernel["ProblemType"]["DataType"].is8bitFloat():
         #    if numElementsPerBatch > 1:
         #        numElementsPerBatch = int(numElementsPerBatch/4)*4
@@ -2113,7 +2113,7 @@ class StreamK(Component):
                     # are likely to be low-performing so likely not worth optimizing.
                     if shrinkDb:
                         print("WARNING: half requires at least two elements per batch")
-                    self.overflowedResources = 3
+                    writer.states.overflowedResources = 3
             #elif kernel["ProblemType"]["DataType"].is8bitFloat():
             #    if numElementsPerBatch > 1:
             #        numElementsPerBatch = int(numElementsPerBatch/4)*4
