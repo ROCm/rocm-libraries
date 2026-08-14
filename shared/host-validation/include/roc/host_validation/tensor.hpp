@@ -122,6 +122,10 @@ template <typename T>
 struct NativeScalarType;
 
 template <>
+struct NativeScalarType<bool> {
+    static constexpr ScalarType value = ScalarType::Boolean;
+};
+template <>
 struct NativeScalarType<uint8_t> {
     static constexpr ScalarType value = ScalarType::UInt8;
 };
@@ -1020,6 +1024,81 @@ void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logic
 inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     return detail::storageBytesForLayout(type, layout);
 }
+
+class Scalar {
+   public:
+    static constexpr size_t maximumStorageBytes = 16;
+
+    template <typename Source>
+    static Scalar from(Source value) {
+        using Value = std::remove_cvref_t<Source>;
+        Scalar result(nativeScalarType<Value>);
+        detail::encodeScalar(result.m_type, result.m_storage, 0, std::move(value));
+        return result;
+    }
+
+    static Scalar fromStorage(ScalarType type, std::span<const std::byte> storage) {
+        Scalar result(type);
+        if (storage.size() != result.storageSize())
+            throw std::invalid_argument("Scalar storage size does not match its type.");
+        std::copy(storage.begin(), storage.end(), result.m_storage.begin());
+        const uint16_t remainder = scalarTypeInfo(type).storageBits % 8;
+        if (remainder != 0) {
+            const uint8_t mask = static_cast<uint8_t>((1U << remainder) - 1U);
+            const size_t finalByte = result.storageSize() - 1;
+            result.m_storage[finalByte] = static_cast<std::byte>(
+                std::to_integer<uint8_t>(result.m_storage[finalByte]) & mask);
+        }
+        return result;
+    }
+
+    static Scalar zero(ScalarType type) {
+        Scalar result(type);
+        detail::encodeScalar(type, result.m_storage, 0, int64_t{0});
+        return result;
+    }
+
+    static Scalar one(ScalarType type) {
+        Scalar result(type);
+        detail::encodeScalar(type, result.m_storage, 0, int64_t{1});
+        return result;
+    }
+
+    ScalarType type() const {
+        return m_type;
+    }
+
+    std::span<const std::byte> storage() const {
+        return std::span<const std::byte>(m_storage).first(storageSize());
+    }
+
+    template <typename Target>
+    Target as() const {
+        return detail::decodeScalar<Target>(m_type, m_storage, 0);
+    }
+
+    friend bool operator==(const Scalar& left, const Scalar& right) {
+        return left.m_type == right.m_type &&
+               std::equal(left.storage().begin(), left.storage().end(), right.storage().begin(),
+                          right.storage().end());
+    }
+
+   private:
+    explicit Scalar(ScalarType type) : m_type(type) {
+        if (type == ScalarType::Count)
+            throw std::invalid_argument("Scalar requires a concrete scalar type.");
+        if (storageSize() > maximumStorageBytes)
+            throw std::invalid_argument("Scalar type exceeds inline scalar storage.");
+    }
+
+    size_t storageSize() const {
+        const uint16_t bits = scalarTypeInfo(m_type).storageBits;
+        return bits / 8 + static_cast<size_t>(bits % 8 != 0);
+    }
+
+    ScalarType m_type;
+    std::array<std::byte, maximumStorageBytes> m_storage{};
+};
 
 class Tensor;
 
