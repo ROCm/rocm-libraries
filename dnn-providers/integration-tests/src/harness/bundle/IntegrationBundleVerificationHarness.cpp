@@ -345,27 +345,31 @@ void IntegrationBundleVerificationHarness::recordSupportObservations()
     const std::string platform = currentPlatform();
     const bool emitToStdout = TestConfig::get().emitSupportObservations();
 
-    const auto recordAll = [&](ObservedSupport support) {
+    const auto recordOne = [&](const LoadedEngine& engine, ObservedSupport support) {
+        SupportObservationLog::get().record({_claimLocator,
+                                             engine.name,
+                                             arch,
+                                             platform,
+                                             support,
+                                             _bundle->metadata.enforcementLevel});
+
+        if(emitToStdout)
+        {
+            emitObservationLine(bundleKeyForObservation(_claimLocator.sidecarPath),
+                                _claimLocator.isSweep() ? nlohmann::json(_claimLocator.caseId)
+                                                        : nlohmann::json(nullptr),
+                                engine.name,
+                                arch,
+                                platform,
+                                support,
+                                toString(_bundle->metadata.enforcementLevel));
+        }
+    };
+
+    const auto recordAllAs = [&](ObservedSupport support) {
         for(const auto& engine : engines)
         {
-            SupportObservationLog::get().record({_claimLocator,
-                                                 engine.name,
-                                                 arch,
-                                                 platform,
-                                                 support,
-                                                 _bundle->metadata.enforcementLevel});
-
-            if(emitToStdout)
-            {
-                emitObservationLine(bundleKeyForObservation(_claimLocator.sidecarPath),
-                                    _claimLocator.isSweep() ? nlohmann::json(_claimLocator.caseId)
-                                                            : nlohmann::json(nullptr),
-                                    engine.name,
-                                    arch,
-                                    platform,
-                                    support,
-                                    toString(_bundle->metadata.enforcementLevel));
-            }
+            recordOne(engine, support);
         }
     };
 
@@ -378,7 +382,7 @@ void IntegrationBundleVerificationHarness::recordSupportObservations()
     auto err = graph.from_binary(handle, graphBytes);
     if(err.is_bad())
     {
-        recordAll(ObservedSupport::UNKNOWN);
+        recordAllAs(ObservedSupport::UNKNOWN);
         return;
     }
 
@@ -387,7 +391,7 @@ void IntegrationBundleVerificationHarness::recordSupportObservations()
 
     if(!isResolved(status.get_code()))
     {
-        recordAll(ObservedSupport::UNKNOWN);
+        recordAllAs(ObservedSupport::UNKNOWN);
         return;
     }
 
@@ -395,26 +399,7 @@ void IntegrationBundleVerificationHarness::recordSupportObservations()
     {
         const bool supported
             = std::find(engineIds.begin(), engineIds.end(), engine.id) != engineIds.end();
-        const auto verdict = supported ? ObservedSupport::SUPPORTED : ObservedSupport::DECLINED;
-
-        SupportObservationLog::get().record({_claimLocator,
-                                             engine.name,
-                                             arch,
-                                             platform,
-                                             verdict,
-                                             _bundle->metadata.enforcementLevel});
-
-        if(emitToStdout)
-        {
-            emitObservationLine(bundleKeyForObservation(_claimLocator.sidecarPath),
-                                _claimLocator.isSweep() ? nlohmann::json(_claimLocator.caseId)
-                                                        : nlohmann::json(nullptr),
-                                engine.name,
-                                arch,
-                                platform,
-                                verdict,
-                                toString(_bundle->metadata.enforcementLevel));
-        }
+        recordOne(engine, supported ? ObservedSupport::SUPPORTED : ObservedSupport::DECLINED);
     }
 }
 
