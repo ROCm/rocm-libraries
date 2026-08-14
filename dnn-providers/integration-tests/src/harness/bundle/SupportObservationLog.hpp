@@ -68,13 +68,7 @@ struct SupportObservation
 };
 
 // Process-wide log of support observations. Populated during
-// --write-support-claims and --emit-support-observations runs and drained once
-// after RUN_ALL_TESTS().
-//
-// Unresolved queries are recorded too, as UNKNOWN — the harvest emitter reports
-// them, because a target that keeps erroring is worth seeing. They are not
-// observations of "unsupported", so every consumer that removes claims must
-// filter them out first; writeObservedSupportClaims() does exactly that.
+// --write-support-claims runs and drained once after RUN_ALL_TESTS().
 class SupportObservationLog
 {
 public:

@@ -133,8 +133,9 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
-    // Where to append the harvest JSONL (RFC 0015 §12.1). Unset = no harvest.
-    std::optional<std::filesystem::path> supportObservationsPath;
+    // When true, the harness prints ##support-observation: tagged lines to
+    // stdout during test execution (RFC 0015 §12.1).
+    bool emitSupportObservations = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -230,7 +231,7 @@ public:
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
         instance._captureDir = std::move(opts.captureDir);
 
-        instance._supportObservationsPath = std::move(opts.supportObservationsPath);
+        instance._emitSupportObservations = opts.emitSupportObservations;
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -432,21 +433,10 @@ public:
         return _captureDir.value();
     }
 
-    bool hasSupportObservationsPath() const
+    bool emitSupportObservations() const
     {
         throwIfNotInitialized();
-        return _supportObservationsPath.has_value();
-    }
-
-    const std::filesystem::path& getSupportObservationsPath() const
-    {
-        throwIfNotInitialized();
-        if(!_supportObservationsPath.has_value())
-        {
-            throw std::runtime_error("getSupportObservationsPath() called but "
-                                     "--emit-support-observations was not provided");
-        }
-        return _supportObservationsPath.value();
+        return _emitSupportObservations;
     }
 
 private:
@@ -467,7 +457,7 @@ private:
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
     std::optional<std::filesystem::path> _captureDir;
-    std::optional<std::filesystem::path> _supportObservationsPath;
+    bool _emitSupportObservations = false;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

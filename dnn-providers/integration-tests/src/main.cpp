@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -29,7 +28,6 @@
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
-#include "harness/bundle/SupportObservationEmitter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
@@ -162,10 +160,12 @@ int main(int argc, char** argv) noexcept
                   "--test-engine). Implies --allow-bundles, since bundles are what "
                   "carry the claims. Idempotent: no support change = zero git diff.");
         parser.add_argument("--emit-support-observations")
-            .help("Append observed engine support to the given JSONL file, one record "
-                  "per (bundle, case, engine, arch, platform). Pure side effect: it "
-                  "observes what the run was going to do anyway and never changes the "
-                  "verdict. Feed the file to scripts/harvest_support_observations.py.");
+            .default_value(false)
+            .implicit_value(true)
+            .help("Print ##support-observation:{json} lines to stdout during the run, "
+                  "one per (bundle, case, engine, arch, platform). Pure side effect: "
+                  "never changes the verdict. CI greps stdout into a JSONL file for "
+                  "scripts/harvest_support_observations.py.");
         std::vector<std::string> remainingArgs;
         try
         {
@@ -319,16 +319,12 @@ int main(int argc, char** argv) noexcept
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
-        if(parser.is_used("--emit-support-observations"))
-        {
-            opts.supportObservationsPath = parser.get<std::string>("--emit-support-observations");
-        }
+        opts.emitSupportObservations = parser.get<bool>("--emit-support-observations");
 
-        // The write path drains the same log into sidecars and diverts every
-        // bundle away from actually running. Harvesting from that run would
-        // record real observations, but of a run that verified nothing — and
-        // the two flags disagree about what the binary is for.
-        if(opts.writeSupportClaims && opts.supportObservationsPath.has_value())
+        // The write path drains the log into sidecars and diverts every bundle
+        // away from actually running. Harvesting from that run would record
+        // observations of a run that verified nothing.
+        if(opts.writeSupportClaims && opts.emitSupportObservations)
         {
             std::cerr << "--write-support-claims and --emit-support-observations are "
                       << "mutually exclusive.\n";
@@ -470,49 +466,6 @@ int main(int argc, char** argv) noexcept
             {
                 exitCode = 1;
             }
-        }
-
-        if(hipdnn_integration_tests::TestConfig::get().hasSupportObservationsPath())
-        {
-            namespace bundle_ns = hipdnn_integration_tests::bundle;
-
-            auto envOr = [](const char* name) -> std::string {
-                const char* v = std::getenv(name);
-                return v ? v : "";
-            };
-            const bundle_ns::ObservationProvenance provenance{envOr("ROCM_VERSION"),
-                                                              envOr("CI_COMMIT_SHA"),
-                                                              envOr("CI_RUN_ID"),
-                                                              bundle_ns::currentUtcTimestamp()};
-
-            const auto& obsPath
-                = hipdnn_integration_tests::TestConfig::get().getSupportObservationsPath();
-            const auto emitSummary
-                = bundle_ns::emitSupportObservations(bundle_ns::SupportObservationLog::get().all(),
-                                                     obsPath,
-                                                     bundle_ns::resolveDataDir(),
-                                                     provenance);
-
-            std::cerr << "\n==== SUPPORT OBSERVATION EMIT SUMMARY ====\n"
-                      << "  records: " << emitSummary.recordsEmitted
-                      << "  errors: " << emitSummary.errors.size() << "\n";
-            for(const auto& error : emitSummary.errors)
-            {
-                std::cerr << "  ERROR: " << error << "\n";
-            }
-            if(emitSummary.recordsEmitted == 0)
-            {
-                std::cerr << "  WARNING: nothing was observed. The harvest consumer cannot tell "
-                             "this apart\n"
-                             "           from a shard that was never scheduled — it will report "
-                             "0% coverage\n"
-                             "           either way. Check --allow-bundles and --gtest_filter.\n";
-            }
-
-            // exitCode is deliberately untouched, errors and all. Harvesting is
-            // a side effect of the run (RFC 0015 §12.1); a full disk must not
-            // turn a green enforcement result red. The loud stderr above is the
-            // signal, and the consumer's coverage report is the backstop.
         }
 
         if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims()

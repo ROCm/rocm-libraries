@@ -4,18 +4,25 @@
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <ctime>
+#include <iostream>
 #include <ostream>
 #include <set>
 #include <sstream>
+#include <system_error>
+
+#include <nlohmann/json.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <hipdnn_test_sdk/utilities/ComparisonReport.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
@@ -27,6 +34,7 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
@@ -38,6 +46,72 @@
 
 namespace hipdnn_integration_tests::bundle
 {
+
+namespace
+{
+
+std::string bundleKeyForObservation(const std::filesystem::path& sidecarPath)
+{
+    const auto directory = sidecarPath.parent_path();
+    const auto bundleRoot = resolveDataDir();
+
+    std::error_code ec;
+    const auto relative = std::filesystem::relative(directory, bundleRoot, ec);
+
+    if(ec || relative.empty() || *relative.begin() == "..")
+    {
+        return directory.generic_string();
+    }
+    return relative.generic_string();
+}
+
+std::string currentUtcTimestampForObservation()
+{
+    const auto seconds = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+
+    std::tm utc{};
+#ifdef _WIN32
+    gmtime_s(&utc, &seconds);
+#else
+    gmtime_r(&seconds, &utc);
+#endif
+
+    std::array<char, 32> buffer{};
+    const std::size_t written
+        = std::strftime(buffer.data(), buffer.size(), "%Y-%m-%dT%H:%M:%SZ", &utc);
+    return {buffer.data(), written};
+}
+
+void emitObservationLine(const std::string& bundle,
+                         const nlohmann::json& caseId,
+                         const std::string& engineName,
+                         const std::string& arch,
+                         const std::string& platform,
+                         ObservedSupport support,
+                         const std::string& enforcementLevel)
+{
+    auto envOr = [](const char* name) -> std::string {
+        const char* v = std::getenv(name);
+        return v ? v : "";
+    };
+
+    nlohmann::json record;
+    record["bundle"] = bundle;
+    record["case_id"] = caseId;
+    record["engine"] = engineName;
+    record["arch"] = arch;
+    record["platform"] = platform;
+    record["verdict"] = toString(support);
+    record["enforcement_level"] = enforcementLevel;
+    record["provenance"] = {{"rocm_version", envOr("ROCM_VERSION")},
+                            {"commit", envOr("CI_COMMIT_SHA")},
+                            {"run_id", envOr("CI_RUN_ID")},
+                            {"timestamp", currentUtcTimestampForObservation()}};
+
+    std::cout << "##support-observation:" << record.dump() << std::endl;
+}
+
+} // namespace
 
 // ---- virtual defaults ------------------------------------------------------
 
@@ -83,13 +157,9 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
             SupportClaimVerdicts::get().record(v);
             if(isFailure(v.verdict) && (!hasPinnedEngine || v.engineName == pinnedName))
             {
-                failureAggregate += formatVerdictMessage(v);
+                FAIL() << formatVerdictMessage(v);
+                return;
             }
-        }
-        if(!failureAggregate.empty())
-        {
-            FAIL() << failureAggregate;
-            return;
         }
     }
 
@@ -259,34 +329,8 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
     _verified = true;
 }
 
-// Hand-rolls the query loop instead of delegating to observeAllSupport because
-// it records raw SupportObservations (engine supported yes/no), not SupportResults.
-void IntegrationBundleVerificationHarness::observeSupportOnly()
+void IntegrationBundleVerificationHarness::recordSupportObservations()
 {
-    auto handle = getSharedHandle();
-
-    const std::vector<uint8_t> graphBytes(
-        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
-
-    hipdnn_frontend::graph::Graph graph;
-    auto err = graph.from_binary(handle, graphBytes);
-    if(err.is_bad())
-    {
-        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: from_binary failed for " << _bundlePath << ": "
-                                                                             << err.get_message());
-        return;
-    }
-
-    std::vector<int64_t> engineIds;
-    auto status = graph.get_ranked_engine_ids(engineIds);
-
-    if(!isResolved(status.get_code()))
-    {
-        HIPDNN_PLUGIN_LOG_WARN("observeSupportOnly: unresolved query for " << _bundlePath << ": "
-                                                                           << status.get_message());
-        return;
-    }
-
     auto engines = LoadedEngineTable::get().all();
     if(TestConfig::get().hasEngineName())
     {
@@ -299,14 +343,95 @@ void IntegrationBundleVerificationHarness::observeSupportOnly()
 
     const std::string arch = baseArchToken(TestConfig::get().getCurrentArch());
     const std::string platform = currentPlatform();
+    const bool emitToStdout = TestConfig::get().emitSupportObservations();
+
+    const auto recordAll = [&](ObservedSupport support) {
+        for(const auto& engine : engines)
+        {
+            SupportObservationLog::get().record({_claimLocator,
+                                                 engine.name,
+                                                 arch,
+                                                 platform,
+                                                 support,
+                                                 _bundle->metadata.enforcementLevel});
+
+            if(emitToStdout)
+            {
+                emitObservationLine(bundleKeyForObservation(_claimLocator.sidecarPath),
+                                    _claimLocator.isSweep() ? nlohmann::json(_claimLocator.caseId)
+                                                            : nlohmann::json(nullptr),
+                                    engine.name,
+                                    arch,
+                                    platform,
+                                    support,
+                                    toString(_bundle->metadata.enforcementLevel));
+            }
+        }
+    };
+
+    auto handle = getSharedHandle();
+
+    const std::vector<uint8_t> graphBytes(
+        _bundle->graphBuffer.data(), _bundle->graphBuffer.data() + _bundle->graphBuffer.size());
+
+    hipdnn_frontend::graph::Graph graph;
+    auto err = graph.from_binary(handle, graphBytes);
+    if(err.is_bad())
+    {
+        recordAll(ObservedSupport::UNKNOWN);
+        return;
+    }
+
+    std::vector<int64_t> engineIds;
+    auto status = graph.get_ranked_engine_ids(engineIds);
+
+    if(!isResolved(status.get_code()))
+    {
+        recordAll(ObservedSupport::UNKNOWN);
+        return;
+    }
 
     for(const auto& engine : engines)
     {
-        const bool engineIsSupported
+        const bool supported
             = std::find(engineIds.begin(), engineIds.end(), engine.id) != engineIds.end();
+        const auto verdict = supported ? ObservedSupport::SUPPORTED : ObservedSupport::DECLINED;
 
-        SupportObservationLog::get().record(
-            {_claimLocator, engine.name, arch, platform, engineIsSupported});
+        SupportObservationLog::get().record({_claimLocator,
+                                             engine.name,
+                                             arch,
+                                             platform,
+                                             verdict,
+                                             _bundle->metadata.enforcementLevel});
+
+        if(emitToStdout)
+        {
+            emitObservationLine(bundleKeyForObservation(_claimLocator.sidecarPath),
+                                _claimLocator.isSweep() ? nlohmann::json(_claimLocator.caseId)
+                                                        : nlohmann::json(nullptr),
+                                engine.name,
+                                arch,
+                                platform,
+                                verdict,
+                                toString(_bundle->metadata.enforcementLevel));
+        }
+    }
+}
+
+void IntegrationBundleVerificationHarness::recordSupportObservationsQuietly()
+{
+    try
+    {
+        recordSupportObservations();
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_SDK_LOG_WARN("Support observation skipped for " << _claimLocator.diagnosticPath
+                                                               << ": " << e.what());
+    }
+    catch(...)
+    {
+        HIPDNN_SDK_LOG_WARN("Support observation skipped for " << _claimLocator.diagnosticPath);
     }
 }
 
@@ -314,8 +439,17 @@ void IntegrationBundleVerificationHarness::runComparison()
 {
     if(TestConfig::get().writeSupportClaims())
     {
-        observeSupportOnly();
+        recordSupportObservations();
         return;
+    }
+
+    // Harvest observes and then gets out of the way: the test runs to whatever
+    // verdict it would have reached anyway (RFC 0015 §12.1). Hence no early
+    // return here, and hence the try/catch — a failed query costs a JSONL line,
+    // never a red test.
+    if(TestConfig::get().emitSupportObservations())
+    {
+        recordSupportObservationsQuietly();
     }
 
     if(_bundle->metadata.enforcementLevel != EnforcementLevel::FULL)
@@ -348,9 +482,6 @@ void IntegrationBundleVerificationHarness::runComparison()
         return;
     case VerificationMode::AUTO:
         runAutoMode();
-        return;
-    case VerificationMode::GOLDEN_CHECK:
-        runGoldenCheckMode();
         return;
     default:
         FAIL() << "Unknown verification mode";
@@ -494,37 +625,6 @@ void IntegrationBundleVerificationHarness::runAutoMode()
     }
 }
 
-void IntegrationBundleVerificationHarness::runGoldenCheckMode()
-{
-    if(!_bundle->hasGoldenOutputs)
-    {
-        skipUnverifiable("no golden data (verification-mode=golden-check)");
-        return;
-    }
-
-    OutputTensors cpuOutputs;
-    const RefRunResult result
-        = runReferenceCapturingOutputs(ReferenceExecutorType::CPU, cpuOutputs);
-    switch(result.status)
-    {
-    case RefStatus::CAPABILITY_MISS:
-        skipUnverifiable("CPU ref cannot run this op (golden-check): " + result.message);
-        return;
-    case RefStatus::RUNTIME_ERROR:
-        recordRefError("CPU ref errored (golden-check): " + result.message);
-        FAIL() << "CPU ref errored (golden-check): " << result.message;
-        return;
-    case RefStatus::RAN:
-        compareEach(cpuOutputs, [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& {
-            return *_bundle->tensors->at(uid);
-        });
-        return;
-    default:
-        FAIL() << "Unknown RefStatus";
-        return;
-    }
-}
-
 // ---- inputs ----------------------------------------------------------------
 
 bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
@@ -560,6 +660,19 @@ bool IntegrationBundleVerificationHarness::fillBundleInputs()
     if(!fillResult.filled)
     {
         skipUnverifiable(fillResult.reason);
+        return false;
+    }
+
+    auto missing = _inputFillRecipes.unfilled(leafInputUids);
+    if(!missing.empty())
+    {
+        std::ostringstream os;
+        os << "cannot fill:";
+        for(const int64_t uid : missing)
+        {
+            os << " uid=" << uid;
+        }
+        skipUnverifiable(os.str());
         return false;
     }
 
@@ -644,11 +757,6 @@ std::optional<OutputTensors>
     catch(const EngineNotApplicableError& e)
     {
         error = e.what();
-        return std::nullopt;
-    }
-
-    if(::testing::Test::HasFatalFailure())
-    {
         return std::nullopt;
     }
 
@@ -788,20 +896,59 @@ void IntegrationBundleVerificationHarness::compareOutputTensor(
 
     if(!passed)
     {
-        const auto label = labelFor(uid, attrs);
-        hipdnn_test_sdk::utilities::ComparisonContext ctx;
-        ctx.contextLine = "Bundle: " + _bundlePath.string();
-        ctx.tensorLabel = label + " (UID " + std::to_string(uid) + ", output)";
-        ctx.dtypeName = hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
-        ctx.atol = atol;
-        ctx.rtol = rtol;
-
         std::ostringstream report;
-        report << hipdnn_test_sdk::utilities::formatComparisonHeader(ctx, expected);
-        hipdnn_test_sdk::utilities::appendComparisonDiffByDataType(
-            report, dataType, label, expected, actual, atol, rtol);
+        report << reportHeader(uid, attrs, dataType, expected, atol, rtol);
+        appendTensorDiff(report, uid, attrs, dataType, expected, actual, atol, rtol);
         EXPECT_TRUE(false) << report.str();
     }
+}
+
+void IntegrationBundleVerificationHarness::appendTensorDiff(
+    std::ostream& os,
+    int64_t uid,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    hipdnn_data_sdk::utilities::ITensor& expected,
+    hipdnn_data_sdk::utilities::ITensor& actual,
+    float atol,
+    float rtol)
+{
+    using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::types::half;
+
+    switch(dataType)
+    {
+    case DT::FLOAT:
+        appendFpDiff<float>(os, uid, attrs, expected, actual, atol, rtol);
+        return;
+    case DT::HALF:
+        appendFpDiff<half>(os, uid, attrs, expected, actual, atol, rtol);
+        return;
+    case DT::BFLOAT16:
+        appendFpDiff<bfloat16>(os, uid, attrs, expected, actual, atol, rtol);
+        return;
+    case DT::DOUBLE:
+        appendFpDiff<double>(os, uid, attrs, expected, actual, atol, rtol);
+        return;
+    default:
+        os << "  (no element-wise diff available for this data type)\n";
+    }
+}
+
+template <typename T>
+void IntegrationBundleVerificationHarness::appendFpDiff(
+    std::ostream& os,
+    int64_t uid,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+    hipdnn_data_sdk::utilities::ITensor& expected,
+    hipdnn_data_sdk::utilities::ITensor& actual,
+    float atol,
+    float rtol)
+{
+    const auto summary
+        = hipdnn_test_sdk::utilities::computeTensorDiff<T>(expected, actual, atol, rtol);
+    hipdnn_test_sdk::utilities::printTensorDiffSummary(os, labelFor(uid, attrs), summary);
 }
 
 std::string IntegrationBundleVerificationHarness::labelFor(
@@ -809,6 +956,30 @@ std::string IntegrationBundleVerificationHarness::labelFor(
 {
     const auto* name = attrs.name();
     return (name != nullptr && !name->empty()) ? name->str() : ("uid=" + std::to_string(uid));
+}
+
+std::string IntegrationBundleVerificationHarness::reportHeader(
+    int64_t uid,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    hipdnn_data_sdk::utilities::ITensor& expected,
+    float atol,
+    float rtol) const
+{
+    std::ostringstream os;
+    os << "\nGolden comparison FAILED\n"
+       << "  Bundle: " << _bundlePath << "\n"
+       << "  Tensor: " << labelFor(uid, attrs) << " (UID " << uid << ", output)\n"
+       << "  Shape:  " << hipdnn_test_sdk::utilities::StreamVec(expected.dims()) << "  "
+       << dataTypeName(dataType) << "\n"
+       << "  Tolerance: atol=" << atol << " rtol=" << rtol << "\n";
+    return os.str();
+}
+
+std::string IntegrationBundleVerificationHarness::dataTypeName(
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    return hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataType);
 }
 
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const

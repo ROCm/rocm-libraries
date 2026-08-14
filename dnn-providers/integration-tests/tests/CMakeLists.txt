@@ -7,7 +7,6 @@ add_executable(hipdnn_integration_tests_unit_tests
     ../src/harness/bundle/SupportClaimReport.cpp
     ../src/harness/bundle/SupportClaimWriter.cpp
     ../src/harness/bundle/SupportClaims.cpp
-    ../src/harness/bundle/SupportObservationEmitter.cpp
     ../src/harness/bundle/SupportVerdict.cpp
     ../src/harness/input-init/FillInputs.cpp
     TestBundleMetadata.cpp
@@ -39,7 +38,6 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimReport.cpp
     TestSupportClaimRoundTrip.cpp
     TestSupportClaimWriter.cpp
-    TestSupportObservationEmitter.cpp
     TestSupportVerdict.cpp
 )
 
