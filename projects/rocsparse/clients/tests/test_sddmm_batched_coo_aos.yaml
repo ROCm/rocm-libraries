@@ -1,0 +1,197 @@
+# ########################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+#
+# ########################################################################
+
+---
+include: rocsparse_common.yaml
+
+
+Definitions:
+  - &alpha_beta_range_quick
+    - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
+
+  - &alpha_beta_range_checkin
+    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
+
+  - &alpha_beta_range_nightly
+    - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
+    - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
+
+Tests:
+# ##############################
+# # Quick
+# ##############################
+- name: sddmm_batched_coo_aos
+  category: quick
+  function: sddmm_batched_coo_aos
+  indextype: *i32
+  precision: *single_only_precisions
+  M: [15, 32]
+  N: [2, 3]
+  K: [7, 27]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  batch_count_C: [7]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+
+- name: sddmm_batched_coo_aos
+  category: quick
+  function: sddmm_batched_coo_aos
+  indextype: *i32_i64
+  precision: *double_only_precisions
+  M: [155, 300]
+  N: [22, 39]
+  K: [72, 265]
+  batch_count_A: [5]
+  batch_count_B: [1]
+  batch_count_C: [5]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_row]
+  orderB: [rocsparse_order_row]
+
+- name: sddmm_batched_coo_aos
+  category: quick
+  function: sddmm_batched_coo_aos
+  indextype: *i32
+  precision: *single_only_precisions_complex
+  M: [128]
+  N: [128]
+  K: [128]
+  batch_count_A: [1]
+  batch_count_B: [4]
+  batch_count_C: [4]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+
+- name: sddmm_batched_coo_aos
+  category: quick
+  function: sddmm_batched_coo_aos
+  indextype: *i32
+  precision: [*float16_float16_float32_float32_abct_precision, 
+              *bfloat16_bfloat16_float32_float32_abct_precision, 
+              *bfloat16_bfloat16_bfloat16_float32_abct_precision]
+  M: [88]
+  N: [103]
+  K: [72]
+  batch_count_A: [3]
+  batch_count_B: [3]
+  batch_count_C: [3]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+
+##############################
+# Precheckin
+##############################
+- name: sddmm_batched_coo_aos_bad_arg
+  category: pre_checkin
+  function: sddmm_batched_coo_aos_bad_arg
+  indextype: *i32
+  precision: *single_only_precisions
+
+- name: sddmm_batched_coo_aos
+  category: pre_checkin
+  function: sddmm_batched_coo_aos
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [64]
+  N: [37]
+  K: [53]
+  batch_count_A: [1]
+  batch_count_B: [1]
+  batch_count_C: [6]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column, rocsparse_order_row]
+  orderB: [rocsparse_order_column, rocsparse_order_row]
+
+- name: sddmm_batched_coo_aos_graph_test
+  category: pre_checkin
+  function: sddmm_batched_coo_aos
+  indextype: *i32
+  precision: *single_double_precisions
+  M: [16]
+  N: [93]
+  K: [34]
+  batch_count_A: [1]
+  batch_count_B: [5]
+  batch_count_C: [5]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
+  graph_test: true
+
+##############################
+# Nightly
+##############################
+- name: sddmm_batched_coo_aos
+  category: nightly
+  function: sddmm_batched_coo_aos
+  indextype: *i64
+  precision: *single_double_precisions_complex_real
+  M: [431]
+  N: [273]
+  K: [97]
+  batch_count_A: [8]
+  batch_count_B: [8]
+  batch_count_C: [8]
+  alpha_beta: *alpha_beta_range_nightly
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  sddmm_alg: [rocsparse_sddmm_alg_default]
+  order: [rocsparse_order_column]
+  orderB: [rocsparse_order_column]
