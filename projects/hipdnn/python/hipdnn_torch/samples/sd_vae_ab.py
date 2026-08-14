@@ -20,7 +20,7 @@ produce non-finite activations, which is a property of the reference math, not t
 injection. The script reports a finite-aware parity check and the per-op census.
 
     HIPDNN_TORCH_PROVIDER_SO=<...>/libhip_kernel_provider.so \
-        COMFYUI_PATH=~/comfyui-repro/ComfyUI \
+        COMFYUI_PATH=/path/to/ComfyUI \
         python samples/sd_vae_ab.py
 
     # contrast: force one engine (conv2d has no kernel there -> native fallback)

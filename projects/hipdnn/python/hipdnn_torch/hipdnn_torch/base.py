@@ -143,7 +143,17 @@ class OpOverride:
             if err.is_bad():
                 raise NotApplicable(f"build_operation_graph: {err.get_message()}")
 
-            ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
+            # No engine claiming the graph is a clean decline, not an error. Most
+            # backends signal that with an empty ranking; some (this gfx1151
+            # nightly's binding) instead RAISE "Failed to get ranked engine ids:
+            # No engine configurations available for the graph". Translate either
+            # form to NotApplicable so the op's fallback ladder (e.g. linear's
+            # fused-bias -> matmul-only rung) runs instead of aborting to full
+            # native -- an unclaimed fused graph must not sink the matmul.
+            try:
+                ranked = g.get_ranked_engine_ids([st.hipdnn.HeuristicMode.FALLBACK])
+            except Exception as err:  # noqa: BLE001 -- ranking probe failure == no engine
+                raise NotApplicable(f"get_ranked_engine_ids raised: {err}")
             if not ranked:
                 raise NotApplicable(f"no engine applicable for {describe}")
 

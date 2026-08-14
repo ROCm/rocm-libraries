@@ -4,7 +4,7 @@
 """Shared per-op device-time census for the model A/B samples.
 
 Wraps the hot ``torch.nn.functional`` entry points in CUDA-event timing pairs for
-one forward call and returns a ranked table. Kineto GPU capture is dead on this WSL
+one forward call and returns a ranked table. Kineto GPU capture is dead on this
 ROCm build, so CUDA events are the reliable per-op device timer. This is measurement
 only -- it does not route anything to hipDNN (that is what ``hipdnn_torch.install``
 does); run it with the injection installed to time the routed ops, or uninstalled to

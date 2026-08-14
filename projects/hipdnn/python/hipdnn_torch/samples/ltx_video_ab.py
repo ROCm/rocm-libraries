@@ -10,7 +10,7 @@ its full forward pass native vs the hipdnn_torch injection layer.
 This is the real-model end-to-end proof: it instantiates the actual DiT, installs a
 selectable subset of overrides (``--ops linear,rmsnorm,sdpa``), verifies the output
 is not corrupted, and dumps both the hipdnn_torch intercept report AND a per-op
-device-time census (via CUDA events, since kineto GPU capture is dead on WSL ROCm).
+device-time census (via CUDA events, since kineto GPU capture is dead on this ROCm build).
 
 Random weights are used on purpose: the LTX checkpoint changes pixel values, not the
 call sites / shapes / op mix, so it doesn't affect what routes to hipDNN. Because the
@@ -118,7 +118,7 @@ def time_forward(torch, model, x, timestep, context, warmup, iters):
 
 def device_time_census(torch, model, x, timestep, context) -> str:
     """Per-op device time for one forward, via CUDA-event pairs around each hot
-    functional (kineto GPU capture is dead on this WSL ROCm build)."""
+    functional (kineto GPU capture is dead on this ROCm build)."""
     F = torch.nn.functional
     reals = {
         "linear (GEMM)": ("linear", F.linear),

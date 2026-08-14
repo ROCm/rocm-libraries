@@ -9,7 +9,7 @@ native vs the hipdnn_torch injection layer.
 This is the **widest op-mix** sample: a ViT touches every override at once --
 ``F.conv2d`` (the patch-embed stem, NCHW), then per block ``F.layer_norm``,
 ``F.linear`` (qkv + proj + MLP), ``F.scaled_dot_product_attention``, and ``F.gelu``.
-It is hand-built (no torchvision/timm on this box) but uses the canonical ViT-B/16
+It is hand-built (no torchvision/timm dependency) but uses the canonical ViT-B/16
 geometry, so the routed shapes match a real classifier.
 
 Weights are random; the transformer path is numerically stable in bf16 (no group_norm

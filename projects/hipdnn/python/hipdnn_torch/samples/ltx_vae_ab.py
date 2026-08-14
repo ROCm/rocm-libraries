@@ -17,9 +17,9 @@ hipDNN routes conv3d to whichever loaded engine serves it (MIOpen on this stack)
 you instead ``force`` an engine that has no conv3d kernel, every conv3d drops to
 native and the speedup evaporates. Run it both ways and compare the census.
 
-    COMFYUI_PATH=~/comfyui-repro/ComfyUI \
+    COMFYUI_PATH=/path/to/ComfyUI \
         HIPDNN_TORCH_PROVIDER_SO=<...>/libhip_kernel_provider.so \
-        LTX_VAE=~/comfyui-repro/models/LTX-Video-VAE-BF16.safetensors \
+        LTX_VAE=/path/to/LTX-Video-VAE-BF16.safetensors \
         python samples/ltx_vae_ab.py
 
     # contrast: force one engine (conv3d has no kernel there -> native fallback)
