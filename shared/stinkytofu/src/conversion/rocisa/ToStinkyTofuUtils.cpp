@@ -1439,6 +1439,19 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     m.def("getRegisteredArchKeys", &BackendRegistry::getRegisteredArchKeys,
           "Return a list of arch name strings for all registered StinkyTofu backends (e.g. "
           "[\"gfx1250\"]).");
+    m.def(
+        "isMnemonicSupportedByStinkyTofu",
+        [](const std::string& mnemonic, nb::object arch_obj) {
+            std::array<int, 3> archArray = convertArch(arch_obj);
+            const auto* info =
+                ArchHelper::getInstance().getArchInfo(archArray[0], archArray[1], archArray[2]);
+            if (!info) return false;
+            const auto& map = info->getMnemonicToIsaOpcodeMap();
+            return map.find(mnemonic) != map.end();
+        },
+        nb::arg("mnemonic"), nb::arg("arch"),
+        "Check if StinkyTofu has a hardware instruction definition for the mnemonic on this "
+        "architecture. Lets rocisa ask before emitting an instruction StinkyTofu cannot lower.");
     // Wrapper class to add signature support to StinkyAsmModule
     class StinkyAsmModuleWithSignature {
        private:

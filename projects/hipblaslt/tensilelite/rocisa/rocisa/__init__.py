@@ -378,3 +378,7 @@ def hasStinkyTofuBackend() -> bool:
 if not hasStinkyTofuBackend():
     def isSupportedByStinkyTofu(version) -> bool:
         return False
+
+    def isMnemonicSupportedByStinkyTofu(mnemonic, version) -> bool:
+        # No StinkyTofu to lower through, so nothing here can reject a mnemonic.
+        return True

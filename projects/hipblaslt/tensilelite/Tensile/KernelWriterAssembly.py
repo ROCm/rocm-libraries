@@ -88,6 +88,7 @@ from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
+from Tensile.Common.MatrixInstructionNaming import dataTypeNameAbbrevToInstType, matrixInstructionTypes
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
 
@@ -8893,107 +8894,6 @@ class KernelWriterAssembly(KernelWriter):
     shiftK = Module("shiftK")
     m = (u) % (self.states.numVgprBuffer) # local to use for MACs
 
-    def dataTypeToMfmaInstTypePair(dataTypeA: DataType, dataTypeB: DataType, sourceSwap: bool) -> Tuple[InstType, InstType]:
-      miInTypeStrA  = dataTypeA.toNameAbbrev()
-      miInTypeStrB  = dataTypeB.toNameAbbrev()
-      miInTypeStr = miInTypeStrA + "_" + miInTypeStrB if miInTypeStrA != miInTypeStrB else miInTypeStrA
-      miInInstType = dataTypeNameAbbrevToInstType(miInTypeStr, sourceSwap) # v_mfma_[...xK]<InType>
-      miOutInstType = dataTypeNameAbbrevToInstType(dataTypeA.MIOutputTypeNameAbbrev()) # v_mfma_<OutType>..
-      return miInInstType, miOutInstType
-
-    def dataTypeNameAbbrevToInstType(abbrev: str, sourceSwap: bool = False) -> InstType:
-      if abbrev == 'f64':
-          return InstType.INST_F64
-      elif abbrev == 'f32':
-          return InstType.INST_F32
-      elif abbrev == 'f16':
-          return InstType.INST_F16
-      elif abbrev == 'i32':
-          return InstType.INST_I32
-      elif abbrev == 'i8':
-          return InstType.INST_I8
-      elif abbrev == 'bf16':
-          return InstType.INST_BF16
-      elif abbrev == 'xf32':
-          return InstType.INST_XF32
-      elif abbrev == 'fp8':
-          return InstType.INST_F8
-      elif abbrev == 'bf8':
-          return InstType.INST_BF8
-      elif (abbrev == 'fp8_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_fp8' and sourceSwap == True):
-          return InstType.INST_F8_BF8
-      elif (abbrev == 'bf8_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_bf8' and sourceSwap == True):
-          return InstType.INST_BF8_F8
-      elif abbrev == 'fp6':
-          return InstType.INST_F6
-      elif abbrev == 'bf6':
-          return InstType.INST_BF6
-      elif (abbrev == 'fp6_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_fp6' and sourceSwap == True):
-          return InstType.INST_F6_B6
-      elif (abbrev == 'bf6_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_bf6' and sourceSwap == True):
-          return InstType.INST_B6_F6
-      elif abbrev == 'fp4':
-          return InstType.INST_F4
-      elif (abbrev == 'fp8_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_fp8' and sourceSwap == True):
-          return InstType.INST_F8_F4
-      elif (abbrev == 'fp4_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_fp4' and sourceSwap == True):
-          return InstType.INST_F4_F8
-      elif (abbrev == 'fp6_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_fp6' and sourceSwap == True):
-          return InstType.INST_F6_F4
-      elif (abbrev == 'fp4_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_fp4' and sourceSwap == True):
-          return InstType.INST_F4_F6
-      elif (abbrev == 'fp8_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_fp8' and sourceSwap == True):
-          return InstType.INST_F8_F6
-      elif (abbrev == 'fp6_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_fp6' and sourceSwap == True):
-          return InstType.INST_F6_F8
-      elif (abbrev == 'fp8_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_fp8' and sourceSwap == True):
-          return InstType.INST_F8_B6
-      elif (abbrev == 'bf6_fp8' and sourceSwap == False) or \
-          (abbrev == 'fp8_bf6' and sourceSwap == True):
-          return InstType.INST_B6_F8
-      elif (abbrev == 'bf8_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_bf8' and sourceSwap == True):
-          return InstType.INST_B8_F4
-      elif (abbrev == 'fp4_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_fp4' and sourceSwap == True):
-          return InstType.INST_F4_B8
-      elif (abbrev == 'bf6_fp4' and sourceSwap == False) or \
-          (abbrev == 'fp4_bf6' and sourceSwap == True):
-          return InstType.INST_B6_F4
-      elif (abbrev == 'fp4_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_fp4' and sourceSwap == True):
-          return InstType.INST_F4_B6
-      elif (abbrev == 'bf8_fp6' and sourceSwap == False) or \
-          (abbrev == 'fp6_bf8' and sourceSwap == True):
-          return InstType.INST_B8_F6
-      elif (abbrev == 'fp6_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_fp6' and sourceSwap == True):
-          return InstType.INST_F6_B8
-      elif (abbrev == 'bf8_bf6' and sourceSwap == False) or \
-          (abbrev == 'bf6_bf8' and sourceSwap == True):
-          return InstType.INST_B8_B6
-      elif (abbrev == 'bf6_bf8' and sourceSwap == False) or \
-          (abbrev == 'bf8_bf6' and sourceSwap == True):
-          return InstType.INST_B6_B8
-      elif abbrev == 'e8':
-        return InstType.INST_E8
-      elif abbrev == 'e5m3':
-          return InstType.INST_E5M3
-      else:
-          assert("Unsupported data type.")
-      return InstType.INST_NOTYPE
-
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     miInputTypeA     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeA"]
     miInputTypeB     = kernel["ProblemType"]["F32XdlMathOp"] if kernel["EnableF32XdlMathOp"] else kernel["ProblemType"]["MacDataTypeB"]
@@ -9025,14 +8925,7 @@ class KernelWriterAssembly(KernelWriter):
     numMIInput       = max(numMIInputA, numMIInputB)
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
-    miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(miInputTypeA, miInputTypeB, kernel["SourceSwap"])
-    neg_flag           = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
-    miInInstType       = InstType.INST_U8 if ((not is_mfma) and miInInstType == InstType.INST_I8) else miInInstType
-    computeDataType    = kernel["ProblemType"]["ComputeDataType"]
-    # complex WMMA is emulated with real matrix ops, so the output inst type is the
-    # real base (f32/f64), not the complex abbrev (f32c/f64c) which has no InstType.
-    computeOutAbbrev   = computeDataType.MIOutputTypeNameAbbrev() if computeDataType.isComplex() else computeDataType.toNameAbbrev()
-    miOutInstType      = miOutInstType if (is_mfma or kernel["ProblemType"]["Sparse"]) else dataTypeNameAbbrevToInstType(computeOutAbbrev)
+    miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(kernel, is_mfma)
     miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
     miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA

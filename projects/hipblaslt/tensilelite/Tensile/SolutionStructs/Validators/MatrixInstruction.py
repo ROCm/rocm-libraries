@@ -25,9 +25,12 @@
 import pprint
 from typing import Dict, Optional
 
+import rocisa
+
 from Tensile.Common import IsaVersion, IsaInfo, print2, elineno
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.DataType import DataType
+from Tensile.Common.MatrixInstructionNaming import matrixInstructionMnemonic
 from Tensile.Common.ValidParameters import makeValidMatrixInstructions, makeValidMFMA, makeValidSMFMA, makeValidWMMA, makeValidSWMMAC
 
 from ..Utilities import reject
@@ -150,6 +153,30 @@ def matrixInstructionToMIParameters(
 
     print2(f">> MI Parameters: {pprint.pformat(result)}")
     return result
+
+
+def unsupportedMatrixInstructionMnemonic(solution, isa, mi4, hasMFMA):
+    """Return the mnemonic this MatrixInstruction emits if StinkyTofu cannot lower it.
+
+    Returns None when the mnemonic is supported or when the architecture has no
+    StinkyTofu backend to lower through. Kernels on an architecture StinkyTofu owns
+    are rejected here instead of reaching a mnemonic it has no definition for.
+
+    A data type with no matrix-instruction spelling at all makes the backend raise
+    while naming the instruction; that is not this check's call to make, so the
+    solution is left to the checks that already cover it.
+    """
+    if not rocisa.isSupportedByStinkyTofu(tuple(isa)):
+        return None
+
+    try:
+        mnemonic = matrixInstructionMnemonic(solution, isa, mi4, hasMFMA)
+    except (RuntimeError, ValueError, KeyError):
+        return None
+
+    if rocisa.isMnemonicSupportedByStinkyTofu(mnemonic, tuple(isa)):
+        return None
+    return mnemonic
 
 
 def validateMIParameters(
@@ -285,10 +312,20 @@ def validateMIParameters(
                         printSolutionRejectionReason,
                         f"Invalid MFMA configuration: {solution}",
                     )
-        elif hasWMMA and (not mi4 in validWMMA):
-            return not reject(
-                solution, printSolutionRejectionReason, f"Invalid WMMA configuration: {solution}"
-            )
+        elif hasWMMA:
+            if not mi4 in validWMMA:
+                return not reject(
+                    solution, printSolutionRejectionReason, f"Invalid WMMA configuration: {solution}"
+                )
+            unsupported = unsupportedMatrixInstructionMnemonic(solution, isa, mi4, hasMFMA)
+            if unsupported is not None:
+                return not reject(
+                    solution,
+                    printSolutionRejectionReason,
+                    f"Invalid WMMA configuration: MatrixInstruction {mi4} with input data types "
+                    f"{macDataTypeA}/{macDataTypeB} emits '{unsupported}', which StinkyTofu has no "
+                    f"instruction definition for on {isa}",
+                )
     else:
         if hasSMFMA and not (miDataTypeKey in validSMFMA and mi4 in validSMFMA[miDataTypeKey]):
             return not reject(

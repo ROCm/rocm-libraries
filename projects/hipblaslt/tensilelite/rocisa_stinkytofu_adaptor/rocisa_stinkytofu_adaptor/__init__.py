@@ -435,6 +435,15 @@ def isSupportedByStinkyTofu(isa) -> bool:
     return stinkytofu.isSupportedByStinkyTofu(list(_caps.normalize_isa_key(isa)))
 
 
+def isMnemonicSupportedByStinkyTofu(mnemonic, isa) -> bool:
+    """Return True if StinkyTofu can lower *mnemonic* on *isa*."""
+    import stinkytofu
+
+    if not hasattr(stinkytofu, "isMnemonicSupported"):
+        return True
+    return stinkytofu.isMnemonicSupported(mnemonic, list(_caps.normalize_isa_key(isa)))
+
+
 def getRegisteredArchKeys():
     """Return arch name strings for all registered StinkyTofu backends."""
     import stinkytofu
