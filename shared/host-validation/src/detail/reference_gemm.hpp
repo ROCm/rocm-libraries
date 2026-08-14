@@ -32,6 +32,17 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     }
 }
 
+template <typename Accumulator>
+void validateRuntimeGemmScalars(const GemmProblem& problem) {
+    (void)runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha");
+    (void)runtimeScalar<Accumulator>(problem.epilogue.beta, "beta");
+    (void)runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale");
+    (void)runtimeScalar<Accumulator>(problem.epilogue.activationParameter0,
+                                     "activation parameter 0");
+    (void)runtimeScalar<Accumulator>(problem.epilogue.activationParameter1,
+                                     "activation parameter 1");
+}
+
 inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
     requireRank(problem.a.values.shape(), 2, "Reference GEMM", "A");
     requireRank(problem.b.values.shape(), 2, "Reference GEMM", "B");
@@ -118,10 +129,27 @@ inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
                     "Int32 reference GEMM does not support floating-point activation.");
         }
     }
-    if (!complexAccumulator &&
-        (problem.epilogue.alpha.imag() != 0.0 || problem.epilogue.beta.imag() != 0.0 ||
-         problem.epilogue.outputScale.imag() != 0.0))
-        throw std::invalid_argument("Reference GEMM real accumulator has a complex scalar.");
+    switch (problem.accumulatorType) {
+        case ScalarType::Float16:
+        case ScalarType::BFloat16:
+        case ScalarType::Float32:
+            validateRuntimeGemmScalars<float>(problem);
+            break;
+        case ScalarType::Float64:
+            validateRuntimeGemmScalars<double>(problem);
+            break;
+        case ScalarType::Int32:
+            validateRuntimeGemmScalars<int32_t>(problem);
+            break;
+        case ScalarType::ComplexFloat32:
+            validateRuntimeGemmScalars<std::complex<float>>(problem);
+            break;
+        case ScalarType::ComplexFloat64:
+            validateRuntimeGemmScalars<std::complex<double>>(problem);
+            break;
+        default:
+            throw std::invalid_argument("Unsupported runtime reference GEMM accumulator type.");
+    }
     if (problem.epilogue.outputConversion == OutputConversion::SaturatingInt8 &&
         problem.outputType != ScalarType::Int8)
         throw std::invalid_argument(
@@ -200,9 +228,9 @@ class RuntimeGemmFinalizer {
           m_beta(m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.beta, "beta"))),
           m_outputScale(runtimeScalar<Accumulator>(problem.epilogue.outputScale, "output scale")),
           m_activationParameter0(m_quantizeAccumulator(runtimeScalar<Accumulator>(
-              {problem.epilogue.activationParameter0, 0.0}, "activation parameter 0"))),
+              problem.epilogue.activationParameter0, "activation parameter 0"))),
           m_activationParameter1(m_quantizeAccumulator(runtimeScalar<Accumulator>(
-              {problem.epilogue.activationParameter1, 0.0}, "activation parameter 1"))),
+              problem.epilogue.activationParameter1, "activation parameter 1"))),
           m_alphaIsZero(m_alpha == Accumulator(0)),
           m_betaIsZero(m_beta == Accumulator(0)) {
         if (problem.epilogue.bias) m_bias.emplace(problem.epilogue.bias->values);

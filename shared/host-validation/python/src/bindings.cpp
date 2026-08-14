@@ -414,8 +414,8 @@ GemmOperand gemmOperandView(const PythonGemmOperand& operand) {
     return result;
 }
 
-GemmEpilogue gemmEpilogueView(const PythonGemmEpilogue& epilogue) {
-    GemmEpilogue result;
+GemmEpilogue gemmEpilogueView(const PythonGemmEpilogue& epilogue, ScalarType accumulatorType) {
+    GemmEpilogue result(accumulatorType);
     result.alpha = epilogue.alpha;
     result.beta = epilogue.beta;
     if (epilogue.bias)
@@ -465,7 +465,7 @@ PythonGemmResult referenceGemmRequestOwned(const PythonGemmRequest& request,
                               output.mutableView(), request.accumulatorType);
     nativeRequest.accumulationRounding = request.accumulationRounding;
     nativeRequest.mathMode = request.mathMode;
-    nativeRequest.epilogue = gemmEpilogueView(request.epilogue);
+    nativeRequest.epilogue = gemmEpilogueView(request.epilogue, request.accumulatorType);
     nativeRequest.outputSelection = request.outputSelection;
 
     const GemmResult result =

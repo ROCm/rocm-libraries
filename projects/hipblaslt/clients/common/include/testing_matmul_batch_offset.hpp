@@ -347,8 +347,8 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
                 storageElements(size_t(M), size_t(N), 1, static_cast<ptrdiff_t>(ldd)),
                 Layout(Shape{size_t(M), size_t(N)}, {1, static_cast<ptrdiff_t>(ldd)})),
             scalarType<Tc>());
-        problem.epilogue.alpha = {static_cast<double>(h_alpha), 0.0};
-        problem.epilogue.beta  = {static_cast<double>(h_beta), 0.0};
+        problem.epilogue.alpha = static_cast<double>(h_alpha);
+        problem.epilogue.beta  = static_cast<double>(h_beta);
         referenceGemm(problem);
     }
 
