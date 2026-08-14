@@ -200,6 +200,27 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
     int                  nModeD = descD->mLengths.size();
     std::vector<int32_t> modeDV(modeD, modeD + nModeD);
 
+    // Reject batched contraction: a mode shared by A, B and D has no M/N/K
+    // slot and would be silently summed, giving a wrong result. See ROCm#6559.
+    {
+        std::set<int32_t> setB(modeBV.cbegin(), modeBV.cend());
+        std::set<int32_t> setD(modeDV.cbegin(), modeDV.cend());
+        for(int32_t m : modeAV)
+        {
+            if(setB.count(m) && setD.count(m))
+            {
+                snprintf(msg,
+                         sizeof(msg),
+                         "Batched contraction (mode %d shared by A, B and D) is not supported",
+                         m);
+                logger->logError("hiptensorCreateContraction", msg);
+                delete *desc;
+                *desc = nullptr;
+                return HIPTENSOR_STATUS_NOT_SUPPORTED;
+            }
+        }
+    }
+
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
                       || (opC != HIPTENSOR_OP_IDENTITY);
 
