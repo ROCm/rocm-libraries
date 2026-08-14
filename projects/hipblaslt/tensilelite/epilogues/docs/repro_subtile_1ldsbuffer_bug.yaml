@@ -1,0 +1,85 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Reproducer for the Subtile 1LDSBuffer=1 swap-mask bug (Bug 1 in
+# bug_partialrms_validation.md).
+#
+# The Subtile double-buffer GR/LR swap mask is computed as:
+#   swapMask = base XOR (base + ldsTotalSize)
+# and applied unconditionally at every macro-tile boundary, regardless of
+# 1LDSBuffer. When 1LDSBuffer=1 only one LDS slot is allocated, so the XOR
+# target lands outside the reserved region — into a neighbour's LDS — and
+# the MFMA accumulator fills with garbage.
+#
+# This reproducer exercises plain bf16 GEMM (no PartialRMS, no epilogue) on
+# the Subtile path with 1LDSBuffer=1 explicitly forced, demonstrating that
+# the corruption is not specific to the PartialRMS epilogue.
+#
+# Key parameter choices that keep 1LDSBuffer=1 alive through validation:
+#   DirectToLds: 0    — DirectToLds forces 1LDSBuffer=0 (Solution.py:4481)
+#   ScheduleIterAlg: 3 — SIA=2 forces 1LDSBuffer=1 but is rejected by
+#                        UseSubtileImpl; SIA=3 is required.
+#   1LDSBuffer: 1     — set explicitly; auto-resolve (-1) would pick 0 for
+#                        these tile sizes because ldsNumBytesAB is small.
+#   PrefetchAcrossPersistent: 0 — PAP rejects 1LDSBuffer=1.
+#   UseSubtileImpl: True — required by the Subtile codegen path.
+#   StreamK: 3, StreamKForceDPOnly: 1 — required by UseSubtileImpl.
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+
+BenchmarkProblems:
+  -
+    - # ProblemType — plain bf16 TN GEMM, no epilogue
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+
+    - # Reproducer group: Subtile + 1LDSBuffer=1 + DirectToLds=0
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1, 4, 8, 2, 1]   # MT0=128 MT1=128, wg0=2 wg1=1
+            - [16, 16, 32, 1, 1, 4, 8, 4, 1]   # MT0=256 MT1=128, wg0=4 wg1=1
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - DirectToLds: [0]
+        - 1LDSBuffer: [1]
+        - UseSubtileImpl: [True]
+        - PrefetchAcrossPersistent: [0]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [2048, 2048, 1, 2048]
+            - Exact: [4096, 4096, 1, 4096]
+
+LibraryLogic:
+  ScheduleName: "repro_subtile_1ldsbuffer"
+  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ArchitectureName: "gfx950"
