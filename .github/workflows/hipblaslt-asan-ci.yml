@@ -219,6 +219,7 @@ jobs:
           path: rocm-libraries
 
       - name: Download hipBLASLt ASAN trees
+        timeout-minutes: 30
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: asan-trees-hipblaslt-${{ matrix.family }}
@@ -246,7 +247,7 @@ jobs:
         run: |
           set -euo pipefail
           OUT="${GITHUB_WORKSPACE}/build"
-          ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan-x86_64.so' | head -1)")"
+          ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan*.so' | head -1)")"
           LSAN_SUPP="${GITHUB_WORKSPACE}/rocm-libraries/test/therock/lsan.supp"
           {
             echo "ASAN_OPTIONS=quarantine_size_mb=600"

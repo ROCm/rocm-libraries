@@ -39,8 +39,11 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE, uint32_t ITEMS_PER_THREAD, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrmmnn_merge_compute_coords(J M,
-                                      I nnz,
+    void csrmmnn_merge_compute_coords(J        M,
+                                      I        nnz,
+                                      int64_t  batch_count,
+                                      int64_t  offsets_batch_stride_A,
+                                      uint32_t coords_per_batch,
                                       const I* __restrict__ csr_row_ptr,
                                       coordinate_t<uint32_t>* __restrict__ coord0,
                                       coordinate_t<uint32_t>* __restrict__ coord1,
@@ -52,12 +55,29 @@ namespace rocsparse
         const I diagonal0 = (bid + 0) * ITEMS_PER_THREAD;
         const I diagonal1 = rocsparse::min((I)(M + nnz), (I)((bid + 1) * ITEMS_PER_THREAD));
 
-        rocprim::counting_iterator<I> nnz_indices0(idx_base);
-        rocprim::counting_iterator<I> nnz_indices1(idx_base);
+        // Coordinates are computed independently for each batch because the row
+        // pointer data may differ between batches (offsets_batch_stride_A != 0). Each
+        // batch owns a contiguous block of coords_per_batch coordinates. Grid-stride
+        // over the batch dimension so batch counts larger than the grid-y limit work.
+        for(int64_t batch = blockIdx.y; batch < batch_count; batch += gridDim.y)
+        {
+            rocprim::counting_iterator<I> nnz_indices0(idx_base);
+            rocprim::counting_iterator<I> nnz_indices1(idx_base);
 
-        // Search across the diagonals to find coordinates to process.
-        merge_path_search(diagonal0, csr_row_ptr + 1, nnz_indices0, I(M), nnz, coord0[bid]);
-        merge_path_search(diagonal1, csr_row_ptr + 1, nnz_indices1, I(M), nnz, coord1[bid]);
+            // Search across the diagonals to find coordinates to process.
+            merge_path_search(diagonal0,
+                              load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
+                              nnz_indices0,
+                              I(M),
+                              nnz,
+                              load_pointer(coord0, batch, coords_per_batch)[bid]);
+            merge_path_search(diagonal1,
+                              load_pointer(csr_row_ptr, batch, offsets_batch_stride_A) + 1,
+                              nnz_indices1,
+                              I(M),
+                              nnz,
+                              load_pointer(coord1, batch, coords_per_batch)[bid]);
+        }
     }
 
     // Given the sparse A matrix:

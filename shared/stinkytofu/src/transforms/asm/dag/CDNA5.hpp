@@ -43,6 +43,7 @@
 #include "ReadyQueue.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
@@ -65,57 +66,47 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // -------------------------------------------------------------------------
 
 // -------------------------------------------------------------------------
-// Per-arch CDNA5 scheduling config. CDNA5.hpp is the CDNA5 *family* ready queue: both
-// gfx1250 and gfx1250v0 compile against it, so the tunable numbers and the hazard-rule
-// table are selected per arch here rather than baked in as single family-wide constants.
-// A new CDNA5-family arch adds one case to cdna5ConfigForArch(); the ready queue and the
-// scheduler pre-scan both read the selected config. User PassFeatureConfig overrides
-// still win over these per-arch defaults (see the dsRead* accessors).
+// Per-arch CDNA5 scheduling POLICY. CDNA5.hpp is the CDNA5 *family* ready queue: both
+// gfx1250 and gfx1250v0 compile against it, so these are selected per arch here rather
+// than baked in as single family-wide constants. A new CDNA5-family arch adds one case
+// to cdna5ConfigForArch(). User PassFeatureConfig overrides still win over these
+// per-arch defaults (see the dsReadPerWmma accessor).
 //
-// hazardRules is a table pointer + count (not a fixed array) so an arch can override the
-// whole rule set — different cycle counts, or a different number of rules — not just the
-// scalar knobs. The pointed-to table must have static storage duration.
+// Only the scheduling *ratios* live here. The physical facts this queue also needs -
+// LDS queue depth, drain/throttle latency, and the hazard-rule table - are hardware,
+// not policy, and live in HWModel (stinkytofu/hardware/HWModel.hpp), reached through
+// passCtx.getHWModel(). Keeping them there is what lets other passes see the same
+// numbers instead of each redeclaring them.
 // -------------------------------------------------------------------------
 struct CDNA5Config {
-    // Used when dagFeatures still hold the PassFeatureConfig sentinel values (0 /
-    // INT_MAX); explicit non-sentinel user config wins over these.
-    int dsReadQueueDepth;
-    int dsReadDrainLatency;
-    int dsReadThrottleLatency;
+    // Used when dagFeatures still hold the PassFeatureConfig INT_MAX sentinel;
+    // explicit non-sentinel user config wins over these.
     int dsReadPerWmma;
     int globalReadPerWmma;
-    const HazardRule* hazardRules;
-    int numHazardRules;
 };
 
 constexpr CDNA5Config kGfx1250Config = {
-    /*dsReadQueueDepth=*/16,
-    /*dsReadDrainLatency=*/72,
-    /*dsReadThrottleLatency=*/72,
     /*dsReadPerWmma=*/3,
     /*globalReadPerWmma=*/1,
-    /*hazardRules=*/kCdna5HazardRules,
-    /*numHazardRules=*/kNumCdna5HazardRules,
 };
 
-// gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real queue
-// depths / drain latency / per-WMMA ratios, and point hazardRules at a gfx1250v0 table if
-// its hazard cycles or rule set diverge. Kept as its own case so those numbers can be
-// changed here without touching gfx1250.
-// TODO: arch encoding {12,5,1} is a placeholder stepping value pending
-// https://github.com/ROCm/rocm-libraries/pull/10273 landing the real gfx1250v0 ArchInfo.
+// gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real
+// per-WMMA ratios. Kept as its own case so those numbers can be changed here without
+// touching gfx1250. Its physical facts are likewise a separate HWModel entry.
 constexpr CDNA5Config kGfx1250v0Config = kGfx1250Config;
 
-// Select the CDNA5-family config for \p arch. Private to the ready queue / scheduler (not
-// shared infrastructure): each CDNA5 arch's knobs live next to the family model that
-// consumes them. gfx1250 is the default for any unlisted arch (the pipeline only runs the
-// CDNA5 ready queue on CDNA5-family archs).
+// Select the CDNA5-family policy for \p arch. Private to the ready queue / scheduler
+// (not shared infrastructure): each CDNA5 arch's knobs live next to the family model
+// that consumes them. gfx1250 is the default for any unlisted arch (the pipeline only
+// runs the CDNA5 ready queue on CDNA5-family archs).
+//
+// Keyed off the shared kArchKey* constants (HWModel.hpp) so this policy table and the
+// HWModel fact table cannot be restepped independently.
 inline const CDNA5Config& cdna5ConfigForArch(const std::array<int, 3>& arch) {
-    const int key = arch[0] * 10000 + arch[1] * 100 + arch[2];
-    switch (key) {
-        case 12 * 10000 + 5 * 100 + 1:  // gfx1250v0
+    switch (archKey(arch)) {
+        case kArchKeyGfx1250v0:
             return kGfx1250v0Config;
-        case 12 * 10000 + 5 * 100 + 0:  // gfx1250
+        case kArchKeyGfx1250:
         default:
             return kGfx1250Config;
     }
@@ -354,9 +345,13 @@ class CDNA5ReadyQueue : public ReadyQueue {
     ReadySetByDAGid barrierQueue;
     ReadySetByDAGid otherQueue;  // scalars, waits in region, etc.
 
-    // Per-arch CDNA5 scheduling config (numbers + hazard-rule table), selected by arch in
-    // the constructor. Points at a static constexpr CDNA5Config, so this is a stable ref.
+    // Per-arch CDNA5 scheduling policy (the per-WMMA ratios), selected by arch in the
+    // constructor. Points at a static constexpr CDNA5Config, so this is a stable ref.
     const CDNA5Config& config_;
+
+    // Physical hardware facts for this arch (LDS queue model, hazard-rule table).
+    // Owned by the library, one object per arch, so this reference is stable too.
+    const HWModel& hw_;
 
     // Throttle tensor issues vs other work.
     int globalReadCounter = 0;
@@ -380,19 +375,25 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     int dsReadQueueDepth() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadQueueDepth;
-        return cfg > 0 ? cfg : config_.dsReadQueueDepth;
+        return cfg > 0 ? cfg : hw_.lds.readQueueDepth;
     }
+    // Barrier-timing only (computeBarrierAfterThresholds): the cycles a barrier must wait for
+    // its dependent ds_reads to return. 0 means "derive dynamically from the matching
+    // ds_read count and target ds_read latency." Queue occupancy / pacing uses
+    // dsReadThrottleLatency, not this.
     int dsReadDrainLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadDrainLatency;
-        return cfg > 0 ? cfg : config_.dsReadDrainLatency;
+        return cfg > 0 ? cfg : hw_.lds.readDrainLatency;
     }
+    // Lifetime of one in-flight ds_read credit; also sets the saturated-queue issue interval
+    // (dsReadThrottleLatency/dsReadQueueDepth cycles per ds_read).
     int dsReadThrottleLatency() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadThrottleLatency;
-        return cfg > 0 ? cfg : config_.dsReadThrottleLatency;
+        return cfg > 0 ? cfg : hw_.lds.readThrottleLatency;
     }
     int dsReadPerWmma() const {
         const int cfg = getPassContext().getPassFeatureConfig().dagFeatures.dsReadPerWmma;
-        return cfg < INT_MAX ? cfg : config_.dsReadPerWmma;
+        return cfg > 0 ? (cfg < INT_MAX ? cfg : config_.dsReadPerWmma) : config_.dsReadPerWmma;
     }
     bool dsReadQueueFull() const {
         return dsReadInflight_.full();
@@ -548,7 +549,8 @@ class CDNA5ReadyQueue : public ReadyQueue {
     explicit CDNA5ReadyQueue(const PassContext& passCtx)
         : ReadyQueue(passCtx),
           config_(cdna5ConfigForArch(passCtx.getGemmTileConfig().arch)),
-          hazardGates_(config_.numHazardRules) {}
+          hw_(passCtx.getHWModel()),
+          hazardGates_(hw_.hazards.numRules) {}
 
     DAGNode* pickOne() override;
     void push(DAGNode* node) override;
@@ -689,7 +691,7 @@ DAGNode* CDNA5ReadyQueue::popNonWmma(DAGNode* node, int pickKind) {
         // rule.cycles == -1 ("hoist as far as possible"): the strategy is producer-side
         // hoisting (deadline forced to 0 in the pre-scan), not a consumer-side hold, so
         // clamp the gate to 0 rather than stamping a negative wait.
-        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, config_.hazardRules[hf.ruleIdx].cycles);
+        hazardGates_[hf.ruleIdx][hf.regKey] = std::max(0, hw_.hazards.rules[hf.ruleIdx].cycles);
     // No longer a live hoist candidate once issued (decidePromote() must not try to
     // force it again).
     if (!node->hazardFlags.empty()) {
@@ -754,8 +756,8 @@ int CDNA5ReadyQueue::getMaxSrcDataWait(DAGNode* node) const {
 // pickFreeBest and findSmallestPickableNonWmma).
 int CDNA5ReadyQueue::getHazardWait(DAGNode* node) const {
     int maxLat = 0;
-    for (int ruleIdx = 0; ruleIdx < config_.numHazardRules; ++ruleIdx) {
-        const HazardRule& rule = config_.hazardRules[ruleIdx];
+    for (int ruleIdx = 0; ruleIdx < hw_.hazards.numRules; ++ruleIdx) {
+        const HazardRule& rule = hw_.hazards.rules[ruleIdx];
         const auto& gate = hazardGates_[ruleIdx];
         if (gate.empty() || !rule.isConsumer(*node->inst)) continue;
         for (const StinkyRegister& srcReg : node->inst->getSrcRegs()) {
@@ -963,7 +965,7 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     // Per-WMMA-window DS cap (rule 4) only spreads ds_loads across an active WMMA
     // co-issue window; it is meaningless when no WMMA is available to issue, so it
     // is applied only while a WMMA is pending. When the DS queue reaches depth,
-    // ds_load can still issue, but is throttled to dsReadDrainLatency/dsReadQueueDepth.
+    // ds_load can still issue, but is throttled to dsReadThrottleLatency/dsReadQueueDepth.
     int windowCap = maxDsPerWmmaWindow_;
     if (!dsTargetPerWindow_.empty()) {
         const int w = std::min((int)wmmaIssuedCountThisRegion_, (int)dsTargetPerWindow_.size() - 1);
@@ -1115,12 +1117,16 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 }
 
 // WMMA windows needed to issue dsLoadCount ds_reads given the per-window DS cap. When the
-// count exceeds the DS read queue depth, the queue stalls to drain, so add enough extra
-// windows to cover that drain latency.
+// count exceeds the DS read queue depth, the queue is saturated and the extra ds_reads are
+// paced at dsReadThrottleLatency/dsReadQueueDepth cycles each, so add enough extra windows
+// to cover that pacing cost.
 int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
     const int maxDsPerWmmaWindow = dsReadPerWmma();
     int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
-    if (dsLoadCount > dsReadQueueDepth()) {
+    // Depth 0 means the arch has no modeled LDS return queue, so there is no drain
+    // to account for. Guarding here matches onInit(), which already skips the same
+    // ratio when the depth is zero.
+    if (dsReadQueueDepth() > 0 && dsLoadCount > dsReadQueueDepth()) {
         const float cyclePerDs = (float)dsReadThrottleLatency() / (float)dsReadQueueDepth();
         const float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
         const float baseWindows =
@@ -1140,8 +1146,8 @@ int CDNA5ReadyQueue::computeWmmaWindowsNeeded(int dsLoadCount) const {
 //  Step 4 — threshold N = max(lastOverlap, wmmaWindowsNeeded) + latencyWmmaBudget;
 //            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
 //            wmmaWindowsNeeded is derived from matching ds_read count and DS per-WMMA cap.
-//            use dsReadDrainLatency when matchingDsLoadCount > dsReadQueueDepth(), else
-//            targetDSLoadLatency from the latest matching ds_read.
+//            latency = dsReadDrainLatency when it is configured (> 0), else
+//            computeDynamicDrainLatency(hw, matchingDsLoadCount, targetDSLoadLatency, numWaves).
 std::unordered_map<StinkyInstruction*, CDNA5ReadyQueue::BarrierAfterOutput>
 CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                                                IRList::iterator regionEnd) {
@@ -1201,11 +1207,17 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
         }
 
         // Step 4: threshold N = lastOverlap + (latency / wmmaIssueConfig.latency) + 1.
-        // When matching ds_load count exceeds queue depth, use dsReadDrainLatency; otherwise
-        // use the latest matching ds_read latency.
-        const int latencyForAfterThreshold = matchingDsLoadCount > dsReadQueueDepth()
-                                                 ? dsReadDrainLatency()
-                                                 : (int)targetDSLoadLatency;
+        // A positive dsReadDrainLatency pins the latency. A non-positive value
+        // (default 0) means "use dynamic drain latency," derived from the matching
+        // ds_load count and the latest matching ds_read latency by the HWModel helper,
+        // keyed by this pass context's NumWaves.
+        const int configuredDrainLatency = dsReadDrainLatency();
+        const int numWaves = static_cast<int>(getPassContext().getGemmTileConfig().NumWaves);
+        const int latencyForAfterThreshold =
+            configuredDrainLatency > 0
+                ? configuredDrainLatency
+                : computeDynamicDrainLatency(hw_, matchingDsLoadCount, (int)targetDSLoadLatency,
+                                             numWaves);
         const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
         const int wmmaWindowsNeeded = computeWmmaWindowsNeeded(matchingDsLoadCount);
         const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
@@ -1221,6 +1233,7 @@ CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
                              << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
                              << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
+                             << " latencyForAfterThreshold=" << latencyForAfterThreshold
                              << " lastOverlap=" << lastOverlap << "\n");
     }
 
@@ -1413,7 +1426,8 @@ CDNA5ReadyQueue::computeBarrierBeforeThresholds(IRList::iterator regionStart,
         //   beforeN — remaining latency after the last consumer WMMA
         //   maxFinalWmmaIdx — absolute cap after the 1st ds_load (DS load latency / WMMA latency)
         //   wmmaWindowsNeeded — DS issue bandwidth (enough WMMA windows for all ds_loads); when
-        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from dsReadDrainLatency.
+        //       dsLoadCount > dsReadQueueDepth(), add extra drain windows from
+        //       dsReadThrottleLatency.
         int beforeThreshold =
             std::max(0, std::min(beforeN, wmmaIssueConfig.issuedCount -
                                               std::max(maxFinalWmmaIdx, wmmaWindowsNeeded)));

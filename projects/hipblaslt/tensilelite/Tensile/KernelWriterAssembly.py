@@ -10510,61 +10510,22 @@ class KernelWriterAssembly(KernelWriter):
     ########################################
 
     if isTr:
-      # DirectToVgpr case, we need to calculate max address
-      module.addComment1("Max read address offset for GLTr%s"%tc)
+      # global_load_tr has no num_records field, so nothing bounds it in hardware.
+      # Clamp each offset to the limit buffer_load would enforce: Srd+2 minus one
+      # load width, saturated into non-negative i32 for the signed VMinI32 below.
+      # Keep SSubU32/SCSelectB32 adjacent -- SCSelectB32 reads SCC (the borrow).
+      module.addComment1("Max read address offset for GLTr%s (= Srd+2 num_records - bytesPerLoad)"%tc)
 
       maxGroVgpr = self.vgprPool.checkOut(1, tag="globalReadGuardK_maxGroVgpr")
-
-      tmpVgpr = self.vgprPool.checkOutAligned(2, 2, tag="globalReadGuardK_tmpVgpr")
-      tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
-
-      tmp = self.vgprPool.checkOut(1, tag="globalReadGuardK_tmp")
-      tmp2 = self.vgprPool.checkOut(1, tag="globalReadGuardK_tmp2")
-
-      WvG_M = kernel["MIWaveGroup"][0]
-      numKr = kernel["MatrixInstK"] // tP["glvw"]
-
-      module.addComment0("calc last tile offset")
-      module.add(vectorStaticDivide(maxGroVgpr, "Serial", kernel["WavefrontSize"], tmpVgprRes))
-      if tP["isA"]:
-        module.add(VAndB32(dst=vgpr(maxGroVgpr), src0=hex(WvG_M-1), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_M) mod MIWG[0]"%tc))
-        module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_M) *= numKr"%tc))
-      elif tP["isB"]:
-        # NB:
-        #   Calc of w_id is: /= MIWG[0], not %= MIWG[1]
-        module.add(VLShiftRightB32(dst=vgpr(maxGroVgpr), shiftHex=log2(WvG_M), src=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) /= MIWG[0]"%tc))
-        module.add(VMulU32U24(dst=vgpr(maxGroVgpr), src0=numKr, src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id (along_N) *= numKr"%tc))
-
-      module.add(VBfeU32(dst=vgpr(tmp2), src0=vgpr("Serial"), src1=int(tP["bpeGR"])+1, src2=1, comment="GLTr%s: offset for the right half of the tile"%(tc)))
-      module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(tmp2), src1=vgpr(maxGroVgpr), comment="GLTr%s: wave_id += offset for the right half of the tile"%(tc)))
-
-      with self.allocTmpSgpr(1, tag="globalReadGuardK_tmpSgprInfo") as tmpSgprInfo:
-        if tP["glvw"] > 1:
-          if tP["tlu"]:
-            module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: tile * glvw(%u)"%(tc, tP["glvw"])))
-          else:
-            module.add(vectorStaticMultiply(vgpr(maxGroVgpr), vgpr(maxGroVgpr), tP["glvw"], tmpSgprInfo, comment="GLTr%s: unroll * glvw(%u)"%(tc, tP["glvw"])))
-
-      strideIdx = tP["lsc"] if tP["tlu"] else tP["lsp"]
-      stride = kernel[strideIdx]
-      module.add(VAddU32(dst=vgpr(maxGroVgpr), src0=vgpr(maxGroVgpr), src1=stride*(tP["nrt"]-1)))
-
-      module.addComment0("calc last unroll offset")
-      module.add(VMovB32(dst=vgpr(tmp), src=sgpr("SizesSum+%u"%self.states.unrollIdx)))
-      with self.allocTmpSgpr(1, tag="globalReadGuardK_tmpSgprInfo2") as tmpSgprInfo:
-        module.add(vectorStaticRemainder(tmp, tmp2, tmp, kernel["DepthU"], tmpVgprRes, tmpSgprInfo))
-
-      module.addComment0("final offset")
-      module.add(VSubU32(dst=vgpr(tmp2), src0=vgpr(tmp2), src1=1, comment="GLTr%s: unroll idx - 1"%(tc)))
-      bfArgs = (maxGroVgpr, maxGroVgpr, tmp2, tmp)
-      module.add(MacroInstruction(name="GLOBAL_OFFSET_%s"%tc, args=bfArgs))
-      module.add(vectorMultiplyBpe(maxGroVgpr, maxGroVgpr, tP["bpeGR"]))
+      bytesPerLoad = int(tP["bpeGR"] * tP["glvw"])
+      with self.allocTmpSgpr(1, tag="globalReadGuardK_gltrLimit") as tmpSgprInfo:
+        limitSgpr = tmpSgprInfo.idx
+        module.add(SSubU32(dst=sgpr(limitSgpr), src0=sgpr("Srd%s+2"%tc), src1=bytesPerLoad, comment="GLTr%s: tensor-end byte limit - bytesPerLoad(%u)"%(tc, bytesPerLoad)))
+        module.add(SCSelectB32(dst=sgpr(limitSgpr), src0=0, src1=sgpr(limitSgpr), comment="GLTr%s: saturate at 0 if the subtract borrowed"%tc))
+        module.add(SMinU32(dst=sgpr(limitSgpr), src0=sgpr(limitSgpr), src1=0x7FFFFFFF, comment="GLTr%s: cap at INT_MAX (huge tensor -> no-op clamp)"%tc))
+        module.add(VMovB32(dst=vgpr(maxGroVgpr), src=sgpr(limitSgpr), comment="GLTr%s: bound -> vgpr for per-load VMinI32"%tc))
 
       module.addSpaceLine()
-
-      self.vgprPool.checkIn(tmp)
-      self.vgprPool.checkIn(tmp2)
-      self.vgprPool.checkIn(tmpVgpr)
     elif not kernel["BufferLoad"]:
       with self.allocTmpSgpr(2, tag="globalReadGuardK_tmpSgprInfo3") as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
@@ -16768,6 +16729,8 @@ class KernelWriterAssembly(KernelWriter):
         return GlobalLoadTR8B64(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
       elif bpl==16:
         return GlobalLoadTR16B128(dst=vgpr(destVgpr, rpv), vaddr=addr0, saddr=addr1, modifier=modifier, comment=comment)
+      else:
+        assert 0, "%s\nchooseGlobalRead: bad bpl %u for transpose load"%(self.states.kernelName,bpl)
     else:
       modifier = GLOBALModifiers(offset=int(offset), glc=glc, slc=slc, dlc=False, scope=CacheScope.SCOPE_NONE, lds=lds, isStore=False)
       saddr_off = vgpr("off", 1, False, False, True)
