@@ -1,0 +1,20 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "tensilelite-epilogues"
+version = "0.1.0"
+description = "PartialRMS fused GEMM epilogue tools and tests for TensileLite"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["epilogues*"]
+
+[tool.pytest.ini_options]
+testpaths = ["unittests"]
