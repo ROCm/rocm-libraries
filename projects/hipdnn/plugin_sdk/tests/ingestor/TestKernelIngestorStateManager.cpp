@@ -18,6 +18,8 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+
 #include "KernelIngestorTestFixtures.hpp"
 
 /**
@@ -41,6 +43,12 @@ inline bool bindAgreeingTokenValue(const MatchContext& /*context*/, BoundTokens&
 {
     bound["test.bound_token"] = BOUND_TOKEN_VALUE;
     return true;
+}
+
+inline bool rejectEveryKernel(const MatchContext& /*context*/, const KernelDefinition& /*kernel*/)
+{
+    ++counters().kernelCalls;
+    return false;
 }
 
 TEST(TestKernelIngestorStateManager, KernelLevelMatcherPrunesTheCatalog)
@@ -466,6 +474,51 @@ TEST(TestKernelIngestorStateManager, KnobValuesComeFromTheCatalogInRankedOrder)
     ASSERT_EQ(values.size(), 2U);
     EXPECT_EQ(std::get<int64_t>(values[0]), 256);
     EXPECT_EQ(std::get<int64_t>(values[1]), 64);
+}
+
+// A pack whose kernel matchers reject everything contributes nothing, so it must read
+// as excluded rather than as a participant that happened to score zero. The two declines
+// ahead of it, arch and graph-scoped, both say plainly that the pack is out.
+TEST(TestKernelIngestorStateManager, APackAdmittingNoKernelSaysSoRatherThanReportingZero)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", rejectEveryKernel);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x5E));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_TRUE(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).empty());
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_INFO,
+                                          toString(PACK_ID)
+                                              + " admitted no kernel of 3 at a kernel-scoped "
+                                                "matcher"))
+        << "a pack that contributed nothing must not read as one that scored zero:\n"
+        << recorder.getRecordedLogsAsString();
+
+    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_INFO, "admitted 0 of"))
+        << "the zero-admit case must not fall through to the contributor message:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestKernelIngestorStateManager, APackAdmittingSomeKernelsStillReportsTheCount)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x5F));
+    const auto properties = testDeviceProperties();
+
+    EXPECT_EQ(manager->unsortedDefinitions(MatchContext{graph, 0, properties}).size(), 2U);
+
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_INFO,
+        toString(PACK_ID) + " admitted 2 of 3 kernel(s) after kernel-scoped matching"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDispatchSymbol)
