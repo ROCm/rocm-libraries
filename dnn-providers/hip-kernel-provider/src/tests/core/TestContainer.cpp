@@ -89,8 +89,16 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
 
     const std::vector<int64_t> dims{4, 8, 256, 128};
     auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
-    auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
-        dims, strides, dims, strides, dims, strides, dims, strides, DataType::BFLOAT16);
+    auto graph = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(dims,
+                                                                     strides,
+                                                                     dims,
+                                                                     strides,
+                                                                     dims,
+                                                                     strides,
+                                                                     dims,
+                                                                     strides,
+                                                                     DataType::BFLOAT16,
+                                                                     DataType::FLOAT);
     auto graphBuffer = graph.Release();
 
     auto graphWrapper = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(

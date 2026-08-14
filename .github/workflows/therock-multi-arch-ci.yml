@@ -26,6 +26,11 @@ name: TheRock Multi-Arch CI
 # deliberately separate from the build-source `ref:` inputs.
 
 on:
+  # pull_request:
+  #   types:
+  #     - opened
+  #     - synchronize
+  #     - reopened
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -59,6 +64,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # A PR number if a pull request and otherwise the commit hash. This cancels
@@ -94,6 +100,8 @@ jobs:
 
       - name: Configure CI
         id: configure
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
             --event-name "${{ github.event_name }}" \
@@ -138,15 +146,20 @@ jobs:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
-      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx1151' }}
+      windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || 'gfx110X' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      # Manual override for prebuilt stages (empty = use automatic stage reuse)
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # Enable automatic stage reuse - TheRock finds commit-compatible baselines
+      # and determines which stages to rebuild based on changed files
+      stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
       # Concrete SHA resolved once by resolve_therock_ref; setup re-exports the
       # checked-out commit as needs.setup.outputs.ref for downstream jobs.
       ref: ${{ needs.resolve_therock_ref.outputs.therock_ref }}
+      # Pass external repo info for stage-impact analysis
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -164,6 +177,8 @@ jobs:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
+      rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
+      rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Empty string when run_all_tests=true triggers full test run in downstream workflow

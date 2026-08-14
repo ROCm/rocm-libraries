@@ -127,6 +127,37 @@ Template-sweep segments:
 | `Operation`    | PascalCase op name                           | `BatchnormFwdInference` |
 | `TopologyName` | Stable graph skeleton name                   | `Inference` |
 
+### `tensor_patches` (per-case structural tensor edits)
+
+A `sweep.json` case can carry an optional `tensor_patches` array to make
+structural edits to a tensor after `graph.template.json` placeholders are
+expanded, but before the graph is sealed into a flatbuffer. This covers cases
+that differ from the template by more than a placeholder substitution — e.g. a
+case where a tensor is runtime-pass-by-value and must not also carry a baked
+`value`/`value_type`.
+
+Each entry targets one tensor by `uid` and supports two operations:
+
+```json
+"tensor_patches": [
+  {
+    "uid": 4,
+    "set": { "is_runtime_pass_by_value": true },
+    "remove": ["value", "value_type"]
+  }
+]
+```
+
+- `set` (object): upserts the given fields on the target tensor.
+- `remove` (array of strings): erases the given fields from the target tensor.
+- `uid` must match a tensor present in the expanded graph, or loading the case
+  fails with an error.
+
+`set` is applied before `remove` for a given patch entry. A tensor marked
+`is_runtime_pass_by_value: true` that still carries `value`/`value_type` after
+patching fails validation at load time — use `remove` to drop the baked
+fallback fields when converting a tensor to runtime pass-by-value.
+
 ## Pull Data Locally
 
 Bundles are optional. Skip this step if you only need computed (GPU/CPU)

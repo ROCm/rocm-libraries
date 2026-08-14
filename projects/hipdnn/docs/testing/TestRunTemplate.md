@@ -1,160 +1,226 @@
 # hipDNN Test Run Template
 
-This document provides a template for recording hipDNN test results. Use this template to document test execution details and results for tracking purposes.
+This is the recording artifact for a **hipDNN milestone / release verification** run. It captures the traceability, evidence, and reproducible commands that show a release build was validated and is ready to ship. It is **not** the per-PR development testing form; for the day-to-day bar during development, see [Testing](../Testing.md#expectations-during-development).
+
+**How to use this template:**
+
+- Copy this file to a working notes file for your feature or milestone (e.g. `ROCM-<ticket> <short name> validation.md`) and fill in every `<placeholder>`.
+- The run this template records is a run of the [Test Plan](./TestPlan.md). Follow the plan's procedures; record the results here.
+- Replace the illustrative snippets with your own observed commands and output. Keep it evidence-based: paste real command output, not a summary.
+- See [Testing](../Testing.md#release--milestone-verification) for how this template and the Test Plan fit together.
+
+**Filling this in as you follow the Test Plan.** The sections below are ordered to match the qualifier's path through the plan. Work top to bottom:
+
+1. Record identifiers as you go (section 1) and describe what the run covers (section 2).
+2. [Test Plan → Prerequisites](./TestPlan.md#prerequisites): record the CI evidence (section 3).
+3. [Test Plan → Running Tests From TheRock Builds](./TestPlan.md#running-tests-from-therock-builds): prepare the artifacts and manifest (section 4), then run the tests and paste the output (section 5).
+4. [Test Plan → Running Tests From Source Build](./TestPlan.md#running-tests-from-source-build): build from source and record its results (section 6).
+5. Sign off once every plan step is evidenced (section 7).
 
 ---
 
-## Test Run Template
+## 1. Header / traceability
 
-```
-Name:
-Operating System:
-Has GPU:
-ASIC:
-MIOpen hash:
-ROCm version:
-Run environment:
-Test results:
-```
+Fill in the identifiers that let a reader trace exactly what was validated back to source.
 
----
+- **Feature or milestone**: `<feature name or milestone>`
+- **Epic / ticket**: `<JIRA-EPIC>` / `<JIRA-TICKET>`
+- **Delivery PR**: `<https://github.com/ROCm/rocm-libraries/pull/NNNN>`
+- **PR head commit**: `<sha>`
+- **PR merge commit**: `<https://github.com/ROCm/rocm-libraries/commit/sha>`
+- **GPU / ASIC family used**: `<e.g. gfx942 (MI300), gfx950 (MI350)>`
+- **Build(s) validated** (artifact identifiers/URLs, which encode OS / ASIC / ROCm version):
+  - `<https://.../therock-dist-linux-<gpu-family>-<version>.tar.gz>`
+  - `<https://.../therock-dist-linux-<gpu-family>-tests-<version>.tar.gz>`
 
-## Test Run Details
-
-### Field Descriptions
-
-- **Name**: Runner's name or identifier
-- **Operating System**: OS details (Windows/Linux, and distro or version of Windows)
-- **Has GPU**: Yes/No
-- **ASIC**: Name of device after running `rocminfo` (or "N/A" if no GPU)
-- **MIOpen hash**: Hash of installed MIOpen, can be found by running:
-  ```bash
-  cat /opt/rocm/include/miopen/version.h
-  ```
-  Or "N/A" if MIOpen is not installed
-- **ROCm version**: AMD-SMI ROCm version info (or "N/A" if not applicable)
-- **Run environment**: One of:
-  - `ninja check_ctest`
-  - `make check_ctest`
-  - Running installed test artifacts
-  - Running built executables directly
-- **Test results**: Summary of tests run, skipped, and passed/failed
+> The artifact identifier encodes the OS, ASIC family, and ROCm version, so those no longer need separate fields. Still note the physical GPU/ASIC family the run executed on above, since a multi-arch artifact can target several.
 
 ---
 
-## Example Test Run
+## 2. What was validated
 
-### Successful Run Example
+One paragraph describing the scope of the change and what this run exercises.
 
-```
-Name: John Doe
-Operating System: Linux Ubuntu 22.04
-Has GPU: Yes
-ASIC: gfx90a
-MIOpen hash: 7ae16d1b5
-ROCm version: AMD-SMI 26.0.0+842b9680 amdgpu version: 6.8.5 ROCm version: 7.1.0
-Run environment: ninja check_ctest
+> `<One-paragraph summary: what the feature/milestone delivers and what behavior this validation confirms.>`
 
-Test results:
-    (3 / 4) Test Cases Passed
-    (1 / 4) Test Cases Failed
-    (0 / 4) Test Cases did not run
+Bulleted test areas covered (delete rows that do not apply):
 
-Section: Prerequisites:
-    Test Case 1: Passed
-    Test Case 2: Failed
-        There is a spelling mistake in the change log
-
-Section: Regular Tests:
-    Test Case 1: Passed
-        Regular test results 519/519 tests passed, 0 failed out of 519, none skipped
-
-Section: ASAN Enabled Tests:
-    Test Case 1: Passed
-        ASAN test results 100% passed.
-```
-
-### CPU-Only Environment Example
-
-```
-Name: Jane Smith
-Operating System: Windows 11
-Has GPU: No
-ASIC: N/A
-MIOpen hash: N/A
-ROCm version: N/A
-Run environment: ninja check_ctest
-
-Test results:
-    (4 / 4) Test Cases Passed
-    (0 / 4) Test Cases Failed
-    (0 / 4) Test Cases did not run
-
-Section: Prerequisites:
-    Test Case 1: Passed
-    Test Case 2: Passed
-
-Section: Regular Tests:
-    Test Case 1: Passed
-        Regular test results 100/519 tests passed, 0 failed, 419 skipped (GPU tests)
-
-Section: ASAN Enabled Tests:
-    Test Case 1: Passed
-        ASAN test results 100/519 tests passed, 0 failed, 419 skipped (GPU tests)
-```
-
-### Skipped Tests Example
-
-When tests are skipped (e.g., due to ASAN being enabled), document them as follows:
-
-```
-Skipped:
-The following tests did not run:
-43 - MigratableMemory.NotInitialized (Skipped)
-44 - MigratableMemory.InitializeWithSize (Skipped)
-45 - MigratableMemory.MoveConstructor (Skipped)
-46 - MigratableMemory.MoveAssignment (Skipped)
-47 - MigratableMemory.Resize (Skipped)
-48 - MigratableMemory.MigrateToDevice (Skipped)
-49 - MigratableMemory.MigrateToHost (Skipped)
-50 - MigratableMemory.Clear (Skipped)
-68 - TestTensor.BasicRowMajorUsage (Skipped)
-69 - TestTensor.FillWithValuesUsage (Skipped)
-70 - TestTensor.FillWithRandomValuesUsage (Skipped)
-177 - GPU_EnginePluginTest.LoadPluginsAndExecuteOpGraph (Skipped)
-178 - GPU_EnginePluginResourceManagerTest.LoadPluginsAndExecuteOpGraph (Skipped)
-194 - GPU_HandleTests.SetAndGetStream (Skipped)
-195 - GPU_HandleTests.SetStreamToNull (Skipped)
-403 - GPU_hipDNNHandleAPITests.GetStreamPointer (Skipped)
-404 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/Default_plugin_with_manual_UIDs # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_good_plugin.so, description: Default plugin with manual UIDs, graph_name: DefaultPluginBatchnormTest, expected_failure: NONE, use_manual_uids: true} (Skipped)
-405 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/Default_plugin_with_auto_UIDs # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_good_plugin.so, description: Default plugin with auto UIDs, graph_name: DefaultPluginBatchnormTestAutoUID, expected_failure: NONE, use_manual_uids: false} (Skipped)
-406 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/Execute_fails_plugin # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_execute_fails_plugin.so, description: Execute fails plugin, graph_name: ExecuteFailsPluginBatchnormTest, expected_failure: EXECUTE, use_manual_uids: true} (Skipped)
-407 - IntegrationTests/Frontend_e2e_integration_test.IntegrationTest/No_applicable_engines_plugin # GetParam() = BatchnormTestCase{plugin_path: ../test_plugins/libtest_no_applicable_engines_plugin.so, description: No applicable engines plugin, graph_name: NoEnginesPluginBatchnormTest, expected_failure: CREATE_EXECUTION_PLAN, use_manual_uids: true} (Skipped)
-436 - MiopenEnginePluginApiTest.EnginePluginCreateAlsoCreatesMIOpenHandleOnSuccess (Skipped)
-437 - MiopenEnginePluginApiTest.EnginePluginCreateTwiceGivesTheSameContainerHandle (Skipped)
-438 - MiopenEnginePluginApiTest.EnginePluginCreateNonNullHandlePointer (Skipped)
-441 - MiopenEnginePluginApiTest.EnginePluginSetStreamNullStream (Skipped)
-442 - MiopenEnginePluginApiTest.EnginePluginSetStreamValidStream (Skipped)
-444 - MiopenEnginePluginApiTest.EnginePluginGetApplicableEngineIdsValid (Skipped)
-446 - MiopenEnginePluginApiTest.EnginePluginGetEngineDetailsValid (Skipped)
-449 - MiopenEnginePluginApiTest.EnginePluginGetWorkspaceSizeValid (Skipped)
-451 - MiopenEnginePluginApiTest.EnginePluginCreateExecutionContextValid (Skipped)
-453 - Batchnorm_execute_graph_test.RunBfloat16FwdbatchnormGraph (Skipped)
-454 - Batchnorm_execute_graph_test.RunHalfFwdbatchnormGraph (Skipped)
-464 - MiopenHandleFactoryTest.CreatesAndDestroysHandle (Skipped)
-484 - RunFwdbatchnormGraphWithParams/Batchnorm_execute_graph_test.RunFloatFwdbatchnormGraph/(n:1 c:3 h:14 w:14) (Skipped)
-485 - RunFwdbatchnormGraphWithParams/Batchnorm_execute_graph_test.RunFloatFwdbatchnormGraph/(n:2 c:3 h:14 w:14) (Skipped)
-487 - RunFloatFwdBatchnormGraph/Batchnorm_forward_inference_integration_test.RunFloatFwdBatchnormGraph/(n:1 c:3 h:14 w:14) (Skipped)
-488 - RunFloatFwdBatchnormGraph/Batchnorm_forward_inference_integration_test.RunFloatFwdBatchnormGraph/(n:2 c:3 h:14 w:14) (Skipped)
-...
-```
+- **Frontend unit tests**: `<suites / behaviors covered>`
+- **Backend unit tests**: `<suites / behaviors covered>`
+- **GPU integration tests**: `<suites / behaviors covered>`
+- **Sample validation**: `<sample name and flows exercised>`
 
 ---
 
-## Best Practices
+## 3. Passing evidence
 
-1. **Be Specific**: Document exact error messages when tests fail.
-2. **Include Context**: Note any environmental factors that might affect test results.
-3. **Track Patterns**: If certain tests consistently skip or fail, document why.
-4. **Version Information**: Always include accurate version information for reproducibility.
-5. **Save logs**: Saving and attaching logs lends critical insight into your run. See [Environment.md](../Environment.md#environment-variables) for details on enabling logging.
+> Records the [Test Plan → Prerequisites](./TestPlan.md#prerequisites) step (CI is green).
+
+Link the CI, superbuild, and release-artifact runs that back this validation.
+
+| Evidence | Link | Status |
+|---|---|---|
+| hipDNN Jenkins / codecov test job (`<gpu-family>`) | `<consoleText URL>` | `<Passed; e.g. 100% tests passed, 0 failed out of N>` |
+| hipDNN Superbuild CI | `<actions run URL>` | `<Passed>` |
+| Final TheRock / release artifact run | `<actions run URL>` | `<Passed / TBD>` |
+| Final sample run artifact / log | `<actions run URL>` | `<Passed / TBD>` |
+
+> **Scope note:** The command/output snippets in section 5 are *focused* validation runs (targeted gtest/ctest filters for the feature under test). The *full* hipDNN CTest suite evidence comes from the linked CI job. A complete release validation runs **both** the focused filters below **and** the full installed CTest suite on the selected artifacts.
+
+---
+
+## 4. Replication setup
+
+> Records the "obtain a ROCm build" step of [Test Plan → Running Tests From TheRock Builds](./TestPlan.md#running-tests-from-therock-builds).
+
+How to prepare the validated artifacts on a GPU node so a reader can reproduce section 5.
+
+Use a GPU node matching the artifact family (e.g. `gfx94X-dcgpu` for MI300/MI325, `gfx950-dcgpu` for MI350/MI355). Download the `...-tests.tar.gz` variant (a superset of the plain distribution tarball that also carries the test executables); see [Obtaining ROCm](../Building.md#obtaining-rocm) for the filename structure and version selection. Run from an empty working directory:
+
+```bash
+mkdir <feature>-validation
+cd <feature>-validation
+
+curl -O https://rocm.nightlies.amd.com/tarball-multi-arch/therock-dist-linux-<gpu-family>-tests-<version>.tar.gz
+
+mkdir rocm-artifacts
+tar -C rocm-artifacts -zxf therock-dist-linux-<gpu-family>-tests-<version>.tar.gz
+```
+
+Record what the manifest inside the tree reports: the ROCm version and the exact source commit the build came from. Run the following and paste the output here:
+
+```bash
+# ROCm version/package version, the TheRock build commit, and the CI run that produced the build.
+grep -E '"the_rock_commit"|"github_run_id"|"rocm_version"|"rocm_package_version"' rocm-artifacts/share/therock/therock_manifest.json
+# The rocm-libraries source commit (pin_sha) the build came from, with its submodule name for context.
+grep -A3 '"submodule_name": "rocm-libraries"' rocm-artifacts/share/therock/therock_manifest.json | grep -E '"submodule_name"|"pin_sha"'
+```
+
+Example output:
+
+```text
+  "the_rock_commit": "d9551ec95643eb12cc1fdb81a95530e105539415",
+  "github_run_id": "30227121935",
+  "rocm_package_version": "7.15.0a20260727",
+  "rocm_version": "7.15.0",
+      "submodule_name": "rocm-libraries",
+      "pin_sha": "bbb68174083e83e9465b60ecd8e20e4439a8e101",
+```
+
+> Record the above output from the manifest; the `pin_sha` confirm the delivery commit (section 1) is contained in the history of that SHA. This proves the feature is actually present in the validated build. The manifest lists a `pin_sha` for every submodule, so use the `rocm-libraries` entry specifically, not the first `pin_sha` in the file.
+
+See the [Test Plan](./TestPlan.md#running-tests-from-therock-builds) for more on obtaining a ROCm build with the hipDNN test executables.
+
+---
+
+## 5. Test commands and expected output
+
+> Records the "running the hipDNN tests" step of [Test Plan → Running Tests From TheRock Builds](./TestPlan.md#running-the-hipdnn-tests).
+
+The core of the record: repeatable command → observed-output blocks. Paste the **actual** output you saw. Reference the real hipDNN test binaries under `rocm-artifacts/bin/` (e.g. `hipdnn_frontend_tests`, `hipdnn_backend_tests`, `hipdnn_public_frontend_tests`). Numeric timings and tensor values vary by GPU and run.
+
+### Example: focused gtest filter run
+
+```bash
+./rocm-artifacts/bin/<test_binary> \
+  --gtest_filter="<Suite1*:Suite2*>" \
+  --gtest_brief=1
+```
+
+Observed passing output:
+
+```text
+[==========] <N> tests from <M> test suites ran. (<t> ms total)
+[  PASSED  ] <N> tests.
+```
+
+### Example: GPU integration filter (plugin dir required)
+
+```bash
+HIPDNN_PLUGIN_DIR="$(pwd)/rocm-artifacts/lib/test_plugins/custom" \
+./rocm-artifacts/bin/hipdnn_public_frontend_tests \
+  --gtest_filter="<*IntegrationFeature*>" \
+  --gtest_brief=1
+```
+
+Observed passing output:
+
+```text
+[==========] <N> tests from <M> test suites ran. (<t> ms total)
+[  PASSED  ] <N> tests.
+```
+
+### Example: installed CTest filter
+
+```bash
+HIPDNN_PLUGIN_DIR="$(pwd)/rocm-artifacts/lib/hipdnn_plugins/engines" \
+ctest --test-dir ./rocm-artifacts/bin/hipdnn_samples \
+  -R <test_name_regex> \
+  --output-on-failure
+```
+
+Observed passing output:
+
+```text
+100% tests passed, 0 tests failed out of <N>
+```
+
+> Repeat one command/output block per focused area from section 2. For the full-suite requirement in the scope note, run the installed hipDNN CTest suite (see the [Test Plan](./TestPlan.md#running-the-hipdnn-tests)) and record its `100% tests passed, 0 tests failed out of <N>` line here as well.
+
+---
+
+## 6. Optional: build from source against installed artifacts
+
+> Records the [Test Plan → Running Tests From Source Build](./TestPlan.md#running-tests-from-source-build) step. Reuse the `rocm-artifacts` tree from section 4 as the build's ROCm dependency, as the plan describes.
+
+Only needed when validating the **source** itself, or when the artifact ships runtime/devel packages but no prebuilt test/sample binaries. This builds against the installed artifacts using a user-supplied toolchain, so paths and the CMake prefix are explicit rather than preset-driven.
+
+Check out the matching source tree (use the `pin_sha` from section 4, or `develop` after merge):
+
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/ROCm/rocm-libraries.git rocm-libraries
+cd rocm-libraries
+git sparse-checkout init --cone
+git sparse-checkout set projects/hipdnn dnn-providers cmake test
+git checkout <develop-or-pin-sha>
+```
+
+Configure and build against the installed artifacts (run from the `rocm-libraries` folder, sibling to `rocm-artifacts`):
+
+```bash
+cmake -S projects/hipdnn \
+  -B build/hipdnn-tests \
+  -GNinja \
+  -DCMAKE_PREFIX_PATH="$(pwd)/../rocm-artifacts/lib/cmake" \
+  -DROCM_PATH="$(pwd)/../rocm-artifacts" \
+  -DCMAKE_C_COMPILER="$(pwd)/../rocm-artifacts/lib/llvm/bin/clang" \
+  -DCMAKE_CXX_COMPILER="$(pwd)/../rocm-artifacts/lib/llvm/bin/clang++" \
+  -DHIPDNN_SKIP_TESTS=OFF \
+  -DENABLE_CLANG_TIDY=OFF
+
+cmake --build build/hipdnn-tests --target <targets>
+ctest --test-dir build/hipdnn-tests --output-on-failure --parallel 8
+```
+
+> To build a sample instead, point `-S` at `projects/hipdnn/samples` and build the sample target. Expected result: the same passing snippets as section 5, and a full-suite `100% tests passed, 0 tests failed out of <N>`.
+>
+> This flow builds against the installed artifacts with an explicit toolchain and CMake prefix. For an ordinary standalone source build using the checked-in configure presets, follow the [Quick Start Guide](../Building.md#quick-start-guide) instead.
+
+---
+
+## 7. Final validation checklist
+
+Sign-off gate. Every box must be checked with real evidence before marking the milestone verified.
+
+- [ ] Filled section 1 with the merged release/nightly **build identifier(s)** and the physical GPU/ASIC family used.
+- [ ] Confirmed the delivery commit is contained in the artifact's manifest `pin_sha` (section 4).
+- [ ] Replaced every `TBD` evidence link in section 3 with the final CI / release-artifact run and sample log.
+- [ ] Ran the focused gtest/ctest filters **and** the full installed hipDNN CTest suite on the final artifacts.
+- [ ] Pasted the passing snippets into section 5 (elapsed times updated if rerun on final artifacts).
+- [ ] Confirmed all [Test Plan](./TestPlan.md) prerequisites (CI green, documentation/changelog current) are satisfied.
+
+**Tips for a defensible record:**
+
+- Paste exact output, including failing messages if any; do not summarize away detail.
+- Note environmental factors (GPU family, driver/ROCm version) that could affect results; the artifact identifier captures most of this.
+- If a test consistently skips (e.g. GPU-gated or ASAN-incompatible), record why rather than deleting it. See [Environment](../Environment.md#environment-variables) for enabling logging when a run needs deeper insight.

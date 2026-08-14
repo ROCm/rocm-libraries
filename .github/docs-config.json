@@ -114,6 +114,11 @@
         "folder":  "hipthreads",
         "rtd_slug": "advanced-micro-devices-hipthread",
         "rtd_alias": "hipThreads"
+    },
+    {
+        "folder":  "rocalution",
+        "rtd_slug": "advanced-micro-devices-rocalution",
+        "rtd_alias": "rocALUTION"
     }
     ]
 }
