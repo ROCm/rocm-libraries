@@ -153,10 +153,13 @@ Key configuration:
 
 ## Step 4: Run rocprofv3 with ATT
 
-**NOTE**: CK DSL does not expose a `debug=` parameter in `compile_kernel()`. Source mapping in ATT traces
-depends on LLVM backend flags which are not directly controllable from CK DSL user code.
+**NOTE**: `compile_kernel()` has no `debug=` parameter, but source mapping *is* available — set
+`ROCKE_DEBUG_LOC=1` on the process that builds the kernel. See
+[Debug Info in CK DSL](#debug-info-in-ck-dsl) below for what it does and why it is opt-in. Without
+it there is no DWARF and the `Source` column stays empty.
 
-**For ISA-level analysis** (which always works), you can extract and disassemble the HSACO after rocprof completes:
+**For ISA-level analysis** (which works either way), you can extract and disassemble the HSACO after
+rocprof completes:
 ```python
 # Extract ISA from compiled HSACO (no debug info required)
 # See src/stage3_extract_isa/extract_isa.py for automated extraction
@@ -253,8 +256,9 @@ cursor --install-extension wavescope-<version>.vsix --force   # or: code --insta
 On a remote session install it on the **remote** side — the extension reads the trace from the
 remote filesystem and streams it into the webview, so nothing is copied to the client.
 
-Then run **WaveScope: Open Trace Folder...** and pick the dispatch folder. The Source tab will
-not appear (see Debug Info in CK DSL below); everything else works.
+Then run **WaveScope: Open Trace Folder...** and pick the dispatch folder. The Source tab appears
+only when the kernel was built with `ROCKE_DEBUG_LOC=1` (see
+[Debug Info in CK DSL](#debug-info-in-ck-dsl) below); everything else works either way.
 
 ### Closing the loop with an agent
 
@@ -282,7 +286,8 @@ After capture, report:
 
 1. **Trace location**: Local path to the downloaded trace directory
 2. **Kernel info**: Name, VGPR/AGPR counts, grid size, duration (from out_kernel_trace.csv)
-3. **Source mapping**: % of instructions with source annotations (expect 0% — see Debug Info below)
+3. **Source mapping**: % of instructions with source annotations (high with `ROCKE_DEBUG_LOC=1`, 0%
+   without it — see [Debug Info in CK DSL](#debug-info-in-ck-dsl) below)
 4. **Instruction count**: Total instructions in code.json
 5. **Next step**: Open the folder in WaveScope (Step 6), or run `/kernel-trace-analysis` for a
    text-only bottleneck report
@@ -292,7 +297,7 @@ Example output:
 Trace captured: ./trace_data/20260516_153000_conv_implicit_gemm/
   Kernel: conv_implicit_gemm_v4r1_nhwc_kc_gemmm_gemmn_gemmk_64x128x64
   arch_vgpr=104, accum_vgpr=128, SGPR=80
-  Instructions: 2845, source-mapped: 0 (0%)
+  Instructions: 2845, source-mapped: 0 (0%)   # 0% => rebuilt needed with ROCKE_DEBUG_LOC=1
 
 Open in WaveScope, or run /kernel-trace-analysis to analyze bottlenecks.
 ```

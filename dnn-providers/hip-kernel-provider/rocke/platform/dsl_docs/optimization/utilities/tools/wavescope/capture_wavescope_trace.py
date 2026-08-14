@@ -128,6 +128,28 @@ def run_sidecar(out_dir: Path, code_object: Path | None) -> bool:
     return True
 
 
+def clear_stale_sidecars(out_dir: Path) -> None:
+    """Drop sidecars in a reused folder that this run will not rewrite.
+
+    ``--no-source`` skips the sidecar step entirely, so without this a
+    recapture into a folder that already had one leaves the previous build's
+    attribution sitting beside a brand-new trace. The viewer cannot tell: the
+    keys are addresses, they still resolve, and the Source tab reports the old
+    kernel's call stacks against these instructions.
+    """
+    argv = [sys.executable, str(SIDECAR_SCRIPT), str(out_dir), "--invalidate-only"]
+    if subprocess.run(argv).returncode != 0:
+        print(
+            f"\n[warn] could not clear sidecars under {out_dir}. If this folder "
+            "was used\n"
+            "       for an earlier capture, delete any inline_frames.json in it "
+            "by hand:\n"
+            "       the Source tab would otherwise show the previous build's "
+            "call stacks.",
+            file=sys.stderr,
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -179,6 +201,8 @@ def main(argv: list[str] | None = None) -> int:
             "\n[inline] recovering the call stack rocprofv3 flattened away", flush=True
         )
         run_sidecar(out_dir, args.code_object)
+    else:
+        clear_stale_sidecars(out_dir)
 
     dispatches = sorted(out_dir.glob(DISPATCH_GLOB))
     if not dispatches:

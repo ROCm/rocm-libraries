@@ -15,6 +15,12 @@ these instructions. Everything here is about refusing to guess:
   * a sidecar from an earlier run over the same folder is gone before this run
     decides anything, so an unresolvable dispatch cannot keep serving the
     previous run's attribution.
+
+That last one is a lifecycle invariant rather than a single behaviour: every way
+a run can end -- no code object, no llvm-dwarfdump, an unreadable object, a
+failed write, a capture that deliberately writes no sidecar at all -- has to
+leave each dispatch holding a complete sidecar from this run or none, never an
+earlier one and never a partial file.
 """
 
 from __future__ import annotations
@@ -26,13 +32,21 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-_TOOL = (
+_TOOLS = (
     Path(__file__).resolve().parents[2]
-    / "dsl_docs/optimization/utilities/tools/wavescope/emit_inline_frames.py"
+    / "dsl_docs/optimization/utilities/tools/wavescope"
 )
-_spec = importlib.util.spec_from_file_location("emit_inline_frames", _TOOL)
-efi = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(efi)
+
+
+def _load(name: str):
+    spec = importlib.util.spec_from_file_location(name, _TOOLS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+efi = _load("emit_inline_frames")
+cwt = _load("capture_wavescope_trace")
 
 
 def dumped(tmp: Path, ident: int, size: int = 1024) -> Path:
@@ -169,6 +183,26 @@ class TwoObjectTrace:
     def sidecar_of(self, d: Path) -> dict:
         return json.loads((d / efi.SIDECAR).read_text())
 
+    def stale(self, d: Path) -> Path:
+        """A sidecar a previous run left, naming a function from another object."""
+        path = d / efi.SIDECAR
+        path.write_text(
+            json.dumps(
+                {
+                    "version": efi.SIDECAR_VERSION,
+                    "functions": ["from_a_previous_run"],
+                    "files": ["/src/old.py"],
+                    "stacks": {"9:100": [[0, 0, 1, 0]]},
+                    "resolved": 1,
+                }
+            )
+        )
+        return path
+
+    def leftovers(self, d: Path) -> list[str]:
+        """Everything sidecar-shaped in ``d``, temporary files included."""
+        return sorted(p.name for p in d.iterdir() if p.name.startswith(efi.SIDECAR))
+
 
 class TestMainPerDispatch(TwoObjectTrace, unittest.TestCase):
     """End to end over a trace with two dispatches of two different kernels."""
@@ -210,22 +244,6 @@ class TestRerunOverAnExistingSidecar(TwoObjectTrace, unittest.TestCase):
     reports the wrong kernel's source rather than falling back.
     """
 
-    def stale(self, d: Path) -> Path:
-        """A sidecar a previous run left, naming a function from another object."""
-        path = d / efi.SIDECAR
-        path.write_text(
-            json.dumps(
-                {
-                    "version": efi.SIDECAR_VERSION,
-                    "functions": ["from_a_previous_run"],
-                    "files": ["/src/old.py"],
-                    "stacks": {"9:100": [[0, 0, 1, 0]]},
-                    "resolved": 1,
-                }
-            )
-        )
-        return path
-
     def test_stale_sidecar_is_gone_when_the_dispatch_cannot_be_resolved(self):
         orphan = self.dispatch("9", 9)
         good = self.dispatch("1", 1)
@@ -254,10 +272,131 @@ class TestRerunOverAnExistingSidecar(TwoObjectTrace, unittest.TestCase):
         """The write goes through a temp name; it must not survive the run."""
         d = self.dispatch("1", 1)
         self.assertEqual(efi.main([str(self.tmp)]), 0)
-        self.assertEqual(
-            [p.name for p in d.iterdir() if p.name.startswith(efi.SIDECAR)],
-            [efi.SIDECAR],
+        self.assertEqual(self.leftovers(d), [efi.SIDECAR])
+
+
+class TestNothingSurvivesAFailedRun(TwoObjectTrace, unittest.TestCase):
+    """Invalidation has to happen before anything that can end the run.
+
+    Ordering is the whole finding here. Removing stale sidecars inside the
+    per-dispatch loop looks equivalent and is not: the loop is reached only
+    after a code object has been found and llvm-dwarfdump located, so on a host
+    missing either, the run exits reporting that no sidecar was written while
+    every previous sidecar is still sitting in the folder for the viewer to
+    read. The wrapper's warning then actively misleads -- it says the Source tab
+    has fallen back to innermost frames when it is in fact showing another
+    build's call stacks.
+    """
+
+    def test_a_stale_sidecar_goes_even_when_no_code_object_is_found(self):
+        d = self.dispatch("1", 1)
+        self.stale(d)
+        for obj in self.objs.values():
+            obj.unlink()
+        with self.assertRaises(SystemExit):
+            efi.main([str(self.tmp)])
+        self.assertEqual(self.leftovers(d), [])
+
+    def test_a_stale_sidecar_goes_even_when_dwarfdump_is_missing(self):
+        d = self.dispatch("1", 1)
+        self.stale(d)
+
+        def missing():
+            raise SystemExit("llvm-dwarfdump not found")
+
+        with mock.patch.object(efi, "find_dwarfdump", missing):
+            with self.assertRaises(SystemExit):
+                efi.main([str(self.tmp)])
+        self.assertEqual(self.leftovers(d), [])
+
+    def test_a_stale_sidecar_goes_even_when_the_object_cannot_be_read(self):
+        """A dwarfdump failure ends the loop part way through the dispatches."""
+        first = self.dispatch("1", 1)
+        second = self.dispatch("2", 2)
+        self.stale(second)
+
+        def unreadable(obj, _dd):
+            raise SystemExit(f"llvm-dwarfdump failed on {obj}")
+
+        with mock.patch.object(efi, "parse_inline_frames", unreadable):
+            with self.assertRaises(SystemExit):
+                efi.main([str(self.tmp)])
+        self.assertEqual(self.leftovers(first), [])
+        self.assertEqual(self.leftovers(second), [])
+
+    def test_an_interrupted_write_leaves_neither_the_new_nor_the_old_sidecar(self):
+        """A half-written file is unreadable; the old one is worse -- it parses."""
+        d = self.dispatch("1", 1)
+        self.stale(d)
+        with mock.patch.object(Path, "replace", side_effect=OSError("no space")):
+            with self.assertRaises(OSError):
+                efi.main([str(self.tmp)])
+        self.assertEqual(self.leftovers(d), [])
+
+    def test_a_temporary_file_from_an_interrupted_run_is_cleaned_up(self):
+        """An interrupt leaves a `.tmp`; the next run must not leave it there."""
+        d = self.dispatch("9", 9)
+        (d / f"{efi.SIDECAR}{efi.TMP_SUFFIX}").write_text('{"version": 2, "stac')
+        with self.assertRaises(SystemExit):
+            efi.main([str(self.tmp)])
+        self.assertEqual(self.leftovers(d), [])
+
+
+class TestInvalidateOnly(TwoObjectTrace, unittest.TestCase):
+    """The mode the wrapper uses after a capture that writes no sidecar."""
+
+    def test_it_drops_sidecars_without_needing_a_code_object_or_the_tool(self):
+        d = self.dispatch("1", 1)
+        self.stale(d)
+        for obj in self.objs.values():
+            obj.unlink()
+
+        def missing():
+            raise SystemExit("llvm-dwarfdump not found")
+
+        with mock.patch.object(efi, "find_dwarfdump", missing):
+            self.assertEqual(efi.main([str(self.tmp), "--invalidate-only"]), 0)
+        self.assertEqual(self.leftovers(d), [])
+
+    def test_a_folder_with_nothing_to_drop_is_not_an_error(self):
+        self.dispatch("1", 1)
+        self.assertEqual(efi.main([str(self.tmp), "--invalidate-only"]), 0)
+
+
+class TestCaptureWithoutSource(unittest.TestCase):
+    """``--no-source`` writes no sidecar, so it has to remove the one it finds.
+
+    The trace in the folder is new after a recapture and the sidecar beside it
+    describes a build that no longer exists. Skipping the sidecar step is not
+    the same as leaving the folder alone.
+    """
+
+    def setUp(self):
+        self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.out = self.tmp / "att_out"
+        self.dispatch_dir = self.out / "ui_output_kernel_dispatch_0"
+        self.dispatch_dir.mkdir(parents=True)
+        (self.dispatch_dir / "code.json").write_text(
+            json.dumps({"code": [row("v_mov", 1, 100)]})
         )
+        self.sidecar = self.dispatch_dir / efi.SIDECAR
+        self.sidecar.write_text(json.dumps({"version": 2, "stacks": {"9:100": []}}))
+        self.enterContext(mock.patch.object(cwt, "run_capture", lambda *a, **kw: None))
+
+    def run_wrapper(self, *flags: str) -> int:
+        return cwt.main(["--output-dir", str(self.out), *flags, "--", "true"])
+
+    def test_a_recapture_without_source_removes_the_old_sidecar(self):
+        self.assertEqual(self.run_wrapper("--no-source"), 0)
+        self.assertFalse(self.sidecar.exists())
+
+    def test_a_capture_with_source_still_delegates_to_the_sidecar_tool(self):
+        seen = []
+        with mock.patch.object(
+            cwt, "run_sidecar", lambda out, obj: seen.append(Path(out)) or True
+        ):
+            self.assertEqual(self.run_wrapper(), 0)
+        self.assertEqual(seen, [self.out.resolve()])
 
 
 if __name__ == "__main__":

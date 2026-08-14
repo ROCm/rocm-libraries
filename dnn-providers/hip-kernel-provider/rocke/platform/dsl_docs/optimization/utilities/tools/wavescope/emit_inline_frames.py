@@ -23,25 +23,33 @@ and collide across objects, so a trace that loaded more than one needs both
 columns to identify an instruction.
 
 Re-running over a folder that already has sidecars is safe and is the expected
-way to use this: each dispatch's old sidecar goes away before its new one is
-resolved, so a dispatch this run cannot attribute is left with no sidecar rather
-than the previous run's answer.
+way to use this: every dispatch's old sidecar goes away as soon as the dispatch
+folders are known -- before this run looks for a code object or for
+llvm-dwarfdump, either of which can end the run -- so a dispatch this run does
+not rewrite is left with no sidecar rather than the previous run's answer.
 
     python emit_inline_frames.py <att-output-dir>
     python emit_inline_frames.py <att-output-dir> --code-object k.hsaco
+    python emit_inline_frames.py <att-output-dir> --invalidate-only
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 SIDECAR = "inline_frames.json"
+
+# Written first and renamed over the destination, so a viewer never opens a
+# half-written file.
+TMP_SUFFIX = ".tmp"
 
 # The dispatch folders rocprofv3 writes, each a self-contained trace.
 DISPATCH_GLOB = "ui_output_*_dispatch_*"
@@ -248,6 +256,56 @@ def dispatch_dirs(root: Path) -> list[Path]:
     return sorted(root.glob(DISPATCH_GLOB))
 
 
+def invalidate_sidecars(dirs: list[Path]) -> None:
+    """Drop every dispatch's sidecar before this run decides anything.
+
+    This runs ahead of code-object discovery and of looking for
+    llvm-dwarfdump, both of which end the run, and ahead of the loop, which an
+    unreadable object ends part way through. A trace folder gets re-decoded and
+    re-run over, and a sidecar left beside a dispatch this run does not rewrite
+    is worse than no sidecar at all: the viewer loads it and attributes the
+    dispatch to whichever code object the previous run picked, which is the
+    address-overlap mis-attribution the per-dispatch selection exists to stop.
+    No sidecar just falls back to innermost-frame attribution, which is how the
+    Source tab behaved before this file existed.
+
+    Staleness cannot be detected by reading the file. Its keys are bare
+    addresses with nothing in them tying the file to a build, and a rebuild that
+    moved only some addresses still joins on the rest. The file's presence is
+    therefore the only signal there is, so this run has to earn it back.
+    """
+    for d in dirs:
+        for path in (d / SIDECAR, d / f"{SIDECAR}{TMP_SUFFIX}"):
+            if path.exists():
+                path.unlink()
+                print(f"  {d.name}: removed {path.name} from an earlier run")
+
+
+@contextlib.contextmanager
+def sidecar_write(d: Path) -> Iterator[Path]:
+    """Yield the temporary path to write ``d``'s sidecar to.
+
+    Leaving the block normally renames that file over the destination, so a
+    viewer only ever opens a whole one: a partial write, from a full disk or an
+    interrupt, is indistinguishable from a valid sidecar until it fails to
+    parse. An exception removes the temporary instead and leaves no destination
+    -- in particular it does not put back what was there before, which is the
+    one outcome that would be read as this run's answer.
+    """
+    out = d / SIDECAR
+    tmp = out.with_name(out.name + TMP_SUFFIX)
+    out.unlink(missing_ok=True)
+    tmp.unlink(missing_ok=True)
+    try:
+        yield tmp
+        # Inside the guard: a full disk can fail the rename as easily as the
+        # write, and that would otherwise leave the temporary behind.
+        tmp.replace(out)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def find_code_objects(root: Path) -> list[Path]:
     """Every code object rocprofv3 dumped under ``root``, largest first.
 
@@ -329,11 +387,27 @@ def main(argv=None) -> int:
         default=None,
         help="code object with DWARF; defaults to the one rocprofv3 dumped",
     )
+    ap.add_argument(
+        "--invalidate-only",
+        action="store_true",
+        help="drop existing sidecars and write none, for a capture that has none",
+    )
     args = ap.parse_args(argv)
 
     root: Path = args.trace_dir
     if not root.is_dir():
         raise SystemExit(f"not a directory: {root}")
+
+    # Identify the dispatches, then invalidate, then everything that can fail.
+    dirs = dispatch_dirs(root)
+    invalidate_sidecars(dirs)
+
+    if args.invalidate_only:
+        print(f"  {len(dirs)} dispatch(es) left without a sidecar")
+        return 0
+
+    if not dirs:
+        raise SystemExit(f"no decoded dispatch folder under {root}")
 
     candidates = [args.code_object] if args.code_object else find_code_objects(root)
     if not candidates:
@@ -342,10 +416,6 @@ def main(argv=None) -> int:
             f"'{CODE_OBJECT_GLOB}' beside the raw trace; pass --code-object "
             "to point at it (or at the .hsaco the kernel was built from)."
         )
-
-    dirs = dispatch_dirs(root)
-    if not dirs:
-        raise SystemExit(f"no decoded dispatch folder under {root}")
 
     dwarfdump = find_dwarfdump()
     parsed: dict[Path, list[dict]] = {}
@@ -357,17 +427,6 @@ def main(argv=None) -> int:
             continue
         rows = json.loads(code_json.read_text())["code"]
         present = row_code_objects(rows)
-
-        # Drop any sidecar from an earlier run before deciding anything. Traces
-        # get re-decoded and this tool re-run over the same folder, so a stale
-        # file left beside a dispatch this run cannot resolve is worse than no
-        # file at all: the viewer would load it and attribute the dispatch to
-        # whichever code object the previous run picked, which is the
-        # address-overlap mis-attribution the selection below exists to stop.
-        stale = d / SIDECAR
-        if stale.exists():
-            stale.unlink()
-            print(f"  {d.name}: removed the sidecar from an earlier run")
 
         code_object, code_object_id, problem = select_code_object(
             candidates, present, args.code_object
@@ -396,13 +455,9 @@ def main(argv=None) -> int:
 
         sidecar = build_sidecar(rows, frames, code_object_id)
         total = len([r for r in rows if r and r[0] and not r[0].startswith(";")])
+        with sidecar_write(d) as tmp:
+            tmp.write_text(json.dumps(sidecar))
         out = d / SIDECAR
-        # Rename over the destination so the viewer only ever sees a whole file:
-        # a partial write, from a full disk or an interrupt, would otherwise be
-        # indistinguishable from a valid sidecar until it failed to parse.
-        tmp = out.with_name(out.name + ".tmp")
-        tmp.write_text(json.dumps(sidecar))
-        tmp.replace(out)
         written += 1
         print(
             f"  {d.name}: {sidecar['resolved']}/{total} instructions resolved, "

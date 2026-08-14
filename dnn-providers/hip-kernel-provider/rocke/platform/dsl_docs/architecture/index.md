@@ -42,6 +42,7 @@ builders are cataloged separately in [`../instances/index.md`](../instances/inde
   gfx950 tiled-2D attention optimization controls.
 - [`wavescope_integration.md`](wavescope_integration.md) — how source locations
   reach an ATT trace, and how to use the viewer during an optimization pass.
+  Opens with a glossary of the LLVM and DWARF terms the rest of it assumes.
 
 Experiment summaries are historical evidence tied to their stated hardware,
 toolchain, and configuration. They are not current performance promises.

@@ -671,7 +671,11 @@ class TestLlvmToolDiscovery(unittest.TestCase):
     def test_configured_rocm_wins_over_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             expected = self.fake_bin(tmp, "llc")
-            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}):
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
+                # An inherited override outranks ROCM_PATH, so a host that has
+                # one set -- which is what the variable is for -- would answer
+                # from a route above the one under test.
+                env.pop(LLVM_BIN_ENV, None)
                 self.assertEqual(llvm_tool("llc"), expected)
 
     def test_explicit_llvm_bin_wins_over_rocm_path(self):
@@ -699,7 +703,8 @@ class TestLlvmToolDiscovery(unittest.TestCase):
 
     def test_a_configured_root_without_the_tool_falls_through(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}):
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}) as env:
+                env.pop(LLVM_BIN_ENV, None)
                 self.assertEqual(llvm_tool("llc"), shutil.which("llc"))
 
 

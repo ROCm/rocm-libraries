@@ -3,8 +3,9 @@
 This is the failure-mode catalog for the **engine and build** — the things that
 look like bugs but usually aren't. For debugging a *running kernel* (wrong
 output, hangs, faults, slowness), see the "Debugging Patterns" section of
-[`testing.md`](./testing.md). For the rules behind several of these, see
-[`invariants.md`](./invariants.md).
+[`testing.md`](./testing.md); to put a faulting kernel under a debugger, see
+[`debugging_rocgdb.md`](./debugging_rocgdb.md). For the rules behind several of
+these, see [`invariants.md`](./invariants.md).
 
 > **First rule of this codebase:** when something that should work doesn't, suspect
 > a **stale or mis-flagged build product before you suspect the source**. Almost
@@ -27,11 +28,12 @@ Re-sync (content-verified, not a timestamp/rsync filter) and rebuild. A clean
 build from current source in `/tmp` is the source of truth.
 
 ### The provider build can't find hipDNN headers / `_deps` / `SDPA`
-A by-hand build dropped a required flag. The full set lives in
-[`../../../BUILD.md`](../../../BUILD.md) ("the flags that get
-forgotten") — `-D__HIP_PLATFORM_AMD__`, the generated `build/` include set
-including `_deps`, the SDPA enable, and an explicit fresh `ROCKE_LIB`. Prefer
-`tools/build.sh`, which bakes them all.
+A by-hand build dropped a required flag. The set is `-D__HIP_PLATFORM_AMD__`, the
+generated `build/` include set including `_deps`, the SDPA enable, and an explicit
+fresh `ROCKE_LIB`. For how a provider resolves the engine archive, see
+[`../../BUILD.md`](../../BUILD.md#consuming-the-engine-from-a-provider-plugin);
+letting the engine build fresh (no `-DROCKE_LIB`) is what keeps the archive in
+lockstep with the source.
 
 ### Sanitizer build fails with a `-Wformat-truncation` "null format string"
 This is a known interaction between sanitizer instrumentation and the format

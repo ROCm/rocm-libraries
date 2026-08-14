@@ -136,6 +136,16 @@ clickable. `capture_wavescope_trace.py` writes the sidecar for you;
 `emit_inline_frames.py <att-output-dir>` regenerates it against a trace you
 already have.
 
+Re-running over a folder that already has sidecars is the expected way to use
+this. Every sidecar in it goes as soon as the dispatch folders are known, before
+anything that could fail, so each dispatch ends up with a sidecar from this run
+or none — never the previous one. That matters because a stale sidecar cannot be
+recognized as stale: its keys are addresses, and a rebuild that moved only some
+of them still joins on the rest and reports the old build's call stacks.
+`--no-source` clears them too, since a capture that writes no sidecar must not
+leave one behind; `emit_inline_frames.py <dir> --invalidate-only` does just that
+step if you need it on its own.
+
 ## When it doesn't work
 
 | Symptom | Cause |

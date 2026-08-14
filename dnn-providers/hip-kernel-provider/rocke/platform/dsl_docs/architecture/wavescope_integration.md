@@ -24,6 +24,80 @@ question you actually have — "which part of my tiling scheme causes this
 Closing that gap needs the authoring context recorded during the build, carried
 through compilation as debug info, and rejoined to the trace afterwards.
 
+## Vocabulary
+
+Two debug-info vocabularies meet in this pipeline, and they are similar enough to
+be confusing: LLVM's `DI*` metadata nodes, which rocke *writes*, and DWARF's DIEs
+and tags, which those nodes become once compiled and which the sidecar *reads*.
+Everything defined here is used somewhere below or in the tools.
+
+### What rocke writes: LLVM debug metadata
+
+`DI` is simply LLVM's prefix for "debug info". These nodes live in the emitted
+`.ll` as `!`-prefixed metadata, and building them is all `core/lower_llvm.py` and
+`cpp/core/lower_llvm/debug.cpp` do.
+
+| Node | What it is |
+| --- | --- |
+| `!DIFile` | one source file, as a filename plus a directory |
+| `!DICompileUnit` | the root of a module's debug info: which file, which producer (`rocke`), and how much detail to emit |
+| `!DISubprogram` | a function. rocke emits one for the kernel, plus one for each Python function that contributed ops to it |
+| `!DILocation` | a single point in source — line, column, and enclosing scope. Attached to an instruction as `!dbg !N` |
+| `!DILexicalBlockFile` | a scope whose file differs from its function's, used for a location that arrived without a call stack |
+
+Two fields matter more than the rest. **`inlinedAt`** on a `!DILocation` points at
+the location it was inlined into, so a chain of them *is* a call stack — that
+chain is the entire mechanism by which a rocke kernel's Python authorship
+survives to the profiler. And **`emissionKind`** says how much to emit;
+`LineTablesOnly` means enough to map addresses to lines and inline scopes, but not
+the variable and type description a source debugger would want.
+
+The `Debug Info Version` module flag is not optional: without it LLVM silently
+discards every `!dbg` attachment, and nothing downstream can distinguish that from
+a build that never captured locations.
+
+### What the sidecar reads: DWARF
+
+**DWARF** is the debug format that ends up *inside* the compiled code object.
+Everything downstream — debuggers, `rocprofv3`, `emit_inline_frames.py` — reads
+DWARF, never the `.ll`.
+
+DWARF is a tree of **DIEs** (Debugging Information Entries). Each DIE has a **tag**
+naming what it describes and **attributes** carrying the details.
+`llvm-dwarfdump --debug-info` prints one DIE per line, indented by depth, which is
+how the sidecar recovers which frame encloses which.
+
+| Tag | What it describes |
+| --- | --- |
+| `DW_TAG_compile_unit` | the root, from `!DICompileUnit` |
+| `DW_TAG_subprogram` | a real function, from `!DISubprogram` |
+| `DW_TAG_inlined_subroutine` | **one inlined call** — a function body pasted into its caller. One per call site rather than one per function, and the entry the sidecar is built from |
+
+| Attribute | What it carries |
+| --- | --- |
+| `DW_AT_name` | the name |
+| `DW_AT_abstract_origin` | on an inlined subroutine, a pointer to the DIE holding the name |
+| `DW_AT_call_file`, `DW_AT_call_line`, `DW_AT_call_column` | where the call was made *from*. Recorded on the callee, which is why the sidecar's frames carry call sites rather than declaration sites |
+| `DW_AT_low_pc` / `DW_AT_high_pc`, or a list of `[lo, hi)` ranges | the instruction addresses this DIE covers |
+
+A **PC** is a program counter — the address of one instruction. PC ranges are the
+hinge of the whole design: the trace measures per address and DWARF describes per
+address range, so the two can be joined afterwards without either side having been
+built to know about the other.
+
+### The trace side
+
+| Term | Meaning |
+| --- | --- |
+| **ATT** | Advanced Thread Trace, the `rocprofv3` mode that records what each wave executed, cycle by cycle |
+| **dispatch** | one launch of one kernel — the kernel is the compiled code, a dispatch is one execution of it. Profiling is per dispatch, and each decoded dispatch gets its own folder |
+| **code object** | the compiled GPU binary that gets loaded (`.hsaco`), and the thing carrying the DWARF |
+| **`Vaddr`, `Codeobj`** | `code.json` columns: an instruction's address, and which code object it belongs to. Addresses restart per object, so both are needed to name an instruction |
+| **wave / wavefront** | lanes executing in lockstep, 64 of them on the CDNA parts. ATT reports per wave |
+| **CU** | compute unit. ATT traces exactly one |
+| **comgr** | the ROCm compiler library rocke hands the `.ll` to |
+| **sidecar** | a file written beside a trace that the viewer loads if present and ignores if absent — here, `inline_frames.json` |
+
 ## Pipeline
 
 ```
@@ -118,6 +192,18 @@ viewer compares how many entries found an instruction against how many the sidec
 carries, so a rebuild that moved half the addresses is reported too, not just one
 that moved all of them. That property is what lets the
 feature ship without coupling to a decoder release.
+
+Nothing in the file can prove it belongs to the trace it sits beside: the keys are
+bare addresses. So the producer does not try to validate what it finds, it
+replaces it — every sidecar under the trace is removed as soon as the dispatch
+folders are known, ahead of code-object discovery, of locating `llvm-dwarfdump`,
+and of the loop, all of which can end the run early. Each write then goes to a
+temporary that is renamed over the destination and deleted if anything raises.
+A dispatch is therefore left holding a complete sidecar from this run or none,
+where none degrades to innermost-frame attribution and the previous run's answer
+would silently attribute to a layout that no longer exists. `--no-source` follows
+the same rule: it writes no sidecar, so it removes any it finds rather than
+leaving one beside a trace it does not describe.
 
 ## Invariants
 
