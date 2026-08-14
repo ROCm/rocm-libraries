@@ -28,8 +28,15 @@ def _set_tensilelite_version(monkeypatch, version: str) -> None:
     monkeypatch.setattr(tensilelite, "__version__", version)
 
 
-def test_expected_rocm_version_from_local_tag():
-    assert _rocm.expected_rocm_version("tensilelite", "5.0.0+rocm7.2.4") == "7.2.4"
+@pytest.mark.parametrize(
+    ("distribution_version", "expected"),
+    [
+        ("5.0.0+rocm7.2.4", "7.2.4"),
+        ("5.0.0+devrocm10.1.0.dev0.0123456789abcdef", "10.1.0.dev0.0123456789abcdef"),
+    ],
+)
+def test_expected_rocm_version_parses_valid_rocm_tags(distribution_version, expected):
+    assert _rocm.expected_rocm_version("tensilelite", distribution_version) == expected
 
 
 @pytest.mark.parametrize("version", ["5.0.0", "5.0.0+cuda12.0.0"])
@@ -59,11 +66,18 @@ def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
     monkeypatch.setattr(_rocm, "resolve_system_rocm", lambda: _system_rocm(root, "active Python rocm_sdk"))
 
-    with pytest.raises(
-        _rocm.TensileLiteRuntimeError,
-        match="selected by: active Python rocm_sdk",
-    ):
+    with pytest.raises(_rocm.TensileLiteRuntimeError) as exc_info:
         _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.2.4")
+
+    assert str(exc_info.value) == (
+        "tensilelite and ROCm release mismatch.\n"
+        "  tensilelite version: 5.0.0+rocm7.2.4\n"
+        "  expected ROCm: 7.2.4\n"
+        "  found ROCm: 7.3.0\n"
+        f"  selected root: {root}\n"
+        "  selected by: active Python rocm_sdk\n"
+        "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
+    )
 
 
 def test_resolve_system_rocm_prefers_environment(tmp_path, monkeypatch):
@@ -76,11 +90,8 @@ def test_resolve_system_rocm_prefers_environment(tmp_path, monkeypatch):
     assert result.source == "explicit ROCM_PATH"
 
 
-def test_resolve_system_rocm_uses_hipconfig_on_path(tmp_path, monkeypatch):
+def test_resolve_system_rocm_falls_back_to_path_discovery(tmp_path, monkeypatch):
     root = _root(tmp_path)
-    hipconfig = tmp_path / "hipconfig"
-    hipconfig.write_text("#!/bin/sh\n", encoding="utf-8")
-    hipconfig.chmod(0o755)
     monkeypatch.delenv("ROCM_PATH", raising=False)
     monkeypatch.setattr(_rocm, "_path_system_rocm", lambda: _system_rocm(root, "hipconfig on PATH"))
     monkeypatch.setattr(_rocm.Path, "is_dir", lambda path: False if path == _rocm.Path("/opt/rocm") else path.exists())
@@ -93,48 +104,40 @@ def test_resolve_system_rocm_uses_hipconfig_on_path(tmp_path, monkeypatch):
 
 def test_path_system_rocm_uses_hipconfig_rocmpath(tmp_path, monkeypatch):
     root = _root(tmp_path)
-    monkeypatch.setattr(_rocm.shutil, "which", lambda name: "/usr/bin/hipconfig")
+    which_requests = []
+    command_requests = []
+    monkeypatch.setattr(
+        _rocm.shutil,
+        "which",
+        lambda name: which_requests.append(name) or "/usr/bin/hipconfig",
+    )
     monkeypatch.setattr(
         _rocm.subprocess,
         "run",
-        lambda *args, **kwargs: _rocm.subprocess.CompletedProcess(
-            args[0], 0, str(root) + "\n", ""
-        ),
+        lambda *args, **kwargs: command_requests.append((args, kwargs))
+        or _rocm.subprocess.CompletedProcess(args[0], 0, str(root) + "\n", ""),
     )
 
     result = _rocm._path_system_rocm()
 
     assert result == _system_rocm(root, "hipconfig on PATH")
-
-
-def test_python_sdk_version_uses_distribution_version(monkeypatch):
-    core_version = "10.1.0a20260813"
-
-    class Core:
-        __version__ = core_version
-
-    monkeypatch.setitem(sys.modules, "rocm_sdk_core", Core)
-
-    assert _rocm._python_sdk_version() == core_version
-
-
-def test_expected_rocm_version_parses_development_tag():
-    assert (
-        _rocm.expected_rocm_version(
-            "tensilelite", "5.0.0+devrocm10.1.0.dev0.0123456789abcdef"
+    assert which_requests == ["hipconfig"]
+    assert command_requests == [
+        (
+            (["/usr/bin/hipconfig", "--rocmpath"],),
+            {"check": True, "capture_output": True, "text": True, "timeout": 5},
         )
-        == "10.1.0.dev0.0123456789abcdef"
-    )
+    ]
 
 
 def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "bin"
     scripts.mkdir(parents=True)
-    monkeypatch.setattr(
-        _rocm,
-        "_python_sdk_version",
-        lambda: "10.1.0a20260813",
-    )
+
+    class Core:
+        __version__ = "10.1.0a20260813"
+
+    monkeypatch.setitem(sys.modules, "rocm_sdk_core", Core)
     monkeypatch.setattr(_rocm.sysconfig, "get_path", lambda name: str(scripts))
     monkeypatch.setattr(
         _rocm,
