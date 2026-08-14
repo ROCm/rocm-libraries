@@ -370,7 +370,7 @@ endif()
 
 block(SCOPE_FOR VARIABLES)
     set(BUILD_SHARED_LIBS "${TENSILELITE_BUILD_SHARED_LIBS}")
-    add_subdirectory(tensilelite)
+    add_subdirectory(tensilelite tensilelite)
 endblock()
 
 set(BUILD_SHARED_LIBS "${HIPBLASLT_BUILD_SHARED_LIBS}")

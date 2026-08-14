@@ -1,0 +1,5 @@
+--index-url https://rocm.nightlies.amd.com/whl-multi-arch/
+torch[device-gfx950]
+torchvision[device-gfx950]
+torchaudio
+
