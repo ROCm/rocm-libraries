@@ -100,11 +100,13 @@ int64_t registerEngineName(const std::string& name)
 
     if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(name))
     {
-        // A run-time name must be interned somewhere outliving the registry.
-        static std::deque<std::string> s_names;
-        static std::vector<hipdnn_data_sdk::utilities::EngineRegistrar> s_registrars;
+        // A run-time name must be interned somewhere outliving the registry: it keeps a
+        // string_view, and every other caller registers a literal through the macro.
         // deque, not vector: reallocation would move a registered view's string.
-        s_registrars.emplace_back(s_names.emplace_back(name));
+        static std::deque<std::string> s_names;
+        // The registrar is a constructor, not an object: it writes into the process-wide
+        // registry and carries no state, so nothing needs to hold it.
+        hipdnn_data_sdk::utilities::EngineRegistrar{s_names.emplace_back(name)};
     }
     return hipdnn_data_sdk::utilities::engineNameToId(name);
 }
