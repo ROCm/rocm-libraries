@@ -358,7 +358,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  *  Load callbacks have the following signature:
  *
  *  @code
- *  void store_cb(Tdata* data, size_t offset, Tdata element, void* cbdata, void* sharedMem);
+ *  Tdata load_cb(Tdata* data, size_t offset, void* cbdata, void* sharedMem);
  *  @endcode
  *
  *  'Tdata' is the type of a single element of the input buffer.  It is
