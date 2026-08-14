@@ -3866,36 +3866,25 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::vector<std::vector<uint64_t*>> db1(block_count, std::vector<uint64_t*>(gemm_count));
     std::vector<std::vector<uint64_t*>> dc1(block_count, std::vector<uint64_t*>(gemm_count));
     std::vector<std::vector<uint64_t*>> dd1(block_count, std::vector<uint64_t*>(gemm_count));
-
+   
     std::vector<uint64_t*> dda, ddb, ddc, ddd;
-    std::vector<uint64_t*> hha, hhb, hhc, hhd;
-
-    for(int i = 0; i < block_count; i++)
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        uint64_t* ptr = nullptr;
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        dda.push_back(ptr);
+        for(int i = 0; i < block_count; i++)
+        {
+            uint64_t* ptr = nullptr;
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            dda.push_back(ptr);
 
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hha.push_back(ptr);
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            ddb.push_back(ptr);
 
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        ddb.push_back(ptr);
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            ddc.push_back(ptr);
 
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hhb.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        ddc.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hhc.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        ddd.push_back(ptr);
-
-        CHECK_HIP_ERROR(hipHostMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
-        hhd.push_back(ptr);
+            CHECK_HIP_ERROR(hipMalloc(&ptr, gemm_count * sizeof(uint64_t*)));
+            ddd.push_back(ptr);
+        }
     }
 
     for(int32_t b = 0; b < block_count; b++)
@@ -6285,16 +6274,15 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     //Freeing the device memory allocated for the General Batched GEMM Pointer Arrays
-    for(int i = 0; i < block_count; i++)
+    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
     {
-        CHECK_HIP_ERROR(hipFree(dda[i]));
-        CHECK_HIP_ERROR(hipFree(ddb[i]));
-        CHECK_HIP_ERROR(hipFree(ddc[i]));
-        CHECK_HIP_ERROR(hipFree(ddd[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hha[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hhb[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hhc[i]));
-        CHECK_HIP_ERROR(hipFreeHost(hhd[i]));
+        for(int i = 0; i < block_count; i++)
+        {
+            CHECK_HIP_ERROR(hipFree(dda[i]));
+            CHECK_HIP_ERROR(hipFree(ddb[i]));
+            CHECK_HIP_ERROR(hipFree(ddc[i]));
+            CHECK_HIP_ERROR(hipFree(ddd[i]));
+        }
     }
 
     if(dWorkspace != nullptr)

@@ -33,6 +33,7 @@ logger = logging.getLogger("GEKO")
 
 
 def _normalize_compute_type(v: str) -> str:
+    # Normalize legacy values so downstream joins always use c_* compute_type keys.
     v = str(v)
     return v if v.startswith("c_") else f"c_{v}"
 
