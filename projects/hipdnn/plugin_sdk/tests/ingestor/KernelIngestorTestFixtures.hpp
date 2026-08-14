@@ -579,7 +579,15 @@ struct StubSettings
 
 struct StubContext
 {
-    void setExecutionSettings(const StubSettings& /*settings*/) {}
+    void setExecutionSettings(const StubSettings& settings)
+    {
+        _settings = settings;
+    }
+
+    const StubSettings& executionSettings() const
+    {
+        return _settings;
+    }
 
     void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> plan)
     {
@@ -592,6 +600,7 @@ struct StubContext
     }
 
 private:
+    StubSettings _settings;
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<StubHandle>> _plan;
 };
 

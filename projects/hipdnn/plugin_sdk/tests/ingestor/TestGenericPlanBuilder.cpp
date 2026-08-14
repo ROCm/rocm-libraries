@@ -79,7 +79,15 @@ struct KnobFilterSettings
 
 struct KnobFilterContext
 {
-    void setExecutionSettings(const KnobFilterSettings& /*settings*/) {}
+    void setExecutionSettings(const KnobFilterSettings& settings)
+    {
+        _settings = settings;
+    }
+
+    const KnobFilterSettings& executionSettings() const
+    {
+        return _settings;
+    }
 
     void setPlan(std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> plan)
     {
@@ -92,6 +100,7 @@ struct KnobFilterContext
     }
 
 private:
+    KnobFilterSettings _settings;
     std::unique_ptr<hipdnn_plugin_sdk::IPlan<TestHandle>> _plan;
 };
 
@@ -298,10 +307,16 @@ TEST(TestIngestorGenericPlanBuilder, HonorsAnExplicitKnobSettingOverTheHeuristic
     const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 64);
 
     const TestGraph graph(makeGraphId(30));
+
+    // The sequence GenericEngine::initializeExecutionContext runs: populate the settings
+    // from the config, store them on the context, then build. buildPlan reads the filter
+    // from the context, so a test that skips the middle step is exercising a state the
+    // engine never produces.
     KnobFilterSettings settings;
     builder.initializeExecutionSettings(0, graph, engineConfig, settings);
 
     KnobFilterContext context;
+    context.setExecutionSettings(settings);
     builder.buildPlan(0, graph, engineConfig, context);
 
     EXPECT_EQ(context.plan().kernel().getIntMetadata(BLOCK_SIZE), 64);
@@ -321,7 +336,12 @@ TEST(TestIngestorGenericPlanBuilder, UnsatisfiableKnobValueThrowsInvalidValueNam
     const auto engineConfig = makeIntKnobEngineConfig(fbb, BLOCK_SIZE, 999);
 
     const TestGraph graph(makeGraphId(31));
+
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+
     KnobFilterContext context;
+    context.setExecutionSettings(settings);
 
     try
     {

@@ -33,6 +33,8 @@ using KnobFilter = std::map<std::string, int64_t>;
 /// The one plan builder a descriptor-backed engine has: a catalog entry is a
 /// candidate, and this builds a plan for whichever one selection chose.
 /// @tparam TSettings Must carry a `KnobFilter ingestorKnobFilter` member.
+/// @tparam TContext Must expose `const TSettings& executionSettings() const`, holding
+///         the settings initializeExecutionSettings() populated.
 template <typename THandle, typename TSettings, typename TContext>
 class GenericPlanBuilder : public IPlanBuilder<THandle, TSettings, TContext>
 {
@@ -129,7 +131,7 @@ public:
 
     void buildPlan(const THandle& handle,
                    const IGraph& opGraph,
-                   const IEngineConfig& engineConfig,
+                   const IEngineConfig& /*engineConfig*/,
                    TContext& executionContext) const override
     {
         const auto context = contextFor(handle, opGraph);
@@ -139,7 +141,11 @@ public:
             throwNoApplicableKernel();
         }
 
-        const auto filter = readKnobFilter(engineConfig);
+        // The settings this context already carries, not a second parse of engineConfig:
+        // initializeExecutionSettings() ran against this same config immediately before
+        // and the engine stored the result. Re-reading is both wasted work and a second
+        // place for the two paths to disagree.
+        const auto& filter = executionContext.executionSettings().ingestorKnobFilter;
         const auto filtered = applyKnobFilter(catalog.entries, filter);
         if(filtered.empty())
         {
