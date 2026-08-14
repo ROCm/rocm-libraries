@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+import _tensilelite_client_binding as client_binding
+import tensilelite
 from tensilelite import _rocm, _runtime
 
 pytestmark = pytest.mark.unit
@@ -20,6 +22,10 @@ def _root(tmp_path: Path, version: str = "7.2.4") -> Path:
 
 def _resolved(root: Path, source: str = "test") -> _rocm.ResolvedRocmRoot:
     return _rocm.ResolvedRocmRoot(root, source)
+
+
+def _set_tensilelite_version(monkeypatch, version: str) -> None:
+    monkeypatch.setattr(tensilelite, "__version__", version)
 
 
 def test_expected_rocm_version_from_local_tag():
@@ -41,6 +47,7 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
         "tensilelite", "5.0.0+rocm10.1.0a20260813"
     )
 
+    assert isinstance(result, _rocm.PrefixRocm)
     assert result.root == root
     assert result.version == "10.1.0"
     assert result.source == "test"
@@ -129,12 +136,17 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
         lambda: "10.1.0a20260813",
     )
     monkeypatch.setattr(_rocm.sysconfig, "get_path", lambda name: str(scripts))
+    monkeypatch.setattr(
+        _rocm,
+        "resolve_rocm_root",
+        lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
+    )
 
     result = _rocm.validate_distribution(
         "tensilelite", "5.0.0+rocm10.1.0a20260813"
     )
 
-    assert result.root is None
+    assert isinstance(result, _rocm.PythonSdkRocm)
     assert result.version == "10.1.0a20260813"
     assert result.source == "active Python rocm_sdk_core"
     assert result.toolchain_paths == (scripts.resolve(),)
@@ -148,7 +160,7 @@ def test_runtime_reports_external_rocisa_import_failure(monkeypatch):
     monkeypatch.setattr(_runtime, "import_module", fail_import)
 
     with pytest.raises(_rocm.TensileLiteRuntimeError, match="independently packaged"):
-        _runtime.initialize("5.0.0+rocm7.2.4")
+        _runtime.initialize()
 
 
 def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
@@ -158,31 +170,31 @@ def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
     client_requests = []
 
     monkeypatch.setattr(_runtime, "_client", None)
-    monkeypatch.setattr(_runtime, "_root", None)
-    monkeypatch.setattr(_runtime, "_root_source", None)
-    monkeypatch.setattr(_runtime, "_toolchain_paths", None)
-    monkeypatch.setattr(_runtime, "_distribution_version", None)
+    monkeypatch.setattr(_runtime, "_installation", None)
+    _set_tensilelite_version(monkeypatch, "5.0.0+rocm7.2.4")
     monkeypatch.setattr(_runtime, "import_module", lambda name: imports.append(name) or object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.ValidatedRocm(
+        lambda distribution, version: _rocm.PrefixRocm(
             root, "7.2.4", "test", (root / "bin", root / "lib" / "llvm" / "bin")
         ),
     )
     monkeypatch.setattr(
         _runtime,
         "selected_client",
-        lambda root: client_requests.append(root) or (client, False),
+        lambda default_client: client_requests.append(default_client())
+        or client_binding.ClientCandidate(client, "test client"),
     )
     monkeypatch.setattr(_runtime, "validate_client", lambda path, version: None)
 
-    _runtime.initialize("5.0.0+rocm7.2.4")
+    _runtime.initialize()
 
     assert imports == ["rocisa"]
     assert client_requests == []
+    assert _runtime.toolchain_search_paths() == (root / "bin", root / "lib" / "llvm" / "bin")
     assert _runtime.client_executable() == client
-    assert client_requests == [root]
+    assert client_requests == [client_binding.ClientCandidate(client, "test")]
 
 
 def test_cli_help_does_not_request_client(monkeypatch):
@@ -197,44 +209,80 @@ def test_cli_help_does_not_request_client(monkeypatch):
     assert cli.main(["--help"]) == 0
 
 
-def test_python_sdk_client_request_reports_unavailable_client(tmp_path, monkeypatch):
+def test_python_sdk_client_request_uses_sdk_client_trampoline(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "bin"
     scripts.mkdir(parents=True)
     monkeypatch.setattr(_runtime, "_client", None)
-    monkeypatch.setattr(_runtime, "_root", None)
-    monkeypatch.setattr(_runtime, "_root_source", None)
-    monkeypatch.setattr(_runtime, "_toolchain_paths", None)
-    monkeypatch.setattr(_runtime, "_distribution_version", None)
+    monkeypatch.setattr(_runtime, "_installation", None)
+    _set_tensilelite_version(monkeypatch, "5.0.0+rocm10.1.0a20260813")
     monkeypatch.setattr(_runtime, "import_module", lambda name: object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.ValidatedRocm(
-            None, "10.1.0a20260813", "active Python rocm_sdk_core", (scripts,)
+        lambda distribution, version: _rocm.PythonSdkRocm(
+            "10.1.0a20260813", (scripts,)
         ),
     )
+    monkeypatch.setattr(_runtime, "selected_client", lambda default_client: default_client())
+    validated = []
+    monkeypatch.setattr(
+        _runtime,
+        "validate_client",
+        lambda path, version: validated.append((path, version)),
+    )
 
-    _runtime.initialize("5.0.0+rocm10.1.0a20260813")
+    _runtime.initialize()
 
-    with pytest.raises(_rocm.TensileLiteRuntimeError, match="not yet shipped by rocm-sdk-libraries"):
-        _runtime.client_executable()
+    executable = scripts / ("tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client")
+    assert _runtime.client_executable() == executable
+    assert validated == [(executable, "5.0.0+rocm10.1.0a20260813")]
+
+
+def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_path, monkeypatch):
+    scripts = tmp_path / "venv" / "bin"
+    scripts.mkdir(parents=True)
+    configured = tmp_path / "configured-client"
+    monkeypatch.setattr(_runtime, "_client", None)
+    monkeypatch.setattr(_runtime, "_installation", None)
+    _set_tensilelite_version(monkeypatch, "5.0.0+rocm10.1.0a20260813")
+    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
+    monkeypatch.setattr(
+        _runtime,
+        "validate_distribution",
+        lambda distribution, version: _rocm.PythonSdkRocm("10.1.0a20260813", (scripts,)),
+    )
+    monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: configured)
+    monkeypatch.setattr(
+        _rocm.PythonSdkRocm,
+        "default_client",
+        lambda self: (_ for _ in ()).throw(AssertionError("SDK client was probed")),
+    )
+    validated = []
+    monkeypatch.setattr(
+        _runtime,
+        "validate_client",
+        lambda path, version: validated.append((path, version)),
+    )
+
+    _runtime.initialize()
+
+    assert _runtime.client_executable() == configured
+    assert validated == [(configured, "5.0.0+rocm10.1.0a20260813")]
 
 
 def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(_runtime, "_client", None)
-    monkeypatch.setattr(_runtime, "_root", None)
-    monkeypatch.setattr(_runtime, "_root_source", None)
-    monkeypatch.setattr(_runtime, "_toolchain_paths", None)
-    monkeypatch.setattr(_runtime, "_distribution_version", None)
+    monkeypatch.setattr(_runtime, "_installation", None)
+    _set_tensilelite_version(monkeypatch, "5.0.0+rocm7.2.4")
     monkeypatch.setattr(_runtime, "import_module", lambda name: object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.ValidatedRocm(
+        lambda distribution, version: _rocm.PrefixRocm(
             root, "7.2.4", "test", (root / "bin", root / "lib" / "llvm" / "bin")
         ),
     )
-    _runtime.initialize("5.0.0+rocm7.2.4")
+    _runtime.initialize()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")

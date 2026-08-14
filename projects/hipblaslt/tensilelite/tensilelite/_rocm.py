@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
+from typing import TypeAlias
+
+from _tensilelite_client_binding import ClientCandidate, standard_client_path
 
 
 class TensileLiteRuntimeError(ImportError):
@@ -22,11 +25,31 @@ class TensileLiteRuntimeError(ImportError):
 
 
 @dataclass(frozen=True)
-class ValidatedRocm:
-    root: Path | None
+class PythonSdkRocm:
+    version: str
+    toolchain_paths: tuple[Path, ...]
+    source: str = "active Python rocm_sdk_core"
+
+    def default_client(self) -> ClientCandidate:
+        executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
+        return ClientCandidate(
+            self.toolchain_paths[0] / executable,
+            "active Python rocm_sdk_libraries",
+        )
+
+
+@dataclass(frozen=True)
+class PrefixRocm:
+    root: Path
     version: str
     source: str
     toolchain_paths: tuple[Path, ...]
+
+    def default_client(self) -> ClientCandidate:
+        return ClientCandidate(standard_client_path(self.root), self.source)
+
+
+ValidatedRocm: TypeAlias = PythonSdkRocm | PrefixRocm
 
 
 @dataclass(frozen=True)
@@ -146,43 +169,85 @@ def resolve_rocm_root() -> ResolvedRocmRoot:
     )
 
 
+def _validate_version(
+    distribution: str,
+    distribution_version: str | None,
+    expected_for_comparison: str,
+    validated: ValidatedRocm,
+) -> None:
+    if validated.version != expected_for_comparison:
+        shown_version = distribution_version or package_version(distribution)
+        selected = (
+            f"  selected root: {validated.root}\n"
+            if isinstance(validated, PrefixRocm)
+            else ""
+        )
+        raise TensileLiteRuntimeError(
+            f"{distribution} and ROCm release mismatch.\n"
+            f"  {distribution} version: {shown_version}\n"
+            f"  expected ROCm: {expected_for_comparison}\n"
+            f"  found ROCm: {validated.version}\n"
+            f"{selected}"
+            f"  selected by: {validated.source}\n"
+            "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
+        )
+
+
+def _validate_python_sdk(
+    distribution: str,
+    distribution_version: str | None,
+    expected: str,
+    python_sdk_version: str,
+) -> PythonSdkRocm:
+    validated = PythonSdkRocm(
+        canonical_rocm_version(python_sdk_version),
+        _python_sdk_toolchain_paths(),
+    )
+    _validate_version(distribution, distribution_version, expected, validated)
+    return validated
+
+
+def _validate_rocm_prefix(
+    distribution: str,
+    distribution_version: str | None,
+    expected: str,
+) -> PrefixRocm:
+    resolved = resolve_rocm_root()
+    version_file = resolved.root / ".info" / "version"
+    try:
+        actual = canonical_rocm_version(version_file.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise TensileLiteRuntimeError(
+            "The resolved ROCm installation has no readable release metadata.\n"
+            f"  selected root: {resolved.root}\n"
+            f"  selected by: {resolved.source}\n"
+            f"  expected file: {version_file}"
+        ) from exc
+    validated = PrefixRocm(
+        resolved.root,
+        actual,
+        resolved.source,
+        (resolved.root / "bin", resolved.root / "lib" / "llvm" / "bin"),
+    )
+    _validate_version(
+        distribution,
+        distribution_version,
+        rocm_base_version(expected),
+        validated,
+    )
+    return validated
+
+
 def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
     expected = expected_rocm_version(distribution, distribution_version)
     python_sdk_version = _python_sdk_version()
     if python_sdk_version is not None:
-        actual = canonical_rocm_version(python_sdk_version)
-        expected_for_comparison = expected
-        root = None
-        source = "active Python rocm_sdk_core"
-        toolchain_paths = _python_sdk_toolchain_paths()
-    else:
-        resolved = resolve_rocm_root()
-        version_file = resolved.root / ".info" / "version"
-        try:
-            actual = canonical_rocm_version(version_file.read_text(encoding="utf-8"))
-        except OSError as exc:
-            raise TensileLiteRuntimeError(
-                "The resolved ROCm installation has no readable release metadata.\n"
-                f"  selected root: {resolved.root}\n"
-                f"  selected by: {resolved.source}\n"
-                f"  expected file: {version_file}"
-            ) from exc
-        expected_for_comparison = rocm_base_version(expected)
-        root = resolved.root
-        source = resolved.source
-        toolchain_paths = (root / "bin", root / "lib" / "llvm" / "bin")
-    if actual != expected_for_comparison:
-        shown_version = distribution_version or package_version(distribution)
-        selected = f"  selected root: {root}\n" if root is not None else ""
-        raise TensileLiteRuntimeError(
-            f"{distribution} and ROCm release mismatch.\n"
-            f"  {distribution} version: {shown_version}\n"
-            f"  expected ROCm: {expected_for_comparison}\n"
-            f"  found ROCm: {actual}\n"
-            f"{selected}"
-            f"  selected by: {source}\n"
-            "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
+        return _validate_python_sdk(
+            distribution,
+            distribution_version,
+            expected,
+            python_sdk_version,
         )
-    return ValidatedRocm(root, actual, source, toolchain_paths)
+    return _validate_rocm_prefix(distribution, distribution_version, expected)

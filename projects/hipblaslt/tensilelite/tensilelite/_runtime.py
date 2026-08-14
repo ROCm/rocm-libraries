@@ -14,14 +14,11 @@ from _tensilelite_client_binding import (
     validate_client,
 )
 
-from ._rocm import TensileLiteRuntimeError, validate_distribution
+from ._rocm import TensileLiteRuntimeError, ValidatedRocm, validate_distribution
 
 
 _client: Path | None = None
-_root: Path | None = None
-_root_source: str | None = None
-_toolchain_paths: tuple[Path, ...] | None = None
-_distribution_version: str | None = None
+_installation: ValidatedRocm | None = None
 
 
 def _require_rocisa() -> None:
@@ -35,17 +32,14 @@ def _require_rocisa() -> None:
         ) from exc
 
 
-def initialize(distribution_version: str) -> None:
+def initialize() -> None:
     """Validate generator prerequisites without requiring the optional client."""
-    global _client, _root, _root_source, _toolchain_paths, _distribution_version
+    from tensilelite import __version__
+
+    global _installation
 
     _require_rocisa()
-    validated = validate_distribution("tensilelite", distribution_version)
-    _client = None
-    _root = validated.root
-    _root_source = validated.source
-    _toolchain_paths = validated.toolchain_paths
-    _distribution_version = distribution_version
+    _installation = validate_distribution("tensilelite", __version__)
 
 
 def client_executable() -> Path:
@@ -54,29 +48,32 @@ def client_executable() -> Path:
 
     if _client is not None:
         return _client
-    if _root_source is None or _distribution_version is None:
+    if _installation is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
-    if _root is None:
-        raise TensileLiteRuntimeError(
-            "tensilelite-client is unavailable for a Python ROCm SDK installation.\n"
-            "  selected by: active Python rocm_sdk_core\n"
-            "The client is not yet shipped by rocm-sdk-libraries; use a conventional ROCm prefix or configure a source-development client."
-        )
 
+    from tensilelite import __version__
+
+    candidate = None
     try:
-        selected, custom = selected_client(_root)
-        validate_client(selected, _distribution_version)
+        candidate = selected_client(_installation.default_client)
+        validate_client(candidate.path, __version__)
     except ClientBindingError as exc:
+        selected = (
+            f"  selected client: {candidate.path}\n"
+            f"  selected by: {candidate.source}"
+            if candidate is not None
+            else "  selected by: TensileLite client binding lookup"
+        )
         raise TensileLiteRuntimeError(
             f"{exc}\n"
-            f"  selected root: {_root}\n"
-            f"  selected by: {_root_source}"
+            f"{selected}"
         ) from exc
-    _client = selected
+    _client = candidate.path
     return _client
+
 
 def toolchain_search_paths() -> tuple[Path, ...]:
     """Return the tool locations for the frozen ROCm installation model."""
-    if _toolchain_paths is None:
+    if _installation is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
-    return _toolchain_paths
+    return _installation.toolchain_paths

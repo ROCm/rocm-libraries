@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
 from importlib import metadata, util
@@ -27,6 +28,12 @@ class Installation:
     package_dir: Path
     identifier: str
     version: str
+
+
+@dataclass(frozen=True)
+class ClientCandidate:
+    path: Path
+    source: str
 
 
 def _package_dir() -> Path:
@@ -106,9 +113,14 @@ def standard_client_path(rocm_root: Path) -> Path:
     return rocm_root / "libexec" / "hipblaslt" / "tensilelite" / executable
 
 
-def selected_client(rocm_root: Path, installation: Installation | None = None) -> tuple[Path, bool]:
+def selected_client(
+    default_client: Callable[[], ClientCandidate],
+    installation: Installation | None = None,
+) -> ClientCandidate:
     configured = read_binding(installation)
-    return (configured, True) if configured is not None else (standard_client_path(rocm_root), False)
+    if configured is not None:
+        return ClientCandidate(configured, "explicit TensileLite client binding")
+    return default_client()
 
 
 def validate_client(client: Path, expected_version: str) -> None:

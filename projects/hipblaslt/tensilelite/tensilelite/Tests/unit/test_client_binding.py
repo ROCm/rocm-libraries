@@ -91,22 +91,28 @@ def test_configured_binding_is_exclusive_even_when_missing(tmp_path, monkeypatch
     path = binding.binding_path(installation)
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(str(configured)), encoding="utf-8")
-    standard = tmp_path / "rocm/libexec/hipblaslt/tensilelite/tensilelite-client"
-    standard.parent.mkdir(parents=True)
-    standard.write_text("standard", encoding="utf-8")
+    def default_client():
+        raise AssertionError("configured bindings must not resolve a default client")
 
-    selected, custom = binding.selected_client(tmp_path / "rocm", installation)
+    selected = binding.selected_client(default_client, installation)
 
-    assert (selected, custom) == (configured, True)
+    assert selected == binding.ClientCandidate(configured, "explicit TensileLite client binding")
 
 
-def test_standard_client_uses_only_fixed_rocm_location(tmp_path, monkeypatch):
+def test_default_client_uses_fixed_rocm_location_without_a_binding(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
-    selected, custom = binding.selected_client(tmp_path / "rocm", installation)
+    root = tmp_path / "rocm"
+
+    def default_client():
+        return binding.ClientCandidate(binding.standard_client_path(root), "test prefix")
+
+    selected = binding.selected_client(default_client, installation)
     executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-    assert selected == tmp_path / "rocm/libexec/hipblaslt/tensilelite" / executable
-    assert custom is False
+    assert selected == binding.ClientCandidate(
+        root / "libexec/hipblaslt/tensilelite" / executable,
+        "test prefix",
+    )
 
 
 def _client_result(stdout="5.0.0+rocm7.2.4\n", stderr="", returncode=0):
