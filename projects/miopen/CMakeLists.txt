@@ -274,7 +274,7 @@ option(MIOPEN_CK_UNBUNDLE_PER_ARCH
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
 message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
-option(MIOPEN_USE_HIPCONV "Enable MIOpen to use vendored hipconv convolution kernels" Off)
+option(MIOPEN_USE_HIPCONV "Enable MIOpen to use vendored hipconv convolution kernels" On)
 message(STATUS "Enable hipconv: ${MIOPEN_USE_HIPCONV}")
 
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU"))
