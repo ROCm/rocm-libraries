@@ -240,10 +240,9 @@ void writeDocument(const std::filesystem::path& directory, const TestDocument& d
     std::filesystem::create_directories(directory);
     // Stem is the id purely to keep names unique here. The loader never parses the stem,
     // which is what makes an arbitrary one the right choice for a fixture.
-    std::ofstream file(directory
-                           / (document.body.at("id").get<std::string>()
-                              + std::string(document.suffix)),
-                       std::ios::binary);
+    std::ofstream file(
+        directory / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+        std::ios::binary);
     file << document.body.dump(2) << '\n';
 }
 
@@ -413,7 +412,7 @@ struct ViolationCase
     std::function<void(Documents&)> corrupt;
 };
 
-class DescriptorLoaderViolation : public ::testing::TestWithParam<ViolationCase>
+class TestDescriptorLoaderViolation : public ::testing::TestWithParam<ViolationCase>
 {
 };
 
@@ -421,7 +420,7 @@ class DescriptorLoaderViolation : public ::testing::TestWithParam<ViolationCase>
 
 /// Every authored-format violation is rejected file by file: the engine whose descriptor
 /// broke is dropped, and the valid engine sharing the directory still loads.
-TEST_P(DescriptorLoaderViolation, RejectsTheOffenderAndKeepsTheSibling)
+TEST_P(TestDescriptorLoaderViolation, RejectsTheOffenderAndKeepsTheSibling)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(GetParam().name));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
@@ -438,7 +437,7 @@ TEST_P(DescriptorLoaderViolation, RejectsTheOffenderAndKeepsTheSibling)
 
 INSTANTIATE_TEST_SUITE_P(
     Format,
-    DescriptorLoaderViolation,
+    TestDescriptorLoaderViolation,
     ::testing::Values(
         // RFC 0017 §4 names fields Descriptors.hpp does not model yet, so an authored
         // one is either a typo or a field arriving before its parsed form -- both are
@@ -450,10 +449,9 @@ INSTANTIATE_TEST_SUITE_P(
                       }},
         // D1: `schema` is required and cross-checked against the tag the filename's
         // suffix selects; both directions of that rule need a case.
-        ViolationCase{"missing_schema",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json").erase("schema");
-                      }},
+        ViolationCase{
+            "missing_schema",
+            [](Documents& documents) { documentOfType(documents, ".ued.json").erase("schema"); }},
         ViolationCase{"schema_mismatched_tag",
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["schema"] = "hipdnn.kmd/v1";
@@ -469,8 +467,7 @@ INSTANTIATE_TEST_SUITE_P(
                       }},
         ViolationCase{"default_value_contradicts_type",
                       [](Documents& documents) {
-                          documentOfType(documents, ".kmd.json")
-                              .at("fields")[1]["default_value"]
+                          documentOfType(documents, ".kmd.json").at("fields")[1]["default_value"]
                               = 5;
                       }},
         ViolationCase{"unparsable_id",
@@ -479,15 +476,13 @@ INSTANTIATE_TEST_SUITE_P(
                       }},
         // Required on every type, with no absence-safe default: a type carrying no
         // version cannot be gated by the RFC 0020 §11.1 accept rule at all.
-        ViolationCase{"ued_missing_version",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json").erase("version");
-                      }},
+        ViolationCase{
+            "ued_missing_version",
+            [](Documents& documents) { documentOfType(documents, ".ued.json").erase("version"); }},
         // Pinned as per-type rather than UED-only.
-        ViolationCase{"udd_missing_version",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".udd.json").erase("version");
-                      }},
+        ViolationCase{
+            "udd_missing_version",
+            [](Documents& documents) { documentOfType(documents, ".udd.json").erase("version"); }},
         // RFC 0020 §11.1: `file.minor <= provider.minor`. A newer minor may carry fields
         // this build has no reader for.
         ViolationCase{"version_newer_minor",
@@ -521,10 +516,9 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".kmd.json")["version"] = "1.1";
                       }},
         // A JSON number where `version` must be a string.
-        ViolationCase{"version_is_a_number",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["version"] = 1.0;
-                      }},
+        ViolationCase{
+            "version_is_a_number",
+            [](Documents& documents) { documentOfType(documents, ".ued.json")["version"] = 1.0; }},
         // `arch` must be an array; a bare string is rejected rather than treated as a
         // one-element list.
         ViolationCase{"arch_is_not_an_array",
@@ -676,7 +670,8 @@ TEST(TestDescriptorLoader, DisablingOneOfTwoCollidingEnginesLetsTheOtherLoad)
 
     // The disabled UED is skipped before it claims the name, which frees it for the
     // survivor -- the recovery lever RFC 0020 §12 names for the drop-all rule above.
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled("HIPDNN_DISABLE_ENGINES", testUuid('2', ROLE_ENGINE));
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disabled(
+        "HIPDNN_DISABLE_ENGINES", testUuid('2', ROLE_ENGINE));
 
     const auto sets = loadFrom(dir.path());
 
@@ -829,10 +824,9 @@ TEST(TestDescriptorLoader, ReadsTheTypeFromTheSuffixNotTheStem)
     int index = 0;
     for(const auto& document : documents)
     {
-        std::ofstream file(dir.path()
-                               / ("descriptor" + std::to_string(index++)
-                                  + std::string(document.suffix)),
-                           std::ios::binary);
+        std::ofstream file(
+            dir.path() / ("descriptor" + std::to_string(index++) + std::string(document.suffix)),
+            std::ios::binary);
         file << document.body.dump(2) << '\n';
     }
 
@@ -883,16 +877,15 @@ TEST(TestDescriptorLoader, DropsAnEngineRepeatingANumericalNote)
 }
 
 const std::string DISABLED_ENGINE_NAME = "test:disabled";
-const int64_t DISABLED_ENGINE_ID
-    = hipdnn_data_sdk::utilities::engineNameToId(DISABLED_ENGINE_NAME);
+const int64_t DISABLED_ENGINE_ID = hipdnn_data_sdk::utilities::engineNameToId(DISABLED_ENGINE_NAME);
 
 /// All three spellings RFC 0020 §12 admits reach the same engine. Parameterised over the
 /// identifier rather than repeated, since the matcher is one list walk for all three.
-class DisabledEngineIdentifier : public ::testing::TestWithParam<std::string>
+class TestDisabledEngineIdentifier : public ::testing::TestWithParam<std::string>
 {
 };
 
-TEST_P(DisabledEngineIdentifier, SkipsTheEngineBeforeItIsRegistered)
+TEST_P(TestDisabledEngineIdentifier, SkipsTheEngineBeforeItIsRegistered)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("disabled"));
     writeDocuments(dir.path(), makeSetDocuments('a', DISABLED_ENGINE_NAME));
@@ -912,7 +905,7 @@ const std::array<std::string, 6> DISABLED_SPELLINGS{
 
 INSTANTIATE_TEST_SUITE_P(
     Spelling,
-    DisabledEngineIdentifier,
+    TestDisabledEngineIdentifier,
     ::testing::Values(
         DISABLED_ENGINE_NAME,
         testUuid('a', ROLE_ENGINE),
@@ -1069,12 +1062,10 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
     std::filesystem::create_directories(commented);
     for(const auto& document : documents)
     {
-        std::ofstream file(commented
-                               / (document.body.at("id").get<std::string>()
-                                  + std::string(document.suffix)),
-                           std::ios::binary);
-        file << "// authored with a comment, per RFC 0020 §4.3\n"
-             << document.body.dump(2) << "\n";
+        std::ofstream file(
+            commented / (document.body.at("id").get<std::string>() + std::string(document.suffix)),
+            std::ios::binary);
+        file << "// authored with a comment, per RFC 0020 §4.3\n" << document.body.dump(2) << "\n";
     }
 
     const auto sets = loadFrom(dir.path());

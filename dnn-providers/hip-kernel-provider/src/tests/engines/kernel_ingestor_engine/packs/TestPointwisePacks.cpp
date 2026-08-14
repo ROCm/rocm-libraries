@@ -114,14 +114,11 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
     EXPECT_EQ(std::count_if(add.matcherIds.begin(),
                             add.matcherIds.end(),
                             [&lists](const auto& matcherId) {
-                                return std::all_of(lists.begin(),
-                                                   lists.end(),
-                                                   [&matcherId](const auto* other) {
-                                                       return std::find(other->begin(),
-                                                                        other->end(),
-                                                                        matcherId)
-                                                              != other->end();
-                                                   });
+                                return std::all_of(
+                                    lists.begin(), lists.end(), [&matcherId](const auto* other) {
+                                        return std::find(other->begin(), other->end(), matcherId)
+                                               != other->end();
+                                    });
                             }),
               2);
 }

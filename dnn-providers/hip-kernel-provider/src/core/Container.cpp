@@ -39,7 +39,6 @@ namespace hip_kernel_provider::core
 
 using namespace hipdnn_data_sdk::utilities;
 
-
 const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = [] {

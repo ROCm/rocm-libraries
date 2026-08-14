@@ -339,8 +339,8 @@ class PreparedPointwise : public PreparedDispatch
 {
 public:
     PreparedPointwise(std::unique_ptr<compilation::ICompiledProgram> program,
-                         std::unique_ptr<compilation::IRunnableKernel> kernel,
-                         PointwiseBinding binding)
+                      std::unique_ptr<compilation::IRunnableKernel> kernel,
+                      PointwiseBinding binding)
         : _program(std::move(program))
         , _kernel(std::move(kernel))
         , _binding(binding)
@@ -407,8 +407,7 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
  * launches. A plan may execute concurrently from several threads, so nothing here
  * mutates after preparation.
  */
-class PointwiseDispatchHandler
-    : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
+class PointwiseDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.

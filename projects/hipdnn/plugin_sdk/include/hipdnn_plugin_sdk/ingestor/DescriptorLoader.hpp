@@ -129,7 +129,7 @@ struct CatalogEntry
     /// seven descriptor types that nothing else in the system wants.
     nlohmann::json source;
     std::filesystem::path path; ///< first file that defined this id
-    bool conflicted = false;    ///< two files disagreed; treat as absent
+    bool conflicted = false; ///< two files disagreed; treat as absent
 };
 
 template <typename T>
@@ -261,15 +261,14 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
     // own; a version component that long is a malformed file, not a real generation.
     const auto isDigits = [](std::string_view part) {
         return !part.empty() && part.size() <= 9
-               && std::all_of(part.begin(), part.end(), [](unsigned char c) {
-                      return std::isdigit(c) != 0;
-                  });
+               && std::all_of(
+                   part.begin(), part.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
     };
     if(dot == std::string_view::npos || !isDigits(all.substr(0, dot))
        || !isDigits(all.substr(dot + 1)))
     {
-        fail("key 'version' in " + where
-             + " must be '<major>.<minor>' with numeric halves, not '" + text + "'");
+        fail("key 'version' in " + where + " must be '<major>.<minor>' with numeric halves, not '"
+             + text + "'");
     }
 
     DescriptorVersion version;
@@ -347,13 +346,11 @@ inline DescriptorId
 inline void requireScopedName(const std::string& name, const std::string& where)
 {
     const auto colon = name.find(':');
-    const auto isNameChar = [](unsigned char c) {
-        return std::isalnum(c) != 0 || c == '_' || c == '.' || c == '-';
-    };
+    const auto isNameChar
+        = [](unsigned char c) { return std::isalnum(c) != 0 || c == '_' || c == '.' || c == '-'; };
     if(colon == std::string::npos || colon == 0 || colon + 1 == name.size()
-       || !std::all_of(name.begin(), name.end(), [&](unsigned char c) {
-              return c == ':' || isNameChar(c);
-          })
+       || !std::all_of(
+           name.begin(), name.end(), [&](unsigned char c) { return c == ':' || isNameChar(c); })
        || name.find(':', colon + 1) != std::string::npos)
     {
         fail("engine name '" + name + "' in " + where
@@ -562,8 +559,8 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
         MetadataField field;
         field.name = requireString(fieldJson, "name", "a 'fields' entry");
         const std::string fieldWhere = "field '" + field.name + "'";
-        field.type = metadataTypeFromString(requireString(fieldJson, "type", fieldWhere),
-                                            fieldWhere);
+        field.type
+            = metadataTypeFromString(requireString(fieldJson, "type", fieldWhere), fieldWhere);
 
         if(const auto it = fieldJson.find("default_value"); it != fieldJson.end())
         {
@@ -709,8 +706,8 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
     {
         try
         {
-            engine.sdkVersion = hipdnn_data_sdk::utilities::Version{
-                requireString(root, "sdk_version", where)};
+            engine.sdkVersion
+                = hipdnn_data_sdk::utilities::Version{requireString(root, "sdk_version", where)};
         }
         catch(const std::invalid_argument& error)
         {
@@ -784,8 +781,9 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
 inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
 {
     requireObject(root, "a 'kernelDescriptors' entry");
-    requireOnlyKeys(
-        root, {"id", "name", "kernel_source", "metadata", "priority"}, "a 'kernelDescriptors' entry");
+    requireOnlyKeys(root,
+                    {"id", "name", "kernel_source", "metadata", "priority"},
+                    "a 'kernelDescriptors' entry");
 
     KernelDescriptor kernel;
     kernel.id = requireId(root, "id", "a 'kernelDescriptors' entry");
@@ -859,8 +857,8 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
         }
         catch(const std::invalid_argument& error)
         {
-            fail("key 'matchers' in " + where + " holds a value that is not a UUID: "
-                 + error.what());
+            fail("key 'matchers' in " + where
+                 + " holds a value that is not a UUID: " + error.what());
         }
     }
 
@@ -915,8 +913,8 @@ inline void insertCatalogEntry(DescriptorMap<T>& map,
         return;
     }
     HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: " << path << " and " << it->second.path
-                                                  << " both define id=" << toString(id)
-                                                  << " name='" << name
+                                                  << " both define id=" << toString(id) << " name='"
+                                                  << name
                                                   << "' with different contents; ignoring both");
     // Never cleared by a later file: once two files disagree about what an id means,
     // no third file can decide which of them was right.
@@ -938,9 +936,8 @@ inline const T* findDescriptor(const DescriptorMap<T>& map, const DescriptorId& 
 /// Checks and completes one kernel's metadata against its engine's KMD, mirroring the
 /// rules KernelIngestorStateManager::completeMetadata enforces so a violation drops one
 /// pack here rather than throwing out of the state manager and taking the whole engine.
-inline bool coerceKernelMetadata(KernelDescriptor& kernel,
-                                 const MetadataSchema& schema,
-                                 std::string& error)
+inline bool
+    coerceKernelMetadata(KernelDescriptor& kernel, const MetadataSchema& schema, std::string& error)
 {
     for(const auto& field : schema.fields)
     {
@@ -966,11 +963,10 @@ inline bool coerceKernelMetadata(KernelDescriptor& kernel,
     for(const auto& entry : kernel.metadata)
     {
         const std::string& name = entry.first;
-        const auto declared = std::find_if(schema.fields.begin(),
-                                           schema.fields.end(),
-                                           [&name](const MetadataField& field) {
-                                               return field.name == name;
-                                           });
+        const auto declared
+            = std::find_if(schema.fields.begin(),
+                           schema.fields.end(),
+                           [&name](const MetadataField& field) { return field.name == name; });
         if(declared == schema.fields.end())
         {
             error = "kernel '" + kernel.name + "' supplies metadata field '" + name
@@ -1181,7 +1177,9 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
                     // warns too -- it is never a loadable extension, so it always lands
                     // here.
                     std::string extension = walk->path().extension().string();
-                    std::transform(extension.begin(), extension.end(), extension.begin(),
+                    std::transform(extension.begin(),
+                                   extension.end(),
+                                   extension.begin(),
                                    [](unsigned char c) { return std::tolower(c); });
                     if(extension == ".json" || extension == ".jsonc")
                     {
@@ -1232,7 +1230,9 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
             // parse_error.101. Only the parser ever sees the comments --
             // `insertCatalogEntry` compares the parsed documents, so a comment cannot
             // make two copies of one descriptor look like a collision.
-            document = nlohmann::json::parse(file, nullptr, /*allow_exceptions=*/true,
+            document = nlohmann::json::parse(file,
+                                             nullptr,
+                                             /*allow_exceptions=*/true,
                                              /*ignore_comments=*/true);
         }
         catch(const std::exception& parseError)
@@ -1281,11 +1281,9 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
     // DescriptorId is std::array<uint8_t, 16>, so its operator< is the byte-lexicographic
     // order toString() would render -- same ordering, without formatting a UUID per
     // comparison.
-    std::sort(engineEntries.begin(),
-              engineEntries.end(),
-              [](const auto* lhs, const auto* rhs) {
-                  return lhs->descriptor.id < rhs->descriptor.id;
-              });
+    std::sort(engineEntries.begin(), engineEntries.end(), [](const auto* lhs, const auto* rhs) {
+        return lhs->descriptor.id < rhs->descriptor.id;
+    });
 
     // RFC 0020 §12: disabled engines leave before anything claims a name, which is what
     // makes the variable the recovery lever for the collision rule below -- disabling one
@@ -1406,8 +1404,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                 const auto* matcher = detail::findDescriptor(catalog.matchers, matcherId);
                 if(matcher == nullptr)
                 {
-                    reason = "names matcher " + toString(matcherId)
-                             + ", which no descriptor defines";
+                    reason
+                        = "names matcher " + toString(matcherId) + ", which no descriptor defines";
                     break;
                 }
                 packMatchers.push_back(matcher);
@@ -1458,8 +1456,7 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         {
             // An engine with no kernels can never match, so advertising it is noise.
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                    << engine.name
-                                    << "' has no loadable kernel pack; dropping it");
+                                    << engine.name << "' has no loadable kernel pack; dropping it");
             continue;
         }
 
@@ -1484,7 +1481,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
     std::vector<const CatalogEntry<KernelDescriptorPack>*> orphans;
     for(const auto& [id, entry] : catalog.packs)
     {
-        if(!entry.conflicted && catalog.engines.find(entry.descriptor.engineId) == catalog.engines.end())
+        if(!entry.conflicted
+           && catalog.engines.find(entry.descriptor.engineId) == catalog.engines.end())
         {
             orphans.push_back(&entry);
         }
@@ -1496,8 +1494,8 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
     {
         HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: pack '"
                                 << entry->descriptor.name
-                                << "' id=" << toString(entry->descriptor.id)
-                                << " names engine " << toString(entry->descriptor.engineId)
+                                << "' id=" << toString(entry->descriptor.id) << " names engine "
+                                << toString(entry->descriptor.engineId)
                                 << ", which no descriptor defines; dropping it");
     }
 
@@ -1511,11 +1509,12 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
 template <typename THandle>
 inline std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(DescriptorSet set)
 {
-    return std::make_unique<KernelIngestorStateManager<THandle>>(std::move(set.schema),
-                                                                 std::move(set.matchers),
-                                                                 std::move(set.dispatches),
-                                                                 std::move(set.packs),
-                                                                 makeKernelHeuristic(set.heuristic));
+    return std::make_unique<KernelIngestorStateManager<THandle>>(
+        std::move(set.schema),
+        std::move(set.matchers),
+        std::move(set.dispatches),
+        std::move(set.packs),
+        makeKernelHeuristic(set.heuristic));
 }
 
 /// @brief Builds the engine one DescriptorSet describes.

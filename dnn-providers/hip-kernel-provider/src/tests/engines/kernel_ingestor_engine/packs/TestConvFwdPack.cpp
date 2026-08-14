@@ -66,12 +66,9 @@ TEST(TestConvFwdBinding, BindsAllThreeOperandUids)
     BoundTokens bound;
     ASSERT_TRUE(matchesGraph(CONV_FWD, fixture.context(), bound));
 
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.inputAToken),
-              CONV_X_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.inputBToken),
-              CONV_W_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.outputToken),
-              CONV_Y_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.inputAToken), CONV_X_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.inputBToken), CONV_W_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.outputToken), CONV_Y_UID);
 }
 
 // ---------------------------------------------------------------------------
@@ -297,10 +294,8 @@ TEST(TestConvFwdPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
 
     const auto describes = [&kernels](int64_t blockSize, const std::string& dtype) {
         return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
-            return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD)))
-                       == blockSize
-                   && std::get<std::string>(kernel.metadata.at(std::string(DTYPE_FIELD)))
-                          == dtype
+            return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD))) == blockSize
+                   && std::get<std::string>(kernel.metadata.at(std::string(DTYPE_FIELD))) == dtype
                    && kernel.source.entryPoint == "ConvFwd";
         });
     };

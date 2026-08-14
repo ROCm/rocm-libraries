@@ -222,10 +222,7 @@ protected:
     ///        one element must deliver. A kernel that accumulates cannot: GPU and CPU
     ///        sum in different orders, so the float error grows with the term count and
     ///        the tolerance has to say so rather than be loosened globally.
-    void executeAndVerify(Graph& graph,
-                          void* workspace,
-                          unsigned int seed,
-                          int reductionLength = 1)
+    void executeAndVerify(Graph& graph, void* workspace, unsigned int seed, int reductionLength = 1)
     {
         GraphTensorBundle gpuBundle;
         GraphTensorBundle cpuBundle;

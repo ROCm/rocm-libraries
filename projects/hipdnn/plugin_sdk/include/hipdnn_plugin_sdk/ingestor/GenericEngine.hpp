@@ -69,8 +69,7 @@ public:
         if(const auto* undeclared
            = findUndeclaredKnob(_engine, _stateManager->metadataSchema().fields))
         {
-            throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '"
-                                        + *undeclared
+            throw std::invalid_argument("engine '" + _engine.name + "' exposes knob '" + *undeclared
                                         + "', which its metadata schema does not declare");
         }
     }

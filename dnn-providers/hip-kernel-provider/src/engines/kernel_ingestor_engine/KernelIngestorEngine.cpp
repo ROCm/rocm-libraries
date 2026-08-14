@@ -130,7 +130,6 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
     return s_sets;
 }
 
-
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

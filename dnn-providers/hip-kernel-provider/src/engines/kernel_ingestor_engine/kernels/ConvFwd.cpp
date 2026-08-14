@@ -21,7 +21,13 @@
 extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
                                    const HIP_PLUGIN_CONV_TYPE* w,
                                    HIP_PLUGIN_CONV_TYPE* y,
-                                   int n, int c, int h, int width, int k, int r, int s)
+                                   int n,
+                                   int c,
+                                   int h,
+                                   int width,
+                                   int k,
+                                   int r,
+                                   int s)
 {
     // int64_t: n*k*p*q can exceed 2^31 for shapes the matcher admits (element count is
     // unbounded); 32-bit arithmetic here wrapped, defeating the `index >= total` guard
