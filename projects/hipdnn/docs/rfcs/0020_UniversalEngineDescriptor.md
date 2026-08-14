@@ -3,7 +3,7 @@
 - Contributors: TBD
 - **Status**: Draft
 - **Implementation Version**: TBD
-- **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification — the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
+- **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
 ## Table of Contents
 
@@ -40,7 +40,7 @@ numerical notes, plus the registration that turns a UED into a selectable engine
 
 Concretely, this RFC delivers:
 
-- The **UED field contract**: the normative field set, with a per-version JSON Schema file
+- The **UED field contract**: the normative field set, with a single JSON Schema file
   recommended (not mandated) as its single-source-of-truth expression, plus serialization
   (§ 4, § 14.3).
 - The **engine-identity model**, including the two distinct id spaces a descriptor engine
@@ -52,9 +52,9 @@ Concretely, this RFC delivers:
   (cross-descriptor, including drop-all duplicate detection), with guidance on the UED-vs-KDP
   boundary (§ 13).
 - **Versioning & compatibility**: the accept rule keyed on the `version` field, the constrained
-  meaning of `major`/`minor`, and the per-version schema-file mechanism (§ 14); plus
+  meaning of `major`/`minor`, and the single-schema mechanism (§ 14); plus
   **lifecycle/operational policy** (load-failure, concurrency, the `HIPDNN_DISABLE_ENGINES`
-  opt-out) and **test scope** (§ 15-13).
+  opt-out) and **test scope** (§ 15-16).
 
 **Out of scope:** Drop-in **trust and enablement** rules for untrusted descriptor files remain
 out of scope, as in RFC 0017 § 14; this RFC adds no trust policy.
@@ -63,27 +63,30 @@ out of scope, as in RFC 0017 § 14; this RFC adds no trust policy.
 
 This RFC lives alongside RFC 0017; some sections restate 0017 material (identity, knobs, the
 reference model) so the UED format reads standalone. **This RFC is the source of truth for UED
-matters.** It follows 0017's descriptor conventions, including the two version-bearing fields
-0017's KDP and UMD examples carry: a `schema` type tag (`hipdnn.ued/v1`) and a separate
-`major.minor` `version` field that the accept rule gates on (§ 14). The relationships to 0017 recorded below are
-**tightenings**: points 0017 defers or under-constrains (often to this very follow-up, per 0017
-§ 17.2) that this RFC now pins down. As a follow-up, filling 0017's deferred scope is expected and
-is not itself a divergence.
+matters.** Most of what follows **tightens** points 0017 defers or under-constrains (often to this
+very follow-up, per 0017 § 14.2); a few points **diverge** from 0017's descriptor conventions. As
+a follow-up, filling 0017's deferred scope is expected and is not itself a divergence.
 
 **Tightenings (this RFC pins down what 0017 deferred or left soft):**
 
-- **Version field (§ 4.2).** 0017's UED example carries only the `schema` tag; this RFC adds the
-  separate `major.minor` `version` field the accept rule gates on, matching 0017's KDP and UMD
-  examples.
 - **Compatibility mechanism (§ 14).** Absence-safe minor bumps, hard-reject unknown fields, and a
-  runtime version from the provider's schema file(s).
+  runtime version from the provider's schema.
 - **Engine name format (§ 4.2).** A globally-unique, scoped `namespace:local` `name`, since it is
   hashed into the engine-id space and must not collide.
 - **Duplicate detection (§ 13.2.1).** An independent descriptor-`id` check; drop all UEDs in a
   genuine collision, but accept content-identical `id` duplicates, loading them as one.
 
-No other silent contradictions; this draft aims to formalize 0017. Any conflict surfaced during
-review is recorded here.
+**Divergences (this RFC departs from an 0017 convention):**
+
+- **No in-band type tag (§ 4).** 0017's examples carry a `schema` tag naming the descriptor kind;
+  a UED carries none. The descriptor kind is tracked externally (§ 4), and a `major.minor`
+  `version` field carries compatibility (§ 14).
+- **Version-specific validation is not required (§ 13.1).** A single schema validates the
+  structural superset across all supported versions. The schema carries `addedInVersion` data
+  (§ 4.2) that makes validating a UED against its declared version's exact field set *possible*, but
+  this RFC does not require any consumer to perform that check (§ 13.1).
+
+No other silent contradictions. Any conflict surfaced during review is recorded here.
 
 ## 3. Engine Identity
 
@@ -111,16 +114,20 @@ UUID `id` binds. Names must be **globally unique** and should be scoped, e.g. `r
 
 ## 4. The UED Schema
 
-This section **defines** the UED schema (schema tag `hipdnn.ued/v1`): § 4.1 an example instance,
-§ 4.2 the normative definition, § 4.3 serialization. Following RFC 0017's convention, a UED
-carries two version-bearing fields: the `schema` type tag, constant across a major generation,
-and a separate `version` field (`major.minor`) that the accept rule gates on (§ 14).
+This section **defines** the UED schema: § 4.1 an example instance, § 4.2 the normative
+definition, § 4.3 serialization. A UED carries a `major.minor` `version` field that the accept
+rule gates on (§ 14).
+
+A UED does not carry an in-band type tag, so the descriptor kind is determined externally rather
+than from the file contents (for example, by a filename suffix such as `<name>.ued.json`).
+Confirming that a file presented as a UED is in fact one is therefore the external mechanism's
+responsibility; the schema validates a UED's contents but cannot establish that the file was meant
+to be a UED.
 
 ### 4.1 Example instance
 
 ```jsonc
 {
-  "schema":          "hipdnn.ued/v1",              // file-type tag (§ 4.2)
   "version":         "1.0",                        // major.minor; gated at load (§ 14)
   "id":              "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // UUID; referenced by KDPs (§ 3a)
   "name":            "rocke:attention_dense_fwd",  // globally-unique, scoped engine name (§ 3b)
@@ -132,18 +139,16 @@ and a separate `version` field (`major.minor`) that the accept rule gates on (§
 }
 ```
 
-### 4.2 Normative schema (version 1.0)
+### 4.2 Normative schema
 
-A conforming UED is a JSON object with exactly the members below. Members not listed are
-rejected under the version rule (§ 14). The object has no logic; it is identity, two required
-references, and optional annotations.
+A conforming UED is a JSON object with the members below. Unknown members are rejected. The object
+has no logic; it is a version, identity, two required references, and optional annotations.
 
 **Field specification (normative).**
 
 | Field | Req. | JSON type | Value constraints |
 |---|---|---|---|
-| `schema` | yes | string | The descriptor type tag; exact value `hipdnn.ued/v1`. Constant across the major-1 generation; names which descriptor kind this is. |
-| `version` | yes | string | `<major>.<minor>` (both numeric), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
+| `version` | yes | string | `<major>.<minor>`, both numeric, and one of the values the schema enumerates (§ 14.3), e.g. `1.0`. The compatibility field the accept rule gates on (§ 14). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 13.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
 | `heuristic` | yes | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 13.2). |
@@ -154,60 +159,73 @@ references, and optional annotations.
 
 All three optional fields may be omitted; a valid engine can expose no knobs and carry no notes.
 
-Each `major.minor` is a standalone JSON Schema **file** in the repository (§ 14.3); the inline copy
-below mirrors the authoritative `ued/1.0.json`, and a CI check verifies the match.
+A single JSON Schema **file** lives in the repository; the inline copy below mirrors the
+authoritative `ued.json`, and a build check verifies the match. The file reflects the latest version
+the runtime supports and covers **all** supported versions at once: its `version` property
+enumerates the accepted versions (here, only `1.0`), and each new version adds its value to the
+`enum`. The runtime supports exactly one major version, so every enumerated version is of that
+major. Every field is present, with fields introduced after the earliest version marked
+**optional**, so the schema is a structural **superset**: it accepts any supported version
+structurally but does not, on its own, enforce which fields are required or forbidden at a specific
+version. Confirming whether a given field is permitted or required at the UED's declared version is
+possible from the `addedInVersion` data but is not part of this schema's own validation (§ 13.1,
+§ 14).
 
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "ued/1.0.json",
-  "title": "hipdnn.ued version 1.0",
+  "$id": "ued.json",
+  "title": "hipdnn UED",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "version", "id", "name", "heuristic", "metadata"],
+  "required": ["version", "id", "name", "heuristic", "metadata"],
   "properties": {
-    "schema": {
-      "type": "string",
-      "const": "hipdnn.ued/v1"
-    },
     "version": {
       "type": "string",
-      "const": "1.0"
+      "enum": ["1.0"],
+      "addedInVersion": "1.0"
     },
     "id": {
-      "description": "This descriptor's own UUID. Unique across loaded UEDs except for content-identical duplicates (semantic; see RFC 0020 section 10.2.1).",
+      "description": "This descriptor's own UUID. Unique across loaded UEDs except for content-identical duplicates (semantic; see RFC 0020 section 13.2.1).",
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
     },
     "name": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
+      "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$",
+      "addedInVersion": "1.0"
     },
     "heuristic": {
-      "description": "Cross-reference: MUST resolve to a loadable UHD (semantic; see RFC 0020 section 10.2).",
+      "description": "Cross-reference: MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
     },
     "metadata": {
-      "description": "Cross-reference: MUST resolve to a loadable KMD (semantic; see RFC 0020 section 10.2).",
+      "description": "Cross-reference: MUST resolve to a loadable KMD (semantic; see RFC 0020 section 13.2).",
       "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "addedInVersion": "1.0"
     },
     "knobs": {
-      "description": "Each entry MUST be a field name declared by the referenced KMD (semantic; see RFC 0020 section 10.2).",
+      "description": "Each entry MUST be a field name declared by the referenced KMD (semantic; see RFC 0020 section 13.2).",
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
     },
     "behavior_notes": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
     },
     "numerical_notes": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
+      "uniqueItems": true,
+      "addedInVersion": "1.0"
     }
   }
 }
@@ -218,16 +236,22 @@ resolve to. JSON Schema cannot *enforce* cross-file resolution, so these are rec
 machine-readable annotations and checked semantically (§ 13.2); `additionalProperties: false`
 makes any unknown field a hard rejection (§ 13.1).
 
+**`addedInVersion`.** Each property carries an `addedInVersion` keyword naming the `major.minor` at
+which the field was introduced (every field here is `1.0`); its value must be one the `version`
+enum accepts. The schema must include it on every property, since it is the machine-readable record
+that makes version-accurate auditing and validation possible (§ 13.1). **A JSON Schema validator
+ignores the keyword**, so it does not affect the superset check; it is consumed by tooling and
+follow-on checks instead.
+
 The schema targets **Draft 7** (recommended, not required): off-the-shelf C++ JSON-Schema
 validators target Draft 7, so one file can drive both the build-time and runtime checks without
-a bespoke validator. The constructs used (`type`, `const`, `pattern`, `required`,
+a bespoke validator. The constructs used (`type`, `enum`, `pattern`, `required`,
 `additionalProperties`, `uniqueItems`) are common to Draft 7 and later dialects.
 
 ### 4.3 Serialization
 
 The UED is authored and shipped as **JSONC** (JSON with comments), consistent with how RFC 0017
-presents every descriptor. Comments are stripped before the UED is validated for its declared
-version (§ 4.2, § 14.3).
+presents every descriptor. Comments are stripped before validation (§ 4.2, § 14.3).
 
 ## 5. The Graph Model the Pattern Matches
 
@@ -260,7 +284,7 @@ operand is `q_tensor_uid: long (umd_input_tensor, umd_name: "q")` and its O resu
 long (umd_output_tensor, umd_name: "o")`. Optionality is not re-annotated: a UID field's `= null`
 default already encodes it (`attn_mask_tensor_uid: long = null`), and the `NodeAttributes` union
 already maps each opcode to its table, so every unannotated *scalar* field is a scalar attribute by
-elimination (unannotated non-scalar fields — vectors, sub-tables — are not bindable scalars and are
+elimination (unannotated non-scalar fields: vectors, sub-tables, are not bindable scalars and are
 skipped). A build step emits the binary reflection schema (`graph.bfbs`, which transitively covers
 every attribute table; custom attributes surface only through reflection, not the generated headers)
 and a generator reads each field's attributes to emit the registry, so it stays in lockstep with the
@@ -313,7 +337,7 @@ them can read a value the match does not produce.
 the same graph shape and differs only in what it constrains. Two consequences run through the rest
 of this document: the matcher binds once per engine per graph rather than once per matcher (§ 7),
 and the bound-symbol set has a single owner. A kernel family whose graph shape differs
-*structurally* is therefore a different engine — most variation does not reach that bar, and a
+*structurally* is therefore a different engine: most variation does not reach that bar, and a
 genuinely different topology already needed its own metadata schema and heuristic anyway, so fused
 and unfused counterparts are mutually exclusive by engine rather than by node count.
 
@@ -504,17 +528,18 @@ parsed) is out of scope. What a loaded UED must satisfy to be valid is specified
 loading facts the UED's host contract depends on: the ingestion paths (§ 11.1), the one
 registration-timing guarantee (§ 11.2), and concurrency (§ 11.3).
 
-### 8.1 Ingestion paths
+### 11.1 Ingestion paths
 
 A UED may reach the provider by either RFC 0017 ingestion path, build-time (AOT) or runtime
 drop-in (§ 15), and both converge on the same UED schema, validation (§ 13), and registration
 (§ 12) defined here. A load always builds the **complete** descriptor set from scratch rather than
 merging into an in-memory set, so every UED is validated against every other on each load
 (§ 13.2.1); a drop-in descriptor is picked up by the next such load. What triggers a load, where
-descriptors live, and how they are discovered are part of the loading mechanism and are out of
+descriptors live, how they are discovered, and how a file is recognized as a UED (the descriptor
+kind is tracked externally, not in-band, § 4) are part of the loading mechanism and are out of
 scope for this RFC.
 
-### 8.2 Registration timing
+### 11.2 Registration timing
 
 The one timing guarantee this RFC fixes is that every valid UED is registered (name -> 64-bit id,
 § 12) before any graph is served, because the host must be able to enumerate the engines it may
@@ -523,7 +548,7 @@ selection begins. A KDP's `engine` reference correspondingly resolves against an
 already-registered UED; how a provider orders UED and KDP loading to guarantee that is a mechanism
 detail.
 
-### 8.3 Concurrency
+### 11.3 Concurrency
 
 Engine registration occurs on the provider's plugin-load path, which is already serialized, so it
 introduces no new concurrency model and requires no additional locking beyond that existing
@@ -546,7 +571,7 @@ hand-written engine-registration path. For each UED that passes validation (§ 1
    ([RFC 0015](0015_EngineSupportClaims.md)) key on the real name rather than a hex id.
 
 Nothing in the host-facing engine contract changes: a descriptor-backed engine is selected and
-driven exactly as a hand-written one (RFC 0017 § 3, § 11). This RFC specifies registration (how
+driven exactly as a hand-written one (RFC 0017 § 3, § 8). This RFC specifies registration (how
 a validated UED becomes an exposed engine) and the generic engine's identity and descriptor
 binding. Populating the generic engine's plan builder is registration's responsibility; the plan
 builder's *internal* behavior over UDD and UKD data is defined by those descriptors' own
@@ -560,17 +585,36 @@ catches errors before shipping; run-time validation ensures integrity of the loa
 **structural** (the field contract of § 4.2) and **semantic** (cross-descriptor); the
 implementation may fold them into one pass.
 
-### 10.1 Structural validation
+### 13.1 Structural validation
 
-The UED's fields are checked against the contract for its declared `version` (§ 4.2, § 14.3):
-required fields present, each field's type and pattern, the `schema`/`version` constants, and
-**any unknown field is a hard rejection** (not a forward-compat case, since an author stamps the
-lowest version the UED needs, § 14.2). The contract applied is the one for the declared version,
-not the runtime's latest (§ 14.3). The per-version JSON Schema file of § 4.2 is the recommended way
-to express and run this check (`additionalProperties: false` gives the unknown-field rejection),
+The **structural check** validates the UED against the schema (§ 4.2, § 14.3), confirming three
+things:
+
+- **`version` is one the schema accepts**: the schema lists the exact `major.minor` values it
+  recognizes, and the UED's `version` must be one of them.
+- **each present field is well-formed**: correct type and pattern.
+- **no unknown field is present**: an unknown field is a hard rejection.
+
+Because fields added after the earliest version are optional in this schema, passing this check
+means the UED is structurally valid for *some* supported version, not necessarily for the one it
+declares (version-accurate validation below closes that gap). The § 4.2 JSON Schema is the recommended
+way to express and run the check (`additionalProperties: false` gives the unknown-field rejection),
 but the contract is normative independently of that mechanism.
 
-### 10.2 Semantic validation (cross-descriptor)
+**Version-accurate validation (facilitated, not required).** The superset schema alone does not
+check that a UED is valid for the specific version it declares, since a later version's field is
+optional in the schema and so passes structurally. The schema carries the data to make a finer
+check *possible*: each property's `addedInVersion` (§ 4.2) records the version it was introduced in,
+and the schema's `required` set records the always-required fields. From these, the **minimum
+version a UED needs** is computable: it is the newest `addedInVersion` among the fields the UED
+carries. Comparing that minimum to the declared `version` flags an error in either direction: a
+declared version *below* the minimum means the UED carries a field newer than it claims, and a
+declared version *above* the minimum means the UED over-declares and will needlessly fail to load
+on older runtimes that could serve it (§ 14.2). A consumer can also confirm the required fields are
+present. This RFC describes the capability and guarantees the data exists to support it; it does not
+require any consumer to perform it.
+
+### 13.2 Semantic validation (cross-descriptor)
 
 These cannot be expressed in JSON Schema because they depend on other descriptors; each is
 performed at build time and run time alike:
@@ -589,7 +633,7 @@ spans multiple descriptor types and is best specified at a higher level than the
 This RFC fixes only that a UED's own `heuristic` and `metadata` references are subject to it, at
 both build and run time.
 
-#### 10.2.1 Duplicate detection (descriptor `id` and `name`)
+#### 13.2.1 Duplicate detection (descriptor `id` and `name`)
 
 Duplicate detection runs over the complete loaded set (§ 11.1), so a drop-in UED is checked against
 every other UED exactly as any other.
@@ -625,9 +669,9 @@ not load, and diagnostics name every descriptor involved. (RFC 0017 § 4 detects
 name/hash but specifies neither drop-all, the independent `id` check, nor the content-identical
 exception.)
 
-### 10.3 UED-load vs KDP-load boundary (guidance)
+### 13.3 UED-load vs KDP-load boundary (guidance)
 
-The engine-scoped checks above (§ 13.1-10.2) belong at **UED load**. For contrast, these are
+The engine-scoped checks above (§ 13.1-13.2) belong at **UED load**. For contrast, these are
 **KDP-load** (pack-scoped) concerns, governed by the KDP's own specification and listed only to
 place the boundary:
 
@@ -641,21 +685,19 @@ This boundary is guidance, not a hard split; a shared loader may fold both into 
 
 ## 14. Versioning and Compatibility
 
-A UED's compatibility is carried by its `version` field (`major.minor`); the `schema` tag names
-the descriptor kind and is constant within a major generation. Each descriptor file type versions
-independently (a KMD and a UDD advance on their own schedules). This section defines the accept
-rule, what `major` and `minor` are permitted to mean, and how per-version schema files back
-validation.
+A UED's compatibility is carried by its `version` field (`major.minor`). Each descriptor file type
+versions independently (a KMD and a UDD advance on their own schedules). This section defines the
+accept rule, what `major` and `minor` are permitted to mean, and how the schema backs validation.
 
 > **Tightens RFC 0017 § 4 (compat mechanism).** RFC 0017 gives the accept/reject *policy* and a
 > coarse field-evolution rule but leaves the unknown-field policy and the runtime's version source
 > unspecified. This section keeps 0017's accept rule unchanged and pins down the rest; it does not
 > override 0017, it makes the deferred detail concrete.
 
-### 11.1 The accept rule
+### 14.1 The accept rule
 
-The runtime carries a supported `major.minor` for the UED type; concretely, the version(s) of
-the UED schema file(s) embedded in the provider build (§ 14.3). A UED is accepted iff:
+The runtime carries a supported `major.minor` for the UED type; concretely, the UED schema embedded
+in the provider build, which enumerates the versions it supports (§ 14.3). A UED is accepted iff:
 
 - **`file.major == provider.major`**, and
 - **`file.minor <= provider.minor`**.
@@ -674,7 +716,7 @@ authoring toolchain rather than per-file hand-editing. Because major bumps shoul
 (§ 14.2), this is an accepted cost, revisited only if descriptor longevity across a break becomes
 a requirement.
 
-### 11.2 What `major` and `minor` are permitted to mean
+### 14.2 What `major` and `minor` are permitted to mean
 
 - **Minor bump: additive, absence-safe changes only.** A minor may add a field **only if its
   absence is well-defined as "the behavior before the field existed"**: a UED at an earlier minor
@@ -685,38 +727,31 @@ a requirement.
   required, or changing a field's meaning/permitted values). These are the changes where an old
   reader would misinterpret a file, which the hard `major ==` break (§ 14.1) prevents.
 
-**Authors stamp the lowest version their UED needs**, so it stays loadable on the oldest runtime
-that can serve it and never carries a field its version does not define. The UED's version should
-move rarely.
+**Authors should stamp the lowest version their UED needs**, so it stays loadable on the oldest
+runtime that can serve it and never carries a field its version does not define. The structural
+check (§ 13.1) does not enforce this, but the `addedInVersion` data makes the lowest version a UED
+needs computable, so a consumer that wants it can flag an over-declared version (§ 13.1).
 
-### 11.3 Per-version schema files (a supporting design, not a mandate)
+### 14.3 The schema's role in versioning (a supporting design, not a mandate)
 
-The structural contract for each `major.minor` is expressed as a standalone JSON Schema file in
-the repository (`ued/1.0.json` is authoritative; § 4.2 reproduces it), pinning that version's
-`version` property with `const` (e.g. `"const": "1.0"`). A new version is a new file. This design
-is **chosen to support**, not to require, a single source of truth that can drive validation in
-two places from one artifact:
+The schema (§ 4.2) is a single file whose `version` enum lists the accepted `major.minor` values.
+That enum is one expression of the accept rule (§ 14.1): because the runtime supports exactly one
+major version, every enumerated version is of that major, so the enum and the `major` equality /
+`minor <=` comparison describe the same policy. A runtime enforces that comparison directly whether
+or not the schema is available to it.
+
+Maintaining the contract as one schema file supports a single source of truth that can drive
+validation in two places from one artifact:
 
 - **Build time**: the authoring toolchain can validate every authored UED.
-- **Run time**: the provider can carry the schema file(s) it supports and run the same
-  validation on ingested UEDs, since drop-ins (§ 11) bypass the build.
+- **Run time**: the provider can carry the schema and run the same validation on ingested UEDs,
+  since drop-ins (§ 11) bypass the build.
 
-Because each file pins its own `version`, a UED is validated against the file for its declared
-version, so a `1.0` UED carrying a `1.1`-only field is rejected even on a `1.1` runtime. This RFC
-recommends the file-per-version approach so an off-the-shelf validator can enforce the structural
-contract; it does **not** prescribe how the schema is carried in the provider, which validator is
-used, or that an implementation must use JSON Schema at all.
-
-### 11.4 Minimum-version checking (a supporting design, not a mandate)
-
-§ 14.2 requires authors to stamp the **lowest** version their UED needs. This RFC does not require
-automated enforcement of that rule, but the per-version file design (§ 14.3) supports a build-time
-lint for implementations that want one.
-
-Such a lint validates a UED declaring `<major>.<m>` against the schema files of the **same major**
-from the oldest minor up to `m`; the oldest that accepts it is the true minimum, and a minimum
-below the declared minor is an over-declaration. The search is confined to the declared major
-because a major mismatch is a hard break (§ 14.1).
+This RFC recommends the single-schema approach so an off-the-shelf validator can enforce the
+structural superset (§ 4.2), and the `addedInVersion` data makes a version-accurate check possible
+for a consumer that wants one (§ 13.1); but it does **not** prescribe how the schema is carried in
+the provider, which validator is used, that an implementation must use JSON Schema at all, or that
+any version-accurate check be performed.
 
 ## 15. Lifecycle and Operational Policy
 
@@ -745,16 +780,19 @@ fuzzing, this RFC adds UED-specific coverage.
 
 **Unit tests:**
 
-- **Structural validation** (§ 13.1): valid and invalid field sets; missing required fields
-  (including `schema` and `version`); malformed `id`/`name` patterns; wrong `schema`/`version`
-  constant; **unknown field is rejected**; optional fields absent.
-- **Schema build/runtime parity** (if the per-version file design of § 14.3 is used): the schema
-  file embedded in the provider parses to the same JSON as the repository's canonical file and as
+- **Superset structural validation** (§ 13.1): valid and invalid field sets; missing required
+  fields (including `version`); a `version` value the schema does not enumerate is rejected;
+  malformed `id`/`name` patterns; **unknown field is rejected**; optional fields absent.
+- **Schema `addedInVersion` completeness** (§ 4.2): every property in the schema carries an
+  `addedInVersion` keyword whose value the `version` enum accepts, so version-accurate validation
+  is possible.
+- **Version-accurate validation, if performed** (§ 13.1): a UED whose `version` is `1.0` that
+  carries a field whose `addedInVersion` is later is rejected even though the superset schema
+  accepts it.
+- **Schema build/runtime parity** (if the single-schema design of § 14.3 is used): the schema
+  embedded in the provider parses to the same JSON as the repository's canonical file and as
   the inline copy in § 4.2 (a CI check comparing parsed structure, not bytes, so formatting and
   comments do not matter), so the build-time and runtime validators enforce the same contract.
-- **Per-version validation** (§ 14.3): a UED whose `version` is `1.0` that carries a `1.1`-only
-  field is **rejected** even on a `1.1` runtime (validated against its declared version, not the
-  latest).
 - **Version accept rule** (§ 14.1): matrix of `file` vs `provider` `major.minor` read from the
   `version` field: same major/older-or-equal minor loads; newer minor rejected; any major mismatch
   dropped.
@@ -825,7 +863,6 @@ named list of field names an engine's kernels vary over:
 
 ```jsonc
 {
-  "schema":  "hipdnn.kmd/v1",                          // KMD's own tag form; defined by the KMD RFC
   "version": "1.0",
   "id":      "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",   // the UED's "metadata" names this
   "name":    "attention_dense variant fields",
@@ -849,7 +886,6 @@ declares (§ A.1); the notes are RFC 0010 annotations.
 
 ```jsonc
 {
-  "schema":          "hipdnn.ued/v1",
   "version":         "1.0",
   "id":              "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",   // UUID; KDPs name this via "engine"
   "name":            "rocke:attention_dense_fwd",              // globally-unique, scoped; hashed to the 64-bit engine id
@@ -870,7 +906,6 @@ The same engine with only required fields, no knobs, no notes:
 
 ```jsonc
 {
-  "schema":    "hipdnn.ued/v1",
   "version":   "1.0",
   "id":        "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
   "name":      "rocke:attention_dense_fwd",
