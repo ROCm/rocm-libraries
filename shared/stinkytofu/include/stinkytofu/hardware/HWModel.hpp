@@ -105,6 +105,11 @@ constexpr int kArchKeyGfx1250 = archKey({12, 5, 0});
 // ArchInfo. Changing it here retargets both the HWModel and the CDNA5 policy table.
 constexpr int kArchKeyGfx1250v0 = archKey({12, 5, 1});
 
+// Internal helper used by stinkytofu passes to model dynamic LDS drain latency
+// from per-arch HWModel facts. Not part of the exported API surface.
+int computeDynamicDrainLatency(const HWModel& hw, int matchingDsLoadCount, int targetDSLoadLatency,
+                               int numWaves);
+
 /// Look up the hardware model for \p arch (the {major, minor, stepping} triple
 /// from GemmTileConfig). gfx1250 is the fallback for any unlisted arch.
 STINKYTOFU_EXPORT const HWModel& hwModelForArch(const std::array<int, 3>& arch);
