@@ -71,6 +71,10 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         // CK_Tensor: tensor_load_to_lds; every consumer drains.
         {[](const StinkyInstruction& i) { return isTensorLoad(i); },
          [](const StinkyInstruction& i) { return true; }},
+        // CK_Async: global_store_async_from_lds_*; drains via the LDS WAR
+        // anti-dep scan (scanAsyncAntiDeps), not via SSA consumers.
+        {[](const StinkyInstruction& i) { return isAsyncMemOp(i); },
+         [](const StinkyInstruction&) { return true; }},
     };
     return kPolicies[c];
 }
@@ -363,6 +367,8 @@ const char* counterName(CounterKind c) {
             return "scalar (kmcnt)";
         case CK_Tensor:
             return "tensor (tlcnt)";
+        case CK_Async:
+            return "async (asynccnt)";
         default:
             return "?";
     }
@@ -378,6 +384,8 @@ int getCounterField(const WaitCountSpec& spec, CounterKind c) {
             return spec.kmCount;
         case CK_Tensor:
             return spec.tensorCount;
+        case CK_Async:
+            return spec.asyncCount;
         default:
             return WaitCountSpec::kUnused;
     }
@@ -396,6 +404,9 @@ void setCounterField(WaitCountSpec& spec, CounterKind c, int w) {
             break;
         case CK_Tensor:
             spec.tensorCount = w;
+            break;
+        case CK_Async:
+            spec.asyncCount = w;
             break;
         default:
             break;
@@ -602,12 +613,40 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         }
     }
 
+    // WAR-on-LDS for the async counter, mirroring scanDsAntiDeps. asynccnt
+    // tracks global_store_async_from_lds_*, an LDS reader with no register dest;
+    // an LDS writer (tensor_load / ds_write) or barrier reusing a buffer it is
+    // still reading must drain asynccnt first.
+    auto scanAsyncAntiDeps = [&](const std::vector<int>& anchorTokens) {
+        for (const auto& q : state.queues[CK_Async]) {
+            const int qsize = static_cast<int>(q.ops.size());
+            for (int idx = 0; idx < qsize; ++idx) {
+                StinkyInstruction* op = q.ops[idx];
+                if (op == inst) continue;
+                auto* opTokens = op->getModifier<MemTokenData>();
+                bool overlap =
+                    (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
+                if (!overlap) continue;
+                tightenRequired(CK_Async, qsize - idx - 1);
+            }
+        }
+    };
+
+    if (isLdsWriterAnchor(*inst) || isBarrier(*inst)) {
+        const auto* tk = inst->getModifier<MemTokenData>();
+        if (tk != nullptr) scanAsyncAntiDeps(tk->tokens);
+    }
+
     // Conservative MemTokenData fallbacks. An untagged anchor or
     // untagged producer means we cannot prove disjointness, so we
     // force the matching counter to 0.
     if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
         anyOpInFlight(CK_Tensor)) {
         required[CK_Tensor] = 0;
+    }
+    if ((isLdsWriterAnchor(*inst) || isBarrier(*inst)) &&
+        inst->getModifier<MemTokenData>() == nullptr && anyOpInFlight(CK_Async)) {
+        required[CK_Async] = 0;
     }
     if (isLdsWriterAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
         anyOpInFlight(CK_DS) && !isDSWrite(*inst)) {
@@ -694,6 +733,9 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
                     break;
                 case CK_Tensor:
                     spec.tensorCount = required[c];
+                    break;
+                case CK_Async:
+                    spec.asyncCount = required[c];
                     break;
                 default:
                     break;
@@ -914,6 +956,7 @@ WaitInsertionPlan WaitDataflow::materializePlan() const {
                 if (entry.second.bufferCount != WaitCountSpec::kUnused) spec.bufferCount = 0;
                 if (entry.second.kmCount != WaitCountSpec::kUnused) spec.kmCount = 0;
                 if (entry.second.tensorCount != WaitCountSpec::kUnused) spec.tensorCount = 0;
+                if (entry.second.asyncCount != WaitCountSpec::kUnused) spec.asyncCount = 0;
                 if (spec.isValid()) plan.anchorWaits[entry.first] = spec;
             }
         }
