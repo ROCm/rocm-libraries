@@ -30,6 +30,8 @@
 #include "testing_matmul_batch_offset.hpp"
 #include <cctype>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 #include <type_traits>
 
 #include <gtest/gtest-spi.h>
@@ -116,6 +118,46 @@ TEST(HostValidationEpilogueBridge, SaturatesInt8Output)
     roc::host_validation::hipblaslt_adapter::referenceEpilogue(arguments);
 
     EXPECT_EQ(output, (std::array<int8_t, 4>{-128, -128, 126, 127}));
+}
+
+TEST(HostValidationEpilogueBridge, UsesIdentityForNullScaleDefaults)
+{
+    std::array<float, 4> input{-2, 1, 3, -4};
+    std::array<float, 4> output{};
+    std::array<float, 4> auxiliary{};
+
+    roc::host_validation::hipblaslt_adapter::EpilogueArguments arguments;
+    arguments.rows             = 2;
+    arguments.columns          = 2;
+    arguments.leadingDimension = 2;
+    arguments.input            = input.data();
+    arguments.output           = output.data();
+    arguments.auxiliary        = auxiliary.data();
+    arguments.outputType       = HIP_R_32F;
+    arguments.computeType      = HIP_R_32F;
+    roc::host_validation::hipblaslt_adapter::referenceEpilogue(arguments);
+
+    EXPECT_EQ(output, input);
+    EXPECT_EQ(auxiliary, input);
+}
+
+TEST(HostValidationEpilogueBridge, RejectsOverflowingLeadingDimensionLayout)
+{
+    float input  = 0;
+    float output = 0;
+
+    roc::host_validation::hipblaslt_adapter::EpilogueArguments arguments;
+    arguments.rows             = 1;
+    arguments.columns          = 3;
+    arguments.leadingDimension
+        = std::numeric_limits<decltype(arguments.leadingDimension)>::max();
+    arguments.input       = &input;
+    arguments.output      = &output;
+    arguments.outputType  = HIP_R_32F;
+    arguments.computeType = HIP_R_32F;
+
+    EXPECT_THROW(roc::host_validation::hipblaslt_adapter::referenceEpilogue(arguments),
+                 std::overflow_error);
 }
 
 TEST(HostValidationReductionBridge, DelegatesStridedBiasSum)
