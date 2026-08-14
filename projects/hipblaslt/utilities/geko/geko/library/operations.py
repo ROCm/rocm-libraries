@@ -525,7 +525,7 @@ def from_full_dataframe(
         raise ValueError(f"Input DataFrame has missing fields")
 
     with open(match_table_path) as f:
-        match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        match_table = yaml.load(f, Loader=SafeLoader)
 
     lib_dir = Path(lib_dir)
     n_sols = len(df)
