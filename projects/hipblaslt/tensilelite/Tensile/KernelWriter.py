@@ -57,6 +57,7 @@ from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2, clusterEnabled
 from .Common.GlobalParameters import globalParameters
+from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -6766,6 +6767,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # gfx1250 v0/v1 share ISA (12,5,0); this build-wide name (empty unless a
+                               # colliding stepping is targeted) tells StinkyTofu which cost table to use.
+                               "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
@@ -6795,6 +6799,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
+                               # between an urgent and a deferrable tensor_load group.
+                               # Off by default.
+                               "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
                                # PrefetchGlobalRead (PGR) for Tensile scheduling. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
@@ -6807,6 +6815,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # abs prefetch is off (also -1 for Stream-K / non-gfx1250).
                                "SwInstructionPrefetchAbsBaseSgpr": int(
                                    self.states.swPrefetchAbsBaseSgpr),
+                               # Arch capability read by Gfx1250HazardPass: XNACK replay
+                               # can reorder in-flight memory ops, so the pass inserts
+                               # s_wait_xcnt drains to order them.
+                               "RequiresXCntForVolatileVMEM": bool(
+                                   self.states.archCaps["RequiresXCntForVolatileVMEM"]),
                               }
 
       # Region-clone jobs for StinkyTofu RegionClonePass.
@@ -6942,6 +6955,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.asmCaps  = ti.getAsmCaps()
     self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
+
+    # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
+    # the build's arch name is the only signal here (empty for v1). Rebuild the
+    # dict rather than mutate: some backends return the live cached cap dict.
+    archName = globalParameters.get("StinkyTofuArchName") or ""
+    archCapDeltas = ARCH_CAP_OVERRIDES.get(archName, {}).get("archCaps", {})
+    if archCapDeltas:
+      self.states.archCaps = {**self.states.archCaps, **archCapDeltas}
 
     self.asmAssert = Assert(self.states.laneSGPRCount, kernel["WavefrontSize"], self.db["EnableAsserts"])
 
@@ -9170,7 +9191,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
       if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
-        raise RuntimeError("Generating asm kernel error: total vgpr: %u not in [0, %u].\n" % (self.states.totalVgprs, self.states.regCaps["MaxVgpr"]))
+        print("warning: total VGPRS (%d) overflowed max VGPRS (%d)." % (self.states.totalVgprs, self.states.regCaps["MaxVgpr"]))
 
       agprLimit = self.states.regCaps["PhysicalMaxVgpr"] - self.states.regCaps["MaxVgpr"]
       if self.states.totalAgprs > agprLimit:

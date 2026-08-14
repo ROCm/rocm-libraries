@@ -86,7 +86,42 @@ add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURREN
     LABELS slow
     ENVIRONMENT ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV})
 
+# Forward the merged raw-test environment (published by add_integration_test_target)
+# to the parent scope so the tiered CTest suites created in ../CMakeLists.txt can
+# pick it up. Setting ENVIRONMENT directly on the raw test name here is a hard
+# configure error when YAML categorization is active, hence the forwarding.
 if(DEFINED hip_kernel_provider_integration_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_integration_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
+endif()
+
+# Register the cross-provider ASM SDPA gpu-reference integration test target. In
+# standalone provider builds the harness may not already be in scope, so try to
+# import it first.
+if(NOT COMMAND add_external_integration_test_target)
+    find_package(hipdnn_integration_tests CONFIG QUIET)
+endif()
+
+if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
+   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+    set(_synthetic_root "/__hipdnn_install_root__")
+    set(_install_cwd_abs "${_synthetic_root}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider")
+    set(_install_asm_abs
+        "${_synthetic_root}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/asm_kernels"
+    )
+    file(RELATIVE_PATH _install_asm_dir "${_install_cwd_abs}" "${_install_asm_abs}")
+
+    add_external_integration_test_target(
+        TARGET_NAME hip_kernel_provider_asm_sdpa_gpu_ref_integration_tests
+        PLUGIN_TARGET hip_kernel_provider
+        ENGINE_NAME ASM_SDPA_ENGINE
+        INSTALL_SUBDIR hip_kernel_provider
+        REFERENCE_EXECUTOR gpu
+        GTEST_FILTER
+            Smoke/IntegrationGpuSdpaFwdBfp16.Correctness/*
+        ENVIRONMENT
+            ${HIP_KERNEL_PROVIDER_ASM_KERNEL_ENV}
+        INSTALL_ENVIRONMENT
+            "HIPDNN_AITER_ASM_DIR=${_install_asm_dir}"
+    )
 endif()

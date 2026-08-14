@@ -173,7 +173,12 @@ _rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
         throw;
     }
 }
-#else
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
+
+// Default constructor used by rocsparse_create_handle. It performs synchronous
+// initialization on an internally-managed stream. It is always compiled so that
+// the default handle-creation path keeps its behavior independently of the
+// optional rocsparse_handle_create API (ROCSPARSE_WITH_HANDLE_CREATE).
 _rocsparse_handle::_rocsparse_handle()
 {
     try
@@ -305,7 +310,6 @@ _rocsparse_handle::_rocsparse_handle()
         throw;
     }
 }
-#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
 /*******************************************************************************
  * destructor

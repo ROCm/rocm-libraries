@@ -98,7 +98,8 @@ def _build_corpus():
 
     kernels["conv_implicit_gemm"] = build_implicit_gemm_conv(
         ImplicitGemmConvSpec(
-            problem=ConvProblem(N=1, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+            problem=ConvProblem(N=1, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1),
+            epilogue="cshuffle",
         )
     )
 
