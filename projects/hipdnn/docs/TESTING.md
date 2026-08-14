@@ -562,6 +562,7 @@ White box tests focus on internal implementation details of hipDNN components.
 | **Provider** | `dnn-providers/<name>/tests/` | Test internal implementation of a specific provider | Minimal & fast | Windows & Linux |
 
 Note: If a test depends on the GPU then it needs to be marked with `SKIP_IF_NO_DEVICES()` so tests run and pass correctly on CPU only machines.
+
 ---
 
 #### Test Categories by Component
