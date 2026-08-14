@@ -114,6 +114,8 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
     const RuntimeQuantizer<Accumulator> quantizeA(problem.a.computeType);
     const RuntimeQuantizer<Accumulator> quantizeB(problem.b.computeType);
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
+                                                        problem.epilogue.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
@@ -208,16 +210,18 @@ GemmRunInfo runTiled(const GemmRequest& problem) {
         if (storeAllOutputs) {
             for (size_t row = 0; row < rows; ++row) {
                 for (size_t column = 0; column < columns; ++column) {
-                    finalizer.store(rowBase + row, columnBase + column,
-                                    accumulator[row * columns + column]);
+                    output.store(rowBase + row, columnBase + column,
+                                 finalizer.finalize(rowBase + row, columnBase + column,
+                                                    accumulator[row * columns + column]));
                 }
             }
         } else {
             for (const size_t localIndex : selectedOutputIndices) {
                 const size_t row = localIndex / outputTileColumns;
                 const size_t column = localIndex % outputTileColumns;
-                finalizer.store(rowBase + row, columnBase + column,
-                                accumulator[row * columns + column]);
+                output.store(rowBase + row, columnBase + column,
+                             finalizer.finalize(rowBase + row, columnBase + column,
+                                                accumulator[row * columns + column]));
             }
         }
         return rows * columns;
