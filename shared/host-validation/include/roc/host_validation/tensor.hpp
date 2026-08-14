@@ -13,6 +13,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <limits>
+#include <numeric>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -116,6 +117,11 @@ inline constexpr const ScalarTypeInfo& scalarTypeInfo(ScalarType type) {
 
 inline constexpr std::string_view scalarTypeName(ScalarType type) {
     return scalarTypeInfo(type).name;
+}
+
+inline constexpr size_t scalarElementGroupSize(ScalarType type) {
+    const size_t bits = scalarTypeInfo(type).storageBits;
+    return 8 / std::gcd(bits, size_t{8});
 }
 
 template <typename T>
