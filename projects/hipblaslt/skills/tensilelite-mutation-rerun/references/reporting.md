@@ -101,7 +101,7 @@ Include paths for:
 - explanations for identical behavior or production-design problems; and
 - the final version-controlled file-status record.
 
-A missing or uncommitted path under `work/` is not durable evidence. Copy it
+A missing or uncommitted path under `work/` is not evidence another developer can rely on. Copy it
 to the agreed handoff location before citing it.
 
 ## 4. Report scores without hiding results
