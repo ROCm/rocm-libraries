@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import os
 import re
 import shutil
@@ -17,48 +16,30 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
 
-from _tensilelite_client_binding import ClientBindingError, ClientCandidate, standard_client_path
-
-
 # Diagnostic source label for an active Python rocm-sdk-core installation.
 _PYTHON_SDK_SOURCE = "active Python rocm_sdk_core"
-
-
 
 class TensileLiteRuntimeError(ImportError):
     """The installed TensileLite wheel and ROCm runtime do not match."""
 
 
 @dataclass(frozen=True)
-class ValidatedRocm(ABC):
+class ValidatedRocm:
     """A ROCm installation selected and validated for this process."""
 
     path: Path
     version: str
-    toolchain_paths: tuple[Path, ...]
+    executable_search_paths: tuple[Path, ...]
     source: str
-
-    @abstractmethod
-    def default_client(self) -> ClientCandidate:
-        """Return the default client candidate for this installation."""
 
 
 @dataclass(frozen=True)
 class PythonRocm(ValidatedRocm):
     source: str = _PYTHON_SDK_SOURCE
 
-    def default_client(self) -> ClientCandidate:
-        # Enable the Python SDK default when rocm-sdk-libraries publishes the
-        # tensilelite-client console-script trampoline.
-        raise ClientBindingError(
-            "rocm-sdk-libraries does not publish the tensilelite-client console script. "
-            "Configure an explicit TensileLite client binding instead."
-        )
-
 
 class SystemRocm(ValidatedRocm):
-    def default_client(self) -> ClientCandidate:
-        return ClientCandidate(standard_client_path(self.path), self.source)
+    pass
 
 
 @dataclass(frozen=True)
@@ -186,7 +167,7 @@ def _validate_python_sdk(
 ) -> PythonRocm:
     version = _canonical_rocm_version(python_sdk_version)
     path = _python_sdk_location()
-    toolchain_paths = _python_sdk_toolchain_paths()
+    executable_search_paths = _python_sdk_executable_search_paths()
     _validate_compatibility(
         distribution=distribution,
         distribution_version=distribution_version,
@@ -195,7 +176,11 @@ def _validate_python_sdk(
         path=path,
         source=_PYTHON_SDK_SOURCE,
     )
-    return PythonRocm(path=path, version=version, toolchain_paths=toolchain_paths)
+    return PythonRocm(
+        path=path,
+        version=version,
+        executable_search_paths=executable_search_paths,
+    )
 
 
 def _python_sdk_location() -> Path:
@@ -214,7 +199,7 @@ def _python_sdk_location() -> Path:
         ) from exc
 
 
-def _python_sdk_toolchain_paths() -> tuple[Path, ...]:
+def _python_sdk_executable_search_paths() -> tuple[Path, ...]:
     user_scheme = sysconfig.get_preferred_scheme("user")
     script_dirs = (
         sysconfig.get_path("scripts"),
@@ -252,7 +237,12 @@ def _validate_system_rocm(
             f"  expected file: {version_file}"
         ) from exc
     path = resolved.root
-    toolchain_paths = (path / "bin", path / "lib" / "llvm" / "bin")
+    executable_search_paths = (
+        path / "bin",
+        path / "lib" / "llvm" / "bin",
+        # TODO: Enable once conventional prefixes ship tensilelite-client here.
+        # path / "libexec" / "hipblaslt" / "tensilelite",
+    )
     _validate_compatibility(
         distribution=distribution,
         distribution_version=distribution_version,
@@ -265,7 +255,7 @@ def _validate_system_rocm(
         path=path,
         version=actual,
         source=resolved.source,
-        toolchain_paths=toolchain_paths,
+        executable_search_paths=executable_search_paths,
     )
 
 

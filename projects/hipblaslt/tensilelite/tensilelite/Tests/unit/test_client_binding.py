@@ -6,7 +6,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 from packaging.version import Version
 import pytest
@@ -99,20 +98,21 @@ def test_configured_binding_is_exclusive_even_when_missing(tmp_path, monkeypatch
     assert selected == binding.ClientCandidate(configured, "explicit TensileLite client binding")
 
 
-def test_default_client_uses_fixed_rocm_location_without_a_binding(tmp_path, monkeypatch):
+def test_default_client_candidate_uses_first_existing_executable_path(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     installation = binding.Installation(tmp_path / "package", "id", "5.0.0+rocm7.2.4")
-    root = tmp_path / "rocm"
+    primary = tmp_path / "primary"
+    fallback = tmp_path / "fallback"
+    executable = "tensilelite-client.exe" if os.name == "nt" else "tensilelite-client"
+    client = fallback / executable
+    client.parent.mkdir()
+    client.write_text("client", encoding="utf-8")
 
     def default_client():
-        return binding.ClientCandidate(binding.standard_client_path(root), "test prefix")
+        return binding.default_client_candidate((primary, fallback), "test prefix")
 
     selected = binding.selected_client(default_client, installation)
-    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-    assert selected == binding.ClientCandidate(
-        root / "libexec/hipblaslt/tensilelite" / executable,
-        "test prefix",
-    )
+    assert selected == binding.ClientCandidate(client, "test prefix")
 
 
 def _client_result(stdout="5.0.0+rocm7.2.4\n", stderr="", returncode=0):

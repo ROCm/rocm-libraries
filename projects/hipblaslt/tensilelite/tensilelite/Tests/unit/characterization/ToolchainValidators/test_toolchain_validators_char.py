@@ -8,9 +8,7 @@
 # etc. on a non-Windows fs). See target.md.
 ################################################################################
 import importlib
-import os
 import stat
-from pathlib import Path
 
 import pytest
 
@@ -75,26 +73,6 @@ def test_exe_exists_true_false(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _posixSearchPaths (frozen-root-driven, pure)
-# ---------------------------------------------------------------------------
-def test_posix_search_paths_defaults(monkeypatch):
-    root = Path("/selected/rocm")
-    monkeypatch.setattr(V, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
-    paths = V._posixSearchPaths()
-    assert paths == [root / "bin", root / "lib" / "llvm" / "bin"]
-
-
-def test_posix_search_paths_with_rocm_and_path(monkeypatch):
-    root = Path("/selected/rocm")
-    monkeypatch.setattr(V, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
-    monkeypatch.setenv("ROCM_PATH", "/custom/rocm")
-    monkeypatch.setenv("PATH", "/binA" + os.pathsep + "/binB")
-    paths = V._posixSearchPaths()
-
-    assert paths == [root / "bin", root / "lib" / "llvm" / "bin"]
-
-
-# ---------------------------------------------------------------------------
 # _validateExecutable
 # ---------------------------------------------------------------------------
 def _make_exe(d, name):
@@ -142,7 +120,7 @@ def test_validate_toolchain_no_args():
 
 def test_validate_toolchain_single_returns_scalar(tmp_path, monkeypatch):
     _make_exe(tmp_path, "amdclang++")
-    monkeypatch.setattr(V, "_posixSearchPaths", lambda: [tmp_path])
+    monkeypatch.setattr(V, "executable_search_paths", lambda: [tmp_path])
     result = V.validateToolchain("amdclang++")
     assert result == str(tmp_path / "amdclang++")
     assert isinstance(result, str)
@@ -151,14 +129,14 @@ def test_validate_toolchain_single_returns_scalar(tmp_path, monkeypatch):
 def test_validate_toolchain_multiple_returns_tuple(tmp_path, monkeypatch):
     _make_exe(tmp_path, "amdclang++")
     _make_exe(tmp_path, "amdclang")
-    monkeypatch.setattr(V, "_posixSearchPaths", lambda: [tmp_path])
+    monkeypatch.setattr(V, "executable_search_paths", lambda: [tmp_path])
     result = V.validateToolchain("amdclang++", "amdclang")
     assert isinstance(result, tuple)
     assert result == (str(tmp_path / "amdclang++"), str(tmp_path / "amdclang"))
 
 
 def test_validate_toolchain_propagates_not_found(tmp_path, monkeypatch):
-    monkeypatch.setattr(V, "_posixSearchPaths", lambda: [tmp_path])
+    monkeypatch.setattr(V, "executable_search_paths", lambda: [tmp_path])
     with pytest.raises(FileNotFoundError):
         validate = V.validateToolchain("amdclang++")
         # generator is lazy for the single-arg path; force evaluation
@@ -180,16 +158,6 @@ def test_toolchain_defaults_posix():
 
 def test_oss_select_posix():
     assert V.osSelect(linux="L", windows="W") == "L"
-
-
-# ---------------------------------------------------------------------------
-# Windows selected-root helper — exercised directly on the Linux host.
-# ---------------------------------------------------------------------------
-def test_windows_search_paths_direct(monkeypatch):
-    root = Path("/selected/rocm")
-    monkeypatch.setattr(V, "_toolchainSearchPaths", lambda: [root / "bin", root / "lib" / "llvm" / "bin"])
-    paths = V._windowsSearchPaths()
-    assert paths == [root / "bin", root / "lib" / "llvm" / "bin"]
 
 
 def test_windows_with_extensions_raises_on_posix():

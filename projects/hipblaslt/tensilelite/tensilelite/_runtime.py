@@ -9,6 +9,7 @@ from pathlib import Path
 
 from _tensilelite_client_binding import (
     ClientBindingError,
+    default_client_candidate,
     selected_client,
     validate_client,
 )
@@ -42,7 +43,12 @@ def client_executable() -> Path:
 
     candidate = None
     try:
-        candidate = selected_client(_installation.default_client)
+        candidate = selected_client(
+            lambda: default_client_candidate(
+                _installation.executable_search_paths,
+                _installation.source,
+            )
+        )
         validate_client(candidate.path, __version__)
     except ClientBindingError as exc:
         selected = (
@@ -59,8 +65,8 @@ def client_executable() -> Path:
     return _client
 
 
-def toolchain_search_paths() -> tuple[Path, ...]:
-    """Return the tool locations for the frozen ROCm installation model."""
+def executable_search_paths() -> list[Path]:
+    """Return the executable locations for the frozen ROCm installation model."""
     if _installation is None:
         raise TensileLiteRuntimeError("TensileLite runtime has not been initialized.")
-    return _installation.toolchain_paths
+    return list(_installation.executable_search_paths)

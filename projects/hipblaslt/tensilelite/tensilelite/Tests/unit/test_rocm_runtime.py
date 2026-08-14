@@ -67,7 +67,7 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
     assert result.path == root
     assert result.version == "10.1.0"
     assert result.source == "test"
-    assert result.toolchain_paths == (root / "bin", root / "lib" / "llvm" / "bin")
+    assert result.executable_search_paths == (root / "bin", root / "lib" / "llvm" / "bin")
 
 
 def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
@@ -211,14 +211,14 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     assert result.path == core_path.resolve()
     assert result.version == "10.1.0a20260813"
     assert result.source == "active Python rocm_sdk_core"
-    assert result.toolchain_paths == (scripts.resolve(), user_scripts.resolve())
+    assert result.executable_search_paths == (scripts.resolve(), user_scripts.resolve())
 
 
 @pytest.mark.parametrize(
     "user_scheme",
     ["posix_user", "nt_user"],
 )
-def test_python_sdk_toolchain_paths_include_platform_user_scripts(
+def test_python_sdk_executable_search_paths_include_platform_user_scripts(
     tmp_path, monkeypatch, user_scheme
 ):
     scripts = tmp_path / "venv" / "bin"
@@ -236,12 +236,15 @@ def test_python_sdk_toolchain_paths_include_platform_user_scripts(
     )
     monkeypatch.setattr(_rocm.sysconfig, "get_path", get_path)
 
-    assert _rocm._python_sdk_toolchain_paths() == (scripts.resolve(), user_scripts.resolve())
+    assert _rocm._python_sdk_executable_search_paths() == (
+        scripts.resolve(),
+        user_scripts.resolve(),
+    )
     assert calls == [("scripts", None), ("scripts", user_scheme)]
 
 
 @pytest.mark.parametrize("primary_exists", [False, True])
-def test_python_sdk_toolchain_prefers_primary_script_over_user_script(
+def test_python_sdk_executable_search_prefers_primary_script_over_user_script(
     tmp_path, monkeypatch, primary_exists
 ):
     from tensilelite.Toolchain.Validators import validateToolchain
@@ -263,7 +266,7 @@ def test_python_sdk_toolchain_prefers_primary_script_over_user_script(
         _rocm.PythonRocm(
             version="10.1.0a20260813",
             path=scripts,
-            toolchain_paths=(scripts, user_scripts),
+            executable_search_paths=(scripts, user_scripts),
         ),
     )
 
@@ -286,14 +289,19 @@ def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
             path=root,
             version="7.2.4",
             source="test",
-            toolchain_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
+            executable_search_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
         ),
     )
     monkeypatch.setattr(
         _runtime,
-        "selected_client",
-        lambda default_client: client_requests.append(default_client())
+        "default_client_candidate",
+        lambda paths, source: client_requests.append((paths, source))
         or client_binding.ClientCandidate(client, "test client"),
+    )
+    monkeypatch.setattr(
+        _runtime,
+        "selected_client",
+        lambda default_client: default_client(),
     )
     monkeypatch.setattr(_runtime, "validate_client", lambda path, version: None)
 
@@ -301,9 +309,11 @@ def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
 
     assert "rocisa" not in sys.modules
     assert client_requests == []
-    assert _runtime.toolchain_search_paths() == (root / "bin", root / "lib" / "llvm" / "bin")
+    assert _runtime.executable_search_paths() == [root / "bin", root / "lib" / "llvm" / "bin"]
     assert _runtime.client_executable() == client
-    assert client_requests == [client_binding.ClientCandidate(client, "test")]
+    assert client_requests == [
+        ((root / "bin", root / "lib" / "llvm" / "bin"), "test"),
+    ]
 
 
 def test_cli_help_does_not_request_client(monkeypatch):
@@ -318,7 +328,7 @@ def test_cli_help_does_not_request_client(monkeypatch):
     assert cli.main(["--help"]) == 0
 
 
-def test_python_sdk_client_request_requires_explicit_binding(tmp_path, monkeypatch):
+def test_python_sdk_client_request_fails_when_no_client_script_is_published(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "bin"
     scripts.mkdir(parents=True)
     monkeypatch.setattr(_runtime, "_client", None)
@@ -330,7 +340,7 @@ def test_python_sdk_client_request_requires_explicit_binding(tmp_path, monkeypat
         lambda distribution, version: _rocm.PythonRocm(
             version="10.1.0a20260813",
             path=scripts,
-            toolchain_paths=(scripts,),
+            executable_search_paths=(scripts,),
         ),
     )
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: None)
@@ -339,7 +349,7 @@ def test_python_sdk_client_request_requires_explicit_binding(tmp_path, monkeypat
 
     with pytest.raises(
         _rocm.TensileLiteRuntimeError,
-        match="rocm-sdk-libraries does not publish the tensilelite-client console script",
+        match="tensilelite-client was not found in the selected executable paths",
     ):
         _runtime.client_executable()
 
@@ -357,14 +367,14 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
         lambda distribution, version: _rocm.PythonRocm(
             version="10.1.0a20260813",
             path=scripts,
-            toolchain_paths=(scripts,),
+            executable_search_paths=(scripts,),
         ),
     )
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: configured)
     monkeypatch.setattr(
-        _rocm.PythonRocm,
-        "default_client",
-        lambda self: (_ for _ in ()).throw(AssertionError("SDK client was probed")),
+        _runtime,
+        "default_client_candidate",
+        lambda *args: (_ for _ in ()).throw(AssertionError("default client was probed")),
     )
     validated = []
     monkeypatch.setattr(
@@ -390,18 +400,20 @@ def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
             path=root,
             version="7.2.4",
             source="test",
-            toolchain_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
+            executable_search_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
         ),
     )
     _runtime.initialize()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
-def test_client_writer_path_request_rejects_missing_standard_client(tmp_path, monkeypatch):
+def test_client_writer_path_request_rejects_missing_explicit_client(tmp_path, monkeypatch):
     from tensilelite import ClientWriter
 
     root = _root(tmp_path)
+    configured = (tmp_path / "missing-client").absolute()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: configured)
     _initialize_runtime_with_root(root, monkeypatch)
 
     with pytest.raises(_rocm.TensileLiteRuntimeError, match="Client path is not a regular file"):
@@ -409,15 +421,16 @@ def test_client_writer_path_request_rejects_missing_standard_client(tmp_path, mo
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX test executable")
-def test_client_writer_path_request_accepts_valid_standard_client(tmp_path, monkeypatch):
+def test_client_writer_path_request_accepts_valid_explicit_client(tmp_path, monkeypatch):
     from tensilelite import ClientWriter
 
     root = _root(tmp_path)
-    client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
-    client.parent.mkdir(parents=True)
+    client = (tmp_path / "configured-client").absolute()
+    client.parent.mkdir(parents=True, exist_ok=True)
     client.write_text("#!/bin/sh\nprintf '5.0.0+rocm7.2.4\\n'\n", encoding="utf-8")
     client.chmod(0o755)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: client)
     _initialize_runtime_with_root(root, monkeypatch)
 
     assert ClientWriter.getClientExecutablePath() == str(client)

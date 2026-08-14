@@ -28,19 +28,9 @@ from pathlib import Path
 from typing import List, NamedTuple
 
 from tensilelite.Common.Utilities import isRhel8, print2
+from tensilelite._runtime import executable_search_paths
 
 osSelect = lambda linux, windows: linux if os.name != "nt" else windows
-
-
-def _toolchainSearchPaths() -> List[Path]:
-    """Return the paths provided by the frozen ROCm installation model."""
-    from tensilelite import _runtime
-
-    return list(_runtime.toolchain_search_paths())
-
-
-def _windowsSearchPaths() -> List[Path]:
-    return _toolchainSearchPaths()
 
 
 def _windowsWithExtensions(exe: str) -> List[str]:
@@ -49,10 +39,6 @@ def _windowsWithExtensions(exe: str) -> List[str]:
     files = [exe]
     files.extend([exe + ext.lower() for ext in os.environ["PATHEXT"].split(";")])
     return files
-
-
-def _posixSearchPaths() -> List[Path]:
-    return _toolchainSearchPaths()
 
 
 class ToolchainDefaults(NamedTuple):
@@ -208,7 +194,7 @@ def validateToolchain(*args: str):
     if not args:
         raise ValueError("No toolchain components to validate, at least one argument is required")
 
-    searchPaths = _windowsSearchPaths() if os.name == "nt" else _posixSearchPaths()
+    searchPaths = executable_search_paths()
 
     out = (_validateExecutable(x, searchPaths) for x in args)
 
@@ -234,7 +220,8 @@ def deviceEnumeratorCandidates(explicit: str | None = None) -> tuple[str, ...]:
             continue
     if paths:
         return tuple(paths)
+
     raise FileNotFoundError(
         "No supported device enumerator is executable in the selected tool paths: "
-        f"{':'.join(map(str, _toolchainSearchPaths()))}"
+        f"{':'.join(map(str, executable_search_paths()))}"
     )
