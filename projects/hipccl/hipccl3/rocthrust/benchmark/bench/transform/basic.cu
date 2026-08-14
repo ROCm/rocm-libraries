@@ -32,7 +32,6 @@
 // rocThrust
 #include <thrust/copy.h>
 #include <thrust/count.h>
-#include <thrust/detail/functional/address_stability.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -49,6 +48,8 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
+
+#include _THRUST_LIBCXX_INCLUDE(functional)
 
 template <class InT, class OutT>
 struct fib_t
@@ -187,7 +188,7 @@ struct mul
   {
     const T scalar = startScalar;
     return bench_transform(
-      c.begin(), c.end(), b.begin(), ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
+      c.begin(), c.end(), b.begin(), _THRUST_LIBCXX::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
         return ci * scalar;
       }));
   }
@@ -205,7 +206,7 @@ struct add
       a.end(),
       b.begin(),
       c.begin(),
-      ::thrust::detail::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
+      _THRUST_LIBCXX::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
         return ai + bi;
       }));
   }
@@ -225,7 +226,7 @@ struct triad
       b.end(),
       c.begin(),
       a.begin(),
-      ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
+      _THRUST_LIBCXX::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
         return bi + scalar * ci;
       }));
   }
@@ -245,7 +246,7 @@ struct nstream
       thrust::make_zip_iterator(a.end(), b.end(), c.end()),
       a.begin(),
       thrust::make_zip_function(
-        ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
+        _THRUST_LIBCXX::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
           return ai + bi + scalar * ci;
         })));
   }
