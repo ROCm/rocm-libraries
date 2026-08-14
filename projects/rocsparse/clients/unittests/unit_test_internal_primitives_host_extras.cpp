@@ -149,9 +149,10 @@ namespace
         {
             device_vector<J> d_buf2(nnz_sz);
             ASSERT_NE(d_buf2.ptr, nullptr);
-            ASSERT_EQ((rocsparse::primitives::sort_csr_column_indices<I, J>(
-                          handle, m, n, nnz, d_row_ptr.ptr, d_col_ind.ptr, d_buf2.ptr, d_buffer.ptr)),
-                      rocsparse_status_success);
+            ASSERT_EQ(
+                (rocsparse::primitives::sort_csr_column_indices<I, J>(
+                    handle, m, n, nnz, d_row_ptr.ptr, d_col_ind.ptr, d_buf2.ptr, d_buffer.ptr)),
+                rocsparse_status_success);
             ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
             EXPECT_EQ(to_host(d_col_ind), sorted);
         }
