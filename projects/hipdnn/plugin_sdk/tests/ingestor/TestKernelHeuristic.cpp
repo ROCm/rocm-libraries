@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -13,6 +14,7 @@
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 #include "KernelIngestorTestFixtures.hpp"
 
@@ -144,6 +146,91 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter
     descriptor.payload = "some/model/artifact.bin";
 
     EXPECT_THROW(makeKernelHeuristic(descriptor), std::invalid_argument);
+}
+
+TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicFallsBackWhenNoDescriptorIsSupplied)
+{
+    // An engine shipping no UHD still gets a usable scorer rather than a null or a
+    // throw: absence is a supported state, not a load failure.
+    const auto heuristic = makeKernelHeuristic(std::nullopt);
+
+    ASSERT_NE(heuristic, nullptr);
+}
+
+TEST(TestIngestorKernelHeuristic, WarnsNamingTheEngineWhenNoHeuristicIsSupplied)
+{
+    // The warning is the whole point of allowing a missing UHD: it is what separates an
+    // engine that meant to declare its order from one still waiting on a model. An
+    // unnamed warning cannot tell an operator which engine to go look at.
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+
+    const auto heuristic = makeKernelHeuristic(std::nullopt, "engine 'test:unranked'");
+
+    ASSERT_NE(heuristic, nullptr);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "test:unranked"))
+        << "warning did not name the engine:\n"
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "ships no heuristic"))
+        << "warning did not say what was missing:\n"
+        << recorder.getRecordedLogsAsString();
+}
+
+TEST(TestIngestorKernelHeuristic, DeclaredOrderRanksOnPriorityWhenNoHeuristicIsSupplied)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto lowPriorityId = testId(0x01);
+    const auto highPriorityId = testId(0x02);
+    // Declared low-first, so insertion order cannot make this pass. The block sizes
+    // differ and favour the loser, so a fallback that scored on kernel metadata instead
+    // of returning a constant would outrank priority and fail here.
+    catalog.entries
+        = {makeDefinition(lowPriorityId, 4096, 1), makeDefinition(highPriorityId, 64, 5)};
+
+    const auto heuristic = makeKernelHeuristic(std::nullopt);
+    const auto ranked = heuristic->rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, highPriorityId);
+}
+
+TEST(TestIngestorKernelHeuristic, DeclaredOrderFallsToKernelIdWhenPriorityTies)
+{
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto lowerId = testId(0x01);
+    const auto higherId = testId(0x02);
+    // Equal priority, declared higher-id first, block sizes differing and favouring the
+    // loser: only the id tie-break can produce the expected order, and any metadata-
+    // sensitive score would break it.
+    catalog.entries = {makeDefinition(higherId, 4096), makeDefinition(lowerId, 64)};
+
+    const auto heuristic = makeKernelHeuristic(std::nullopt);
+    const auto ranked = heuristic->rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 2U);
+    EXPECT_EQ(ranked.front().kernelId, lowerId);
+}
+
+TEST(TestIngestorKernelHeuristic, DeclaredOrderRanksEveryKernelEqually)
+{
+    // The fallback must contribute no ordering of its own: any score spread would
+    // outrank priority, which is the one signal an engine without a model still has.
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    const DeclaredOrderKernelHeuristic heuristic;
+
+    EXPECT_EQ(heuristic.score(makeDefinition(testId(0x01), 64), context),
+              heuristic.score(makeDefinition(testId(0x02), 4096), context));
 }
 
 } // namespace

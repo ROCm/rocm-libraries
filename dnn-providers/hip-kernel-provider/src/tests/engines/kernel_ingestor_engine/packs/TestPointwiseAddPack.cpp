@@ -81,7 +81,9 @@ TEST(TestPointwiseAddPack, EngineNamesItsHeuristicAndMetadataSchema)
 {
     const auto set = buildPointwiseAddDescriptorSet();
 
-    EXPECT_EQ(set.engine.heuristicId, set.heuristic.id);
+    ASSERT_TRUE(set.heuristic.has_value()) << "this pack ships a scorer";
+    ASSERT_TRUE(set.engine.heuristicId.has_value());
+    EXPECT_EQ(*set.engine.heuristicId, set.heuristic->id);
     EXPECT_EQ(set.engine.metadataSchemaId, set.schema.id);
 }
 

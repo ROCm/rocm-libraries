@@ -240,7 +240,9 @@ TEST(TestPointwiseSubPack, PackCrossReferencesResolveWithinTheDescriptorSet)
     const auto& pack = set.packs.front();
 
     EXPECT_EQ(pack.engineId, set.engine.id);
-    EXPECT_EQ(set.engine.heuristicId, set.heuristic.id);
+    ASSERT_TRUE(set.heuristic.has_value()) << "this pack ships a scorer";
+    ASSERT_TRUE(set.engine.heuristicId.has_value());
+    EXPECT_EQ(*set.engine.heuristicId, set.heuristic->id);
     EXPECT_EQ(set.engine.metadataSchemaId, set.schema.id);
 
     ASSERT_EQ(pack.matcherIds.size(), 2U);
@@ -262,8 +264,9 @@ TEST(TestPointwiseSubPack, SharesNoDescriptorIdWithTheAddPack)
     const auto add = buildPointwiseAddDescriptorSet();
     const auto sub = buildPointwiseSubDescriptorSet();
 
+    ASSERT_TRUE(add.heuristic.has_value());
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> addIds{
-        add.engine.id, add.schema.id, add.heuristic.id, add.packs.front().id};
+        add.engine.id, add.schema.id, add.heuristic->id, add.packs.front().id};
     for(const auto& matcher : add.matchers)
     {
         addIds.push_back(matcher.id);
@@ -277,8 +280,9 @@ TEST(TestPointwiseSubPack, SharesNoDescriptorIdWithTheAddPack)
         addIds.push_back(kernel.id);
     }
 
+    ASSERT_TRUE(sub.heuristic.has_value());
     std::vector<hipdnn_plugin_sdk::ingestor::DescriptorId> subIds{
-        sub.engine.id, sub.schema.id, sub.heuristic.id, sub.packs.front().id};
+        sub.engine.id, sub.schema.id, sub.heuristic->id, sub.packs.front().id};
     for(const auto& matcher : sub.matchers)
     {
         subIds.push_back(matcher.id);

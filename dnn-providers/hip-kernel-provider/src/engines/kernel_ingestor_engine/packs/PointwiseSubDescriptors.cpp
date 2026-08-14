@@ -75,9 +75,11 @@ hipdnn_plugin_sdk::ingestor::DescriptorSet buildPointwiseSubDescriptorSet()
     set.schema.fields = {{std::string(BLOCK_SIZE_FIELD), MetadataType::INT, int64_t{64}},
                          {std::string(DTYPE_FIELD), MetadataType::STRING, std::nullopt}};
 
-    set.heuristic.id = HEURISTIC_ID;
-    set.heuristic.name = "pointwise sub selector";
-    set.heuristic.payload = SCORE_SYMBOL;
+    HeuristicDescriptor heuristic;
+    heuristic.id = HEURISTIC_ID;
+    heuristic.name = "pointwise sub selector";
+    heuristic.payload = SCORE_SYMBOL;
+    set.heuristic = std::move(heuristic);
 
     set.engine.id = ENGINE_ID;
     set.engine.name = ENGINE_NAME;

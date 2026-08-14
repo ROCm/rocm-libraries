@@ -145,7 +145,9 @@ struct EngineDescriptor
 {
     DescriptorId id;
     std::string name;
-    DescriptorId heuristicId;
+    /// nullopt when the engine ships no UHD; selection then falls back to the
+    /// descriptor-declared order. Must equal `DescriptorSet::heuristic`'s id when set.
+    std::optional<DescriptorId> heuristicId;
     DescriptorId metadataSchemaId;
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
@@ -227,7 +229,9 @@ struct DescriptorSet
 {
     EngineDescriptor engine;
     MetadataSchema schema;
-    HeuristicDescriptor heuristic;
+    /// nullopt when this engine ships no ranking model; the generic engine then ranks
+    /// on `priority` then descriptor id. See makeKernelHeuristic().
+    std::optional<HeuristicDescriptor> heuristic;
     std::vector<MatchDescriptor> matchers;
     std::vector<DispatchDescriptor> dispatches;
     std::vector<KernelDescriptorPack> packs;

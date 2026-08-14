@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Catalog.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
@@ -86,16 +88,44 @@ private:
     ScoreFn _scoreFn;
 };
 
-/// @throws std::invalid_argument if @p descriptor names a kind with no adapter yet.
-inline std::shared_ptr<IKernelHeuristic> makeKernelHeuristic(const HeuristicDescriptor& descriptor)
+/// Used when an engine ships no UHD: scores every kernel alike, so rank()'s tie-break
+/// decides. That chain is already `priority` descending, then descriptor id ascending,
+/// which is the declared order — this adds no ordering rule of its own, it just
+/// declines to reorder. Ranking stays total and stable, so the absence of a model
+/// costs selection quality, never determinism.
+class DeclaredOrderKernelHeuristic : public IKernelHeuristic
 {
-    switch(descriptor.kind)
+public:
+    double score(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/) const override
+    {
+        return 0.0;
+    }
+};
+
+/// @param describedBy Engine named in the warning when @p descriptor is nullopt.
+/// @throws std::invalid_argument if @p descriptor names a kind with no adapter yet.
+inline std::shared_ptr<IKernelHeuristic>
+    makeKernelHeuristic(const std::optional<HeuristicDescriptor>& descriptor,
+                        const std::string& describedBy = {})
+{
+    if(!descriptor.has_value())
+    {
+        // Warn, not fail: an engine with no model still selects deterministically. The
+        // warning is the point -- it separates an engine that declares its order from
+        // one still waiting on a UHD, which otherwise look identical from the outside.
+        HIPDNN_PLUGIN_LOG_WARN("ingestor: " << (describedBy.empty() ? "engine" : describedBy)
+                                            << " ships no heuristic; ranking kernels by declared "
+                                               "order (priority, then descriptor id)");
+        return std::make_shared<DeclaredOrderKernelHeuristic>();
+    }
+
+    switch(descriptor->kind)
     {
     case HeuristicKind::NATIVE:
         return std::make_shared<NativeKernelHeuristic>(
-            descriptor.payload, describeDescriptor("heuristic", descriptor.name, descriptor.id));
+            descriptor->payload, describeDescriptor("heuristic", descriptor->name, descriptor->id));
     default:
-        throw std::invalid_argument("heuristic '" + toString(descriptor.id)
+        throw std::invalid_argument("heuristic '" + toString(descriptor->id)
                                     + "' names a kind with no adapter yet");
     }
 }
