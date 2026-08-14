@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 #include <map>
 #include <memory>
 #include <string>
@@ -50,13 +51,27 @@ public:
     {
     }
 
+    /// Declines on any error rather than propagating: engine enumeration walks every
+    /// engine in one loop, so a throw here would deny the caller the engines that would
+    /// have answered. Device resolution, matching, and the schema read can all throw.
     bool isApplicable(const THandle& handle, const IGraph& opGraph) const override
     {
-        if(!understandsGraph(opGraph))
+        try
         {
+            if(!understandsGraph(opGraph))
+            {
+                return false;
+            }
+            return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
+        }
+        catch(const std::exception& error)
+        {
+            HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
+                                    << _engine.name
+                                    << "' declined the graph: deciding applicability failed: "
+                                    << error.what());
             return false;
         }
-        return !_stateManager.unsortedDefinitions(contextFor(handle, opGraph)).empty();
     }
 
     bool understandsGraph(const IGraph& opGraph) const

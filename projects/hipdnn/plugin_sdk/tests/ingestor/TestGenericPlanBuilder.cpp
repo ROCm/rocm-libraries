@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -127,6 +128,57 @@ TEST(TestIngestorGenericPlanBuilder, IsApplicableFalseWhenTheGraphMatcherRejects
     const TestPlanBuilder builder(engine, *manager, resolver);
 
     const TestGraph graph(makeGraphId(0x91));
+
+    EXPECT_FALSE(builder.isApplicable(0, graph));
+}
+
+/// Fails the way HandleDeviceResolver does when hipGetDeviceProperties fails.
+class ThrowingDeviceResolver : public IDeviceResolver<TestHandle>
+{
+public:
+    DeviceId deviceId(const TestHandle& /*handle*/) const override
+    {
+        return 0;
+    }
+
+    const DeviceProperties& deviceProperties(DeviceId deviceId) const override
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "hipGetDeviceProperties failed for device "
+                                                           + std::to_string(deviceId));
+    }
+};
+
+bool throwingGraphMatcher(const MatchContext& /*context*/, BoundTokens& /*bound*/)
+{
+    throw std::runtime_error("a matcher threw while deciding applicability");
+}
+
+// isApplicable is called in a loop over every engine, so a throw here would deny the
+// caller the engines that would have answered. Both legs of the body can throw.
+TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenTheDeviceResolverThrows)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const ThrowingDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x92));
+
+    EXPECT_FALSE(builder.isApplicable(0, graph));
+}
+
+TEST(TestIngestorGenericPlanBuilder, IsApplicableDeclinesWhenAMatcherThrows)
+{
+    const ScopedSymbols symbols(
+        "test.graph", throwingGraphMatcher, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
+    const TestDeviceResolver resolver;
+    const TestPlanBuilder builder(engine, *manager, resolver);
+
+    const TestGraph graph(makeGraphId(0x93));
 
     EXPECT_FALSE(builder.isApplicable(0, graph));
 }
