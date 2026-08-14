@@ -52,6 +52,24 @@ enum class use
     Acc
 };
 
+// Structured-sparsity pattern of an operand: live values per group along K.
+//
+// n1of4 is a staging format -- one non-zero per group, what a depthwise diagonal
+// produces; n2of4 is what the sparse MFMA consumes.
+enum class sparsity : int
+{
+    n1of4 = 0x14, // live << 4 | group size
+    n2of4 = 0x24
+};
+constexpr auto live_per_group(sparsity s) -> int
+{
+    return static_cast<int>(s) >> 4;
+}
+constexpr auto sparsity_group_size(sparsity s) -> int
+{
+    return static_cast<int>(s) & 0xF;
+}
+
 enum class wmma_flag : uint32_t
 {
     A_reuse = 1,
@@ -131,6 +149,15 @@ constexpr auto ilog2(T x) -> T
         x >>= 1;
     }
     return l;
+}
+
+template <std::integral T>
+constexpr auto next_power_of_two(T x) -> T
+{
+    int y = 1;
+    while(y < x)
+        y *= 2;
+    return y;
 }
 
 template <typename F, int... Is>
@@ -844,6 +871,21 @@ __device__ static void prefetch_matrix(int wave, T const* base, int64_t stride)
     });
 }
 
+// Sets the mma walk order reuse priority
+enum class reuse_priority
+{
+    a, // Prioritize A-reuse
+    b, // Prioritize B-reuse
+    c, // Prioritize C-reuse
+};
+
+// Sets the mma walk order method
+enum class walk_order
+{
+    linear, // Standard triple-nested-loop order
+    gray,   // Trips are only 1 bit flip apart according to Gray code
+};
+
 namespace detail
 {
 template <typename D, typename A, typename B, typename C>
@@ -862,100 +904,183 @@ __device__ void mma_assert()
     static_assert(C::matrix::cols == B::matrix::cols && C::col_blocks == B::col_blocks);
     static_assert(A::matrix::cols == B::matrix::rows && A::col_blocks == B::row_blocks);
 }
+
+template <int Mb, int Nb, int Kb, int Mb_up, int Nb_up, int Kb_up, reuse_priority priority>
+struct mma_trip
+{
+    int mb, nb, kb;
+    uint32_t reuse;
+
+    static __device__ constexpr auto to3d(int j) -> mma_trip
+    {
+        if constexpr(priority == reuse_priority::c)
+        {
+            const int kb = j % Kb_up;
+            const int mb = j / Kb_up % Mb_up;
+            const int nb = j / (Kb_up * Mb_up);
+            return {mb, nb, kb, 0};
+        }
+        else if constexpr(priority == reuse_priority::a)
+        {
+            const int nb = j % Nb_up;
+            const int mb = j / Nb_up % Mb_up;
+            const int kb = j / (Mb_up * Nb_up);
+            return {mb, nb, kb, 0};
+        }
+        const int mb = j % Mb_up;
+        const int nb = j / Mb_up % Nb_up;
+        const int kb = j / (Mb_up * Nb_up);
+        return {mb, nb, kb, 0};
+    }
+
+    static __device__ constexpr auto from_linear(int j_1, int j) -> mma_trip
+    {
+        auto p_1       = to3d(j_1);
+        auto p         = to3d(j);
+        uint32_t reuse = 0;
+        if(j_1 >= 0 && p.kb == p_1.kb)
+        {
+            if(p.mb == p_1.mb)
+                reuse |= static_cast<uint32_t>(wmma_flag::A_reuse);
+            if(p.nb == p_1.nb)
+                reuse |= static_cast<uint32_t>(wmma_flag::B_reuse);
+        }
+        return {p.mb, p.nb, p.kb, reuse};
+    }
+
+    __device__ constexpr auto in_bounds() const -> bool { return mb < Mb && nb < Nb && kb < Kb; }
+    static __device__ constexpr auto count() -> int { return Mb_up * Nb_up * Kb_up; }
+};
+
+template <typename Trip, int I, int N, int PrevGray, int Gray, typename F>
+__device__ constexpr void gray_walk_order_helper(F&& f)
+{
+    if constexpr(I < N)
+    {
+        constexpr auto p = Trip::from_linear(PrevGray, Gray);
+        if(p.in_bounds())
+            f(std::integral_constant<Trip, p>());
+        constexpr auto prev_gray = p.in_bounds() ? Gray : PrevGray;
+        // Cf. https://stackoverflow.com/questions/17490431/gray-code-increment-function
+        constexpr int next_gray = [] {
+            if constexpr(I % 2 == 0)
+            {
+                return Gray ^ 1;
+            }
+            constexpr int h = Gray & ~(Gray - 1);
+            return Gray ^ (h << 1);
+        }();
+        gray_walk_order_helper<Trip, I + 1, N, prev_gray, next_gray>(std::forward<F>(f));
+    }
+}
+template <typename Trip, int N, typename F>
+__device__ constexpr void gray_walk_order(F&& f)
+{
+    gray_walk_order_helper<Trip, 0, N, -1, 0>(std::forward<F>(f));
+}
+
+
+template <int Mb, int Nb, int Kb, walk_order order, reuse_priority priority, typename F>
+__device__ void mma_walk(F&& f)
+{
+    if constexpr(order == walk_order::gray)
+    {
+        constexpr int Mb_up = next_power_of_two(Mb);
+        constexpr int Nb_up = next_power_of_two(Nb);
+        constexpr int Kb_up = next_power_of_two(Kb);
+        using trip          = detail::mma_trip<Mb, Nb, Kb, Mb_up, Nb_up, Kb_up, priority>;
+        detail::gray_walk_order<trip, trip::count()>([&](auto p) {
+            f(p);
+            __builtin_amdgcn_sched_group_barrier(0x8, 1, 0);
+        });
+    }
+    else
+    {
+        using trip = detail::mma_trip<Mb, Nb, Kb, Mb, Nb, Kb, priority>;
+        static_unroll<trip::count()>([&](auto j) {
+            constexpr auto p = trip::from_linear(j - 1, j);
+            f(std::integral_constant<trip, p>());
+            __builtin_amdgcn_sched_group_barrier(0x8, 1, 0);
+        });
+    }
+}
+
+constexpr auto default_walk_order     = walk_order::linear;
+constexpr auto default_reuse_priority = reuse_priority::b;
 } // namespace detail
 
-template <typename D, typename A, typename B, typename C>
+template <walk_order order        = detail::default_walk_order,
+          reuse_priority priority = detail::default_reuse_priority,
+          typename D,
+          typename A,
+          typename B,
+          typename C>
 __device__ void mma(D& d, A& a, B& b, C& c)
 {
     detail::mma_assert<D, A, B, C>();
 
-    using arch                 = A::matrix::arch;
-    constexpr uint32_t b_reuse = static_cast<uint32_t>(wmma_flag::B_reuse);
+    using arch = A::matrix::arch;
 
-#pragma unroll
-    for(int nb = 0; nb < C::col_blocks; ++nb)
-    {
-#pragma unroll
-        for(int kb = 0; kb < A::col_blocks; ++kb)
-        {
-            arch::template mma<>::wmma(
-                d.block(0, nb), a.block(0, kb), b.block(kb, nb), c.block(0, nb));
-#pragma unroll
-            for(int mb = 1; mb < C::row_blocks; ++mb)
-            {
-                arch::template mma<b_reuse>::wmma(
-                    d.block(mb, nb), a.block(mb, kb), b.block(kb, nb), c.block(mb, nb));
-            }
-        }
-    }
+    detail::mma_walk<C::row_blocks, C::col_blocks, A::col_blocks, order, priority>([&](auto p) {
+        arch::template mma<p().reuse>::wmma(d.block(p().mb, p().nb),
+                                            a.block(p().mb, p().kb),
+                                            b.block(p().kb, p().nb),
+                                            c.block(p().mb, p().nb));
+    });
 }
 
-template <typename C, typename A, typename B>
+template <walk_order order        = detail::default_walk_order,
+          reuse_priority priority = detail::default_reuse_priority,
+          typename C,
+          typename A,
+          typename B>
 __device__ void mma(C& c, A& a, B& b)
 {
     detail::mma_assert<C, A, B, C>();
 
-    using arch                 = A::matrix::arch;
-    constexpr uint32_t b_reuse = static_cast<uint32_t>(wmma_flag::B_reuse);
+    using arch = A::matrix::arch;
+
+    static_assert(order == walk_order::linear, "Gray walk order unsupported for zero init");
 
     auto zero = typename C::matrix{};
-#pragma unroll
-    for(int nb = 0; nb < C::col_blocks; ++nb)
-    {
-        arch::template mma<>::wmma(c.block(0, nb), a.block(0, 0), b.block(0, nb), zero);
-#pragma unroll
-        for(int mb = 1; mb < C::row_blocks; ++mb)
+    detail::mma_walk<C::row_blocks, C::col_blocks, A::col_blocks, order, priority>([&](auto p) {
+        if constexpr(p().kb == 0)
         {
-            arch::template mma<b_reuse>::wmma(
-                c.block(mb, nb), a.block(mb, 0), b.block(0, nb), zero);
+            arch::template mma<p().reuse>::wmma(
+                c.block(p().mb, p().nb), a.block(p().mb, p().kb), b.block(p().kb, p().nb), zero);
         }
-#pragma unroll
-        for(int kb = 1; kb < A::col_blocks; ++kb)
+        else
         {
-            arch::template mma<>::wmma(
-                c.block(0, nb), a.block(0, kb), b.block(kb, nb), c.block(0, nb));
-#pragma unroll
-            for(int mb = 1; mb < C::row_blocks; ++mb)
-            {
-                arch::template mma<b_reuse>::wmma(
-                    c.block(mb, nb), a.block(mb, kb), b.block(kb, nb), c.block(mb, nb));
-            }
+            arch::template mma<p().reuse>::wmma(c.block(p().mb, p().nb),
+                                                a.block(p().mb, p().kb),
+                                                b.block(p().kb, p().nb),
+                                                c.block(p().mb, p().nb));
         }
-    }
+    });
 }
 
-template <typename D, typename A, typename B, typename C, typename AScale, typename BScale>
+template <walk_order order        = detail::default_walk_order,
+          reuse_priority priority = detail::default_reuse_priority,
+          typename D,
+          typename A,
+          typename B,
+          typename C,
+          typename AScale,
+          typename BScale>
 __device__ void mma_scale(D& d, A& a, B& b, C& c, AScale& ascale, BScale& bscale)
 {
     detail::mma_assert<D, A, B, C>();
 
     using arch = A::matrix::arch;
 
-#pragma unroll
-    for(int nb = 0; nb < C::col_blocks; ++nb)
-    {
-#pragma unroll
-        for(int kb = 0; kb < A::col_blocks; ++kb)
-        {
-            arch::template mma<>::wmma_scale(d.block(0, nb),
-                                             a.block(0, kb),
-                                             b.block(kb, nb),
-                                             c.block(0, nb),
-                                             ascale.block(0, kb),
-                                             bscale.block(kb, nb));
-#pragma unroll
-            for(int mb = 1; mb < C::row_blocks; ++mb)
-            {
-                constexpr uint32_t flags = static_cast<uint32_t>(wmma_flag::A_reuse);
-                arch::template mma<flags>::wmma_scale(d.block(mb, nb),
-                                                      a.block(mb, kb),
-                                                      b.block(kb, nb),
-                                                      c.block(mb, nb),
-                                                      ascale.block(mb, kb),
-                                                      bscale.block(kb, nb));
-            }
-        }
-    }
+    detail::mma_walk<C::row_blocks, C::col_blocks, A::col_blocks, order, priority>([&](auto p) {
+        arch::template mma<p().reuse>::wmma_scale(d.block(p().mb, p().nb),
+                                                  a.block(p().mb, p().kb),
+                                                  b.block(p().kb, p().nb),
+                                                  c.block(p().mb, p().nb),
+                                                  ascale.block(p().mb, p().kb),
+                                                  bscale.block(p().kb, p().nb));
+    });
 }
 
 } // namespace bunnies

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "bunnies.hpp"
+#include "detail.h"
 
 #include <type_traits>
 
@@ -30,10 +31,21 @@ struct arch_cdna4
             return {x[0] / 16 * 16 ^ x[1] / 16 * 64 ^ x[1] % 16, x[0] % 16};
         }
     };
+    // 16-deep A, reached as the compressed base of the 1:4 staging operand: one 2-VGPR
+    // block, so a lane-group holds a run of 4.
+    template <fpfmt Fmt>
+    requires(is_16bit<Fmt>) struct map_fun<Fmt, 16, 16, use::A>
+    {
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return {x[0] % 16, x[0] / 16 * 4 ^ x[1]};
+        }
+    };
     template <fpfmt Fmt>
     requires(is_16bit<Fmt>) struct map_fun<Fmt, 16, 32, use::A>
     {
-        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        __device__ __host__ static constexpr auto
+        map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] % 16, x[0] / 16 * 8 ^ x[1]};
         }
@@ -41,9 +53,20 @@ struct arch_cdna4
     template <fpfmt Fmt>
     requires(is_16bit<Fmt>) struct map_fun<Fmt, 32, 16, use::B>
     {
-        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        __device__ __host__ static constexpr auto
+        map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return {x[0] / 16 * 8 ^ x[1], x[0] % 16};
+        }
+    };
+    // smfmac_16x16x64 B (CDNA4 ISA 7.5.1.3): two stacked 32-deep halves, each laid out
+    // like the dense 32x16 operand -- k = 32*(item/8) + 8*(L/16) + item%8, n = L%16.
+    template <fpfmt Fmt>
+    requires(is_16bit<Fmt>) struct map_fun<Fmt, 64, 16, use::B>
+    {
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return {x[1] / 8 * 32 ^ x[0] / 16 * 8 ^ x[1] % 8, x[0] % 16};
         }
     };
     template <fpfmt Fmt>
@@ -77,11 +100,99 @@ struct arch_cdna4
         using storage_t      = storage_type_t<fmt, num_items>;
         storage_t data;
 
-        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        __device__ __host__ static constexpr auto
+        map(std::array<int, 2> const& x) -> std::array<int, 2>
         {
             return map_fun<Fmt, Rows, Cols, Use>::map(x);
         }
     };
+
+    // A structured-sparse operand: compressed values plus their sparsity index.
+    //
+    // Storage is the dense compressed matrix (K scaled by the compression ratio), while
+    // rows/cols advertise the logical shape. `idx` follows the smfmac Src2 encoding: one
+    // nibble per group, holding the 2-bit in-group position of each of its live slots.
+    // The 1:4 staging form keeps that nibble spacing, so the cast to 2:4 copies it as is.
+    template <fpfmt Fmt, int Rows, int Cols, use Use, sparsity Sprs>
+    struct sparse_matrix
+        : private matrix<Fmt, Rows, Cols * live_per_group(Sprs) / sparsity_group_size(Sprs), Use>
+    {
+        static constexpr int live_per_grp    = live_per_group(Sprs);
+        static constexpr int group_size      = sparsity_group_size(Sprs);
+        static constexpr int compressed_cols = Cols * live_per_grp / group_size;
+        using base                           = matrix<Fmt, Rows, compressed_cols, Use>;
+        static constexpr int cols            = Cols;
+
+        using base::data;
+        using base::fmt;
+        using base::num_items;
+        using typename base::arch;
+        using typename base::base_storage_t;
+
+        uint32_t idx;
+
+        // (lane,item) -> (row, compressed col): the compressed matrix's own layout, so
+        // load_tile / store_tile drive a sparse tile exactly like a dense one. The
+        // logical column additionally needs the index field; see to_logical.
+        __device__ static constexpr auto map(std::array<int, 2> const& x) -> std::array<int, 2>
+        {
+            return base::map(x);
+        }
+
+        // In-group position of compressed item `item`.
+        //
+        // Position fields sit at a fixed group_size / live_per_grp bit stride: 2 for 2:4
+        // (both slots share a nibble), 4 for 1:4 (one slot leaves its nibble half empty).
+        __device__ auto position(int item) const -> int
+        {
+            return (idx >> (group_size / live_per_grp * item)) & 3;
+        }
+
+        // (lane,item) -> logical (row, col), i.e. `map` composed with the index.
+        __device__ auto to_logical(std::array<int, 2> const& x) const -> std::array<int, 2>
+        {
+            const auto coord = map(x);
+            return {coord[0], coord[1] / live_per_grp * group_size + position(x[1])};
+        }
+
+        // Fill every compressed slot, map-driven like load_tile.
+        //
+        // `pos(row, group)` picks the live position within the group; `value` then
+        // supplies the element at the resulting logical coordinate.
+        template <typename Pos, typename Value>
+        __device__ void fill(Pos&& pos, Value&& value)
+        {
+            static_assert(Sprs == sparsity::n1of4, "fill places one live value per group");
+            const int lane = lane_id();
+            idx            = 0;
+            static_for<base::num_items>([&]<int item>() {
+                const auto coord = map({lane, item});
+                const int p      = pos(coord[0], coord[1]);
+                idx |= p << (4 * item);
+                this->data[item] = value(coord[0], coord[1] * group_size + p);
+            });
+        }
+    };
+
+    // 1:4 -> 2:4: spread each live value into the even slot of its 2:4 slot pair.
+    //
+    // Lane-local by construction (the 1:4 layout is the 2:4 one pulled back along
+    // item -> 2*item) and the nibble spacing matches, so the index copies verbatim.
+    // The zero padding slot keeps position 0, which may name the same dense column as
+    // the live slot; harmless because its value is zero.
+    template <fpfmt Fmt, int Rows, int Cols, use Use>
+    inline __device__ static void
+    matrix_cast(sparse_matrix<Fmt, Rows, Cols, Use, sparsity::n2of4>& dest,
+                sparse_matrix<Fmt, Rows, Cols, Use, sparsity::n1of4> const& src)
+    {
+        using src_t  = sparse_matrix<Fmt, Rows, Cols, Use, sparsity::n1of4>;
+        using elem_t = base_storage_type_t<Fmt>;
+        static_for<src_t::num_items>([&]<int item>() {
+            dest.data[2 * item]     = src.data[item];
+            dest.data[2 * item + 1] = elem_t(0);
+        });
+        dest.idx = src.idx;
+    }
 
     template <fpfmt Fmt>
     requires(is_16bit<Fmt>) inline __device__
@@ -122,6 +233,31 @@ struct arch_cdna4
         }
     };
 
+    // 2:4 structured-sparse MFMA (V_SMFMAC_F32_16X16X64).
+    //
+    // A is a compressed sparse operand carrying its own sparsity index; B is the
+    // dense 64x16 operand; D/C are 16x16. Only n2of4 is accepted, so a 1:4 staging
+    // operand has to pass through matrix_cast first.
+    struct smma
+    {
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    sparse_matrix<fpfmt::e5m10, 16, 64, use::A, sparsity::n2of4>& a,
+                                    matrix<fpfmt::e5m10, 64, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_smfmac_f32_16x16x64_f16(
+                a.data, b.data, c.data, static_cast<int>(a.idx), 0, 0);
+        }
+        __device__ static void wmma(matrix<fpfmt::e8m23, 16, 16, use::Acc>& d,
+                                    sparse_matrix<fpfmt::e8m7, 16, 64, use::A, sparsity::n2of4>& a,
+                                    matrix<fpfmt::e8m7, 64, 16, use::B>& b,
+                                    matrix<fpfmt::e8m23, 16, 16, use::Acc>& c)
+        {
+            d.data = __builtin_amdgcn_smfmac_f32_16x16x64_bf16(
+                a.data, b.data, c.data, static_cast<int>(a.idx), 0, 0);
+        }
+    };
+
     template <typename T>
     __device__ static auto make_buffer(T* global_ptr, int64_t global_size) -> buffer_t
     {
@@ -139,17 +275,26 @@ struct arch_cdna4
         {
             if constexpr(BytesPerLane == 16)
             {
+                // Guarded here, not at the calling kernel: the literal size is checked
+                // when this template is defined, so `if constexpr` does not hide it.
+#ifdef __gfx950__
                 __builtin_amdgcn_raw_ptr_buffer_load_lds(
                     buffer, lds_ptr, 16, v_offset, s_offset, 0, 0);
+#endif
             }
             else if constexpr(BytesPerLane == 4)
             {
                 __builtin_amdgcn_raw_ptr_buffer_load_lds(
                     buffer, lds_ptr, 4, v_offset, s_offset, 0, 0);
             }
+            else if constexpr(BytesPerLane == 2)
+            {
+                __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    buffer, lds_ptr, 2, v_offset, s_offset, 0, 0);
+            }
             else
             {
-                static_assert(false, "BytesPerLane must be 4 or 16");
+                static_assert(false, "BytesPerLane must be 2, 4, or 16");
             }
         }
     };
@@ -196,6 +341,52 @@ struct arch_cdna4
         }
     };
 
+    // Symmetric to buffer_store: a raw buffer (V#) load dispatched on per-lane byte
+    // width, writing the result into `dest`.
+    //
+    // Buffer addressing gives free hardware bounds checking (OOB lanes read 0).
+    template <int BytesPerLane>
+    struct buffer_load
+    {
+        __device__ static void load(buffer_t buffer, void* dest, int v_offset, int s_offset)
+        {
+            if constexpr(BytesPerLane == 16)
+            {
+                *static_cast<uint32x4*>(dest) =
+                    __builtin_amdgcn_raw_buffer_load_b128(buffer, v_offset, s_offset, 0);
+            }
+            else if constexpr(BytesPerLane == 12)
+            {
+                *static_cast<uint32x3*>(dest) =
+                    __builtin_amdgcn_raw_buffer_load_b96(buffer, v_offset, s_offset, 0);
+            }
+            else if constexpr(BytesPerLane == 8)
+            {
+                *static_cast<uint32x2*>(dest) =
+                    __builtin_amdgcn_raw_buffer_load_b64(buffer, v_offset, s_offset, 0);
+            }
+            else if constexpr(BytesPerLane == 4)
+            {
+                *static_cast<uint32_t*>(dest) =
+                    __builtin_amdgcn_raw_buffer_load_b32(buffer, v_offset, s_offset, 0);
+            }
+            else if constexpr(BytesPerLane == 2)
+            {
+                *static_cast<uint16_t*>(dest) =
+                    __builtin_amdgcn_raw_buffer_load_b16(buffer, v_offset, s_offset, 0);
+            }
+            else if constexpr(BytesPerLane == 1)
+            {
+                *static_cast<uint8_t*>(dest) =
+                    __builtin_amdgcn_raw_buffer_load_b8(buffer, v_offset, s_offset, 0);
+            }
+            else
+            {
+                static_assert(false, "BytesPerLane must be 1, 2, 4, 8, 12, or 16.");
+            }
+        }
+    };
+
     template <int BytesPerLane>
     struct global_or_ds_load
     {
@@ -227,7 +418,7 @@ struct arch_cdna4
     {
         using type                         = int16x4;
         static constexpr int bits_per_load = 64;
-        inline __device__ static auto
+        inline __device__ __host__ static constexpr auto
         map(int lane, int item, int bits_per_item) -> std::array<int, 2>
         {
             const auto num_items = bits_per_load / bits_per_item;
@@ -291,10 +482,10 @@ struct arch_cdna4
     static constexpr uint16_t max_vmcnt   = 63;
     static constexpr uint16_t max_lgkmcnt = 15;
     static constexpr uint16_t max_expcnt  = 7;
-    // SIMM16[3:0] = vmcount (vector memory operations) lower bits [3:0],
-    // SIMM16[6:4] = export/mem-write-data count,
-    // SIMM16[11:8] = LGKMcnt (scalar-mem/GDS/LDS count),
-    // SIMM16[15:14] = vmcount (vector memory operations) upper bits [5:4].
+    // Pack a waitcnt SIMM16 from separate vm/lgkm/exp counts.
+    //
+    // SIMM16[3:0] = vmcount low bits, [6:4] = export/mem-write count,
+    // [11:8] = LGKMcnt (scalar-mem/GDS/LDS), [15:14] = vmcount high bits.
     inline __device__ static constexpr auto makecnt(uint16_t vmcnt   = max_vmcnt,
                                                     uint16_t lgkmcnt = max_lgkmcnt,
                                                     uint16_t expcnt  = max_expcnt) -> uint16_t

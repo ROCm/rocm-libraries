@@ -1,6 +1,6 @@
-EMU version: v0.1.2-0-gd24b588
-EMU commit: d24b5885b9724a3fe43979a0e6ff19f0702b5628
-Snapshot date: 2026-07-24
+EMU version: v0.2.0-0-g015d54e
+EMU commit: 015d54e5aeff053690d402ca9226fd5dee69afa5
+Snapshot date: 2026-08-14
 Arches: cdna3,cdna4,cdna5
 Files:
   ./.clang-format
@@ -17,10 +17,16 @@ Files:
   ./src/algorithm.h
   ./src/algorithm_registry.hpp.in
   ./src/arch/cdna3/CMakeLists.txt
+  ./src/arch/cdna3/depthwise_backend.cpp
   ./src/arch/cdna3/direct_backend.cpp
   ./src/arch/cdna3/grouped_backend.cpp
   ./src/arch/cdna4/bunnies_cdna4.hpp
   ./src/arch/cdna4/CMakeLists.txt
+  ./src/arch/cdna4/depthwise_backend.cpp
+  ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/config_table.h
+  ./src/arch/cdna4/depthwise/depthwise_1d_toeplitz/kernel.h
+  ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/config_table.h
+  ./src/arch/cdna4/depthwise/depthwise_2d_toeplitz/kernel.h
   ./src/arch/cdna4/direct_backend.cpp
   ./src/arch/cdna4/direct/direct/config.hpp
   ./src/arch/cdna4/direct/direct/config_matcher.cpp
@@ -45,6 +51,21 @@ Files:
   ./src/arch/cdna4/direct/direct_l1/wave_compute_index.h
   ./src/arch/cdna4/direct/direct_l1/weights_layout.h
   ./src/arch/cdna4/direct/direct_l1/weights_loader.h
+  ./src/arch/cdna4/direct/direct_wgrad/config_desc.cpp
+  ./src/arch/cdna4/direct/direct_wgrad/config_desc.h
+  ./src/arch/cdna4/direct/direct_wgrad/config.h
+  ./src/arch/cdna4/direct/direct_wgrad/config_table.h
+  ./src/arch/cdna4/direct/direct_wgrad/epilogue.h
+  ./src/arch/cdna4/direct/direct_wgrad/grid.h
+  ./src/arch/cdna4/direct/direct_wgrad/kernel.h
+  ./src/arch/cdna4/direct/direct_wgrad/lds_layout.h
+  ./src/arch/cdna4/direct/direct_wgrad/main_loop.h
+  ./src/arch/cdna4/direct/direct_wgrad/operand_loader.h
+  ./src/arch/cdna4/direct/direct_wgrad/perf_model.h
+  ./src/arch/cdna4/direct/direct_wgrad/prologue.h
+  ./src/arch/cdna4/direct/direct_wgrad/row_loader.h
+  ./src/arch/cdna4/direct/direct_wgrad/row_schedule.h
+  ./src/arch/cdna4/direct/direct_wgrad/workgroup_tiles.h
   ./src/arch/cdna4/grouped_backend.cpp
   ./src/arch/cdna4/grouped/grouped_16c.cpp
   ./src/arch/cdna4/grouped/grouped_16c_wgrad_fp16bf16.cpp
@@ -63,8 +84,11 @@ Files:
   ./src/arch/cdna4/persistent_grid.h
   ./src/arch/cdna5/bunnies_mi400.hpp
   ./src/arch/cdna5/CMakeLists.txt
+  ./src/arch/cdna5/depthwise_backend.cpp
   ./src/arch/cdna5/direct_backend.cpp
   ./src/arch/cdna5/direct/config.hpp
+  ./src/arch/cdna5/direct/config_matcher.cpp
+  ./src/arch/cdna5/direct/config_matcher.hpp
   ./src/arch/cdna5/direct/config_table.hpp
   ./src/arch/cdna5/direct/kernel.hpp
   ./src/arch/cdna5/grouped_backend.cpp
@@ -84,12 +108,15 @@ Files:
   ./src/conv_kernel.cpp
   ./src/conv_kernel.h
   ./src/conv_kernel_table.h
+  ./src/depthwise_algorithm_stub.h
+  ./src/depthwise_conv_kernel.h
   ./src/detail.h
   ./src/direct_algorithm_stub.h
   ./src/direct_conv_kernel.h
   ./src/grouped_algorithm_stub.h
   ./src/grouped_conv_kernel.h
   ./src/hip_util.h
+  ./src/j_to_hnw.hpp
   ./src/kv_descriptor.cpp
   ./src/kv_descriptor.h
   ./src/launch_params.h

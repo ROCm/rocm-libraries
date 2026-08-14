@@ -257,9 +257,15 @@ public:
             const int dest = lds_base_ + tic * LdsLayout::tic_stride + row * LdsLayout::h_stride;
 
             // EXEC-mask off out-of-tile lanes; the load still counts once toward vmcnt.
+            //
+            // Guarded here, not at the calling kernel: sizeof(Vector) is constant,
+            // so the size is checked when this template is defined.
+
+#ifdef __gfx950__
             if(lane_in_tile_)
                 __builtin_amdgcn_raw_ptr_buffer_load_lds(
                     input_rsrc_, &input_lds_[dest], sizeof(Vector), voffset, soffset, 0, 0);
+#endif
         }
     }
 

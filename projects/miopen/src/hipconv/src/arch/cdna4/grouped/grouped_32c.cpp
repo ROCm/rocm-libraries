@@ -351,8 +351,10 @@ __device__ void conv2d_grouped_32c_cdna4_nhwc_impl(const ToType<DT>* __restrict_
 
         for(int j = tid; j < WEIGHT_LDS_SIZE_UINT4; j += cfg.block_size())
         {
+#ifdef __gfx950__
             __builtin_amdgcn_raw_ptr_buffer_load_lds(
                 weight_rsrc, &lds_buf[j], 16, voffset_base + j * sizeof(uint4), 0, 0, 0);
+#endif
         }
 
         wait_vmcnt<0>();
@@ -810,27 +812,33 @@ __global__ void conv2d_grouped_32c_nhwc_cdna4(const ToType<DT>* __restrict__ in,
                                               int py,
                                               int px)
 {
-    conv2d_grouped_32c_cdna4_nhwc_impl<cfg, DT>(in,
-                                                wei,
-                                                alpha,
-                                                beta,
-                                                out,
-                                                N,
-                                                groups,
-                                                c_per_group,
-                                                k_per_group,
-                                                hi,
-                                                wi,
-                                                ho,
-                                                wo,
-                                                fy,
-                                                fx,
-                                                sy,
-                                                sx,
-                                                dy,
-                                                dx,
-                                                py,
-                                                px);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_raw_ptr_buffer_load_lds) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
+    {
+        conv2d_grouped_32c_cdna4_nhwc_impl<cfg, DT>(in,
+                                                    wei,
+                                                    alpha,
+                                                    beta,
+                                                    out,
+                                                    N,
+                                                    groups,
+                                                    c_per_group,
+                                                    k_per_group,
+                                                    hi,
+                                                    wi,
+                                                    ho,
+                                                    wo,
+                                                    fy,
+                                                    fx,
+                                                    sy,
+                                                    sx,
+                                                    dy,
+                                                    dx,
+                                                    py,
+                                                    px);
+    }
 }
 
 template <Config cfg>

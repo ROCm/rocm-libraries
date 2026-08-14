@@ -11,6 +11,8 @@
 
 #include <hip/hip_runtime.h>
 
+#include <cstddef>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,13 +48,24 @@ HIPCONV_API std::optional<ArchHandle> resolve_arch(std::string_view name);
 // codes in the future.
 using hipconvError_t = hipError_t;
 
+// How many ranked configs survive a merge, at every level of it.
+inline constexpr std::size_t MAX_RANKED_CONFIGS = 8;
+
+// Keeps every matching config, for a caller that selects by index or by descriptor.
+inline constexpr std::size_t ALL_RANKED_CONFIGS = std::numeric_limits<std::size_t>::max();
+
 // All valid kernels for the given params, best first. Empty if unsupported.
-HIPCONV_API std::vector<ConvKernelHandle> get_valid_configs(ArchHandle arch,
-                                                            const Conv2dParams& par);
+HIPCONV_API std::vector<ConvKernelHandle>
+get_valid_configs(ArchHandle arch,
+                  const Conv2dParams& par,
+                  std::size_t max_ranked = MAX_RANKED_CONFIGS);
 
 // All valid kernels for the given params and algorithm.
 HIPCONV_API std::vector<ConvKernelHandle>
-get_valid_configs(ArchHandle arch, const Conv2dParams& par, Algorithm algo);
+get_valid_configs(ArchHandle arch,
+                  const Conv2dParams& par,
+                  Algorithm algo,
+                  std::size_t max_ranked = MAX_RANKED_CONFIGS);
 
 // Best kernel, or nullopt if unsupported.
 HIPCONV_API std::optional<ConvKernelHandle> find_config(ArchHandle arch, const Conv2dParams& par);

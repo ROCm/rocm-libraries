@@ -31,11 +31,24 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(GpuArch)
 
 set(HIPCONV_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
-hipconv_make_logical_to_gpu("${CMAKE_HIP_ARCHITECTURES}" HIPCONV_LOGICAL_TO_GPU)
 
+# Experimental cdna4 depthwise 2D patch-Toeplitz kernel; off by default since it never
+# wins the auto-pick.
+#
+# ON compiles it back in so its configs stay reachable via --config / the tuner. Must
+# precede the arch subdirectories, since hipconv_add_arch_lib reads it.
+option(HIPCONV_ENABLE_CDNA4_DW_2D_TOEPLITZ
+    "Build the experimental cdna4 depthwise 2D patch-Toeplitz kernel (slower than 1D; not auto-selected)" OFF)
+
+# Every arch in the tree is built, whatever this build targets: the set of arch
+# directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
 set(_arch_targets "")
 foreach(_arch_dir IN LISTS _hipconv_arch_directories)
+    # Skip tooling directories; an arch declares itself with a CMakeLists.
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_arch_dir}/CMakeLists.txt")
+        continue()
+    endif()
     add_subdirectory(${_arch_dir})
     get_property(_targets DIRECTORY ${_arch_dir} PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_target IN LISTS _targets)
@@ -46,7 +59,7 @@ foreach(_arch_dir IN LISTS _hipconv_arch_directories)
     endforeach()
 endforeach()
 if(NOT _arch_targets)
-    message(FATAL_ERROR "hipconv: no matching architecture found")
+    message(FATAL_ERROR "hipconv: no architectures found under src/arch")
 endif()
 
 # ---- hipconv static library ----
