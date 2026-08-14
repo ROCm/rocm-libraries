@@ -111,6 +111,11 @@ namespace
         setenv("HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE", "0", 1);
         setenv("HIPBLASLT_TUNING_SCRATCH_MAX_BYTES", "1073741824", 1);
 
+        // Left at the shipping default so the flush path is exercised, but the
+        // per-device calibration burst is the dominant cost at these tiny
+        // iteration counts, so it is measured once and reused across tests.
+        setenv("HIPBLASLT_TUNING_FLUSH_ICACHE", "1", 1);
+
         // Large enough to rotate over several blocks rather than collapsing to
         // one. runGemm asks for a 32 MiB workspace, and the workspace is part of
         // the per-block footprint, so a budget below that silently disables
@@ -180,10 +185,12 @@ namespace
             {
                 const std::vector<uint16_t> onesA(static_cast<size_t>(m * k), halfBits(1.0f));
                 const std::vector<uint16_t> onesB(static_cast<size_t>(k * n), halfBits(1.0f));
-                ok = hipMemcpy(dA, onesA.data(), onesA.size() * sizeof(uint16_t),
-                               hipMemcpyHostToDevice)
+                ok = hipMemcpy(
+                         dA, onesA.data(), onesA.size() * sizeof(uint16_t), hipMemcpyHostToDevice)
                          == hipSuccess
-                     && hipMemcpy(dB, onesB.data(), onesB.size() * sizeof(uint16_t),
+                     && hipMemcpy(dB,
+                                  onesB.data(),
+                                  onesB.size() * sizeof(uint16_t),
                                   hipMemcpyHostToDevice)
                             == hipSuccess;
             }
@@ -254,10 +261,7 @@ namespace
                 if(ok && verifyFirst)
                 {
                     uint16_t first = 0;
-                    ok = hipMemcpy(&first,
-                                   inPlace ? dC : dD,
-                                   sizeof(first),
-                                   hipMemcpyDeviceToHost)
+                    ok = hipMemcpy(&first, inPlace ? dC : dD, sizeof(first), hipMemcpyDeviceToHost)
                              == hipSuccess
                          && first == 0x4000;
                 }
@@ -366,12 +370,18 @@ namespace
         {
             hipblasLtMatmulHeuristicResult_t heuristic[1];
             int                              returned = 0;
-            const bool                       gotAlgo
-                = hipblasLtMatmulAlgoGetHeuristic(
-                      handle, desc, layoutA, layoutB, layoutD, layoutD, pref, 1, heuristic,
-                      &returned)
-                      == HIPBLAS_STATUS_SUCCESS
-                  && returned > 0;
+            const bool                       gotAlgo  = hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                                 desc,
+                                                                 layoutA,
+                                                                 layoutB,
+                                                                 layoutD,
+                                                                 layoutD,
+                                                                 pref,
+                                                                 1,
+                                                                 heuristic,
+                                                                 &returned)
+                                     == HIPBLAS_STATUS_SUCCESS
+                                 && returned > 0;
 
             if(!gotAlgo)
             {
@@ -520,13 +530,14 @@ namespace
                                                 "HIPBLASLT_TUNING_COLD_ITERS",
                                                 "HIPBLASLT_TUNING_HOT_ITERS",
                                                 "HIPBLASLT_TUNING_ROTATING_MB",
+                                                "HIPBLASLT_TUNING_FLUSH_ICACHE",
                                                 "HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE",
                                                 "HIPBLASLT_TUNING_SCRATCH_MAX_BYTES"};
             for(const char* name : names)
             {
                 const char* value = getenv(name);
-                m_savedEnv.emplace_back(
-                    name, value ? std::optional<std::string>(value) : std::nullopt);
+                m_savedEnv.emplace_back(name,
+                                        value ? std::optional<std::string>(value) : std::nullopt);
             }
 
             if(!gpuAvailable())
@@ -873,7 +884,10 @@ namespace
         struct RestoreDevice
         {
             int device;
-            ~RestoreDevice() { static_cast<void>(hipSetDevice(device)); }
+            ~RestoreDevice()
+            {
+                static_cast<void>(hipSetDevice(device));
+            }
         } restore{originalDevice};
 
         enterMode("tune", m_path);

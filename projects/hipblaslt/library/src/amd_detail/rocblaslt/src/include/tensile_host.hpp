@@ -319,8 +319,8 @@ TensileLite::ProblemOverride TensileDataGemm2ProblemOverride(std::shared_ptr<voi
  */
 bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
-                                  const RocblasltContractionProblem&   problem,
-                                  std::shared_ptr<void>                gemmData,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
                                   size_t                              max_workspace_bytes);
 
 TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void>);

@@ -151,6 +151,7 @@ matching how ``hipblaslt-bench`` selects. The benchmarking effort can be adjuste
    export HIPBLASLT_TUNING_COLD_ITERS=<value>           (Default value is: 1000)
    export HIPBLASLT_TUNING_HOT_ITERS=<value>            (Default value is: 1000)
    export HIPBLASLT_TUNING_ROTATING_MB=<value>          (Default value is: 512)
+   export HIPBLASLT_TUNING_FLUSH_ICACHE=<0|1>           (Default value is: 1)
    export HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE=<value>  (Default value is: 0, no limit)
 
 Each candidate is measured the way ``hipblaslt-bench`` measures one: ``HIPBLASLT_TUNING_COLD_ITERS``
@@ -167,6 +168,19 @@ Rotation is declined for problems whose buffer sizes cannot be established from 
 description alone, such as broadcast inputs with a zero batch stride and swizzled ``A`` or ``B``.
 Those shapes are still tuned, just with their inputs cache-resident. Very small problems rotate over
 fewer blocks than the memory budget would allow, since each block costs setup work per candidate.
+
+The instruction cache is invalidated between timed launches, the same way and with the same kernel
+the bench client uses, so a candidate is not timed with its own code already resident. It costs
+roughly 5% of tuning time and measurably improves agreement with ``hipblaslt-bench``.
+``HIPBLASLT_TUNING_FLUSH_ICACHE=0`` turns it off. The per-flush cost is measured once per device and
+subtracted, so the recorded time stays the GEMM time and remains comparable to entries tuned without
+it.
+
+Where a shape's leading kernels are separated by more than measurement noise, this is enough to make
+tuning land on the same kernel run after run. Where they are within a couple of percent of each
+other, the choice stays unstable and tuning may pick a kernel marginally slower than the heuristic
+default; that is a property of the measurement, not of the cache, and ``hipblaslt-bench`` behaves the
+same way on those shapes.
 
 By default every kernel that can run the problem is measured, not just the ones the selection
 heuristic ranks highest, because the fastest kernel is not always inside that ranked prefix. Setting
@@ -188,10 +202,12 @@ that measures every candidate is kept however long it took, because a complete s
 answer regardless of its duration.
 
 Runtime tuning is close to how ``hipblaslt-bench`` measures, but not identical, so the two can
-disagree between kernels that are within noise of each other. The bench client flushes the
-instruction cache between timed launches and runtime tuning does not; runtime tuning also caps how
-many rotation blocks it uses, and leaves the scale vectors and a forward bias unrotated. Treat
-``hipblaslt-bench`` as the reference when a shape matters enough to check by hand.
+disagree between kernels that are within noise of each other. Runtime tuning caps how many rotation
+blocks it uses, leaves the scale vectors and a forward bias unrotated, and enumerates candidates
+through a different Tensile entry point. Both flush the instruction cache. Runtime tuning always
+times with HIP events; ``hipblaslt-bench`` does the same only with ``--use_gpu_timer`` and otherwise
+uses a synchronized CPU timer. Treat ``hipblaslt-bench`` as the reference when a shape matters
+enough to check by hand.
 
 Benchmarking never writes to your buffers. Candidates run against memory the library allocates for
 the purpose, and only the winner runs on the real output.

@@ -230,8 +230,8 @@ namespace TensileLite
             return num(row, name, fallback ? 1 : 0) != 0;
         }
 
-        std::optional<rocisa::DataType>
-            dataType(const std::map<std::string, std::string>& row, const char* name)
+        std::optional<rocisa::DataType> dataType(const std::map<std::string, std::string>& row,
+                                                 const char*                               name)
         {
             auto it = row.find(name);
             if(it == row.end() || it->second.empty())
@@ -312,12 +312,8 @@ namespace TensileLite
                || (str(row, "transB") != "N" && str(row, "transB") != "T"))
                 return false;
 
-            static const char* const requiredText[] = {"a_type",
-                                                       "b_type",
-                                                       "c_type",
-                                                       "d_type",
-                                                       "compute_type",
-                                                       "gcnArchName"};
+            static const char* const requiredText[]
+                = {"a_type", "b_type", "c_type", "d_type", "compute_type", "gcnArchName"};
             for(const char* name : requiredText)
                 if(!has(row, name) || str(row, name).empty())
                     return false;
@@ -345,17 +341,17 @@ namespace TensileLite
                 return false;
 
             static const char* const int32Fields[] = {"compute_input_type_a",
-                                                       "compute_input_type_b",
-                                                       "batch_mode",
-                                                       "epilogue",
-                                                       "bias_type",
-                                                       "bias_stride",
-                                                       "aux_type",
-                                                       "scaleA_format",
-                                                       "scaleB_format",
-                                                       "streamk_tile_scheduling",
-                                                       "sm_count_target",
-                                                       "CUs"};
+                                                      "compute_input_type_b",
+                                                      "batch_mode",
+                                                      "epilogue",
+                                                      "bias_type",
+                                                      "bias_stride",
+                                                      "aux_type",
+                                                      "scaleA_format",
+                                                      "scaleB_format",
+                                                      "streamk_tile_scheduling",
+                                                      "sm_count_target",
+                                                      "CUs"};
             for(const char* name : int32Fields)
                 if(!isInt32(row, name))
                     return false;
@@ -458,8 +454,8 @@ namespace TensileLite
             if(computeType == HIPBLASLT_COMPUTE_TYPE_INVALID)
                 return std::nullopt;
 
-            po.computeType = rocComputeType_to_tensile_type(
-                static_cast<rocblaslt_compute_type>(computeType));
+            po.computeType
+                = rocComputeType_to_tensile_type(static_cast<rocblaslt_compute_type>(computeType));
         }
         po.computeInputTypeA = static_cast<int32_t>(num(row, "compute_input_type_a"));
         po.computeInputTypeB = static_cast<int32_t>(num(row, "compute_input_type_b"));
@@ -518,8 +514,8 @@ namespace TensileLite
             entry.requiredWorkspaceBytes
                 = static_cast<size_t>(*exactNum(row, "required_workspace"));
         else
-            entry.requiredWorkspaceBytes = static_cast<size_t>(
-                std::max<int64_t>(0, num(row, "required_workspace")));
+            entry.requiredWorkspaceBytes
+                = static_cast<size_t>(std::max<int64_t>(0, num(row, "required_workspace")));
         entry.winnerTimeUs           = real(row, "us");
         entry.baselineIndex          = static_cast<int32_t>(num(row, "baseline_index", -1));
         entry.baselineTimeUs         = real(row, "baseline_us");
@@ -720,7 +716,10 @@ namespace TensileLite
             OverrideMap& map;
             std::string  path;
             bool         success = false;
-            ~LoadClaim() { map.finishLoad(path, success); }
+            ~LoadClaim()
+            {
+                map.finishLoad(path, success);
+            }
         } claim{m_override, path};
 
         std::ifstream file_read(path);

@@ -350,8 +350,8 @@ bool problem_override_from_file(rocblaslt_handle&                 handle,
 // whether a key still has a usable entry rather than merely any entry.
 bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
                                   const TensileLite::ProblemOverride& key,
-                                  const RocblasltContractionProblem&   problem,
-                                  std::shared_ptr<void>                gemmData,
+                                  const RocblasltContractionProblem&  problem,
+                                  std::shared_ptr<void>               gemmData,
                                   size_t                              max_workspace_bytes)
 {
     TensileLite::OverrideMap& m_override = TensileLite::OverrideMap::getMap();
@@ -385,11 +385,10 @@ bool tuning_cache_has_valid_entry(rocblaslt_handle                    handle,
         // check, and the tune-mode gate must perform the same one or it can
         // suppress retuning forever while replay falls back every time.
         RocblasltContractionProblem supportProblem = problem;
-        size_t                      required        = 0;
-        auto                        algo            = resolved[0].algo;
+        size_t                      required       = 0;
+        auto                        algo           = resolved[0].algo;
         if(rocblaslt_status_success
-               == isSolutionSupportedNoMutation(
-                   handle, supportProblem, gemmData, &algo, &required)
+               == isSolutionSupportedNoMutation(handle, supportProblem, gemmData, &algo, &required)
            && required <= max_workspace_bytes)
             return true;
 

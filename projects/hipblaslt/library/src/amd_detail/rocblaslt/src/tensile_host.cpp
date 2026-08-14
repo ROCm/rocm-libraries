@@ -3397,6 +3397,40 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
 }
 #endif
 
+/**
+ * Invalidate every compute unit's instruction cache.
+ *
+ * Byte-for-byte the bench client's flush_icache kernel, and launched with the
+ * same geometry, because the point of having it here is that the two measure
+ * the same thing. Without it a candidate is timed with its own code already
+ * resident after the first launch, which is not how a kernel runs the first
+ * time a production workload reaches it.
+ *
+ * The nops are what the client uses: s_icache_inv has no hardware interlock, so
+ * the wave has to be kept from fetching across the invalidate before it lands.
+ */
+__global__ void hipblasltTuningFlushICache()
+{
+    asm __volatile__("s_icache_inv \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t"
+                     "s_nop 0 \n\t" ::
+                         :);
+}
+
 namespace
 {
     /**
@@ -3449,6 +3483,28 @@ namespace
         static int candidateCap()
         {
             return std::max(1, envInt("HIPBLASLT_TUNING_MAX_CANDIDATES", 128));
+        }
+
+        /**
+         * Invalidate the instruction cache between timed launches, as the bench
+         * client does when tuning.
+         *
+         * On by default because it demonstrably improves agreement with bench:
+         * across three fp16 shapes the tuner reached bench's exact winner on
+         * two of them with the flush on, and repeated runs picked the same
+         * kernel on those two. It is not a cure-all. On a shape whose leading
+         * kernels sit within a couple of percent of each other the choice stays
+         * unstable with the flush on, because at that separation the ordering
+         * is below what either tool can resolve.
+         *
+         * The cost is about 5% of tuning time (135.6s to 142.5s on
+         * 2048x1024x2048), far less than the ~10 us per flush suggests, because
+         * the flush launches pipeline behind the GEMMs rather than serialising
+         * with them.
+         */
+        static bool flushICache()
+        {
+            return envInt("HIPBLASLT_TUNING_FLUSH_ICACHE", 1) != 0;
         }
         /**
          * Untimed launches before measuring, then launches in the timed batch.
@@ -3503,7 +3559,135 @@ namespace
         {
             return size_t(std::max(0, envInt("HIPBLASLT_TUNING_ROTATING_MB", 512))) * 1024 * 1024;
         }
+    };
 
+    /**
+     * Instruction-cache flush, sized and costed the way the bench client does.
+     *
+     * The grid is CU count times 60 with 64 threads, so every compute unit is
+     * covered several times over; that geometry is copied from the client
+     * rather than derived, because a smaller grid would not invalidate the same
+     * set of caches and the two would stop measuring the same thing.
+     *
+     * costUs() is the average wall time of one such launch, measured once per
+     * device and remembered. The timed span contains one flush per iteration,
+     * so that average is subtracted back out to leave the GEMM time. Candidates
+     * all pay the same flush, so the ranking would survive without it, but the
+     * number written to the cache and compared against the baseline would be
+     * the GEMM plus a flush rather than the GEMM.
+     */
+    class ICacheFlush
+    {
+    public:
+        static ICacheFlush& instance()
+        {
+            static ICacheFlush gInstance;
+            return gInstance;
+        }
+
+        bool launch(hipStream_t stream)
+        {
+            const Device* device = current();
+            if(device == nullptr)
+                return false;
+
+            hipLaunchKernelGGL(hipblasltTuningFlushICache, dim3(device->grid), dim3(64), 0, stream);
+            return hipGetLastError() == hipSuccess;
+        }
+
+        /** Microseconds one flush launch costs on the current device, or 0. */
+        double costUs(hipStream_t stream)
+        {
+            const Device* device = current(stream);
+            return device ? device->costUs : 0.0;
+        }
+
+    private:
+        struct Device
+        {
+            unsigned grid   = 0;
+            double   costUs = 0.0;
+        };
+
+        // Enough launches for the average to be stable without the 100k the
+        // client uses; the flush is a fixed-cost launch, not a measurement that
+        // needs converging, and this runs before a tuning pass that is about to
+        // spend far longer than the calibration itself.
+        static constexpr int kCalibrationIters = 2000;
+
+        const Device* current(hipStream_t stream = nullptr)
+        {
+            int id = 0;
+            if(hipGetDevice(&id) != hipSuccess)
+                return nullptr;
+
+            auto found = m_devices.find(id);
+            if(found != m_devices.end())
+            {
+                // A launch-only caller can have created this entry before
+                // anyone had a stream to calibrate on, which would otherwise
+                // leave the cost pinned at zero for the life of the process and
+                // silently stop the flush being subtracted.
+                if(found->second.costUs == 0.0 && stream != nullptr)
+                    found->second.costUs = calibrate(found->second.grid, stream);
+                return &found->second;
+            }
+
+            hipDeviceProp_t props{};
+            if(hipGetDeviceProperties(&props, id) != hipSuccess)
+                return nullptr;
+
+            Device device;
+            device.grid = static_cast<unsigned>(props.multiProcessorCount) * 60u;
+
+            // Only the geometry is needed to launch, so publish it first and
+            // let a caller that has no stream to calibrate on use it at zero
+            // cost rather than blocking.
+            if(stream != nullptr)
+                device.costUs = calibrate(device.grid, stream);
+
+            return &(m_devices[id] = device);
+        }
+
+        static double calibrate(unsigned grid, hipStream_t stream)
+        {
+            hipEvent_t start = nullptr;
+            hipEvent_t stop  = nullptr;
+            if(hipEventCreate(&start) != hipSuccess || hipEventCreate(&stop) != hipSuccess)
+            {
+                if(start)
+                    static_cast<void>(hipEventDestroy(start));
+                if(stop)
+                    static_cast<void>(hipEventDestroy(stop));
+                return 0.0;
+            }
+
+            auto burst = [&] {
+                for(int i = 0; i < kCalibrationIters; i++)
+                    hipLaunchKernelGGL(hipblasltTuningFlushICache, dim3(grid), dim3(64), 0, stream);
+            };
+
+            burst(); // warm the queue and the flush kernel's own code object
+
+            double us = 0.0;
+            if(hipEventRecord(start, stream) == hipSuccess)
+            {
+                burst();
+                float ms = 0.0f;
+                if(hipEventRecord(stop, stream) == hipSuccess
+                   && hipEventSynchronize(stop) == hipSuccess
+                   && hipEventElapsedTime(&ms, start, stop) == hipSuccess)
+                    us = (static_cast<double>(ms) * 1000.0) / kCalibrationIters;
+            }
+
+            static_cast<void>(hipEventDestroy(start));
+            static_cast<void>(hipEventDestroy(stop));
+            static_cast<void>(hipGetLastError());
+            return us;
+        }
+
+        // Only ever touched with the tuning lock held.
+        std::map<int, Device> m_devices;
     };
 
     /**
@@ -3688,19 +3872,19 @@ namespace
         // merely unused, and testing beta here would mean decoding the scalar
         // through its storage type for no benefit beyond a few blocks of space.
         // When C aliases D it is covered by D's rotation instead.
-        size_t blockCount = 1;
-        size_t offsetA    = 0;
-        size_t bytesA     = 0;
-        size_t strideA    = 0;
-        size_t offsetB    = 0;
-        size_t bytesB     = 0;
-        size_t strideB    = 0;
-        size_t offsetC    = 0;
-        size_t bytesC     = 0;
-        size_t strideC    = 0;
-        size_t strideD    = 0;
-        size_t strideE    = 0;
-        size_t strideBias = 0;
+        size_t blockCount      = 1;
+        size_t offsetA         = 0;
+        size_t bytesA          = 0;
+        size_t strideA         = 0;
+        size_t offsetB         = 0;
+        size_t bytesB          = 0;
+        size_t strideB         = 0;
+        size_t offsetC         = 0;
+        size_t bytesC          = 0;
+        size_t strideC         = 0;
+        size_t strideD         = 0;
+        size_t strideE         = 0;
+        size_t strideBias      = 0;
         size_t strideWorkspace = 0;
     };
 
@@ -3880,11 +4064,10 @@ namespace
         // not the logical span at all, so both the copy length and the per-block
         // stride would be wrong. Neither case is worth guessing at, and
         // declining only costs a cache-hot measurement.
-        const bool rotatable = layout.bytesA != 0 && layout.bytesB != 0 && prob.A != nullptr
-                               && prob.B != nullptr && prob.batch_A == nullptr
-                               && prob.batch_B == nullptr && !expandedA && !expandedB
-                               && !(expandedC && layout.bytesC != 0) && !prob.swizzleA
-                               && !prob.swizzleB;
+        const bool rotatable
+            = layout.bytesA != 0 && layout.bytesB != 0 && prob.A != nullptr && prob.B != nullptr
+              && prob.batch_A == nullptr && prob.batch_B == nullptr && !expandedA && !expandedB
+              && !(expandedC && layout.bytesC != 0) && !prob.swizzleA && !prob.swizzleB;
 
         // Everything a candidate reads or writes, so no iteration finds any of
         // it already resident. The scale vectors are deliberately left out: they
@@ -3997,14 +4180,14 @@ namespace
      * the normal path afterwards, on the real ones.
      */
     int benchmarkAndSelectWinner(
-        rocblaslt_handle                                                              handle,
-        const RocblasltContractionProblem&                                            prob,
-        std::shared_ptr<void>                                                         gemmData,
+        rocblaslt_handle                   handle,
+        const RocblasltContractionProblem& prob,
+        std::shared_ptr<void>              gemmData,
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>&
-                                                     library,
-        std::shared_ptr<TensileLite::Hardware>&      hardware,
-        TensileLite::hip::SolutionAdapter*           adapter,
-        TensileLite::TunedEntry&                     winnerOut)
+                                                library,
+        std::shared_ptr<TensileLite::Hardware>& hardware,
+        TensileLite::hip::SolutionAdapter*      adapter,
+        TensileLite::TunedEntry&                winnerOut)
     {
         // Wall clock from function entry, not the sum of the timed spans.
         // Scratch allocation, rotation seeding, enumeration, support checks,
@@ -4127,8 +4310,7 @@ namespace
         if(blocks > 1)
         {
             auto seed = [&](size_t offset, size_t stride, const void* src, size_t span) {
-                if(hipMemcpyAsync(
-                       bytes + offset, src, span, hipMemcpyDeviceToDevice, prob.stream)
+                if(hipMemcpyAsync(bytes + offset, src, span, hipMemcpyDeviceToDevice, prob.stream)
                    != hipSuccess)
                     return false;
                 for(size_t b = 1; b < blocks; b++)
@@ -4142,11 +4324,10 @@ namespace
                 return true;
             };
 
-            const bool seeded
-                = seed(layout.offsetA, layout.strideA, prob.A, layout.bytesA)
-                  && seed(layout.offsetB, layout.strideB, prob.B, layout.bytesB)
-                  && (layout.bytesC == 0
-                      || seed(layout.offsetC, layout.strideC, prob.C, layout.bytesC));
+            const bool seeded = seed(layout.offsetA, layout.strideA, prob.A, layout.bytesA)
+                                && seed(layout.offsetB, layout.strideB, prob.B, layout.bytesB)
+                                && (layout.bytesC == 0
+                                    || seed(layout.offsetC, layout.strideC, prob.C, layout.bytesC));
 
             if(!seeded || hipStreamSynchronize(prob.stream) != hipSuccess)
             {
@@ -4159,8 +4340,8 @@ namespace
         if(blocks > 1 && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
         {
             std::ostringstream msg;
-            msg << "tuning-cache: rotating over " << blocks << " blocks, "
-                << (layout.total >> 20) << " MiB scratch";
+            msg << "tuning-cache: rotating over " << blocks << " blocks, " << (layout.total >> 20)
+                << " MiB scratch";
             log_info(__func__, msg.str());
         }
 
@@ -4277,9 +4458,22 @@ namespace
         // span replaying the same few.
         size_t rotor = 0;
 
+        // Calibrated once here rather than per candidate, and only when the
+        // flush is actually going to run, so a disabled flush costs nothing.
+        const bool   flushICache = TuningPolicy::flushICache();
+        const double flushUs     = flushICache ? ICacheFlush::instance().costUs(prob.stream) : 0.0;
+
+        if(flushICache && (get_logger_layer_mode() & rocblaslt_layer_mode_log_info))
+        {
+            std::ostringstream msg;
+            msg << "tuning-cache: icache flush enabled, " << flushUs << " us per launch";
+            log_info(__func__, msg.str());
+        }
+
         auto timeBatch
             = [&](const std::vector<std::vector<TensileLite::KernelInvocation>>& perBlock,
-                  int                                                            n) -> double {
+                  int                                                            n,
+                  bool                                                           flush) -> double {
             if(hipEventRecord(start, prob.stream) != hipSuccess)
                 return -1.0;
 
@@ -4287,6 +4481,12 @@ namespace
             {
                 const auto& kernels = perBlock[rotor++ % perBlock.size()];
                 if(adapter->launchKernels(kernels, prob.stream, nullptr, nullptr) != hipSuccess)
+                    return -1.0;
+
+                // Inside the span, exactly as the bench client does it: the
+                // flush has to land between one launch and the next to be worth
+                // anything, and its cost comes back out of the mean below.
+                if(flush && !ICacheFlush::instance().launch(prob.stream))
                     return -1.0;
             }
 
@@ -4374,14 +4574,23 @@ namespace
                 const int cold = TuningPolicy::coldIterations();
                 const int hot  = TuningPolicy::hotIterations();
 
-                if(cold > 0 && timeBatch(perBlock, cold) < 0.0)
+                // Warm-up does not flush, matching the bench client: its cold
+                // loop launches the GEMM alone and only the timed lambda adds a
+                // flush. Flushing here would just pay for evicting code that
+                // the first timed flush evicts anyway.
+                if(cold > 0 && timeBatch(perBlock, cold, false) < 0.0)
                     return -1.0;
 
-                const double spanUs = timeBatch(perBlock, hot);
+                const double spanUs = timeBatch(perBlock, hot, flushICache);
                 if(spanUs < 0.0)
                     return -1.0;
 
-                return spanUs / hot;
+                // The span holds one flush per iteration. Subtracting its
+                // measured cost leaves the GEMM, so the recorded time stays
+                // comparable to a bench number and to entries tuned without the
+                // flush. Clamped because a kernel faster than the flush's own
+                // jitter could otherwise land at or below zero.
+                return std::max(1e-3, spanUs / hot - flushUs);
             }
             catch(...)
             {
@@ -4587,8 +4796,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 // "No usable entry", not "no entry". Entries that failed name
                 // validation after a rebuild stay in the map, and testing for
                 // mere presence made them permanently un-retunable.
-                if(!tuning_cache_has_valid_entry(
-                       handle, key, prob, gemmData, prob.workspaceSize))
+                if(!tuning_cache_has_valid_entry(handle, key, prob, gemmData, prob.workspaceSize))
                 {
                     // try_lock, not lock: a second thread meeting an untuned
                     // shape runs normally rather than stalling behind a
@@ -4617,8 +4825,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                             // outright if the fresh winner reused their index.
                             cache.replaceAll(key, winner);
 
-                            const bool persisted = TensileLite::appendTunedEntry(
-                                tuning.cachePath(), prob, winner);
+                            const bool persisted
+                                = TensileLite::appendTunedEntry(tuning.cachePath(), prob, winner);
 
                             auto& counters = TensileLite::TuningCounters::instance();
                             if(persisted)

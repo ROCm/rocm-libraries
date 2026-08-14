@@ -122,7 +122,8 @@ scratch allocation. For more information, see
 
     * - | ``HIPBLASLT_TUNING_COLD_ITERS``
         | Sets untimed warm-up launches per candidate.
-      - | Positive integer (default: 1000)
+      - | Non-negative integer (default: 1000)
+        | 0 disables warm-up
 
     * - | ``HIPBLASLT_TUNING_HOT_ITERS``
         | Sets timed launches per candidate.
@@ -132,6 +133,11 @@ scratch allocation. For more information, see
         | Sets the target rotating-buffer footprint.
       - | MiB (default: 512)
         | 0 disables rotation
+
+    * - | ``HIPBLASLT_TUNING_FLUSH_ICACHE``
+        | Invalidates the instruction cache between timed launches, matching the bench client.
+      - | 1: Flush (default); costs about 5% of tuning time
+        | 0: Do not flush; winners become less reproducible
 
     * - | ``HIPBLASLT_TUNING_BUDGET_MS_PER_SHAPE``
         | Sets a soft wall-clock limit checked between candidates.
