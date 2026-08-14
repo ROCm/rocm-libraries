@@ -227,19 +227,23 @@ class RuntimeMatrixWriter {
 };
 
 template <typename Accumulator>
-class RuntimeMatrixOutputWriter {
+class RuntimeOutputConverter {
    public:
-    RuntimeMatrixOutputWriter(MutableTensorView output, OutputConversion conversion)
-        : m_output(std::move(output)), m_defaultWriter(m_output), m_conversion(conversion) {
-        if (m_conversion == OutputConversion::SaturatingInt8 && m_output.type() != ScalarType::Int8)
+    RuntimeOutputConverter(ScalarType outputType, OutputConversion conversion)
+        : m_outputType(outputType),
+          m_conversion(conversion),
+          m_load(runtimeLoadFunction<Accumulator>(outputType)),
+          m_store(runtimeStoreFunction<Accumulator>(outputType)) {
+        if (m_conversion == OutputConversion::SaturatingInt8 && m_outputType != ScalarType::Int8)
             throw std::invalid_argument(
                 "Saturating output conversion requires an Int8 output tensor.");
     }
 
-    void store(size_t row, size_t column, Accumulator value) const {
+    Accumulator operator()(Accumulator value) const {
         if (m_conversion == OutputConversion::Default) {
-            m_defaultWriter.store(row, column, value);
-            return;
+            std::array<std::byte, 16> storage{};
+            m_store(storage, 0, value);
+            return m_load(storage, 0);
         }
 
         if constexpr (IsComplex<Accumulator>::value) {
@@ -248,18 +252,40 @@ class RuntimeMatrixOutputWriter {
         } else if constexpr (std::is_integral_v<Accumulator>) {
             const Accumulator clamped =
                 std::clamp(value, static_cast<Accumulator>(-128), static_cast<Accumulator>(127));
-            m_output.storeFrom({row, column}, static_cast<int8_t>(clamped));
+            return static_cast<Accumulator>(static_cast<int8_t>(clamped));
         } else {
             const long double rounded = std::nearbyint(static_cast<long double>(value));
             const long double clamped =
                 std::clamp(rounded, static_cast<long double>(-128), static_cast<long double>(127));
-            m_output.storeFrom({row, column}, static_cast<int8_t>(clamped));
+            return static_cast<Accumulator>(static_cast<int8_t>(clamped));
         }
     }
 
    private:
-    MutableTensorView m_output;
+    ScalarType m_outputType;
+    OutputConversion m_conversion;
+    RuntimeLoadFunction<Accumulator> m_load;
+    RuntimeStoreFunction<Accumulator> m_store;
+};
+
+template <typename Accumulator>
+class RuntimeMatrixOutputWriter {
+   public:
+    RuntimeMatrixOutputWriter(MutableTensorView output, OutputConversion conversion)
+        : m_defaultWriter(output),
+          m_converter(output.type(), conversion),
+          m_conversion(conversion) {}
+
+    void store(size_t row, size_t column, Accumulator value) const {
+        if (m_conversion == OutputConversion::Default)
+            m_defaultWriter.store(row, column, value);
+        else
+            m_defaultWriter.store(row, column, m_converter(value));
+    }
+
+   private:
     RuntimeMatrixWriter<Accumulator> m_defaultWriter;
+    RuntimeOutputConverter<Accumulator> m_converter;
     OutputConversion m_conversion;
 };
 
