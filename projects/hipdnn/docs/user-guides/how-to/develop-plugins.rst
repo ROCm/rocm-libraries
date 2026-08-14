@@ -195,7 +195,7 @@ Name resolution
 
 hipDNN resolves a name by trying ``hipdnnEnginePluginGetEngineName``, then the registry in ``EngineNames.hpp``, then a zero-padded uppercase hexadecimal rendering of the engine ID, such as ``0x000000000000001A``. A resolved name is therefore never empty. Every surface uses this same order, so enumeration through ``hipdnnGetEngineInfo_ext`` and graph-scoped reporting through ``HIPDNN_ATTR_ENGINE_NAME_EXT`` always agree on an engine's name.
 
-The ``name`` field of the engine's ``EngineDetails`` payload records the name an engine carries, but hipDNN never resolves from it. ``EngineDetails`` exists only once a graph does, so a name carried there is invisible to the load-time checks under :ref:`engine-name-conflicts` and could not be validated before use. Implementing ``hipdnnEnginePluginGetEngineName`` is what gives an engine a name; filling in ``EngineDetails.name`` without it names the engine nowhere, and hipDNN logs a warning identifying the plugin, the engine, and the name it had to ignore.
+The ``name`` field of the engine's ``EngineDetails`` payload records the name an engine carries, but hipDNN never resolves from it. ``EngineDetails`` exists only once a graph does, so a name carried there is invisible to the load-time checks under :ref:`engine-name-conflicts`. Implementing ``hipdnnEnginePluginGetEngineName`` is the only way a plugin can name its engines; filling in ``EngineDetails.name`` without it makes hipDNN log a warning identifying the plugin, the engine, and the name it had to ignore.
 
 When the entry point and the ``EngineDetails`` record disagree, hipDNN uses the entry point's name and logs a warning naming the plugin, the engine ID, and both strings.
 

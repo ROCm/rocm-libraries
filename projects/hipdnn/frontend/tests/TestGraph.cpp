@@ -8430,7 +8430,7 @@ TEST_F(TestGraph, DeselectEnginesCompiledPlanPath)
 TEST_F(TestGraph, DeselectEnginesUnregisteredNameIsHashed)
 {
     // A plugin-supplied engine is absent from the frontend's engine name
-    // registry, so names are hashed unconditionally instead of being skipped.
+    // registry, so every name is hashed whether or not it is registered.
     const std::string unregisteredName = "nonexistent_engine_xyz";
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(unregisteredName));
 

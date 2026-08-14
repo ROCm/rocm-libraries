@@ -609,8 +609,8 @@ TEST_F(TestEngineDescriptor, GetEngineIdReturnsValueIfFinalized)
 }
 
 // HIPDNN_ATTR_ENGINE_NAME_EXT. The resolver is mocked, so these pin the candidate
-// the descriptor derives and the answer it publishes, not which sources the
-// resolver is willing to draw a name from.
+// the descriptor derives and the answer it publishes, leaving the resolver's own
+// choice of source to TestEnginePluginResourceManager.cpp.
 
 TEST_F(TestEngineDescriptor, GetEngineNameForwardsEngineDetailsNameAsTheCandidate)
 {
@@ -693,9 +693,8 @@ TEST_F(TestEngineDescriptor, GetEngineNameEmptyNameInEngineDetails)
 TEST_F(TestEngineDescriptor, FinalizeFailsBeforeNameResolutionWhenEngineDetailsMissing)
 {
     // The plugin answers with no engine details at all. finalize() declares a
-    // disengaged candidate for exactly this case, but the candidate is
-    // unreachable today: EngineDetailsWrapper refuses to construct around an
-    // empty buffer, so finalize() fails before the resolver is consulted.
+    // disengaged candidate for this case, but never reaches it: EngineDetailsWrapper
+    // refuses to construct around an empty buffer, so finalize() fails first.
     setGraph();
     setGlobalIndex(ENGINE_ID);
     EXPECT_CALL(*getMockGraph(), getHandle()).WillOnce(Return(_mockHandle.get()));

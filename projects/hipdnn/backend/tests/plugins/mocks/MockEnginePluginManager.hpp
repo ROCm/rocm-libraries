@@ -37,8 +37,7 @@ public:
                 (const, override));
 
     /// Declares what admission left of a plugin. Mock plugins never go through the
-    /// real admission hooks, so by default one contributes everything it declares
-    /// and only tests exercising a drop need this.
+    /// real admission hooks, so by default one contributes everything it declares.
     void setAcceptedEngineIds(const EnginePlugin& plugin, std::vector<int64_t> engineIds)
     {
         _accepted[&plugin] = std::move(engineIds);

@@ -801,9 +801,9 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineInfo_ext(hipdnnHandle_t hand
  * This is the inverse of the names reported by hipdnnGetEngineInfo_ext: any name obtained
  * from that enumeration resolves here, and it resolves to exactly one engine.
  *
- * An engine ID is the FNV-1a hash of the engine's name, so names are unique across loaded
- * engines. The backend enforces this at load time, dropping any engine whose reported name
- * does not hash to its ID or whose ID an earlier plugin already provides.
+ * Names are unique across loaded engines. The backend enforces this at load time, dropping
+ * any engine whose reported name does not hash to its ID, or whose ID an earlier plugin
+ * already provides.
  *
  * @param[in]  handle       A valid hipDNN handle.
  * @param[in]  engineName   Null-terminated engine name to resolve.

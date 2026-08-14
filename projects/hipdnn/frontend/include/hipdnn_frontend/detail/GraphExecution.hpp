@@ -54,9 +54,8 @@ inline std::string resolveEngineName(int64_t engineId)
 }
 
 /// Resolve a finalized engine descriptor to its name, read from
-/// HIPDNN_ATTR_ENGINE_NAME_EXT, which the backend guarantees hashes to the
-/// engine ID. Falls back to the ID-only overload when the backend reports no
-/// name.
+/// HIPDNN_ATTR_ENGINE_NAME_EXT. Falls back to the ID-only overload when the
+/// backend reports no name.
 inline std::string resolveEngineName(hipdnnBackendDescriptor_t engineDesc, int64_t engineId)
 {
     if(engineDesc != nullptr)

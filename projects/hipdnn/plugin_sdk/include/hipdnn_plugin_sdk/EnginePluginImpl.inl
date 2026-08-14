@@ -113,10 +113,10 @@ namespace
 {
 /// Dispatches to the container's optional static getEngineName member.
 ///
-/// This lives in a function template on purpose: `if constexpr` only suppresses
-/// instantiation of the discarded branch inside a template, so writing it
-/// directly in the extern "C" entry point below would fail to compile for every
-/// container that does not provide the member.
+/// This lives in a function template because `if constexpr` only suppresses
+/// instantiation of the discarded branch inside a template; written directly in
+/// the extern "C" entry point below, it would fail to compile for containers
+/// that do not provide the member.
 template <typename ContainerType>
 hipdnnPluginStatus_t invokeContainerGetEngineName(int64_t engineId, const char** name)
 {
@@ -288,8 +288,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginGetEngineName(int64_t engineId, const cha
         return containerStatus;
     }
 
-    // NOT_APPLICABLE is the ordinary answer for a container that supplies no name for this engine,
-    // so it is neither an error nor a success worth reporting as one.
+    // NOT_APPLICABLE is the ordinary answer for a container that supplies no name for this engine.
     if(containerStatus == HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE)
     {
         HIPDNN_PLUGIN_LOG_INFO("API not applicable: [" << __func__ << "] engineId=" << engineId);

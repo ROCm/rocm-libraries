@@ -19,8 +19,8 @@ if(NOT HIPDNN_SKIP_TESTS AND TARGET ${TEST_GOOD_DEFAULT_PLUGIN_NAME})
     # in tests/test_plugins/TestPluginEngineIdMap.hpp.
     set(HIPDNN_LIST_ENGINES_SMOKE_EXPECTED "TEST_GOOD_DEFAULT_ENGINE (0xFFFFFFFFFFFFFFFD)")
 
-    # The tool is a plain CLI, not a gtest binary, so the checks live in a driver script: it asserts
-    # a zero exit status, a non-empty engine list, and the expected name anywhere in the output.
+    # The tool is not a gtest binary, so the checks live in a driver script: it asserts a zero exit
+    # status, a non-empty engine list, and the expected name anywhere in the output.
     # cmake-format: off
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/ListEnginesSmokeTest.cmake" [[
 if(NOT DEFINED HIPDNN_LIST_ENGINES_TOOL OR NOT DEFINED HIPDNN_LIST_ENGINES_EXPECTED)

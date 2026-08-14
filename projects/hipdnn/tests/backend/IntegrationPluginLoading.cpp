@@ -91,10 +91,8 @@ protected:
 namespace
 {
 // Installs a user log callback and raises the backend's global log level, then
-// puts both back on scope exit. The restoration has to be unconditional: a
-// failed assertion inside a test leaves the rest of the test body unrun, and a
-// callback or log level left installed contaminates every later test in the
-// binary.
+// puts both back on scope exit. A failed assertion leaves the rest of the test
+// body unrun, so the restoration cannot be left to the test itself.
 class ScopedBackendLogCapture
 {
 public:
@@ -681,9 +679,8 @@ TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointFallsBackToHex
 // which the backend rejects at load: the plugin loads, its one engine does not.
 TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdDropsTheEngine)
 {
-    // The recorder is constructed first so that it saves, and on destruction restores, the log
-    // level in force before this test touched it. The scope guard nests inside it and is destroyed
-    // first, so the two restorations unwind in the order they were applied.
+    // The recorder is constructed first so it captures the log level in force before this test
+    // touched it. The scope guard nests inside it, so the two restorations unwind in order.
     auto recorder
         = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
@@ -714,7 +711,7 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdDropsTheEn
         << recorder.getRecordedLogsAsString();
 }
 
-// A dropped engine is unavailable, not merely hidden: naming it, or addressing it by id, fails.
+// A dropped engine is unavailable: naming it, or addressing it by id, fails.
 TEST_F(IntegrationPluginLoading, DroppedEngineCannotBeSelected)
 {
     const std::string& pluginPath = hipdnn_tests::plugin_constants::testMismatchedNamePluginPath();

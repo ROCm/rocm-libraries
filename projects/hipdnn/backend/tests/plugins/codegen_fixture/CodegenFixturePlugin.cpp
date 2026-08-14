@@ -47,8 +47,7 @@ void CodegenFixtureEngine::getDetails(
     hipdnnPluginConstData_t& detailsOut) const
 {
     // Engine ID only: no knobs, no behavior notes, and — matching the container's
-    // missing getEngineName — no name. Every naming tier this fixture could
-    // satisfy is left empty on purpose.
+    // missing getEngineName — no name.
     flatbuffers::FlatBufferBuilder builder;
 
     auto engineDetails

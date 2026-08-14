@@ -34,8 +34,7 @@ public:
     /// An engine is dropped when its plugin-reported name does not hash to its
     /// engine ID (RFC 0003), or when an already-loaded plugin owns the same ID.
     /// Dropped engines are absent here, so enumeration, routing and dispatch all
-    /// treat them as nonexistent. Keying by ID is what makes an engine's owner
-    /// unique by construction rather than by a check.
+    /// treat them as nonexistent.
     [[nodiscard]] virtual const std::unordered_map<int64_t, const EnginePlugin*>&
         liveEngines() const
     {
@@ -53,8 +52,7 @@ public:
 
     /// @brief The live engine IDs a single plugin contributes, ascending.
     ///
-    /// A view over liveEngines() for the callers that walk one plugin at a time.
-    /// Ordering is imposed here because the underlying map has none.
+    /// Ordering is imposed here because liveEngines() is an unordered map.
     [[nodiscard]] virtual std::vector<int64_t> acceptedEngineIds(const EnginePlugin& plugin) const
     {
         std::vector<int64_t> engineIds;
@@ -125,11 +123,10 @@ protected:
         }
 
         // A plugin with no engines, or with duplicate IDs within itself, is
-        // malformed rather than conflicting and is rejected whole. Conflicts
-        // between plugins are left to actionAfterAdding, which drops only the
-        // offending engine; throwing here would reject the plugin. The call also
-        // caches the IDs, so actionAfterAdding cannot throw after the plugin is in
-        // the list.
+        // malformed and is rejected whole by the throw here. Conflicts between
+        // plugins are instead left to actionAfterAdding, which drops only the
+        // offending engine. This call also caches the IDs, so actionAfterAdding
+        // cannot throw once the plugin is in the list.
         std::ignore = plugin.getAllEngineIds();
     }
 
@@ -143,20 +140,18 @@ protected:
 
         for(const auto id : engineIds)
         {
-            // The name entry point is optional, so an engine that reports no name
-            // is exempt; plugins predating it keep loading unchanged. Standing in
-            // the engine's own ID for the absent name keeps that engine on the
-            // uniqueness check below while it skips the hash check.
+            // The name entry point is optional, so an engine reporting no name is
+            // exempt and plugins predating it keep loading. Substituting its own ID
+            // skips the hash check while keeping it on the uniqueness check below.
             const auto engineName = plugin.getEngineName(id);
             const auto nameId
                 = engineName.has_value() ? utilities::engineNameToId(*engineName) : id;
             if(nameId != id)
             {
-                // A name determines an ID, so whichever engine holds hash(name) is
-                // the one the name belongs to. Naming that engine turns an opaque
-                // hash mismatch into the collision the reader is looking at. The
-                // plugin's own list is consulted too because IDs arrive sorted, so
-                // the rightful owner may not have been admitted yet.
+                // A name determines an ID, so whichever engine holds hash(name) owns
+                // the name; naming it turns an opaque hash mismatch into a legible
+                // collision. The plugin's own list is consulted too because IDs
+                // arrive sorted, so the rightful owner may not be admitted yet.
                 std::string holder = "no loaded engine claims that ID";
                 if(const auto claimant = _engineOwner.find(nameId); claimant != _engineOwner.end())
                 {

@@ -132,11 +132,10 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *       allocating the buffer for the serialized `EngineDetails`. After use, this memory must be freed using
  *       hipdnnEnginePluginDestroyEngineDetails().
  *
- * @note The optional `name` field of `EngineDetails` records the engine's name, but hipDNN never
- *       resolves a name from it: `EngineDetails` exists only once a graph does, so a name carried
- *       there cannot be validated when the plugin loads. Report the name through
- *       hipdnnEnginePluginGetEngineName, which is the only channel that names an engine; filling
- *       in this field alone is reported as a plugin defect and the name is ignored.
+ * @note The optional `name` field of `EngineDetails` records the engine's name but never confers
+ *       one: `EngineDetails` exists only once a graph does, so a name carried there cannot be
+ *       validated when the plugin loads. Report the name through hipdnnEnginePluginGetEngineName
+ *       instead; filling in this field alone is reported as a plugin defect and ignored.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
@@ -374,17 +373,15 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 /**
  * @brief Retrieves the human-readable name of a specific engine.
  *
- * Introduced in engine plugin API 1.4.0 and optional: the host decides purely on
- * whether the symbol is exported, never on the API version the plugin reports.
- * A plugin that does not export it, or that answers with any status other than
+ * Introduced in engine plugin API 1.4.0 and optional: the host keys off symbol
+ * export alone, ignoring the API version the plugin reports. A plugin that does
+ * not export it, or that answers with any status other than
  * HIPDNN_PLUGIN_STATUS_SUCCESS, has its engines named by the host instead.
  *
- * The host resolves a name from this entry point, then the `name` field of the
- * engine's `EngineDetails` payload, then the built-in registry in
- * EngineNames.hpp, then a hexadecimal rendering of the engine ID. Enumeration
- * has no graph, so `EngineDetails` is unreachable there; implementing this entry
- * point is what makes a name visible on every surface. See "Engine names" in
- * docs/user-guides/how-to/develop-plugins.rst.
+ * The host resolves a name from this entry point, then the built-in registry in
+ * EngineNames.hpp, then a hexadecimal rendering of the engine ID. Implementing
+ * this entry point is the only way a plugin can name its own engines. See
+ * "Engine names" in docs/user-guides/how-to/develop-plugins.rst.
  *
  * The name is a key, not just a display label: the engine ID must equal its hash,
  * engineNameToId(name) == engine_id, using the FNV-1a definition in

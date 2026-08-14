@@ -2885,10 +2885,9 @@ struct SingleEnginePluginHarness
         EXPECT_CALL(*plugin, destroyHandle(::testing::Eq(K_HARNESS_HANDLE)));
     }
 
-    /// Stubs the plugin identity that getEngineInfos() copies into every row.
-    /// Only the getEngineInfos() cases need it; the resolveEngineName() cases
-    /// read none of those fields and leave the plugin nameless, which is what
-    /// makes cachedName() report its "mock_plugin" fallback there.
+    /// Stubs the plugin identity that getEngineInfos() copies into every row. The
+    /// resolveEngineName() cases read none of those fields and leave the plugin
+    /// nameless, so cachedName() reports its "mock_plugin" fallback there.
     void stubIdentity(const char* pluginName, const char* pluginVersion) const
     {
         EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return(pluginName));
@@ -2962,10 +2961,8 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosFallsBackToHexWhenPluginExpo
     harness.stubIdentity("test-plugin", "1.0");
 
     // A plugin that never exported the symbol reaches the hexadecimal fallback
-    // with the entry point untouched. apiVersion() is expected never to be
-    // consulted: naming turns on symbol presence alone, and the companion test
-    // GetEngineInfosUsesEngineNameRegardlessOfReportedApiVersion covers the other
-    // half of that claim.
+    // with the entry point untouched. apiVersion() is never consulted, because
+    // naming turns on symbol presence alone.
     EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(false));
     EXPECT_CALL(*harness.plugin, apiVersion()).Times(0);
     EXPECT_CALL(*harness.plugin, getEngineName(::testing::_)).Times(0);
@@ -3027,8 +3024,8 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosOmitsEnginesDroppedAtLoad)
 
 TEST(TestEnginePluginResourceManager, FindEngineIdByNameDoesNotResolveADroppedEngine)
 {
-    // The other half of "fully unavailable": a dropped engine is missing from the
-    // reverse index too, so its hexadecimal name no longer resolves.
+    // A dropped engine is missing from the reverse index too, so its hexadecimal
+    // name no longer resolves.
     const SingleEnginePluginHarness harness(std::vector<int64_t>{300, 100});
     harness.stubIdentity("test-plugin", "1.0");
     harness.pluginManager->setAcceptedEngineIds(*harness.plugin, {300});
@@ -3045,9 +3042,8 @@ TEST(TestEnginePluginResourceManager, FindEngineIdByNameDoesNotResolveADroppedEn
 
 TEST(TestEnginePluginResourceManager, GetEngineInfosAcceptsPluginNameWhoseHashMatchesId)
 {
-    // The well-behaved counterpart of the test above: the plugin derived its
-    // engine ID from the name, so no mismatch diagnostic applies and the name is
-    // returned by the same path.
+    // A plugin that derived its engine ID from the name, as production plugins
+    // do: the hash matches, so no mismatch diagnostic applies.
     const int64_t matchingId = hipdnn_data_sdk::utilities::engineNameToId("HASH_MATCHED_ENGINE");
 
     const SingleEnginePluginHarness harness(matchingId);
@@ -3078,9 +3074,8 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosFallsBackToHexWhenPluginDecl
     EXPECT_CALL(*harness.plugin, apiVersion())
         .WillRepeatedly(::testing::Return(HIPDNN_ENGINE_API_VERSION));
 
-    // The entry point exists and the version gate opens, but the plugin has no
-    // name for this particular engine. That is an ordinary answer, not an error,
-    // and resolution continues to the next tier.
+    // The entry point exists but has no name for this particular engine. That is
+    // an ordinary answer, and resolution continues to the next tier.
     EXPECT_CALL(*harness.plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
     EXPECT_CALL(*harness.plugin, getEngineName(100))
         .WillRepeatedly(::testing::Return(std::optional<std::string>()));
@@ -3324,12 +3319,9 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameRefusesUndeclaredEngineDe
     {
         const EnginePluginResourceManager resourceManager(harness.pluginManager);
 
-        // The candidate is well formed and hashes to the engine it describes, so
-        // nothing about the string itself is wrong. It is refused because the
-        // plugin never declared it through the entry point, which is the only
-        // channel load-time admission can inspect. Honoring a name no gate ever
-        // saw is what the refusal exists to prevent, so a correct one is refused
-        // on the same terms as an incorrect one.
+        // The candidate is well formed and hashes to the engine it describes, and
+        // is still refused: the plugin never declared it through the entry point,
+        // the only channel load-time admission can inspect.
         EXPECT_EQ(
             resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_NAMED_ENGINE")),
             hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
@@ -3365,8 +3357,7 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNamePrefersEntryPointOverEngi
         const EnginePluginResourceManager resourceManager(pluginManager);
 
         // The entry point is authoritative and EngineDetails.name is a graph-scoped
-        // echo of it, so a disagreement is reported and then ignored rather than
-        // resolved in the other direction or escalated.
+        // echo of it, so a disagreement is reported and then ignored.
         EXPECT_EQ(resourceManager.resolveEngineName(100, std::string_view("DETAILS_ENGINE")),
                   "ENTRY_POINT_ENGINE");
 
@@ -3418,8 +3409,7 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameLetsTheRegistryOutrankEng
         const EnginePluginResourceManager resourceManager(harness.pluginManager);
 
         // The static registry is a name the host itself declares, so it carries the
-        // guarantee the EngineDetails candidate lacks and answers ahead of it even
-        // though the candidate is the more specific of the two.
+        // guarantee the EngineDetails candidate lacks and outranks it.
         EXPECT_EQ(resourceManager.resolveEngineName(engineId, std::string_view("DETAILS_ENGINE")),
                   hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
     }
@@ -3466,7 +3456,7 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNamePrefersEntryPointOverRegi
 
         // A drop-in pack that rebinds an ID the host already knows still gets the
         // name it reports: the entry point outranks the graph-scoped record and the
-        // in-tree registry alike, and no other source can produce that answer.
+        // in-tree registry alike.
         EXPECT_EQ(resolved, "PACK_SUPPLIED_ENGINE");
         EXPECT_NE(resolved, "DETAILS_ENGINE");
         EXPECT_NE(resolved, hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
@@ -3478,8 +3468,7 @@ namespace
 
 /// Routes backend warnings to the isolated log recorder for the duration of a
 /// case, which is the only way to observe the resolver's diagnostics. Delivery
-/// is synchronous so the assertions need no waiting, and the global level is put
-/// back on the way out.
+/// is synchronous, so the assertions need no waiting.
 class ScopedBackendWarningCapture
 {
 public:
@@ -3545,9 +3534,9 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameReportsEntryPointAndDetai
                   "ENTRY_POINT_ENGINE");
     }
 
-    // Taking tier 1 silently would hide a plugin defect: the pack describes one
-    // engine differently through its two name channels. The report has to carry
-    // enough to find it, so it names the plugin, the engine and both strings.
+    // Taking tier 1 silently would hide a plugin describing one engine differently
+    // through its two name channels, so the report names the plugin, the engine
+    // and both strings.
     const std::string recordedLogs = recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "EngineDetails.name")) << recordedLogs;
     EXPECT_TRUE(recorder.hasLogContaining("ENTRY_POINT_ENGINE")) << recordedLogs;
@@ -3602,10 +3591,9 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameReportsUndeclaredEngineDe
                   "0x0000000000000064");
     }
 
-    // Refusing the only name on offer without a word would leave the caller
-    // staring at a hexadecimal ID with nothing to explain it. The report has to
-    // name the plugin, the engine and the refused string, and say which channel
-    // was left empty, since filling that channel is the whole fix.
+    // Refusing the only name on offer without a word would leave the caller staring
+    // at a hexadecimal ID. The report names the plugin, the engine, the refused
+    // string, and the channel that was left empty, since filling it is the fix.
     const std::string recordedLogs = recorder.getRecordedLogsAsString();
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "EngineDetails.name")) << recordedLogs;
     EXPECT_TRUE(recorder.hasLogContaining("hipdnnEnginePluginGetEngineName")) << recordedLogs;
@@ -3632,19 +3620,17 @@ TEST(TestEnginePluginResourceManager, ResolveEngineNameStaysSilentOnAnEmptyEngin
                   "0x0000000000000064");
     }
 
-    // An EngineDetails record with an unset name field is a plugin declining to
-    // record one, not a plugin declaring one through the wrong channel. Both reach
-    // the hexadecimal fallback, but only the latter is a defect, so the empty case
-    // has to stay quiet or every unnamed engine would warn on every graph.
+    // An unset EngineDetails name field is a plugin declining to record one, not
+    // one declaring through the wrong channel. Warning here would fire for every
+    // unnamed engine on every graph.
     EXPECT_FALSE(recorder.hasLogContaining("EngineDetails.name"))
         << recorder.getRecordedLogsAsString();
 }
 
 // ---------------------------------------------------------------------------
 // Admission diagnostics. A name that does not hash to its engine ID is dropped
-// either way; what these cases pin down is that the error says which engine the
-// name actually belongs to, so a collision is not left reading as a bare hash
-// mismatch.
+// either way; these cases pin down that the error says which engine the name
+// actually belongs to.
 // ---------------------------------------------------------------------------
 
 namespace
@@ -3806,8 +3792,7 @@ TEST(TestEnginePluginResourceManager, CodegenFixtureExportsGeneratedEngineNameEn
     ASSERT_NE(getEngineName, nullptr);
 
     // The container supplies no getEngineName, so the generated entry point takes
-    // its fallback branch. The call is well-formed; the plugin simply has nothing
-    // to report.
+    // its fallback branch: a well-formed call with nothing to report.
     const char* name = nullptr;
     EXPECT_EQ(getEngineName(codegen_fixture::K_FIXTURE_ENGINE_ID, &name),
               HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE);
@@ -3828,12 +3813,11 @@ TEST(TestEnginePluginResourceManager, CodegenFixtureResolvesToHexThroughResource
     const auto& fixturePlugin = plugins.front();
 
     // The fixture defines no HIPDNN_PLUGIN_API_VERSION, so it reports the baseline
-    // — the shape of most plugins in tree. Naming must work for it anyway, which
-    // makes this the end-to-end half of the "no version gate" guarantee.
+    // like most plugins in tree. Naming must work for it anyway.
     EXPECT_EQ(fixturePlugin->apiVersion(), hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE);
 
-    // The symbol is present because the SDK generates it unconditionally, which is
-    // exactly why the host cannot treat its presence as a promise of a name.
+    // The SDK generates the symbol unconditionally, so its presence is no promise
+    // of a name.
     EXPECT_TRUE(fixturePlugin->hasEngineName());
     EXPECT_FALSE(fixturePlugin->getEngineName(codegen_fixture::K_FIXTURE_ENGINE_ID).has_value());
 
@@ -3955,9 +3939,8 @@ TEST(TestEnginePluginResourceManager, LyingEngineNameResolvesToHexThroughResourc
     auto infos = resourceManager.getEngineInfos();
 
     // The plugin publishes exactly one engine, the one whose entry point claims
-    // success and supplies nothing. EngineDetails.name is unset too, so both
-    // plugin-supplied tiers come up empty and the id is not in the static
-    // registry -- resolution has to land on the hex fallback.
+    // success and supplies nothing. The id is not in the static registry either,
+    // so resolution has to land on the hex fallback.
     ASSERT_EQ(infos.size(), 1);
     EXPECT_EQ(infos[0].engineId, K_LYING_NULL_NAME_ENGINE_ID);
     EXPECT_EQ(infos[0].engineName, "0xFFFFFFFFFFFFFFE6");

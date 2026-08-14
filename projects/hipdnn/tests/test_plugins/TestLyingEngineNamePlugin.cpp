@@ -19,9 +19,9 @@ thread_local char
 // EnginePlugin::getEngineName rejects all three and reports no name, so the
 // backend falls through to the next tier of the name-resolution chain.
 //
-// Only the first id belongs to an engine this plugin publishes; the other two are
-// ids it does not expose. The entry point is keyed by engine id, so one loaded
-// plugin can present all three answers without publishing three sets of details.
+// Only the first id belongs to an engine this plugin publishes. The entry point is
+// keyed by engine id, so one plugin can present all three answers without
+// publishing three sets of details.
 class LyingEngineNamePlugin : public TestPluginBase
 {
 public:
@@ -65,7 +65,7 @@ __attribute__((constructor)) static void initializePlugin()
 
 // The standard surface comes from the shared macro. The engine-name entry point
 // is hand-written rather than taken from REGISTER_TEST_PLUGIN_ENGINE_NAME_API()
-// precisely because that macro delegates to the conforming implementation.
+// because that macro delegates to the conforming implementation.
 REGISTER_TEST_PLUGIN_API()
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -83,9 +83,8 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
 
     if(engineId == constants::engineId<LyingEngineNamePlugin>())
     {
-        // Claims success without ever writing through the out parameter. Set
-        // explicitly rather than left alone so the fixture does not depend on
-        // the caller having zeroed it first.
+        // Claims success without ever writing a name. Set explicitly so the
+        // fixture does not depend on the caller having zeroed it first.
         *name = nullptr;
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }

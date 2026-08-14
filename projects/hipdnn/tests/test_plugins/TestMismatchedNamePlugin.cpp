@@ -10,13 +10,10 @@ thread_local char
     = "";
 
 // A plugin that names its engine well but hardcodes an engine id that the name
-// does not hash back to, which is the defect the host reports through its
-// name/id disagreement warning.
+// does not hash back to. The host logs an error and drops the engine at load.
 //
-// The host raises that warning only once per (plugin, engine id) per process,
-// so the fixture asserting it must be loaded by exactly one test. Other fakes
-// carry the same disagreement but are loaded by several tests, which would
-// leave the assertion dependent on test order.
+// It exists as its own fixture so the tests asserting that error load nothing
+// else, and so no other test has to tolerate the error in its logs.
 class MismatchedNamePlugin : public TestPluginBase
 {
 public:

@@ -206,10 +206,9 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
 
-    // Engine ID -> display name, memoised for the lifetime of _graphDesc. Entries
-    // are resolved against the current _graphDesc, so the cache is dropped
-    // whenever that descriptor is replaced. Written by const accessors, so every
-    // access goes through _engineNameCacheMutex and a shared const reference
+    // Engine ID -> display name, memoised for the lifetime of _graphDesc and
+    // dropped whenever that descriptor is replaced. Written by const accessors, so
+    // every access goes through _engineNameCacheMutex and a shared const reference
     // stays safe to use from several threads.
     mutable std::unordered_map<int64_t, std::string> _engineNameCache;
 
@@ -256,9 +255,8 @@ protected:
         // Set by deselect_engines().
         // Accumulates across calls.
 
-    // Engine name exclusion set. Populated alongside _barredEngineIds by the
-    // string overload of deselect_engines(), and cleared with it. See
-    // isEngineBarred().
+    // Engine name exclusion set. Populated alongside _barredEngineIds by the string
+    // overload of deselect_engines() and cleared with it. See isEngineBarred().
     std::unordered_set<std::string> _barredEngineNames;
 
     // Barred names that have already been reported as matching no candidate
@@ -514,9 +512,8 @@ protected:
 private:
     std::optional<int64_t> _preferredEngineId;
 
-    // Preferred engine as a display name. Takes precedence over
-    // _preferredEngineId when it matches a candidate. See
-    // findPreferredEngineByName().
+    // Preferred engine as a display name. Takes precedence over _preferredEngineId
+    // when it matches a candidate. See findPreferredEngineByName().
     std::optional<std::string> _preferredEngineName;
 
     bool _isOverrideShapeEnabled = false;
@@ -909,9 +906,8 @@ private:
 
     /// Whether an engine is excluded, by ID or by the name it displays under.
     ///
-    /// Name matching resolves the candidate's name and compares it, so a name
-    /// shared by several engines bars all of them. Graphs that never bar by name
-    /// take the ID-only path and never resolve a name.
+    /// Graphs that never bar by name take the ID-only path and never resolve a
+    /// name.
     bool isEngineBarred(int64_t engineId) const
     {
         if(_barredEngineIds.count(engineId) > 0)
@@ -4398,10 +4394,9 @@ public:
      * along with the rest of the filter state by @c create_execution_plans().
      *
      * Matching happens at plan-build time against the name each candidate engine
-     * displays under, so every engine carrying the name is barred. Each name is
-     * also hashed to an engine ID and added to the barred engine ID set, which
-     * keeps built-in and hex-form names working before any candidate engine is
-     * known.
+     * displays under. Each name is also hashed to an engine ID and added to the
+     * barred engine ID set, which bars registered names before any candidate
+     * engine is known.
      *
      * A name that matches no candidate bars nothing and is reported once as a
      * warning when the plans are built.

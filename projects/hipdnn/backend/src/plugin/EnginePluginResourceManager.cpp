@@ -192,9 +192,8 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
                < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
-    // Built from the sorted vector, so it agrees with the enumeration by
-    // construction. Admission ties each name to its own hash, so distinct
-    // engines cannot collide here.
+    // Built from the sorted vector, so it agrees with the enumeration. Admission
+    // ties each name to its own hash, so distinct engines cannot collide here.
     auto& idsByName = _cachedEngineIdsByName.emplace();
     idsByName.reserve(infos.size());
     for(const auto& info : infos)
@@ -223,10 +222,8 @@ std::string EnginePluginResourceManager::resolveEngineName(
                                             ? std::string_view(owningPlugin->cachedName())
                                             : std::string_view("<unknown>");
 
-    // The owning plugin's hipdnnEnginePluginGetEngineName entry point is the only
-    // channel a plugin can name an engine through, because it is the only one
-    // load-time admission can reach. Symbol presence is the whole predicate; see
-    // EnginePlugin::hasEngineName().
+    // The entry point is the only channel a plugin can name an engine through,
+    // because it is the only one load-time admission can reach.
     std::optional<std::string> entryPointName;
     if(owningPlugin != nullptr && owningPlugin->hasEngineName())
     {
@@ -253,14 +250,11 @@ std::string EnginePluginResourceManager::resolveEngineName(
         return *entryPointName;
     }
 
-    // EngineDetails.name records the name an engine carries; it does not confer
-    // one. Reaching here means the entry point supplied nothing, so a candidate
-    // still standing at this point belongs to an engine whose plugin never
-    // declared the name at load time. Admission is graph-blind and cannot see
-    // this field, so honoring it would surface a name that no load-time gate
-    // ever checked. Declaring a name in one place and not the other is a plugin
-    // defect: the name resolves from the registry or the hex ID instead, and the
-    // plugin is told which channel it left empty.
+    // EngineDetails.name records a name but never confers one. Admission is
+    // graph-blind and cannot see this field, so honoring a candidate that
+    // survived to here would surface a name no load-time gate ever checked.
+    // Declaring a name here but not through the entry point is a plugin defect;
+    // the name resolves from the registry or the hex ID instead.
     if(detailsName.has_value() && !detailsName->empty())
     {
         HIPDNN_BACKEND_LOG_WARN(
@@ -346,9 +340,8 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
         _handleToPlugin[handle] = plugin.get();
 
         // Nested in the success path on purpose: a plugin that never got a handle
-        // has nothing to route to, so its engines contribute no entries. Routing
-        // is built from the accepted set only, so a dropped engine is unreachable
-        // rather than merely hidden from enumeration.
+        // has nothing to route to. Routing is built from the accepted set, so a
+        // dropped engine cannot be reached at all.
         for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             _engineIdToHandle[id] = handle;

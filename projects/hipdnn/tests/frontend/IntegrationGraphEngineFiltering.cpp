@@ -474,7 +474,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, PreferByPluginSuppliedEngineName)
     graph->set_preferred_engine_id_ext(pluginEngineName());
 
     // The hashed ID is stored too, so the preference is observable before the
-    // graph is built and callers relying on that keep working.
+    // graph is built.
     EXPECT_EQ(
         graph->get_preferred_engine_id_ext(),
         std::optional<int64_t>{hipdnn_data_sdk::utilities::engineNameToId(pluginEngineName())});
@@ -560,8 +560,7 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectBarsPluginEnginePlan)
 }
 
 // A plugin whose engine ID is the hash of its name -- the identity
-// HIPDNN_REGISTER_ENGINE gives production plugins -- is still deselectable by that
-// name, so name matching has not displaced the hashed-ID path.
+// HIPDNN_REGISTER_ENGINE gives production plugins -- is deselectable by that name.
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectByHashedPluginSuppliedEngineName)
 {
     // Guards against drift between the name and the hardcoded engine ID literal in

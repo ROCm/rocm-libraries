@@ -86,7 +86,7 @@ struct HasGetEngineName<
  * - EngineManager& getEngineManager()
  * - static uint32_t copyEngineIds(int64_t*, uint32_t, uint32_t&)
  *
- * Optional methods (detected, never required):
+ * Optional methods:
  * - static hipdnnPluginStatus_t getEngineName(int64_t, const char**)
  */
 template <typename ContainerType>

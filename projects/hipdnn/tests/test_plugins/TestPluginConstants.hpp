@@ -71,8 +71,8 @@ inline const std::string& testHashedNamePluginPath()
 }
 #endif
 
-// Guarded by the define so only the one target that needs this plugin can reach
-// it; see TestMismatchedNamePlugin.cpp for why it must stay single-consumer.
+// The mismatched-name plugin is consumed only by the backend plugin-loading
+// integration tests, so the accessor is guarded the same way.
 #ifdef TEST_MISMATCHED_NAME_PLUGIN_NAME
 inline const std::string& testMismatchedNamePluginPath()
 {

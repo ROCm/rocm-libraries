@@ -30,9 +30,8 @@ private:
     std::vector<hipdnnBackendBehaviorNote_t> _behaviorNotes;
 
     /// Name resolved during finalize() by
-    /// EnginePluginResourceManager::resolveEngineName(): a declared name, which
-    /// hashes to _engineId, or that ID rendered as hex when nothing declares one.
-    /// Empty until then.
+    /// EnginePluginResourceManager::resolveEngineName(); empty until then. Either
+    /// a declared name, which hashes to _engineId, or that ID rendered as hex.
     std::string _engineName;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,

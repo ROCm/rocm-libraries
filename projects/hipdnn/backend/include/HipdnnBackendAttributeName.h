@@ -409,12 +409,9 @@ typedef enum
      * @brief Human-readable name of this engine (HIPDNN_TYPE_CHAR, extension).
      *
      * Read-only and supplied by the backend. Never empty for a finalized engine
-     * descriptor. An engine ID is the hash of its name, so the name reported here
-     * always maps back to the same engine through `hipdnnGetEngineIdByName_ext`.
-     * A plugin names an engine through its `hipdnnEnginePluginGetEngineName`
-     * entry point, which is validated when the plugin loads; the name a plugin
-     * records in `EngineDetails.name` is not a substitute, so this attribute
-     * agrees with `hipdnnGetEngineInfo_ext` for every engine. See
+     * descriptor. Names are unique across loaded engines, so the name reported
+     * here maps back to this engine through `hipdnnGetEngineIdByName_ext` and
+     * agrees with `hipdnnGetEngineInfo_ext`. See
      * `EnginePluginResourceManager::resolveEngineName()`.
      */
     HIPDNN_ATTR_ENGINE_NAME_EXT = 1008,

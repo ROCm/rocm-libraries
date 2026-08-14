@@ -228,17 +228,14 @@ install(TARGETS ${TEST_NO_API_VERSION_PLUGIN_NAME} LIBRARY DESTINATION ${HIPDNN_
         RUNTIME DESTINATION ${HIPDNN_TEST_PLUGIN_INSTALL_DIR}
 )
 
-# libhipdnn_test_engine_plugin1.so or hipdnn_test_engine_plugin1.dll (used by
-# TestEnginePluginResourceManager.cpp)
-#
-# The only consumer of EnginePluginImpl.inl inside the main build; see
+# A real, loadable engine plugin used by TestEnginePluginResourceManager.cpp, and
+# the only consumer of EnginePluginImpl.inl inside the main build; see
 # plugins/codegen_fixture/CodegenFixturePlugin.hpp for what it pins.
 #
-# It lives in its own codegen_fixture/ subdirectory rather than beside the flat
-# test plugins above: this is a real, loadable engine plugin, and the plugins in
-# ${HIPDNN_TEST_PLUGIN_DIR} include one that deliberately fails to load. Output
-# directory, install destination and rpath origin all take the suffix together,
-# otherwise the isolation holds in the build tree but not in the installed tree.
+# It gets its own codegen_fixture/ subdirectory because ${HIPDNN_TEST_PLUGIN_DIR}
+# holds a plugin that deliberately fails to load. Output directory, install
+# destination and rpath origin all take the suffix together, otherwise the
+# isolation holds in the build tree but not in the installed tree.
 set(CODEGEN_FIXTURE_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/codegen_fixture")
 set(CODEGEN_FIXTURE_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/codegen_fixture")
 

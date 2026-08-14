@@ -33,10 +33,9 @@ public:
      * @brief Reports whether this plugin exports the optional engine-name
      *        symbol (`hipdnnEnginePluginGetEngineName`).
      *
-     * Plugins built against engine plugin API < 1.4.0 do not export it. Symbol
-     * presence is the sole predicate for consulting the plugin about names: the
-     * version a plugin reports is self-declared, and most plugins leave it at
-     * the 1.0.0 baseline.
+     * Symbol presence is the sole predicate for consulting a plugin about names:
+     * the version a plugin reports is self-declared, and most leave it at the
+     * 1.0.0 baseline.
      */
     virtual bool hasEngineName() const;
 

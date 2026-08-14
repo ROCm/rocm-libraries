@@ -138,22 +138,21 @@ public:
     /// Never throws; always returns a non-empty string.
     /// @param engineId    Engine ID as reported by the owning plugin.
     /// @param detailsName Name recorded in EngineDetails.name, or std::nullopt
-    ///                    when there is no graph. Never a source for the result:
-    ///                    load-time admission cannot see this field, so a name
-    ///                    carried only here was never validated. It is compared
-    ///                    against the entry point when one answers and reported
-    ///                    as a plugin defect otherwise. The referenced storage
-    ///                    must outlive this call.
+    ///                    when there is no graph. Never a source for the result,
+    ///                    since load-time admission cannot see this field: it is
+    ///                    compared against the entry point when one answers, and
+    ///                    reported as a plugin defect otherwise. The referenced
+    ///                    storage must outlive this call.
     [[nodiscard]] virtual std::string
         resolveEngineName(int64_t engineId, std::optional<std::string_view> detailsName) const;
 
     /// @brief Resolves a name to the engine ID that carries it.
     ///
-    /// The lookup is the exact inverse of the names getEngineInfos() reports, so
-    /// a name from that enumeration always resolves, and to exactly one engine:
-    /// names are unique across loaded engines because an engine whose name does
-    /// not hash to its ID is dropped at load. Unlike engineNameToId(), which
-    /// hashes any string, this also confirms the engine is loaded.
+    /// The exact inverse of the names getEngineInfos() reports: a name from that
+    /// enumeration always resolves, and to exactly one engine, because an engine
+    /// whose name does not hash to its ID is dropped at load. Unlike
+    /// engineNameToId(), which hashes any string, this also confirms the engine
+    /// is loaded.
     ///
     /// An engine named only through the graph-scoped EngineDetails.name is
     /// indexed under its registry or hex name instead, the same limitation

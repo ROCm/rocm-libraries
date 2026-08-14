@@ -10,8 +10,7 @@ thread_local char
     = "";
 
 // A well-behaved plugin whose engine id is the hash of its own engine name, the
-// identity HIPDNN_REGISTER_ENGINE gives production plugins. The other fake plugins
-// hardcode unrelated ids, so only this one exercises a name-hashing filter.
+// identity HIPDNN_REGISTER_ENGINE gives production plugins.
 class HashedNamePlugin : public TestPluginBase
 {
 public:

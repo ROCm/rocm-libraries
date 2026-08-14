@@ -23,8 +23,7 @@
 ///
 /// CodegenFixtureContainer deliberately omits the optional static getEngineName
 /// member, so the generated hipdnnEnginePluginGetEngineName entry point takes
-/// its fallback branch and reports HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE. The
-/// runtime half is asserted from TestEnginePluginResourceManager.cpp.
+/// its fallback branch and reports HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE.
 ///
 /// The engine here computes nothing: it reports itself inapplicable to every
 /// graph, so the backend never asks it for a plan.
