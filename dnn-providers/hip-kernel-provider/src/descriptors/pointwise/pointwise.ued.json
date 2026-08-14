@@ -1,4 +1,5 @@
 {
+  "schema": "hipdnn.ued/v1",
   "version": "1.0",
   "id": "8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911",
   "name": "hipkernel:Pointwise",

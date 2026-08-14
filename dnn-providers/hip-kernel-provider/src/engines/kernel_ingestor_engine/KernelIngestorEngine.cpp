@@ -24,17 +24,51 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 std::filesystem::path descriptorSearchDirectory()
 {
-    // The install tree is the only path compiled in. A build-tree default would be an
-    // absolute path from this machine baked into the shipped plugin, preferred over the
-    // installed copy on any host where it happens to exist, and it would mean nothing
-    // ever exercises the installed one. Tests and run-from-build-dir set the variable
-    // instead, the same way the ASM engine takes HIPDNN_AITER_ASM_DIR.
+    // Three sources, in falling order of how much they know about this specific install.
+    //
+    // 1. The environment, which is the only one an operator or a test can set. Tests and
+    //    run-from-build-dir use it, the same way the ASM engine takes HIPDNN_AITER_ASM_DIR.
     if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
        !override.empty())
     {
         return override;
     }
 
+    // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR below
+    //    bakes in the prefix this build was *configured* with, which a DESTDIR-staged,
+    //    relocated or repackaged install (ROCm packaging, conda, wheels) invalidates --
+    //    and the cost of getting it wrong is the whole descriptor-backed engine inventory,
+    //    reported only as "0 descriptor-backed engine(s) loaded from <a path that is not
+    //    there>". Measuring from the loaded module instead is correct wherever it lands,
+    //    because the descriptors install at a fixed offset from the plugin.
+    //
+    //    hipdnnPluginGetName is this plugin's own exported entry point, so an RTLD_DEFAULT
+    //    lookup from inside the plugin finds this module even when several RTLD_LOCAL
+    //    providers export that same name. No Windows counterpart takes a symbol yet, so
+    //    there the chain is 1 then 3, exactly as before.
+#if defined(__linux__)
+    try
+    {
+        const auto candidate
+            = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForSymbol("hipdnnPluginGetName")
+              / HIPDNN_DESCRIPTOR_SUBDIR;
+        std::error_code notFound;
+        if(std::filesystem::is_directory(candidate, notFound))
+        {
+            return candidate;
+        }
+    }
+    catch(const std::runtime_error& error)
+    {
+        // No loaded module to measure from -- a statically linked test binary, say.
+        // Not fatal: step 3 still answers. Logged because on a real install it would
+        // mean the relocatable path silently stopped working.
+        HIPDNN_PLUGIN_LOG_INFO("ingestor: no module-relative descriptor directory ("
+                               << error.what() << "); using the configure-time path");
+    }
+#endif
+
+    // 3. The configure-time prefix. Right for an install that never moved.
     return HIPDNN_DESCRIPTOR_INSTALL_DIR;
 }
 

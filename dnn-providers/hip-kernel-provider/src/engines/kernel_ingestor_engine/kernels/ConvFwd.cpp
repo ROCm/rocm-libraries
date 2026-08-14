@@ -16,16 +16,21 @@
 // HIP_PLUGIN_CONV_TYPE: a _Float16 accumulator loses too much precision for a reference
 // a CPU float reference is compared against.
 
+#include <cstdint>
+
 extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
                                    const HIP_PLUGIN_CONV_TYPE* w,
                                    HIP_PLUGIN_CONV_TYPE* y,
                                    int n, int c, int h, int width, int k, int r, int s)
 {
-    const int p = h - r + 1;
-    const int q = width - s + 1;
-    const int total = n * k * p * q;
+    // int64_t: n*k*p*q can exceed 2^31 for shapes the matcher admits (element count is
+    // unbounded); 32-bit arithmetic here wrapped, defeating the `index >= total` guard
+    // and turning it into an out-of-bounds read/write.
+    const int64_t p = h - r + 1;
+    const int64_t q = width - s + 1;
+    const int64_t total = static_cast<int64_t>(n) * k * p * q;
 
-    const int index = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
+    const int64_t index = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(index >= total)
     {
         return;
@@ -33,14 +38,14 @@ extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
 
     // Unravel the linear index over (n, k, p, q), q fastest -- the same order y is
     // stored in, so index also addresses y directly.
-    int remaining = index;
-    const int qOut = remaining % q;
+    int64_t remaining = index;
+    const int64_t qOut = remaining % q;
     remaining /= q;
-    const int pOut = remaining % p;
+    const int64_t pOut = remaining % p;
     remaining /= p;
-    const int kOut = remaining % k;
+    const int64_t kOut = remaining % k;
     remaining /= k;
-    const int nOut = remaining;
+    const int64_t nOut = remaining;
 
     float accumulator = 0.0f;
     for(int cIn = 0; cIn < c; ++cIn)
@@ -49,10 +54,10 @@ extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
         {
             for(int sIn = 0; sIn < s; ++sIn)
             {
-                const int hIn = pOut + rIn;
-                const int wIn = qOut + sIn;
-                const int xIndex = ((nOut * c + cIn) * h + hIn) * width + wIn;
-                const int wIndex = ((kOut * c + cIn) * r + rIn) * s + sIn;
+                const int64_t hIn = pOut + rIn;
+                const int64_t wIn = qOut + sIn;
+                const int64_t xIndex = ((nOut * c + cIn) * h + hIn) * width + wIn;
+                const int64_t wIndex = ((kOut * c + cIn) * r + rIn) * s + sIn;
                 accumulator += static_cast<float>(x[xIndex]) * static_cast<float>(w[wIndex]);
             }
         }

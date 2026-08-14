@@ -1,4 +1,5 @@
 {
+  "schema": "hipdnn.udd/v1",
   "version": "1.0",
   "id": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
   "name": "pointwise dispatch",

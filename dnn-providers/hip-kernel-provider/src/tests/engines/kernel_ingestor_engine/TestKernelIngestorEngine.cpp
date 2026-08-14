@@ -256,6 +256,10 @@ TEST(TestKernelIngestorEngine, ServesAllItsPacksOperationsUnderOneEngineId)
 
 TEST(TestKernelIngestorEngine, DeclinesAGraphNoPackOfItsClaims)
 {
+    // Matchers decline outright with no device resolved, so a decline here would be
+    // vacuous rather than proof the operation matchers refused DIV.
+    SKIP_IF_NO_DEVICES();
+
     Container container;
     auto& engineManager = container.getEngineManager();
     Handle handle;

@@ -54,6 +54,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # Build-tree runs set HIPDNN_DESCRIPTOR_DIR instead; the test targets do it for ctest.
     target_compile_definitions(hip_kernel_provider_impl PRIVATE
         HIPDNN_DESCRIPTOR_INSTALL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}"
+        # Container.cpp resolves this relative to the loaded .so first, so a
+        # DESTDIR-staged, relocated, or repackaged install still finds its own
+        # descriptors; HIPDNN_DESCRIPTOR_INSTALL_DIR above is only its fallback.
+        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}"
     )
 endif()
 

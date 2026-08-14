@@ -248,6 +248,41 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
+    const auto* xDims = x->dims();
+    const auto* wDims = w->dims();
+    const auto* yDims = y->dims();
+    const auto xC = xDims->Get(1);
+    const auto xH = xDims->Get(2);
+    const auto xW = xDims->Get(3);
+    const auto wK = wDims->Get(0);
+    const auto wR = wDims->Get(2);
+    const auto wS = wDims->Get(3);
+
+    // Filter channels vs. input channels -- also the missing group-count refusal:
+    // grouped conv is encoded purely as a smaller w channel count, and this kernel has
+    // no notion of groups. prepare() takes c from x alone (below) and the kernel
+    // indexes w with it (ConvFwd.cpp); a filter with fewer channels reads off the end.
+    if(wDims->Get(1) != xC)
+    {
+        return false;
+    }
+
+    // r <= h and s <= width, or p = h - r + 1 / q = width - s + 1 go non-positive,
+    // which the kernel's flat-index unravel (ConvFwd.cpp) never expects.
+    if(wR > xH || wS > xW)
+    {
+        return false;
+    }
+
+    // y must be exactly the shape the kernel computes it for: total = n*k*p*q is
+    // derived entirely from x and w, and the kernel writes every index < total into y.
+    // A smaller y is an out-of-bounds write.
+    if(yDims->Get(0) != xDims->Get(0) || yDims->Get(1) != wK || yDims->Get(2) != xH - wR + 1
+       || yDims->Get(3) != xW - wS + 1)
+    {
+        return false;
+    }
+
     // Binds operand uids for the dispatch handler to read back rather than re-deriving
     // them from the graph.
     bound[std::string(X_TOKEN)] = attributes.x_tensor_uid();
@@ -482,9 +517,13 @@ public:
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
-        const auto total = static_cast<unsigned int>(n) * static_cast<unsigned int>(k)
-                           * static_cast<unsigned int>(p) * static_cast<unsigned int>(q);
-        const auto gridSize = (total + blockSize - 1) / blockSize;
+        // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits (element
+        // count is unbounded); the previous 32-bit product silently wrapped here and
+        // in the kernel body (ConvFwd.cpp), corrupting both the grid size and the
+        // kernel's own bounds guard.
+        const int64_t total = static_cast<int64_t>(n) * k * p * q;
+        const auto gridSize = static_cast<unsigned int>(
+            (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
 
         runnableKernel->setBlockSize(blockSize, 1, 1);
         runnableKernel->setGridSize(gridSize, 1, 1);

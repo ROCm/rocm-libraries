@@ -399,6 +399,8 @@ constexpr int64_t CONV_Y_UID = 3;
  *
  * @param wDataType Overrides w's dtype away from @p dataType, for the cross-operand
  *        dtype-mismatch refusal.
+ * @param xStridesOverride Overrides x's strides away from packed row-major, for the
+ *        non-packed-layout refusal; the kernel takes no strides of its own.
  */
 inline flatbuffers::FlatBufferBuilder buildConvFwdGraph(
     hipdnn_flatbuffers_sdk::data_objects::DataType dataType
@@ -412,7 +414,8 @@ inline flatbuffers::FlatBufferBuilder buildConvFwdGraph(
     const std::vector<int64_t>& xDims = {1, 1, 3, 3},
     const std::optional<std::vector<int64_t>>& wDims = std::nullopt,
     const std::optional<std::vector<int64_t>>& yDims = std::nullopt,
-    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> wDataType = std::nullopt)
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> wDataType = std::nullopt,
+    const std::optional<std::vector<int64_t>>& xStridesOverride = std::nullopt)
 {
     namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -422,7 +425,7 @@ inline flatbuffers::FlatBufferBuilder buildConvFwdGraph(
                              xDims[3] - resolvedWDims[3] + 1});
     const auto resolvedWDataType = wDataType.value_or(dataType);
 
-    const auto xStrides = packedRowMajorStrides(xDims);
+    const auto xStrides = xStridesOverride.value_or(packedRowMajorStrides(xDims));
     const auto wStrides = packedRowMajorStrides(resolvedWDims);
     const auto yStrides = packedRowMajorStrides(resolvedYDims);
 

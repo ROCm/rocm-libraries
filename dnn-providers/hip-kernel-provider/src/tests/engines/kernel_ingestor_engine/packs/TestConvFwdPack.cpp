@@ -3,6 +3,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -145,6 +147,78 @@ INSTANTIATE_TEST_SUITE_P(
         {"APointwiseGraph",
          // This engine's matcher only ever admits a ConvolutionFwdAttributes node.
          []() { return buildPointwiseGraph(); }},
+        {"FilterChannelsDisagreeWithInput",
+         // w's channel count (4) disagrees with x's (1) -- also the group-count
+         // refusal, since this pack has no notion of groups.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 3, 3},
+                                      /*wDims=*/std::vector<int64_t>{1, 4, 2, 2});
+         }},
+        {"OutputDimsInconsistentWithInputAndFilter",
+         // y's shape disagrees with n/k/p/q, which is entirely what the kernel
+         // actually computes it from -- a smaller y is an out-of-bounds write.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 3, 3},
+                                      /*wDims=*/std::nullopt,
+                                      /*yDims=*/std::vector<int64_t>{1, 3, 9, 9});
+         }},
+        {"PostPaddingOnly",
+         // Padding on one side is still padding; the flat index arithmetic never
+         // adds any.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{1, 1});
+         }},
+        {"NonPackedStrides",
+         // Valid strides, but not packed row-major; the kernel takes no strides of
+         // its own and assumes contiguous NCHW.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 3, 3},
+                                      /*wDims=*/std::nullopt,
+                                      /*yDims=*/std::nullopt,
+                                      /*wDataType=*/std::nullopt,
+                                      /*xStridesOverride=*/std::vector<int64_t>{9, 9, 1, 3});
+         }},
+        {"Rank3Tensors",
+         // Rank 4 is required; a rank-3 x is refused before any cross-operand
+         // comparison runs, so w/y here only need to be constructible.
+         []() {
+             return buildConvFwdGraph(data_objects::DataType::FLOAT,
+                                      data_objects::ConvMode::CROSS_CORRELATION,
+                                      /*stride=*/std::vector<int64_t>{1, 1},
+                                      /*dilation=*/std::vector<int64_t>{1, 1},
+                                      /*prePadding=*/std::vector<int64_t>{0, 0},
+                                      /*postPadding=*/std::vector<int64_t>{0, 0},
+                                      /*xDims=*/std::vector<int64_t>{1, 1, 3},
+                                      /*wDims=*/std::vector<int64_t>{1, 1, 2, 2},
+                                      /*yDims=*/std::vector<int64_t>{1, 1, 2, 2});
+         }},
+        {"UnsupportedDtype",
+         // Only FLOAT and HALF are supported; the reference kernel has no other
+         // instantiation.
+         []() { return buildConvFwdGraph(data_objects::DataType::INT32); }},
     }),
     [](const ::testing::TestParamInfo<GraphMatcherRefusalCase>& info) { return info.param.name; });
 
@@ -202,6 +276,66 @@ TEST(TestConvFwdScore, PrefersTheLargerBlockSize)
 
     EXPECT_GT(scoreKernel(CONV_FWD, makeKernel(256, "FLOAT", "ConvFwd"), fixture.context()),
               scoreKernel(CONV_FWD, makeKernel(64, "FLOAT", "ConvFwd"), fixture.context()));
+}
+
+// ---------------------------------------------------------------------------
+// Shipped descriptor set
+// ---------------------------------------------------------------------------
+//
+// Every test above resolves symbols compiled into this binary and hand-builds
+// KernelDefinitions via makeKernel() -- none of it loads conv_fwd/*.json. Without this
+// section, a broken shipped descriptor (wrong entry_point, a missing kernel, a knob
+// naming no KMD field) passes every unit test and only shows up in the slow GPU suite.
+
+TEST(TestConvFwdPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
+{
+    const auto& set = loadedSet("hipkernel:ConvFwd");
+
+    ASSERT_EQ(set.packs.size(), 1U);
+    const auto& kernels = set.packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3U);
+
+    const auto describes = [&kernels](int64_t blockSize, const std::string& dtype) {
+        return std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+            return std::get<int64_t>(kernel.metadata.at(std::string(BLOCK_SIZE_FIELD)))
+                       == blockSize
+                   && std::get<std::string>(kernel.metadata.at(std::string(DTYPE_FIELD)))
+                          == dtype
+                   && kernel.source.entryPoint == "ConvFwd";
+        });
+    };
+
+    EXPECT_TRUE(describes(64, "FLOAT"));
+    EXPECT_TRUE(describes(256, "FLOAT"));
+    EXPECT_TRUE(describes(64, "HALF"));
+}
+
+TEST(TestConvFwdPack, ExposesBlockSizeAsTheOneKnob)
+{
+    const auto& set = loadedSet("hipkernel:ConvFwd");
+
+    ASSERT_EQ(set.engine.knobs.size(), 1U);
+    EXPECT_EQ(set.engine.knobs.front(), std::string(BLOCK_SIZE_FIELD));
+}
+
+TEST(TestConvFwdPack, HasOneGraphMatcherAndOneKernelMatcher)
+{
+    const auto& set = loadedSet("hipkernel:ConvFwd");
+
+    EXPECT_EQ(std::count_if(set.matchers.begin(),
+                            set.matchers.end(),
+                            [](const auto& matcher) {
+                                return matcher.scope
+                                       == hipdnn_plugin_sdk::ingestor::MatchScope::GRAPH;
+                            }),
+              1);
+    EXPECT_EQ(std::count_if(set.matchers.begin(),
+                            set.matchers.end(),
+                            [](const auto& matcher) {
+                                return matcher.scope
+                                       == hipdnn_plugin_sdk::ingestor::MatchScope::KERNEL;
+                            }),
+              1);
 }
 
 } // namespace

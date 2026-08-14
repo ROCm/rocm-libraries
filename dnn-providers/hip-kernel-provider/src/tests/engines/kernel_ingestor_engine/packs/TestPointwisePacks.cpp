@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
@@ -91,8 +92,11 @@ TEST(TestPointwisePacks, EveryPackSharesTheEngineDispatchAndAllButOneMatcher)
     const auto& mul = packFor(set, "Mul");
     const auto& sub = packFor(set, "Sub");
 
-    EXPECT_EQ(add.engineId, mul.engineId);
-    EXPECT_EQ(add.engineId, sub.engineId);
+    // Load-bearing form: packs land in set.packs by resolveDescriptorSets() selecting
+    // engineId == set.engine.id, so comparing packs to each other proves nothing.
+    EXPECT_EQ(add.engineId, set.engine.id);
+    EXPECT_EQ(mul.engineId, set.engine.id);
+    EXPECT_EQ(sub.engineId, set.engine.id);
     EXPECT_EQ(add.dispatchId, mul.dispatchId);
     EXPECT_EQ(add.dispatchId, sub.dispatchId);
     ASSERT_EQ(set.dispatches.size(), 1U);
@@ -151,6 +155,24 @@ TEST(TestPointwisePacks, MatchersCoverBothScopes)
                                        == hipdnn_plugin_sdk::ingestor::MatchScope::KERNEL;
                             }),
               1);
+}
+
+/// The GPU suite (ExecutesASubtractGraphThroughItsOwnPack) proves the kernel itself
+/// computes a - b; add and mul are commutative so an operand swap there is invisible,
+/// but sub is asymmetric, so this pins the fast, device-free half: binding never
+/// swaps input_a/input_b before dispatch gets them.
+TEST(TestPointwisePacks, SubtractsInTheRightDirection)
+{
+    const GraphFixture fixture(
+        buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB));
+
+    hipdnn_plugin_sdk::ingestor::BoundTokens bound;
+    ASSERT_TRUE(matchesGraph(POINTWISE_SUB, fixture.context(), bound));
+
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputAToken),
+              INPUT_A_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputBToken),
+              INPUT_B_UID);
 }
 
 } // namespace

@@ -91,17 +91,20 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
-    // Names the ids rather than counting them. A count cannot tell a missing ingestor
-    // engine from an extra native one, and it cannot see the failure this is really
-    // guarding: the pack table being dropped from a binary that links the provider as a
-    // static archive, which leaves the engine absent and every other assertion happy.
+    // Named rather than merely non-empty: neither a count nor an emptiness check tells
+    // a missing engine (a set that failed to stage or install) from a renamed one, and
+    // the failure this guards -- the pack table dropped from a static-archive link --
+    // looks identical to "nothing shipped" either way.
     const auto& sets = discoverDescriptorSets();
 
-    // Reading the expectation from the function under test reintroduces the blindness
-    // this test exists to remove: with an empty result the loop below is vacuous and
-    // every count assertion in this file still passes. Reachable, since a pack that
-    // fails symbol registration is excluded from exactly this list.
-    ASSERT_FALSE(sets.empty()) << "no descriptor sets discovered, so nothing was asserted";
+    std::vector<std::string> names;
+    names.reserve(sets.size());
+    for(const auto& set : sets)
+    {
+        names.push_back(set.engine.name);
+    }
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(names, (std::vector<std::string>{"hipkernel:ConvFwd", "hipkernel:Pointwise"}));
 
     Container container;
     const auto allEngineIds = container.getEngineManager().getAllEngineIds();

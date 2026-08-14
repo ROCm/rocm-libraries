@@ -21,6 +21,10 @@
 #endif
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <filesystem>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginApi.h>
 #include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
@@ -34,6 +38,7 @@ namespace hip_kernel_provider::core
 {
 
 using namespace hipdnn_data_sdk::utilities;
+
 
 const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions()
 {
@@ -86,7 +91,11 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
             const auto engineId = engineNameToId(set.engine.name);
             definitions.push_back(
                 {engineId,
-                 [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                 // set is a reference into discoverDescriptorSets()'s memoized s_sets
+                 // vector (static, process-lifetime) -- captured by reference, not
+                 // value, is what that memoization exists to make safe. Do not change
+                 // this back to [set]: it re-copies a DescriptorSet per engine.
+                 [&set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                      -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                      try
                      {

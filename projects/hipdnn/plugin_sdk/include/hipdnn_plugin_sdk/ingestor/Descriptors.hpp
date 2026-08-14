@@ -224,6 +224,14 @@ struct KernelDescriptorPack
     DescriptorId dispatchId;
     /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent.
     /// Matches the base target id exactly, so `gfx942` never accepts `gfx950`.
+    ///
+    /// Enforced only at catalog build (KernelIngestorStateManager::buildCatalog), against
+    /// the device that call targets. There is no load-time gate, so a pack every local
+    /// device excludes is still built and simply declines per call.
+    ///
+    /// An arch-excluded pack is a correct, expected decline, the same category as a matcher
+    /// returning false -- reporting it as malformed makes a healthy cross-arch install read
+    /// as a pile of failures.
     std::vector<std::string> arch;
     std::vector<KernelDescriptor> kernels;
 };

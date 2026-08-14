@@ -7,6 +7,7 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -23,12 +24,14 @@
 
 #include <nlohmann/json.hpp>
 
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 /**
@@ -166,7 +169,7 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
     const auto kernel = [tag](char slot, int64_t blockSize, const std::string& dtype) {
         return nlohmann::json{{"id", testUuid(tag, slot)},
                               {"name", std::string("kernel_") + slot},
-                              {"source",
+                              {"kernel_source",
                                {{"kind", "embedded_source"},
                                 {"source_file", "Kernel.cpp"},
                                 {"entry_point", "Entry"}}},
@@ -176,20 +179,23 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
 
     return {
         {".kmd.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.kmd/v1"},
+          {"version", "1.0"},
           {"id", schemaId},
           {"name", "variant fields"},
           {"fields",
            {{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}},
             {{"name", "dtype"}, {"type", "string"}}}}}},
         {".uhd.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.uhd/v1"},
+          {"version", "1.0"},
           {"id", heuristicId},
           {"name", "selector"},
           {"kind", "native"},
           {"payload", SCORE_SYMBOL}}},
         {".ued.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.ued/v1"},
+          {"version", "1.0"},
           {"id", engineId},
           {"name", engineName},
           {"heuristic", heuristicId},
@@ -197,30 +203,34 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
           {"knobs", {"block_size"}},
           {"behavior_notes", {"runtime_compilation"}}}},
         {".umd.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.umd/v1"},
+          {"version", "1.0"},
           {"id", graphMatcherId},
           {"name", "graph shape"},
           {"scope", "graph"},
           {"match_symbol", GRAPH_SYMBOL}}},
         {".umd.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.umd/v1"},
+          {"version", "1.0"},
           {"id", kernelMatcherId},
           {"name", "kernel dtype"},
           {"scope", "kernel"},
           {"match_symbol", KERNEL_SYMBOL}}},
         {".udd.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.udd/v1"},
+          {"version", "1.0"},
           {"id", dispatchId},
           {"name", "dispatch"},
           {"dispatch_symbol", DISPATCH_SYMBOL}}},
         {".kdp.json",
-         {{"version", "1.0"},
+         {{"schema", "hipdnn.kdp/v1"},
+          {"version", "1.0"},
           {"id", testUuid(tag, ROLE_PACK)},
           {"name", "pack"},
-          {"matcher_ids", {graphMatcherId, kernelMatcherId}},
-          {"engine_id", engineId},
-          {"dispatch_id", dispatchId},
-          {"kernels",
+          {"matchers", {graphMatcherId, kernelMatcherId}},
+          {"engine", engineId},
+          {"dispatch", dispatchId},
+          {"kernelDescriptors",
            {kernel('8', 64, "FLOAT"), kernel('9', 256, "FLOAT"), kernel('a', 64, "HALF")}}}},
     };
 }
@@ -259,13 +269,22 @@ nlohmann::json& documentOfType(Documents& documents, std::string_view suffix)
     throw std::runtime_error("no document of type " + std::string(suffix));
 }
 
-/// Keyed on the pid, not on gtest's random_seed(), which is 0 unless --gtest_shuffle is
-/// passed: ScopedDirectory throws on an existing path, so a fixed name turns one killed
-/// run into a permanent failure and makes two concurrent runs collide.
+/// mkdtemp's XXXXXX template is unique by construction (kernel-guaranteed, not pid-keyed),
+/// so a SIGKILLed run's leftover directory and pid reuse -- both real in short-lived CI
+/// containers -- can no longer make a later run collide. mkdtemp() creates the directory;
+/// removed immediately so ScopedDirectory below (which throws on an existing path) can
+/// create it again -- a small TOCTOU window only an adversarial local process could hit.
 std::filesystem::path uniqueDirectory(const std::string& name)
 {
-    return std::filesystem::temp_directory_path()
-           / ("descriptor_loader_" + name + "_" + std::to_string(::getpid()));
+    std::string path
+        = (std::filesystem::temp_directory_path() / ("descriptor_loader_" + name + "_XXXXXX"))
+              .string();
+    if(::mkdtemp(path.data()) == nullptr)
+    {
+        throw std::runtime_error("mkdtemp failed for " + path);
+    }
+    ::rmdir(path.c_str());
+    return path;
 }
 
 std::vector<DescriptorSet> loadFrom(const std::filesystem::path& root)
@@ -357,7 +376,9 @@ TEST(TestDescriptorLoader, MalformedJsonDoesNotCostTheOtherEngine)
 
 TEST(TestDescriptorLoader, IgnoresANonJsonFile)
 {
-    // The filename check, not the parser, is what skips this -- it never even opens.
+    // A file whose name matches no descriptor suffix and has no `.json`/`.jsonc`
+    // extension costs nothing -- distinct from SkipsAJsonFileThatNamesNoDescriptorType,
+    // which is a near-miss that does warn.
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("non_json"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
     std::ofstream(dir.path() / "README.txt", std::ios::binary) << "not a descriptor";
@@ -427,13 +448,15 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".ued.json")["features_signature"]
                               = nlohmann::json::array({"tensor_core"});
                       }},
-        // The type comes from the filename now, so a leftover `schema` key is simply an
-        // unknown one. Rejected rather than ignored: accepting both would leave two
-        // sources of truth for a file's type.
-        ViolationCase{"leftover_schema_key",
+        // D1: `schema` is required and cross-checked against the tag the filename's
+        // suffix selects; both directions of that rule need a case.
+        ViolationCase{"missing_schema",
                       [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["schema"]
-                              = "hipdnn.ued/v1";
+                          documentOfType(documents, ".ued.json").erase("schema");
+                      }},
+        ViolationCase{"schema_mismatched_tag",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["schema"] = "hipdnn.kmd/v1";
                       }},
         ViolationCase{"missing_required_key",
                       [](Documents& documents) {
@@ -493,8 +516,45 @@ INSTANTIATE_TEST_SUITE_P(
                       }},
         // The gate is per file type, not UED-only: a KMD this build cannot read is
         // skipped, and the engine whose `metadata` named it drops with it.
-        ViolationCase{"non_ued_newer_minor", [](Documents& documents) {
+        ViolationCase{"non_ued_newer_minor",
+                      [](Documents& documents) {
                           documentOfType(documents, ".kmd.json")["version"] = "1.1";
+                      }},
+        // A JSON number where `version` must be a string.
+        ViolationCase{"version_is_a_number",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["version"] = 1.0;
+                      }},
+        // `arch` must be an array; a bare string is rejected rather than treated as a
+        // one-element list.
+        ViolationCase{"arch_is_not_an_array",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"] = "gfx942";
+                      }},
+        // Every `arch` entry must be a string, not just the field as a whole.
+        ViolationCase{"arch_holds_a_non_string",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({123});
+                      }},
+        // Empty means arch-independent only as the whole list; an empty entry inside it
+        // is an authoring mistake, not a value.
+        ViolationCase{"arch_holds_an_empty_string",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({""});
+                      }},
+        // archSupports (DeviceProperties.hpp) is a case-sensitive exact compare, so a
+        // typo here would otherwise silently disable the pack everywhere.
+        ViolationCase{"arch_holds_a_malformed_id",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({"x86_64"});
+                      }},
+        ViolationCase{"arch_has_duplicate_entries",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")["arch"]
+                              = nlohmann::json::array({"gfx942", "gfx942"});
                       }}),
     [](const ::testing::TestParamInfo<ViolationCase>& info) { return info.param.name; });
 
@@ -506,7 +566,7 @@ TEST(TestDescriptorLoader, DropsOnlyThePackWhoseMatcherIsMissing)
     auto danglingPack = documentOfType(documents, ".kdp.json");
     danglingPack["id"] = testUuid('1', 'b');
     danglingPack["name"] = "pack with a dangling matcher";
-    danglingPack["matcher_ids"] = nlohmann::json::array({testUuid('f', 'f')});
+    danglingPack["matchers"] = nlohmann::json::array({testUuid('f', 'f')});
     documents.push_back(TestDocument{".kdp.json", danglingPack});
     writeDocuments(dir.path(), documents);
 
@@ -522,7 +582,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackIsUnresolvable)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:packless");
-    documentOfType(broken, ".kdp.json")["dispatch_id"] = testUuid('f', 'f');
+    documentOfType(broken, ".kdp.json")["dispatch"] = testUuid('f', 'f');
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -537,7 +597,7 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackDeclaresNoKernels)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:empty_pack");
-    documentOfType(broken, ".kdp.json")["kernels"] = nlohmann::json::array();
+    documentOfType(broken, ".kdp.json")["kernelDescriptors"] = nlohmann::json::array();
     writeDocuments(dir.path(), broken);
 
     const auto sets = loadFrom(dir.path());
@@ -555,7 +615,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
     // the one place resolveDescriptorSets logs a pack rather than losing it with no trace.
     // test:orphaned's own UED is left with no pack of its own and is dropped along with it.
     auto orphaned = makeSetDocuments('2', "test:orphaned");
-    documentOfType(orphaned, ".kdp.json")["engine_id"] = testUuid('f', 'f');
+    documentOfType(orphaned, ".kdp.json")["engine"] = testUuid('f', 'f');
     writeDocuments(dir.path(), orphaned);
 
     const auto sets = loadFrom(dir.path());
@@ -575,6 +635,18 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsMissing)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_schema"));
     auto documents = makeSetDocuments('1', "test:schemaless");
     documentOfType(documents, ".ued.json")["metadata"] = testUuid('f', 'f');
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The applicability-descriptor analogue of DropsAnEngineWhoseMetadataSchemaIsMissing
+/// above: a UED's other required cross-reference, unresolved, must drop the engine too.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseHeuristicIsMissing)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_heuristic"));
+    auto documents = makeSetDocuments('1', "test:heuristicless");
+    documentOfType(documents, ".ued.json")["heuristic"] = testUuid('f', 'f');
     writeDocuments(dir.path(), documents);
 
     EXPECT_TRUE(loadFrom(dir.path()).empty());
@@ -619,7 +691,7 @@ TEST(TestDescriptorLoader, CoercesAnIntegerValueForAFloatField)
     documentOfType(documents, ".kmd.json")
         .at("fields")
         .push_back({{"name", "scale"}, {"type", "float"}, {"default_value", 1}});
-    for(auto& kernel : documentOfType(documents, ".kdp.json").at("kernels"))
+    for(auto& kernel : documentOfType(documents, ".kdp.json").at("kernelDescriptors"))
     {
         kernel["metadata"]["scale"] = 2;
     }
@@ -643,7 +715,7 @@ TEST(TestDescriptorLoader, DropsAPackWhoseMetadataContradictsTheSchema)
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
     auto broken = makeSetDocuments('2', "test:bad_metadata");
-    for(auto& kernel : documentOfType(broken, ".kdp.json").at("kernels"))
+    for(auto& kernel : documentOfType(broken, ".kdp.json").at("kernelDescriptors"))
     {
         kernel["metadata"]["block_size"] = "sixty-four";
     }
@@ -676,7 +748,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
 {
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered"));
-    writeDocuments(dir.path(), makeSetDocuments('1', "test:registered"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:symbol_check_sibling"));
 
     auto unregistered = makeSetDocuments('2', "test:unregistered");
     documentOfType(unregistered, ".umd.json")["match_symbol"] = "descriptorloader.absent";
@@ -685,7 +757,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:registered");
+    EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
 }
 
 /// The probe's catch: two kernels completing to the same metadata tuple make the state
@@ -694,17 +766,17 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineWhoseKernelsShareAMetadataTupl
 {
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("duplicate_tuple"));
-    writeDocuments(dir.path(), makeSetDocuments('1', "test:registered"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:tuple_check_sibling"));
 
     auto duplicated = makeSetDocuments('2', "test:duplicate_tuple");
-    auto& kernels = documentOfType(duplicated, ".kdp.json").at("kernels");
+    auto& kernels = documentOfType(duplicated, ".kdp.json").at("kernelDescriptors");
     kernels[1]["metadata"] = kernels[0]["metadata"];
     writeDocuments(dir.path(), duplicated);
 
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:registered");
+    EXPECT_EQ(sets.front().engine.name, "test:tuple_check_sibling");
 }
 
 /// A name hashing onto an engine registered elsewhere in the process: EngineManager would
@@ -713,7 +785,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineCollidingWithARegisteredName)
 {
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("collision"));
-    writeDocuments(dir.path(), makeSetDocuments('1', "test:registered"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:collision_check_sibling"));
 
     static const std::string s_claimed = "test:already_claimed";
     static const hipdnn_data_sdk::utilities::EngineRegistrar s_registrar{s_claimed};
@@ -722,7 +794,7 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineCollidingWithARegisteredName)
     const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
 
     ASSERT_EQ(sets.size(), 1u);
-    EXPECT_EQ(sets.front().engine.name, "test:registered");
+    EXPECT_EQ(sets.front().engine.name, "test:collision_check_sibling");
 }
 
 /// The loader registers the names it accepts, so a second load of the same directory has
@@ -1011,12 +1083,33 @@ TEST(TestDescriptorLoader, ReadsCommentedDescriptorsAndIgnoresCommentsWhenCompar
     EXPECT_EQ(sets.front().engine.name, "test:commented");
 }
 
+/// RFC 0020 §4.3's authored form strips comments only; a trailing comma is a hard
+/// nlohmann parse_error.101, not the broader "permit trailing commas" many mean by
+/// "JSONC" (VS Code, tsconfig). The rejection is right -- pinned here so the label
+/// staying wrong in a docblock doesn't quietly become the behavior.
+TEST(TestDescriptorLoader, RejectsATrailingComma)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trailing_comma"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "broken.ued.json", std::ios::binary)
+        << R"({"schema": "hipdnn.ued/v1", "version": "1.0",})";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
 /// A `.json` naming no descriptor type is skipped before it is opened, so an unrelated
 /// JSON file living under the descriptor root costs nothing. Distinct from
-/// IgnoresANonJsonFile, which never had a `.json` extension to begin with.
+/// IgnoresANonJsonFile, which never had a `.json` extension to begin with. The sibling
+/// still loading holds even if the file were opened and rejected as malformed, so the
+/// WARN naming it is what actually distinguishes "skipped before opening" from that.
 TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
 {
     const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stray_json"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
     std::ofstream(dir.path() / "notes.json", std::ios::binary) << R"({"id":"x"})";
@@ -1025,6 +1118,40 @@ TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:intact");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "notes.json"));
+}
+
+/// findFileType() requires a non-empty stem; a filename that is nothing but the suffix
+/// has none, so it names no type despite ending in one.
+TEST(TestDescriptorLoader, IgnoresAFileWhoseWholeNameIsASuffix)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bare_suffix"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / ".ued.json", std::ios::binary) << "{}";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+}
+
+/// findFileType() is case-sensitive on purpose; an uppercased suffix must still warn
+/// instead of vanishing the way it did before the WARN check was widened to catch it.
+TEST(TestDescriptorLoader, IgnoresAnUppercasedSuffix)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("uppercase_suffix"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
+    std::ofstream(dir.path() / "pointwise.KDP.JSON", std::ios::binary) << "{}";
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:intact");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "pointwise.KDP.JSON"));
 }
 
 /// `arch` is optional and empty means arch-independent, but it has to survive the parse:
@@ -1053,6 +1180,24 @@ TEST(TestDescriptorLoader, APackWithNoDeclaredArchIsArchIndependent)
     const ScopedSymbols symbols;
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_no_arch"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:no_arch"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_TRUE(sets.front().packs.front().arch.empty());
+}
+
+/// Explicit `"arch": []` and an absent `arch` key both mean arch-independent; the
+/// validation added for arch entries must not reject the empty list itself.
+TEST(TestDescriptorLoader, AnExplicitlyEmptyArchIsArchIndependent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("pack_arch_explicit_empty"));
+    auto documents = makeSetDocuments('1', "test:explicit_empty_arch");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array();
+    writeDocuments(dir.path(), documents);
 
     const auto sets = loadFrom(dir.path());
 
