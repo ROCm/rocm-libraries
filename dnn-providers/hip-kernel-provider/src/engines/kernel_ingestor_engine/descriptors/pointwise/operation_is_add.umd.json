@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.umd/v1",
   "version": "1.0",
   "id": "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe",
   "name": "graph operation is add",

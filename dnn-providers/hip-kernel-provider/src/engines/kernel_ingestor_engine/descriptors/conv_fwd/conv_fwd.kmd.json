@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.kmd/v1",
   "version": "1.0",
   "id": "a7745b41-dcd5-4b4f-89ca-a98f608dba38",
   "name": "conv_fwd variant fields",

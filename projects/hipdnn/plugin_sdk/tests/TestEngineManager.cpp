@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 
@@ -133,6 +134,7 @@ TEST(TestEngineManager, AddMultipleEngines)
 /// engine down to punish a duplicate.
 TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
 {
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true, 2048));
     manager.addEngine(createTestEngine(1, true, 4096));
@@ -140,6 +142,12 @@ TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
     auto engineIds = manager.getAllEngineIds();
     ASSERT_EQ(engineIds.size(), 1u);
     EXPECT_EQ(engineIds[0], 1);
+
+    // The diagnostic is the entire point of the change over the bare `emplace` it
+    // replaced -- everything above already held true against that, so nothing failed
+    // before this assertion existed.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "already registered"));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate is discarded"));
 
     // The incumbent is the one still answering, not the arrival that lost the insert.
     const TestHandle handle;

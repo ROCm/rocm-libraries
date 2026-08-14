@@ -93,6 +93,27 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
     return dlsym(handle, symbolName);
 }
 
+/// The directory of the module @p address belongs to.
+///
+/// Works under every dlopen flag and needs nothing exported: the address already names
+/// the module. Prefer this over the symbol-name form when asking "where am I loaded
+/// from" about the calling module itself -- pass the address of one of its own functions.
+inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
+{
+    Dl_info info{};
+    if(dladdr(address, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    {
+        throw std::runtime_error("Failed to find loaded library for address");
+    }
+
+    return std::filesystem::path(info.dli_fname).parent_path();
+}
+
+/// The directory of the module exporting @p symbolName.
+///
+/// Resolves through the dynamic linker's default scope, so the answer depends on what is
+/// loaded and how. To ask about the calling module itself, use
+/// getLoadedLibraryDirectoryForAddress() instead -- it cannot pick a different module.
 inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symbolName)
 {
     auto _ = dlerror();
@@ -104,14 +125,15 @@ inline std::filesystem::path getLoadedLibraryDirectoryForSymbol(const char* symb
                                  + error + ")");
     }
 
-    Dl_info info{};
-    if(dladdr(symbol, &info) == 0 || info.dli_fname == nullptr || info.dli_fname[0] == '\0')
+    try
+    {
+        return getLoadedLibraryDirectoryForAddress(symbol);
+    }
+    catch(const std::runtime_error&)
     {
         throw std::runtime_error("Failed to find loaded library for symbol: "
                                  + std::string(symbolName));
     }
-
-    return std::filesystem::path(info.dli_fname).parent_path();
 }
 
 } // namespace hipdnn_data_sdk::utilities

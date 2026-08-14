@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.umd/v1",
   "version": "1.0",
   "id": "e5d38a04-9c71-4b2f-83a6-7f14b0d29e58",
   "name": "single-node binary pointwise over 1-element tensors",

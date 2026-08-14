@@ -179,23 +179,20 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
 
     return {
         {".kmd.json",
-         {{"schema", "hipdnn.kmd/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", schemaId},
           {"name", "variant fields"},
           {"fields",
            {{{"name", "block_size"}, {"type", "int"}, {"default_value", 64}},
             {{"name", "dtype"}, {"type", "string"}}}}}},
         {".uhd.json",
-         {{"schema", "hipdnn.uhd/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", heuristicId},
           {"name", "selector"},
           {"kind", "native"},
           {"payload", SCORE_SYMBOL}}},
         {".ued.json",
-         {{"schema", "hipdnn.ued/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", engineId},
           {"name", engineName},
           {"heuristic", heuristicId},
@@ -203,28 +200,24 @@ Documents makeSetDocuments(char tag, const std::string& engineName)
           {"knobs", {"block_size"}},
           {"behavior_notes", {"runtime_compilation"}}}},
         {".umd.json",
-         {{"schema", "hipdnn.umd/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", graphMatcherId},
           {"name", "graph shape"},
           {"scope", "graph"},
           {"match_symbol", GRAPH_SYMBOL}}},
         {".umd.json",
-         {{"schema", "hipdnn.umd/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", kernelMatcherId},
           {"name", "kernel dtype"},
           {"scope", "kernel"},
           {"match_symbol", KERNEL_SYMBOL}}},
         {".udd.json",
-         {{"schema", "hipdnn.udd/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", dispatchId},
           {"name", "dispatch"},
           {"dispatch_symbol", DISPATCH_SYMBOL}}},
         {".kdp.json",
-         {{"schema", "hipdnn.kdp/v1"},
-          {"version", "1.0"},
+         {{"version", "1.0"},
           {"id", testUuid(tag, ROLE_PACK)},
           {"name", "pack"},
           {"matchers", {graphMatcherId, kernelMatcherId}},
@@ -266,6 +259,27 @@ nlohmann::json& documentOfType(Documents& documents, std::string_view suffix)
         }
     }
     throw std::runtime_error("no document of type " + std::string(suffix));
+}
+
+/// The body of the *second* document in @p documents of type @p suffix. makeSetDocuments
+/// emits two `.umd.json` documents -- graph scope, then kernel scope -- and
+/// documentOfType always returns the first, so this is the only way to corrupt the
+/// kernel-scope matcher specifically.
+nlohmann::json& secondDocumentOfType(Documents& documents, std::string_view suffix)
+{
+    bool sawFirst = false;
+    for(auto& document : documents)
+    {
+        if(document.suffix == suffix)
+        {
+            if(sawFirst)
+            {
+                return document.body;
+            }
+            sawFirst = true;
+        }
+    }
+    throw std::runtime_error("no second document of type " + std::string(suffix));
 }
 
 /// mkdtemp's XXXXXX template is unique by construction (kernel-guaranteed, not pid-keyed),
@@ -447,14 +461,12 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".ued.json")["features_signature"]
                               = nlohmann::json::array({"tensor_core"});
                       }},
-        // D1: `schema` is required and cross-checked against the tag the filename's
-        // suffix selects; both directions of that rule need a case.
-        ViolationCase{
-            "missing_schema",
-            [](Documents& documents) { documentOfType(documents, ".ued.json").erase("schema"); }},
-        ViolationCase{"schema_mismatched_tag",
+        // A file's type comes from its filename alone. A `schema` member would be a second
+        // spelling of that fact, so one is rejected outright rather than tolerated: two
+        // sources of truth have no correct reading when they disagree.
+        ViolationCase{"schema_key_is_not_a_member",
                       [](Documents& documents) {
-                          documentOfType(documents, ".ued.json")["schema"] = "hipdnn.kmd/v1";
+                          documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
                       }},
         ViolationCase{"missing_required_key",
                       [](Documents& documents) {
@@ -545,6 +557,16 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".kdp.json")["arch"]
                               = nlohmann::json::array({"x86_64"});
                       }},
+        // Only 'embedded_source' has an implementation the dispatch handler can call; a
+        // kernel naming any other kind would otherwise pass validation and load, only to
+        // throw inside getKernelSrc("") at plan-build time -- after applicability has
+        // already promised the graph, which is what this rejection at load time prevents.
+        ViolationCase{"kernel_source_kind_not_dispatchable",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".kdp.json")
+                              .at("kernelDescriptors")[0]["kernel_source"]["kind"]
+                              = "hsaco_file";
+                      }},
         ViolationCase{"arch_has_duplicate_entries",
                       [](Documents& documents) {
                           documentOfType(documents, ".kdp.json")["arch"]
@@ -602,6 +624,8 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseOnlyPackDeclaresNoKernels)
 
 TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
 {
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("orphan_pack"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
 
@@ -622,6 +646,71 @@ TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
             return toString(pack.id) == testUuid('2', ROLE_PACK);
         }));
     }
+    // The block that logs this is diagnostics-only: an orphan pack is absent from every
+    // set whether or not the block exists, so the assertions above hold either way. This
+    // is what actually pins it -- without the block, this is the one silent drop in the
+    // loader with nothing to say why the pack vanished.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, testUuid('2', ROLE_PACK)));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "no descriptor defines"));
+}
+
+/// findDescriptor's third outcome, distinct from missing: an id present but conflicted.
+/// Losing the `|| it->second.conflicted` check there would hand the engine back
+/// whichever of the two disagreeing KMDs the walk happened to insert first, so the
+/// engine loads and runs against an arbitrary schema instead of dropping.
+TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsConflicted)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflicted_schema"));
+    auto documents = makeSetDocuments('1', "test:conflicted_schema");
+    auto schema = documentOfType(documents, ".kmd.json");
+    writeDocuments(dir.path(), documents);
+
+    // Same id, different content, different filename -- a second KMD claiming the id
+    // conflicts it rather than colliding on filename.
+    schema["name"] = "a different schema name";
+    std::ofstream(dir.path() / "second-claim.kmd.json", std::ios::binary) << schema.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The same findDescriptor outcome, reached through the pack loop's matcher lookup
+/// instead of the engine's schema lookup, so a regression to that check's other call
+/// site is covered too.
+TEST(TestDescriptorLoader, DropsAPackWhoseMatcherIsConflicted)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflicted_matcher"));
+    auto documents = makeSetDocuments('1', "test:conflicted_matcher");
+    auto matcher = documentOfType(documents, ".umd.json");
+    writeDocuments(dir.path(), documents);
+
+    matcher["name"] = "a different matcher name";
+    std::ofstream(dir.path() / "second-claim.umd.json", std::ios::binary) << matcher.dump(2);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+}
+
+/// The nameClaims loop behind the drop-all-on-shared-name rule skips conflicted entries
+/// before counting; DropsAnIdTwoFilesDisagreeAbout never puts a shared name in play,
+/// since its two engines are named differently. Without that skip, a healthy engine is
+/// silently taken down for merely sharing a name with a broken shard.
+TEST(TestDescriptorLoader, ConflictedEngineDoesNotClaimANameItsHealthySiblingUses)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("conflicted_name_claim"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:shared_name"));
+
+    // Two files disagree about tag '2''s UED id, so it is conflicted -- but both copies
+    // also claim the same name as tag '1''s healthy engine, which is what the nameClaims
+    // guard has to see through.
+    auto conflicted = makeSetDocuments('2', "test:shared_name");
+    writeDocuments(dir.path(), conflicted);
+    auto& engine = documentOfType(conflicted, ".ued.json");
+    engine["heuristic"] = testUuid('1', ROLE_HEURISTIC);
+    std::ofstream(dir.path() / "second-claim.ued.json", std::ios::binary) << engine.dump(2);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(toString(sets.front().engine.id), testUuid('1', ROLE_ENGINE));
 }
 
 TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsMissing)
@@ -722,6 +811,60 @@ TEST(TestDescriptorLoader, DropsAPackWhoseMetadataContradictsTheSchema)
     EXPECT_EQ(sets.front().engine.name, "test:valid");
 }
 
+/// coerceKernelMetadata's omit arm, at engine scope so a regression there is
+/// distinguishable from the wrong-type arm the test above covers: without it, the
+/// incomplete kernel is not caught here at all, and instead reaches the probe in
+/// loadValidatedDescriptorSets, where KernelIngestorStateManager::completeMetadata throws
+/// -- which costs the WHOLE engine via that catch, not just the one pack that named it.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelOmitsAnUndefaultedMetadataField)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("missing_metadata_field"));
+    auto documents = makeSetDocuments('1', "test:omitted_field");
+
+    auto brokenPack = documentOfType(documents, ".kdp.json");
+    brokenPack["id"] = testUuid('1', 'b');
+    brokenPack["name"] = "pack whose kernel omits dtype";
+    for(auto& kernel : brokenPack.at("kernelDescriptors"))
+    {
+        kernel["metadata"].erase("dtype"); // declares no default_value in the KMD
+    }
+    documents.push_back(TestDocument{".kdp.json", brokenPack});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+}
+
+/// coerceKernelMetadata's other arm: an undeclared key must drop the pack rather than
+/// survive into the completed tuple, where it would make two otherwise-identical kernels
+/// present as distinct catalog entries -- a silent selection change, not a drop, so
+/// nothing here throws either with or without the guard.
+TEST(TestDescriptorLoader, DropsAPackWhoseKernelSuppliesAnUndeclaredMetadataField)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("undeclared_metadata_field"));
+    auto documents = makeSetDocuments('1', "test:undeclared_field");
+
+    auto brokenPack = documentOfType(documents, ".kdp.json");
+    brokenPack["id"] = testUuid('1', 'b');
+    brokenPack["name"] = "pack whose kernel supplies an undeclared field";
+    for(auto& kernel : brokenPack.at("kernelDescriptors"))
+    {
+        kernel["metadata"]["undeclared_flag"] = true;
+    }
+    documents.push_back(TestDocument{".kdp.json", brokenPack});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().packs.size(), 1u);
+}
+
 /// GenericEngine's constructor throws on this, and by then copyEngineIds has advertised
 /// the id -- so the engine has to be gone before it is ever counted.
 TEST(TestDescriptorLoader, DropsAnEngineWhoseKnobNamesNoSchemaField)
@@ -753,6 +896,83 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
+}
+
+/// The kernel-scope arm of the match-symbol pre-flight: the test above only ever
+/// corrupts the first `.umd.json` documentOfType returns, which makeSetDocuments always
+/// emits as the graph-scope matcher, so the KernelMatcherRegistry::isRegistered() branch
+/// was never taken. Pointing the kernel-scope matcher at the *graph* symbol -- registered,
+/// but only for graph scope -- would still get the engine dropped even with the ternary
+/// collapsed onto GraphMatcherRegistry for both scopes, since KernelIngestorStateManager's
+/// own constructor resolves matchers by scope again and throws; the pre-flight's specific
+/// diagnostic is the only observable that distinguishes the two, so that is what this
+/// asserts.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelScopeMatcher)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+        uniqueDirectory("kernel_scope_wrong_registry"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:kernel_scope_check_sibling"));
+
+    auto misrouted = makeSetDocuments('2', "test:kernel_scope_misrouted");
+    secondDocumentOfType(misrouted, ".umd.json")["match_symbol"] = GRAPH_SYMBOL;
+    writeDocuments(dir.path(), misrouted);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:kernel_scope_check_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names unregistered match symbol"));
+}
+
+/// The dispatch-symbol pre-flight: independent of the match-symbol arm above, and until
+/// now untested. Deleting its loop leaves the whole SDK suite green on drop/survive
+/// assertions alone, because KernelIngestorStateManager's constructor resolves every
+/// dispatch symbol too and throws on the same miss; that generic "does not validate: ..."
+/// catch produces a different message, which is what pins this loop rather than the
+/// probe's fallback.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredDispatchSymbol)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered_dispatch"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:dispatch_check_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered_dispatch");
+    documentOfType(unregistered, ".udd.json")["dispatch_symbol"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:dispatch_check_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names unregistered dispatch symbol"));
+}
+
+/// The score-symbol pre-flight: the third and last of the three independently-pre-flighted
+/// symbol families, also untested until now and also redundant with the probe on the
+/// drop/survive outcome alone -- NativeKernelHeuristic's constructor resolves the score
+/// symbol eagerly too. Same reasoning as the dispatch test above.
+TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredScoreSymbol)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unregistered_score"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:score_check_sibling"));
+
+    auto unregistered = makeSetDocuments('2', "test:unregistered_score");
+    documentOfType(unregistered, ".uhd.json")["payload"] = "descriptorloader.absent";
+    writeDocuments(dir.path(), unregistered);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:score_check_sibling");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names unregistered score symbol"));
 }
 
 /// The probe's catch: two kernels completing to the same metadata tuple make the state
@@ -1083,7 +1303,7 @@ TEST(TestDescriptorLoader, RejectsATrailingComma)
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("trailing_comma"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
     std::ofstream(dir.path() / "broken.ued.json", std::ios::binary)
-        << R"({"schema": "hipdnn.ued/v1", "version": "1.0",})";
+        << R"({"version": "1.0", "id": "x",})";
 
     const auto sets = loadFrom(dir.path());
 
@@ -1162,6 +1382,29 @@ TEST(TestDescriptorLoader, CarriesAPacksDeclaredArchitectures)
     ASSERT_EQ(sets.size(), 1u);
     ASSERT_EQ(sets.front().packs.size(), 1u);
     EXPECT_EQ(sets.front().packs.front().arch, (std::vector<std::string>{"gfx90a", "gfx942"}));
+}
+
+/// The validator must admit exactly what archMatches admits. PREFIX mode terminates the
+/// candidate on ':' or end-of-string, so a candidate carrying its own feature suffix
+/// matches a device reporting more of them, and LLVM generic targets are real gcnArchName
+/// values. A stricter shape check would make both unauthorable while the matcher still
+/// handled them.
+TEST(TestDescriptorLoader, AcceptsArchIdsCarryingFeaturesAndGenericTargets)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_arch_suffix"));
+    auto documents = makeSetDocuments('1', "test:arch_suffix");
+    documentOfType(documents, ".kdp.json")["arch"]
+        = nlohmann::json::array({"gfx942:sramecc+", "gfx90a:sramecc+:xnack-", "gfx9-4-generic"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(
+        sets.front().packs.front().arch,
+        (std::vector<std::string>{"gfx942:sramecc+", "gfx90a:sramecc+:xnack-", "gfx9-4-generic"}));
 }
 
 /// The default: a pack naming no architecture applies everywhere, so absence must parse

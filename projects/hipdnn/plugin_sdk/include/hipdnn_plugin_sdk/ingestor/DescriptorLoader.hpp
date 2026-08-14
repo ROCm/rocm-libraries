@@ -47,20 +47,17 @@
  * The UED follows RFC 0020, which is the source of truth for that file; the other five
  * follow RFC 0017 §4 until their own follow-ups land.
  *
- * One descriptor per file. The filename suffix types the file *before* it is opened; the
- * required `schema` field confirms that type *after* -- redundant on purpose, and the
- * redundancy is checked, so a `.kmd.json` renamed `.uhd.json` is caught by name instead
- * of surfacing as a confusing `unknown key 'fields'`. The `id` field inside is
- * authoritative for identity and the stem is never parsed:
+ * One descriptor per file, and the filename suffix is the only thing that types it. The
+ * `id` field inside is authoritative for identity; the stem is never parsed:
  *
- * | Filename          | `schema`        | Struct               |
- * |-------------------|-----------------|----------------------|
- * | `<name>.kmd.json` | `hipdnn.kmd/v1` | MetadataSchema       |
- * | `<name>.uhd.json` | `hipdnn.uhd/v1` | HeuristicDescriptor  |
- * | `<name>.ued.json` | `hipdnn.ued/v1` | EngineDescriptor     |
- * | `<name>.umd.json` | `hipdnn.umd/v1` | MatchDescriptor      |
- * | `<name>.udd.json` | `hipdnn.udd/v1` | DispatchDescriptor   |
- * | `<name>.kdp.json` | `hipdnn.kdp/v1` | KernelDescriptorPack |
+ * | Filename          | Struct               |
+ * |-------------------|----------------------|
+ * | `<name>.kmd.json` | MetadataSchema       |
+ * | `<name>.uhd.json` | HeuristicDescriptor  |
+ * | `<name>.ued.json` | EngineDescriptor     |
+ * | `<name>.umd.json` | MatchDescriptor      |
+ * | `<name>.udd.json` | DispatchDescriptor   |
+ * | `<name>.kdp.json` | KernelDescriptorPack |
  *
  * The stem is free-form documentation: `pointwise_add.kdp.json` and `a.kdp.json` are read
  * identically, and a non-empty stem is required, so a bare `.ued.json` is not a descriptor.
@@ -75,9 +72,15 @@
  * silently widen what the other five accept. A file this build cannot read is skipped
  * whole rather than half-understood.
  *
- * Two deliberate divergences from RFC 0020 §4.2, both pending an amendment; a §11.3
+ * Three deliberate divergences from RFC 0020 §4.2, all pending an amendment; a §11.3
  * schema validator would reject these files until it lands:
  *
+ * - There is no `schema` member. §4.2 requires it, with the exact value `hipdnn.ued/v1`.
+ *   Here the filename carries that information, so the field would be a second spelling of
+ *   a fact the name already states -- two places to disagree, and a file whose name and
+ *   body disagree has no correct reading. Naming the type outside the file is also what
+ *   lets a `.json` that names no descriptor type be skipped before it is opened. A file
+ *   still carrying the key is rejected as an unknown key rather than ignored.
  * - `version` is required on all six types. RFC 0020 §4.2 mandates it for the UED and no
  *   RFC yet covers the other five, so this is stricter than the letter of the spec -- but
  *   RFC 0017 §4 versions every file type independently, and a type carrying no version
@@ -161,17 +164,15 @@ inline constexpr std::string_view SUFFIX_UMD = ".umd.json";
 inline constexpr std::string_view SUFFIX_UDD = ".udd.json";
 inline constexpr std::string_view SUFFIX_KDP = ".kdp.json";
 
-/// One row per descriptor file type: the suffix that selects it, the `schema` value D1
-/// requires it to carry, the `major.minor` RFC 0017 §4 has this build accept for it (D3:
-/// one row per type, not a build-wide pair, so the first type to reach 1.1 cannot widen
-/// what the other five accept), and the parse-and-insert function. Declared here, ahead
-/// of every parse function, so versionIsSupported() and requireMatchingSchema() below can
-/// take a row by reference; FILE_TYPES itself is assembled further down, after every
+/// One row per descriptor file type: the suffix that selects it, the `major.minor` RFC 0017
+/// §4 has this build accept for it (one row per type, not a build-wide pair, so the first
+/// type to reach 1.1 cannot widen what the other five accept), and the parse-and-insert
+/// function. Declared here, ahead of every parse function, so versionIsSupported() below
+/// can take a row by reference; FILE_TYPES itself is assembled further down, after every
 /// parse function it names exists to take the address of.
 struct FileType
 {
     std::string_view suffix;
-    std::string_view tag;
     int major;
     int minor;
     void (*insert)(DescriptorCatalog&, const nlohmann::json&, const std::filesystem::path&);
@@ -275,21 +276,6 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
     version.major = std::stoi(text.substr(0, dot));
     version.minor = std::stoi(text.substr(dot + 1));
     return version;
-}
-
-/// D1: `schema` is required and must equal the tag @p fileType's suffix selected. The
-/// filename types the file before it is opened; this confirms that type after -- checked,
-/// not just restated, so a `.kmd.json` renamed `.uhd.json` is caught by name here instead
-/// of surfacing as a confusing `unknown key 'fields'` from the wrong parser.
-inline void requireMatchingSchema(const nlohmann::json& document, const FileType& fileType)
-{
-    const std::string where{fileType.suffix};
-    const auto schema = requireString(document, "schema", where);
-    if(schema != fileType.tag)
-    {
-        fail("key 'schema' in " + where + " must be '" + std::string(fileType.tag) + "', not '"
-             + schema + "'");
-    }
 }
 
 /// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed, so a
@@ -540,7 +526,7 @@ inline bool coerceToDeclaredType(MetadataValue& value, MetadataType declared)
 inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_KMD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "fields"}, where);
+    requireOnlyKeys(root, {"version", "id", "name", "fields"}, where);
 
     MetadataSchema schema;
     schema.id = requireId(root, "id", where);
@@ -579,7 +565,7 @@ inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_UHD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "kind", "payload"}, where);
+    requireOnlyKeys(root, {"version", "id", "name", "kind", "payload"}, where);
 
     HeuristicDescriptor heuristic;
     heuristic.id = requireId(root, "id", where);
@@ -605,11 +591,14 @@ inline void requireNoDuplicates(const std::vector<std::string>& values,
     }
 }
 
-/// A bare gfx target id: "gfx" followed by lowercase hex digits, with no feature suffix.
-/// archSupports (DeviceProperties.hpp) compares this exactly against a device's base id,
-/// so a shape check here is what stands between an authoring typo and a pack silently
-/// applying nowhere -- the only signal otherwise is an INFO decline indistinguishable
-/// from a healthy cross-arch install.
+/// A gfx target id in the shape archSupports (DeviceProperties.hpp) will compare: "gfx",
+/// a base id, then any number of `:feature` groups. Deliberately no stricter than
+/// archMatches in PREFIX mode, which terminates the candidate on ':' or end-of-string --
+/// so `gfx942:sramecc+` legitimately matches a device reporting `gfx942:sramecc+:xnack-`,
+/// and LLVM generic targets like `gfx9-4-generic` are real gcnArchName values. The check
+/// catches an authoring typo, which would otherwise disable the pack on every device with
+/// nothing louder than an INFO decline; it is not an existence check, so an unheard-of but
+/// well-formed id still parses.
 inline bool isPlausibleArchBaseId(std::string_view value)
 {
     constexpr std::string_view PREFIX = "gfx";
@@ -617,9 +606,33 @@ inline bool isPlausibleArchBaseId(std::string_view value)
     {
         return false;
     }
-    return std::all_of(value.begin() + PREFIX.size(), value.end(), [](unsigned char c) {
-        return std::isdigit(c) != 0 || (c >= 'a' && c <= 'f');
-    });
+
+    // The base id, then one group per ':'. Lowercase only: a device reports its arch
+    // lowercased and the compare is case-sensitive, so `gfx942:SRAMECC+` is a typo.
+    for(std::size_t start = PREFIX.size();;)
+    {
+        const auto colon = value.find(':', start);
+        const auto end = colon == std::string_view::npos ? value.size() : colon;
+        auto group = value.substr(start, end - start);
+
+        // A feature carries a trailing '+' or '-' (sramecc+, xnack-); a base id does not.
+        if(start > PREFIX.size() && !group.empty() && (group.back() == '+' || group.back() == '-'))
+        {
+            group.remove_suffix(1);
+        }
+        if(group.empty() || !std::all_of(group.begin(), group.end(), [](unsigned char c) {
+               return (c >= 'a' && c <= 'z') || std::isdigit(c) != 0 || c == '-' || c == '_';
+           }))
+        {
+            return false;
+        }
+
+        if(colon == std::string_view::npos)
+        {
+            return true;
+        }
+        start = colon + 1;
+    }
 }
 
 /// `arch`: every entry must be non-empty, non-repeated, and a plausible gfx base id.
@@ -662,8 +675,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
     // schema. Accepted here pending the RFC amendment that moves the field; a §11.3
     // schema validator would reject it until then.
     requireOnlyKeys(root,
-                    {"schema",
-                     "version",
+                    {"version",
                      "id",
                      "name",
                      "sdk_version",
@@ -720,7 +732,7 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
 inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_UMD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "scope", "match_symbol"}, where);
+    requireOnlyKeys(root, {"version", "id", "name", "scope", "match_symbol"}, where);
 
     MatchDescriptor matcher;
     matcher.id = requireId(root, "id", where);
@@ -733,7 +745,7 @@ inline MatchDescriptor parseMatchDescriptor(const nlohmann::json& root)
 inline DispatchDescriptor parseDispatchDescriptor(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_UDD};
-    requireOnlyKeys(root, {"schema", "version", "id", "name", "dispatch_symbol"}, where);
+    requireOnlyKeys(root, {"version", "id", "name", "dispatch_symbol"}, where);
 
     DispatchDescriptor dispatch;
     dispatch.id = requireId(root, "id", where);
@@ -820,17 +832,10 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
 inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_KDP};
-    requireOnlyKeys(root,
-                    {"schema",
-                     "version",
-                     "id",
-                     "name",
-                     "arch",
-                     "matchers",
-                     "engine",
-                     "dispatch",
-                     "kernelDescriptors"},
-                    where);
+    requireOnlyKeys(
+        root,
+        {"version", "id", "name", "arch", "matchers", "engine", "dispatch", "kernelDescriptors"},
+        where);
 
     KernelDescriptorPack pack;
     pack.id = requireId(root, "id", where);
@@ -1041,42 +1046,36 @@ inline bool isEngineDisabled(const EngineDescriptor& engine)
 /// is a one-row edit that cannot silently widen what the other five accept.
 inline constexpr std::array FILE_TYPES{
     FileType{SUFFIX_KMD,
-             "hipdnn.kmd/v1",
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
                  insertCatalogEntry(c.schemas, parseMetadataSchema(d), d, p);
              }},
     FileType{SUFFIX_UHD,
-             "hipdnn.uhd/v1",
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
                  insertCatalogEntry(c.heuristics, parseHeuristicDescriptor(d), d, p);
              }},
     FileType{SUFFIX_UED,
-             "hipdnn.ued/v1",
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
                  insertCatalogEntry(c.engines, parseEngineDescriptor(d), d, p);
              }},
     FileType{SUFFIX_UMD,
-             "hipdnn.umd/v1",
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
                  insertCatalogEntry(c.matchers, parseMatchDescriptor(d), d, p);
              }},
     FileType{SUFFIX_UDD,
-             "hipdnn.udd/v1",
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
                  insertCatalogEntry(c.dispatches, parseDispatchDescriptor(d), d, p);
              }},
     FileType{SUFFIX_KDP,
-             "hipdnn.kdp/v1",
              1,
              0,
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
@@ -1145,6 +1144,13 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
         HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: cannot read " << root << ": "
                                                                   << error.message());
     }
+    // A failed increment is recovered from rather than ending the walk, so one bad entry
+    // does not cost every file sorting after it. Bounded because recovery assumes the
+    // increment still advanced: libstdc++ moves past the offending entry, but an
+    // implementation that reports an error without advancing would spin here forever.
+    // Consecutive failures only -- any successful step resets the budget.
+    constexpr int MAX_CONSECUTIVE_WALK_ERRORS = 64;
+    int consecutiveErrors = 0;
     for(; walk != std::filesystem::recursive_directory_iterator(); walk.increment(error))
     {
         if(error)
@@ -1152,8 +1158,16 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: could not continue walking "
                                     << root << ": " << error.message());
             error.clear();
+            if(++consecutiveErrors >= MAX_CONSECUTIVE_WALK_ERRORS)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: giving up on "
+                                        << root << " after " << MAX_CONSECUTIVE_WALK_ERRORS
+                                        << " consecutive errors; the walk is not advancing");
+                break;
+            }
             continue;
         }
+        consecutiveErrors = 0;
         try
         {
             std::error_code entryError;
@@ -1245,7 +1259,10 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
         try
         {
             detail::requireObject(document, "the document root");
-            detail::requireMatchingSchema(document, *fileType);
+            // Version before schema tag: a file from a newer toolchain bumps both, and
+            // "unsupported version 2.0" names the actionable mismatch where "must be
+            // 'hipdnn.ued/v1'" would blame the wrong field. Both still precede the insert,
+            // so RFC 0020 §10.2.1's version-before-duplicate ordering is unaffected.
             if(!detail::versionIsSupported(document, *fileType, path))
             {
                 continue;

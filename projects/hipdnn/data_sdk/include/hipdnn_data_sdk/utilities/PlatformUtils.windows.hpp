@@ -123,6 +123,34 @@ inline std::filesystem::path getLoadedLibraryDirectory(const char* libraryName)
     return std::filesystem::path(result.data()).parent_path();
 }
 
+/// The directory of the module @p address belongs to.
+///
+/// The Windows counterpart of the dladdr() form: the address already names the module, so
+/// this works however the module was loaded and needs nothing exported. Prefer it when
+/// asking "where am I loaded from" about the calling module -- pass the address of one of
+/// its own functions. UNCHANGED_REFCOUNT because the caller is not taking ownership.
+inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
+{
+    HMODULE handle = nullptr;
+    if(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+                              | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          reinterpret_cast<LPCWSTR>(address),
+                          &handle)
+       == 0)
+    {
+        throw std::runtime_error("Failed to find loaded library for address");
+    }
+
+    std::array<wchar_t, MAX_PATH> result{};
+    const auto length = GetModuleFileNameW(handle, result.data(), result.size());
+    if(length == 0 || length >= result.size())
+    {
+        throw std::runtime_error("Failed to get loaded library path for address");
+    }
+
+    return std::filesystem::path(result.data()).parent_path();
+}
+
 } // namespace hipdnn_data_sdk::utilities
 
 #else

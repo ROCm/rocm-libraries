@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.umd/v1",
   "version": "1.0",
   "id": "91ecbb8a-475d-408e-9d0c-6364093877cd",
   "name": "graph operation is mul",

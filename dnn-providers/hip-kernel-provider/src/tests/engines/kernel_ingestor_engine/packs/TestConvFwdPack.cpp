@@ -5,14 +5,20 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
+#include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 
 #include "tests/engines/kernel_ingestor_engine/packs/PointwiseTestGraphs.hpp"
 
@@ -331,6 +337,161 @@ TEST(TestConvFwdPack, HasOneGraphMatcherAndOneKernelMatcher)
                                        == hipdnn_plugin_sdk::ingestor::MatchScope::KERNEL;
                             }),
               1);
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch: this pack's IKernelDispatchHandler, unreached above
+// ---------------------------------------------------------------------------
+//
+// Every test above resolves the graph/kernel matchers and the scorer directly.
+// dispatchHandler(CONV_FWD) (ConvNative.cpp prepare()/workspaceBytes()/launch()) is
+// never touched anywhere in this suite, so short of the LABELS-slow GPU integration
+// test, nothing catches a broken registration or a broken prepare() unhappy path.
+
+/// Bindings a real plan build would hand the handler, from running the graph matcher.
+BoundTokens convBindingsFor(const MatchContext& context)
+{
+    BoundTokens bound;
+    if(!matchesGraph(CONV_FWD, context, bound))
+    {
+        throw std::logic_error("test graph does not match the conv pack");
+    }
+    return bound;
+}
+
+/// If IngestorPacks drops the ConvFwd row, or registerConvFwdSymbols stops registering
+/// DISPATCH_SYMBOL, this resolves to nullptr and every plan build for this engine
+/// null-derefs at dispatch time; nothing else in the fast suite ever asks the registry
+/// for this symbol.
+TEST(TestConvFwdDispatch, DispatchSymbolResolves)
+{
+    registerNativeIngestorSymbols();
+    EXPECT_NE(hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
+                  std::string(CONV_FWD.dispatch)),
+              nullptr);
+}
+
+/// This reference kernel needs no scratch: every output element is accumulated in a
+/// register and written once. The one caller of workspaceBytes() (execution-plan build,
+/// exercised only by the slow GPU suite) allocates whatever it reports without ever
+/// checking the number against anything, so a regression to a non-zero value is
+/// invisible there too -- this is the only place that pins it to 0.
+TEST(TestConvFwdDispatch, WorkspaceBytesIsAlwaysZero)
+{
+    const GraphFixture fixture(buildConvFwdGraph());
+    const auto& handler = dispatchHandler(CONV_FWD);
+
+    EXPECT_EQ(handler.workspaceBytes(fixture.context(),
+                                     convBindingsFor(fixture.context()),
+                                     makeKernel(64, "FLOAT", "ConvFwd")),
+              0U);
+}
+
+/// convFwdBinding() (ConvNative.cpp) must throw before touching HIP: an empty
+/// BoundTokens is what a catalog entry built by a matcher other than this pack's own
+/// would hand prepare(). Without this guard a plan build reads uninitialized binding
+/// values (0) and either launches against the wrong tensors or crashes deep in HIP
+/// instead of failing cleanly at plan-build time.
+TEST(TestConvFwdDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
+{
+    const GraphFixture fixture(buildConvFwdGraph());
+    const auto& handler = dispatchHandler(CONV_FWD);
+
+    EXPECT_THROW(
+        handler.prepare(fixture.context(), BoundTokens{}, makeKernel(64, "FLOAT", "ConvFwd")),
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+/// elementTypeFor() (ConvNative.cpp) throws on a dtype its two `if` branches don't
+/// name; reached only from inside prepare(), after binding and tensor lookup already
+/// succeeded. Note this is a *different* guard from the kernel matcher's
+/// RefusesAKernelBakedForAnotherDtype above: that one returns false and never reaches
+/// dispatch, so it would keep passing even if this throw were deleted and replaced
+/// with, say, always compiling as float.
+TEST(TestConvFwdDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
+{
+    const GraphFixture fixture(buildConvFwdGraph());
+    const auto& handler = dispatchHandler(CONV_FWD);
+
+    EXPECT_THROW(handler.prepare(fixture.context(),
+                                 convBindingsFor(fixture.context()),
+                                 makeKernel(64, "BFLOAT16", "ConvFwd")),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ---------------------------------------------------------------------------
+// Shipped descriptor set: source kind/file, behavior notes, operation metadata
+// ---------------------------------------------------------------------------
+
+/// Pins kernel_source.kind and source_file for the conv pack, the conv analogue of
+/// TestPointwisePacks.cpp's EveryKernelNamesItsPacksEmbeddedSource. Without this, a
+/// descriptor edit that swapped in a source kind with no adapter, or renamed/misspelled
+/// the source file, would pass this entire fast suite -- prepare() only discovers a bad
+/// source_file when the (slow, GPU-only) integration test tries to compile it.
+TEST(TestConvFwdPack, PinsTheEmbeddedConvSource)
+{
+    const auto& set = loadedSet("hipkernel:ConvFwd");
+
+    ASSERT_EQ(set.packs.size(), 1U);
+    ASSERT_FALSE(set.packs.front().kernels.empty());
+    for(const auto& kernel : set.packs.front().kernels)
+    {
+        EXPECT_EQ(kernel.source.kind,
+                  hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE);
+        EXPECT_EQ(kernel.source.sourceFile, "ConvFwd.cpp");
+        EXPECT_EQ(kernel.source.entryPoint, "ConvFwd");
+    }
+}
+
+/// behavior_notes: ["runtime_compilation"] is parsed by the loader and published onto
+/// the EngineDetails flatbuffer, but nothing anywhere asserts it survives. Losing it --
+/// a dropped descriptor line, or a loader regression that stops copying it into
+/// EngineDescriptor -- tells a caller-facing framework this engine never JIT-compiles,
+/// which is false for both engines this provider ships.
+TEST(TestConvFwdPack, BothShippedEnginesDeclareRuntimeCompilation)
+{
+    for(const std::string_view engineName : {"hipkernel:Pointwise", "hipkernel:ConvFwd"})
+    {
+        const auto& notes = loadedSet(engineName).engine.behaviorNotes;
+        EXPECT_NE(std::find(notes.begin(),
+                            notes.end(),
+                            static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION)),
+                  notes.end())
+            << engineName;
+    }
+}
+
+/// Nothing in production reads a kernel's "operation" metadata -- matching runs on
+/// block_size/dtype alone, and the graph-scoped operation matchers key off the graph,
+/// not the kernel. All three Pointwise packs could ship "operation": "ADD" and every
+/// other test, including the matcher tests above, would keep passing. This is the one
+/// place that ties each pack's kernels back to the operation its own source file (and
+/// therefore its own operation matcher) actually implements.
+TEST(TestConvFwdPack, PointwisePacksClaimTheOperationTheyActuallyImplement)
+{
+    const auto& set = loadedSet("hipkernel:Pointwise");
+
+    for(const auto& expected : {std::pair{"PointwiseAdd.cpp", "ADD"},
+                                std::pair{"PointwiseMul.cpp", "MUL"},
+                                std::pair{"PointwiseSub.cpp", "SUB"}})
+    {
+        // Not a structured binding: capturing one in the lambda below is C++20, and this
+        // project is C++17.
+        const auto* const sourceFile = expected.first;
+        const auto* const operation = expected.second;
+
+        const auto pack = std::find_if(set.packs.begin(), set.packs.end(), [&](const auto& p) {
+            return !p.kernels.empty() && p.kernels.front().source.sourceFile == sourceFile;
+        });
+        ASSERT_NE(pack, set.packs.end()) << sourceFile;
+
+        for(const auto& kernel : pack->kernels)
+        {
+            EXPECT_EQ(std::get<std::string>(kernel.metadata.at(std::string(OPERATION_FIELD))),
+                      operation)
+                << kernel.name;
+        }
+    }
 }
 
 } // namespace

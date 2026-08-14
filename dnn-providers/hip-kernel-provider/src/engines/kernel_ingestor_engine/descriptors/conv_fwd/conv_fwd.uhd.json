@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.uhd/v1",
   "version": "1.0",
   "id": "e8066dca-b56e-4dfa-8755-a1e1bcadf09f",
   "name": "conv_fwd selector",

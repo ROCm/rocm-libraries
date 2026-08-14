@@ -113,6 +113,9 @@ inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_v
 /// what a pack author copies, unlike the symbol names, which must differ per pack.
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view DTYPE_FIELD = "dtype";
+/// The KMD field that discriminates the three Pointwise packs (ADD/MUL/SUB); ConvFwd's
+/// KMD declares no such field, since it has only one operation.
+constexpr std::string_view OPERATION_FIELD = "operation";
 
 /// A pack's native functions, reached by the symbol name its descriptors carry.
 /// Resolving (not calling directly) surfaces a descriptor naming a symbol nothing

@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.kdp/v1",
   "version": "1.0",
   "id": "4b449330-4b06-4e8e-a5b5-5c3f0f7fd020",
   "name": "hipkernel:conv_fwd",

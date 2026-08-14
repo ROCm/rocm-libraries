@@ -4,6 +4,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -11,10 +12,13 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericPlan.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
 #include <hipdnn_plugin_sdk/ingestor/SymbolScope.hpp>
@@ -276,6 +280,69 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphNoPackOfItsClaims)
                         applicable.end(),
                         hipdnn_data_sdk::utilities::engineNameToId(POINTWISE_ADD.engineName)),
               applicable.end());
+}
+
+// ---------------------------------------------------------------------------
+// descriptorSearchDirectory(): which of the three sources answers
+// ---------------------------------------------------------------------------
+
+/// The env override is what every test and every run-from-build-dir depends on, so a real
+/// directory there has to beat both the module-relative path and the configure-time one.
+TEST(TestKernelIngestorEngine, PrefersHipdnnDescriptorDirOverEverything)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory existing(
+        std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_env");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
+        "HIPDNN_DESCRIPTOR_DIR", existing.path().string());
+
+    EXPECT_EQ(descriptorSearchDirectory(), existing.path());
+}
+
+/// A stale override is ignored rather than obeyed. The install-tree CTestTestfile.cmake is
+/// generated from the same ENVIRONMENT list as the build-tree one, so it ships this build's
+/// absolute staging path; on a test machine that directory does not exist. Without this
+/// guard the override wins, both remaining branches are skipped, and the installed suite
+/// silently loads zero descriptor sets.
+TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorDirThatDoesNotExist)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
+        "HIPDNN_DESCRIPTOR_DIR", "/nowhere/in/particular");
+
+    const auto resolved = descriptorSearchDirectory();
+
+    EXPECT_NE(resolved, std::filesystem::path("/nowhere/in/particular"));
+    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
+        << "resolved to " << resolved;
+}
+
+/// With the env unset the answer comes from step 2 or step 3, and both end in the same
+/// fixed offset. Pinning the suffix is what distinguishes "resolved a real directory" from
+/// the empty path a failed lookup would produce -- before this, step 2 falling through
+/// silently was indistinguishable from step 2 working, which is how it could have shipped
+/// broken.
+TEST(TestKernelIngestorEngine, FallsBackToAModuleRelativeOrInstalledPath)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset("HIPDNN_DESCRIPTOR_DIR",
+                                                                            "");
+
+    const auto resolved = descriptorSearchDirectory();
+
+    ASSERT_FALSE(resolved.empty());
+    EXPECT_TRUE(resolved.generic_string().find(HIPDNN_DESCRIPTOR_SUBDIR) != std::string::npos)
+        << "resolved to " << resolved << ", which does not end in " << HIPDNN_DESCRIPTOR_SUBDIR;
+}
+
+/// The mechanism step 2 rests on, asserted directly: an address resolves to the module that
+/// contains it. In this static test binary that is the executable itself. A symbol-name
+/// lookup could answer for a different module -- every provider exports the same plugin
+/// entry points -- which is why the resolver keys on an address instead.
+TEST(TestKernelIngestorEngine, ResolvesAModuleDirectoryFromAnAddressWithinIt)
+{
+    const auto directory = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
+        reinterpret_cast<const void*>(&descriptorSearchDirectory));
+
+    std::error_code exists;
+    EXPECT_TRUE(std::filesystem::is_directory(directory, exists)) << directory;
 }
 
 } // namespace

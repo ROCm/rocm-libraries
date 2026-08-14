@@ -328,13 +328,24 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_custom_target(
         hip_kernel_provider_descriptors ALL
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors"
                 "${HIPDNN_DESCRIPTOR_BUILD_DIR}"
         COMMENT "Staging hip-kernel-provider descriptors"
         VERBATIM
     )
 
-    install(DIRECTORY src/descriptors/
+    # Both suites read HIPDNN_DESCRIPTOR_DIR, which points into the staged tree, but the
+    # target above is reachable only through ALL. Building a test target by name on a fresh
+    # tree -- `ninja hip_kernel_provider_tests && ctest`, which is what `ninja check` does
+    # -- would otherwise run against a directory that does not exist yet and quietly find
+    # no descriptors. CI escapes this only because it builds the default target.
+    foreach(_descriptor_consumer hip_kernel_provider_tests hip_kernel_provider_integration_tests)
+        if(TARGET ${_descriptor_consumer})
+            add_dependencies(${_descriptor_consumer} hip_kernel_provider_descriptors)
+        endif()
+    endforeach()
+
+    install(DIRECTORY src/engines/kernel_ingestor_engine/descriptors/
             DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_DESCRIPTOR_SUBDIR}
             FILES_MATCHING PATTERN "*.json")
 endif()

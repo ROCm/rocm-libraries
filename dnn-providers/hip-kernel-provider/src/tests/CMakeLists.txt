@@ -90,6 +90,13 @@ endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(engines/kernel_ingestor_engine)
+
+    # descriptorSearchDirectory()'s tests assert which of its three sources answered, and
+    # the only way to tell branch 2 or 3 from a failed lookup is that both end in this
+    # fixed offset. Same value the provider is compiled with, so the test cannot drift
+    # into asserting a path the provider never builds.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPDNN_DESCRIPTOR_SUBDIR="${HIPDNN_DESCRIPTOR_SUBDIR}")
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

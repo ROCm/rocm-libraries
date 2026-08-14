@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.umd/v1",
   "version": "1.0",
   "id": "b833015e-2640-4eb5-be56-1bcd4da916b4",
   "name": "single-node conv forward, unit stride/dilation, no padding",

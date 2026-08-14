@@ -1,58 +1,57 @@
 {
-  "schema": "hipdnn.kdp/v1",
   "version": "1.0",
-  "id": "7d024fb9-5e13-4c86-a92b-08f37d1c4e50",
-  "name": "hipkernel:pointwise_add",
+  "id": "19373f40-1ee2-4f5d-97da-58d0447ef6a7",
+  "name": "hipkernel:pointwise_mul",
   "matchers": [
     "e5d38a04-9c71-4b2f-83a6-7f14b0d29e58",
-    "be019c8c-dfcc-4cab-ba40-3c440ce3f3fe",
+    "91ecbb8a-475d-408e-9d0c-6364093877cd",
     "1a7f52c8-b036-4e91-95d2-6c83af407b14"
   ],
   "engine": "8f1a6c30-7d24-4a0e-9b51-2c6d84f0a911",
   "dispatch": "93b6c1e7-2058-4fa3-8d17-4b95e2c60fa8",
   "kernelDescriptors": [
     {
-      "id": "2f8c17d6-4a90-4b53-9e18-c05a63b782d4",
-      "name": "pointwise_add.f32_block64",
+      "id": "3acc760d-6286-438a-9e51-40561a127aab",
+      "name": "pointwise_mul.f32_block64",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseAdd.cpp",
-        "entry_point": "PointwiseAdd"
+        "source_file": "PointwiseMul.cpp",
+        "entry_point": "PointwiseMul"
       },
       "metadata": {
         "block_size": 64,
         "dtype": "FLOAT",
-        "operation": "ADD"
+        "operation": "MUL"
       },
       "priority": 0
     },
     {
-      "id": "a41b93e5-6d72-4f08-b3c9-15e847d0629f",
-      "name": "pointwise_add.f32_block256",
+      "id": "f8e91362-ebe9-4d58-9a47-c51345c89ead",
+      "name": "pointwise_mul.f32_block256",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseAdd.cpp",
-        "entry_point": "PointwiseAdd"
+        "source_file": "PointwiseMul.cpp",
+        "entry_point": "PointwiseMul"
       },
       "metadata": {
         "block_size": 256,
         "dtype": "FLOAT",
-        "operation": "ADD"
+        "operation": "MUL"
       },
       "priority": 0
     },
     {
-      "id": "c6e20a48-8b31-4d97-a052-9f4173e8b5c1",
-      "name": "pointwise_add.f16_block64",
+      "id": "02045f2e-f42b-47f3-a44c-a9abed808ea6",
+      "name": "pointwise_mul.f16_block64",
       "kernel_source": {
         "kind": "embedded_source",
-        "source_file": "PointwiseAdd.cpp",
-        "entry_point": "PointwiseAdd"
+        "source_file": "PointwiseMul.cpp",
+        "entry_point": "PointwiseMul"
       },
       "metadata": {
         "block_size": 64,
         "dtype": "HALF",
-        "operation": "ADD"
+        "operation": "MUL"
       },
       "priority": 0
     }

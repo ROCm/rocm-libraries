@@ -28,10 +28,25 @@ std::filesystem::path descriptorSearchDirectory()
     //
     // 1. The environment, which is the only one an operator or a test can set. Tests and
     //    run-from-build-dir use it, the same way the ASM engine takes HIPDNN_AITER_ASM_DIR.
+    //
+    //    Taken only if it names a real directory. A stale value is not hypothetical: the
+    //    install-tree CTestTestfile.cmake is generated from the same ENVIRONMENT list as
+    //    the build-tree one, so it carries this build's absolute staging path, and on a
+    //    test machine that path does not exist. Honouring it unconditionally would win
+    //    over both branches below and load nothing at all -- the failure this whole
+    //    function is ordered to avoid.
     if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
        !override.empty())
     {
-        return override;
+        std::error_code notFound;
+        if(std::filesystem::is_directory(override, notFound))
+        {
+            return override;
+        }
+        HIPDNN_PLUGIN_LOG_WARN("ingestor: HIPDNN_DESCRIPTOR_DIR is set to '"
+                               << override
+                               << "', which is not a directory; ignoring it and resolving "
+                                  "the descriptor tree from the loaded module instead");
     }
 
     // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR below
@@ -42,16 +57,17 @@ std::filesystem::path descriptorSearchDirectory()
     //    there>". Measuring from the loaded module instead is correct wherever it lands,
     //    because the descriptors install at a fixed offset from the plugin.
     //
-    //    hipdnnPluginGetName is this plugin's own exported entry point, so an RTLD_DEFAULT
-    //    lookup from inside the plugin finds this module even when several RTLD_LOCAL
-    //    providers export that same name. No Windows counterpart takes a symbol yet, so
-    //    there the chain is 1 then 3, exactly as before.
-#if defined(__linux__)
+    //    Keyed on the address of this very function rather than on a symbol name. A name
+    //    lookup goes through the dynamic linker's scope rules and can in principle answer
+    //    for a different module -- every provider exports the same plugin entry points,
+    //    and the backend opens each one RTLD_LOCAL. An address cannot be ambiguous: it
+    //    already belongs to exactly one module, under any dlopen flag and on both
+    //    platforms, and nothing has to be exported for it to work.
     try
     {
-        const auto candidate
-            = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForSymbol("hipdnnPluginGetName")
-              / HIPDNN_DESCRIPTOR_SUBDIR;
+        const auto candidate = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
+                                   reinterpret_cast<const void*>(&descriptorSearchDirectory))
+                               / HIPDNN_DESCRIPTOR_SUBDIR;
         std::error_code notFound;
         if(std::filesystem::is_directory(candidate, notFound))
         {
@@ -60,13 +76,12 @@ std::filesystem::path descriptorSearchDirectory()
     }
     catch(const std::runtime_error& error)
     {
-        // No loaded module to measure from -- a statically linked test binary, say.
-        // Not fatal: step 3 still answers. Logged because on a real install it would
-        // mean the relocatable path silently stopped working.
+        // No module to measure from -- this TU linked straight into an executable, as in
+        // the static test binaries. Not fatal: step 3 still answers. Logged because on a
+        // real install it would mean the relocatable path had silently stopped working.
         HIPDNN_PLUGIN_LOG_INFO("ingestor: no module-relative descriptor directory ("
                                << error.what() << "); using the configure-time path");
     }
-#endif
 
     // 3. The configure-time prefix. Right for an install that never moved.
     return HIPDNN_DESCRIPTOR_INSTALL_DIR;

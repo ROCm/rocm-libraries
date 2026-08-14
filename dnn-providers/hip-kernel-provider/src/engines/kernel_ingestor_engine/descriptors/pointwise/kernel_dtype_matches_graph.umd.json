@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.umd/v1",
   "version": "1.0",
   "id": "1a7f52c8-b036-4e91-95d2-6c83af407b14",
   "name": "kernel dtype matches the graph's dtype",

@@ -496,7 +496,7 @@ product that a shape like `{-1,-1,1,1}` satisfies.
    are three packs sharing one graph matcher, one scorer and one dispatch handler, and
    differing only in the operation matcher each names.
 
-2. Write the descriptor files under `src/descriptors/<engine>/`. They are **data, not
+2. Write the descriptor files under `src/engines/kernel_ingestor_engine/descriptors/<engine>/`. They are **data, not
    code** — installed JSON the loader reads at engine construction, so adding a variant
    ships no C++. A file's type comes from its filename suffix, one of `.kmd.json`,
    `.uhd.json`, `.ued.json`, `.umd.json`, `.udd.json` or `.kdp.json`; the stem is

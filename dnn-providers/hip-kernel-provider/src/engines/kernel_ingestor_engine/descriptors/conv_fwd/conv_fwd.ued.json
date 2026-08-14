@@ -1,5 +1,4 @@
 {
-  "schema": "hipdnn.ued/v1",
   "version": "1.0",
   "id": "4e06e981-aaf2-4fe1-836d-09c221009a0c",
   "name": "hipkernel:ConvFwd",
