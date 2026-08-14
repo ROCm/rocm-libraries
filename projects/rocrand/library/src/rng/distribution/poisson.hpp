@@ -62,8 +62,7 @@ public:
 
     template<class T>
     __forceinline__ __host__ __device__
-    unsigned int
-        operator()(T x) const
+    unsigned int operator()(T x) const
     {
         return base_t::operator()(x);
     }
@@ -89,8 +88,7 @@ public:
         output[0] = generate_lds(input[0]);
     }
 
-    __forceinline__
-    __host__ __device__
+    __forceinline__ __host__ __device__
     bool check_lds_size()
     {
         return base_t::check_lds_size();
@@ -116,8 +114,7 @@ public:
 
     template<class T>
     __forceinline__ __host__ __device__
-    unsigned int
-        operator()(T x) const
+    unsigned int operator()(T x) const
     {
         const double normal_d = rocrand_device::detail::normal_distribution_double(x);
         return static_cast<unsigned int>(round(m_sqrt_lambda * normal_d + m_lambda));
