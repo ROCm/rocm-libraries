@@ -30,6 +30,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 using hipdnn_backend::heuristics::static_ordering::populateFunctionTable;
@@ -372,6 +373,74 @@ TEST_F(TestStaticOrderingBuiltIn, FallbackEnvUnknownNameSilentlySkipped)
     // and the recognized name should still apply.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
         FALLBACK_ORDERING_ENV, "NotARealEngine,MIOPEN_ENGINE");
+
+    const std::array<int64_t, 2> ids{MIOPEN_DETERMINISTIC_ID, MIOPEN_ENGINE_ID};
+    _plugin->setEngineIds(_desc, ids.data(), ids.size());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 1u);
+    EXPECT_EQ(sorted[0], MIOPEN_ENGINE_ID);
+}
+
+TEST_F(TestStaticOrderingBuiltIn, FallbackEnvAcceptsAHexEngineId)
+{
+    // An engine that declares no name is enumerated as its ID in hex. Pasting
+    // that spelling back into the env must reach the engine — hashing the hex
+    // string would land on an unrelated ID and match nothing.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
+        FALLBACK_ORDERING_ENV, hipdnn_data_sdk::utilities::formatEngineIdHex(CUSTOM_ENGINE_ID));
+
+    const std::array<int64_t, 2> ids{MIOPEN_ENGINE_ID, CUSTOM_ENGINE_ID};
+    _plugin->setEngineIds(_desc, ids.data(), ids.size());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 1u);
+    EXPECT_EQ(sorted[0], CUSTOM_ENGINE_ID);
+}
+
+TEST_F(TestStaticOrderingBuiltIn, FallbackEnvMixesNamesAndHexIds)
+{
+    // Both spellings resolve through one parse, and the env order is kept
+    // across the two forms.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
+        FALLBACK_ORDERING_ENV,
+        hipdnn_data_sdk::utilities::formatEngineIdHex(CUSTOM_ENGINE_ID) + ",MIOPEN_ENGINE");
+
+    const std::array<int64_t, 3> ids{MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID, CUSTOM_ENGINE_ID};
+    _plugin->setEngineIds(_desc, ids.data(), ids.size());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 2u);
+    EXPECT_EQ(sorted[0], CUSTOM_ENGINE_ID);
+    EXPECT_EQ(sorted[1], MIOPEN_ENGINE_ID);
+}
+
+TEST_F(TestStaticOrderingBuiltIn, FallbackEnvAcceptsADecimalEngineId)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(
+        FALLBACK_ORDERING_ENV, std::to_string(MIOPEN_DETERMINISTIC_ID));
+
+    const std::array<int64_t, 2> ids{MIOPEN_ENGINE_ID, MIOPEN_DETERMINISTIC_ID};
+    _plugin->setEngineIds(_desc, ids.data(), ids.size());
+
+    ASSERT_TRUE(_plugin->finalize(_desc));
+    const auto sorted = _plugin->getSortedEngineIds(_desc);
+    ASSERT_EQ(sorted.size(), 1u);
+    EXPECT_EQ(sorted[0], MIOPEN_DETERMINISTIC_ID);
+}
+
+TEST_F(TestStaticOrderingBuiltIn, FallbackEnvLetsARegisteredNameOutrankItsNumericReading)
+{
+    // A registered name is answered from the registry before the numeric parse
+    // is tried, so a name that happens to look like a number still names its
+    // engine. None of the in-tree names do, so assert the precedence directly.
+    EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameOrIdToId("MIOPEN_ENGINE"), MIOPEN_ENGINE_ID);
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(FALLBACK_ORDERING_ENV,
+                                                                          "MIOPEN_ENGINE");
 
     const std::array<int64_t, 2> ids{MIOPEN_DETERMINISTIC_ID, MIOPEN_ENGINE_ID};
     _plugin->setEngineIds(_desc, ids.data(), ids.size());

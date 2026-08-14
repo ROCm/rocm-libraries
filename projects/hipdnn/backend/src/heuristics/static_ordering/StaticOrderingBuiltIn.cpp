@@ -79,9 +79,17 @@ constexpr const char* FALLBACK_ORDERING_ENV = "HIPDNN_HEUR_FALLBACK_ENGINE_ORDER
 /// Parse HIPDNN_HEUR_FALLBACK_ENGINE_ORDER (comma-separated engine names) into a
 /// list of engine IDs in the order the user wrote them. Empty / unset env →
 /// empty vector (caller falls back to the legacy sortEngineIds ordering).
-/// Blank tokens are skipped; unknown engine names hash to a deterministic ID
-/// via engineNameToId — the caller filters against the candidate list, so a
-/// typo'd name simply won't match anything.
+/// Blank tokens are skipped.
+///
+/// engineNameOrIdToId gives every form the enumeration displays an engine under.
+/// A declared name hashes to the engine's ID, which load-time admission
+/// guarantees, and an engine that declares none displays as its ID in hex, which
+/// the numeric path parses — so an operator can paste either straight out of
+/// hipdnn_list_engines. The one ambiguity is a name spelled as a number, which
+/// resolves as the ID rather than the name; the heuristic config file resolves
+/// its rules the same way. An unrecognized token still hashes to a deterministic
+/// ID and the caller filters against the candidate list, so a typo'd name simply
+/// won't match anything.
 std::vector<int64_t> parseFallbackOrderingEnv()
 {
     const std::string raw = hipdnn_data_sdk::utilities::getEnv(FALLBACK_ORDERING_ENV, "");
@@ -100,7 +108,7 @@ std::vector<int64_t> parseFallbackOrderingEnv()
         {
             continue;
         }
-        ids.push_back(hipdnn_data_sdk::utilities::engineNameToId(name));
+        ids.push_back(hipdnn_data_sdk::utilities::engineNameOrIdToId(name));
     }
     return ids;
 }

@@ -218,7 +218,7 @@ Addressing an engine by name
 
 A name matching no candidate engine changes nothing: ``deselect_engines`` reports it once as a warning when the plans are built, and ``set_preferred_engine_id_ext`` falls back silently to the heuristics' top pick. A string that appears only in ``EngineDetails.name`` never becomes an engine's name, so it matches nothing on these surfaces either.
 
-The heuristic policy surfaces are the exception. A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so it can't reach the resolver: the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable is hashed inside the policy, and the engine override rules in the heuristic config file resolve their names when the config loads, before any handle exists. Derive your engine IDs the way ``HIPDNN_REGISTER_ENGINE`` does if you want them addressable from those surfaces.
+The heuristic policy surfaces reach an engine without the resolver. A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable and the engine override rules in the heuristic config file both turn an operator's string into an ID on their own. They can do so exactly: a declared name hashes to the engine's ID, and an engine that declares none is displayed as its ID in hexadecimal, which both surfaces also parse. Either spelling can be pasted from the enumeration.
 
 Create a kernel engine plugin
 =============================
