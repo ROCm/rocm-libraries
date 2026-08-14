@@ -86,8 +86,8 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
                                               Layout(Shape{size_t(runner.m), size_t(runner.n)},
                                                      {1, static_cast<ptrdiff_t>(runner.m)})),
                             ScalarType::Float32);
-        problem.epilogue.alpha = {static_cast<double>(runner.alpha) * scaleA, 0.0};
-        problem.epilogue.beta  = {static_cast<double>(runner.beta), 0.0};
+        problem.epilogue.alpha = static_cast<double>(runner.alpha) * scaleA;
+        problem.epilogue.beta  = static_cast<double>(runner.beta);
         referenceGemm(problem);
     }
 

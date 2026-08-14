@@ -923,8 +923,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
                                           dElements,
                                           Layout(Shape{size_t(m[i]), size_t(n[i])}, {1, ldd[i]})),
                         ScalarType::Float32);
-                    problem.epilogue.alpha      = {static_cast<double>(alpha[i]), 0.0};
-                    problem.epilogue.beta       = {static_cast<double>(beta[i]), 0.0};
+                    problem.epilogue.alpha      = static_cast<double>(alpha[i]);
+                    problem.epilogue.beta       = static_cast<double>(beta[i]);
                     problem.epilogue.activation = toHostValidationActivation(actType[i]);
                     if(bias_ptr)
                         problem.epilogue.bias
