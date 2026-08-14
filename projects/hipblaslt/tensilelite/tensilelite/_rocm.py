@@ -49,41 +49,13 @@ class SystemRocmRoot:
 
 
 # ---------------------------------------------------------------------------
-# Public version normalization
-# ---------------------------------------------------------------------------
-
-def expected_rocm_version(distribution: str, distribution_version: str | None = None) -> str:
-    if distribution_version is None:
-        try:
-            distribution_version = package_version(distribution)
-        except PackageNotFoundError as exc:
-            raise TensileLiteRuntimeError(
-                f"{distribution} must be installed as a ROCm-versioned wheel; "
-                "direct source-tree imports are unsupported."
-            ) from exc
-    try:
-        local = distribution_version.split("+", 1)[1]
-    except IndexError as exc:
-        raise TensileLiteRuntimeError(
-            f"{distribution} {distribution_version!r} has no '+rocmX.Y.Z' release tag."
-        ) from exc
-    if local.startswith("devrocm"):
-        return _canonical_rocm_version(local[len("devrocm") :])
-    if not local.startswith("rocm"):
-        raise TensileLiteRuntimeError(
-            f"{distribution} {distribution_version!r} has an invalid ROCm release tag."
-        )
-    return _canonical_rocm_version(local[len("rocm") :])
-
-
-# ---------------------------------------------------------------------------
 # Public installation validation
 # ---------------------------------------------------------------------------
 
 def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
-    expected = expected_rocm_version(distribution, distribution_version)
+    expected = _expected_rocm_version(distribution, distribution_version)
     python_sdk_version = _python_sdk_version()
     if python_sdk_version is not None:
         return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
@@ -115,6 +87,30 @@ def _validate_compatibility(
         f"  selected by: {source}\n"
         "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
     )
+
+
+def _expected_rocm_version(distribution: str, distribution_version: str | None = None) -> str:
+    if distribution_version is None:
+        try:
+            distribution_version = package_version(distribution)
+        except PackageNotFoundError as exc:
+            raise TensileLiteRuntimeError(
+                f"{distribution} must be installed as a ROCm-versioned wheel; "
+                "direct source-tree imports are unsupported."
+            ) from exc
+    try:
+        local = distribution_version.split("+", 1)[1]
+    except IndexError as exc:
+        raise TensileLiteRuntimeError(
+            f"{distribution} {distribution_version!r} has no '+rocmX.Y.Z' release tag."
+        ) from exc
+    if local.startswith("devrocm"):
+        return _canonical_rocm_version(local[len("devrocm") :])
+    if not local.startswith("rocm"):
+        raise TensileLiteRuntimeError(
+            f"{distribution} {distribution_version!r} has an invalid ROCm release tag."
+        )
+    return _canonical_rocm_version(local[len("rocm") :])
 
 
 # A canonical ROCm release has a three-part numeric base version and may

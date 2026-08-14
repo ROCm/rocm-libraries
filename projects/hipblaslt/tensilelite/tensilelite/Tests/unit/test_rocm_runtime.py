@@ -44,13 +44,13 @@ def _set_tensilelite_version(monkeypatch, version: str) -> None:
     ],
 )
 def test_expected_rocm_version_parses_valid_rocm_tags(distribution_version, expected):
-    assert _rocm.expected_rocm_version("tensilelite", distribution_version) == expected
+    assert _rocm._expected_rocm_version("tensilelite", distribution_version) == expected
 
 
 @pytest.mark.parametrize("version", ["5.0.0", "5.0.0+cuda12.0.0"])
 def test_expected_rocm_version_rejects_unmatched_distribution(version):
     with pytest.raises(_rocm.TensileLiteRuntimeError):
-        _rocm.expected_rocm_version("tensilelite", version)
+        _rocm._expected_rocm_version("tensilelite", version)
 
 
 def test_validate_distribution_uses_base_info_version_without_python_core(tmp_path, monkeypatch):
