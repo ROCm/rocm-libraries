@@ -23,12 +23,13 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 
 # Enum member order mirrors C++ CounterKind (CK_DS, CK_Buffer, CK_KM,
-# CK_Tensor) so iteration order matches the reference dataflow.
+# CK_Tensor, CK_Async) so iteration order matches the reference dataflow.
 class CK(Enum):
     DS = "DS"
     BUFFER = "Buffer"
     KM = "KM"
     TENSOR = "Tensor"
+    ASYNC = "Async"
 
 
 COUNTER_WAIT_OPS: Dict[CK, str] = {
@@ -36,6 +37,7 @@ COUNTER_WAIT_OPS: Dict[CK, str] = {
     CK.BUFFER: "s_wait_loadcnt",
     CK.KM: "s_wait_kmcnt",
     CK.TENSOR: "s_wait_tensorcnt",
+    CK.ASYNC: "s_wait_asynccnt",
 }
 
 WAIT_MOD_FIELDS: Dict[str, Tuple[CK, str]] = {
@@ -43,6 +45,7 @@ WAIT_MOD_FIELDS: Dict[str, Tuple[CK, str]] = {
     "s_wait_loadcnt": (CK.BUFFER, "vlcnt"),
     "s_wait_kmcnt": (CK.KM, "kmcnt"),
     "s_wait_tensorcnt": (CK.TENSOR, "tlcnt"),
+    "s_wait_asynccnt": (CK.ASYNC, "asynccnt"),
 }
 
 K_UNUSED = -1
@@ -593,6 +596,10 @@ def classify_counter(inst: Instruction) -> Optional[CK]:
         return CK.DS
     if _is_km_producer(op):
         return CK.KM
+    # Must precede the buffer check: global_store_async_from_lds_* shares the
+    # "global_store" prefix but lives on asynccnt, not loadcnt.
+    if _is_async_producer(op):
+        return CK.ASYNC
     if _is_buffer_producer(op):
         return CK.BUFFER
     if op == "tensor_load_to_lds":
@@ -625,6 +632,13 @@ def _is_buffer_producer(op: str) -> bool:
         "flat_store",
     )
     return any(op.startswith(p) for p in prefixes)
+
+
+def _is_async_producer(op: str) -> bool:
+    # Async memory family tracked by asynccnt (s_wait_asynccnt). Today only
+    # global_store_async_from_lds_* (an LDS reader); extend as async loads etc.
+    # are added. Mirrors C++ isAsyncMemOp.
+    return op.startswith("global_store_async_from_lds")
 
 
 def is_barrier(inst: Instruction) -> bool:
@@ -667,7 +681,10 @@ def get_wait_counts(inst: Instruction) -> Dict[CK, int]:
     if inst.opcode not in WAIT_MOD_FIELDS:
         return result
     ck, field_name = WAIT_MOD_FIELDS[inst.opcode]
-    mod_key = "mod.swaitcnt" if ck != CK.TENSOR else "mod.swaittensorcnt"
+    mod_key = {
+        CK.TENSOR: "mod.swaittensorcnt",
+        CK.ASYNC: "mod.swaitasynccnt",
+    }.get(ck, "mod.swaitcnt")
     mod = inst.attrs.get(mod_key)
     if isinstance(mod, dict) and field_name in mod:
         val = int(mod[field_name])
@@ -961,6 +978,35 @@ def collect_war_deps(
     return deps
 
 
+def collect_async_war_deps(
+    inst: Instruction, state: CounterState
+) -> List[Tuple[Instruction, CK]]:
+    # WAR-on-LDS for the async counter, mirroring scanAsyncAntiDeps in
+    # WaitDataflow.cpp. asynccnt tracks global_store_async_from_lds_*, an LDS
+    # reader; an LDS writer (tensor_load / ds_write) or barrier reusing a buffer
+    # it is still reading must drain asynccnt first.
+    if not is_lds_writer_anchor(inst) and not is_barrier(inst):
+        return []
+    anchor_tokens = inst.memtokens()
+    if not anchor_tokens:
+        return []
+    deps: List[Tuple[Instruction, CK]] = []
+    seen: Set[int] = set()
+    for op in state.iter_ops(CK.ASYNC):
+        if op.uid == inst.uid:
+            continue
+        op_tokens = op.memtokens()
+        overlap = (not op_tokens) or has_token_overlap(op_tokens, anchor_tokens)
+        if not overlap:
+            continue
+        if op.uid in seen:
+            continue
+        if state.count_from(CK.ASYNC, op) > 0:
+            deps.append((op, CK.ASYNC))
+            seen.add(op.uid)
+    return deps
+
+
 def collect_conservative_deps(
     inst: Instruction, state: CounterState
 ) -> List[Tuple[Instruction, CK]]:
@@ -984,6 +1030,13 @@ def collect_conservative_deps(
         for prod in state.iter_ops(CK.TENSOR):
             if not prod.memtokens() and state.count_from(CK.TENSOR, prod) > 0:
                 deps.append((prod, CK.TENSOR))
+    # Untagged LDS writer / barrier cannot be proven disjoint from any in-flight
+    # async LDS reader, so drain asynccnt fully.
+    if (is_lds_writer_anchor(inst) or is_barrier(inst)) and not inst.memtokens():
+        if state.in_flight(CK.ASYNC):
+            for prod in state.iter_ops(CK.ASYNC):
+                if state.count_from(CK.ASYNC, prod) > 0:
+                    deps.append((prod, CK.ASYNC))
     return deps
 
 
@@ -998,6 +1051,7 @@ def collect_all_deps(
         collect_register_deps,
         collect_lds_raw_deps,
         collect_war_deps,
+        collect_async_war_deps,
         collect_conservative_deps,
     ):
         for prod, ck in collector(inst, state):
