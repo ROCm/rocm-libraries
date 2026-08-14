@@ -208,6 +208,35 @@ def tdmDealiasAB(ks):
     return ks.get("NumWaves", 1) > 1 and not ks.get("UseSubtileImpl")
 
 
+def tdmWaveComponents(ks, tc):
+    """How many wave-components carry tensor `tc`, and the shift from WaveIdx
+    to its component id.
+
+    Grouping -- which tensors share one descriptor register set -- and component
+    count -- how many waves split one tensor's transfer -- are independent axes.
+    TDMFuse names only the grouping, so the count travels separately on
+    TDMWaveSpread.
+
+    Returns (numComp, compShift). compShift is the right shift applied to
+    WaveIdx; 0 means the component id IS the wave index, and None means this
+    tensor sits on a single wave, so its component id is a constant zero and no
+    register arithmetic is emitted for it at all.
+    """
+    numWaves = ks.get("NumWaves", 1)
+    isMXS = "MXS" in tc
+
+    # TDMWaveSpread=1: the hand-written reference's 2/2/4 overlay. A and B each
+    # spread over every wave; the MX scales keep the parity pair untouched, so
+    # MXSA still rides waves 0 and 2 and MXSB waves 1 and 3.
+    if ks.get("TDMWaveSpread", 0) == 1:
+        return (numWaves // 2, 1) if isMXS else (numWaves, 0)
+
+    # Every other configuration keeps the parity split exactly as it was: two
+    # components, component id WaveIdx >> 1. Passed explicitly rather than left
+    # to a default so that adding a row cannot move an existing one.
+    return numWaves // 2, 1
+
+
 def decoupledOneBlockBoth(ks):
     """True when both tensors are on a single LDS block inside a prefetch loop.
 

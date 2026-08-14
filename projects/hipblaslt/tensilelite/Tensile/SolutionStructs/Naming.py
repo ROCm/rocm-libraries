@@ -272,6 +272,11 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
   if state.get("TDMFuse", 0):
     requiredParametersTemp.add("TDMFuse")
 
+  # Name the count only when one was asked for, so switching it off leaves every
+  # pre-existing kernel name alone.
+  if state.get("TDMWaveSpread", 0):
+    requiredParametersTemp.add("TDMWaveSpread")
+
   # Optional parameters otherwise opt IN above; _NAME_ABSENT_KEYS is the switch
   # for the keys that have a defined "not specified" level instead. See its
   # comment for the measured cost of each setting.

@@ -41,7 +41,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
 from Tensile.Common.DataType import DataType
 from Tensile.Common.DecouplePgr import pgrLevelsForTensors, ldsBlocksForPgrLevel, \
                                        decoupledOneBlockBoth, tdmBothTensors, \
-                                       tdmDealiasAB, decouplePgrBlocks, \
+                                       tdmDealiasAB, tdmWaveComponents, decouplePgrBlocks, \
                                        equalPairDegeneratesToScalar, \
                                        divergentPairUnsupportedReason
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
@@ -2995,6 +2995,39 @@ class Solution(collections.abc.Mapping):
         if state["enableTDMMetadata"]:
           reject(state, printRejectionReason,
                  "TDMFuse=6 does not describe the sparse metadata tensor")
+          return
+
+    # TDMWaveSpread -- see the declaration in Common/ValidParameters.py.
+    if state.get("TDMWaveSpread", 0):
+      if not (state["enableTDMA"] and state["enableTDMB"]):
+        reject(state, printRejectionReason,
+               "TDMWaveSpread=%d splits TDM transfers across waves, so it needs the TDM on both "
+               "tensors (TDMInst=3); got TDMInst=%d"
+               % (state["TDMWaveSpread"], state["TDMInst"]))
+        return
+      if state["NumWaves"] <= 1:
+        reject(state, printRejectionReason,
+               "TDMWaveSpread=%d requires wave-separated TDM (NumWaves > 1); at NumWaves=%d there "
+               "is one wave to carry everything and nothing to spread"
+               % (state["TDMWaveSpread"], state["NumWaves"]))
+        return
+      # One shared set puts A on the even waves and B on the odd ones by
+      # construction, and no component count can undo that.
+      if not tdmDealiasAB(state):
+        reject(state, printRejectionReason,
+               "TDMWaveSpread=1 puts both A and B on every wave, which requires the de-aliased "
+               "{A} + {B} + {MXSA,MXSB} grouping (TDMFuse=6 and its envelope); with A and B "
+               "sharing one descriptor set the parity pair fixes A to the even waves and B to "
+               "the odd ones")
+        return
+      # mt // numComp is a tile extent: a truncating divide silently drops rows.
+      for tc, mtKey in (("A", "MacroTile0"), ("B", "MacroTile1")):
+        numComp, _ = tdmWaveComponents(state, tc)
+        if numComp and state[mtKey] % numComp != 0:
+          reject(state, printRejectionReason,
+                 "TDMWaveSpread=%d splits %s into %d components, but %s=%d is not divisible by "
+                 "%d, so the per-wave tile extent would truncate"
+                 % (state["TDMWaveSpread"], tc, numComp, mtKey, state[mtKey], numComp))
           return
 
     # DepthU == -1?

@@ -80,7 +80,7 @@ from .Components.GlobalWriteBatch import GlobalWriteBatchWriter
 from .KernelWriterModules import *
 from .AsmMemoryHelpers import dsStore, dsLoad, _vgprOffset
 from .Common.DecouplePgr import decouplePgrBlocks, decoupledSingleBuffered, decoupledOneBlockBoth, \
-                                tdmDealiasAB
+                                tdmDealiasAB, tdmWaveComponents
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .Activation import ActivationType
@@ -366,6 +366,19 @@ class KernelWriterAssembly(KernelWriter):
 
   def isTdmWaveSeparated(self, kernel) -> bool:
     return kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] > 1
+
+  def tdmEmitWaveCompId(self, dstSgprIdx, compShift, waveIdxSgpr, comment):
+    """Materialise a tensor's TDM wave-component id from WaveIdx.
+
+    compShift comes from tdmWaveComponents: a shift amount, 0 when the
+    component id is the wave index itself, or None when one wave carries the
+    whole tensor and the id is a constant zero.
+    """
+    if compShift is None:
+      return SMovB32(sgpr(dstSgprIdx), 0, comment)
+    if compShift == 0:
+      return SMovB32(sgpr(dstSgprIdx), sgpr(waveIdxSgpr), comment)
+    return SLShiftRightB32(sgpr(dstSgprIdx), compShift, sgpr(waveIdxSgpr), comment)
 
   def tdmDealiasAB(self, kernel) -> bool:
     """True when A and B hold their own TDM descriptor sets (see Common.DecouplePgr).
@@ -19776,8 +19789,7 @@ class KernelWriterAssembly(KernelWriter):
     bpe: float = tP["bpeGR"] if not tP["isM"] else 1
     #TODO: temp hack
     numWaves: int = kernel["NumWaves"]
-    numComp: int = numWaves // 2
-    assert numComp & (numComp - 1) == 0
+    numComp, compShift = tdmWaveComponents(kernel, tc)
     wavelen: int = kernel["WavefrontSize"]
     ldsConstOffset: int = kernel[f"LdsOffset{tc}"]
     ldsBlockSizePerPad: int = kernel[f"LdsBlockSizePerPad{tc}"]
@@ -19808,7 +19820,10 @@ class KernelWriterAssembly(KernelWriter):
     with self.allocTmpSgpr(2, tag="initTDMDescriptorWaveSeparatedImpl_tmpSgprRes") as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
       tmpPadSgprIdx: int = tmpSgprRes.idx + 1
-      mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr(waveIdxSgpr), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
+      mod.add(self.tdmEmitWaveCompId(waveOffsetSgprIdx, compShift, waveIdxSgpr,
+              "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"
+              if compShift == 1 else
+              f"wId=WaveIdx (one component per wave: numComp = {numComp})"))
       dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
       _segAB = bool(kernel.get("LDSSegmentInterleave") == 1) and (
           tc == "A" or (tc == "B" and not kernel["LDSSegInterleaveOffsets"].get("bBaseline", False)))
@@ -20581,7 +20596,7 @@ class KernelWriterAssembly(KernelWriter):
     tlu: int = tP["tlu"]
     unrolledMajor = not tlu
     numWaves: int = kernel["NumWaves"]
-    numComp: int = numWaves // 2
+    numComp, _compShift = tdmWaveComponents(kernel, tc)
 
     mod = Module(f"Reset TDM Descriptor For Tail {tc}")
     def descSgprName(idx: int) -> str:
@@ -20649,7 +20664,8 @@ class KernelWriterAssembly(KernelWriter):
     tcB: str = tPB["tensorChar"]
     numWaves: int = kernel["NumWaves"]
     wavelen: int = kernel["WavefrontSize"]
-    numComp: int = numWaves // 2
+    numCompA, compShiftA = tdmWaveComponents(kernel, tcA)
+    numCompB, compShiftB = tdmWaveComponents(kernel, tcB)
     tluA: int = tPA["tlu"]
     unrolledMajorA = not tluA
     tluB: int = tPB["tlu"]
@@ -20662,13 +20678,13 @@ class KernelWriterAssembly(KernelWriter):
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplittingA = numMxKGroups >= numComp if isMXSA else False
+    mxKSplittingA = numMxKGroups >= numCompA if isMXSA else False
     if isMXSB:
         subTc = tcB[3]
         mxUnit: int = kernel["MatrixInstK"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
         numMxKGroups = mxDU // mxUnit
-    mxKSplittingB = numMxKGroups >= numComp if isMXSB else False
+    mxKSplittingB = numMxKGroups >= numCompB if isMXSB else False
     assert numWaves > 1
 
     tdmResetTailLblA = Label(f"TDMResetTail{tcA}", "")
@@ -20686,8 +20702,8 @@ class KernelWriterAssembly(KernelWriter):
 
       wOfstSgprId = None if unrolledMajorA and not isMXSA else waveOfstSgprIdx
       if not unrolledMajorA or mxKSplittingA:
-        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), 1, sgpr(waveIdSgprIdx), "wOffset=wId // 2"))
-        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numComp),
+        mod.add(self.tdmEmitWaveCompId(waveOfstSgprIdx, compShiftA, waveIdSgprIdx, "wOffset=wId // 2"))
+        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numCompA),
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPA, wOfstSgprId))
       mod.add(SBranch(tdmResetTailLblEnd.getLabelName()))
@@ -20695,8 +20711,8 @@ class KernelWriterAssembly(KernelWriter):
       mod.add(tdmResetTailLblB)
       wOfstSgprId = None if unrolledMajorB and not isMXSB else waveOfstSgprIdx
       if not unrolledMajorB or mxKSplittingB:
-        mod.add(SLShiftRightB32(sgpr(waveOfstSgprIdx), 1, sgpr(waveIdSgprIdx), "wOffset=wId // 2"))
-        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numComp),
+        mod.add(self.tdmEmitWaveCompId(waveOfstSgprIdx, compShiftB, waveIdSgprIdx, "wOffset=wId // 2"))
+        mod.add(SMulI32(sgpr(waveOfstSgprIdx), sgpr(waveOfstSgprIdx), int(du // numCompB),
                         "wOffset = wOffset * du // numpComp"))
       mod.add(self.resetTDMDescriptorForTail(kernel, tPB, wOfstSgprId))
       mod.add(tdmResetTailLblEnd)
