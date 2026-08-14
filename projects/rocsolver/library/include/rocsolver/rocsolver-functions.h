@@ -18444,7 +18444,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
     The upper Hessenberg form is given by:
 
     \f[
-        H = Q'  A  Q
+        H = Q^H  A  Q
     \f]
 
     where \f$H\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
@@ -18456,7 +18456,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i'
+        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i^H
     \f]
 
     where the first i elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i+1] = 1\f$.
@@ -18528,7 +18528,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
     For each instance in the batch, the upper Hessenberg form is given by:
 
     \f[
-        H_l = Q_l'  A_l  Q_l
+        H_l = Q_l^H  A_l  Q_l
     \f]
 
     where \f$H_l\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
@@ -18540,7 +18540,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}'
+        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18628,7 +18628,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
     For each instance in the batch, the upper Hessenberg form is given by:
 
     \f[
-        H_l = Q_l'  A_l  Q_l
+        H_l = Q_l^H  A_l  Q_l
     \f]
 
     where \f$H_l\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
@@ -18640,7 +18640,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}'
+        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18736,7 +18736,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
     The upper Hessenberg form is given by:
 
     \f[
-        H = Q'  A  Q
+        H = Q^H  A  Q
     \f]
 
     where \f$H\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
@@ -18748,7 +18748,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i'
+        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i^H
     \f]
 
     where the first i elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i+1] = 1\f$.
@@ -18820,7 +18820,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
     For each instance in the batch, the upper Hessenberg form is given by:
 
     \f[
-        H_l = Q_l'  A_l  Q_l
+        H_l = Q_l^H  A_l  Q_l
     \f]
 
     where \f$H_l\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
@@ -18832,7 +18832,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}'
+        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18920,7 +18920,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
     For each instance in the batch, the upper Hessenberg form is given by:
 
     \f[
-        H_l = Q_l'  A_l  Q_l
+        H_l = Q_l^H  A_l  Q_l
     \f]
 
     where \f$H_l\f$ is an upper Hessenberg matrix, and \f$Q\f$ is an ``n``-by-``n`` orthogonal/unitary matrix represented as the product of \f$(ihi-ilo)\f$ Householder matrices
@@ -18932,7 +18932,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}'
+        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
