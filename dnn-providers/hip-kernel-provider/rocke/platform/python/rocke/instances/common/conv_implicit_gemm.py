@@ -397,14 +397,18 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         )
 
     # Check global store vector size and disable default epilogue for
-    # vec_size_c > 1
-    if (
-        spec.vector_size_c is not None
-        and spec.vector_size_c > 1
-        and spec.epilogue == "default"
-    ):
+    # vec_size_c > 1 — whether set explicitly or auto-derived from K.
+    _eff_vec_c = (
+        spec.vector_size_c
+        if spec.vector_size_c is not None
+        else ImplicitGemmConvSpec.default_vector_sizes(
+            spec.problem.C, spec.problem.K, spec.data.dtype_d
+        )[2]
+    )
+    _is_wmma_arch = target.wave_size == 32
+    if _eff_vec_c > 1 and spec.epilogue == "default":
         return False, (
-            f"default epilogue is not supported with vector size c: {spec.vector_size_c}"
+            f"default epilogue is not supported with vector size c: {_eff_vec_c}"
         )
 
     # The MMA *family* is selected from the target's wave size: CDNA (wave64)
@@ -412,7 +416,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # shape thus resolves to an MFMA op_id on gfx942/gfx950 and a WMMA op_id on
     # gfx1151. ``spec.wave_size`` is baked into ``block_size``, so it must match
     # the target's wave size or the lane geometry is wrong on hardware.
-    family = "wmma" if target.wave_size == 32 else "mma"
+    family = "wmma" if _is_wmma_arch else "mma"
     if spec.wave_size != target.wave_size:
         return False, (
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
@@ -980,13 +984,27 @@ def build_implicit_gemm_conv(
     # (``c_threads``, ``c_load_vec``, ``c_cols_per_vec``) once per
     # ``load()`` invocation, which the AMDGPU backend constant-folds.
 
-    # The two descriptors used for global loads. The A descriptor is
-    # the conv-coord-transform DAG; B is a simple naive (KYXC) +
-    # unmerge for K_gemm.
-    A_desc = make_a_descriptor(
-        p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a
-    )
-    B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
+    # For pointwise convolutions (Y=X=1, stride 1, pad 0) A, B, D are truly
+    # flat 2-D matrices: A[M,C], B[K,C], D[M,K] with M = N*Ho*Wo (pre-multiplied
+    # compile-time constant).  We skip the TensorDescriptor DAG entirely and
+    # compute offsets as plain multiplications — no magic divisions, no pad
+    # guards, no embed arithmetic.
+    if p.is_pointwise:
+        A_desc = None
+        B_desc = None
+        _c_M = p.M  # compile-time constant for bounds check
+        _c_C = p.cpg  # per-group C (== C for groups=1)
+        _c_K = p.kpg  # per-group K
+        _c_C_ir = b.const_i32(_c_C)
+        _c_K_ir = b.const_i32(_c_K)
+        _c_M_ir = b.const_i32(_c_M)
+        _always_valid = b.const_i32(1)  # no pad guard needed
+    else:
+        A_desc = make_a_descriptor(
+            p, decompose_m=(a_mhw_index_fn is None), dtype=spec.data.dtype_a
+        )
+        B_desc = make_b_descriptor(p, dtype=spec.data.dtype_b)
+        _c_M_ir = _c_C_ir = _c_K_ir = _always_valid = None
 
     # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
     # wraps ``b.buffer_rsrc(ptr, num_bytes)`` and pre-binds a zero
@@ -1014,9 +1032,14 @@ def build_implicit_gemm_conv(
     # `(element_offset, valid_predicate)`.
     def a_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_val = b_.add(k_off_capture[0], col)
+        if p.is_pointwise:
+            # Flat: offset = m * C + c,  valid = (m < M) & (c < C)
+            m_val = b_.add(block_m_off_v, row)
+            off = b_.add(b_.mul(m_val, _c_C_ir), k_val)
+            m_ok = b_.cmp_lt(m_val, _c_M_ir)
+            c_ok = b_.cmp_lt(k_val, _c_C_ir)
+            return off, b_.land(m_ok, c_ok)
         if a_mhw_index_fn is not None:
-            # Decomposed A descriptor: feed (n, ho, wo) straight in, skipping
-            # the m-flatten -> magic-unmerge round-trip (see make_a_descriptor).
             n_v, ho_v, wo_v = a_mhw_index_fn(b_, row, grid)
             return A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val)
         m_val = (
@@ -1029,6 +1052,12 @@ def build_implicit_gemm_conv(
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):
         k_out = b_.add(block_n_off_v, row)
         kg = b_.add(k_off_capture[0], col)
+        if p.is_pointwise:
+            # Flat: offset = k_out * C + c,  valid = (k_out < K) & (c < C)
+            off = b_.add(b_.mul(k_out, _c_C_ir), kg)
+            k_ok = b_.cmp_lt(k_out, _c_K_ir)
+            c_ok = b_.cmp_lt(kg, _c_C_ir)
+            return off, b_.land(k_ok, c_ok)
         return B_desc.offset(b_, k_out=k_out, k_gemm=kg)
 
     # `k_off_capture` lets the closures pick up the current k0 from
@@ -1552,10 +1581,17 @@ def _emit_direct_epilogue(
     coordinate-transform DAG.
     """
     p = spec.problem
-    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+    if p.is_pointwise:
+        _c_K_ir = b.const_i32(p.kpg)
 
-    def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return D_desc.offset(b_, m=m_val, k_out=n_val)
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return b_.add(b_.mul(m_val, _c_K_ir), n_val), b.const_i32(1)
+
+    else:
+        D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return D_desc.offset(b_, m=m_val, k_out=n_val)
 
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
@@ -1597,7 +1633,8 @@ def _emit_direct_epilogue_wmma(
 
     c_M = b.const_i32(p.M)
     c_N = b.const_i32(p.N_gemm)
-    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+    _c_K_wmma = b.const_i32(p.kpg) if p.is_pointwise else None
+    D_desc = None if p.is_pointwise else make_d_descriptor(p, dtype=spec.data.dtype_d)
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
@@ -1625,7 +1662,10 @@ def _emit_direct_epilogue_wmma(
                 ok = b.land(m_ok, n_ok)
 
                 v_f32 = b.vec_extract(acc, i)
-                d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
+                if p.is_pointwise:
+                    d_off_elems = b.add(b.mul(m_val, _c_K_wmma), n_val)
+                else:
+                    d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
                 d_off_bytes = b.mul(d_off_elems, b.const_i32(_elem_bytes))
                 safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
                 if _fp32_out:
@@ -1674,14 +1714,20 @@ def _emit_cshuffle_epilogue(
     ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
-    D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+    if p.is_pointwise:
+        _c_K_ir = b.const_i32(p.kpg)
 
-    def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
-        return D_desc.offset(b_, m=m_val, k_out=n_val)
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return b_.add(b_.mul(m_val, _c_K_ir), n_val), b.const_i32(1)
+
+    else:
+        D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return D_desc.offset(b_, m=m_val, k_out=n_val)
 
     _cshuffle_kwargs: dict = {
         "out_dtype": spec.data.dtype_d,
-        "no_alias": spec.cshuffle_no_alias,
     }
     if spec.vector_size_c is not None:
         _cshuffle_kwargs["max_store_vec"] = spec.vector_size_c

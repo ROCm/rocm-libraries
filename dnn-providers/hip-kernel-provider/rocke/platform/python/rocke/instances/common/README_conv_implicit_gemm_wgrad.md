@@ -88,6 +88,24 @@ parameters are required.
 build time using `select_split_k_wgrad` (the CK formula:
 `floor((waves_per_cu × num_cus) / base_grid)`, clamped to `[1, wg_K]`).
 
+### Pointwise explicit-GEMM fast path
+
+For **pointwise convolutions** (`Y=X=1`, `sH=sW=1`, `pH=pW=0` — and for 3-D: `Z=1`, `sD=1`, `pD=0`) the wgrad kernel automatically bypasses the coordinate-transform descriptor DAG and replaces all three operand address computations with flat multiply-add arithmetic.
+
+**Detection:** `ConvProblem.is_pointwise` returns `True`; no user-facing flag is needed.
+
+**Address arithmetic (pointwise path):**
+
+| Operand | Formula | Replaces |
+|---------|---------|---------|
+| dY (A) | `offset = k_wg_red * K + k_out` | `make_dy_descriptor` + `unmerge_magic` on K_wg |
+| X  (B) | `offset = k_wg_red * C + n_wg`  | `make_x_wgrad_descriptor` + full conv DAG |
+| dW (D) | `offset = k_out * C + n_wg`     | `make_dw_descriptor` + `unmerge_magic` + pads |
+
+**Why this is faster:** For 1×1/s1/p0 the spatial affine map (embed), the filter-unmerge (unmerge_magic on y, x, c), and the boundary pads (pad on y, x) all collapse to identity. The implicit descriptor computes the same address but generates extra VALU instructions (multiplications, additions, comparisons) that the compiler cannot always eliminate. Flat arithmetic emits exactly one `mul` and one `add` per operand.
+
+The split-K epilogue (`global_atomic_add` / `global_atomic_add_pk_*`) already used flat arithmetic (`c_m * wg_N + c_n`) and required no change.
+
 ---
 
 ## Next steps

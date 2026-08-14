@@ -247,4 +247,7 @@ public:
         return set_mean(std::move(mean)).set_inv_variance(std::move(invVariance));
     }
 };
+
+typedef LayernormBackwardAttributes
+    Layernorm_backward_attributes; // NOLINT(readability-identifier-naming)
 } // namespace hipdnn_frontend::graph
