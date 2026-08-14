@@ -24,7 +24,7 @@ int64_t uidByName(const std::unordered_map<int64_t, const TensorAttributes*>& te
 {
     for(const auto& [uid, tensor] : tensorMap)
     {
-        if(tensor->name() && tensor->name()->str() == name)
+        if(tensor->name() != nullptr && tensor->name()->str() == name)
         {
             return uid;
         }

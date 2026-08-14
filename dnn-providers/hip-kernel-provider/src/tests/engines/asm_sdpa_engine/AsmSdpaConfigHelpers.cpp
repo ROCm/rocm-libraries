@@ -148,7 +148,7 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
     attributes.set_name(testCase.withStats ? "SdpaFwdKernelConfigStatsTest"
-                                          : "SdpaFwdKernelConfigTest");
+                                           : "SdpaFwdKernelConfigTest");
 
     if(testCase.withStats)
     {
