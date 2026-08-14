@@ -1348,7 +1348,13 @@ static const std::vector<SinkWindowParam> kSinkWindowParams = {
     {256, "n", 0.0f, 2048, "t:128,30,256", 0},
     {128, "e", 0.0f, 2048, "t:128,30,256", 0},
     {256, "n", 0.0f, 2048, "b:128,30,256", 0},
-};
+    // hdim 128 with plain bias, so bf16/fp16 reach the async pipeline. It carries
+    // its own copy of the K/V jump, which is wrong for any sink_size, hence the
+    // num_sink_loop == 1 shape here as well.
+    // async
+    {128, "n", 0.0f, 2048, "t:128,33,4", 0},
+    // sync
+    {256, "n", 0.0f, 2048, "b:128,33,4", 0}};
 
 class SinkWindowMask : public TestWithParam<std::tuple<mode_enum, SinkWindowParam>>
 {
