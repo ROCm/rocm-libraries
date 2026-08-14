@@ -23,7 +23,10 @@ void TimePassesInstrumentation::enter(const std::string& passName) {
 }
 
 void TimePassesInstrumentation::leave() {
-    if (running.empty()) return;  // unbalanced callbacks: nothing to charge
+    // Unbalanced callbacks: nothing to charge.
+    if (running.empty()) {
+        return;
+    }
 
     const Running done = std::move(running.back());
     running.pop_back();
@@ -34,7 +37,9 @@ void TimePassesInstrumentation::leave() {
     time.self += elapsed - done.nested;
     time.runs++;
 
-    if (!running.empty()) running.back().nested += elapsed;
+    if (!running.empty()) {
+        running.back().nested += elapsed;
+    }
 }
 
 void TimePassesInstrumentation::report(std::ostream& os, const std::string& label) const {
@@ -43,14 +48,18 @@ void TimePassesInstrumentation::report(std::ostream& os, const std::string& labe
               [](const auto& a, const auto& b) { return a.second.self > b.second.self; });
 
     double wall = 0.0;
-    for (const auto& [name, time] : rows) wall += time.self;
+    for (const auto& [name, time] : rows) {
+        wall += time.self;
+    }
 
     // Composed in full and written once: kernels are generated in parallel
     // processes that share stderr, so a report emitted line by line would
     // interleave with another kernel's.
     std::ostringstream block;
     block << "===== StinkyTofu pass timing";
-    if (!label.empty()) block << ": " << label;
+    if (!label.empty()) {
+        block << ": " << label;
+    }
     block << " =====\n";
     block << "   self(s)   total(s)   self%   runs  pass\n";
 
@@ -61,9 +70,10 @@ void TimePassesInstrumentation::report(std::ostream& os, const std::string& labe
               << "  " << name << '\n';
     };
 
-    for (const auto& [name, time] : rows)
+    for (const auto& [name, time] : rows) {
         printRow(time.self, time.total, wall > 0.0 ? 100.0 * time.self / wall : 0.0, time.runs,
                  name);
+    }
 
     block << std::fixed << std::setprecision(4) << std::setw(10) << wall << "  total\n";
 
@@ -77,13 +87,17 @@ std::shared_ptr<TimePassesInstrumentation> getActiveTimePasses() {
 
 TimePassesSession::TimePassesSession(bool enable, std::string label, std::ostream& os)
     : label(std::move(label)), os(os) {
-    if (!enable || activeTimePasses()) return;
+    if (!enable || activeTimePasses()) {
+        return;
+    }
     timer = std::make_shared<TimePassesInstrumentation>();
     activeTimePasses() = timer;
 }
 
 TimePassesSession::~TimePassesSession() {
-    if (!timer) return;
+    if (!timer) {
+        return;
+    }
     activeTimePasses().reset();
     timer->report(os, label);
 }

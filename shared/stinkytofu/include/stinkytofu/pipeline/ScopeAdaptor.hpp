@@ -191,7 +191,9 @@ inline void configureModuleInstrumentations(ModulePassManager& mpm,
                                             const StinkyAsmModule* module = nullptr) {
     if (auto inst = makeDebugPrintInstrumentation(opts, label, debugStreams, module))
         mpm.addInstrumentation(std::move(inst));
-    if (auto timer = getActiveTimePasses()) mpm.addInstrumentation(std::move(timer));
+    if (auto timer = getActiveTimePasses()) {
+        mpm.addInstrumentation(std::move(timer));
+    }
     if (!opts.DebugPass.empty()) {
         std::istringstream stream(opts.DebugPass);
         std::string name;
@@ -217,7 +219,9 @@ inline void configureStandardInstrumentations(
     if (opts.VerifyEach) {
         pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }
-    if (auto timer = getActiveTimePasses()) pm.addInstrumentation(std::move(timer));
+    if (auto timer = getActiveTimePasses()) {
+        pm.addInstrumentation(std::move(timer));
+    }
 }
 
 // -----------------------------------------------------------------------

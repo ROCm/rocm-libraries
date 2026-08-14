@@ -804,8 +804,9 @@ int main(int argc, char** argv) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
             }
-            if (auto timer = stinkytofu::getActiveTimePasses())
+            if (auto timer = stinkytofu::getActiveTimePasses()) {
                 passManager.addInstrumentation(std::move(timer));
+            }
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
             passManager.setGemmTileConfig(gemmTileConfig);
