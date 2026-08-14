@@ -7,7 +7,6 @@
 #include <chrono>
 #include <ctime>
 #include <fstream>
-#include <ostream>
 #include <system_error>
 
 #include "harness/BundleMetadata.hpp"
@@ -17,8 +16,6 @@ namespace hipdnn_integration_tests::bundle
 
 namespace
 {
-
-constexpr const char* k_stdoutTag = "[[HIPDNN_SUPPORT_OBS]]";
 
 /// The sidecar's directory relative to the bundle root, POSIX-spelled — the key
 /// the Python consumer indexes bundles by.
@@ -39,13 +36,6 @@ std::string bundleKey(const std::filesystem::path& sidecarPath,
         return directory.generic_string();
     }
     return relative.generic_string();
-}
-
-/// "Foo" from ".../Foo.support.json". Two stems: the first strips ".json", the
-/// second ".support".
-std::string graphName(const std::filesystem::path& sidecarPath)
-{
-    return sidecarPath.stem().stem().string();
 }
 
 } // namespace
@@ -81,20 +71,8 @@ nlohmann::json toObservationRecord(const SupportObservation& observation,
     record["verdict"] = toString(observation.support);
     record["enforcement_level"] = toString(observation.enforcementLevel);
 
-    if(locator.isSweep())
-    {
-        // A sweep directory holds one sidecar for many cases, so the case id is
-        // load-bearing; the graph name is not, and there isn't one.
-        record["case_id"] = locator.caseId;
-    }
-    else
-    {
-        record["case_id"] = nullptr;
-        // Only meaningful when a directory holds more than one graph, which is
-        // allowed and which the consumer cannot otherwise disambiguate. Always
-        // written, so the one-graph and many-graph cases produce the same shape.
-        record["graph"] = graphName(locator.sidecarPath);
-    }
+    record["case_id"]
+        = locator.isSweep() ? nlohmann::json(locator.caseId) : nlohmann::json(nullptr);
 
     record["provenance"] = {{"rocm_version", provenance.rocmVersion},
                             {"commit", provenance.commit},
@@ -107,8 +85,7 @@ nlohmann::json toObservationRecord(const SupportObservation& observation,
 EmitSummary emitSupportObservations(const std::vector<SupportObservation>& observations,
                                     const std::filesystem::path& outputPath,
                                     const std::filesystem::path& bundleRoot,
-                                    const ObservationProvenance& provenance,
-                                    std::ostream& mirror)
+                                    const ObservationProvenance& provenance)
 {
     EmitSummary summary;
 
@@ -139,7 +116,6 @@ EmitSummary emitSupportObservations(const std::vector<SupportObservation>& obser
         const std::string line = toObservationRecord(observation, bundleRoot, provenance).dump();
 
         file << line << "\n";
-        mirror << k_stdoutTag << " " << line << "\n";
         ++summary.recordsEmitted;
     }
 

@@ -6,21 +6,14 @@
 // Writes the harvest transport described in RFC 0015 §12.1: one JSON object per
 // line, one line per observed (bundle, case, engine, arch, platform) cell.
 //
-// The consumer of these lines is scripts/harvest_support_observations.py, which
-// proposes sidecar updates from them. Two properties of this file exist for its
-// benefit and must not be relaxed:
-//
-//   * The `bundle` field is the sidecar's *directory*, relative to the bundle
-//     root and spelled POSIX-style. That is the key the Python side builds its
-//     index on; an absolute path or a backslash makes the record an orphan.
-//   * A record's absence means "not observed", never "not supported". Which is
-//     why UNKNOWN cells are emitted rather than dropped — the coverage report
-//     can only distinguish a shard that never ran from a target that keeps
-//     erroring if both leave a trace.
+// The consumer is scripts/harvest_support_observations.py.  The `bundle` field
+// is the sidecar's *directory*, relative to the bundle root and POSIX-spelled —
+// the key the Python side indexes on; an absolute path makes the record an
+// orphan.  UNKNOWN cells are emitted rather than dropped so the coverage report
+// can distinguish a shard that never ran from a target that keeps erroring.
 
 #include <cstddef>
 #include <filesystem>
-#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -63,9 +56,7 @@ struct EmitSummary
     std::vector<std::string> errors;
 };
 
-/// Appends every observation to @p outputPath as JSONL and mirrors each line to
-/// @p mirror behind the "[[HIPDNN_SUPPORT_OBS]]" tag, so a CI job can harvest
-/// from captured console output when it cannot retrieve an artifact.
+/// Appends every observation to @p outputPath as JSONL.
 ///
 /// Appends rather than truncates: several sharded binaries may share one path,
 /// and the consumer's merge is a union, so duplicate lines are harmless and a
@@ -73,7 +64,6 @@ struct EmitSummary
 EmitSummary emitSupportObservations(const std::vector<SupportObservation>& observations,
                                     const std::filesystem::path& outputPath,
                                     const std::filesystem::path& bundleRoot,
-                                    const ObservationProvenance& provenance,
-                                    std::ostream& mirror);
+                                    const ObservationProvenance& provenance);
 
 } // namespace hipdnn_integration_tests::bundle

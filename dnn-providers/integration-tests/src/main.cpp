@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -162,17 +163,9 @@ int main(int argc, char** argv) noexcept
                   "carry the claims. Idempotent: no support change = zero git diff.");
         parser.add_argument("--emit-support-observations")
             .help("Append observed engine support to the given JSONL file, one record "
-                  "per (bundle, case, engine, arch, platform), and mirror each line to "
-                  "stdout behind [[HIPDNN_SUPPORT_OBS]]. Pure side effect: it observes "
-                  "what the run was going to do anyway and never changes the verdict. "
-                  "Feed the file to scripts/harvest_support_observations.py.");
-        parser.add_argument("--rocm-version")
-            .help("Provenance stamped on emitted observations. Falls back to $ROCM_VERSION.");
-        parser.add_argument("--run-id")
-            .help("Provenance stamped on emitted observations. Falls back to $CI_RUN_ID.");
-        parser.add_argument("--commit-sha")
-            .help("Provenance stamped on emitted observations. Falls back to $CI_COMMIT_SHA.");
-
+                  "per (bundle, case, engine, arch, platform). Pure side effect: it "
+                  "observes what the run was going to do anyway and never changes the "
+                  "verdict. Feed the file to scripts/harvest_support_observations.py.");
         std::vector<std::string> remainingArgs;
         try
         {
@@ -330,18 +323,6 @@ int main(int argc, char** argv) noexcept
         {
             opts.supportObservationsPath = parser.get<std::string>("--emit-support-observations");
         }
-        if(parser.is_used("--rocm-version"))
-        {
-            opts.rocmVersion = parser.get<std::string>("--rocm-version");
-        }
-        if(parser.is_used("--run-id"))
-        {
-            opts.runId = parser.get<std::string>("--run-id");
-        }
-        if(parser.is_used("--commit-sha"))
-        {
-            opts.commitSha = parser.get<std::string>("--commit-sha");
-        }
 
         // The write path drains the same log into sidecars and diverts every
         // bundle away from actually running. Harvesting from that run would
@@ -494,19 +475,23 @@ int main(int argc, char** argv) noexcept
         if(hipdnn_integration_tests::TestConfig::get().hasSupportObservationsPath())
         {
             namespace bundle_ns = hipdnn_integration_tests::bundle;
-            const auto& config = hipdnn_integration_tests::TestConfig::get();
 
-            const bundle_ns::ObservationProvenance provenance{config.getRocmVersion(),
-                                                              config.getCommitSha(),
-                                                              config.getRunId(),
+            auto envOr = [](const char* name) -> std::string {
+                const char* v = std::getenv(name);
+                return v ? v : "";
+            };
+            const bundle_ns::ObservationProvenance provenance{envOr("ROCM_VERSION"),
+                                                              envOr("CI_COMMIT_SHA"),
+                                                              envOr("CI_RUN_ID"),
                                                               bundle_ns::currentUtcTimestamp()};
 
+            const auto& obsPath
+                = hipdnn_integration_tests::TestConfig::get().getSupportObservationsPath();
             const auto emitSummary
                 = bundle_ns::emitSupportObservations(bundle_ns::SupportObservationLog::get().all(),
-                                                     config.getSupportObservationsPath(),
+                                                     obsPath,
                                                      bundle_ns::resolveDataDir(),
-                                                     provenance,
-                                                     std::cout);
+                                                     provenance);
 
             std::cerr << "\n==== SUPPORT OBSERVATION EMIT SUMMARY ====\n"
                       << "  records: " << emitSummary.recordsEmitted
