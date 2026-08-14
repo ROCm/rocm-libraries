@@ -44,17 +44,19 @@ inline Error tensorLookupToVariantPack(
     return {ErrorCode::OK, ""};
 }
 
-/// Resolve a backend engine ID to its human-readable name from the static
-/// registry alone. Prefer the descriptor-aware overload below whenever an
-/// engine descriptor is available.
+/// Resolve a backend engine ID to its name from the static registry alone,
+/// falling back to the hexadecimal ID for an engine the registry does not carry.
+/// Prefer the descriptor-aware overload below whenever an engine descriptor is
+/// available, since it also reaches plugin-supplied names.
 inline std::string resolveEngineName(int64_t engineId)
 {
     return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
 }
 
-/// Resolve a finalized engine descriptor to its human-readable name, read from
-/// HIPDNN_ATTR_ENGINE_NAME_EXT. Falls back to the ID-only overload when the
-/// backend reports no name.
+/// Resolve a finalized engine descriptor to its name, read from
+/// HIPDNN_ATTR_ENGINE_NAME_EXT, which the backend guarantees hashes to the
+/// engine ID. Falls back to the ID-only overload when the backend reports no
+/// name.
 inline std::string resolveEngineName(hipdnnBackendDescriptor_t engineDesc, int64_t engineId)
 {
     if(engineDesc != nullptr)

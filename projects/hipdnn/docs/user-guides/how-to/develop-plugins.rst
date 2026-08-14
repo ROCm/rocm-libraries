@@ -86,7 +86,7 @@ The plugin API defines how kernel engine plugins interact with hipDNN:
 Engine IDs
 ==========
 
-Every engine used by hipDNN requires an engine ID that is unique among all loaded engines. Plugins that provide more than one engine must have a unique ID for each engine provided by the plugin. hipDNN does not enforce this: two plugins claiming the same ID are not rejected at load time.
+Every engine used by hipDNN requires an engine ID that is unique among all loaded engines. hipDNN enforces this at load time. A plugin that repeats an ID within itself is rejected outright. When two plugins claim the same ID, the plugin that loaded first keeps the engine; hipDNN logs an error and drops the later plugin's engine, leaving the rest of that plugin loaded. A dropped engine doesn't appear in enumeration and can't be selected or executed.
 
 hipDNN uses a deterministic hash-based system for managing engine IDs. This system converts human-readable engine names to ``int64_t`` identifiers.
 
@@ -183,7 +183,7 @@ Other requirements:
 
 - The string is owned by the plugin and must stay valid for the lifetime of the loaded library. Use a string literal or an entry in a static table; returning a stack buffer is a use-after-free.
 - On any status other than ``HIPDNN_PLUGIN_STATUS_SUCCESS``, hipDNN doesn't read ``*name``.
-- The name is an opaque, plugin-chosen string. hipDNN doesn't parse it or require it to be unique — two plugins may report the same name, and one plugin may report the same name for several engines.
+- The engine ID must be the hash of the reported name, so that ``engineNameToId(name) == engineId``. Deriving both from ``HIPDNN_REGISTER_ENGINE`` satisfies this automatically. hipDNN verifies it when it loads the plugin and drops any engine that fails; see :ref:`engine-name-conflicts`.
 - The implementation must be thread-safe.
 
 ``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
@@ -193,20 +193,30 @@ The entry point is available to build against from Plugin SDK engine API version
 Name resolution
 ---------------
 
-Resolving against a graph — the engine-descriptor path behind ``HIPDNN_ATTR_ENGINE_NAME_EXT`` and the frontend's per-engine reporting — tries ``hipdnnEnginePluginGetEngineName``, then the ``name`` field of the engine's ``EngineDetails`` payload, then the registry in ``EngineNames.hpp``, then a zero-padded uppercase hexadecimal rendering of the engine ID, such as ``0x000000000000001A``. A resolved name is therefore never empty.
+hipDNN resolves a name by trying ``hipdnnEnginePluginGetEngineName``, then the registry in ``EngineNames.hpp``, then a zero-padded uppercase hexadecimal rendering of the engine ID, such as ``0x000000000000001A``. A resolved name is therefore never empty. Every surface uses this same order, so enumeration through ``hipdnnGetEngineInfo_ext`` and graph-scoped reporting through ``HIPDNN_ATTR_ENGINE_NAME_EXT`` always agree on an engine's name.
 
-Enumeration — ``hipdnnGetEngineInfo_ext`` and the APIs built on it — has no graph and therefore no ``EngineDetails``, so it tries only the entry point, the registry, and the hexadecimal ID. Implementing ``hipdnnEnginePluginGetEngineName`` is therefore what makes a name visible on every surface; a name supplied only through ``EngineDetails.name`` is absent from the enumeration APIs and from ``hipdnnGetEngineIdByName_ext``.
+The ``name`` field of the engine's ``EngineDetails`` payload records the name an engine carries, but hipDNN never resolves from it. ``EngineDetails`` exists only once a graph does, so a name carried there is invisible to the load-time checks under :ref:`engine-name-conflicts` and could not be validated before use. Implementing ``hipdnnEnginePluginGetEngineName`` is what gives an engine a name; filling in ``EngineDetails.name`` without it names the engine nowhere, and hipDNN logs a warning identifying the plugin, the engine, and the name it had to ignore.
 
-When the two sources disagree, hipDNN uses the entry point's name and logs a warning naming the plugin, the engine ID, and both strings.
+When the entry point and the ``EngineDetails`` record disagree, hipDNN uses the entry point's name and logs a warning naming the plugin, the engine ID, and both strings.
 
-hipDNN also hashes the reported name and compares the result against the engine ID the plugin reported. A mismatch is logged as a warning only: the plugin isn't rejected, and the plugin-reported ID stays canonical for routing and serialization.
+.. _engine-name-conflicts:
+
+Name conflicts
+--------------
+
+An engine name is a key, not just a display label. hipDNN admits an engine only when the two rules below hold, and drops it otherwise — logging an error that names the plugin, the engine, and the reason. The rest of the plugin still loads.
+
+- **The name must hash to the engine ID**: ``engineNameToId(name) == engineId``. An engine that reports no name at all is exempt, so plugins built before the entry point existed keep loading unchanged.
+- **The engine ID must be unused**: the first plugin to declare an ID keeps it.
+
+Because names hash to IDs and IDs are unique, engine names are unique across loaded engines as well, and a name can never resolve to an engine other than the one that reports it. The same rules apply to names in the built-in registry, whose IDs are hashes of the same names.
 
 Addressing an engine by name
 ----------------------------
 
-Name lookup doesn't go through that hash. ``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under.
+``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under. Each resolves to at most one engine.
 
-Where several engines share a name, the backend lookup returns the first in enumeration order, ``deselect_engines`` bars all of them, and ``set_preferred_engine_id_ext`` prefers whichever the heuristics ranked highest. A name matching no candidate engine changes nothing: ``deselect_engines`` reports it once as a warning when the plans are built, and ``set_preferred_engine_id_ext`` falls back silently to the heuristics' top pick.
+A name matching no candidate engine changes nothing: ``deselect_engines`` reports it once as a warning when the plans are built, and ``set_preferred_engine_id_ext`` falls back silently to the heuristics' top pick. A string that appears only in ``EngineDetails.name`` never becomes an engine's name, so it matches nothing on these surfaces either.
 
 The heuristic policy surfaces are the exception. A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so it can't reach the resolver: the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable is hashed inside the policy, and the engine override rules in the heuristic config file resolve their names when the config loads, before any handle exists. Derive your engine IDs the way ``HIPDNN_REGISTER_ENGINE`` does if you want them addressable from those surfaces.
 

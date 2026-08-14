@@ -11,7 +11,6 @@
 #include <limits>
 #include <mutex>
 #include <numeric>
-#include <set>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -87,49 +86,6 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
         return false;
     }
     return flag;
-}
-
-/// Records the (plugin, engine ID) pairs already warned about by
-/// warnOnEngineNameIdMismatch, with its own mutex because name resolution runs
-/// on every EngineDescriptor::finalize() and those can be concurrent.
-std::mutex gEngineNameWarningMutex;
-std::set<std::pair<std::string, int64_t>> gWarnedEngineNameMismatches;
-
-/// Reports whether this is the first mismatch seen for the pair, recording it.
-bool shouldWarnOnEngineNameIdMismatch(std::string_view pluginName, int64_t engineId)
-{
-    const std::lock_guard<std::mutex> lock(gEngineNameWarningMutex);
-    return gWarnedEngineNameMismatches.emplace(std::string(pluginName), engineId).second;
-}
-
-/// Checks a plugin-supplied engine name against the RFC 0003 name-to-ID hash.
-///
-/// Log-and-continue by design: the plugin-reported ID stays canonical for
-/// routing and serialization, while the reported name is still used for
-/// display. The warning fires once per (plugin, engine ID), since the defect is
-/// static but resolution repeats on every engine descriptor finalize.
-void warnOnEngineNameIdMismatch(std::string_view pluginName,
-                                int64_t engineId,
-                                std::string_view engineName)
-{
-    const auto hashedId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
-    if(hashedId == engineId)
-    {
-        return;
-    }
-
-    if(!shouldWarnOnEngineNameIdMismatch(pluginName, engineId))
-    {
-        return;
-    }
-
-    HIPDNN_BACKEND_LOG_WARN(
-        "Plugin '{}' reports engine name '{}' for engine ID {}, but that name hashes to {}. "
-        "Keeping the plugin-reported ID; the name is used for display only.",
-        pluginName,
-        engineName,
-        hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
-        hipdnn_data_sdk::utilities::formatEngineIdHex(hashedId));
 }
 
 } // namespace
@@ -212,8 +168,9 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
         auto pluginType = std::string(::toString(plugin->type()));
         auto pluginName = std::string(plugin->name());
 
-        auto engineIds = plugin->getAllEngineIds();
-        for(const auto id : engineIds)
+        // The accepted set omits engines dropped at load time, so they reach
+        // neither the enumeration nor the reverse index.
+        for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             EngineInfo info;
             info.engineId = id;
@@ -228,30 +185,21 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
         }
     }
 
-    // Alphabetical by resolved name is the documented contract. Names are not
-    // unique, and neither are engine IDs across plugins, so both break ties to
-    // make the comparator a total order and the enumeration stable across runs.
+    // Alphabetical by resolved name is the documented contract. The tie breakers
+    // make the comparator a total order, keeping the order stable across runs.
     std::sort(infos.begin(), infos.end(), [](const EngineInfo& a, const EngineInfo& b) {
         return std::tie(a.engineName, a.engineId, a.pluginName)
                < std::tie(b.engineName, b.engineId, b.pluginName);
     });
 
     // Built from the sorted vector, so it agrees with the enumeration by
-    // construction: emplace() keeps the first row for a repeated name.
+    // construction. Admission ties each name to its own hash, so distinct
+    // engines cannot collide here.
     auto& idsByName = _cachedEngineIdsByName.emplace();
     idsByName.reserve(infos.size());
     for(const auto& info : infos)
     {
-        const auto [it, inserted] = idsByName.emplace(info.engineName, info.engineId);
-        if(!inserted)
-        {
-            HIPDNN_BACKEND_LOG_WARN(
-                "Engines {} and {} are both named '{}'; name lookups will resolve to {}",
-                hipdnn_data_sdk::utilities::formatEngineIdHex(it->second),
-                hipdnn_data_sdk::utilities::formatEngineIdHex(info.engineId),
-                info.engineName,
-                hipdnn_data_sdk::utilities::formatEngineIdHex(it->second));
-        }
+        idsByName.emplace(info.engineName, info.engineId);
     }
 
     return _cachedEngineInfos.emplace(std::move(infos));
@@ -275,8 +223,10 @@ std::string EnginePluginResourceManager::resolveEngineName(
                                             ? std::string_view(owningPlugin->cachedName())
                                             : std::string_view("<unknown>");
 
-    // Tier 1: the owning plugin's hipdnnEnginePluginGetEngineName entry point.
-    // Symbol presence is the whole predicate; see EnginePlugin::hasEngineName().
+    // The owning plugin's hipdnnEnginePluginGetEngineName entry point is the only
+    // channel a plugin can name an engine through, because it is the only one
+    // load-time admission can reach. Symbol presence is the whole predicate; see
+    // EnginePlugin::hasEngineName().
     std::optional<std::string> entryPointName;
     if(owningPlugin != nullptr && owningPlugin->hasEngineName())
     {
@@ -299,15 +249,27 @@ std::string EnginePluginResourceManager::resolveEngineName(
                 *entryPointName);
         }
 
-        warnOnEngineNameIdMismatch(pluginName, engineId, *entryPointName);
+        // Admission already established that this name hashes to engineId.
         return *entryPointName;
     }
 
-    // Tier 2: the EngineDetails.name candidate, absent when there is no graph.
+    // EngineDetails.name records the name an engine carries; it does not confer
+    // one. Reaching here means the entry point supplied nothing, so a candidate
+    // still standing at this point belongs to an engine whose plugin never
+    // declared the name at load time. Admission is graph-blind and cannot see
+    // this field, so honoring it would surface a name that no load-time gate
+    // ever checked. Declaring a name in one place and not the other is a plugin
+    // defect: the name resolves from the registry or the hex ID instead, and the
+    // plugin is told which channel it left empty.
     if(detailsName.has_value() && !detailsName->empty())
     {
-        warnOnEngineNameIdMismatch(pluginName, engineId, *detailsName);
-        return std::string(*detailsName);
+        HIPDNN_BACKEND_LOG_WARN(
+            "Plugin '{}' names engine {} '{}' in EngineDetails.name but does not report that name "
+            "through hipdnnEnginePluginGetEngineName. An engine name must be declared through the "
+            "entry point so load-time admission can validate it; ignoring the reported name.",
+            pluginName,
+            hipdnn_data_sdk::utilities::formatEngineIdHex(engineId),
+            *detailsName);
     }
 
     return hipdnn_data_sdk::utilities::engineNameOrHex(engineId);
@@ -383,21 +345,11 @@ EnginePluginResourceManager::EnginePluginResourceManager(std::shared_ptr<EngineP
 
         _handleToPlugin[handle] = plugin.get();
 
-        std::vector<int64_t> engineIds;
-        try
-        {
-            engineIds = plugin->getAllEngineIds();
-        }
-        catch(const std::exception& e)
-        {
-            HIPDNN_BACKEND_LOG_ERROR(
-                "Failed to get engine IDs for plugin '{}': {}", plugin->name(), e.what());
-            safeDestroyHandle(plugin.get(), handle);
-            _handleToPlugin.erase(handle);
-            continue;
-        }
-
-        for(const auto id : engineIds)
+        // Nested in the success path on purpose: a plugin that never got a handle
+        // has nothing to route to, so its engines contribute no entries. Routing
+        // is built from the accepted set only, so a dropped engine is unreachable
+        // rather than merely hidden from enumeration.
+        for(const auto id : _pm->acceptedEngineIds(*plugin))
         {
             _engineIdToHandle[id] = handle;
         }
@@ -511,23 +463,30 @@ std::vector<int64_t>
             continue;
         }
 
-        auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
-        engineIds.insert(engineIds.end(), ids.begin(), ids.end());
+        const auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
 
         for(const auto& id : ids)
         {
-            if(_engineIdToHandle.find(id) == _engineIdToHandle.end())
+            const auto handleIt = _engineIdToHandle.find(id);
+            if(handleIt == _engineIdToHandle.end())
             {
-                throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR, "Unknown engine ID");
+                // A plugin is never told which of its engines were dropped, so it
+                // keeps offering them; skipping beats failing the whole graph.
+                HIPDNN_BACKEND_LOG_INFO(
+                    "Skipping engine {} offered by plugin '{}': it was dropped at load time",
+                    hipdnn_data_sdk::utilities::formatEngineIdHex(id),
+                    plugin->cachedName());
+                continue;
             }
 
-            auto existingHandle = _engineIdToHandle.at(id);
-            if(existingHandle != handle)
+            if(handleIt->second != handle)
             {
                 throw HipdnnException(HIPDNN_STATUS_PLUGIN_ERROR,
                                       "Engine ID " + std::to_string(id)
                                           + " is already associated with a different plugin");
             }
+
+            engineIds.push_back(id);
         }
 
         if(findFirst && !engineIds.empty())

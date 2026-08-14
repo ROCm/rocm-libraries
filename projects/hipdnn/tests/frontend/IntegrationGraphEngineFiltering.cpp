@@ -339,9 +339,7 @@ TEST_P(IntegrationGraphEngineFiltering, EngineSelection)
     runTest();
 }
 
-// An engine whose ID is unrelated to the name it reports is still removed from
-// consideration by that name alone. TestExecuteFailsPlugin hardcodes its engine
-// ID, so hashing its name reaches nothing.
+// An engine is removed from consideration by the name its plugin reports.
 TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
 {
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(pluginEngineName()));
@@ -361,9 +359,8 @@ TEST_F(IntegrationGraphEngineNameFiltering, DeselectByPluginSuppliedEngineName)
     ASSERT_NE(failingConfig, configs.end()) << "Execute-fails plugin engine not among candidates";
     EXPECT_EQ(failingConfig->engineName, pluginEngineName());
 
-    // Guards the point of the test: were the name to hash to this engine's ID,
-    // the bar below would succeed through the ID path and prove nothing.
-    ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId(pluginEngineName()), failingEngineId);
+    // A plugin only keeps an engine whose ID is the hash of the name it reports.
+    ASSERT_EQ(hipdnn_data_sdk::utilities::engineNameToId(pluginEngineName()), failingEngineId);
 
     // create_execution_plans() resets the filter set, so the deselection is
     // applied afterwards.
@@ -464,12 +461,11 @@ TEST_F(IntegrationGraphEngineNameFiltering, CreateExecutionPlansResetsNameFilter
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
 }
 
-// A preference expressed as a plugin-supplied name selects that engine even though
-// hashing the name reaches a different ID entirely.
+// A preference expressed as a plugin-supplied name selects that engine.
 TEST_F(IntegrationGraphEngineNameFiltering, PreferByPluginSuppliedEngineName)
 {
     const int64_t failingEngineId = hipdnn_tests::plugin_constants::engineId<ExecuteFailsPlugin>();
-    ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId(pluginEngineName()), failingEngineId);
+    ASSERT_EQ(hipdnn_data_sdk::utilities::engineNameToId(pluginEngineName()), failingEngineId);
 
     const std::vector<int64_t> dims = {1, 3, 4, 4};
     _handle = createHandle(defaultEnginePluginPaths());

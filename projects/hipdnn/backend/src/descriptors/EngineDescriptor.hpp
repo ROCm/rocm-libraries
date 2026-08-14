@@ -29,8 +29,10 @@ private:
     std::vector<flatbuffers::DetachedBuffer> _knobSerializedBuffers;
     std::vector<hipdnnBackendBehaviorNote_t> _behaviorNotes;
 
-    /// Display name resolved during finalize() by
-    /// EnginePluginResourceManager::resolveEngineName(). Empty until then.
+    /// Name resolved during finalize() by
+    /// EnginePluginResourceManager::resolveEngineName(): a declared name, which
+    /// hashes to _engineId, or that ID rendered as hex when nothing declares one.
+    /// Empty until then.
     std::string _engineName;
 
     void setGraph(hipdnnBackendAttributeType_t attributeType,

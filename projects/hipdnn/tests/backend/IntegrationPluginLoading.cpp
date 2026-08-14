@@ -301,8 +301,18 @@ TEST_F(IntegrationPluginLoading, IncorrectEngineID)
         "EngineDescriptor::finalize() failed: Engine id is not in a valid range of engine IDs");
 }
 
+// Two plugins declare the same engine id. The first to load keeps it; the second still loads,
+// minus that engine, and the drop is reported as an error.
 TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
 {
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const ScopedBackendLogCapture logCapture(
+        hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
+        HIPDNN_SEV_ERROR,
+        this);
+
     const std::array<const char*, 2> paths
         = {hipdnn_tests::plugin_constants::testDuplicateIdAPluginPath().c_str(),
            hipdnn_tests::plugin_constants::testDuplicateIdBPluginPath().c_str()};
@@ -312,16 +322,26 @@ TEST_F(IntegrationPluginLoading, DuplicateEngineIds)
 
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 
-    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer;
-    hipdnnGetLastErrorString(buffer.data(), buffer.size());
+    EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 2);
 
-    const std::string expectedError
-        = fmt::format("Engine ID {} already exists",
-                      hipdnn_tests::plugin_constants::engineId<DuplicateIdBPlugin>());
+    const auto duplicateId = hipdnn_tests::plugin_constants::engineId<DuplicateIdBPlugin>();
+    const auto engines = queryReportedEngines(_handle);
+    const auto matches
+        = std::count_if(engines.begin(), engines.end(), [duplicateId](const auto& candidate) {
+              return candidate.engineId == duplicateId;
+          });
 
-    EXPECT_NE(std::string{buffer.data()}.find(expectedError), std::string::npos);
+    EXPECT_EQ(matches, 1) << "The contested engine must be reported exactly once. Reported "
+                             "engines:\n"
+                          << describeReportedEngines(engines);
 
-    EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 1);
+    const std::string expectedFragment
+        = "declares engine " + hipdnn_data_sdk::utilities::formatEngineIdHex(duplicateId)
+          + ", which plugin";
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedFragment))
+        << "Expected a duplicate-engine error. Captured logs:\n"
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(IntegrationPluginLoading, IncompleteAPI)
@@ -542,8 +562,8 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameIsReportedByGetEngineIn
         << describeReportedEngines(engines);
 }
 
-// The reverse of the query above. The plugin-supplied name deliberately does not hash to the
-// plugin's engine id, so a hash of the name cannot produce this answer.
+// The reverse of the query above. The lookup also confirms the engine is loaded, which is what
+// separates it from a bare hash of the name.
 TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameResolvesToItsEngineId)
 {
     const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
@@ -554,12 +574,27 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameResolvesToItsEngineId)
     const auto expectedId = hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>();
     const auto* engineName = hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME;
 
-    ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId(engineName), expectedId)
-        << "This test only proves anything while the name does not hash to the engine id.";
-
     auto resolvedId = int64_t{0};
     EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, engineName, &resolvedId), HIPDNN_STATUS_SUCCESS);
     EXPECT_EQ(resolvedId, expectedId);
+}
+
+// The id literals in TestPluginEngineIdMap.hpp are precomputed, so this is where they are checked
+// against the hash the backend applies at load.
+TEST(IntegrationPluginEngineIds, NamedPluginFixtureIdsAreTheHashOfTheirNames)
+{
+    using namespace hipdnn_tests::plugin_constants;
+
+    EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameToId(K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME),
+              engineId<GoodDefaultPlugin>());
+    EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameToId(K_EXECUTE_FAILS_PLUGIN_ENGINE_NAME),
+              engineId<ExecuteFailsPlugin>());
+    EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameToId(K_HASHED_NAME_PLUGIN_ENGINE_NAME),
+              engineId<HashedNamePlugin>());
+
+    // The mismatched-name fake exists to violate the gate, so it must keep violating it.
+    EXPECT_NE(hipdnn_data_sdk::utilities::engineNameToId(K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME),
+              engineId<MismatchedNamePlugin>());
 }
 
 // Whatever the enumeration reports can be fed straight back in. This covers the hexadecimal
@@ -642,20 +677,19 @@ TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointFallsBackToHex
                                                         << describeReportedEngines(engines);
 }
 
-// test_mismatched_name_plugin's name deliberately does not hash back to its hardcoded engine id.
-// The warning is raised once per (plugin, engine id) per process, which is why this is the only
-// test that loads that plugin.
-TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarning)
+// test_mismatched_name_plugin's name deliberately does not hash back to its hardcoded engine id,
+// which the backend rejects at load: the plugin loads, its one engine does not.
+TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdDropsTheEngine)
 {
     // The recorder is constructed first so that it saves, and on destruction restores, the log
     // level in force before this test touched it. The scope guard nests inside it and is destroyed
     // first, so the two restorations unwind in the order they were applied.
     auto recorder
-        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
 
     const ScopedBackendLogCapture logCapture(
         hipdnn_test_sdk::utilities::IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-        HIPDNN_SEV_WARN,
+        HIPDNN_SEV_ERROR,
         this);
 
     const std::string& pluginPath = hipdnn_tests::plugin_constants::testMismatchedNamePluginPath();
@@ -663,17 +697,71 @@ TEST_F(IntegrationPluginLoading, PluginSuppliedEngineNameNotMatchingIdLogsWarnin
 
     ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
 
+    EXPECT_EQ(test_util::getLoadedPlugins(_handle).size(), 1);
+
     const auto engines = queryReportedEngines(_handle);
-    EXPECT_FALSE(engines.empty());
+    EXPECT_TRUE(engines.empty()) << "The engine must be gone from enumeration. Reported engines:\n"
+                                 << describeReportedEngines(engines);
 
     const std::string expectedFragment
         = std::string("reports engine name '")
-          + hipdnn_tests::plugin_constants::K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME
-          + "' for engine ID "
+          + hipdnn_tests::plugin_constants::K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME + "' for engine "
           + hipdnn_data_sdk::utilities::formatEngineIdHex(
               hipdnn_tests::plugin_constants::engineId<MismatchedNamePlugin>());
 
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, expectedFragment))
-        << "Expected a name/id disagreement warning. Captured logs:\n"
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, expectedFragment))
+        << "Expected a name/id disagreement error. Captured logs:\n"
         << recorder.getRecordedLogsAsString();
+}
+
+// A dropped engine is unavailable, not merely hidden: naming it, or addressing it by id, fails.
+TEST_F(IntegrationPluginLoading, DroppedEngineCannotBeSelected)
+{
+    const std::string& pluginPath = hipdnn_tests::plugin_constants::testMismatchedNamePluginPath();
+    ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    auto resolvedId = int64_t{0};
+    EXPECT_EQ(hipdnnGetEngineIdByName_ext(
+                  _handle,
+                  hipdnn_tests::plugin_constants::K_MISMATCHED_NAME_PLUGIN_ENGINE_NAME,
+                  &resolvedId),
+              HIPDNN_STATUS_NOT_SUPPORTED);
+
+    test_util::createTestGraph(&_graph, _handle);
+    hipdnnBackendFinalize(_graph);
+
+    test_util::createTestEngine(&_engine,
+                                &_graph,
+                                _handle,
+                                hipdnn_tests::plugin_constants::engineId<MismatchedNamePlugin>());
+
+    EXPECT_EQ(hipdnnBackendFinalize(_engine), HIPDNN_STATUS_BAD_PARAM);
+}
+
+// The engine-name entry point is optional. A plugin that does not export it keeps every engine,
+// which is what makes the hash requirement safe for plugins predating it.
+TEST_F(IntegrationPluginLoading, PluginWithoutEngineNameEntryPointKeepsItsEngines)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testDuplicateIdAPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto expectedId = hipdnn_tests::plugin_constants::engineId<DuplicateIdAPlugin>();
+    ASSERT_NE(hipdnn_data_sdk::utilities::engineNameToId(
+                  hipdnn_data_sdk::utilities::formatEngineIdHex(expectedId)),
+              expectedId)
+        << "This test only proves anything while the engine could not have satisfied the hash "
+           "requirement had it reported a name.";
+
+    const auto engines = queryReportedEngines(_handle);
+    EXPECT_NE(std::find_if(
+                  engines.begin(),
+                  engines.end(),
+                  [expectedId](const auto& candidate) { return candidate.engineId == expectedId; }),
+              engines.end())
+        << "Reported engines:\n"
+        << describeReportedEngines(engines);
 }

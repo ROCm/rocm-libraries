@@ -132,8 +132,11 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  *       allocating the buffer for the serialized `EngineDetails`. After use, this memory must be freed using
  *       hipdnnEnginePluginDestroyEngineDetails().
  *
- * @note The optional `name` field of `EngineDetails` supplies a human-readable engine name.
- *       See hipdnnEnginePluginGetEngineName for the resolution order.
+ * @note The optional `name` field of `EngineDetails` records the engine's name, but hipDNN never
+ *       resolves a name from it: `EngineDetails` exists only once a graph does, so a name carried
+ *       there cannot be validated when the plugin loads. Report the name through
+ *       hipdnnEnginePluginGetEngineName, which is the only channel that names an engine; filling
+ *       in this field alone is reported as a plugin defect and the name is ignored.
  */
 HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
@@ -383,12 +386,13 @@ HIPDNN_PLUGIN_NODISCARD HIPDNN_PLUGIN_EXPORT hipdnnPluginStatus_t
  * point is what makes a name visible on every surface. See "Engine names" in
  * docs/user-guides/how-to/develop-plugins.rst.
  *
- * The name is an opaque, plugin-chosen string with no required format. It is a
- * display label, not a key: names need not be unique across plugins, and a
- * plugin may report the same name for more than one of its engines. The engine
- * ID remains the only identifier the host dispatches on. The host checks that
- * engineNameToId(name) == engine_id and logs a warning on mismatch; the plugin
- * is NOT rejected, and name-based lookup does not depend on that check passing.
+ * The name is a key, not just a display label: the engine ID must equal its hash,
+ * engineNameToId(name) == engine_id, using the FNV-1a definition in
+ * EngineNames.hpp. Deriving both from HIPDNN_REGISTER_ENGINE satisfies this by
+ * construction. The host verifies it at load time and drops any engine that
+ * fails, logging an error; the rest of the plugin still loads. An engine whose ID
+ * an earlier plugin already provides is likewise dropped, which together with the
+ * hash rule makes names unique across loaded plugins.
  *
  * @param[in] engine_id Engine ID (must come from hipdnnEnginePluginGetAllEngineIds).
  * @param[out] name Receives a NUL-terminated string owned by the plugin. Must

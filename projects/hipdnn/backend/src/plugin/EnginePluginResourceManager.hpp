@@ -133,27 +133,31 @@ public:
     virtual size_t getEngineCount() const;
     virtual std::vector<EngineInfo> getEngineInfos() const;
 
-    /// @brief Resolves the display name for an engine: plugin entry point ->
-    /// EngineDetails.name -> static registry -> hex ID.
+    /// @brief Resolves the name for an engine: plugin entry point -> static
+    /// registry -> hex ID.
     /// Never throws; always returns a non-empty string.
     /// @param engineId    Engine ID as reported by the owning plugin.
-    /// @param detailsName Candidate from EngineDetails.name, or std::nullopt when
-    ///                    there is no graph. The referenced storage must outlive
-    ///                    this call.
+    /// @param detailsName Name recorded in EngineDetails.name, or std::nullopt
+    ///                    when there is no graph. Never a source for the result:
+    ///                    load-time admission cannot see this field, so a name
+    ///                    carried only here was never validated. It is compared
+    ///                    against the entry point when one answers and reported
+    ///                    as a plugin defect otherwise. The referenced storage
+    ///                    must outlive this call.
     [[nodiscard]] virtual std::string
         resolveEngineName(int64_t engineId, std::optional<std::string_view> detailsName) const;
 
-    /// @brief Resolves a display name to the engine ID that carries it.
+    /// @brief Resolves a name to the engine ID that carries it.
     ///
     /// The lookup is the exact inverse of the names getEngineInfos() reports, so
-    /// a name obtained from that enumeration always resolves. It is not a hash:
-    /// a plugin-supplied name whose FNV-1a hash is not the engine ID resolves
-    /// here, whereas hipdnn_data_sdk::utilities::engineNameToId() cannot find it.
+    /// a name from that enumeration always resolves, and to exactly one engine:
+    /// names are unique across loaded engines because an engine whose name does
+    /// not hash to its ID is dropped at load. Unlike engineNameToId(), which
+    /// hashes any string, this also confirms the engine is loaded.
     ///
-    /// Engine names need not be unique. When several engines share a name the
-    /// first in getEngineInfos() order wins. An engine named only through
-    /// EngineDetails.name is indexed under its registry or hex name instead,
-    /// the same limitation getEngineInfos() carries.
+    /// An engine named only through the graph-scoped EngineDetails.name is
+    /// indexed under its registry or hex name instead, the same limitation
+    /// getEngineInfos() carries.
     ///
     /// @param engineName Name to resolve. An empty name never matches.
     /// @return The owning engine ID, or std::nullopt when no loaded engine

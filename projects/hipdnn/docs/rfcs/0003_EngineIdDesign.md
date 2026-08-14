@@ -15,10 +15,6 @@
 
 This RFC proposes a simple and effective design for managing engine IDs in the hipDNN plugin ecosystem. The solution uses a deterministic hash function to convert human-readable engine names to `int64_t` IDs.
 
-> This RFC records the design as proposed. Plugins now also report their own engine
-> names, which supersedes parts of the registry story below. See "Engine names" in
-> [Develop plugins](../user-guides/how-to/develop-plugins.rst).
-
 ### Key Benefits
 - **Human-Readable**: Developers can use meaningful string names for engines
 - **Deterministic**: Same name always produces the same ID via hash function
@@ -274,9 +270,34 @@ public:
 
 ### Backend Duplicate Detection
 
-The backend when loading plugins can check for any duplicate engine IDs.  It will throw
-an error when duplicate IDs are found along with the names of the plugins that caused the conflict.
+The backend checks for duplicate engine IDs while loading plugins, and resolves the conflict
+rather than failing the load:
 
+- A plugin that repeats an ID **within itself** is malformed and is rejected whole.
+- When two plugins claim the same ID, the plugin that loaded first keeps the engine. The
+  backend logs an error naming both plugins and the engine, and drops the later plugin's
+  engine while the rest of that plugin stays loaded.
+
+A dropped engine is absent from enumeration, from applicability, and from dispatch, so it
+cannot be reached by ID or by name.
+
+## Plugin-Supplied Engine Names
+
+A plugin names its own engines through the `hipdnnEnginePluginGetEngineName` entry point
+(engine plugin API 1.4.0), so a drop-in plugin can name engines absent from the built-in
+registry without a change to hipDNN source. A reported name takes precedence over the
+registry, which remains the source for in-tree engines and the fallback for plugins that
+report no name.
+
+The hash relation is a **requirement**: an engine ID must equal the hash of its name, which
+`HIPDNN_REGISTER_ENGINE` satisfies by construction. The backend verifies
+`engineNameToId(name) == engineId` at load and drops any engine that fails, under the same
+first-wins, log-an-error rule as a duplicate ID. An engine reporting no name is exempt, so
+plugins predating the entry point keep loading unchanged.
+
+That requirement is what makes names keys: they inherit the uniqueness of IDs, a name always
+resolves to the engine reporting it, and a plugin-chosen name cannot shadow a registry entry
+without colliding on the ID first.
 
 ## Engine Name Registration
 

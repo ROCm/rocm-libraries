@@ -608,10 +608,11 @@ TEST_F(TestEngineDescriptor, GetEngineIdReturnsValueIfFinalized)
     ASSERT_EQ(engineId, 0);
 }
 
-// HIPDNN_ATTR_ENGINE_NAME_EXT. The resolver is mocked; these pin the candidate
-// the descriptor derives and the name it publishes.
+// HIPDNN_ATTR_ENGINE_NAME_EXT. The resolver is mocked, so these pin the candidate
+// the descriptor derives and the answer it publishes, not which sources the
+// resolver is willing to draw a name from.
 
-TEST_F(TestEngineDescriptor, GetEngineNameFromEngineDetails)
+TEST_F(TestEngineDescriptor, GetEngineNameForwardsEngineDetailsNameAsTheCandidate)
 {
     serializeEngineDetailsWithName(ENGINE_ID, "EXAMPLE_PROVIDER_RELU_ENGINE");
 

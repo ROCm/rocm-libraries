@@ -9,7 +9,9 @@
 
 #include <filesystem>
 #include <gmock/gmock.h>
+#include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_backend::plugin
@@ -33,6 +35,23 @@ public:
                 getLoadedPluginFiles,
                 (),
                 (const, override));
+
+    /// Declares what admission left of a plugin. Mock plugins never go through the
+    /// real admission hooks, so by default one contributes everything it declares
+    /// and only tests exercising a drop need this.
+    void setAcceptedEngineIds(const EnginePlugin& plugin, std::vector<int64_t> engineIds)
+    {
+        _accepted[&plugin] = std::move(engineIds);
+    }
+
+    std::vector<int64_t> acceptedEngineIds(const EnginePlugin& plugin) const override
+    {
+        const auto it = _accepted.find(&plugin);
+        return it != _accepted.end() ? it->second : plugin.getAllEngineIds();
+    }
+
+private:
+    std::map<const EnginePlugin*, std::vector<int64_t>> _accepted;
 };
 
 } // namespace hipdnn_backend::plugin

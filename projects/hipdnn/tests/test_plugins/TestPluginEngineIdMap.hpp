@@ -25,10 +25,14 @@ constexpr int64_t engineId() = delete;
 // NOLINTEND(bugprone-macro-parentheses)
 
 HIPDNN_MAP_TO_ID(GoodPlugin, -2);
-HIPDNN_MAP_TO_ID(GoodDefaultPlugin, -3);
+// The good-default and execute-fails fakes report engine names, so their ids must be
+// the FNV-1a-64 hash of those names or the backend drops the engine at load. The
+// literals are precomputed because engineNameToId() is not constexpr; tests assert
+// the identity at runtime.
+HIPDNN_MAP_TO_ID(GoodDefaultPlugin, static_cast<int64_t>(0x5FB06B52DB2039ACULL));
 HIPDNN_MAP_TO_ID(NoApplicableEnginesAPlugin, -4);
 HIPDNN_MAP_TO_ID(NoApplicableEnginesBPlugin, -5);
-HIPDNN_MAP_TO_ID(ExecuteFailsPlugin, -6);
+HIPDNN_MAP_TO_ID(ExecuteFailsPlugin, static_cast<int64_t>(0x637C0BB90F065BA2ULL));
 HIPDNN_MAP_TO_ID(DuplicateIdAPlugin, -7);
 HIPDNN_MAP_TO_ID(DuplicateIdBPlugin, -7);
 HIPDNN_MAP_TO_ID(KnobsPlugin, -8);
@@ -81,11 +85,9 @@ HIPDNN_MAP_TO_ID(MismatchedNamePlugin, -29);
 namespace hipdnn_tests::plugin_constants
 {
 // Engine names reported by the named test plugins. All are deliberately absent from
-// the data_sdk engine-name registry.
-//
-// The good-default, execute-fails and mismatched-name plugins keep hardcoded engine
-// ids that their names do not hash back to. The hashed-name plugin is the opposite
-// fixture: its id is exactly engineNameToId() of its name.
+// the data_sdk engine-name registry. Every id here is engineNameToId() of the matching
+// name, as the backend requires, except the mismatched-name fake, which exists to
+// violate it.
 inline constexpr const char* K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME = "TEST_GOOD_DEFAULT_ENGINE";
 inline constexpr const char* K_EXECUTE_FAILS_PLUGIN_ENGINE_NAME = "TEST_EXECUTE_FAILS_ENGINE";
 inline constexpr const char* K_HASHED_NAME_PLUGIN_ENGINE_NAME = "TEST_HASHED_NAME_ENGINE";
