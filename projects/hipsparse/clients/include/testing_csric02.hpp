@@ -319,8 +319,9 @@ void testing_csric02(Arguments argus)
 
         if(h_analysis_pivot_gold == -1 && h_solve_pivot_gold == -1)
         {
-            unit_check_near(1, nnz, 1, hcsr_val.data(), result_1.data());
-            unit_check_near(1, nnz, 1, hcsr_val.data(), result_2.data());
+            const double rtol = 2e-10;
+            unit_check_near(1, nnz, 1, hcsr_val.data(), result_1.data(), rtol);
+            unit_check_near(1, nnz, 1, hcsr_val.data(), result_2.data(), rtol);
         }
     }
 
