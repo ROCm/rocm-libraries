@@ -11,12 +11,13 @@ rocSOLVER LAPACK-like functions
 Other LAPACK-like routines are provided by rocSOLVER. They are divided into the following subcategories:
 
 * :ref:`liketriangular`: Based on Gaussian elimination.
+* :ref:`likeorthogonal`: Based on Householder reflections.
 * :ref:`likelinears`: Based on triangular factorizations.
 * :ref:`likeeigens`: Eigenproblems for symmetric matrices.
 * :ref:`likesvds`: Singular values and related problems for general matrices.
 
 .. note::
-   
+
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be
@@ -200,6 +201,77 @@ rocsolver_<type>geblttrf_npvt_interleaved_batched()
 .. doxygenfunction:: rocsolver_dgeblttrf_npvt_interleaved_batched
    :outline:
 .. doxygenfunction:: rocsolver_sgeblttrf_npvt_interleaved_batched
+
+
+
+.. _likeorthogonal:
+
+Orthogonal factorizations
+================================
+
+.. contents:: List of LAPACK-like orthogonal factorizations
+   :local:
+   :backlinks: top
+
+.. _cholqr:
+
+rocsolver_<type>cholqr()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zcholqr_64
+   :outline:
+.. doxygenfunction:: rocsolver_ccholqr_64
+   :outline:
+.. doxygenfunction:: rocsolver_dcholqr_64
+   :outline:
+.. doxygenfunction:: rocsolver_scholqr_64
+   :outline:
+.. doxygenfunction:: rocsolver_zcholqr
+   :outline:
+.. doxygenfunction:: rocsolver_ccholqr
+   :outline:
+.. doxygenfunction:: rocsolver_dcholqr
+   :outline:
+.. doxygenfunction:: rocsolver_scholqr
+
+.. _cholqr_batched:
+
+rocsolver_<type>cholqr_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zcholqr_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ccholqr_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_dcholqr_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_scholqr_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_zcholqr_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ccholqr_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dcholqr_batched
+   :outline:
+.. doxygenfunction:: rocsolver_scholqr_batched
+
+.. _cholqr_strided_batched:
+
+rocsolver_<type>cholqr_strided_batched()
+---------------------------------------------------
+.. doxygenfunction:: rocsolver_zcholqr_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_ccholqr_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_dcholqr_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_scholqr_strided_batched_64
+   :outline:
+.. doxygenfunction:: rocsolver_zcholqr_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_ccholqr_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_dcholqr_strided_batched
+   :outline:
+.. doxygenfunction:: rocsolver_scholqr_strided_batched
 
 
 
