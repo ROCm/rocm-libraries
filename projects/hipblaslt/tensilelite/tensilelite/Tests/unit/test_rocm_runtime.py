@@ -56,7 +56,7 @@ def test_expected_rocm_version_rejects_unmatched_distribution(version):
 def test_validate_distribution_uses_base_info_version_without_python_core(tmp_path, monkeypatch):
     root = _root(tmp_path, "10.1.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
-    monkeypatch.setattr(_rocm, "resolve_system_rocm", lambda: _system_rocm(root))
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root))
 
     result = _rocm.validate_distribution(
         "tensilelite", "5.0.0+rocm10.1.0a20260813"
@@ -73,7 +73,12 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
 def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
     root = _root(tmp_path, "7.3.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
-    monkeypatch.setattr(_rocm, "resolve_system_rocm", lambda: _system_rocm(root, "active Python rocm_sdk"))
+    monkeypatch.setattr(_rocm, "_resolve_system_rocm", lambda: _system_rocm(root, "active Python rocm_sdk"))
+    monkeypatch.setattr(
+        _rocm,
+        "SystemRocm",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("invalid system ROCm was created")),
+    )
 
     with pytest.raises(_rocm.TensileLiteRuntimeError) as exc_info:
         _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.2.4")
@@ -83,7 +88,7 @@ def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
         "  tensilelite version: 5.0.0+rocm7.2.4\n"
         "  expected ROCm: 7.2.4\n"
         "  found ROCm: 7.3.0\n"
-        f"  selected root: {root}\n"
+        f"  selected: {root}\n"
         "  selected by: active Python rocm_sdk\n"
         "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
     )
@@ -101,8 +106,13 @@ def test_validate_distribution_reports_python_sdk_mismatch(tmp_path, monkeypatch
     )
     monkeypatch.setattr(
         _rocm,
-        "resolve_system_rocm",
+        "_resolve_system_rocm",
         lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
+    )
+    monkeypatch.setattr(
+        _rocm,
+        "PythonRocm",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("invalid Python ROCm was created")),
     )
 
     with pytest.raises(_rocm.TensileLiteRuntimeError) as exc_info:
@@ -113,7 +123,7 @@ def test_validate_distribution_reports_python_sdk_mismatch(tmp_path, monkeypatch
         "  tensilelite version: 5.0.0+rocm7.2.4\n"
         "  expected ROCm: 7.2.4\n"
         "  found ROCm: 7.3.0\n"
-        f"  selected package: {core_path.resolve()}\n"
+        f"  selected: {core_path.resolve()}\n"
         "  selected by: active Python rocm_sdk_core\n"
         "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
     )
@@ -123,7 +133,7 @@ def test_resolve_system_rocm_prefers_environment(tmp_path, monkeypatch):
     root = _root(tmp_path)
     monkeypatch.setenv("ROCM_PATH", str(root))
 
-    result = _rocm.resolve_system_rocm()
+    result = _rocm._resolve_system_rocm()
 
     assert result.root == root.resolve()
     assert result.source == "explicit ROCM_PATH"
@@ -135,7 +145,7 @@ def test_resolve_system_rocm_falls_back_to_path_discovery(tmp_path, monkeypatch)
     monkeypatch.setattr(_rocm, "_path_system_rocm", lambda: _system_rocm(root, "hipconfig on PATH"))
     monkeypatch.setattr(_rocm.Path, "is_dir", lambda path: False if path == _rocm.Path("/opt/rocm") else path.exists())
 
-    result = _rocm.resolve_system_rocm()
+    result = _rocm._resolve_system_rocm()
 
     assert result.root == root.resolve()
     assert result.source == "hipconfig on PATH"
@@ -188,7 +198,7 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     )
     monkeypatch.setattr(
         _rocm,
-        "resolve_system_rocm",
+        "_resolve_system_rocm",
         lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
     )
 
