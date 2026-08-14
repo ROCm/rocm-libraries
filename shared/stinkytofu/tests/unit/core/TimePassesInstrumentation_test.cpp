@@ -1,6 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
+
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -10,7 +12,6 @@
 
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 using namespace stinkytofu;
 
