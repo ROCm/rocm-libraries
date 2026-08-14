@@ -85,7 +85,7 @@ from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinDebugEnv
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -14509,20 +14509,10 @@ class KernelWriterAssembly(KernelWriter):
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
                   "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
                   "SrdC"]
-    # SrdWS re-lend A/B knob (TENSILE_PLSIN_LEND_SRDWS): opt-in ONLY. Lending SrdWS
-    # recovers the weave-store winner speedup (+4-6% on 1-WG-per-tile 4096^2/8192^2
-    # fp4) because it hands the epilogue an extra genuinely-dead 4-aligned SRD hole,
-    # avoiding the extra register-shuffle the repack into SrdA/B/MXSA/MXSB costs.
-    # It is UNSAFE as a static default on StreamK kernels: a persistent WG that is a
-    # full owner for one tile but a split contributor / fixup reducer for others
-    # keeps SrdWS live across the persistent loop (VM_L2_PROTECTION_FAULT on split
-    # shapes, e.g. 200x57344x8192, 256x256x16384). Since a static SGPR allocation
-    # cannot be runtime-branched, the safe production path is a separate kernel
-    # variant selected by the host ONLY for provably non-splitting dispatches
-    # (grid WGs == tiles). This env gate exists to measure that recovery in
-    # isolation on non-splitting winner shapes.
-    if plsinDebugEnv("TENSILE_PLSIN_LEND_SRDWS", "0") != "0":
-      _lendNames.append("SrdWS")
+    # NOTE: SrdWS is intentionally NOT lent here. It is UNSAFE on StreamK kernels: a
+    # persistent WG that is a full owner for one tile but a split contributor / fixup
+    # reducer for others keeps SrdWS live across the persistent loop
+    # (VM_L2_PROTECTION_FAULT on split shapes, e.g. 200x57344x8192, 256x256x16384).
     for _name in _lendNames:
       if _name in self.sgprs and _name not in self.states.freeSgprVarPool:
         self.addSgprVarToPool(_name)
@@ -14695,14 +14685,12 @@ class KernelWriterAssembly(KernelWriter):
       # SrdD address-math into the FUSED NLL's MFMA gaps (see LogicalScheduler
       # _weaveStoreInitIntoLoop) so it overlaps matrix compute instead of running as an
       # exposed serial block before the store. Only for <=256x256 tiles (spill/large
-      # tiles already peak at the arch-VGPR ceiling and keep everything serial), and
-      # opt-out via TENSILE_PLSIN_DEBUG="TENSILE_NLL_HOIST_STOREINIT=0" (test-only). The pure-SALU address
-      # math never touches vmcnt/lgkmcnt/vscnt/dscnt, so relocating it between MFMAs
-      # (which never touch SCC) is register- and counter-safe; _splitHoistableStoreInit
-      # fences off any branch/label/memory content.
+      # tiles already peak at the arch-VGPR ceiling and keep everything serial). The
+      # pure-SALU address math never touches vmcnt/lgkmcnt/vscnt/dscnt, so relocating
+      # it between MFMAs (which never touch SCC) is register- and counter-safe;
+      # _splitHoistableStoreInit fences off any branch/label/memory content.
       _largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
-      _hoistStoreInit = (plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT", "1") != "0") \
-                        and not _largeTile
+      _hoistStoreInit = not _largeTile
       _hoistUnits = None
       if _hoistStoreInit:
         _hoistUnits, _remainder = self._splitHoistableStoreInit(list(srdInitMod.flatitems()))
@@ -14823,13 +14811,11 @@ class KernelWriterAssembly(KernelWriter):
     # no-op there (Alpha*1*1), so skipping the ~per-element muls is the whole win. When
     # not eligible we keep applyAlpha=True (always correct). beta==0 and full-tile are
     # guaranteed by the front guard, so no C-read/edge path is added.
-    # PLSIN: by default SKIP the in-store alpha multiply on the fp32 fast path -- the
-    # front guard (computePostLoopFusedStore) gates on eff-alpha==1, so only WGs whose
-    # effective alpha is 1 (and scale pointers null) reach this store and the per-element
-    # multiply is dropped from the store's critical path. Set TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_APPLY_ALPHA=1"
-    # to instead apply alpha IN the fused store (weave per-element _applyAlpha, VALU woven
-    # under the terminal MFMAs), letting alpha!=1 / scalar scaleA*scaleB WGs fuse too.
-    skipAlpha = self._plsinAlphaSkipEligible(kernel) and not self._plsinApplyAlphaInFused(kernel)
+    # PLSIN: SKIP the in-store alpha multiply on the fp32 fast path -- the front guard
+    # (computePostLoopFusedStore) gates on eff-alpha==1, so only WGs whose effective
+    # alpha is 1 (and scale pointers null) reach this store and the per-element multiply
+    # is dropped from the store's critical path.
+    skipAlpha = self._plsinAlphaSkipEligible(kernel)
     storeModule, _ = self.globalWriteElements(
       kernel, tPA, tPB,
       [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
@@ -15993,19 +15979,13 @@ class KernelWriterAssembly(KernelWriter):
   # PostLoopStoreInNll: effective-alpha==1 fast-path support
   ##############################################################################
   def _plsinMinIter(self, kernel):
-    """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store. Default
-    is 1: the numIter==1 / K==DepthU case is handled by the runtime coord recompute
+    """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store. This is
+    1: the numIter==1 / K==DepthU case is handled by the runtime coord recompute
     emitted in buildSubtileFusedStore (which refills the hoisted write-index coord
     VGPRs when numIter < PGR, since the NGLL init-hoist arm only runs for numIter>=PGR).
     Validated bit-exact vs develop on K==DepthU shapes, so the fused store covers small-K
-    tiles too. TENSILE_PLSIN_MIN_ITER can raise this back toward PGR to restore the
-    conservative gate. Clamped to [1, PGR] so it can only ever RELAX the gate."""
-    pgr = kernel["PrefetchGlobalRead"]
-    try:
-      v = int(plsinDebugEnv("TENSILE_PLSIN_MIN_ITER", "1"))
-    except (TypeError, ValueError):
-      v = 1
-    return max(1, min(v, pgr))
+    tiles too."""
+    return 1
 
   def _plsinAlphaSkipEligible(self, kernel):
     """The fused store may skip its epilogue alpha multiply only when this returns
@@ -16045,23 +16025,7 @@ class KernelWriterAssembly(KernelWriter):
       return False
     if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1:
       return False
-    return plsinDebugEnv("TENSILE_PLSIN_BYPASS_ENDSUM", "1") != "0"
-
-  def _plsinApplyAlphaInFused(self, kernel):
-    """PostLoopStoreInNll: apply the effective alpha (and folded scalar scaleA*scaleB)
-    INSIDE the fused NLL store via the weave per-element _applyAlpha, instead of
-    requiring effective-alpha==1 and routing alpha!=1 / scalar-scaled WGs to the PLAIN
-    store. The multiply is VALU (v_mul_f32 / v_pk_mul_f32) woven under the terminal
-    MFMAs, so it overlaps matrix compute (the same _weaveReadBeforeEpilogue machinery
-    the bias / ScaleAlphaVec epilogue already rides). Only meaningful on the fp32 fast
-    path (_plsinAlphaSkipEligible); the non-fp32 fused store already keeps
-    applyAlpha=True. Default OFF: the fp32 fast path skips the in-store alpha multiply
-    and gates on eff-alpha==1 (applyAlpha=False + the Alpha==1 front-guard fold), which
-    shortens the store critical path and is the measured-faster default. Set
-    TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_APPLY_ALPHA=1" to apply the effective alpha inside the fused store
-    instead, so alpha!=1 / scalar-scaled WGs fuse too rather than routing to PLAIN."""
-    return self._plsinAlphaSkipEligible(kernel) and \
-           plsinDebugEnv("TENSILE_PLSIN_APPLY_ALPHA", "0") != "0"
+    return True
 
   def _plsinFusedNoGuards(self):
     """True inside the FULL-TILE fused NLL store, where every per-store bounds check
@@ -16080,12 +16044,8 @@ class KernelWriterAssembly(KernelWriter):
 
     Partial tiles never reach here -- they take the PLAIN NLL + edge-capable
     post-loop store, which keeps the full subtile Edge/NonEdge machinery (relaxed
-    checkIsEdgeSubtile, align8 masks, OOB branches) untouched.
-
-    TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_FULLTILE_NOGUARD=0" re-emits the guards and masks (test-only A/B;
-    correct but slower)."""
-    return (self.states.subtileFusedFullTileStore
-            and plsinDebugEnv("TENSILE_PLSIN_FULLTILE_NOGUARD", "1") != "0")
+    checkIsEdgeSubtile, align8 masks, OOB branches) untouched."""
+    return self.states.subtileFusedFullTileStore
 
   def computePostLoopFusedStore(self, kernel):
     """Precompute the persistent 'this tile falls through the fused-store path' predicate
@@ -16131,23 +16091,14 @@ class KernelWriterAssembly(KernelWriter):
     if not self._plsinAlphaSkipEligible(kernel):
       return module
     flag = "PostLoopFusedStore"
-    applyAlphaInFused = self._plsinApplyAlphaInFused(kernel)
-    if applyAlphaInFused:
-      # Alpha (and folded scalar scaleA*scaleB) is applied INSIDE the fused NLL store
-      # (weave per-element _applyAlpha), so effective-alpha==1 is no longer a fusion
-      # precondition -- do NOT fold the Alpha==1 / null-scale checks into the flag. The
-      # remaining loop-invariant sub-guards (no-tail / numIter / beta / full-tile /
-      # StreamK-owner) are still folded below.
-      module.addComment1("PLSIN: alpha applied in fused store -> eff-alpha==1 NOT gated; fold remaining sub-guards -> PostLoopFusedStore")
-    else:
-      module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopFusedStore")
+    module.addComment1("PLSIN: precompute effective-alpha==1 (Alpha & null scaleA/B) -> PostLoopFusedStore")
 
     depthU        = kernel["DepthU"]
     depthUPow2    = (depthU & (depthU - 1)) == 0
     unrollIdx     = self.states.unrollIdx
     pgr           = kernel["PrefetchGlobalRead"]
     minIter       = self._plsinMinIter(kernel)
-    isScalarScale = (not applyAlphaInFused) and (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
+    isScalarScale = (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
     supportUA     = kernel["ProblemType"]["SupportUserArgs"]
     useStreamK    = (kernel["StreamK"] > 0 and not kernel["StreamKAtomic"]
                      and not kernel["StreamKForceDPOnly"])
@@ -16225,11 +16176,8 @@ class KernelWriterAssembly(KernelWriter):
           # ~3-instruction emitAccSeed cover, erasing the ~92-cycle lgkmcnt stall. ptr is
           # taken from the free pool (live SRDs / persistent state excluded) and nothing in
           # the prefetch window writes an sgpr temp, so the quad is not clobbered across the
-          # hoist. Keeping ptr(4)+off(1) live across the shadow lifts the SGPR peak, so this
-          # is opt-outable via TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_HOIST_SCALEPTR=0" for the tight-budget shapes
-          # (MT64x448 / MT448x64) that overflow MaxSgpr at +1.
-          hoistScalePtr = (kernel["PrefetchGlobalRead"] >= 1
-                           and plsinDebugEnv("TENSILE_PLSIN_HOIST_SCALEPTR", "1") != "0")
+          # hoist. Keeping ptr(4)+off(1) live across the shadow lifts the SGPR peak.
+          hoistScalePtr = (kernel["PrefetchGlobalRead"] >= 1)
           loadMod = Module("plsinFusedScalePtrLoad")
           loadMod.addComment1("PLSIN guard-hoist: issue scaleA/scaleB pointer load (consumed after the accumulator seed)")
           loadMod.add(SMovB32(dst=sgpr(off), src=packedOff, comment="scaleA ptr kernarg byte offset (packed)"))
@@ -16287,17 +16235,16 @@ class KernelWriterAssembly(KernelWriter):
         self.releaseStreamKConstSgpr(sIpt)
 
       # ---- materialise the flag from the accumulator ------------------------------
-      # flag stays "==1 => fully fuse-eligible", and (when applyAlphaInFused is False)
-      # flag==1 still implies eff-alpha==1, so the compile-time applyAlpha=False fast
-      # path (gated by _plsinAlphaSkipEligible + this runtime flag) remains correct.
+      # flag stays "==1 => fully fuse-eligible", and flag==1 still implies eff-alpha==1,
+      # so the compile-time applyAlpha=False fast path (gated by _plsinAlphaSkipEligible
+      # + this runtime flag) remains correct.
       module.add(SCmpEQU32(src0=sgpr(bad), src1=0, comment="every folded sub-guard passed ?"))
       module.add(SCSelectB32(dst=sgpr(flag), src0=1, src1=0, comment="tentatively fuse-eligible"))
 
       # ---- the remaining sub-guards are not zero-tests, so they keep a cselect ----
       # Alpha == 1.0 completes the eff-alpha==1 term begun by the null-pointer fold.
-      if not applyAlphaInFused:
-        module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha != 1 -> not fused"))
+      module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
+      module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha != 1 -> not fused"))
 
       # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
       # real iteration to drain.
@@ -16417,10 +16364,9 @@ class KernelWriterAssembly(KernelWriter):
       # NLL pipeline has a real iteration to drain; otherwise the hoisted write-index
       # coords are never validly computed and the branch-free full-tile D store faults
       # (illegal memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro).
-      # minIter defaults to PGR; TENSILE_PLSIN_DEBUG="TENSILE_PLSIN_MIN_ITER=1" lowers it (numIter==1 case),
-      # which is correct only with the runtime coord recompute in buildSubtileFusedStore.
-      # The fp32 path folds this into PostLoopFusedStore above; this inline copy covers
-      # the rest.
+      # minIter is 1 (the numIter==1 case is handled by the runtime coord recompute in
+      # buildSubtileFusedStore). The fp32 path folds this into PostLoopFusedStore above;
+      # this inline copy covers the rest.
       pgr = kernel["PrefetchGlobalRead"]
       minIter = self._plsinMinIter(kernel)
       if pgr >= 2 and minIter > 1:

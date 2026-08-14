@@ -56,7 +56,7 @@ from .SolutionStructs.Utilities import getMiInputType, isSubtileIterateMode
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
 from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
-  INDEX_CHARS, IsaVersion, log2, clusterEnabled, plsinDebugEnv
+  INDEX_CHARS, IsaVersion, log2, clusterEnabled
 from .Common.GlobalParameters import globalParameters
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
@@ -5543,8 +5543,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Kernarg order, which is what makes the default a contiguous run:
       allNames = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
                   "SKItersPerWG", "skGrid", "skTiles", "StreamKIdx"]
-      sel = plsinDebugEnv("TENSILE_PLSIN_SK_PARK",
-                          "MagicNumberItersPerTile,MagicShiftItersPerTile,SKItersPerWG,skGrid")
+      sel = "MagicNumberItersPerTile,MagicShiftItersPerTile,SKItersPerWG,skGrid"
       want = [n for n in allNames if n in sel.split(",")]
       if kernel["StreamK"] != 3:
         want = [n for n in want if n not in ("skGrid", "skTiles")]

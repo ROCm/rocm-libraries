@@ -58,49 +58,6 @@ def isSubtileMultiDU(kernel) -> bool:
     du = kernel["DepthU"]
     return kernel.get("_DepthUA", du) < du or kernel.get("_DepthUB", du) < du
 
-def _parsePlsinDebugEnv():
-    """Parse the single TENSILE_PLSIN_DEBUG umbrella into a {name: value} map.
-
-    Pairs are separated by ';' (not ',', because some values -- notably
-    TENSILE_PLSIN_SK_PARK -- are themselves comma lists). Only the first '=' is
-    split, so values may contain '='. Empty/blank pairs are ignored.
-    """
-    raw = os.environ.get("TENSILE_PLSIN_DEBUG", "")
-    parsed = {}
-    for pair in raw.split(";"):
-        if not pair.strip():
-            continue
-        key, sep, value = pair.partition("=")
-        if sep:
-            parsed[key.strip()] = value
-    return parsed
-
-
-def plsinDebugEnv(name: str, default=None):
-    """Read one PostLoopStoreInNll (PLSIN) weave TEST-ONLY override.
-
-    All PLSIN/weave overrides are folded under a SINGLE umbrella variable,
-    ``TENSILE_PLSIN_DEBUG`` -- a ';'-separated list of NAME=value pairs whose
-    names are the historical TENSILE_* knobs, e.g.
-
-        TENSILE_PLSIN_DEBUG="TENSILE_WEAVE_LA=4;TENSILE_PLSIN_APPLY_ALPHA=1"
-
-    IMPORTANT: this is for development, bring-up and testing ONLY. It is NOT a
-    production control surface. In production the fused post-loop store and every
-    weave stage are turned on/off SOLELY by the ``PostLoopStoreInNll`` solution
-    parameter (declared in Common/ValidParameters.py, defaulted in
-    Common/GlobalParameters.py, and gated in SolutionStructs/Solution.py). All
-    callers pass the production value as ``default``, so an unset umbrella -- or
-    one that simply omits this key -- always reproduces the shipped kernel
-    byte-for-byte; a released library never depends on this variable.
-
-    Returns the raw string value for ``name``, or ``default`` when the umbrella
-    is unset or lacks that key. Callers apply their own parsing (int() / "0"
-    comparison), so the production default is preserved exactly. Parsed on every
-    call (no caching) so per-test monkeypatching of the environment is honored.
-    """
-    return _parsePlsinDebugEnv().get(name, default)
-
 # Global
 _global_ti = rocIsa.getInstance()
 

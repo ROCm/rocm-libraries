@@ -60,7 +60,6 @@ from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import isSubtileIterateMode, reject, roundupRatio, pvar
 from .Validators.MXScaleFormat import validateMXScaleFormatCombination
-from Tensile.Common.Utilities import plsinDebugEnv
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
