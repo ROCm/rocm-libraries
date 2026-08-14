@@ -38,6 +38,7 @@
 #include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
+#include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
@@ -160,6 +161,7 @@ class rocsolver_dispatcher
             {"latrd", testing_latrd<T>},
             {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
+            {"lahr2", testing_lahr2<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},
             {"stedc", testing_stedc<T>},
