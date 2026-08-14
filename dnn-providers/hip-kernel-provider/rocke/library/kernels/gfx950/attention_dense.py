@@ -304,10 +304,10 @@ class AttentionDenseSpec:
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
         if self.waves_per_eu < 1 or self.waves_per_eu > 8:
-                    raise ValueError(
-                        f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
-                        "(note: 3+ caps VGPRs at <=170 and causes spills on this kernel)"
-                    )
+            raise ValueError(
+                f"waves_per_eu must be in [1, 8], got {self.waves_per_eu} "
+                "(note: 3+ caps VGPRs at <=170 and causes spills on this kernel)"
+            )
         if self.paged:
             # --- Hard layout / hardware invariants (permanent contract) ---
             if self.block_size <= 0:
