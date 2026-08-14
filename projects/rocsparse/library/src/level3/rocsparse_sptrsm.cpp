@@ -1634,19 +1634,14 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, sptrsm_stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
-    // The diagonal fill mode is only supported by the CSR format, and it
-    // requires a non-unit diagonal (a unit diagonal would reduce the solve to
-    // an identity scaling).
+    // The diagonal fill mode is only supported by the CSR format. A unit
+    // diagonal is treated as a_ii = 1, reducing the solve to the identity
+    // scaling x_i = alpha * b_i.
     ROCSPARSE_CHECKARG(
         2,
         A,
         (A->descr->fill_mode == rocsparse_fill_mode_diagonal && A->format != rocsparse_format_csr),
         rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(2,
-                       A,
-                       (A->descr->fill_mode == rocsparse_fill_mode_diagonal
-                        && A->descr->diag_type == rocsparse_diag_type_unit),
-                       rocsparse_status_not_implemented);
 
     switch(sptrsm_stage)
     {
@@ -1724,19 +1719,14 @@ try
     ROCSPARSE_CHECKARG(3, X, (X->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(4, Y, (Y->batch_count != 1), rocsparse_status_not_implemented);
 
-    // The diagonal fill mode is only supported by the CSR format, and it
-    // requires a non-unit diagonal (a unit diagonal would reduce the solve to
-    // an identity scaling).
+    // The diagonal fill mode is only supported by the CSR format. A unit
+    // diagonal is treated as a_ii = 1, reducing the solve to the identity
+    // scaling x_i = alpha * b_i.
     ROCSPARSE_CHECKARG(
         2,
         A,
         (A->descr->fill_mode == rocsparse_fill_mode_diagonal && A->format != rocsparse_format_csr),
         rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(2,
-                       A,
-                       (A->descr->fill_mode == rocsparse_fill_mode_diagonal
-                        && A->descr->diag_type == rocsparse_diag_type_unit),
-                       rocsparse_status_not_implemented);
 
     const rocsparse_datatype compute_type = sptrsm_descr->get_compute_datatype();
 

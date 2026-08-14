@@ -442,6 +442,18 @@ void testing_sptrsm_csr(const Arguments& arg)
         return;
     }
 
+#ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
+    // The diagonal fill mode can be disabled at build time
+    // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF). rocsparse_gentest.py still maps
+    // rocsparse_fill_mode_diagonal to 2 regardless of the build flag, so skip
+    // those cases in that configuration instead of letting them fail with
+    // rocsparse_status_invalid_value.
+    if(arg.uplo == static_cast<rocsparse_fill_mode>(2))
+    {
+        return;
+    }
+#endif
+
     const J                    K               = arg.K;
     const rocsparse_operation  trans_A         = arg.transA;
     const rocsparse_operation  trans_B         = arg.transB;

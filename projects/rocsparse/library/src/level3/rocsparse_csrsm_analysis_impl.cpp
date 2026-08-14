@@ -88,13 +88,9 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
     // stage has a valid handle and return early.
     if(descr->fill_mode == rocsparse_fill_mode_diagonal)
     {
-        // A diagonal solve divides by the diagonal entry; a unit diagonal would
-        // reduce it to an identity scaling and is therefore not supported.
-        if(descr->diag_type == rocsparse_diag_type_unit)
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
-
+        // A diagonal solve divides by the diagonal entry. A unit diagonal is
+        // treated as a_ii = 1, reducing the solve to the identity scaling
+        // x_i = alpha * b_i (handled directly in the solve stage).
         if(csrsm_info == nullptr)
         {
             csrsm_info      = new _rocsparse_csrsm_info();
