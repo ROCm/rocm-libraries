@@ -348,14 +348,8 @@ constexpr double sddmm_coo_gbyte_count(J M, J N, J K, I nnz, bool beta = false)
 }
 
 template <typename T, typename I, typename J>
-constexpr double sddmm_csr_batched_gbyte_count(J    M,
-                                               J    N,
-                                               J    K,
-                                               I    nnz,
-                                               J    batch_count_A,
-                                               J    batch_count_B,
-                                               J    batch_count_C,
-                                               bool beta = false)
+constexpr double sddmm_csr_batched_gbyte_count(
+    J M, J N, J K, I nnz, J batch_count_A, J batch_count_B, J batch_count_C, bool beta = false)
 {
     // read A matrix
     size_t readA = size_t(batch_count_A) * size_t(nnz) * size_t(K) * sizeof(T);
