@@ -60,6 +60,7 @@
 #include <omp.h>
 #include <optional>
 #include <set>
+#include <span>
 
 extern "C" __global__ void flush_icache()
 {
@@ -2198,6 +2199,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipDeviceProp_t mxProp{};
         if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
             CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
+        auto mxBatchOutput = [](HipHostBuffer& buffer, size_t offset, size_t batchBytes) {
+            if(offset > buffer.getNumBytes())
+                throw std::invalid_argument("MX output offset exceeds host buffer capacity.");
+            size_t capacity = buffer.getNumBytes() - offset;
+            if(batchBytes != 0)
+                capacity = std::min(capacity, batchBytes);
+            return std::span<uint8_t>(buffer.as<uint8_t>() + offset, capacity);
+        };
 #endif
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
@@ -2240,24 +2249,22 @@ void testing_matmul_with_bias(const Arguments& arg,
             refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
-                auto* dataPtrA  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
-                auto* scalePtrA = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
-                auto batchRef
-                    = generateMXInput(TiA,
-                                      scaleDataType(arg.scaleA),
-                                      dataPtrA,
-                                      scalePtrA,
-                                      A_row[i],
-                                      A_col[i],
-                                      lda[i],
-                                      transA == HIPBLAS_OP_T,
-                                      scaleA_row,
-                                      scaleA_col,
-                                      /*isMatrixA=*/true,
-                                      scaleLayoutA,
-                                      hipblaslt_initialization2string(arg.initialization),
-                                      /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                auto dataOutputA = mxBatchOutput(hA[i], b * dataBatchBytesA, dataBatchBytesA);
+                auto scaleOutputA
+                    = mxBatchOutput(hScaleA[i], b * scaleBatchBytesA, scaleBatchBytesA);
+                auto batchRef = generateMXInput(TiA,
+                                                scaleDataType(arg.scaleA),
+                                                dataOutputA,
+                                                scaleOutputA,
+                                                A_row[i],
+                                                A_col[i],
+                                                lda[i],
+                                                scaleA_row,
+                                                scaleA_col,
+                                                scaleLayoutA,
+                                                hipblaslt_initialization2string(arg.initialization),
+                                                /*min_val=*/-1.0f,
+                                                /*max_val=*/1.0f);
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -2343,32 +2350,28 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             MXScaleLayout const scaleLayoutB
                 = mxScaleLayoutForFormat(arg.scaleB, mxProp.gcnArchName);
-            size_t             dataBatchBytesB    = (num_batches[i] > 1)
-                                                        ? elementsToBytes(stride_b[i], TiB)
-                                                        : 0;
-            size_t             scaleBatchBytesB   = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+            size_t dataBatchBytesB  = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
             std::vector<float> refBAll;
             refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
-                auto* dataPtrB  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
-                auto* scalePtrB = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
-                auto batchRef
-                    = generateMXInput(TiB,
-                                      scaleDataType(arg.scaleB),
-                                      dataPtrB,
-                                      scalePtrB,
-                                      B_row[i],
-                                      B_col[i],
-                                      ldb[i],
-                                      transB == HIPBLAS_OP_T,
-                                      scaleB_row,
-                                      scaleB_col,
-                                      /*isMatrixA=*/false,
-                                      scaleLayoutB,
-                                      hipblaslt_initialization2string(arg.initialization),
-                                      /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                auto dataOutputB = mxBatchOutput(hB[i], b * dataBatchBytesB, dataBatchBytesB);
+                auto scaleOutputB
+                    = mxBatchOutput(hScaleB[i], b * scaleBatchBytesB, scaleBatchBytesB);
+                auto batchRef = generateMXInput(TiB,
+                                                scaleDataType(arg.scaleB),
+                                                dataOutputB,
+                                                scaleOutputB,
+                                                B_row[i],
+                                                B_col[i],
+                                                ldb[i],
+                                                scaleB_row,
+                                                scaleB_col,
+                                                scaleLayoutB,
+                                                hipblaslt_initialization2string(arg.initialization),
+                                                /*min_val=*/-1.0f,
+                                                /*max_val=*/1.0f);
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
