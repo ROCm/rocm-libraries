@@ -36,12 +36,11 @@ the [Libraries PR Bot](../../../.github/workflows/libraries-pr-bot.yml) also run
 files show when jobs run; they do not expose repository branch-protection settings, so this document
 does not claim that every listed status is a required merge check.
 
-**What does not gate despite common assumptions.** The 80% code-coverage target is not enforced and
-hipDNN has no checked-in Codecov upload or threshold. `ROCm/dnn-benchmarking` uses the hipDNN Python
-bindings to execute graphs defined in JSON, but performance runs are manual today and have no regular
-cadence. Weekly performance-regression runs are planned. The current trusted ASAN signal is a manually
-run standalone check; pull-request sanitizer jobs are build-only, and scheduled ASAN infrastructure
-is not yet an owned hipDNN signal.
+**What is not automated.** hipDNN does not enforce the 80% code-coverage target and has no checked-in
+Codecov upload or threshold. `ROCm/dnn-benchmarking` uses the hipDNN Python bindings to run graphs
+defined in JSON. Performance testing is manual and has no set cadence today; weekly regression runs
+are planned. The trusted ASAN check is also manual. Pull-request sanitizer jobs build but do not run
+tests, and scheduled ASAN infrastructure is not yet an owned hipDNN signal.
 
 **The biggest gaps.** No automated performance signal; pre-submit covers only the quick/smoke subset
 of intended validation; tolerance overrides, skips, and other test workarounds lack one consistent
@@ -145,27 +144,31 @@ or GPU hardware that an isolated unit test cannot represent.
 | Provider integration | `dnn-providers/<name>/integration_tests/` | Provider-specific errors, determinism, support, and tuning behavior | Yes |
 | Cross-provider | `dnn-providers/integration-tests/` | Same graph executed through every registered provider plugin and compared with a reference | Yes |
 
-The shared cross-provider suite builds one `hipdnn_integration_tests` binary that each provider
-registers against its own plugin. This lets one provider-agnostic graph test run against the MIOpen,
-hipBLASLt, and hip-kernel engines; unsupported operations are skipped through the shared engine-support
-check, while provider-owned TOML files hold engine-specific tolerance overrides and skips. See
-[Provider Integration](../../../dnn-providers/integration-tests/README.md#provider-integration) for
-the canonical wiring and execution details.
+The shared suite builds one `hipdnn_integration_tests` binary:
 
-The suite has [two graph-test authoring mechanisms](../../../dnn-providers/integration-tests/README.md#two-ways-to-test-a-graph):
-data-driven bundles and sweeps are the default for "run this graph and compare it with a reference,"
-while C++ integration tests remain for error paths, API contracts, serialization, determinism, and
-other behavior that graph data cannot express. Bundle tests in turn support
-[single-graph and template-sweep formats](../../../dnn-providers/integration-tests/README.md#bundle-formats-single-graph-vs-template-sweep):
-a concrete graph JSON defines one case, while `graph.template.json` holds invariant topology and
-`${case.*}` placeholders expanded from a `sweep.json` case matrix. Keep format, authoring, migration,
-and golden-data details in the linked cross-provider documentation rather than duplicating them here.
+- Each provider runs the binary against its own plugin. The same graph test can therefore cover
+  MIOpen, hipBLASLt, and hip-kernel engines.
+- Unsupported operations skip through a shared support check.
+- Provider-owned TOML files define engine-specific tolerance overrides and skips.
 
-The shared cross-provider suite is the default home for data-driven graph correctness tests. A
-provider-specific integration directory is reserved for behavior not expressed as "run this graph
-and compare it," such as unsupported paths, determinism, or benchmarking controls.
+See [Provider Integration](../../../dnn-providers/integration-tests/README.md#provider-integration)
+for wiring and execution details.
 
-Current limitations matter:
+Choose the test format based on what the test needs to prove:
+
+- **Bundle:** Default for running a graph and comparing its output with a reference. Use one graph
+  JSON for one case, or a template plus `sweep.json` for many shapes, data types, or layouts.
+- **C++:** Use for behavior that graph data cannot express, such as error paths, API contracts,
+  serialization, determinism, and benchmarking controls.
+
+See [Two Ways to Test a Graph](../../../dnn-providers/integration-tests/README.md#two-ways-to-test-a-graph)
+and [Bundle Formats](../../../dnn-providers/integration-tests/README.md#bundle-formats-single-graph-vs-template-sweep)
+for authoring, migration, and golden-data details.
+
+Put general graph correctness tests in the shared suite. Use a provider-specific integration
+directory only for behavior unique to that provider.
+
+Current limitations:
 
 - Core `quick`, `standard`, `comprehensive`, and `full` categories run the same tests because `quick`
   matches all tests and the higher tiers add no patterns.
@@ -197,16 +200,18 @@ gap below.
 
 ### Performance and Benchmarking
 
-[`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) is hipDNN's performance testing
-platform. It uses the hipDNN Python bindings to execute graph workloads defined in JSON through
-installed engine plugins, measures kernel and synchronized end-to-end time with HIP events, and emits
-a common JSON result format. Optional PyTorch execution/reference support enables validation and
-offline ROCm/CUDA comparison.
+[`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) uses the hipDNN Python bindings
+to run graph workloads defined in JSON through installed engine plugins. It reports kernel time and
+synchronized end-to-end time in a common JSON format. Optional PyTorch support can validate results
+and compare ROCm with CUDA offline.
 
-Runs are manual today and have no regular cadence. A weekly performance-regression run is planned,
-but no automated performance signal, stored baseline comparison, regression threshold, or gate
-exists yet. The [Roadmap](Roadmap.md#benchmarking--performance-testing) tracks Windows support and
-CI/CD work.
+Current status:
+
+- Runs are manual and have no set cadence.
+- A weekly performance-regression run is planned.
+- No automated baseline comparison, regression threshold, or gate exists yet.
+
+The [Roadmap](Roadmap.md#benchmarking--performance-testing) tracks Windows support and CI/CD work.
 
 | Item | Current state |
 | --- | --- |
@@ -667,36 +672,35 @@ Integration tests validate end-to-end functionality across components.
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
 ###### External Integration
-- A shared, cross-provider harness (`hipdnn_integration_tests`) that each provider runs against its
-  own plugin, so one provider-agnostic graph test covers every registered engine
-- Under a superbuild the provider plugin is discovered automatically; standalone, pass
-  `--test-article /path/to/libmiopen_plugin.so`
-- Tiered by the `INSTANTIATE_TEST_SUITE_P` prefix
-  (`Smoke`/`Standard`/`Comprehensive`/`Full`); tiers cascade so each higher tier includes the lower
-  ones, and any suite without a tier prefix runs in smoke
-- The [cross-provider README](../../../dnn-providers/integration-tests/README.md#two-ways-to-test-a-graph)
-  is the canonical guide to the two authoring mechanisms and the
-  [single-graph and template-sweep bundle formats](../../../dnn-providers/integration-tests/README.md#bundle-formats-single-graph-vs-template-sweep)
-- Provider-owned TOML files can override tolerances or skip cases for known numerical/support
-  limitations. These are governed as explicit workarounds, not passing proof; see
-  [TESTING.md § Known Risks and Gaps](#known-risks-and-gaps).
+- Each provider runs the same `hipdnn_integration_tests` binary against its own plugin.
+- Superbuilds discover the plugin automatically. For standalone runs, pass
+  `--test-article /path/to/plugin.so`.
+- Tests use four tiers: `Smoke`, `Standard`, `Comprehensive`, and `Full`. Higher tiers include lower
+  tiers. Tests without a tier prefix run in smoke.
+- Use the [cross-provider guide](../../../dnn-providers/integration-tests/README.md#two-ways-to-test-a-graph)
+  to choose between bundles and C++ tests. It also documents
+  [single-graph and template-sweep bundles](../../../dnn-providers/integration-tests/README.md#bundle-formats-single-graph-vs-template-sweep).
+- Provider-owned TOML files can override tolerances or skip cases for known limitations. These are
+  workarounds, not proof that skipped behavior works. See
+  [Known Risks and Gaps](#known-risks-and-gaps).
 
 #### Graph Validation
-The cross-provider harness can compare outputs with precomputed golden tensors or a live GPU/CPU
-reference executor. See the canonical [verification modes](../../../dnn-providers/integration-tests/README.md#verification-modes)
-for selection and fallback behavior, and the [CPU Graph Executor Design Document](rfcs/0001_CpuGraphExecutorDesign.md)
-for CPU reference implementation details.
+Outputs can be checked against precomputed golden tensors, a GPU reference, or a CPU reference. See
+the [verification modes](../../../dnn-providers/integration-tests/README.md#verification-modes) for
+selection rules and the [CPU Graph Executor Design Document](rfcs/0001_CpuGraphExecutorDesign.md)
+for CPU implementation details.
 
 ---
 
 ### Validation Responsibility and GPU Coverage
 
-hipDNN is primarily a routing library: the frontend API hands a graph to a provider plugin that knows how to run it. That shapes what "GPU coverage" means here, and splits validation responsibility between hipDNN and its providers:
+hipDNN routes graphs to provider plugins; providers execute them. Testing follows that split:
 
-- **hipDNN library** is largely GPU-agnostic. It does not implement per-architecture kernels, so it does not own a per-`gfx` correctness matrix. Its own on-device testing is the **backend/end-to-end integration tests** that confirm hipDNN marshals the right data to the plugin and returns the plugin's results faithfully - i.e. that the routing and data path are correct, not that an operation is numerically correct on a given ASIC.
-- **Operation correctness** across providers is validated by the cross-provider suite in `dnn-providers/integration-tests/`, which runs graphs through a provider plugin and compares the results against a reference executor. This is where `gfx`-specific accuracy coverage lives, so ASIC coverage is effectively delegated to the providers: the suite exercises whatever GPU is present, and each provider is responsible for the architectures it supports.
-
-The cross-provider suite is the default place to add "does this graph run and verify on this engine" tests (authored as data-driven bundles); a provider's own `integration_tests/` directory is reserved for cases that are *not* just running a graph, such as unsupported/error paths, determinism, and benchmarking knobs. For the specifics (bundle formats, tiers, how to add tests, per-provider configuration), see the [integration tests README](../../../dnn-providers/integration-tests/README.md).
+- **hipDNN** owns routing correctness. Its backend and end-to-end tests check that tensors,
+  attributes, and results move through the plugin boundary correctly. hipDNN does not implement
+  kernels, so it does not own a per-`gfx` numerical matrix.
+- **Providers** own numerical correctness on supported GPUs. Each provider runs the shared suite,
+  which executes graphs through its plugin and compares results with a reference.
 
 What hipDNN itself validates directly, by OS:
 
@@ -767,7 +771,9 @@ Flaky tests are not an accepted final state. hipDNN has no encoded quarantine, o
 
 ### 4. Performance Testing
 
-[`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) is hipDNN's performance testing platform. It uses the hipDNN Python bindings to execute graph workloads defined in JSON through installed engine plugins, records HIP-event kernel and synchronized end-to-end timing, and emits comparable JSON results. Runs are manual today and have no regular cadence. A weekly performance-regression run is planned, but hipDNN has no automated performance signal, baseline comparison, or threshold yet. See [TESTING.md § Performance and Benchmarking](#performance-and-benchmarking) and the [Roadmap](Roadmap.md#benchmarking--performance-testing).
+[`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) uses the hipDNN Python bindings
+to run JSON graph workloads. Runs are manual today; weekly regression runs are planned. See
+[Performance and Benchmarking](#performance-and-benchmarking) for current details.
 
 ---
 
