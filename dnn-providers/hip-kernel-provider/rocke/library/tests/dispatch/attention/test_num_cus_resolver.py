@@ -1,14 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only tests for the dispatch-layer num_sms resolver + target_ctas knob.
+"""CPU-only tests for the dispatch-layer num_cus resolver + target_ctas knob.
 
-``num_sms`` drives 2D<->3D routing and the 3D segment count. It historically
+``num_cus`` drives 2D<->3D routing and the 3D segment count. It historically
 defaulted to a stale 120, under-subscribing gfx942 (304 CUs). The resolver turns
 the sentinel default into the live gfx942 CU count behind an explicit-caller
 override seam. Auto-resolution is scoped to gfx942 for now; other archs keep the
 legacy 120 (Future Scope). ``target_ctas`` is the direct device-subscription
-target override: when > 0 it replaces ``num_sms * 4`` for routing/segmentation
+target override: when > 0 it replaces ``num_cus * 4`` for routing/segmentation
 without a device CU count. These tests mock the device query/arch (no GPU) and
 assert the resolution order plus the downstream routing/segment effects.
 """
@@ -59,9 +59,9 @@ def test_gfx942_device_query():
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(AC, "_device_num_cus", lambda: 304)
-        assert _resolve_num_cus(_req(num_sms=0)) == 304
+        assert _resolve_num_cus(_req(num_cus=0)) == 304
         p.attr(AC, "_device_num_cus", lambda: 228)  # smaller-CU gfx942 variant
-        assert _resolve_num_cus(_req(num_sms=0)) == 228
+        assert _resolve_num_cus(_req(num_cus=0)) == 228
     finally:
         p.restore()
 
@@ -75,7 +75,7 @@ def test_gfx942_fallback_off_box():
             AC, "_device_num_cus", lambda: 256
         )  # e.g. a gfx950 box; must NOT be consulted
         assert (
-            _resolve_num_cus(_req(num_sms=0)) == 120
+            _resolve_num_cus(_req(num_cus=0)) == 120
         )  # legacy fallback, not 256, not 304
     finally:
         p.restore()
@@ -87,9 +87,9 @@ def test_other_archs_keep_legacy_120():
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx950")
         p.attr(AC, "_device_num_cus", lambda: 256)
-        assert _resolve_num_cus(_req(num_sms=0, arch="gfx950")) == 120
-        assert _resolve_num_cus(_req(num_sms=0, arch="gfx90a")) == 120
-        assert _resolve_num_cus(_req(num_sms=0, arch="gfxZZZ")) == 120
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx950")) == 120
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfx90a")) == 120
+        assert _resolve_num_cus(_req(num_cus=0, arch="gfxZZZ")) == 120
     finally:
         p.restore()
 
@@ -100,13 +100,13 @@ def test_explicit_caller_wins_any_arch():
     try:
         p.attr(hipm, "get_device_arch", lambda *a, **k: "gfx942")
         p.attr(AC, "_device_num_cus", lambda: 999)  # must NOT be consulted
-        assert _resolve_num_cus(_req(num_sms=200)) == 200
-        assert _resolve_num_cus(_req(num_sms=200, arch="gfx950")) == 200
+        assert _resolve_num_cus(_req(num_cus=200)) == 200
+        assert _resolve_num_cus(_req(num_cus=200, arch="gfx950")) == 200
     finally:
         p.restore()
 
 
-def _prob(nsms, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
+def _prob(num_cus, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
     return UnifiedAttentionProblem(
         total_q=batch,
         num_seqs=batch,
@@ -119,12 +119,12 @@ def _prob(nsms, *, nq=64, nk=8, D=64, kv=8192, batch=64, tctas=0):
         dtype="bf16",
         sliding_window=0,
         use_sinks=False,
-        num_sms=nsms,
+        num_cus=num_cus,
         target_ctas=tctas,
     )
 
 
-def test_routing_scales_with_num_sms():
+def test_routing_scales_with_num_cus():
     """The resolved count changes routing: an under-filled grid flips 2D->3D."""
     # b64 GQA-64/8 D64 kv8192: num_2d=768 -> 2D at 120 (target 480), 3D at 304 (target 1216)
     assert _prob(120).select_path() == "2d"
@@ -132,32 +132,32 @@ def test_routing_scales_with_num_sms():
 
 
 def test_target_ctas_overrides_effective_target():
-    """target_ctas (>0) is the effective routing/segment target, bypassing num_sms*4."""
+    """target_ctas (>0) is the effective routing/segment target, bypassing num_cus*4."""
     assert _prob(120)._effective_target_ctas == 480  # auto: 120*4
     assert _prob(120, tctas=1216)._effective_target_ctas == 1216  # override beats 480
     assert _prob(304, tctas=99)._effective_target_ctas == 99  # override beats 1216
     assert _prob(120, tctas=0)._effective_target_ctas == 480  # 0 => auto
 
 
-def test_target_ctas_flips_routing_without_num_sms():
-    """Setting target_ctas alone flips 2D->3D at fixed num_sms (the knob's purpose)."""
+def test_target_ctas_flips_routing_without_num_cus():
+    """Setting target_ctas alone flips 2D->3D at fixed num_cus (the knob's purpose)."""
     assert _prob(120).select_path() == "2d"  # auto target 480, num_2d=768 -> 2D
-    assert _prob(120, tctas=1216).select_path() == "3d"  # same num_sms, pinned target
+    assert _prob(120, tctas=1216).select_path() == "3d"  # same num_cus, pinned target
 
 
 def test_target_ctas_threaded_through_problem():
     """AttentionRequest.target_ctas reaches the built problem; the resolver ignores it."""
-    prob = A._problem(_req(num_sms=200, target_ctas=1216))
+    prob = A._problem(_req(num_cus=200, target_ctas=1216))
     assert prob.target_ctas == 1216
-    assert prob.num_sms == 200  # num_sms still resolved independently
+    assert prob.num_cus == 200  # num_cus still resolved independently
     assert prob._effective_target_ctas == 1216
-    prob2 = A._problem(_req(num_sms=200, target_ctas=0))
+    prob2 = A._problem(_req(num_cus=200, target_ctas=0))
     assert prob2.target_ctas == 0  # unset => auto
     assert prob2._effective_target_ctas == 800  # 200*4
 
 
 def test_segments_bounded_after_bump():
-    """The num_sms bump must not over-split D128 decode: clamp == pre-bump."""
+    """The num_cus bump must not over-split D128 decode: clamp == pre-bump."""
     p = _Patch()
     try:
         au._RESOLVED_ATTENTION_ARCH = None
@@ -177,7 +177,7 @@ def test_segments_bounded_after_bump():
         assert u304 > u120, f"kv32768 should scale: {u120} -> {u304}"
 
         # q>1 (prefill / spec-decode) D128: the else-branch clamp also holds
-        def qprob(nsms):
+        def qprob(num_cus):
             return UnifiedAttentionProblem(
                 total_q=4,
                 num_seqs=1,
@@ -190,7 +190,7 @@ def test_segments_bounded_after_bump():
                 dtype="bf16",
                 sliding_window=0,
                 use_sinks=False,
-                num_sms=nsms,
+                num_cus=num_cus,
             )
 
         q120 = au._num_segments(qprob(120))

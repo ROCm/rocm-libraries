@@ -1,17 +1,18 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <memory>
+
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "MiopenReluPlanBuilder.hpp"
-#include "engines/plans/MiopenReluApplicabilityChecks.hpp"
-#include "engines/plans/MiopenReluPlan.hpp"
+#include "engines/plans/MiopenUnaryActivationChecks.hpp"
+#include "engines/plans/MiopenUnaryActivationPlan.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 namespace miopen_plugin
 {
 
-bool MiopenReluPlanBuilder::isApplicable(
+bool MiopenUnaryActivationPlanBuilder::isApplicable(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -20,33 +21,33 @@ bool MiopenReluPlanBuilder::isApplicable(
     // descriptors it builds, so decline rather than risk a mismatch (RFC 0008 §4.6).
     if(opGraph.getGraph().is_override_shape_enabled())
     {
-        HIPDNN_PLUGIN_LOG_INFO("ReLU plan builder does not support override shapes");
+        HIPDNN_PLUGIN_LOG_INFO("Unary activation plan builder does not support override shapes");
         return false;
     }
 
-    return relu_applicability::isReluSupported(opGraph);
+    return unary_activation_applicability::isSupported(opGraph);
 }
 
-size_t MiopenReluPlanBuilder::getMaxWorkspaceSize(
+size_t MiopenUnaryActivationPlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
-    // ReLU operations do not require workspace memory.
+    // Unary activations do not require workspace memory.
     return 0u;
 }
 
-void MiopenReluPlanBuilder::initializeExecutionSettings(
+void MiopenUnaryActivationPlanBuilder::initializeExecutionSettings(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
         engineConfig,
     [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
 {
-    // No execution settings are needed for ReLU operations.
+    // No execution settings are needed for unary activations.
 }
 
-void MiopenReluPlanBuilder::buildPlan(
+void MiopenUnaryActivationPlanBuilder::buildPlan(
     [[maybe_unused]] const HipdnnMiopenHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
@@ -57,20 +58,24 @@ void MiopenReluPlanBuilder::buildPlan(
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
-    HIPDNN_PLUGIN_LOG_INFO("Building ReLU plan for node: " << nodeName);
-
     const auto& attrs
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>();
 
-    auto plan = std::make_unique<MiopenReluPlan>(attrs, opGraph.getTensorMap());
+    HIPDNN_PLUGIN_LOG_INFO("Building "
+                           << hipdnn_flatbuffers_sdk::data_objects::EnumNamePointwiseMode(
+                                  attrs.operation())
+                           << " plan for node: " << nodeName);
+
+    auto plan = std::make_unique<MiopenUnaryActivationPlan>(attrs, opGraph.getTensorMap());
     executionContext.setPlan(std::move(plan));
 }
 
-std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> MiopenReluPlanBuilder::getCustomKnobs(
-    [[maybe_unused]] const HipdnnMiopenHandle& handle,
-    [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
+    MiopenUnaryActivationPlanBuilder::getCustomKnobs(
+        [[maybe_unused]] const HipdnnMiopenHandle& handle,
+        [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    // ReLU operations do not expose any custom knobs.
+    // Unary activations do not expose any custom knobs.
     return {};
 }
 

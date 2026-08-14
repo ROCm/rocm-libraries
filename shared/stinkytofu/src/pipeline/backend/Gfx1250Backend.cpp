@@ -68,6 +68,10 @@
 
 namespace stinkytofu {
 namespace {
+// Deliberately a literal triple rather than getArchTriple(GfxArchID::Gfx1250): this file is
+// compiled into every build, including a Gfx1250v0-only one where that enumerator does not
+// exist. Keying on {12,5,0} is also what gives v0 v1's pipeline, which is correct -- the two
+// steppings differ in instruction timing, not in which passes should run.
 constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 
 /// Build the gfx1250 per-region optimization passes into a PassManager.
