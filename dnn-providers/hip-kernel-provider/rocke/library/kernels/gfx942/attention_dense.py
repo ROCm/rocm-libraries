@@ -81,8 +81,8 @@ Implementation status (the optimization plan holds the full ordered work list)
 -----------------------------------------------------------------------------
   * P0  enablement + 32x32x8 atom + K-loop doubling ............ DONE (this file)
   * P1  conflict-free V (perm_b32 store-path transpose) ........ DONE (D128 fp16)
-  * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast all
-        but bf16 D128; fused rescale bit-identical, enables bf16 D64 exp2_fast)
+  * P2  exp2_fast + fused/lazy rescale ........................ DONE (exp2_fast for
+        ALL configs incl. bf16 D128; fused rescale bit-identical, bf16 D64 exp2_fast)
   * P3  occupancy: waves-per-eu tune (bf16 D64 -> wpe4 = 2 WG/CU),
         D64 K bank-pad, wide4 (WG=256), K single-buffer ........... IN PROGRESS
         (waves-per-eu DONE via _tuned_waves_per_eu; **D64 K bank-pad DONE and ADOPTED**
@@ -326,7 +326,7 @@ class Gfx942DenseTuning:
 
     # use_exp2_fast: force the P2 single-instruction exp2 on/off.
     #   None (default) -> :func:`_use_exp2_fast`, which owns the measured verdict
-    #   (on everywhere except bf16 D128, which spills). Numerically safe in both
+    #   (now on for ALL configs; the former bf16-D128 spill holdout is stale). Numerically safe in both
     #   directions here -- both softmax arguments are always <= 0 -- so unlike
     #   ``use_cfvst`` this one is a pure perf A/B and is not gated.
     use_exp2_fast: bool | None = None
@@ -518,22 +518,24 @@ def _rows_per_instr(head_size: int) -> int:
 def _use_exp2_fast(head_size: int, dtype: str) -> bool:
     """Whether softmax uses ``exp2_fast`` (one v_exp_f32, no range-reduction guard).
 
-    Enabled everywhere EXCEPT bf16 D128. exp2_fast is a strict VALU reduction and the
-    dominant P2 lever on the (post-P1) VALU-bound path, and is always numerically safe
-    here -- both softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly
-    exp2_fast's precondition.
+    Enabled for all configs. exp2_fast is a strict VALU reduction and the dominant P2
+    lever on the (post-P1) VALU-bound path, and is always numerically safe here -- both
+    softmax args (alpha's m_i - m_new and p's s - m_new) are <= 0, exactly exp2_fast's
+    precondition, independent of head_size and dtype.
 
-    bf16 D128 is the sole holdout. Its ``.1k`` MFMA schedule keeps more registers live,
-    and exp2_fast makes the exp result available in one instruction (vs plain exp2's
-    ~5-op range reduction), which the scheduler hoists -- lengthening the exp live
-    ranges. Measured post-fused-rescale (plan §6.1): bf16 D128 goes 175 VGPR / 0 spill
-    (plain exp2) -> 256 VGPR / 22 spill (exp2_fast), over the waves-per-eu=2 cap. The
-    fused rescale freed ~28 VGPR but not enough to absorb that hoist on the .1k path;
-    fp16 D128 (213, cfvst) and bf16 D64 (215) both have the headroom. A bf16 D128
-    exp2_fast unblock is a P3 occupancy/scheduling item. Spill re-verified across the
-    fp16/bf16 x D64/D128 cohort.
+    bf16 D128 was previously the sole holdout. An earlier fused-rescale schedule
+    (plan §6.1) spilled with exp2_fast (175 -> 256 VGPR / 22 spill, over the
+    waves-per-eu=2 cap), so the policy disabled it. The current lazy-rescale schedule
+    does not spill: rocprofv3 register capture on the shipped bf16-D128 causal kernel
+    (GQA 32/8, Sq 1024-16384, both the default and persistent grids) reads a lower VGPR
+    count with exp2_fast than without, 0 scratch, numerically identical to plain exp2.
+    The holdout is therefore stale and removed. (The stale numbers were measured against
+    the pre-lazy-rescale body; the register profile has since changed sign.) head_size is
+    no longer a gate -- correctness holds for every head_size (the <= 0 precondition is
+    universal); a new head_size would only warrant a fresh occupancy check, never a
+    correctness one.
     """
-    return dtype == "fp16" or head_size != 128
+    return True
 
 
 def _use_cfvst(head_size: int, dtype: str) -> bool:
@@ -1447,8 +1449,8 @@ def _build_attention_dense_single_buffer(
             # s) -- exactly exp2_fast's precondition (no overflow; v_exp_f32 flushes
             # large negatives to 0). Cuts ~99 VALU/tile at D128, the dominant
             # MFMA-starving residual once conflict-free V (P1) lands. Enabled for
-            # every config except bf16 D128, which spills on the .1k schedule -- the
-            # spill rationale and the matrix live in _use_exp2_fast's docstring.
+            # every config, including bf16 D128 -- its former spill holdout is stale on
+            # the current lazy-rescale schedule; rationale + matrix in _use_exp2_fast's docstring.
             exp2 = b.exp2_fast if tuning.resolved_use_exp2_fast(spec) else b.exp2
             alpha = exp2(b.fsub(m_i, m_new))
 
