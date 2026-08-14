@@ -237,9 +237,8 @@ int64_t rocsparse_clients::spmat_descr<T, I, J>::get_size_cols() const
             [](const ell_t& that) -> int64_t { return that.host().m * that.host().width; },
             [](const bell_t& that) -> int64_t {
                 const auto& h = that.host();
-                return (h.bdim > 0)
-                           ? (int64_t((h.m + h.bdim - 1) / h.bdim) * (h.ell_cols / h.bdim))
-                           : 0;
+                return (h.bdim > 0) ? (int64_t((h.m + h.bdim - 1) / h.bdim) * (h.ell_cols / h.bdim))
+                                    : 0;
             },
             [](const bsr_t& that) -> int64_t { return that.host().nnzb; },
             [](const sell_t& that) -> int64_t { return that.host().sell_colval_size; },
