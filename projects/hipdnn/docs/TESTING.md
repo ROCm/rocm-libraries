@@ -37,10 +37,11 @@ files show when jobs run; they do not expose repository branch-protection settin
 does not claim that every listed status is a required merge check.
 
 **What does not gate despite common assumptions.** The 80% code-coverage target is not enforced and
-hipDNN has no checked-in Codecov upload or threshold. `ROCm/dnn-benchmarking` is the performance
-testing platform, but it is not wired into PR or nightly validation. The current trusted ASAN signal
-is a manually run standalone check; pull-request sanitizer jobs are build-only, and scheduled ASAN
-infrastructure is not yet an owned hipDNN signal.
+hipDNN has no checked-in Codecov upload or threshold. `ROCm/dnn-benchmarking` uses the hipDNN Python
+bindings to execute graphs defined in JSON, but performance runs are manual today and have no regular
+cadence. Weekly performance-regression runs are planned. The current trusted ASAN signal is a manually
+run standalone check; pull-request sanitizer jobs are build-only, and scheduled ASAN infrastructure
+is not yet an owned hipDNN signal.
 
 **The biggest gaps.** No automated performance signal; pre-submit covers only the quick/smoke subset
 of intended validation; tolerance overrides, skips, and other test workarounds lack one consistent
@@ -182,30 +183,31 @@ gap below.
 ### Performance and Benchmarking
 
 [`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) is hipDNN's performance testing
-platform. It loads serialized hipDNN graphs, runs installed engine plugins, measures kernel and
-synchronized end-to-end time with HIP events, and emits a common JSON result format. Optional
-PyTorch execution/reference support enables validation and offline ROCm/CUDA comparison.
+platform. It uses the hipDNN Python bindings to execute graph workloads defined in JSON through
+installed engine plugins, measures kernel and synchronized end-to-end time with HIP events, and emits
+a common JSON result format. Optional PyTorch execution/reference support enables validation and
+offline ROCm/CUDA comparison.
 
-The platform is in early development and its README explicitly says not to use it in CI pipelines
-yet. hipDNN therefore has a performance testing platform, but no automated performance signal,
-stored baseline comparison, or gate. The
-[Roadmap](Roadmap.md#benchmarking--performance-testing) tracks Windows support and CI/CD work.
+Runs are manual today and have no regular cadence. A weekly performance-regression run is planned,
+but no automated performance signal, stored baseline comparison, regression threshold, or gate
+exists yet. The [Roadmap](Roadmap.md#benchmarking--performance-testing) tracks Windows support and
+CI/CD work.
 
 | Item | Current state |
 | --- | --- |
 | Platform | [`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) |
 | Metrics available | HIP-event kernel timing and synchronized end-to-end timing |
-| Workloads | Serialized hipDNN graphs and versioned workload collections in the platform repository |
+| Workloads | hipDNN graph workloads defined in JSON and executed through the Python bindings |
 | Result format | `SuiteResult` JSON; no component-owned baseline store or dashboard |
 | Per-architecture baselines | Not established for automated comparison |
 | Regression threshold | Not defined |
 | PR-level gate | No |
-| Nightly automated comparison | No checked-in hipDNN lane |
+| Scheduled cadence | Manual only today; weekly performance-regression run planned |
 | Release qualification | No performance gate in the current Test Plan |
 
 Performance-sensitive changes require a manual same-architecture before/after run with
-`dnn-benchmarking` and reviewer-visible results. That manual process is the current signal until
-automation, stable baselines, and ownership exist.
+`dnn-benchmarking` and reviewer-visible results. That manual process remains the current signal until
+the planned weekly run, stable baselines, and ownership exist.
 
 ## Pre-submit and CI Gates
 
@@ -739,7 +741,7 @@ Flaky tests are not an accepted final state. hipDNN has no encoded quarantine, o
 
 ### 4. Performance Testing
 
-[`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) is hipDNN's performance testing platform. It executes serialized graphs through installed engine plugins, records HIP-event kernel and synchronized end-to-end timing, and emits comparable JSON results. It is currently manual and explicitly not intended for CI use yet, so hipDNN has no automated PR/nightly performance signal, baseline comparison, or threshold. See [TESTING.md § Performance and Benchmarking](#performance-and-benchmarking) and the [Roadmap](Roadmap.md#benchmarking--performance-testing).
+[`ROCm/dnn-benchmarking`](https://github.com/ROCm/dnn-benchmarking) is hipDNN's performance testing platform. It uses the hipDNN Python bindings to execute graph workloads defined in JSON through installed engine plugins, records HIP-event kernel and synchronized end-to-end timing, and emits comparable JSON results. Runs are manual today and have no regular cadence. A weekly performance-regression run is planned, but hipDNN has no automated performance signal, baseline comparison, or threshold yet. See [TESTING.md § Performance and Benchmarking](#performance-and-benchmarking) and the [Roadmap](Roadmap.md#benchmarking--performance-testing).
 
 ---
 
