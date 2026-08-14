@@ -269,4 +269,4 @@ The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and run 
 tox -e mutation-unit
 ```
 
-It is currently a narrow **report-only pilot** (five files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).
+It is currently a narrow **report-only pilot** (ten files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).

@@ -16,22 +16,25 @@
 namespace miopen_plugin
 {
 
-class MiopenReluPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
+// Shared execution plan for all unary pointwise activations (ReLU family, Sigmoid, Tanh, ...).
+// All per-op behavior lives in MiopenActivationDescriptor / mapPointwiseModeToMiopenActivation;
+// there is no activation-specific logic left to differentiate at this layer.
+class MiopenUnaryActivationPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
-    MiopenReluPlan(
+    MiopenUnaryActivationPlan(
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    MiopenReluPlan(const MiopenReluPlan&) = delete;
-    MiopenReluPlan& operator=(const MiopenReluPlan&) = delete;
+    MiopenUnaryActivationPlan(const MiopenUnaryActivationPlan&) = delete;
+    MiopenUnaryActivationPlan& operator=(const MiopenUnaryActivationPlan&) = delete;
 
-    MiopenReluPlan(MiopenReluPlan&&) = delete;
-    MiopenReluPlan& operator=(MiopenReluPlan&&) = delete;
+    MiopenUnaryActivationPlan(MiopenUnaryActivationPlan&&) = delete;
+    MiopenUnaryActivationPlan& operator=(MiopenUnaryActivationPlan&&) = delete;
 
-    ~MiopenReluPlan() override = default;
+    ~MiopenUnaryActivationPlan() override = default;
 
     size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 

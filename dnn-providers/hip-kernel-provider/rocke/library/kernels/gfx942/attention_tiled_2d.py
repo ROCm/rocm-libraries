@@ -889,9 +889,9 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_register_pv v1 is restricted to dtype='bf16'")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_register_pv v1 does not support fp8 K/V cache")
-            if self.use_sinks or self.sliding_window > 0 or self.has_softcap:
+            if self.sliding_window > 0 or self.has_softcap:
                 raise ValueError(
-                    "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
+                    "use_register_pv v1 requires no sliding window and no softcap"
                 )
             if self.use_alibi or self.use_qq_bias:
                 raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
@@ -4184,8 +4184,11 @@ def build_unified_attention_2d_tiled(
                             # default kg%3 map at k_groups=4 (D128): at kg=1 the
                             # depth-3 prefetch targets slice 3 -> slot 0, the slot
                             # slice 0 used. Without this fence the QK accumulation
-                            # is corrupted (max_abs ~0.5-1.3 at magnitude); D64
-                            # (k_groups=2) never reuses a slot so it is unaffected.
+                            # is corrupted (max_abs ~0.5-1.3 at magnitude). A ring
+                            # with k_groups <= ring_depth touches each slot at most
+                            # once and never reaches this branch -- that was D64 at
+                            # the 32-wide slice; D64 now routes to width 16, so it
+                            # is k_groups=4 and does reuse.
                             # (CK's LdsSeq map hits the same reuse and always
                             # relied on this drain; it now applies to every map.)
                             if kg > 0 and next_slot == _kslot(kg - 1):

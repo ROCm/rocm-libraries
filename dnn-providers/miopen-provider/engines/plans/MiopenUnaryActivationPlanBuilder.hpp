@@ -15,17 +15,21 @@
 namespace miopen_plugin
 {
 
-class MiopenReluPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<HipdnnMiopenHandle,
-                                                                     HipdnnMiopenSettings,
-                                                                     HipdnnMiopenContext>
+// Shared PlanBuilder for all unary pointwise activations (ReLU family, Sigmoid, Tanh, ...).
+// None of buildPlan, getMaxWorkspaceSize, initializeExecutionSettings, or getCustomKnobs
+// differ per activation, so a single builder handles them all: applicability dispatches on
+// the node's pointwise mode in unary_activation_applicability::isSupported, and the plan
+// itself is differentiated by MiopenActivationDescriptor.
+class MiopenUnaryActivationPlanBuilder
+    : public hipdnn_plugin_sdk::
+          IPlanBuilder<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>
 {
 public:
-    MiopenReluPlanBuilder() = default;
-    ~MiopenReluPlanBuilder() override = default;
+    MiopenUnaryActivationPlanBuilder() = default;
+    ~MiopenUnaryActivationPlanBuilder() override = default;
 
-    // Disallow copy and assignment
-    MiopenReluPlanBuilder(const MiopenReluPlanBuilder&) = delete;
-    MiopenReluPlanBuilder& operator=(const MiopenReluPlanBuilder&) = delete;
+    MiopenUnaryActivationPlanBuilder(const MiopenUnaryActivationPlanBuilder&) = delete;
+    MiopenUnaryActivationPlanBuilder& operator=(const MiopenUnaryActivationPlanBuilder&) = delete;
 
     bool isApplicable(
         const HipdnnMiopenHandle& handle,
