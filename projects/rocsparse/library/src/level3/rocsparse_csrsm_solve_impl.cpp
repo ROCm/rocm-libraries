@@ -568,7 +568,6 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
             const int64_t inc_y           = static_cast<int64_t>(1);
 
             _rocsparse_spmat_descr csr(rocsparse_format_csr,
-                                       false,
                                        batch_count,
                                        m,
                                        m,

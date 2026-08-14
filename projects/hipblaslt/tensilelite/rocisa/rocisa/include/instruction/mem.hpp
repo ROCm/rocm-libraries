@@ -339,7 +339,7 @@ namespace rocisa
         {
             std::string dstStr     = dst ? dst->toString() + ", " : "";
             auto        soffsetStr = InstructionInputToString(soffset);
-            if(getAsmCaps()["HasMUBUFConst"])
+            if(capOrDefault(getAsmCaps(), "HasMUBUFConst"))
             {
                 return dstStr + vaddr->toString() + ", " + saddr->toString() + ", " + soffsetStr;
             }
@@ -763,7 +763,7 @@ namespace rocisa
         std::string getArgStr() const
         {
             auto soffsetStr = InstructionInputToString(soffset);
-            if(getAsmCaps()["HasMUBUFConst"])
+            if(capOrDefault(getAsmCaps(), "HasMUBUFConst"))
             {
                 return srcData->toString() + ", " + vaddr->toString() + ", " + saddr->toString()
                        + ", " + soffsetStr;
@@ -3855,7 +3855,7 @@ namespace rocisa
             , s_addr(s_addr)
             , gm(gm)
         {
-            if(getAsmCaps()["HasGlobalPrefetch"])
+            if(capOrDefault(getAsmCaps(), "HasGlobalPrefetch"))
             {
                 setInst("global_prefetch_b8");
             }
