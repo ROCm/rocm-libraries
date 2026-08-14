@@ -49,6 +49,7 @@ class ClientCandidate:
 # ---------------------------------------------------------------------------
 
 def current_installation() -> Installation:
+    """Identify the installed TensileLite package that owns this import."""
     package_dir = _package_dir()
     matches = [
         distribution
@@ -70,11 +71,13 @@ def current_installation() -> Installation:
 # ---------------------------------------------------------------------------
 
 def binding_path(installation: Installation | None = None) -> Path:
+    """Return the explicit-client binding path for an installation."""
     installation = installation or current_installation()
     return user_root() / "bindings" / installation.identifier / "client.json"
 
 
 def read_binding(installation: Installation | None = None) -> Path | None:
+    """Return an installation's explicitly configured client path, if any."""
     path = binding_path(installation)
     try:
         raw = path.read_text(encoding="utf-8")
@@ -100,6 +103,7 @@ def read_binding(installation: Installation | None = None) -> Path | None:
 
 
 def user_root() -> Path:
+    """Return the user-scoped directory that stores TensileLite bindings."""
     return Path.home() / ".tensilelite"
 
 
@@ -112,6 +116,7 @@ def selected_client(
     default_client: Callable[[], ClientCandidate],
     installation: Installation | None = None,
 ) -> ClientCandidate:
+    """Select the explicit client binding or delegate to default lookup."""
     configured = read_binding(installation)
     if configured is not None:
         return ClientCandidate(configured, "explicit TensileLite client binding")
@@ -122,6 +127,7 @@ def default_client_candidate(
     executable_search_paths: tuple[Path, ...],
     source: str,
 ) -> ClientCandidate:
+    """Find tensilelite-client in the selected executable search paths."""
     for directory in executable_search_paths:
         candidate = directory / _CLIENT_EXECUTABLE
         if candidate.is_file():
@@ -134,6 +140,7 @@ def default_client_candidate(
 
 
 def validate_client(client: Path, expected_version: str) -> None:
+    """Verify that a client executable reports the expected package version."""
     if not client.is_absolute():
         raise ClientBindingError(f"Client path must be absolute: {client}")
     if not client.is_file():
@@ -189,6 +196,7 @@ def validate_client(client: Path, expected_version: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _package_dir() -> Path:
+    """Locate the installed tensilelite package without importing it."""
     spec = util.find_spec("tensilelite")
     locations = None if spec is None else spec.submodule_search_locations
     if not locations:
@@ -197,6 +205,7 @@ def _package_dir() -> Path:
 
 
 def _distribution_package_dir(distribution: metadata.Distribution) -> Path | None:
+    """Return the tensilelite package directory described by distribution metadata."""
     for entry in distribution.files or ():
         if str(entry).replace("\\", "/") == "tensilelite/__init__.py":
             return Path(distribution.locate_file(entry)).resolve().parent

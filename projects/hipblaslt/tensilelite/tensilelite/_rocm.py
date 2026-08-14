@@ -55,6 +55,7 @@ class SystemRocmRoot:
 def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
+    """Select and validate the ROCm installation for a TensileLite wheel."""
     expected = _expected_rocm_version(distribution, distribution_version)
     python_sdk_version = _python_sdk_version()
     if python_sdk_version is not None:
@@ -75,6 +76,7 @@ def _validate_compatibility(
     path: Path,
     source: str,
 ) -> None:
+    """Raise when the selected ROCm version does not match the wheel."""
     if actual_version == expected_version:
         return
     shown_version = distribution_version or package_version(distribution)
@@ -90,6 +92,7 @@ def _validate_compatibility(
 
 
 def _expected_rocm_version(distribution: str, distribution_version: str | None = None) -> str:
+    """Extract the wheel's canonical ROCm release from its version tag."""
     if distribution_version is None:
         try:
             distribution_version = package_version(distribution)
@@ -122,6 +125,7 @@ _RELEASE_RE: re.Pattern[str] = re.compile(
 
 
 def _canonical_rocm_version(value: str) -> str:
+    """Normalize and validate a ROCm release identifier."""
     value = re.sub(r"[-_+]+", ".", value.strip().lower()).strip(".")
     if not _RELEASE_RE.fullmatch(value):
         raise TensileLiteRuntimeError(f"Invalid ROCm release value: {value!r}")
@@ -129,6 +133,7 @@ def _canonical_rocm_version(value: str) -> str:
 
 
 def _rocm_base_version(value: str) -> str:
+    """Return the three-part base release from a canonical ROCm version."""
     match = re.match(r"^([0-9]+(?:\.[0-9]+){2})", value)
     if match is None:
         raise TensileLiteRuntimeError(f"Invalid ROCm release value: {value!r}")
@@ -140,6 +145,7 @@ def _rocm_base_version(value: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _python_sdk_version() -> str | None:
+    """Return the active rocm_sdk_core version, if it is installed."""
     try:
         import rocm_sdk_core
     except ModuleNotFoundError:
@@ -161,6 +167,7 @@ def _validate_python_sdk(
     expected: str,
     python_sdk_version: str,
 ) -> PythonRocm:
+    """Validate the active Python ROCm SDK against the TensileLite wheel."""
     version = _canonical_rocm_version(python_sdk_version)
     path = _python_sdk_location()
     executable_search_paths = _python_sdk_executable_search_paths()
@@ -180,6 +187,7 @@ def _validate_python_sdk(
 
 
 def _python_sdk_location() -> Path:
+    """Return the installed rocm_sdk_core package directory."""
     try:
         import rocm_sdk_core
 
@@ -196,6 +204,7 @@ def _python_sdk_location() -> Path:
 
 
 def _python_sdk_executable_search_paths() -> tuple[Path, ...]:
+    """Return Python script directories that expose SDK tool trampolines."""
     user_scheme = sysconfig.get_preferred_scheme("user")
     script_dirs = (
         sysconfig.get_path("scripts"),
@@ -221,6 +230,7 @@ def _validate_system_rocm(
     distribution_version: str | None,
     expected: str,
 ) -> SystemRocm:
+    """Validate a conventional ROCm prefix against the TensileLite wheel."""
     resolved = _resolve_system_rocm()
     version_file = resolved.root / ".info" / "version"
     try:
@@ -256,6 +266,7 @@ def _validate_system_rocm(
 
 
 def _resolve_system_rocm() -> SystemRocmRoot:
+    """Select a ROCm prefix from the environment, default location, or PATH."""
     explicit = os.environ.get("ROCM_PATH")
     if explicit:
         return _validated_system_rocm_root(Path(explicit).expanduser(), "explicit ROCM_PATH")
@@ -272,6 +283,7 @@ def _resolve_system_rocm() -> SystemRocmRoot:
 
 
 def _path_system_rocm() -> SystemRocmRoot | None:
+    """Return the ROCm prefix reported by hipconfig, if it can be queried."""
     hipconfig = shutil.which("hipconfig")
     if hipconfig is None:
         return None
@@ -290,6 +302,7 @@ def _path_system_rocm() -> SystemRocmRoot | None:
 
 
 def _validated_system_rocm_root(root: Path, source: str) -> SystemRocmRoot:
+    """Resolve root after confirming that it is an existing directory."""
     if not root.is_dir():
         raise TensileLiteRuntimeError(
             "ROCm installation not found.\n"
