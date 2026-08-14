@@ -2,7 +2,7 @@ MinimumRequiredVersion: 5.0.0
 ScheduleName: gfx950
 ArchitectureName: gfx950
 CUCount: null
-DeviceNames: [Device 75a0]
+DeviceNames: [Device 75a3, Device 75a2]
 ProblemType:
   Activation: true
   ActivationComputeDataType: 0
