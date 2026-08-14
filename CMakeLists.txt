@@ -31,9 +31,6 @@ include(shared_third_party)
 
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
-option(HIPDNN_ENABLE_KERNEL_INGESTOR
-    "Enable the generic kernel ingestor in the hipDNN superbuild" ON
-)
 
 set(ROCM_LIBS_ENABLE_COMPONENTS "all"
     CACHE STRING "Semicolon-separated list of components to build (default: 'all')"
@@ -61,6 +58,7 @@ set(AVAILABLE_COMPONENTS
     hipblaslt-provider
     hip-kernel-provider
     hipdnn-samples
+    hipdnn-python
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -209,6 +207,14 @@ if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT hipdnn
         PREFIX_PATH projects
         EXPECT_TARGET hipdnn_backend
+    )
+endif()
+
+if("hipdnn-python" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT frontend_bindings
+        PREFIX_PATH projects/hipdnn/python
+        EXPECT_TARGET hipdnn_frontend_bindings
     )
 endif()
 
