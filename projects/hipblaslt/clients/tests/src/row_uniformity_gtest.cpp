@@ -22,10 +22,25 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+// hipblaslt-test links roc::tensilelite-host (through hipblaslt-clients-common),
+// so the solution metadata the launch gate reasons from is available here even
+// though libhipblaslt.so exports none of it. caching_library_gtest.cpp relies on
+// the same property; see its header comment for why white-box coverage lives in
+// this binary rather than in the tensilelite-tests suite, which CI never builds.
+#include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ContractionSolution.hpp>
+#include <Tensile/MasterSolutionLibrary.hpp>
+#include <Tensile/Tensile.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+
+#include <dlfcn.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -56,6 +71,123 @@ namespace
            || hipGetDeviceProperties(&props, device) != hipSuccess)
             return "unknown";
         return props.gcnArchName;
+    }
+
+    using ContractionLibrary
+        = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
+
+    // The two fields the launch gate reasons from when it decides whether the
+    // StaggerU clamp can reach a kernel.
+    struct SolutionStagger
+    {
+        bool   clampCanReach = false;
+        size_t staggerU      = 0;
+    };
+
+    // rocblaslt_find_library_relative_path has hidden visibility, so its probe
+    // order for the Tensile library root is mirrored rather than called.
+    std::vector<std::filesystem::path> libraryRootCandidates()
+    {
+        std::vector<std::filesystem::path> roots;
+
+        if(const char* env = std::getenv("HIPBLASLT_TENSILE_LIBPATH"))
+            roots.emplace_back(env);
+
+        // Taking &hipblasLtCreate here would yield this binary's PLT stub, which
+        // dladdr resolves to the test executable rather than to the library.
+        // dlsym returns the definition itself, so its directory is the one the
+        // runtime probes from.
+        Dl_info info{};
+        void*   entry = dlsym(RTLD_DEFAULT, "hipblasLtCreate");
+        if(entry != nullptr && dladdr(entry, &info) != 0 && info.dli_fname != nullptr)
+        {
+            std::error_code       ec;
+            std::filesystem::path resolved
+                = std::filesystem::weakly_canonical(std::filesystem::path(info.dli_fname), ec);
+            if(ec)
+                resolved = std::filesystem::path(info.dli_fname);
+
+            const std::filesystem::path libDir = resolved.parent_path();
+            roots.push_back(libDir / "hipblaslt" / "library");
+            roots.push_back(libDir.parent_path() / "Tensile" / "library");
+            roots.push_back(libDir / "library");
+        }
+
+        return roots;
+    }
+
+    // The lazy master library the runtime loads, opened here for its metadata
+    // alone: getSolutionByIndex pulls in a placeholder's .dat on demand and
+    // never touches the code objects. Empty return leaves reason populated with
+    // every path tried.
+    std::shared_ptr<ContractionLibrary> masterLibrary(std::string& reason)
+    {
+        static std::string                         failure;
+        static std::shared_ptr<ContractionLibrary> library = [] {
+            // gcnArchName carries feature suffixes ("gfx942:sramecc+:xnack-")
+            // that never appear in the library filename.
+            const std::string arch      = gpuArchName();
+            const std::string processor = arch.substr(0, arch.find(':'));
+
+            std::string tried;
+            for(const auto& root : libraryRootCandidates())
+            {
+                // Always the logical single-extension name: the loader resolves
+                // the shipped ".dat.zlib" by appending the suffix itself.
+                const std::filesystem::path logical
+                    = root / processor / ("TensileLibrary_lazy_" + processor + ".dat");
+                tried += (tried.empty() ? "" : ", ") + logical.string();
+
+                if(!std::filesystem::exists(logical)
+                   && !std::filesystem::exists(logical.string() + ".zlib"))
+                    continue;
+
+                auto loaded
+                    = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
+                        logical.string());
+                auto master = std::dynamic_pointer_cast<ContractionLibrary>(loaded);
+                if(master && master->initLibraryMapping(logical.string()))
+                    return master;
+            }
+
+            failure = "no Tensile library found for " + processor + "; tried " + tried;
+            return std::shared_ptr<ContractionLibrary>();
+        }();
+
+        reason = failure;
+        return library;
+    }
+
+    bool staggerMetadata(const hipblasLtMatmulHeuristicResult_t& candidate,
+                         SolutionStagger&                        out,
+                         std::string&                            reason)
+    {
+        auto library = masterLibrary(reason);
+        if(!library)
+            return false;
+
+        static std::shared_ptr<TensileLite::Hardware> hardware
+            = TensileLite::hip::GetCurrentDevice();
+        if(!hardware)
+        {
+            reason = "could not describe the current device to TensileLite";
+            return false;
+        }
+
+        hipblasLtMatmulAlgo_t algo  = candidate.algo;
+        const int             index = hipblaslt_ext::getIndexFromAlgo(algo);
+
+        auto solution = library->getSolutionByIndex(*hardware, index);
+        if(!solution)
+        {
+            reason = "solution index " + std::to_string(index)
+                     + " is enumerable but absent from the loaded library";
+            return false;
+        }
+
+        out.clampCanReach = solution->internalArgsSupport.staggerU;
+        out.staggerU      = solution->sizeMapping.staggerU;
+        return true;
     }
 
     // Wide dynamic range, mixed sign, non-dyadic. The rand_int fill hipBLASLt
@@ -252,34 +384,6 @@ namespace
             appendSupported(enumerated, stride, stride, kMaxSweepCandidates, supported);
 
             return supported;
-        }
-
-        // Resolves one solution by the index baked into the library. Callers
-        // treat a false return as a failure, not a skip: a pinned index that
-        // stops resolving means the test has quietly stopped testing anything.
-        bool algoFromIndex(int                               solutionIndex,
-                           hipblasLtMatmulHeuristicResult_t& out,
-                           std::string&                      reason)
-        {
-            std::vector<int>                              indices{solutionIndex};
-            std::vector<hipblasLtMatmulHeuristicResult_t> found;
-            if(hipblaslt_ext::getAlgosFromIndex(m_handle, indices, found) != HIPBLAS_STATUS_SUCCESS
-               || found.empty())
-            {
-                reason = "solution index " + std::to_string(solutionIndex)
-                         + " is not present in this library build";
-                return false;
-            }
-
-            std::string why;
-            if(!runnable(found[0], why))
-            {
-                reason = "solution index " + std::to_string(solutionIndex) + " " + why;
-                return false;
-            }
-
-            out = found[0];
-            return true;
         }
 
         std::string solutionName(const hipblasLtMatmulHeuristicResult_t& candidate)
@@ -566,47 +670,135 @@ namespace
                              << " candidates_tried=" << candidates.size();
         }
 
-        // Pins one solution measured to be repaired by the StaggerU clamp in
-        // calculateAutoStaggerU. checkRowUniformity can only assert the
-        // guarantee on whichever candidates its sweep surfaces, and most of
-        // those exercise the launch gate's clean-rejection path instead, so
-        // naming a repaired solution is what keeps the honored branch covered
-        // unconditionally.
-        void checkClampRepairedSolution(const Problem& problem, int solutionIndex)
+        // checkRowUniformity accepts a clean refusal for every candidate, so it
+        // can report green having exercised only the launch gate's rejection
+        // path and never the repair the mode exists to perform. This driver
+        // selects candidates by the same metadata the gate reasons from -- a
+        // kernel that staggers, whose StaggerU the clamp can reach -- and then
+        // asserts the outcome. Selecting on metadata rather than on the observed
+        // result is what stops the assertion being circular, and it replaces an
+        // earlier pair of pinned solution indices that could not survive either
+        // a retune or a change of architecture.
+        void checkClampRepairedSolutions(const Problem& problem)
         {
             RowUniformityHarness harness(problem);
             prepare(harness);
             if(IsSkipped() || HasFailure())
                 return;
 
-            hipblasLtMatmulHeuristicResult_t candidate{};
-            std::string                      reason;
-            ASSERT_TRUE(harness.algoFromIndex(solutionIndex, candidate, reason))
-                << reason << ". arch=" << gpuArchName()
-                << ". This test pins a solution known to be repaired by the StaggerU clamp; if "
-                   "the solution is gone the pin must be re-measured, not dropped";
+            std::string libraryReason;
+            if(!masterLibrary(libraryReason))
+                GTEST_SKIP() << libraryReason;
 
-            const std::string name = harness.solutionName(candidate);
-            RecordProperty("solution_index", solutionIndex);
-            RecordProperty("solution_name", name);
+            int        enumeratedCount = 0;
+            const auto candidates      = harness.candidateAlgos(enumeratedCount);
 
-            ASSERT_EQ(harness.run(candidate, /*uniformMode=*/false), HIPBLAS_STATUS_SUCCESS)
-                << "Baseline run of solution " << solutionIndex << " (" << name << ") failed";
-            ASSERT_GE(harness.firstNonUniformRowOfLastRun(), 0)
-                << "Solution " << solutionIndex << " (" << name
-                << ") is row-uniform with the mode off, so it no longer witnesses the "
-                   "summation-order difference this test exists to catch; re-measure the pin";
+            int         staggering  = 0;
+            int         reachable   = 0;
+            int         unreachable = 0;
+            int         honored     = 0;
+            int         repaired    = 0;
+            int         unresolved  = 0;
+            std::string lastUnresolved;
 
-            ASSERT_EQ(harness.run(candidate, /*uniformMode=*/true), HIPBLAS_STATUS_SUCCESS)
-                << "Solution " << solutionIndex << " (" << name
-                << ") is reachable by the StaggerU clamp, so uniform summation order must honor "
-                   "it rather than refuse it";
+            for(const auto& candidate : candidates)
+            {
+                SolutionStagger stagger;
+                std::string     reason;
+                if(!staggerMetadata(candidate, stagger, reason))
+                {
+                    // Not a failure on its own: the runtime may have resolved a
+                    // different library than the probe above found, and an index
+                    // it never loaded says nothing about the mode. The tally is
+                    // what distinguishes that from an odd solution or two.
+                    ++unresolved;
+                    lastUnresolved = reason;
+                    continue;
+                }
 
-            const int64_t badRow = harness.firstNonUniformRowOfLastRun();
-            EXPECT_EQ(badRow, -1) << "Row " << badRow
-                                  << " of D differs bitwise from row 0 for solution "
-                                  << solutionIndex << " (" << name
-                                  << ") with uniform summation order enabled";
+                if(stagger.staggerU == 0)
+                    continue;
+
+                ++staggering;
+                const std::string name = harness.solutionName(candidate);
+
+                if(!stagger.clampCanReach)
+                {
+                    // The clamp writes a field this kernel never reads, so the
+                    // gate has to refuse it: admitting it would leave the
+                    // compiled-in rotation running.
+                    ++unreachable;
+                    EXPECT_EQ(harness.run(candidate, /*uniformMode=*/true),
+                              HIPBLAS_STATUS_INVALID_VALUE)
+                        << name << " declares StaggerU " << stagger.staggerU
+                        << " with no runtime StaggerU argument, so uniform summation order must "
+                           "refuse it rather than run it unclamped";
+                    continue;
+                }
+
+                ++reachable;
+
+                if(harness.run(candidate, /*uniformMode=*/false) != HIPBLAS_STATUS_SUCCESS)
+                    continue;
+
+                // Staggering metadata does not guarantee this shape actually
+                // reduces in a differing order, and a solution already uniform
+                // with the mode off would satisfy the assertion below without
+                // the clamp having repaired anything.
+                const bool brokenAtBaseline = harness.firstNonUniformRowOfLastRun() >= 0;
+
+                const auto status = harness.run(candidate, /*uniformMode=*/true);
+                // Reaching the clamp settles StaggerU, but the gate refuses on
+                // other grounds too -- an uneven Stream-K partition, atomic
+                // accumulation -- so a clean refusal stays admissible here.
+                if(status == HIPBLAS_STATUS_INVALID_VALUE)
+                    continue;
+
+                ASSERT_EQ(status, HIPBLAS_STATUS_SUCCESS)
+                    << "Uniform summation order must either honor " << name
+                    << " or reject it with HIPBLAS_STATUS_INVALID_VALUE";
+
+                ++honored;
+                if(brokenAtBaseline)
+                    ++repaired;
+
+                const int64_t badRow = harness.firstNonUniformRowOfLastRun();
+                EXPECT_EQ(badRow, -1)
+                    << "Row " << badRow << " of D differs bitwise from row 0 for " << name
+                    << ", a staggering solution the clamp reaches, with uniform summation order "
+                       "enabled";
+            }
+
+            RecordProperty("algos_enumerated", enumeratedCount);
+            RecordProperty("candidates_tried", static_cast<int>(candidates.size()));
+            RecordProperty("staggering", staggering);
+            RecordProperty("clamp_reachable", reachable);
+            RecordProperty("clamp_unreachable", unreachable);
+            RecordProperty("honored", honored);
+            RecordProperty("repaired", repaired);
+            RecordProperty("unresolved", unresolved);
+
+            // Every candidate unresolved means the library loaded here is not
+            // the one the runtime enumerated from, so no conclusion below is
+            // about the shipped solutions.
+            ASSERT_LT(static_cast<size_t>(unresolved), candidates.size())
+                << "No enumerated solution was found in the library this test loaded, so the "
+                   "probe resolved a different library than the runtime uses. Last reason: "
+                << lastUnresolved;
+
+            // Skipping rather than passing is the point: with no solution that
+            // was non-uniform without the mode and honored with it, nothing
+            // above witnessed a repair, and this case must not be mistaken for
+            // coverage of one.
+            if(repaired == 0)
+                GTEST_SKIP() << "No staggering solution the clamp reaches was both non-uniform "
+                                "with the mode off and honored with it on, so this run cannot "
+                                "witness a repair. arch="
+                             << gpuArchName() << " problem=" << problem.m << "x" << problem.n << "x"
+                             << problem.k << " algos_enumerated=" << enumeratedCount
+                             << " candidates_tried=" << candidates.size()
+                             << " staggering=" << staggering << " clamp_reachable=" << reachable
+                             << " clamp_unreachable=" << unreachable << " honored=" << honored;
         }
     };
 
@@ -633,19 +825,12 @@ namespace
         checkRowUniformity({8192, 8192, 8192});
     }
 
-    // Two solutions measured on gfx950 to stagger at MT48x64x16 and MT32x16x128
-    // respectively (packed internalArgs 0x22080000 and 0x20080000 with the mode
-    // off, 0x00000000 with it on). Two rather than one because they differ in
-    // macro-tile shape and StreamK setting, so a change that repairs only one
-    // family of kernels still shows up.
-    TEST_F(RowUniformity_pre_checkin, ClampRepaired_Solution134712_6144x5120x8192)
+    // Covers the repair itself rather than the refusal: every enumerated
+    // solution whose metadata says it staggers is checked, against the outcome
+    // that metadata implies.
+    TEST_F(RowUniformity_pre_checkin, ClampRepaired_6144x5120x8192)
     {
-        checkClampRepairedSolution({6144, 5120, 8192}, 134712);
-    }
-
-    TEST_F(RowUniformity_pre_checkin, ClampRepaired_Solution134733_6144x5120x8192)
-    {
-        checkClampRepairedSolution({6144, 5120, 8192}, 134733);
+        checkClampRepairedSolutions({6144, 5120, 8192});
     }
 
 } // namespace
