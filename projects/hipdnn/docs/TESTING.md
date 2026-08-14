@@ -1,8 +1,7 @@
 # hipDNN Testing Strategy
 
-- **Status:** Draft
 - **Owner:** `@ROCm/hipdnn-core` (see [CODEOWNERS](../../../.github/CODEOWNERS))
-- **Technical lead:** Not recorded in repository metadata; see [Known Risks and Gaps](#known-risks-and-gaps)
+- **Technical lead:** Not recorded in repository metadata
 - **Last updated:** 2026-08-13
 
 > **In a hurry?** Read [The short version](#the-short-version), then use
@@ -432,7 +431,7 @@ being released and an explicit review of unresolved high-risk gaps.
 
 | Dependency/area | Owner | Validation responsibility | Known handoff risk |
 | --- | --- | --- | --- |
-| hipDNN core | `@ROCm/hipdnn-core` | Component unit, API, routing, documentation | No named technical lead or per-area test owners recorded |
+| hipDNN core | `@ROCm/hipdnn-core` | Component unit, API, routing, documentation |
 | Providers and shared integration | `@ROCm/dnn-providers-core` | Numerical correctness and supported ASIC coverage | Provider support matrix and CI inventory are not centralized here |
 | Repository CI | `@ROCm/rocm-libraries-reviewers` | Workflow definitions, runners, shared policy | Branch required-check settings are external to repository files |
 | TheRock / `therock-ci-config` | TheRock/CI owners | Build, package, and live test matrices | Exact package selection can change outside this repository |
