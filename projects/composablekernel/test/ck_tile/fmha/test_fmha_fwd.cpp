@@ -1341,7 +1341,10 @@ static const std::vector<SinkWindowParam> kSinkWindowParams = {
     // num_sink_loop == 0: sink pointer set, no sink columns, window mask
     {256, "n", 0.0f, 1024, "t:128,30", 1},
     {128, "e", 0.0f, 1024, "t:128,30", 1},
+    // dropout exercises the randval window, which each pipeline guards separately. hdim 128
+    // with plain bias routes to async, hdim 256 keeps it on the non-async one.
     {128, "n", 0.2f, 1024, "t:128,30", 1},
+    {256, "n", 0.2f, 1024, "t:128,30", 1},
     {256, "n", 0.0f, 1024, "b:128,30", 1},
     {256, "n", 0.0f, 1024, "t:2,0", 1},
     // num_sink_loop >= 2: sink_size wider than one KV tile
