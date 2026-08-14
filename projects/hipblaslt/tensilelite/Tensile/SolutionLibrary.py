@@ -93,7 +93,7 @@ class MatchingLibrary:
     def FromOriginalState(cls, d, solutions):
         indices = d["indexOrder"]
         distance = d["distance"]
-        origTable = d["table"]
+        origTable = d.get("table") or []
 
         propertyKeys = {
             2: Properties.Property("FreeSizeA", index=0),

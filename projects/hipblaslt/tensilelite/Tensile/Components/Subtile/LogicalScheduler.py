@@ -292,8 +292,10 @@ class SchedulerConfig:
 
         grans = {'A': self.grA, 'B': self.grB}
         if self.hasScale:
-            grans['SA'] = self.grSA
-            grans['SB'] = self.grSB
+            if self.grSA is not None:
+                grans['SA'] = self.grSA
+            if self.grSB is not None:
+                grans['SB'] = self.grSB
 
         maxGrK = max(g.k for g in grans.values())
         for t, g in grans.items():
@@ -344,7 +346,7 @@ class SchedulerConfig:
 
     @property
     def hasScale(self) -> bool:
-        return self.lrSA is not None and self.lrSB is not None
+        return self.lrSA is not None or self.lrSB is not None
 
     @property
     def numPartitionsM(self) -> int:
@@ -695,7 +697,13 @@ class LogicalScheduler:
 
     def __init__(self, config: SchedulerConfig):
         self.config = config
-        self.tensors: List[str] = ['A', 'B'] + (['SA', 'SB'] if config.hasScale else [])
+        scale_tensors = []
+        if config.hasScale:
+            if config.lrSA is not None:
+                scale_tensors.append('SA')
+            if config.lrSB is not None:
+                scale_tensors.append('SB')
+        self.tensors: List[str] = ['A', 'B'] + scale_tensors
         # Shared mutable state across passes. The same field holds different
         # stage representations over time; see ScheduleTypes for stage meanings.
         self._partitions: Optional[Union[LogicalSchedule, AnnotatedSchedule, AugmentedSchedule]] = None
@@ -794,8 +802,10 @@ class LogicalScheduler:
         cfg = self.config
         tensors = [('A', cfg.lrA), ('B', cfg.lrB)]
         if cfg.hasScale:
-            tensors.append(('SA', cfg.lrSA))
-            tensors.append(('SB', cfg.lrSB))
+            if cfg.lrSA is not None:
+                tensors.append(('SA', cfg.lrSA))
+            if cfg.lrSB is not None:
+                tensors.append(('SB', cfg.lrSB))
         return tensors
 
     def _place_LRs_PLR0(self) -> List[List[SubIterKSlot]]:
@@ -947,8 +957,10 @@ class LogicalScheduler:
 
         lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
         if cfg.hasScale:
-            lr_grans['SA'] = cfg.lrSA
-            lr_grans['SB'] = cfg.lrSB
+            if cfg.lrSA is not None:
+                lr_grans['SA'] = cfg.lrSA
+            if cfg.lrSB is not None:
+                lr_grans['SB'] = cfg.lrSB
 
         # ── Phase 1: find last MFMA read for each key ──
         last_read = {}  # key -> flat position
@@ -1096,8 +1108,10 @@ class LogicalScheduler:
 
         lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
         if cfg.hasScale:
-            lr_grans['SA'] = cfg.lrSA
-            lr_grans['SB'] = cfg.lrSB
+            if cfg.lrSA is not None:
+                lr_grans['SA'] = cfg.lrSA
+            if cfg.lrSB is not None:
+                lr_grans['SB'] = cfg.lrSB
 
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
 
@@ -1236,8 +1250,10 @@ class LogicalScheduler:
                 items = [('A', target_range['A'], cfg.grA),
                          ('B', target_range['B'], cfg.grB)]
                 if cfg.hasScale:
-                    items.append(('SA', target_range['A'], cfg.grSA))
-                    items.append(('SB', target_range['B'], cfg.grSB))
+                    if cfg.grSA is not None:
+                        items.append(('SA', target_range['A'], cfg.grSA))
+                    if cfg.grSB is not None:
+                        items.append(('SB', target_range['B'], cfg.grSB))
 
                 for tensor, (t_start, t_end), gr_gran in items:
                     def _valid_k_for_unroll(k, uid):
@@ -3201,8 +3217,10 @@ class LogicalScheduler:
                     items = [('A', target_range['A'], cfg.grA),
                              ('B', target_range['B'], cfg.grB)]
                     if cfg.hasScale:
-                        items.append(('SA', target_range['A'], cfg.grSA))
-                        items.append(('SB', target_range['B'], cfg.grSB))
+                        if cfg.grSA is not None:
+                            items.append(('SA', target_range['A'], cfg.grSA))
+                        if cfg.grSB is not None:
+                            items.append(('SB', target_range['B'], cfg.grSB))
                     for tensor, (t_start, t_end), gr_gran in items:
                         nUnroll = cfg.numUnroll.get(tensor, 1)
                         if uid >= nUnroll:
@@ -3246,8 +3264,10 @@ class LogicalScheduler:
                 items = [('A', target_range['A'], cfg.grA),
                          ('B', target_range['B'], cfg.grB)]
                 if cfg.hasScale:
-                    items.append(('SA', target_range['A'], cfg.grSA))
-                    items.append(('SB', target_range['B'], cfg.grSB))
+                    if cfg.grSA is not None:
+                        items.append(('SA', target_range['A'], cfg.grSA))
+                    if cfg.grSB is not None:
+                        items.append(('SB', target_range['B'], cfg.grSB))
                 for tensor, (t_start, t_end), gr_gran in items:
                     nUnroll = cfg.numUnroll.get(tensor, 1)
                     if uid >= nUnroll:
@@ -3334,8 +3354,10 @@ class LogicalScheduler:
             'B':  MFMATileRange(0, cfg.lrB.k, *part0['B']),
         }
         if cfg.hasScale:
-            lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
-            lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
+            if cfg.lrSA is not None:
+                lr_tiles['SA'] = MFMATileRange(0, cfg.lrSA.k, *part0['A'])
+            if cfg.lrSB is not None:
+                lr_tiles['SB'] = MFMATileRange(0, cfg.lrSB.k, *part0['B'])
 
         initC_op = self._make_initC_op()
 
@@ -3673,6 +3695,11 @@ class LogicalScheduler:
             from rocisa.instruction import SMovB32 as _SMovB32
             from rocisa.instruction import STtraceData as _STtraceData
         for ui in range(uf):
+            # Load this K-block's E8M0 scaleA/scaleB into the scale VGPRs the
+            # iteration's MFMAs consume. One load per unroll copy so every
+            # K-block gets its own scale (PGR=1 uses uf=2). The load's vlcnt=0
+            # drain waits only for the current K-block's in-flight data (1-deep
+            # PGR=1 lookahead), preserving the next K-block's prefetch overlap.
             if emitTraceMarker:
                 # Mainloop iteration marker for SQTT / trace decoder: write
                 # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
@@ -3807,9 +3834,10 @@ class LogicalScheduler:
         def _total_for(peaks):
             t = peaks.get('A', 0) * _tile_vgpr_count(tileInfoA, cfg.lrA) \
               + peaks.get('B', 0) * _tile_vgpr_count(tileInfoB, cfg.lrB)
-            if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
-                t += peaks.get('SA', 0) * _tile_vgpr_count(scaleTileInfoA, cfg.lrSA) \
-                   + peaks.get('SB', 0) * _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)
+            if cfg.hasScale and scaleTileInfoA and cfg.lrSA is not None:
+                t += peaks.get('SA', 0) * _tile_vgpr_count(scaleTileInfoA, cfg.lrSA)
+            if cfg.hasScale and scaleTileInfoB and cfg.lrSB is not None:
+                t += peaks.get('SB', 0) * _tile_vgpr_count(scaleTileInfoB, cfg.lrSB)
             return t
 
         mainloop_total = _total_for(self.tile_peaks)
@@ -3846,13 +3874,15 @@ class LogicalScheduler:
         self.vgprTilesB = _alloc_tiles(self.tile_peaks.get('B', 0),
                                        _tile_vgpr_count(tileInfoB, cfg.lrB))
 
-        if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
+        if cfg.hasScale and scaleTileInfoA and cfg.lrSA is not None:
             self.vgprTilesSA = _alloc_tiles(self.tile_peaks.get('SA', 0),
                                             _tile_vgpr_count(scaleTileInfoA, cfg.lrSA))
+        else:
+            self.vgprTilesSA = []
+        if cfg.hasScale and scaleTileInfoB and cfg.lrSB is not None:
             self.vgprTilesSB = _alloc_tiles(self.tile_peaks.get('SB', 0),
                                             _tile_vgpr_count(scaleTileInfoB, cfg.lrSB))
         else:
-            self.vgprTilesSA = []
             self.vgprTilesSB = []
 
         # Stash tile-info so _realloc_tail_tiles_flat can reallocate the
@@ -3930,8 +3960,10 @@ class LogicalScheduler:
         numP = cfg.numPartitions
         lr_grans = {'A': cfg.lrA, 'B': cfg.lrB}
         if cfg.hasScale:
-            lr_grans['SA'] = cfg.lrSA
-            lr_grans['SB'] = cfg.lrSB
+            if cfg.lrSA is not None:
+                lr_grans['SA'] = cfg.lrSA
+            if cfg.lrSB is not None:
+                lr_grans['SB'] = cfg.lrSB
 
         part_ranges = [self._partition_tile_range(pi) for pi in range(numP)]
         # group_id[(tensor, group_key)] = flat tile id
@@ -4011,15 +4043,17 @@ class LogicalScheduler:
         _swap(self.vgprTilesB,
               _alloc_tiles(peaks.get('B', 0),
                            _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
-        if cfg.hasScale and info['scaleTileInfoA'] and info['scaleTileInfoB']:
+        if cfg.hasScale and info['scaleTileInfoA'] and cfg.lrSA is not None:
             _swap(self.vgprTilesSA,
                   _alloc_tiles(peaks.get('SA', 0),
                                _tile_vgpr_count(info['scaleTileInfoA'], cfg.lrSA)))
+        else:
+            _swap(self.vgprTilesSA, [])
+        if cfg.hasScale and info['scaleTileInfoB'] and cfg.lrSB is not None:
             _swap(self.vgprTilesSB,
                   _alloc_tiles(peaks.get('SB', 0),
                                _tile_vgpr_count(info['scaleTileInfoB'], cfg.lrSB)))
         else:
-            _swap(self.vgprTilesSA, [])
             _swap(self.vgprTilesSB, [])
 
         # Flat tiles are freed wholesale by deallocVgprTiles at kernel end;
