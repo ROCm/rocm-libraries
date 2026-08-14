@@ -76,19 +76,24 @@ def benchmark_rpp(test_binary, test_images_dir, script_dir, gamma, num_runs):
     # Args: src1 src2 dst bitDepth toggle case additionalParam runs testType layout verbosity qaFlag decoder batchSize roiX roiY roiW roiH scriptPath
     cmd = [
         test_binary,
-        src_dir, src_dir, output_dir,
-        "0",            # bitDepth = U8
-        "0",            # outputFormatToggle
-        "106",          # testCase = TONE_MAP
-        "1",            # additionalParam
+        src_dir,
+        src_dir,
+        output_dir,
+        "0",  # bitDepth = U8
+        "0",  # outputFormatToggle
+        "106",  # testCase = TONE_MAP
+        "1",  # additionalParam
         str(num_runs),  # numRuns
-        "1",            # testType = performance
-        "0",            # layoutType = PKD3
-        "0",            # verbosity
-        "0",            # qaFlag
-        "0",            # decoderType
-        "1",            # batchSize
-        "0", "0", "0", "0",  # ROI
+        "1",  # testType = performance
+        "0",  # layoutType = PKD3
+        "0",  # verbosity
+        "0",  # qaFlag
+        "0",  # decoderType
+        "1",  # batchSize
+        "0",
+        "0",
+        "0",
+        "0",  # ROI
         script_dir,
     ]
 
@@ -99,10 +104,11 @@ def benchmark_rpp(test_binary, test_images_dir, script_dir, gamma, num_runs):
         # Parse wall time from output
         # RPP prints: "max,min,avg wall times in ms/batch = 1.12,0.04,0.18"
         import re
+
         for line in output.split("\n"):
             if "wall time" in line.lower():
                 # Format: max,min,avg wall times in ms/batch = X,Y,Z
-                match = re.search(r'=\s*([\d.]+),([\d.]+),([\d.]+)', line)
+                match = re.search(r"=\s*([\d.]+),([\d.]+),([\d.]+)", line)
                 if match:
                     avg_ms = float(match.group(3))  # avg is the third value
                     return avg_ms, output
@@ -117,10 +123,20 @@ def benchmark_rpp(test_binary, test_images_dir, script_dir, gamma, num_runs):
 
 def main():
     parser = argparse.ArgumentParser(description="RPP vs OpenCV Tone Mapping Benchmark")
-    parser.add_argument("--image", default=None, help="Path to input image (default: generate synthetic)")
-    parser.add_argument("--runs", type=int, default=100, help="Number of iterations (default: 100)")
-    parser.add_argument("--gamma", type=float, default=2.2, help="Gamma value (default: 2.2)")
-    parser.add_argument("--save", action="store_true", help="Save output images for visual comparison")
+    parser.add_argument(
+        "--image",
+        default=None,
+        help="Path to input image (default: generate synthetic)",
+    )
+    parser.add_argument(
+        "--runs", type=int, default=100, help="Number of iterations (default: 100)"
+    )
+    parser.add_argument(
+        "--gamma", type=float, default=2.2, help="Gamma value (default: 2.2)"
+    )
+    parser.add_argument(
+        "--save", action="store_true", help="Save output images for visual comparison"
+    )
     args = parser.parse_args()
 
     # Locate RPP test binary and directories
@@ -142,7 +158,9 @@ def main():
         h, w = 1080, 1920
         img_bgr = np.zeros((h, w, 3), dtype=np.uint8)
         img_bgr[:, :, 0] = np.tile(np.linspace(0, 255, w, dtype=np.uint8), (h, 1))
-        img_bgr[:, :, 1] = np.tile(np.linspace(0, 255, h, dtype=np.uint8).reshape(-1, 1), (1, w))
+        img_bgr[:, :, 1] = np.tile(
+            np.linspace(0, 255, h, dtype=np.uint8).reshape(-1, 1), (1, w)
+        )
         img_bgr[:, :, 2] = 128
         img_name = "synthetic_1920x1080"
         if args.image:

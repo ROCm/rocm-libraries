@@ -1271,9 +1271,8 @@ RppStatus rppt_histogram_equalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
 /******************** tone_map ********************/
 
 RppStatus rppt_tone_map(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
-                        RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
-                        RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
-                        RppBackend executionBackend) {
+                        RpptDescPtr dstDescPtr, Rpp32f* gammaTensor, RpptROIPtr roiTensorPtrSrc,
+                        RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend) {
     if (srcDescPtr->dataType != dstDescPtr->dataType) return RPP_ERROR_INVALID_SRC_OR_DST_DATATYPE;
     if ((srcDescPtr->layout != RpptLayout::NCHW) && (srcDescPtr->layout != RpptLayout::NHWC))
         return RPP_ERROR_INVALID_SRC_LAYOUT;
@@ -1289,8 +1288,8 @@ RppStatus rppt_tone_map(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
             (dstDescPtr->dataType == RpptDataType::U8)) {
             tone_map_u8_u8_host_tensor(
                 static_cast<Rpp8u*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
-                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                gammaTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
+                static_cast<Rpp8u*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, gammaTensor,
+                roiTensorPtrSrc, roiType, layoutParams, handle);
         } else if ((srcDescPtr->dataType == RpptDataType::F16) &&
                    (dstDescPtr->dataType == RpptDataType::F16)) {
             tone_map_f16_f16_host_tensor(
@@ -1309,8 +1308,8 @@ RppStatus rppt_tone_map(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr
                    (dstDescPtr->dataType == RpptDataType::I8)) {
             tone_map_i8_i8_host_tensor(
                 static_cast<Rpp8s*>(srcPtr) + srcDescPtr->offsetInBytes, srcDescPtr,
-                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr,
-                gammaTensor, roiTensorPtrSrc, roiType, layoutParams, handle);
+                static_cast<Rpp8s*>(dstPtr) + dstDescPtr->offsetInBytes, dstDescPtr, gammaTensor,
+                roiTensorPtrSrc, roiType, layoutParams, handle);
         } else
             return RPP_ERROR_NOT_IMPLEMENTED;
 

@@ -444,8 +444,8 @@ RppStatus rppt_histogram_equalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
 /*! \brief Tone Map augmentation on HOST backend for a NCHW/NHWC layout tensor
  * \details The tone map augmentation performs Reinhard global tone mapping on a batch of RGB(3
  * channel) images with an NHWC/NCHW tensor layout.<br>
- * The algorithm computes pixel luminance using Rec.709 coefficients (L = 0.2126*R + 0.7152*G + 0.0722*B),
- * applies the Reinhard operator (L_mapped = L / (1 + L)) to compress the dynamic range,
+ * The algorithm computes pixel luminance using Rec.709 coefficients (L = 0.2126*R + 0.7152*G +
+ * 0.0722*B), applies the Reinhard operator (L_mapped = L / (1 + L)) to compress the dynamic range,
  * and scales the RGB channels accordingly.<br>
  * - srcPtr depth ranges - Rpp8u (0 to 255), Rpp16f (0 to 1), Rpp32f (0 to 1), Rpp8s (-128 to 127).
  * - dstPtr depth ranges - Will be same depth as srcPtr.
@@ -468,9 +468,8 @@ RppStatus rppt_histogram_equalize(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPt
  * \retval RPP_ERROR* Unsuccessful completion.
  */
 RppStatus rppt_tone_map(RppPtr_t srcPtr, RpptDescPtr srcDescPtr, RppPtr_t dstPtr,
-                        RpptDescPtr dstDescPtr, Rpp32f* gammaTensor,
-                        RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType, rppHandle_t rppHandle,
-                        RppBackend executionBackend);
+                        RpptDescPtr dstDescPtr, Rpp32f* gammaTensor, RpptROIPtr roiTensorPtrSrc,
+                        RpptRoiType roiType, rppHandle_t rppHandle, RppBackend executionBackend);
 
 /*! @}
  */

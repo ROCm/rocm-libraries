@@ -31,14 +31,16 @@ inline void compute_tone_map_48_host(__m256* p) {
     __m256 pOne = _mm256_set1_ps(1.0f);
 
     // First 8 pixels: R=p[0], G=p[2], B=p[4]
-    __m256 lum1 = _mm256_fmadd_ps(p[0], pLumCoeffR, _mm256_fmadd_ps(p[2], pLumCoeffG, _mm256_mul_ps(p[4], pLumCoeffB)));
+    __m256 lum1 = _mm256_fmadd_ps(
+        p[0], pLumCoeffR, _mm256_fmadd_ps(p[2], pLumCoeffG, _mm256_mul_ps(p[4], pLumCoeffB)));
     __m256 scale1 = _mm256_div_ps(pOne, _mm256_add_ps(pOne, lum1));
     p[0] = _mm256_mul_ps(p[0], scale1);
     p[2] = _mm256_mul_ps(p[2], scale1);
     p[4] = _mm256_mul_ps(p[4], scale1);
 
     // Second 8 pixels: R=p[1], G=p[3], B=p[5]
-    __m256 lum2 = _mm256_fmadd_ps(p[1], pLumCoeffR, _mm256_fmadd_ps(p[3], pLumCoeffG, _mm256_mul_ps(p[5], pLumCoeffB)));
+    __m256 lum2 = _mm256_fmadd_ps(
+        p[1], pLumCoeffR, _mm256_fmadd_ps(p[3], pLumCoeffG, _mm256_mul_ps(p[5], pLumCoeffB)));
     __m256 scale2 = _mm256_div_ps(pOne, _mm256_add_ps(pOne, lum2));
     p[1] = _mm256_mul_ps(p[1], scale2);
     p[3] = _mm256_mul_ps(p[3], scale2);
@@ -52,7 +54,8 @@ inline void compute_tone_map_24_host(__m256* p) {
     __m256 pOne = _mm256_set1_ps(1.0f);
 
     // 8 pixels: R=p[0], G=p[1], B=p[2]
-    __m256 luminance = _mm256_fmadd_ps(p[0], pLumCoeffR, _mm256_fmadd_ps(p[1], pLumCoeffG, _mm256_mul_ps(p[2], pLumCoeffB)));
+    __m256 luminance = _mm256_fmadd_ps(
+        p[0], pLumCoeffR, _mm256_fmadd_ps(p[1], pLumCoeffG, _mm256_mul_ps(p[2], pLumCoeffB)));
     __m256 scale = _mm256_div_ps(pOne, _mm256_add_ps(pOne, luminance));
     p[0] = _mm256_mul_ps(p[0], scale);
     p[1] = _mm256_mul_ps(p[1], scale);
@@ -76,14 +79,16 @@ inline void compute_tone_map_48_u8_host(__m256* p) {
     __m256 b2 = _mm256_mul_ps(p[5], p1o255);
 
     // First 8 pixels
-    __m256 lum1 = _mm256_fmadd_ps(r1, pLumCoeffR, _mm256_fmadd_ps(g1, pLumCoeffG, _mm256_mul_ps(b1, pLumCoeffB)));
+    __m256 lum1 = _mm256_fmadd_ps(r1, pLumCoeffR,
+                                  _mm256_fmadd_ps(g1, pLumCoeffG, _mm256_mul_ps(b1, pLumCoeffB)));
     __m256 scale1 = _mm256_div_ps(pOne, _mm256_add_ps(pOne, lum1));
     p[0] = _mm256_mul_ps(_mm256_mul_ps(r1, scale1), p255);
     p[2] = _mm256_mul_ps(_mm256_mul_ps(g1, scale1), p255);
     p[4] = _mm256_mul_ps(_mm256_mul_ps(b1, scale1), p255);
 
     // Second 8 pixels
-    __m256 lum2 = _mm256_fmadd_ps(r2, pLumCoeffR, _mm256_fmadd_ps(g2, pLumCoeffG, _mm256_mul_ps(b2, pLumCoeffB)));
+    __m256 lum2 = _mm256_fmadd_ps(r2, pLumCoeffR,
+                                  _mm256_fmadd_ps(g2, pLumCoeffG, _mm256_mul_ps(b2, pLumCoeffB)));
     __m256 scale2 = _mm256_div_ps(pOne, _mm256_add_ps(pOne, lum2));
     p[1] = _mm256_mul_ps(_mm256_mul_ps(r2, scale2), p255);
     p[3] = _mm256_mul_ps(_mm256_mul_ps(g2, scale2), p255);
@@ -91,7 +96,7 @@ inline void compute_tone_map_48_u8_host(__m256* p) {
 }
 
 // Single-channel (greyscale) SIMD helpers: L = pixel, out = pixel / (1 + pixel)
-inline void compute_tone_map_16_u8_host(__m256 &p0, __m256 &p1) {
+inline void compute_tone_map_16_u8_host(__m256& p0, __m256& p1) {
     __m256 pOne = _mm256_set1_ps(1.0f);
     __m256 p1o255 = _mm256_set1_ps(1.0f / 255.0f);
     __m256 p255 = _mm256_set1_ps(255.0f);
@@ -101,12 +106,12 @@ inline void compute_tone_map_16_u8_host(__m256 &p0, __m256 &p1) {
     p1 = _mm256_mul_ps(_mm256_div_ps(v1, _mm256_add_ps(pOne, v1)), p255);
 }
 
-inline void compute_tone_map_8_host(__m256 &p) {
+inline void compute_tone_map_8_host(__m256& p) {
     __m256 pOne = _mm256_set1_ps(1.0f);
     p = _mm256_div_ps(p, _mm256_add_ps(pOne, p));
 }
 
-inline void compute_tone_map_scalar_host(Rpp32f &R, Rpp32f &G, Rpp32f &B, Rpp32f invGamma) {
+inline void compute_tone_map_scalar_host(Rpp32f& R, Rpp32f& G, Rpp32f& B, Rpp32f invGamma) {
     Rpp32f L = 0.2126f * R + 0.7152f * G + 0.0722f * B;
     Rpp32f scale = 1.0f / (1.0f + L);
     R *= scale;
@@ -172,7 +177,8 @@ RppStatus tone_map_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[6];
-                        rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                        rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);                // simd loads
                         compute_tone_map_48_u8_host(p);  // tone mapping
                         rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
                                        dstPtrTempB, p);  // simd stores
@@ -227,7 +233,7 @@ RppStatus tone_map_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[6];
                         rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
+                                      srcPtrTempB, p);   // simd loads
                         compute_tone_map_48_u8_host(p);  // tone mapping
                         rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
                                        p);  // simd stores
@@ -276,7 +282,8 @@ RppStatus tone_map_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[6];
-                        rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                        rpp_simd_load(rpp_load48_u8pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);                // simd loads
                         compute_tone_map_48_u8_host(p);  // tone mapping
                         rpp_simd_store(rpp_store48_f32pln3_to_u8pkd3_avx, dstPtrTemp,
                                        p);  // simd stores
@@ -330,7 +337,7 @@ RppStatus tone_map_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[6];
                         rpp_simd_load(rpp_load48_u8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
+                                      srcPtrTempB, p);   // simd loads
                         compute_tone_map_48_u8_host(p);  // tone mapping
                         rpp_simd_store(rpp_store48_f32pln3_to_u8pln3_avx, dstPtrTempR, dstPtrTempG,
                                        dstPtrTempB, p);  // simd stores
@@ -393,8 +400,7 @@ RppStatus tone_map_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     Rpp32f val = (Rpp32f)(*srcPtrTemp) * ONE_OVER_255;
                     val = val / (1.0f + val);
-                    if (invGamma != 1.0f)
-                        val = std::pow(val, invGamma);
+                    if (invGamma != 1.0f) val = std::pow(val, invGamma);
                     *dstPtrTemp = (Rpp8u)RPPPIXELCHECK(std::nearbyintf(val * 255.0f));
 
                     srcPtrTemp++;
@@ -463,7 +469,8 @@ RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[3];
-                        rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                        rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);             // simd loads
                         compute_tone_map_24_host(p);  // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
@@ -519,8 +526,8 @@ RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[3];
                         rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
-                        compute_tone_map_24_host(p);  // tone mapping
+                                      srcPtrTempB, p);  // simd loads
+                        compute_tone_map_24_host(p);    // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
                                        p);  // simd stores
@@ -569,7 +576,8 @@ RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[3];
-                        rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                        rpp_simd_load(rpp_load24_f32pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);             // simd loads
                         compute_tone_map_24_host(p);  // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f32pkd3_avx, dstPtrTemp,
@@ -624,8 +632,8 @@ RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[3];
                         rpp_simd_load(rpp_load24_f32pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
-                        compute_tone_map_24_host(p);  // tone mapping
+                                      srcPtrTempB, p);  // simd loads
+                        compute_tone_map_24_host(p);    // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f32pln3_avx, dstPtrTempR, dstPtrTempG,
                                        dstPtrTempB, p);  // simd stores
@@ -679,7 +687,8 @@ RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                         __m256 p;
                         p = _mm256_loadu_ps(srcPtrTemp);
                         compute_tone_map_8_host(p);
-                        p = _mm256_max_ps(_mm256_setzero_ps(), _mm256_min_ps(p, _mm256_set1_ps(1.0f)));
+                        p = _mm256_max_ps(_mm256_setzero_ps(),
+                                          _mm256_min_ps(p, _mm256_set1_ps(1.0f)));
                         _mm256_storeu_ps(dstPtrTemp, p);
 
                         srcPtrTemp += 8;
@@ -689,8 +698,7 @@ RppStatus tone_map_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, R
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     Rpp32f val = *srcPtrTemp;
                     val = val / (1.0f + val);
-                    if (invGamma != 1.0f)
-                        val = std::pow(val, invGamma);
+                    if (invGamma != 1.0f) val = std::pow(val, invGamma);
                     *dstPtrTemp = RPPPIXELCHECKF32(val);
 
                     srcPtrTemp++;
@@ -760,7 +768,8 @@ RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[3];
 
-                        rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                        rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);             // simd loads
                         compute_tone_map_24_host(p);  // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
@@ -816,8 +825,8 @@ RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[3];
                         rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
-                        compute_tone_map_24_host(p);  // tone mapping
+                                      srcPtrTempB, p);  // simd loads
+                        compute_tone_map_24_host(p);    // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
                                        p);  // simd stores
@@ -866,7 +875,8 @@ RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[3];
-                        rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
+                        rpp_simd_load(rpp_load24_f16pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);             // simd loads
                         compute_tone_map_24_host(p);  // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f16pkd3_avx, dstPtrTemp,
@@ -921,8 +931,8 @@ RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[3];
                         rpp_simd_load(rpp_load24_f16pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
-                        compute_tone_map_24_host(p);  // tone mapping
+                                      srcPtrTempB, p);  // simd loads
+                        compute_tone_map_24_host(p);    // tone mapping
                         rpp_pixel_check_0to1(p, 3);
                         rpp_simd_store(rpp_store24_f32pln3_to_f16pln3_avx, dstPtrTempR, dstPtrTempG,
                                        dstPtrTempB, p);  // simd stores
@@ -976,8 +986,11 @@ RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                         __m256 p;
                         p = _mm256_cvtph_ps(_mm_loadu_si128((__m128i*)srcPtrTemp));
                         compute_tone_map_8_host(p);
-                        p = _mm256_max_ps(_mm256_setzero_ps(), _mm256_min_ps(p, _mm256_set1_ps(1.0f)));
-                        _mm_storeu_si128((__m128i*)dstPtrTemp, _mm256_cvtps_ph(p, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
+                        p = _mm256_max_ps(_mm256_setzero_ps(),
+                                          _mm256_min_ps(p, _mm256_set1_ps(1.0f)));
+                        _mm_storeu_si128(
+                            (__m128i*)dstPtrTemp,
+                            _mm256_cvtps_ph(p, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
 
                         srcPtrTemp += 8;
                         dstPtrTemp += 8;
@@ -986,8 +999,7 @@ RppStatus tone_map_f16_f16_host_tensor(Rpp16f* srcPtr, RpptDescPtr srcDescPtr, R
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     Rpp32f val = (Rpp32f)(*srcPtrTemp);
                     val = val / (1.0f + val);
-                    if (invGamma != 1.0f)
-                        val = std::pow(val, invGamma);
+                    if (invGamma != 1.0f) val = std::pow(val, invGamma);
                     *dstPtrTemp = (Rpp16f)RPPPIXELCHECKF32(val);
 
                     srcPtrTemp++;
@@ -1056,8 +1068,10 @@ RppStatus tone_map_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[6];
-                        rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                        compute_tone_map_48_u8_host(p);  // tone mapping (values are in [0,255] after i8 load)
+                        rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);  // simd loads
+                        compute_tone_map_48_u8_host(
+                            p);  // tone mapping (values are in [0,255] after i8 load)
                         rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
                                        dstPtrTempB, p);  // simd stores
 
@@ -1111,8 +1125,9 @@ RppStatus tone_map_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[6];
                         rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
-                        compute_tone_map_48_u8_host(p);  // tone mapping (values are in [0,255] after i8 load)
+                                      srcPtrTempB, p);  // simd loads
+                        compute_tone_map_48_u8_host(
+                            p);  // tone mapping (values are in [0,255] after i8 load)
                         rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
                                        p);  // simd stores
 
@@ -1160,8 +1175,10 @@ RppStatus tone_map_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                 if (!useGamma) {
                     for (; vectorLoopCount < alignedLength; vectorLoopCount += vectorIncrement) {
                         __m256 p[6];
-                        rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp, p);  // simd loads
-                        compute_tone_map_48_u8_host(p);  // tone mapping (values are in [0,255] after i8 load)
+                        rpp_simd_load(rpp_load48_i8pkd3_to_f32pln3_avx, srcPtrTemp,
+                                      p);  // simd loads
+                        compute_tone_map_48_u8_host(
+                            p);  // tone mapping (values are in [0,255] after i8 load)
                         rpp_simd_store(rpp_store48_f32pln3_to_i8pkd3_avx, dstPtrTemp,
                                        p);  // simd stores
 
@@ -1214,8 +1231,9 @@ RppStatus tone_map_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                          vectorLoopCount += vectorIncrementPerChannel) {
                         __m256 p[6];
                         rpp_simd_load(rpp_load48_i8pln3_to_f32pln3_avx, srcPtrTempR, srcPtrTempG,
-                                      srcPtrTempB, p);        // simd loads
-                        compute_tone_map_48_u8_host(p);  // tone mapping (values are in [0,255] after i8 load)
+                                      srcPtrTempB, p);  // simd loads
+                        compute_tone_map_48_u8_host(
+                            p);  // tone mapping (values are in [0,255] after i8 load)
                         rpp_simd_store(rpp_store48_f32pln3_to_i8pln3_avx, dstPtrTempR, dstPtrTempG,
                                        dstPtrTempB, p);  // simd stores
 
@@ -1277,8 +1295,7 @@ RppStatus tone_map_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
                     Rpp32f val = (Rpp32f)((*srcPtrTemp) + 128) * ONE_OVER_255;
                     val = val / (1.0f + val);
-                    if (invGamma != 1.0f)
-                        val = std::pow(val, invGamma);
+                    if (invGamma != 1.0f) val = std::pow(val, invGamma);
                     *dstPtrTemp = (Rpp8s)RPPPIXELCHECKI8(std::nearbyintf(val * 255.0f) - 128);
 
                     srcPtrTemp++;
