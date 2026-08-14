@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
+ * of this software and associated documentation files (the Software), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
@@ -11,7 +11,7 @@
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -21,31 +21,12 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse-config.h provides the build-time feature configuration that
- * was baked in when the rocSPARSE library was compiled.
- *
- * The macros below are resolved by CMake at library build time and installed
- * alongside the library. Do NOT define them yourself: they describe how the
- * installed library was actually built, and overriding them makes the visible
- * API surface diverge from the compiled shared object.
- */
+#pragma once
 
-#ifndef ROCSPARSE_CONFIG_H
-#define ROCSPARSE_CONFIG_H
+#include "rocsparse_arguments.hpp"
 
-/* Build-time feature flags baked in at compile time. */
-
-/* rocSPARSE 5.1 */
-#cmakedefine ROCSPARSE_WITH_SPMAT_SCALE
-#cmakedefine ROCSPARSE_WITH_SDDMM_BATCHED
-
-/* rocSPARSE 5.0 */
-#cmakedefine ROCSPARSE_WITH_HANDLE_CREATE
-#cmakedefine ROCSPARSE_WITH_U16_REMOVED
-
-/* rocSPARSE 4.7 */
-#cmakedefine ROCSPARSE_WITH_ILDLT0
-#cmakedefine ROCSPARSE_WITH_ILU0_BOOST_SIGN
-
-#endif /* ROCSPARSE_CONFIG_H */
+template <typename I, typename A, typename B, typename C, typename T>
+void testing_sddmm_batched_ell_bad_arg(const Arguments& arg);
+void testing_sddmm_batched_ell_extra(const Arguments& arg);
+template <typename I, typename A, typename B, typename C, typename T>
+void testing_sddmm_batched_ell(const Arguments& arg);

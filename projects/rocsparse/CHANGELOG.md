@@ -8,8 +8,8 @@ Documentation for rocSPARSE is available at
 ### Added
 * Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
 * Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
-* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split`.
-* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_merge_path`.
+* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split` and `rocsparse_spmm_alg_csr_merge_path`.
+* Added `rocsparse_sddmm` batched support to CSR, CSC, COO, COO AoS, and ELL formats.
 
 ### Optimized
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
