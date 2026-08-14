@@ -469,7 +469,31 @@ def _applyWavePartitionLROffset(module, writer, kernel, tileInfo):
     writer.sgprPool.checkIn(tmpSgpr)
     return
 
+  wg_n = kernel["MIWaveGroup"][1]
   if tileInfo.loadRatioGR >= 2.0:
+    # For B with multiple N-waves the cooperative GR covers the full N-tile, so
+    # each wave does not load a private M-strip from LDS. However, each N-wave
+    # still reads a distinct N-column strip from LDS and needs a per-N-wave
+    # offset. Add it here and return; A needs no correction in this regime.
+    if tc != 'B' or wg_n <= 1:
+      return
+    wg_m = kernel["MIWaveGroup"][0]
+    wavesize = kernel["WavefrontSize"]
+    subIterKBytes = tileInfo.subIterKBytes
+    partitionOffset = tileInfo.mmaTileShape[0] * tileInfo.localSubtileGrid[0]
+    sInterval = partitionOffset * subIterKBytes
+    if sInterval == 0:
+      return
+    waveId = writer.vgprPool.checkOut(1, tag="_applyWavePartitionLROffset_waveId")
+    module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="waveId"))
+    module.add(VLShiftRightB32(dst=vgpr(waveId), shiftHex=hex(wg_m.bit_length()-1), src=vgpr(waveId), comment="B: waveIdN = waveId / %d" % wg_m))
+    tmpSgpr = writer.sgprPool.checkOut(1, tag="_applyWavePartitionLROffset_tmpSgpr")
+    module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(sInterval), comment="B: N-wave interleave stride"))
+    module.add(VMulLOU32(dst=vgpr(waveId), src1=vgpr(waveId), src0=sgpr(tmpSgpr), comment="B: waveIdN * sInterval"))
+    for vgprId in range(len(tileInfo.sharedVgprLROffset)):
+      module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=vgpr(waveId), comment="B: N-wave partition LR offset"))
+    writer.vgprPool.checkIn(waveId)
+    writer.sgprPool.checkIn(tmpSgpr)
     return
 
   wavesize = kernel["WavefrontSize"]

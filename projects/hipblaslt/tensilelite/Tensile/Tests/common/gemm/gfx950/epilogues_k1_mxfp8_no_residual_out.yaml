@@ -1,0 +1,183 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Variant of epilogues_k1_mxfp8.yaml exercising the no-ResidualOut path:
+# PartialRMS + ResidualAdd active but PartialRMSStoreBf16D DISABLED (no bf16
+# ResidualOut write-back). D is still OCP fp8 via MXFP8 dynamic quant. Two
+# sibling size groups under one ProblemType: Group 1 (idx 00) MT1=128
+# wave-group tile sweep, Group 2 (idx 01) MT1=256 tiles.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  # The MX-scaled dynamic-quant path has no in-pipeline CPU reference and a full
+  # CPU reference at 8192^3 is intractable; correctness is covered by the GPU gtests.
+  NumElementsToValidate: -1
+  ExitOnFails: 0
+  PrintLevel: 3
+  KernelTime: True
+  PrintSolutionRejectionReason: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  MXScaleFormat: 1
+
+BenchmarkProblems:
+
+  ########################################
+  # MX-scaled fp8 in, fp8 out — two sibling size groups under one ProblemType.
+  ########################################
+  -
+    - # ProblemType — MX-scaled fp8 in, OCP fp8 e4m3 out, f32 compute, residual add, no bf16 ResidualOut
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: True
+      PartialRMSStoreBf16D: False
+      PartialRMSQuant: False
+      DQuantType: MXFP8
+
+    ########################################
+    # Size group 1 (idx 00): MT1=128 wave-group tile sweep.
+    ########################################
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 1x1 (WG0=1, WG1=1, MIWT_N=8)
+            - [16, 16, 128, 1, 1,  4,  8, 1, 1]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1, 12,  8, 1, 1]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1, 16,  8, 1, 1]  # MT0=256  MT1=128
+            # WG 2x1 (WG0=2, WG1=1, MIWT_N=8)
+            - [16, 16, 128, 1, 1,  2,  8, 2, 1]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1,  6,  8, 2, 1]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1,  8,  8, 2, 1]  # MT0=256  MT1=128
+            # WG 1x2 (WG0=1, WG1=2, MIWT_N=4)
+            - [16, 16, 128, 1, 1,  4,  4, 1, 2]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  8,  4, 1, 2]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1, 12,  4, 1, 2]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1, 16,  4, 1, 2]  # MT0=256  MT1=128
+            # WG 2x2 (WG0=2, WG1=2, MIWT_N=4)
+            - [16, 16, 128, 1, 1,  2,  4, 2, 2]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  4,  4, 2, 2]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1,  6,  4, 2, 2]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1,  8,  4, 2, 2]  # MT0=256  MT1=128
+            # WG 1x4 (WG0=1, WG1=4, MIWT_N=2)
+            - [16, 16, 128, 1, 1,  4,  2, 1, 4]  # MT0=64   MT1=128
+            - [16, 16, 128, 1, 1,  8,  2, 1, 4]  # MT0=128  MT1=128
+            - [16, 16, 128, 1, 1, 12,  2, 1, 4]  # MT0=192  MT1=128
+            - [16, 16, 128, 1, 1, 16,  2, 1, 4]  # MT0=256  MT1=128
+            # WG 2x2, larger MT0=320 — added coverage
+            - [16, 16, 128, 1, 1, 10,  4, 2, 2]  # MT0=320  MT1=128
+            # WG 2x4 (WG0=2, WG1=4) REMOVED: 8-wave partialBuf sum-of-squares
+            # miscompute under full CPU validation (PARTIALRMS_WG2X4_KNOWN_ISSUE.md).
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [False]
+        - DQuantType: [MXFP8]
+        - DQuantSize0: [32]
+        - DQuantSize1: [1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [256]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [768, 768, 1, 768]
+            - Exact: [513, 513, 1, 544]   # all-unaligned: M=N=513 not mult of 8 (dwordx2 fallback), K=544 not mult of DepthU
+
+    ########################################
+    # Size group 2 (idx 01): MT1=256 tiles. Sibling size group under the SAME
+    # ProblemType (uniform MT1 per benchmark pass), so it gets idx 01 instead of
+    # clobbering group 1.
+    ########################################
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 2x2, MT1=256 (WG0=2, WG1=2, MIWT_N=8)
+            - [16, 16, 128, 1, 1,  8,  8, 2, 2]  # MT0=256  MT1=256
+            # WG 2x2, MT1=256 — subtile (WG0=2, WG1=2, MIWT_N=8, MIWT_M=6)
+            - [16, 16, 128, 1, 1,  6,  8, 2, 2]  # MT0=192  MT1=256
+            # WG 1x4, MT1=256 — added coverage (WG0=1, WG1=4, MIWT_N=4)
+            - [16, 16, 128, 1, 1, 16,  4, 1, 4]  # MT0=256  MT1=256
+            # WG 2x2, MT0=320, MT1=256 — added coverage
+            - [16, 16, 128, 1, 1, 10,  8, 2, 2]  # MT0=320  MT1=256
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [False]
+        - DQuantType: [MXFP8]
+        - DQuantSize0: [32]
+        - DQuantSize1: [1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        # High-perf tuning for MT192x256/MT256x256 (matches the ~1.7 PFlops
+        # with-epilogue benchmark): PGR locked to the known-good 1, plus
+        # DirectToLds, WorkGroupMapping=4, and PrefetchLocalRead.
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DirectToLds: [1]
+        - WorkGroupMapping: [4]
+        - PrefetchAcrossPersistent: [0]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [256]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [768, 768, 1, 768]
+            - Exact: [513, 513, 1, 544]   # all-unaligned: M=N=513 not mult of 8 (dwordx2 fallback), K=544 not mult of DepthU
