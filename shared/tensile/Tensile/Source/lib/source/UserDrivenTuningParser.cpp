@@ -335,9 +335,11 @@ namespace Tensile
                 entries.push_back(entry);
             }
 
-            // negative indices are retained here as clients may remap them
+            // clients may remap but 0 and InvalidOverrideSolutionIndex are reserved for invalid indices and discarded
+            // 0 means default solution, InvalidOverrideSolutionIndex means no solution found
             auto problemSolution = problemFromEntries<ContractionProblem>(entries);
-            if(problemSolution.second != 0)
+            auto solutionIndex = problemSolution.second;
+            if(solutionIndex != 0 && solutionIndex != InvalidOverrideSolutionIndex)
             {
                 out.push_back(problemSolution);
             }
