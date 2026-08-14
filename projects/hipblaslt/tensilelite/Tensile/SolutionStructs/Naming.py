@@ -71,21 +71,18 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   backups = {k: s[k] for k in _INTERNAL_ARGS}
   gsu_backup = s["GlobalSplitU"]
   gg_backup = pt["GroupedGemm"]
-  wgmxcc_backup = s["WorkGroupMappingXCC"]
 
   # Mask internal args. GroupedGemm normally does not change the generated
   # assembly, so it is masked to dedup grouped/non-grouped kernels. But when
   # SupportUserArgs is set, the batch-offset codegen (KernelWriterAssembly /
   # Signature) is gated on GroupedGemm, so grouped and non-grouped kernels
   # differ and must keep distinct keys -- preserve the real value in that case.
-  if not pt.get("SupportUserArgs", False):
+  if "SupportUserArgs" not in pt or not pt["SupportUserArgs"]:
     pt["GroupedGemm"] = False
   if splitGSU:
     s["GlobalSplitU"] = "M" if (gsu_backup > 1 or gsu_backup == -1) else gsu_backup
   elif gsu_backup != 0:
     s["GlobalSplitU"] = "M"
-  if "WorkGroupMappingXCC" in s and s["WorkGroupMappingXCC"] != -1:
-    s["WorkGroupMappingXCC"] = 1
   for k in _INTERNAL_ARGS:
     s[k] = "M"
 
@@ -95,7 +92,6 @@ def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
   # Restore
   pt["GroupedGemm"] = gg_backup
   s["GlobalSplitU"] = gsu_backup
-  s["WorkGroupMappingXCC"] = wgmxcc_backup
   for k in _INTERNAL_ARGS:
     s[k] = backups[k]
 
@@ -148,8 +144,6 @@ def getParameterValueAbbreviation(key, value):
     return '_'.join(getParameterValueAbbreviation(key, v) for v in value)
   elif isinstance(value, dict):
     return "_".join(f"{pos:d}{k:d}" for pos,k in value.items())
-  else:
-    raise Exception(f"Parameter {key}={value} is new object type ({type(value)})")
 
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
@@ -175,7 +169,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     # one key. When SupportUserArgs is set the batch-offset codegen depends on
     # GroupedGemm, so grouped and non-grouped kernels are not identical and must
     # keep distinct keys -- preserve the real value in that case.
-    if not state["ProblemType"].get("SupportUserArgs", False):
+    if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
       state["ProblemType"]["GroupedGemm"] = False
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
