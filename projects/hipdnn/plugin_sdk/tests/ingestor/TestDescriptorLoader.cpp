@@ -121,6 +121,7 @@ public:
         GraphCriterionRegistry::unregisterSymbol(GRAPH_SYMBOL);
         KernelMatcherRegistry::unregisterSymbol(KERNEL_SYMBOL);
         ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
+        DispatchRegistry<LoaderHandle>::unregisterSymbol(DISPATCH_SYMBOL);
     }
 
     ScopedSymbols(const ScopedSymbols&) = delete;

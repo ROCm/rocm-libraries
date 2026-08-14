@@ -173,16 +173,18 @@ inline bool matchesOperation(const PackSymbols& pack,
 
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
-                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
+                          const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
 {
-    return kernelMatcher(pack)(context, kernel);
+    return kernelMatcher(pack)(context, bound, kernel);
 }
 
 inline double scoreKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
-                          const hipdnn_plugin_sdk::ingestor::MatchContext& context)
+                          const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                          const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
 {
-    return scorer(pack)(kernel, context);
+    return scorer(pack)(kernel, context, bound);
 }
 
 /// Tensor uids the builders below use, in argument order.

@@ -83,7 +83,7 @@ public:
                                std::vector<DispatchDescriptor> dispatches,
                                std::vector<KernelDescriptorPack> packs,
                                std::shared_ptr<IKernelHeuristic> heuristic,
-                               std::string graphMatchSymbol,
+                               const std::string& graphMatchSymbol,
                                size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY)
         : _schema(std::move(schema))
         , _packs(std::move(packs))

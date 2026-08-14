@@ -321,7 +321,7 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
-    EXPECT_EQ(heuristic->score(makeDefinition(testId(0x01), 128), context), 128.0);
+    EXPECT_EQ(heuristic->score(makeDefinition(testId(0x01), 128), context, BoundTokens{}), 128.0);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)

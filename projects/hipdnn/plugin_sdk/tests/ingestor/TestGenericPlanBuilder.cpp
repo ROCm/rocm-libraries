@@ -158,7 +158,7 @@ public:
     }
 };
 
-bool throwingGraphMatcher(const MatchContext& /*context*/, BoundTokens& /*bound*/)
+std::optional<BoundTokens> throwingGraphMatcher(const MatchContext& /*context*/)
 {
     throw std::runtime_error("a matcher threw while deciding applicability");
 }

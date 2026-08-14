@@ -39,7 +39,9 @@ inline bool rejectSecondCriterion(const MatchContext& /*context*/, const BoundTo
     return false;
 }
 
-inline bool rejectEveryKernel(const MatchContext& /*context*/, const KernelDefinition& /*kernel*/)
+inline bool rejectEveryKernel(const MatchContext& /*context*/,
+                              const BoundTokens& /*bound*/,
+                              const KernelDefinition& /*kernel*/)
 {
     ++counters().kernelCalls;
     return false;
@@ -385,8 +387,8 @@ TEST(TestKernelIngestorStateManager, EveryPackOfOneEngineSharesWhatTheGraphMatch
     // land in a catalog carrying its tokens.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
 
-    auto first = makePack({KERNEL_MATCHER_ID});
-    KernelDescriptorPack second = makePack({KERNEL_MATCHER_ID});
+    auto first = makePack({});
+    KernelDescriptorPack second = makePack({});
     second.id = testId(0xB4);
     second.kernels = {makeKernel(testId(0xB5), "second_pack_kernel", 512, "FLOAT")};
 
@@ -694,6 +696,7 @@ TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDisp
     // Descriptor and native halves agree on dispatch symbols by string with no
     // compile-time check; eager resolution must catch a misspelled one.
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     try
     {
@@ -703,7 +706,8 @@ TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredDisp
             std::vector<DispatchDescriptor>{
                 {DISPATCH_ID, "misspelled dispatch", "test.dispatch.not_registered"}},
             std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
-            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+            std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+            std::string{});
         FAIL() << "expected an unresolved-symbol failure";
     }
     catch(const std::runtime_error& error)
@@ -740,6 +744,7 @@ TEST(TestKernelIngestorStateManager, GetDispatchDetailsThrowsOnADanglingDispatch
 TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     KernelDescriptorPack pack = makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID});
     KernelDescriptor sparse;
@@ -752,7 +757,8 @@ TEST(TestKernelIngestorStateManager, CompletesAnOmittedFieldFromItsSchemaDefault
                                makeTestMatchers(),
                                makeTestDispatches(),
                                {pack},
-                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               std::string{});
 
     const TestGraph graph(makeGraphId(10));
     const auto properties = testDeviceProperties();
@@ -778,6 +784,7 @@ class TestKernelIngestorStateManagerConstructionThrows
 TEST_P(TestKernelIngestorStateManagerConstructionThrows, RejectsAtConstruction)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
 
     try
     {
@@ -950,7 +957,8 @@ INSTANTIATE_TEST_SUITE_P(
                                                   std::vector<MatchDescriptor>{},
                                                   std::vector<DispatchDescriptor>{},
                                                   std::vector<KernelDescriptorPack>{},
-                                                  nullptr);
+                                                  nullptr,
+                                                  std::string{});
                                           }}),
     [](const ::testing::TestParamInfo<StateManagerConstructionThrowCase>& info) {
         return info.param.name;

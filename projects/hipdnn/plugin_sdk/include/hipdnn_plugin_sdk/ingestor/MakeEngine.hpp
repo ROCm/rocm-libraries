@@ -28,9 +28,8 @@ namespace hipdnn_plugin_sdk::ingestor
 ///        about. Defaulted from @p set, but a caller that already moved
 ///        `set.engine` out must pass it, or the warning names nothing.
 template <typename THandle>
-std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(DescriptorSet set,
-                                                                      std::string graphMatchSymbol,
-                                                                      std::string describedBy = {})
+std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(
+    DescriptorSet set, const std::string& graphMatchSymbol, std::string describedBy = {})
 {
     if(describedBy.empty())
     {
@@ -42,7 +41,7 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(Descriptor
                                                                  std::move(set.dispatches),
                                                                  std::move(set.packs),
                                                                  std::move(heuristic),
-                                                                 std::move(graphMatchSymbol));
+                                                                 graphMatchSymbol);
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a

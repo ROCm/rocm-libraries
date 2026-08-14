@@ -212,10 +212,12 @@ std::atomic<int>& scoreCalls()
     return s_scoreCalls;
 }
 
-double countingScoreByBlockSize(const KernelDefinition& kernel, const MatchContext& context)
+double countingScoreByBlockSize(const KernelDefinition& kernel,
+                                const MatchContext& context,
+                                const BoundTokens& bound)
 {
     scoreCalls().fetch_add(1, std::memory_order_relaxed);
-    return scoreByBlockSize(kernel, context);
+    return scoreByBlockSize(kernel, context, bound);
 }
 
 thread_local bool holdUntilRanked = false;

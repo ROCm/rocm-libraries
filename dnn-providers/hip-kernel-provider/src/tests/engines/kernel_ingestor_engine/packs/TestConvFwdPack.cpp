@@ -318,17 +318,21 @@ TEST(TestConvFwdPack, ExposesBlockSizeAsTheOneKnob)
     EXPECT_EQ(set.engine.knobs.front(), std::string(BLOCK_SIZE_FIELD));
 }
 
-TEST(TestConvFwdPack, HasOneGraphMatcherAndOneKernelMatcher)
+TEST(TestConvFwdPack, HasAGraphMatchAndOneKernelMatcher)
 {
     const auto& set = loadedSet("hipkernel:ConvFwd");
 
+    // A single-pack engine has nothing to discriminate between, so it carries no
+    // graph-scoped criterion at all: the engine's graph_match both admits the node type
+    // and fully validates the shape.
+    EXPECT_FALSE(set.engine.graphMatchNativeSymbol.empty());
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
                                 return matcher.scope
                                        == hipdnn_plugin_sdk::ingestor::MatchScope::GRAPH;
                             }),
-              1);
+              0);
     EXPECT_EQ(std::count_if(set.matchers.begin(),
                             set.matchers.end(),
                             [](const auto& matcher) {
