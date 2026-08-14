@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <limits>
 #include <roc/host_validation/tensor.hpp>
@@ -14,6 +15,7 @@
 
 namespace {
 using roc::host_validation::Layout;
+using roc::host_validation::Scalar;
 using roc::host_validation::ScalarType;
 using roc::host_validation::scalarTypeInfo;
 using roc::host_validation::Shape;
@@ -158,6 +160,37 @@ void testExhaustiveBinaryFormat(ScalarType type) {
 
 int main() {
     using namespace roc::host_validation;
+
+    const int64_t exactInteger = 9'007'199'254'740'993;
+    const Scalar integerScalar = Scalar::from(exactInteger);
+    require(
+        integerScalar.type() == ScalarType::Int64 && integerScalar.as<int64_t>() == exactInteger,
+        "Runtime scalar did not preserve an integer above 2^53.");
+
+    const std::complex<float> complexValue{1.25f, -2.5f};
+    const Scalar complexScalar = Scalar::from(complexValue);
+    require(complexScalar.type() == ScalarType::ComplexFloat32 &&
+                complexScalar.as<std::complex<float>>() == complexValue,
+            "Runtime scalar did not preserve a complex native value.");
+
+    const std::array<std::byte, 2> int12Storage{std::byte{0x2e}, std::byte{0xfb}};
+    const Scalar int12Scalar = Scalar::fromStorage(ScalarType::Int12, int12Storage);
+    require(int12Scalar.as<int32_t>() == -1234,
+            "Runtime scalar did not decode a packed Int12 value.");
+    require(std::to_integer<uint8_t>(int12Scalar.storage()[1]) == 0x0b,
+            "Runtime scalar did not clear packed padding bits.");
+    require(Scalar::zero(ScalarType::Float6E2M3).as<float>() == 0.0f &&
+                Scalar::one(ScalarType::Float6E2M3).as<float>() == 1.0f,
+            "Runtime scalar zero/one construction failed for a packed type.");
+
+    bool invalidScalarStorageRejected = false;
+    try {
+        (void)Scalar::fromStorage(ScalarType::Int12,
+                                  std::span<const std::byte>(int12Storage).first(1));
+    } catch (const std::invalid_argument&) {
+        invalidScalarStorageRejected = true;
+    }
+    require(invalidScalarStorageRejected, "Runtime scalar accepted incorrectly sized storage.");
 
     const std::array<float, 16> fp4Expected{
         0.0f,  0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f,
