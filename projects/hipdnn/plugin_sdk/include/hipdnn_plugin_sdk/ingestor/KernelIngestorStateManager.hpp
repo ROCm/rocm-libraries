@@ -397,6 +397,14 @@ private:
                 }
             }
 
+            if(admitted == 0)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
+                                       << toString(pack.id) << " admitted no kernel of "
+                                       << pack.kernels.size() << " at a kernel-scoped matcher");
+                continue;
+            }
+
             HIPDNN_PLUGIN_LOG_INFO("ingestor: pack " << toString(pack.id) << " admitted "
                                                      << admitted << " of " << pack.kernels.size()
                                                      << " kernel(s) after kernel-scoped matching");
