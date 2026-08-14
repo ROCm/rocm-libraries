@@ -82,6 +82,7 @@
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
+    X(RequiresXCntForVolatileVMEM, bool)          \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
     X(EnableSwInstructionPrefetchAbs, bool)       \
     X(SwInstructionPrefetchAbsBaseSgpr, int)      \
@@ -96,7 +97,8 @@
     X(DsReadPerWmma, int)                         \
     X(GlobalReadQueueDepth, int)                  \
     X(GlobalReadDrainLatency, int)                \
-    X(DsReadOrder, int)
+    X(DsReadOrder, int)                           \
+    X(ArchName, std::string)
 
 namespace stinkytofu {
 /**

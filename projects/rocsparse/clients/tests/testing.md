@@ -92,12 +92,36 @@ HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-test --gtest_filter='*
 
 ### Unit Testing Strategy
 
-**Purpose:** validate hardware-independent logic that can be exercised without dispatching a kernel
-to a physical device — argument validation, error-code propagation, handle/descriptor lifecycle, and
-type/format bookkeeping.
+**Purpose:** validate individual library components in isolation — host-pure utilities, internal
+building blocks (primitives, algorithm-selection logic, info structs), and hardware-independent logic
+such as argument validation, error-code propagation, and type/format bookkeeping.
 
-rocSPARSE does not maintain a separate host-only unit-test binary. The hardware-independent checks
-live inside the same GoogleTest client (`rocsparse-test`) as two recognizable classes of case:
+> **Work in progress:** the dedicated unit-test layer described below is being landed through a
+> series of in-flight PRs (`clients/unittests/`) and is **not yet on `develop`**. The details here
+> (binaries, sources, CTest wiring) reflect that parallel work and will be finalized in this document
+> once those PRs merge.
+
+rocSPARSE has a dedicated unit-test layer under `clients/unittests/`, being introduced in phases and
+kept deliberately separate from the YAML/Arguments-driven integration suite (`rocsparse-test`). It
+does **not** use the `gentest` data pipeline, and it compiles selected library translation units
+directly into the test binary — because `librocsparse` is built with hidden symbol visibility, the
+internal (non-exported) symbols under test are not reachable by linking `roc::rocsparse`, so the
+`.cpp` files are compiled in without any library source changes. Because it reaches into private
+headers/sources under `library/src`, this layer only builds **in-tree** (it is skipped under
+`BUILD_CLIENTS_ONLY`). It is split into two binaries:
+
+* **`rocsparse-unit-test`** — fast, **GPU-independent** (CPU-only) unit tests with a minimal gtest
+  main. Exercises host-pure components (e.g. enum-trait, index-type and data-type utilities, the
+  csrmv-adaptive analysis logic). Registered with CTest (`ctest -R rocsparse-unit-test`) so CI can
+  run it as an early, no-GPU gate.
+* **`rocsparse-unit-test-device`** — **GPU** unit tests that link `hip::device` and launch individual
+  library kernels/primitives in isolation (e.g. internal scan/find/sort/RLE primitives, host and
+  numeric level-1/2/3, conversion, preconditioner, reordering, and generic paths, plus internal
+  algorithm-selection and info-struct logic). It must run on a GPU through the serializer and is
+  CTest-labeled `gpu`, so it is scheduled on GPU nodes only and is **not** part of the fast CPU gate.
+
+In addition, the integration binary `rocsparse-test` carries the hardware-independent cases that are
+naturally expressed through its YAML pipeline rather than as standalone units:
 
 * **Bad-argument tests** — every routine has a `testing_<routine>_bad_arg` implementation
   (`clients/testings/testing_<routine>.cpp`) exercised through YAML `function: <routine>_bad_arg`
@@ -109,24 +133,29 @@ live inside the same GoogleTest client (`rocsparse-test`) as two recognizable cl
 **Framework:** GoogleTest (pinned to `v1.15.2` in `deps/external-gtest.cmake`; auto-downloaded when
 absent via `deps/CMakeLists.txt` `BUILD_GTEST=ON`).
 
-**Location / structure:** a three-layer pattern per routine —
-`clients/tests/test_<routine>.yaml` (cases) → `clients/tests/test_<routine>.cpp` (registration via
-the `TEST_ROUTINE` macro) → `clients/testings/testing_<routine>.cpp` (implementation, including the
-`_bad_arg` variant). At build time `clients/common/rocsparse_gentest.py` expands the master
-`clients/tests/rocsparse_test.yaml` into a binary `rocsparse_test.data` consumed at runtime.
+**Location / structure:** unit tests live in `clients/unittests/` (`unit_test_*.cpp` +
+`rocsparse_unit_test_main.cpp`), with the internal library `.cpp` files under test compiled directly
+into the two binaries. This is distinct from the integration suite's three-layer per-routine pattern
+(`clients/tests/test_<routine>.yaml` → `test_<routine>.cpp` → `clients/testings/testing_<routine>.cpp`,
+expanded by `clients/common/rocsparse_gentest.py` into `rocsparse_test.data`), which drives the
+`_bad_arg` and numerical cases.
 
-**How to run:** `./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` runs the argument-
-validation cases; these are the closest thing to a GPU-free unit run (a device/driver may still be
-initialized, but no compute kernel is launched).
+**How to run:** `ctest -R rocsparse-unit-test` runs the CPU-only unit binary (no GPU);
+`HIP_VISIBLE_DEVICES=0 gpu-run ./clients/staging/rocsparse-unit-test-device` runs the device unit
+binary on the GPU. The integration binary's host-side subset runs via
+`./clients/staging/rocsparse-test --gtest_filter='*bad_arg*'` (a device/driver may be initialized,
+but no compute kernel is launched).
 
-**What is NOT covered by unit tests:** numerical correctness of any routine, kernel selection, and
-device-side conversions — all of these require a GPU and are covered by integration tests.
+**What is NOT covered by the CPU-only unit binary:** numerical correctness of routines, kernel
+selection, and device-side conversions — these require a GPU and are exercised by
+`rocsparse-unit-test-device` (unit level) and by the integration suite (end-to-end).
 
 **Coverage expectation:** the long-term ROCm-wide goal is >95% line coverage of hardware-independent
-paths; this is not mandated initially and will be pursued in phases. rocSPARSE's realistic near-term
-target is high coverage of the argument-validation / auxiliary surface, since the dominant code paths
-are device kernels whose coverage is not captured by host-side instrumentation. See
-[Coverage](#coverage).
+paths; this is not mandated initially and will be pursued in phases. A useful property of the unit
+layer is that library sources compiled into the two binaries are instrumented under
+`BUILD_CODE_COVERAGE` (`-fprofile-instr-generate -fcoverage-mapping`), so device kernels and internal
+primitives exercised by `rocsparse-unit-test-device` begin to emit LLVM profile data that the
+integration suite's host-side instrumentation cannot capture. See [Coverage](#coverage).
 
 ---
 
@@ -230,8 +259,12 @@ visible or reproducible from this repository.
 rocSPARSE owns its kernels, but nearly all meaningful behavior is only observable on real AMD
 hardware, so the strategy is integration-dominant: a large YAML-driven GoogleTest suite runs each
 routine on-device and validates against a host reference. The hardware-independent surface (argument
-validation, handle/descriptor lifecycle, auxiliary API) is exercised by the `*bad_arg*` and
-auxiliary cases inside the same binary rather than by a separate host unit-test target.
+validation, handle/descriptor lifecycle, auxiliary API) is exercised by the `*bad_arg*` and auxiliary
+cases inside that integration binary. Alongside it, a dedicated unit-test layer
+(`clients/unittests/`) is being introduced to test individual components in isolation — a fast
+CPU-only `rocsparse-unit-test` for host-pure logic and a `rocsparse-unit-test-device` that launches
+single kernels/primitives on the GPU — reaching internal code that the end-to-end suite exercises
+only indirectly.
 
 The tier system (`quick` → `stress`) is a sampling strategy over a large combinatorial space (routine
 × data type × index type × matrix format × size); exhaustive coverage is not achievable, so the tiers
@@ -322,8 +355,11 @@ flag `rocSPARSE`.
 **Code coverage vs. test coverage** are distinct:
 * *Code coverage* = fraction of lines executed (e.g. 700 of 1,000 → 70%).
 * *Test coverage* = fraction of intended functionality exercised (types, index types, formats, sizes,
-  platforms). Because host-side instrumentation does not capture device kernels, rocSPARSE's measured
-  code coverage understates work done on-device; device-path coverage is the largest gap.
+  platforms). Historically, host-side instrumentation did not capture device kernels, so rocSPARSE's
+  measured code coverage understated work done on-device. The new `rocsparse-unit-test-device` binary
+  (`clients/unittests/`) is instrumented under `BUILD_CODE_COVERAGE` and compiles library device
+  sources directly in, so it begins to capture device-path coverage; broad device coverage is still
+  being phased in.
 
 **Wavefront-size gap:** the reported coverage percentage is currently computed on either 32-wavefront
 hardware or 64-wavefront hardware, but not both — a report is not generated for each and then combined
@@ -393,6 +429,8 @@ device configurations are not ASAN-covered.
 
 | Scenario | What to add |
 |---|---|
+| New host-pure utility or internal building block (no GPU) | A unit test in `clients/unittests/` built into `rocsparse-unit-test`; compile the internal `.cpp` under test directly into the binary |
+| New internal kernel/primitive to test in isolation | A unit test built into `rocsparse-unit-test-device` (runs on GPU via the serializer) |
 | New argument/format validation or status-code path | A `testing_<routine>_bad_arg` case (host-side, no kernel) |
 | New or changed on-device routine behavior | A YAML case in `test_<routine>.yaml` at the appropriate tier, validated against the host reference |
 | New data type or index type | Extend the typed config (`rocsparse_test_config*`); the parameterized suite picks up the combinations |
@@ -410,7 +448,7 @@ device configurations are not ASAN-covered.
 | No per-architecture perf baseline reproducible from this repo | Medium | Medium | Perf regression is tracked outside this repo; in-repo JSON logs only |
 | Device-code coverage not captured (host-side instrumentation only) | High | High | Codecov reports host paths; device coverage untracked |
 | No tracked quarantine list (owner + ticket + expiry) for `known_bug` cases | Low | Low | `*known_bug*` excluded from gating; linkage is ad-hoc |
-| No separate host-only unit-test binary | Low | Medium | `*bad_arg*` / auxiliary cases cover host paths inside `rocsparse-test` |
+| Dedicated unit-test layer still being phased in | Low | Medium | `rocsparse-unit-test` (CPU) + `rocsparse-unit-test-device` (GPU) under `clients/unittests/`; `*bad_arg*` / auxiliary cases also cover host paths inside `rocsparse-test` |
 | No TSAN/UBSAN/MSAN | High | High | ASAN only |
 
 ---

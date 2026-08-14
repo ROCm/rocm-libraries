@@ -34,6 +34,7 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -46,8 +47,11 @@ constexpr const char* kEstimateAsmTotalCyclesMetadataKey = "EstimateAsmCyclesPas
 class AsmCycleEstimator {
    public:
     void setLocalReadLatencyByArch(stinkytofu::GfxArchID arch) {
-        if (arch == GfxArchID::Gfx1250) {
-            // FIXME: need to verify
+        // The gfx12.5 branch is intentionally identical to the default for now. It is a
+        // placeholder for future measured gfx12.5 local read/write latencies (the v0 and v1
+        // steppings may differ here), kept as its own branch so those values can land without
+        // reintroducing arch branching. FIXME: populate with measured gfx12.5 values.
+        if (isGfx125(arch)) {
             LocalReadBaseLatencyB128 = 1;
             LocalReadBaseLatencyB64 = 1;
             LocalReadBaseLatencyB32 = 1;
@@ -746,7 +750,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
         AsmCycleEstimator asmCycleEstimator;
         asmCycleEstimator.setLocalReadLatencyByArch(arch_);
 
-        if (arch_ != GfxArchID::Gfx1250) {
+        if (!isGfx125(arch_)) {
             // FIXME: Add support for gfx1201
             return;
         }
@@ -761,17 +765,22 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
+        const HWModel& hw = passCtx.getHWModel();
+        const int barrierSignalToWait = hw.barrier.signalToWaitLatency;
+
         // Estimate cycles for each instruction
         // initial values
         int cycles = 0;
         int hwMFMA = -99;
-        int jumpOverhead = 6;
+        int jumpOverhead = hw.barrier.jumpOverheadCycles;
         int previousLW = 0;
         std::queue<int> hwLRFIFO;
         std::queue<int> lgkmLRFIFO;
         std::deque<int> hwGRFIFO;
         int numPreviousLRs = 0;
-        int previousBarrierSignal = -11;  // gfx1250 barrier signal latency is 11 cycles
+        // Seeded to -latency so that before any signal is seen, the wait clamp
+        // (previousBarrierSignal + latency) is 0 and therefore never binding.
+        int previousBarrierSignal = -barrierSignalToWait;
         int activeWmmaStartCycle = -1;
         int activeWmmaCoExecAdvance = 0;
         std::vector<bool> activeWmmaValuSlots;
@@ -805,7 +814,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 if (opcode.find("s_barrier_signal") != std::string::npos)
                     previousBarrierSignal = cycles;
                 if (opcode.find("s_barrier_wait") != std::string::npos)
-                    cycles = std::max(cycles + inst->issueCycles, previousBarrierSignal + 11);
+                    cycles = std::max(cycles + inst->issueCycles,
+                                      previousBarrierSignal + barrierSignalToWait);
                 else
                     cycles += inst->issueCycles;
             } else if (isDSRead(*inst)) {
@@ -975,7 +985,11 @@ class EstimateAsmCyclesPassImpl : public Pass {
         return static_cast<unsigned>(inst->issueCycles > 0 ? inst->issueCycles : 0);
     }
 
-    GfxArchID arch_ = GfxArchID::Gfx1250;
+    // Placeholder only; overwritten from the tile config in
+    // calculateMathClocksInUnrolledLoop before any use. Index 0 is the single
+    // registered stepping in any build, so this cannot name a specific enumerator
+    // without breaking the build that did not select it.
+    GfxArchID arch_ = static_cast<GfxArchID>(0);
 
     bool annotateComments_ = true;
     std::unordered_map<const StinkyInstruction*, uint32_t> perInstCycles_;

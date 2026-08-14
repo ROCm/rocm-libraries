@@ -166,9 +166,13 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     Extracted from the module-level staleness check so it can be unit-tested
     without requiring a real _rocisa.so or touching actual source files.
     """
+    import math
     from pathlib import Path
 
-    so_mtime = Path(so_path).stat().st_mtime
+    # cmake --install truncates the installed .so's mtime to a whole second, so
+    # a source edited in that same second would read as stale forever. The real
+    # install time is in [t, t+1); compare against the end of that interval.
+    so_mtime = math.floor(Path(so_path).stat().st_mtime) + 1
     build_dir = Path(build_dir).resolve()
     stale = []
     for root in source_roots:

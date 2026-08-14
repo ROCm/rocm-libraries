@@ -6,7 +6,7 @@
 ROCm Performance Primitives documentation
 ********************************************************************
 
-AMD ROCm Performance Primitives (RPP) is a high-performance computer vision library for AMD processors that have HIP, OpenCL, or CPU backends.
+AMD ROCm Performance Primitives (RPP) is a high-performance computer vision library for AMD processors that have HIP or CPU backends.
 
 RPP provides a way to utilize all the hardware available for training and augmentation.
 
@@ -15,7 +15,7 @@ RPP provides a way to utilize all the hardware available for training and augmen
   :width: 200pt
   :align: center
 
-The RPP public repository is located at `https://github.com/ROCm/rpp <https://github.com/ROCm/rpp>`_.
+The RPP source is located in the `ROCm/rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ monorepo under `projects/rpp <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rpp>`_. It was previously developed in the standalone ``ROCm/rpp`` repository.
 
 .. grid:: 2
   :gutter: 3

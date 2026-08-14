@@ -23,57 +23,51 @@
 ################################################################################
 
 from rocisa.code import Module
+from rocisa.container import vgpr
 from rocisa.enum import DataTypeEnum
+from rocisa.instruction import VFmaF64, SSetPrior
 from ..Common.DataType import DataType
-from ..Component import Component, MAC
+from ..Component import MAC
 
 class FMA_F64C_Plain(MAC):
     asmCaps = {"v_fma_f64": True}
     kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.ComplexDouble),
                               "MacDataTypeB": DataType(DataTypeEnum.ComplexDouble)}}
 
-    def __call__(self, writer, m, innerUnroll):
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel
         module = Module("FMA_F64C_Plain")
         module.addComment(self.commentHeader())
-        priority = Component.Priority.find(writer)
 
-        vars = {}
-        vars["m"] = m
-        vars["ThreadTile0"] = kernel["ThreadTile0"]
+        ccA = kernel["ProblemType"]["ComplexConjugateA"]
+        ccB = kernel["ProblemType"]["ComplexConjugateB"]
+        tt0 = kernel["ThreadTile0"]
 
         for b in range(0, kernel["ThreadTile1"]):
-            vars["b"] = b
-            for a in range(0, kernel["ThreadTile0"]):
-                vars["a"] = a
+            for a in range(0, tt0):
                 for iui in range(0, innerUnroll):
-                    vars["iui"] = iui
+                    # each complex-double element is 4 vgprs: real=[+0:+1], imag=[+2:+3]
+                    cReal = vgpr("ValuC+%d" % ((a + b*tt0)*4 + 0), 2)
+                    cImag = vgpr("ValuC+%d" % ((a + b*tt0)*4 + 2), 2)
+                    aReal = vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*4 + 0), 2)
+                    aImag = vgpr("ValuA_X%d_I%d+%d" % (m, iui, a*4 + 2), 2)
+                    bReal = vgpr("ValuB_X%d_I%d+%d" % (m, iui, b*4 + 0), 2)
+                    bImag = vgpr("ValuB_X%d_I%d+%d" % (m, iui, b*4 + 2), 2)
+
                     # c.real += a.real * b.real
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*4+0:(vgprValuC+{a}+{b}*{ThreadTile0})*4+1]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*4+0:vgprValuA_X{m}_I{iui}+{a}*4+1]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*4+0:vgprValuB_X{m}_I{iui}+{b}*4+1]".format_map(vars)
-                    module.addInst("v_fma_f64", cStr, aStr, bStr, cStr, "")
-                    # c.real -= a.imag * b.imag
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*4+0:(vgprValuC+{a}+{b}*{ThreadTile0})*4+1]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*4+2:vgprValuA_X{m}_I{iui}+{a}*4+3]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*4+2:vgprValuB_X{m}_I{iui}+{b}*4+3]".format_map(vars)
-                    sign = "-" if (not kernel["ProblemType"]["ComplexConjugateA"] and not kernel["ProblemType"]["ComplexConjugateB"]) or \
-                            (kernel["ProblemType"]["ComplexConjugateA"] and kernel["ProblemType"]["ComplexConjugateB"]) else ""
-                    module.addInst("v_fma_f64", cStr, aStr, sign + bStr, cStr, "")
-                    # c.imag += a.real * b.imag
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*4+2:(vgprValuC+{a}+{b}*{ThreadTile0})*4+3]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*4+0:vgprValuA_X{m}_I{iui}+{a}*4+1]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*4+2:vgprValuB_X{m}_I{iui}+{b}*4+3]".format_map(vars)
-                    sign = "-" if kernel["ProblemType"]["ComplexConjugateB"] else ""
-                    module.addInst("v_fma_f64", cStr, aStr, sign + bStr, cStr, "")
-                    # c.imag += a.imag * b.real
-                    cStr = "v[vgprValuC+({a}+{b}*{ThreadTile0})*4+2:(vgprValuC+{a}+{b}*{ThreadTile0})*4+3]".format_map(vars)
-                    aStr = "v[vgprValuA_X{m}_I{iui}+{a}*4+2:vgprValuA_X{m}_I{iui}+{a}*4+3]".format_map(vars)
-                    bStr = "v[vgprValuB_X{m}_I{iui}+{b}*4+0:vgprValuB_X{m}_I{iui}+{b}*4+1]".format_map(vars)
-                    sign = "-" if kernel["ProblemType"]["ComplexConjugateA"] else ""
-                    module.addInst("v_fma_f64", cStr, sign + aStr, bStr, cStr, "")
+                    module.add(VFmaF64(dst=cReal, src0=aReal, src1=bReal, src2=cReal))
+                    # c.real -= a.imag * b.imag  (sign flips under a single conjugate)
+                    bImagRR = bImag.getMinus() if (ccA == ccB) else bImag
+                    module.add(VFmaF64(dst=cReal, src0=aImag, src1=bImagRR, src2=cReal))
+                    # c.imag += a.real * b.imag  (negate b.imag when conjugating B)
+                    bImagIR = bImag.getMinus() if ccB else bImag
+                    module.add(VFmaF64(dst=cImag, src0=aReal, src1=bImagIR, src2=cImag))
+                    # c.imag += a.imag * b.real  (negate a.imag when conjugating A)
+                    aImagIR = aImag.getMinus() if ccA else aImag
+                    module.add(VFmaF64(dst=cImag, src0=aImagIR, src1=bReal, src2=cImag))
 
-                    module.add(priority(writer, 1, "Raise priority while processing macs"))
+                    if (b == 0) and (a == 0) and (iui == 0):
+                        module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
 
-        module.add(priority(writer, 0, "Reset priority after macs"))
+        module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
         return module
