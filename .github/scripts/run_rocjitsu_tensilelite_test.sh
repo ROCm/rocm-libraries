@@ -164,7 +164,7 @@ configure_rocjitsu() {
     -DBUILD_TESTING=OFF \
     -DROCM_PATH="${ROCM_PATH}" \
     -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
-    -DCMAKE_CXX_FLAGS="-march=native -Wno-error=unknown-warning-option -Wno-error=nested-anon-types" \
+    -DCMAKE_CXX_FLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types" \
     -DCMAKE_C_COMPILER="$(command -v amdclang)" \
     -DCMAKE_CXX_COMPILER="$(command -v amdclang++)"
 }
