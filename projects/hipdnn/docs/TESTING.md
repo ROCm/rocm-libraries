@@ -18,7 +18,7 @@ sanitizer, performance workload, or release requirement was validated.
 
 ## The short version
 
-**Where confidence comes from.** Fast GoogleTest suites exercise each hipDNN layer and the public API
+**Where confidence comes from.** Fast unit test suites exercise each hipDNN layer and the public API
 with in-tree fake plugins. Frontend-to-backend integration tests verify graph construction, routing,
 and execution flow. Real-provider and cross-provider suites run graphs on GPUs and compare results
 against a reference executor. Providers, not the routing library, own per-ASIC numerical correctness.
