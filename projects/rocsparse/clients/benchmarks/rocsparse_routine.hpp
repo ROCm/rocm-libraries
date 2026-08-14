@@ -86,6 +86,7 @@ ROCSPARSE_DO_ROUTINE(cscsm)					\
 ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(cscsv)					\
+ROCSPARSE_DO_ROUTINE(ellsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
 ROCSPARSE_DO_ROUTINE(spic0)				\

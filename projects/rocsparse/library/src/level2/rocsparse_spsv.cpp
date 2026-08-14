@@ -33,6 +33,9 @@
 #include "rocsparse_cscsv.hpp"
 #include "rocsparse_csrsv.hpp"
 #include "rocsparse_determine_indextype.hpp"
+#include "rocsparse_ellsv.hpp"
+#include "rocsparse_ellsv_info.hpp"
+#include "rocsparse_mat_info.hpp"
 
 // LCOV_EXCL_START
 template <>
@@ -295,8 +298,58 @@ namespace rocsparse
             // LCOV_EXCL_STOP
             break;
         }
-        case rocsparse_format_bsr:
         case rocsparse_format_ell:
+        {
+            switch(stage)
+            {
+            case rocsparse_spsv_stage_buffer_size:
+            {
+                size_t buffer_size_analysis;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_analysis_buffer_size(
+                    handle, trans, mat, &buffer_size_analysis));
+                size_t buffer_size_solve;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve_buffer_size(
+                    handle, trans, mat, x, y, &buffer_size_solve));
+                *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
+                *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
+
+                return rocsparse_status_success;
+            }
+            case rocsparse_spsv_stage_preprocess:
+            {
+                rocsparse::ellsv_info_t* ellsv_info = mat->info->get_ellsv_info();
+                if(ellsv_info == nullptr
+                   || !ellsv_info->matches(
+                       trans, mat->descr->fill_mode, mat->descr->diag_type))
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::ellsv_analysis(handle, trans, mat, temp_buffer)));
+                }
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_spsv_stage_compute:
+            {
+                const rocsparse_datatype datatype = mat->data_type;
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::ellsv_solve(handle,
+                                                                 trans,
+                                                                 datatype,
+                                                                 alpha,
+                                                                 static_cast<int64_t>(0),
+                                                                 mat,
+                                                                 x,
+                                                                 y,
+                                                                 temp_buffer));
+                return rocsparse_status_success;
+            }
+            }
+
+            // LCOV_EXCL_START
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            // LCOV_EXCL_STOP
+            break;
+        }
+        case rocsparse_format_bsr:
         case rocsparse_format_bell:
         case rocsparse_format_sell:
         case rocsparse_format_coo_aos:

@@ -45,6 +45,8 @@ set(rocsparse_source
   src/common/rocsparse_bsrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
+  src/common/rocsparse_ell2csr_info.cpp
+  src/common/rocsparse_ellsv_info.cpp
   src/common/rocsparse_indextype_utils.cpp
   src/common/rocsparse_datatype_utils.cpp
   src/common/rocsparse_one.cpp
@@ -160,6 +162,8 @@ set(rocsparse_source
   src/level2/rocsparse_coosv_analysis.cpp
   src/level2/rocsparse_coosv_solve_buffer_size.cpp
   src/level2/rocsparse_coosv_solve.cpp
+  #
+  src/level2/rocsparse_ellsv.cpp
   #
   src/level2/rocsparse_ellmv.cpp
   src/level2/rocsparse_hybmv.cpp

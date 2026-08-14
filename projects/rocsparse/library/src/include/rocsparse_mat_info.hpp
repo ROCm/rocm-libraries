@@ -28,6 +28,8 @@
 #include "rocsparse_csrgemm_info.hpp"
 #include "rocsparse_csritsv_info.hpp"
 #include "rocsparse_csrmv_info.hpp"
+#include "rocsparse_ell2csr_info.hpp"
+#include "rocsparse_ellsv_info.hpp"
 #include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_sorted_coo2csr_info.hpp"
 #include "rocsparse_trm_info.hpp"
@@ -48,6 +50,8 @@ protected:
     rocsparse_bsrmv_info bsrmv_info{};
 
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
+    rocsparse::ell2csr_info_t*        m_ell2csr_info{};
+    rocsparse::ellsv_info_t*          m_ellsv_info{};
     rocsparse::trm_t                  m_trm;
 
     rocsparse::numeric_boost m_boost{};
@@ -151,4 +155,10 @@ public:
 
     void set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value);
     rocsparse::sorted_coo2csr_info_t* get_sorted_coo2csr_info();
+
+    void                       set_ell2csr_info(rocsparse::ell2csr_info_t* value);
+    rocsparse::ell2csr_info_t* get_ell2csr_info();
+
+    void                     set_ellsv_info(rocsparse::ellsv_info_t* value);
+    rocsparse::ellsv_info_t* get_ellsv_info();
 };

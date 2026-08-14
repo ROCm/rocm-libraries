@@ -326,6 +326,23 @@ void host_csrsv(rocsparse_operation  trans,
                 J*                   struct_pivot,
                 J*                   numeric_pivot);
 
+template <typename I, typename T>
+void host_ellsv(rocsparse_operation  trans,
+                I                    M,
+                I                    N,
+                T                    alpha,
+                const I*             ell_col_ind,
+                const T*             ell_val,
+                I                    ell_width,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                I*                   struct_pivot,
+                I*                   numeric_pivot);
+
 template <typename I, typename J, typename T>
 void host_cscsv(rocsparse_operation  trans,
                 J                    M,
