@@ -26,7 +26,7 @@ BINARY="${1:?Usage: $0 <integration_tests_binary> [work_dir] [--skip-hopd]}"
 WORK="${2:-/tmp/almiopen2279}"
 SKIP_HOPD="${3:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUT="$(cd "$SCRIPT_DIR/.." && pwd)/integration_test_bundles"
+OUT="$(cd "$SCRIPT_DIR/.." && pwd)/integration-test-bundles"
 
 # Template-sweep bundles register under gtest suites named {tier}_{Op}_{Topology}
 # (e.g. quick_ConvolutionFwd_Default) — NOT containing the word "Bundle". Filter
@@ -69,9 +69,14 @@ python3 "$SCRIPT_DIR/verify_migration.py" \
 
 echo ""
 echo "--- Supporting: real binary smoke (bundle loader) ---"
-"$BINARY" --allow-bundles --gd "$OUT" --gtest_filter="$BUNDLE_FILTER" || {
+SMOKE_LOG="$WORK/smoke.log"
+if ! "$BINARY" --allow-bundles --gd "$OUT" --gtest_filter="$BUNDLE_FILTER" 2>&1 | tee "$SMOKE_LOG"; then
+    if grep -q "Failed to load bundle" "$SMOKE_LOG"; then
+        echo "  FAIL: a bundle failed to load — this is a real regression, not a missing-GPU skip" >&2
+        exit 1
+    fi
     echo "  WARN: smoke returned non-zero (may need GPU)" >&2
-}
+fi
 
 # ── Supporting layer: idempotency ───────────────────────────────────────
 

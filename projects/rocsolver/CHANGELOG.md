@@ -6,15 +6,40 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
+    - CHOLQR (with batched and strided\_batched versions)
+    - CHOLQR_64 (with batched and strided\_batched versions)
+* Hessenberg reduction auxiliary routine
+    * LAHR2
+
 ### Changed
-
-* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage. 
-
 ### Removed
 ### Optimized
 ### Resolved issues
 ### Known issues
 ### Upcoming changes
+
+
+
+## rocSOLVER 3.36.0 for ROCm 10.0.0
+
+### Added
+
+* 64-bit APIs for the symmetric/Hermitian eigensolvers
+    * SYEV_64 and HEEV_64 (with batched and strided\_batched versions)
+    * SYEVD_64 and HEEVD_64 (with batched and strided\_batched versions)
+* Support added for the gfx1250 architecture.
+
+### Changed
+
+* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage.
+
+### Known issues
+
+* The 64-bit eigensolver APIs (SYEV_64, HEEV_64, SYEVD_64, HEEVD_64) require the matrix
+  dimensions `n` and `lda` to fit within a 32-bit integer, because their internal tridiagonal
+  reduction and back-transformation steps remain 32-bit.
 
 
 

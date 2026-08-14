@@ -75,7 +75,9 @@ else()
   # On Linux, always include amdgcnspirv target so the clients work
   # on an architecture that the runtime supports but was not
   # specified a build time
-  if( NOT WIN32 )
+  # TODO: amdgcnspirv is not compatible with ASAN.
+  get_target_property(bench_opts hipfft-bench COMPILE_OPTIONS)
+  if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"  )
     target_compile_options( hipfft-bench PRIVATE --offload-arch=amdgcnspirv )
     target_link_options( hipfft-bench PRIVATE --offload-arch=amdgcnspirv )
   endif()

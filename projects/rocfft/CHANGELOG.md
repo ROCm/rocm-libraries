@@ -3,7 +3,40 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## Since last release (ROCm 7.14)
+## (Unreleased) rocFFT 1.0.40
+
+### Added
+
+* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
+
+### Known issues
+
+* Function pointer callbacks specified via `rocfft_execution_info_set_load_callback` or 
+  `rocfft_execution_info_set_store_callback` are not functional on gfx1250 and `rocfft_execute` will fail in this case.
+
+## rocFFT 1.0.39 for ROCm 10.0
+
+### Optimized
+
+* Improved performance of unit-strided, interleaved, real-to-complex FFTs on gfx1201, gfx90a, gfx942, and gfx950 for the following lengths:
+  * (100,100,100)
+  * (192,96,96)
+  * (200,96,96)
+  * (128,128,256)
+  * (160,168,168)
+  * (160,168,192)
+  * (168,168,192)
+  * (168,192,192)
+  * (192,192,192)
+  * (192,192,200)
+  * (192,200,200)
+  * (200,200,200)
+  * (216,216,216)
+  * (216,104,100)
+  * (216,104,104)
+  * (224,104,104)
+  * (224,108,104)
+  * (224,108,108)
 
 ### Added
 
@@ -25,7 +58,6 @@ Documentation for rocFFT is available at
 
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
 * Support for the gfx1250 architecture.
-* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that have not been explicitly compiled in.
 
 ### Optimized
 

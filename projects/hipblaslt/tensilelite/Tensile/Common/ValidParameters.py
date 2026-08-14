@@ -30,6 +30,65 @@ from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
 
 ################################################################################
+# SwInstructionPrefetch bitmask API
+################################################################################
+# Single integer knob replacing the legacy (SwInstructionPrefetch: bool,
+# SwInstructionPrefetchAbs: bool) pair. Domain:
+#   -1 Auto      : resolve by architecture (Absolute on gfx1250 non-Stream-K,
+#                  Relative otherwise).
+#    0 Off       : no software instruction prefetch.
+#    1 Relative  : PC-relative prefetch (s_prefetch_inst_pc_rel; legacy default).
+#    2 Absolute  : absolute prefetch (s_prefetch_inst + label-fixed base);
+#                  gfx1250 non-Stream-K only.
+# Legacy booleans remain accepted as a deprecated alias so already-shipped
+# library-logic YAMLs (which carry `SwInstructionPrefetch: true`) keep loading
+# without a mass rewrite: True -> Relative(1), False -> Off(0).
+SW_INSTRUCTION_PREFETCH_AUTO = -1
+SW_INSTRUCTION_PREFETCH_OFF = 0
+SW_INSTRUCTION_PREFETCH_RELATIVE = 1
+SW_INSTRUCTION_PREFETCH_ABSOLUTE = 2
+
+
+def normalizeSwInstructionPrefetch(value):
+    """Map the SwInstructionPrefetch value (int bitmask or legacy bool) to the
+    canonical integer mode. ``True`` -> Relative(1), ``False`` -> Off(0)."""
+    # bool is a subclass of int, so check it first.
+    if isinstance(value, bool):
+        return SW_INSTRUCTION_PREFETCH_RELATIVE if value else SW_INSTRUCTION_PREFETCH_OFF
+    return int(value)
+
+
+def resolveSwInstructionPrefetch(value, isGfx1250, isStreamK, isF64=False):
+    """Resolve the SwInstructionPrefetch mode to the two module-option enables
+    the StinkyTofu passes read: ``(enableRelative, enableAbsolute)``.
+
+    Auto(-1) resolves to Absolute on gfx1250 non-Stream-K non-f64, and Relative
+    otherwise (Relative is a no-op on non-gfx1250, where StinkyTofu does not
+    run). Explicit Absolute(2) on Stream-K / non-gfx1250 / f64 is rejected
+    earlier in Solution.assignProblemIndependentDerivedParameters; the value it
+    maps to here is neutralized downstream by the baseSgpr=-1 gate regardless.
+
+    f64 (double) is excluded from Absolute: its OptNLL epilogue routinely exceeds
+    the 64 KiB I-cache (bucket-c fleet-wide) so the abs cover/ladder yields no
+    reliable benefit, and its sgprAlpha is a 2-dword pair (the OptNLL-aware
+    Case-B fp32 predicate does not apply). See design doc §16.8/§16.13.
+    """
+    mode = normalizeSwInstructionPrefetch(value)
+    if mode == SW_INSTRUCTION_PREFETCH_OFF:
+        return (False, False)
+    if mode == SW_INSTRUCTION_PREFETCH_RELATIVE:
+        return (True, False)
+    if mode == SW_INSTRUCTION_PREFETCH_ABSOLUTE:
+        # Absolute on f64 is rejected earlier; defensively fall back to Relative
+        # if it ever reaches this point.
+        return (True, False) if isF64 else (False, True)
+    # Auto
+    if isGfx1250 and not isStreamK and not isF64:
+        return (False, True)
+    return (True, False)
+
+
+################################################################################
 # Enumerate Valid Solution Parameters
 ################################################################################
 
@@ -325,20 +384,19 @@ validParameters = { # we need to make sure this matches develop
     "1LDSBuffer": [-1, 0, 1],
     # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
     # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
-    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
-    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
-    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
-    # is helped -- B's halves move too, but both ports can still hit the same B segment.
-    # Two cases:
-    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
-    #            the next one -- no extra LDS.
-    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
-    #            more LDS, and needs PrefetchGlobalRead=2.
+    #
+    # Applies only to gfx1250 wave-separated TDM kernels, and requires:
+    #   - TDMInst=3, MIWaveGroup [2,2], UnrollMajorLDS
+    #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
+    #   - VWA = WaveTileA (TDMSplit optional), or WaveTileA/2 (requires TDMSplit)
+    # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
+    #
     # Values:
-    #   -1 = auto: apply "tight" only (skip "aligned").
+    #   -1 = auto: enable only where it needs no extra LDS reserved.
     #    0 = off (default): baseline layout.
-    #    1 = force on: apply both "tight" and "aligned" wherever valid.
-    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
+    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
+    #            boundary (needs PrefetchGlobalRead=2).
+    # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
@@ -358,16 +416,30 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
-    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
-    # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
-    # False: no prefetch SGPR, prefetch pass disabled for this kernel.
+    # StinkyTofu: whether SwInstructionPrefetchRelStaticPass may insert software instruction prefetch.
+    # StinkyTofu software instruction-prefetch mode (single integer bitmask; see
+    # SW_INSTRUCTION_PREFETCH_* above). -1 Auto, 0 Off, 1 Relative, 2 Absolute.
     #
     # Purpose: command-processor (CP) prefetch only covers a bounded amount of code. When
     # the kernel's assembly footprint is large enough to exceed that window, the front of the
     # kernel can fall out of the I-cache before execution reaches it, causing misses. Software
     # prefetch instructions bring hot code back under software control so execution stays ahead of
     # the fetch pointer and avoids those misses.
-    "SwInstructionPrefetch": [False, True],
+    #
+    # Relative(1): PC-relative prefetch (s_prefetch_inst_pc_rel; no reserved SGPR needed).
+    # Absolute(2): absolute prefetch (s_prefetch_inst) using a label-fixed base address built from
+    #   s_getpc_b64 + s_add_u32; gfx1250 non-Stream-K only. Static regime (32640 < totalBytes <=
+    #   65536): single-label + koffset burst at entry BB. Dynamic regime (totalBytes > 65536):
+    #   run-time-targeted policy — emits a predicated prefetch ladder after label_MultiGemmEnd
+    #   (SwInstructionPrefetchAbsDynamicPass). The 3-SGPR base (even-aligned pair s[base:base+1] +
+    #   scratch s[base+2]) is auto-allocated in KernelWriter (reserved past the kernel-argument
+    #   region, then freed at label_MultiGemmEnd for body reuse) — no manual SGPR index needed.
+    # Auto(-1): Absolute on gfx1250 non-Stream-K, Relative otherwise.
+    # Explicit Absolute(2) on Stream-K / non-gfx1250 is rejected in Solution.py.
+    #
+    # Legacy booleans are accepted as a deprecated alias (True -> Relative, False -> Off) so
+    # already-shipped library-logic YAMLs keep loading; hence bool is a valid type here.
+    "SwInstructionPrefetch": [-1, 0, 1, 2, False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap
@@ -828,6 +900,14 @@ validParameters = { # we need to make sure this matches develop
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
     "StreamKAtomic": [0, 1],
+    # Codegen-time toggle for single-hop next-neighbor work stealing in the
+    # dynamic-queue StreamK fetch (SK4 / SK5-dynamic). Queue count =
+    # archCaps['NumXCD'] (8 on gfx942/gfx950). When a workgroup's home queue
+    # empties, it makes one atomic attempt on its next-neighbor per-XCD queue.
+    # Valid only for StreamK in (4, 5).
+    #  0: off
+    #  1: on
+    "StreamKWorkStealing": [0, 1],
     # Enables XCC-based remapping of workgroups, set the value to the number of XCCs
     # for the device/configuration being used
     #  0: uses default workgroup assignment
@@ -943,6 +1023,7 @@ validParameters = { # we need to make sure this matches develop
     # For gfx942, sets sc0/sc1/nt bits
     # 0: none, 1: sc0, 2: sc1, 3: sc0 sc1, 4: nt, 5: nt sc0, 6: nt sc1, 7: nt sc0 sc1
     "NonTemporalE": list(range(0, 8)),
+    "NonTemporalGate": list(range(0, 8)),
     "NonTemporalD": list(range(0, 8)),
     "NonTemporalC": list(range(0, 8)),
     "NonTemporalA": list(range(0, 8)),
@@ -1089,6 +1170,11 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
+    # (different TDM wait groups) so every wave finishes the urgent group before any
+    # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
+    # gfx1250 / ScheduleIterAlg=4 path only, off by default.
+    "TDMLoadWaveSync": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

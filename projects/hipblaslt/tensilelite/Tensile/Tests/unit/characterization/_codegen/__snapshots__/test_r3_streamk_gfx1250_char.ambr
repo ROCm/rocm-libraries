@@ -2,7 +2,7 @@
 # name: test_r3_streamk_gfx1250_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgNg-IV7t7EnYLL6mzebH3P5CbTswCA1Faj4hopzB-L_A=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgTcyPj5jAoKTsyFJ7mtECm3KsoSx56AhX4NtFa4gQ3BI=',
       'err': 0,
     }),
   ])

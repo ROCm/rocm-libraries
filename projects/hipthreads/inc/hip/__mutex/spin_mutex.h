@@ -56,7 +56,7 @@ namespace cuda {
  *  - It is illegal for more than one fiber to be active while acquiring the lock
  *   (debug assert or livelock). This results in the extra fibers looping, trying
  *   to acquire the lock when it's already owned by a fiber in the same SIMD
- *   wave/hip::thread.
+ *   wave/hip::wthread.
  * - Ownership is tracked using the block id so that we can attempt to detect
  *   this invalid use in debug and assert instead of livelocking.
  * - Prolonged contention wastes execution resources (avoid long critical

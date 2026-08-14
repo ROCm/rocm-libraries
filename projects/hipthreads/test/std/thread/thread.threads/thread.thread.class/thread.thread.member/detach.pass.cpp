@@ -10,7 +10,7 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
 // void detach();
 
@@ -78,7 +78,7 @@ int main(int, char**)
 #ifdef __HIP_DEVICE_COMPILE__
     {
         G g;
-        hip::thread t0 = support::make_test_thread(g);
+        hip::wthread t0 = support::make_test_thread(g);
         assert(t0.joinable());
         t0.detach();
         assert(!t0.joinable());
@@ -102,7 +102,7 @@ int main(int, char**)
     // For now, exception tests requiring host-side thread creation are disabled.
     /*
     {
-        hip::thread t0 = support::make_test_thread([]__device__(){foo();});
+        hip::wthread t0 = support::make_test_thread([]__device__(){foo();});
 
         assert(t0.joinable());
         t0.detach();

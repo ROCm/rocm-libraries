@@ -42,11 +42,14 @@ lane's tile-max is within 8 log2 of the running max) is ALWAYS-ON by default
 
 Head-size / seqlen coverage:
   * ``head_size`` is 64 or 128 (bf16/fp16, MHA + GQA incl. non-power-of-2 NQK).
-    D=128 uses the padded LDS fast path (1 K/V row per async-DMA instr); D=64
-    packs 2 rows per instr into an UNPADDED contiguous tile (64 lanes x 2 bf16 =
-    128 elems = 2 D=64 rows), so its reads take some LDS bank conflict (V-pad is
-    a future D=64 perf lever). D=128 codegen is byte-identical to before this
-    change (same IR hash -> same TFLOPS).
+    D=128 uses the per-row padded LDS fast path (1 K/V row per async-DMA instr).
+    D=64 packs 2 rows per instr (64 lanes x 2 bf16 = 128 elems = 2 D=64 rows),
+    which rules out a per-row pad because a padded row is not contiguous with
+    the next -- so K instead pads between DMA row-GROUPS (``lds_k_group_pad``):
+    the group stays contiguous for the DMA while the group pitch restores the
+    QK read's bank spread. V still uses the unpadded packed pitch, so a
+    conflict-free transposed-V layout remains an open D=64 lever. D=128 codegen
+    is byte-identical across this change (same IR hash -> same TFLOPS).
   * ``seqlen_q``/``seqlen_kv`` must be a multiple of 256 / ``block_n`` on the
     default (aligned) kernel. Non-multiple lengths are handled by a SEPARATE
     ``ragged=True`` kernel path (its own kernel_name) that pads the boundary
@@ -153,6 +156,24 @@ class AttentionDenseSpec:
     # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
     #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
     waves_per_eu: int = 2
+    # lds_k_group_pad: bf16 elements of K padding between DMA row-GROUPS, on the
+    #   packed head_size<128 path only (ignored at 128, which pads per row via
+    #   _LDS_PAD). The async DMA writes 128//head_size rows contiguously, so a
+    #   per-row pad is impossible there -- but the pad can sit BETWEEN groups and
+    #   still break the QK ds_read_b128 bank pattern. A wave64 b128 read moves
+    #   1024 B while LDS delivers 64 banks x 4 B = 256 B/cycle, so 4 lanes per
+    #   bank is the conflict-free floor. Aggregated over all 64 lanes (4 dwords
+    #   each): unpadded D=64 touches 16 of 64 banks at 16 lanes deep; a group pad
+    #   of 8, 16 or 24 reaches all 64 banks at that floor; 32 falls back to 32
+    #   banks at 8 deep. The whole-wave model does not separate 8/16/24, but a
+    #   16-lane phase (16 x 4 dwords = one full 64-bank sweep) does: pad 8 gives
+    #   16 distinct start banks, pad 16 repeats each twice -- hence 8, which is
+    #   also the cheaper of the two in LDS. Must be a non-negative multiple of 8
+    #   elements (16 B) because smem_load_vN stamps `align 16` on the n=8 read
+    #   unconditionally, so an 8-byte-aligned pitch would keep the ds_read_b128
+    #   while silently breaking its alignment contract. 0 reproduces the old
+    #   unpadded layout for A/B.
+    lds_k_group_pad: int = 8
     # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per
     #   (query-block, head, batch). A 1-D grid of ``num_persistent`` long-lived CTAs
     #   grid-strides over the W = (seqlen_q//256)*Hq*B work items, so the per-CTA
@@ -194,6 +215,16 @@ class AttentionDenseSpec:
     #   (still within bf16/fp16 tolerance). ALWAYS-ON by default (parity-identical
     #   at 1.46e-3, ~+2% TFLOPS); set False only to disable for A/B.
     lazy_rescale: bool = True
+    # paged: read K/V from a paged cache [num_blocks, block_size, num_kv_heads,
+    #   head_size] via block_tables indirection instead of contiguous memory.
+    #   Single-sequence only in this revision. 0-cost when False (byte-identical IR).
+    paged: bool = False
+    # block_size: KV cache PAGE size (tokens per physical block). Distinct from
+    #   block_n (the compute KV tile). Required >0 and must divide block_n when paged.
+    block_size: int = 0
+    # num_kv_blocks: total physical blocks in the paged cache (key_cache.shape[0]).
+    #   Bounds the paged buffer resource. Required >0 when paged.
+    num_kv_blocks: int = 0
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -205,6 +236,17 @@ class AttentionDenseSpec:
         # 128 % head_size == 0 so it packs a whole number of rows per instr.
         if self.head_size not in (64, 128):
             raise ValueError(f"head_size must be 64 or 128, got {self.head_size}")
+        # A group pitch that is not 16-byte aligned would keep the QK
+        # ds_read_b128 while breaking its alignment contract (smem_load_vN stamps
+        # `align 16` on the n=8 read unconditionally) -- wrong data or a fault,
+        # silently. Checked for every head size so an unused value cannot go
+        # stale and then bite when head_size changes.
+        if self.lds_k_group_pad < 0 or self.lds_k_group_pad % 8 != 0:
+            raise ValueError(
+                "lds_k_group_pad must be a non-negative multiple of 8 bf16 "
+                "elements (16 bytes) so the K group pitch stays "
+                f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
+            )
         if self.block_n % 32 != 0:
             raise ValueError(f"block_n must be a multiple of 32, got {self.block_n}")
         if self.ragged:
@@ -261,6 +303,73 @@ class AttentionDenseSpec:
                 raise ValueError("varlen is not supported with persistent=True")
             if not self.causal:
                 raise ValueError("varlen requires causal=True")
+        if self.paged:
+            # --- Hard layout / hardware invariants (permanent contract) ---
+            if self.block_size <= 0:
+                raise ValueError("paged=True requires block_size > 0")
+            if self.block_size & (self.block_size - 1) != 0:
+                raise ValueError(
+                    f"paged block_size ({self.block_size}) must be a power of two so "
+                    "the per-page div/mod lower to shift/mask (production page sizes "
+                    "are 16/32); non-power-of-two is correct but pays magic-number "
+                    "address math"
+                )
+            if self.block_n % self.block_size != 0:
+                raise ValueError(
+                    f"block_n ({self.block_n}) must be a multiple of page "
+                    f"block_size ({self.block_size})"
+                )
+            rows_per_wave = (
+                self.block_n // self.num_waves
+            )  # per-wave K/V rows; fit 1 page
+            if self.block_size < rows_per_wave or self.block_size % rows_per_wave != 0:
+                raise ValueError(
+                    f"paged block_size ({self.block_size}) must be >= and a multiple of "
+                    f"ROWS_PER_WAVE ({rows_per_wave} = block_n/{self.num_waves}) so each "
+                    f"wave's K/V rows stay within one page"
+                )
+            if self.num_kv_blocks <= 0:
+                raise ValueError("paged=True requires num_kv_blocks > 0")
+            cache_bytes = (
+                self.num_kv_blocks
+                * self.block_size
+                * self.num_kv_heads
+                * self.head_size
+                * 2
+            )
+            if (
+                cache_bytes > 2**31 - 1
+            ):  # i32 byte-offset limit; i64 paging not yet impl.
+                raise ValueError(
+                    f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB); "
+                    "i64 paging not yet implemented"
+                )
+            # --- Not-yet-implemented shortcuts (deferred scope, NOT a permanent
+            #     contract; see the dense-paged design future-scope list). The paged
+            #     mechanism is general -- these cohorts are simply unverified so far and
+            #     are loud-rejected until each is validated on gfx950. Raised as
+            #     ValueError so supports_*() reports "unsupported" rather than faulting.
+            if self.batch != 1:
+                raise ValueError("paged multi-sequence (batch>1) not yet implemented")
+            if self.varlen:
+                raise ValueError("paged varlen not yet implemented (single-seq only)")
+            if self.persistent:
+                raise ValueError(
+                    "paged + persistent not yet implemented "
+                    "(persistent builder is contiguous-only)"
+                )
+            if self.head_size != 128:
+                raise ValueError("paged not yet implemented for head_size != 128")
+            # forward guard: unreachable while _DTYPE_IR == {fp16, bf16} (both
+            # validated); fires if a future dtype is added there before paged-validation.
+            if self.dtype not in ("fp16", "bf16"):
+                raise ValueError(
+                    f"paged not yet implemented for dtype={self.dtype} (fp16/bf16 only)"
+                )
+            if self.sliding_window <= 0:
+                raise ValueError(
+                    "paged not yet implemented for plain-causal (sliding_window>0 only)"
+                )
 
     @property
     def num_waves(self) -> int:
@@ -297,6 +406,14 @@ class AttentionDenseSpec:
             f"kv{self.num_kv_heads}",
             f"bn{self.block_n}",
             self.dtype,
+        ]
+        # The K group pad changes the emitted layout, so it has to be part of the
+        # kernel identity or two kernels that differ only in pad share a symbol
+        # name (and a launcher-cache entry). Only live on the packed path, so the
+        # head_size=128 name is unchanged.
+        if 128 // self.head_size > 1:
+            parts.append(f"kpad{self.lds_k_group_pad}")
+        parts += [
             f"sq{self.seqlen_q}",
             f"sk{self.seqlen_kv}",
             "causal" if self.causal else "full",
@@ -307,6 +424,11 @@ class AttentionDenseSpec:
             parts.append(f"swa{self.sliding_window}")
         if self.varlen:
             parts.append("varlen")
+        if self.paged:
+            parts.append(f"pgd{self.block_size}")
+            parts.append(
+                f"nb{self.num_kv_blocks}"
+            )  # IR-live: sets the paged rsrc bound
         if self.lazy_rescale:
             parts.append("lazyrs")
         if self.persistent:
@@ -370,8 +492,9 @@ def build_attention_dense(
     stride_k_tok = Hkv * D
     # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16 =
     # 128 elems. D==128 => 1 row/instr (the padded fast path, byte-identical).
-    # D<128 => pack 128//D rows/instr into an UNPADDED contiguous LDS tile (the
-    # transpose/K reads still get correct pitch from the [BN, LDROW] tensor).
+    # D<128 => pack 128//D rows/instr into one contiguous LDS group; K places
+    # those groups at a padded pitch, V at the plain packed pitch. Reads get the
+    # correct pitch from their LDS tensor shape either way.
     ROWS_PER_INSTR = 128 // D
 
     b = IRBuilder(spec.kernel_name())
@@ -402,6 +525,15 @@ def build_attention_dense(
             readonly=True,
             align=4,
         )
+    block_tables = kv_lens = bt_stride = None
+    if spec.paged:
+        block_tables = b.param(
+            "block_tables", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+        )
+        kv_lens = b.param(
+            "kv_lens", PtrType(I32, "global"), noalias=True, readonly=True, align=4
+        )
+        bt_stride = b.param("block_table_stride", I32)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     _exp2 = b.exp2_fast  # native v_exp_f32 (softmax arg always <= 0)
@@ -448,13 +580,32 @@ def build_attention_dense(
         )
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
-    #     PV read bank-conflict pad). Row padding requires 1 row/instr (a padded
-    #     row is not contiguous with the next); the packed D<128 loader must use
-    #     an unpadded pitch (LDROW==D) so its multi-row DMA lands row-aligned. ---
-    LDROW = D + PAD if ROWS_PER_INSTR == 1 else D
+    #     PV read bank-conflict pad). A per-ROW pad requires 1 row/instr (a
+    #     padded row is not contiguous with the next), so the packed D<128 K
+    #     loader pads between DMA row-GROUPS instead: the group stays contiguous
+    #     for the multi-row DMA while the group pitch still breaks the QK read's
+    #     bank pattern (see the ``lds_k_group_pad`` spec field). V keeps the
+    #     unpadded packed pitch. ---
+    if ROWS_PER_INSTR == 1:
+        K_GROUP = 1
+        K_ROWS_LDS = BN
+        LDROW = D + PAD
+    else:
+        K_GROUP = ROWS_PER_INSTR
+        K_ROWS_LDS = BN // K_GROUP
+        LDROW = K_GROUP * D + spec.lds_k_group_pad
     VROW = D + _LDS_PAD_V if ROWS_PER_INSTR == 1 else D
-    K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
+    K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
+    # Packed-K read decode, hoisted out of the KV loop: krow = nsub*32 + lane_m
+    # with nsub*32 even, so the group/sub-row split is a shift+and on lane_m
+    # plus a compile-time nsub scale.
+    if K_GROUP > 1:
+        k_lane_grp = b.div(lane_m, b.const_i32(K_GROUP))
+        k_sub_col = b.mul(b.mod(lane_m, b.const_i32(K_GROUP)), b.const_i32(D))
+    else:
+        k_lane_grp = None
+        k_sub_col = None
 
     # Q packs (B operand), scaled once by qk_scale = softmax_scale * log2(e).
     # ragged: a bounds-checked buffer load returns 0 for OOB query rows (the
@@ -483,39 +634,106 @@ def build_attention_dense(
     n_ktiles = ((Skv + BN - 1) // BN) if RAGGED else (Skv // BN)
     n_per = BLOCK_M // BN
 
-    K_BYTES_PER_BUF = BN * LDROW * 2
-    K_LDROW_BYTES = LDROW * 2
+    K_BYTES_PER_BUF = K_ROWS_LDS * LDROW * 2
+    # Bytes per DMA destination group. ROWS_PER_INSTR==1 => one row, so this is
+    # the row pitch and the D=128 emission is unchanged.
+    K_GROUP_BYTES = LDROW * 2
     V_BYTES_PER_BUF = BN * VROW * 2
-    V_LDROW_BYTES = VROW * 2
+    # NOT a padded pitch: the DMA writes ROWS_PER_INSTR*D CONTIGUOUS elements, so
+    # a padded V would need its second row at +D, not +D+pad. Padding V requires
+    # a pad-aware transposed read, not a wider stride here.
+    V_GROUP_BYTES = ROWS_PER_INSTR * VROW * 2
     ROWS_PER_WAVE = BN // WAVES
+    # Group indexing uses floor division; keep it exact so a future head size or
+    # tile width fails loudly instead of silently mis-addressing LDS.
+    assert BN % K_GROUP == 0 and ROWS_PER_WAVE % ROWS_PER_INSTR == 0, (
+        f"K row-group split must divide evenly: BN={BN} K_GROUP={K_GROUP} "
+        f"ROWS_PER_WAVE={ROWS_PER_WAVE} ROWS_PER_INSTR={ROWS_PER_INSTR}"
+    )
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
-    k_rsrc = b.buffer_rsrc(k, b.const_i32(B * Skv * Hkv * D * 2))
-    v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
+    # Emit a SEPARATE b.const_i32 per buffer_rsrc (NOT a shared IR node): develop
+    # emits two consts here, so sharing one silently breaks paged=False byte-identity
+    # (the attention_dense representative-IR golden). ``_kv_cache_elems`` is a plain
+    # Python int; paged widens the bound to the whole cache, contiguous keeps B*Skv.
+    _kv_cache_elems = (
+        (spec.num_kv_blocks * spec.block_size if spec.paged else B * Skv) * Hkv * D * 2
+    )
+    k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
+    v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
+    if spec.paged:
+        # ROWS_PER_WAVE <= block_size and block_size % ROWS_PER_WAVE == 0 is
+        # enforced at spec construction (__post_init__ paged validation), so every
+        # wave's K/V rows fall within one page -- the per-wave block_tables hoist
+        # below relies on that.
+        # Single-seq: seq_base folds to 0; the bt*bt_stride form keeps bt_stride
+        # live and generalizes to multi-seq. kv_lens[bt] bounds the page index.
+        _pg_seq_base = b.mul(bt, bt_stride)
+        _pg_kv_len = b.global_load_i32(kv_lens, bt)
+        _pg_n_pages = b.div(
+            b.add(_pg_kv_len, b.const_i32(spec.block_size - 1)),
+            b.const_i32(spec.block_size),
+        )
 
-    def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
-        """Async DMA one K/V tile into the [BN, LDROW] LDS layout.
+    def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
+        """Async DMA one K/V tile into its LDS layout.
 
         ROWS_PER_INSTR==1 (D==128): one instr per padded row -- 64 lanes x 2 bf16
-        fill exactly one D-wide row (the original byte-identical fast path).
-        ROWS_PER_INSTR>1 (D<128): pack ROWS_PER_INSTR rows per instr into the
-        unpadded contiguous tile (lane l -> row l//(D/2), col 2*(l%(D/2)))."""
+        fill exactly one D-wide row (the original byte-identical fast path), and
+        a group IS a row.
+        ROWS_PER_INSTR>1 (D<128): pack ROWS_PER_INSTR rows per instr into one
+        contiguous group (lane l -> row l//(D/2), col 2*(l%(D/2))). The group is
+        placed at group_bytes stride, which carries K's inter-group pad; V's
+        group_bytes is the plain unpadded ROWS_PER_INSTR*D pitch, so its layout
+        is unchanged."""
         buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
         if ROWS_PER_INSTR == 1:
+            if spec.paged:
+                # All ROWS_PER_WAVE rows of this wave fall in ONE page (asserted at
+                # setup), so the block_tables lookup is wave-uniform -- hoist it out
+                # of the row loop (was per-row: ~ROWS_PER_WAVE x fewer indirection
+                # loads + div/mask). Per-row cost is then just a mod + add.
+                _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
+                _wpage = b.div(_wg0, b.const_i32(spec.block_size))
+                _wphys = b.masked_global_load(
+                    block_tables,
+                    b.add(_pg_seq_base, _wpage),
+                    b.cmp_lt(_wpage, _pg_n_pages),
+                    b.const_i32(0),
+                    dtype=I32,
+                    align=4,
+                )
+                _wphys_base = b.mul(_wphys, b.const_i32(spec.block_size))
+                # NOTE: _wphys (the physical block id) is used raw -- intentionally
+                # NOT range-checked here. The K/V read goes through a bounds-checked
+                # CDNA buffer SRD (buffer_rsrc word3 0x00027000, num_records = whole
+                # cache = _kv_cache_elems), so an out-of-range id yields a voff beyond
+                # num_records and raw.ptr.buffer.load.lds drops it / fills 0 rather
+                # than reading OOB (contained, but SILENT wrong output on a malformed
+                # table). This backstop holds ONLY while the whole offset stays in the
+                # i32 voffset; the deferred i64 path folds physical_block into a
+                # 64-bit base (bypassing num_records) and MUST add an explicit id
+                # guard there.
             for r in range(ROWS_PER_WAVE):
                 row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
                 row_lds_off = b.add(
-                    buf_off, b.zext(b.mul(row, b.const_i32(ldrow_bytes)), I64)
+                    buf_off, b.zext(b.mul(row, b.const_i32(group_bytes)), I64)
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
+                if spec.paged:
+                    kv_row = b.add(
+                        _wphys_base, b.mod(gkey, b.const_i32(spec.block_size))
+                    )
+                else:
+                    kv_row = gkey
                 voff = b.add(
-                    b.add(k_base, b.mul(gkey, b.const_i32(stride_k_tok))), gcol
+                    b.add(k_base, b.mul(kv_row, b.const_i32(stride_k_tok))), gcol
                 )
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
@@ -524,13 +742,15 @@ def build_attention_dense(
             lanes_per_row = D // 2
             sub_row = b.div(lane, b.const_i32(lanes_per_row))
             col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
-            for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
+            groups_per_wave = ROWS_PER_WAVE // ROWS_PER_INSTR
+            for it in range(groups_per_wave):
                 row0 = b.add(
                     b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
                     b.const_i32(it * ROWS_PER_INSTR),
                 )
+                grp = b.add(b.mul(wave, b.const_i32(groups_per_wave)), b.const_i32(it))
                 row_lds_off = b.add(
-                    buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                    buf_off, b.zext(b.mul(grp, b.const_i32(group_bytes)), I64)
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
@@ -541,12 +761,12 @@ def build_attention_dense(
 
     def async_load_k(lds_base, buf_val, tile_key0):
         _async_load(
-            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
         )
 
     def async_load_v(lds_base, buf_val, tile_key0):
         _async_load(
-            v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
+            v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
         )
 
     def load_tile(buf_val, tile_idx):
@@ -564,9 +784,14 @@ def build_attention_dense(
         s_reg = []
         for nsub in range(N_SUB):
             acc = b.zero_vec_f32(16)
-            krow = b.add(b.const_i32(nsub * 32), lane_m)
+            if K_GROUP == 1:
+                krow = b.add(b.const_i32(nsub * 32), lane_m)
+            else:
+                krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
             for ks in range(K_STEPS):
                 col = b.add(b.const_i32(ks * 16), d_base)
+                if K_GROUP > 1:
+                    col = b.add(k_sub_col, col)
                 k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
                 acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
@@ -970,7 +1195,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
     # DMA row packing (see default builder): 1 row/instr for D==128 (padded fast
-    # path), else pack 128//D rows/instr into an unpadded contiguous LDS tile.
+    # path), else pack 128//D rows/instr into one contiguous LDS group, with K's
+    # groups at a padded pitch and V's at the plain packed pitch.
     ROWS_PER_INSTR = 128 // D
     RAGGED = spec.ragged
     # ragged: ceil both the KV tiles and the query-block count so the partial
@@ -1012,17 +1238,37 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
 
-    # 1 row/instr => padded pitch (bank-conflict fix); packed D<128 => unpadded.
-    LDROW = D + PAD if ROWS_PER_INSTR == 1 else D
+    # 1 row/instr => per-row padded pitch (bank-conflict fix); packed D<128 =>
+    # pad between DMA row-GROUPS on K, unpadded on V (see the default builder).
+    if ROWS_PER_INSTR == 1:
+        K_GROUP = 1
+        K_ROWS_LDS = BN
+        LDROW = D + PAD
+    else:
+        K_GROUP = ROWS_PER_INSTR
+        K_ROWS_LDS = BN // K_GROUP
+        LDROW = K_GROUP * D + spec.lds_k_group_pad
     VROW = (D + _LDS_PAD_V) if ROWS_PER_INSTR == 1 else D
-    K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
+    K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
+    if K_GROUP > 1:
+        k_lane_grp = b.div(lane_m, b.const_i32(K_GROUP))
+        k_sub_col = b.mul(b.mod(lane_m, b.const_i32(K_GROUP)), b.const_i32(D))
+    else:
+        k_lane_grp = None
+        k_sub_col = None
 
-    K_BYTES_PER_BUF = BN * LDROW * 2
-    K_LDROW_BYTES = LDROW * 2
+    K_BYTES_PER_BUF = K_ROWS_LDS * LDROW * 2
+    K_GROUP_BYTES = LDROW * 2
     V_BYTES_PER_BUF = BN * VROW * 2
-    V_LDROW_BYTES = VROW * 2
+    # Not a padded pitch -- see the default builder: the DMA writes contiguous
+    # rows, so padding V needs a pad-aware transposed read, not a wider stride.
+    V_GROUP_BYTES = ROWS_PER_INSTR * VROW * 2
     ROWS_PER_WAVE = BN // WAVES
+    assert BN % K_GROUP == 0 and ROWS_PER_WAVE % ROWS_PER_INSTR == 0, (
+        f"K row-group split must divide evenly: BN={BN} K_GROUP={K_GROUP} "
+        f"ROWS_PER_WAVE={ROWS_PER_WAVE} ROWS_PER_INSTR={ROWS_PER_INSTR}"
+    )
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
     zero_soff = b.const_i32(0)
@@ -1113,16 +1359,18 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
             q_packs.append(b.vec_pack(elems, dtype))
 
-        def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
+        def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
             """Async DMA one K/V tile (see default builder ``_async_load``).
             ROWS_PER_INSTR==1 (D==128): incremental one-instr-per-padded-row fast
-            path (byte-identical). ROWS_PER_INSTR>1 (D<128): pack rows per instr
-            into the unpadded contiguous tile."""
+            path (byte-identical), where a group IS a row.
+            ROWS_PER_INSTR>1 (D<128): pack rows per instr into one contiguous
+            group placed at ``group_bytes`` stride (K carries the inter-group pad,
+            V's stride is the plain unpadded ROWS_PER_INSTR*D pitch)."""
             buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
             if ROWS_PER_INSTR == 1:
                 row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
                 row_lds_off = b.add(
-                    buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                    buf_off, b.zext(b.mul(row0, b.const_i32(group_bytes)), I64)
                 )
                 gcol = b.mul(lane, b.const_i32(2))
                 voff = b.add(
@@ -1138,19 +1386,23 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
                     if r + 1 < ROWS_PER_WAVE:
-                        row_lds_off = b.add(row_lds_off, b.const_i64(ldrow_bytes))
+                        row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
                         voff = b.add(voff, b.const_i32(stride_k_tok))
             else:
                 lanes_per_row = D // 2
                 sub_row = b.div(lane, b.const_i32(lanes_per_row))
                 col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
-                for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
+                groups_per_wave = ROWS_PER_WAVE // ROWS_PER_INSTR
+                for it in range(groups_per_wave):
                     row0 = b.add(
                         b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
                         b.const_i32(it * ROWS_PER_INSTR),
                     )
+                    grp = b.add(
+                        b.mul(wave, b.const_i32(groups_per_wave)), b.const_i32(it)
+                    )
                     row_lds_off = b.add(
-                        buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                        buf_off, b.zext(b.mul(grp, b.const_i32(group_bytes)), I64)
                     )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
@@ -1163,12 +1415,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         def async_load_k(lds_base, buf_val, tile_key0):
             _async_load(
-                k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+                k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
             )
 
         def async_load_v(lds_base, buf_val, tile_key0):
             _async_load(
-                v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
+                v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
             )
 
         def load_tile(buf_val, tile_idx):
@@ -1180,9 +1432,14 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             s_reg = []
             for nsub in range(N_SUB):
                 acc = b.zero_vec_f32(16)
-                krow = b.add(b.const_i32(nsub * 32), lane_m)
+                if K_GROUP == 1:
+                    krow = b.add(b.const_i32(nsub * 32), lane_m)
+                else:
+                    krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
                 for ks in range(K_STEPS):
                     col = b.add(b.const_i32(ks * 16), d_base)
+                    if K_GROUP > 1:
+                        col = b.add(k_sub_col, col)
                     k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
                     acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
@@ -1586,6 +1843,12 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     )
     if spec.varlen:
         sig = sig.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
+    if spec.paged:
+        sig = (
+            sig.ptr("block_tables", "i32")
+            .ptr("kv_lens", "i32")
+            .scalar("block_table_stride", "i32")
+        )
     return sig.build()
 
 
@@ -1609,6 +1872,9 @@ def run_attention_dense_torch(
     arch: str = "gfx950",
     cu_seqlens_q=None,
     cu_seqlens_kv=None,
+    block_tables=None,
+    kv_lens=None,
+    validate_paged: bool = True,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -1626,7 +1892,23 @@ def run_attention_dense_torch(
     Varlen (``spec.varlen``): the kernel emits a 7-arg ABI (packed
     ``[total_tok, H, D]`` q/k/v/o + two int32 ``cu_seqlens`` [batch+1]); pass both
     ``cu_seqlens_q`` and ``cu_seqlens_kv`` or a ``ValueError`` is raised (they are
-    required — never silently launch the 5-arg ABI against a 7-arg kernel)."""
+    required — never silently launch the 5-arg ABI against a 7-arg kernel).
+
+    Paged (``spec.paged``): K/V are a PAGED CACHE, not dense tensors -- ``k``/``v``
+    are ``[num_kv_blocks, block_size, Hkv, D]`` and are addressed through
+    ``block_tables`` indirection. Pass ``block_tables`` (int32
+    ``[num_seqs, max_blocks_per_seq]``) and ``kv_lens`` (int32 ``[num_seqs]``); a
+    ``ValueError`` is raised if either is missing (or is supplied when
+    ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous. Single-sequence
+    only in this revision (``batch == 1``); ``spec.block_size`` is the cache page
+    size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. ``validate_paged``
+    (default True) host-checks the paged CONTENTS (a device->host sync): the used
+    ``block_tables`` entries lie in ``[0, num_kv_blocks)``, and each
+    ``kv_lens[i] == seqlen_kv`` (the kernel visits all compile-time ``seqlen_kv``
+    tiles, so a shorter ``kv_len`` reads page 0 for the uncovered tiles ->
+    wrong output). Pass False on the hot / graph-captured path to skip the sync
+    (block ids then rely on the bounds-checked cache SRD reading 0, and the
+    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
@@ -1637,10 +1919,80 @@ def run_attention_dense_torch(
         )
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
+    if spec.paged and (block_tables is None or kv_lens is None):
+        raise ValueError("paged=True requires block_tables and kv_lens")
+    if not spec.paged and (block_tables is not None or kv_lens is not None):
+        raise ValueError("block_tables/kv_lens provided but spec.paged is False")
+    if spec.paged:
+        # Paged K/V shape guard: the paged buffer-resource bound is sized from the
+        # SPEC (num_kv_blocks*block_size*num_kv_heads*head_size -- see
+        # ``_kv_cache_elems`` in build_attention_dense), NOT from the tensor.
+        # If the passed cache is smaller than the spec claims, that bound
+        # over-reaches the real allocation, so the hardware bounds-check no longer
+        # guards it and a block-table entry can drive an out-of-bounds paged-cache
+        # read. Validate the cache shape against the spec that sizes the bound,
+        # before any compile/launch, so a mismatch fails loudly instead of reading
+        # OOB. (block_tables/kv_lens presence is already checked above.)
+        want = (
+            spec.num_kv_blocks,
+            spec.block_size,
+            spec.num_kv_heads,
+            spec.head_size,
+        )
+        for name, t in (("k", k), ("v", v)):
+            got = tuple(t.shape)
+            if got != want:
+                raise ValueError(
+                    f"paged {name} cache shape {got} != spec-derived "
+                    f"[num_kv_blocks, block_size, num_kv_heads, head_size]={want}; "
+                    "a mismatch mis-sizes the buffer-resource bound and can read OOB"
+                )
+        if validate_paged:
+            # Physical block-id bounds (a CONTENTS check, unlike the metadata checks
+            # above). An entry outside [0, num_kv_blocks) addresses a page outside the
+            # cache; the bounds-checked SRD (see _async_load) drops it to 0 rather
+            # than reading OOB, but that is silently WRONG output on a malformed
+            # table -- so reject it loudly. This reads the tensors (a device->host
+            # sync): pass validate_paged=False to skip on the hot/graph-captured path.
+            # Only the entries the kernel dereferences are checked -- pages
+            # [0, ceil(kv_len/block_size)) per seq; the rest are masked on device.
+            _kvl = kv_lens.tolist() if hasattr(kv_lens, "tolist") else list(kv_lens)
+            for _i in range(spec.batch):
+                _kl = int(_kvl[_i])
+                # Single-seq contract: the kernel visits ALL compile-time seqlen_kv
+                # tiles, but the page-bounds mask uses the runtime kv_len -- so a
+                # kv_len shorter than seqlen_kv leaves the uncovered tiles reading
+                # page 0 (the masked block-table default) and folds them into the
+                # softmax -> silently wrong output. Enforce the contract here.
+                if _kl != spec.seqlen_kv:
+                    raise ValueError(
+                        f"paged kv_lens[{_i}]={_kl} != seqlen_kv={spec.seqlen_kv}; the "
+                        "kernel reads all seqlen_kv tiles, so a shorter kv_len leaves "
+                        "uncovered tiles reading page 0 -> silently wrong output"
+                    )
+                _npages = (_kl + spec.block_size - 1) // spec.block_size
+                if _npages <= 0:
+                    continue
+                _used = block_tables[_i][:_npages]
+                _used = _used.tolist() if hasattr(_used, "tolist") else list(_used)
+                for _phys in _used:
+                    _p = int(_phys)
+                    if _p < 0 or _p >= spec.num_kv_blocks:
+                        raise ValueError(
+                            f"paged block_tables[{_i}] physical block id {_p} "
+                            f"outside [0, num_kv_blocks={spec.num_kv_blocks}); a "
+                            "malformed entry reads 0 via the bounds-checked cache "
+                            "SRD -> silently wrong output"
+                        )
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    key = spec.kernel_name()
+    # `batch` is baked into the kernel (K/V buffer extents + persistent work-item count)
+    # but deliberately kept OUT of kernel_name() to keep existing IR hashes stable, so it
+    # is keyed here. Paged `num_kv_blocks` is also IR-live (it sets the buffer-resource
+    # bound) but IS in kernel_name() (a paged-only tag, no golden impact), so the name
+    # alone distinguishes paged specs -- no separate key term needed.
+    key = (spec.kernel_name(), spec.batch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(
@@ -1659,6 +2011,10 @@ def run_attention_dense_torch(
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
+    if spec.paged:
+        vals["block_tables"] = block_tables
+        vals["kv_lens"] = kv_lens
+        vals["block_table_stride"] = int(block_tables.stride(0))
     launcher(
         vals,
         config=LaunchConfig(

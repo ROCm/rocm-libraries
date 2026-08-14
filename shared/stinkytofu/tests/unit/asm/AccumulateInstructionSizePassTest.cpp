@@ -451,20 +451,56 @@ TEST_F(InstructionSizeCostingTest, BufferOOB_String_Plus4) {
     EXPECT_EQ(getLiteralExtraBytes(*inst), 4);
 }
 
-TEST_F(InstructionSizeCostingTest, LabelString_AddrFromMap) {
+TEST_F(InstructionSizeCostingTest, LabelString_AlwaysPlus4) {
+    // A label operand is always a FK_PCRel_4 relocation: the assembler uses the
+    // 0xff inline-literal slot and reserves a 32-bit literal word, regardless of
+    // the label's resolved address or its position. Verified with
+    // `llvm-mc -mcpu=gfx1250 -show-encoding` (s_add_i32 s66, label, 0 -> 8 bytes).
+    // So +4 in every case, independent of labelByteOffset / current offset.
     auto b = makeBuilder();
     const HwInstDesc* d = getMCIDByUOp(GFX::s_mov_b32, arch);
     StinkyInstruction* inst = b.create(d);
     inst->addDestReg(StinkyRegister("s", 0, 1));
     inst->addSrcReg(litStr("label_foo"));
 
+    // Far label address.
     std::unordered_map<std::string, int64_t> m;
     m["label_foo"] = 100;
     EXPECT_EQ(getLiteralExtraBytes(*inst, &m, 0, nullptr), 4);
 
+    // Near label address (<= 64): still +4 (the old > 64 heuristic was wrong).
     std::unordered_map<std::string, int64_t> m2;
     m2["label_foo"] = 8;
-    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 0);
+    EXPECT_EQ(getLiteralExtraBytes(*inst, &m2, 0, nullptr), 4);
+
+    // Label not in the map (forward reference) and near current offset: still +4.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
+}
+
+// A label operand paired with a short inline immediate: the short immediate
+// contributes 0, but the label still forces the 32-bit literal (+4). Mirrors
+// `llvm-mc -mcpu=gfx1250`: `s_add_i32 s66, label, 0` -> [0xff,0x80,...,A,A,A,A]
+// (8 bytes = 4 base + 4 literal), whereas `s_add_i32 s66, 0, 0` is 4 bytes.
+TEST_F(InstructionSizeCostingTest, LabelWithShortImmediate_OnlyLabelAddsLiteral) {
+    auto b = makeBuilder();
+    const HwInstDesc* d = getMCIDByUOp(GFX::s_add_i32, arch);
+    ASSERT_NE(d, nullptr);
+    StinkyInstruction* inst = b.create(d);
+    inst->addDestReg(StinkyRegister("s", 0, 1));
+    inst->addSrcReg(litStr("label_SW_PrefetchAbs_0"));  // -> +4 (FK_PCRel_4)
+    inst->addSrcReg(litInt(0));                         // short inline -> +0
+
+    // Forward reference (label unknown) must still be +4 total.
+    EXPECT_EQ(getLiteralExtraBytes(*inst, nullptr, 0, nullptr), 4);
+    EXPECT_EQ(totalInstructionEncodingBytes(*inst, nullptr, 0, nullptr),
+              getEffectiveBaseSizeInBytes(*inst) + 4);
+
+    // Sanity: two short immediates add no literal word.
+    StinkyInstruction* plain = b.create(d);
+    plain->addDestReg(StinkyRegister("s", 0, 1));
+    plain->addSrcReg(litInt(0));
+    plain->addSrcReg(litInt(0));
+    EXPECT_EQ(getLiteralExtraBytes(*plain), 0);
 }
 
 // VALU *_f32: hex `0x........` is float32 bits — same literal-extra as decimal

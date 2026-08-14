@@ -10,7 +10,7 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
 // unsigned hardware_concurrency();
 
@@ -22,7 +22,7 @@
 
 int main(int, char**)
 {
-    assert(hip::thread::hardware_concurrency() > 0);
+    assert(hip::wthread::hardware_concurrency() > 0);
 
   return 0;
 }

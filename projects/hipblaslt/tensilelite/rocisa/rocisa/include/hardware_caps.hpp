@@ -24,6 +24,7 @@
 #include <array>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,10 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
         std::cout << "return code: " << rcode << std::endl;
     }
 
+    // 127 means the assembler could not be executed at all (e.g. missing binary),
+    // which is not the same as the assembler rejecting this particular ISA/instruction.
+    if(rcode == 127)
+        throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
     if(rcode != 0)
         return false;
     return true;
@@ -268,6 +273,9 @@ inline std::map<std::string, int>
 
     rv["v_pk_mul_f32"] = tryAssembler(
         isaVersion, assemblerPath, "v_pk_mul_f32 v[20:21], v[18:19], v[20:21]", isDebug);
+
+    rv["v_pk_fma_f32"] = tryAssembler(
+        isaVersion, assemblerPath, "v_pk_fma_f32 v[0:1], v[2:3], v[4:5], v[6:7]", isDebug);
 
     rv["v_mad_mix_f32"]
         = tryAssembler(isaVersion,
@@ -606,6 +614,18 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4; // bytes per bank
 
+    // Per-XCD work-queue count baked into StreamK dynamic-queue kernels. Single
+    // codegen-side mirror of origami get_default_num_xcds(): gfx942/gfx950 bake
+    // 8 (the MI300X value), every other arch 1. gfx942 covers BOTH MI300X (8
+    // XCDs) and MI300A (6 XCDs), which codegen cannot tell apart, so it always
+    // bakes 8; the host guard rejects a device whose runtime NUM_XCD != this
+    // baked value (so MI300A's 6 is excluded at runtime). Power-of-two keeps the
+    // StreamK queue masking (AND/shift) valid.
+    rv["NumXCD"] = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}}) ? 8 : 1;
+
+    // Per-queue counter stride = L2 cache-line size (uniform 128B on supported archs).
+    rv["CacheLineBytes"] = 128;
+
     return rv;
 }
 
@@ -625,23 +645,17 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;
     else if(isaVersion[0] == 11)
-        // Code path for gfx11XX
-        if(isaVersion[1] == 5)
-        {
-            // Code path for gfx115X
-            if(isaVersion[2] == 0 || isaVersion[2] == 2 || isaVersion[2] == 3)
-                // gfx1150, gfx1152, gfx1153
-                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1024 * 32;
-            if(isaVersion[2] == 1)
-                // gfx1151
-                rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * 1536 * 32;
-        }
-        else if(isaVersion[2] == 2)
-            rv["PhysicalMaxVgprCU"] = 1024 * 32;
-        else
-            rv["PhysicalMaxVgprCU"] = 2 * 1536 * 32;
+    {
+        // Code path for gfx11XX (RDNA3, two SIMDs per CU, wave32).
+        // gfx1100, gfx1101 and gfx1151 have a 1536-VGPR file per SIMD; every
+        // other gfx11 part has 1024.
+        const bool has1536Vgpr = (isaVersion[1] == 0 && (isaVersion[2] == 0 || isaVersion[2] == 1))
+                                 || (isaVersion[1] == 5 && isaVersion[2] == 1);
+        const int vgprPerSimd = has1536Vgpr ? 1536 : 1024;
+        rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * vgprPerSimd * 32;
+    }
     else if(isaVersion[0] == 12)
-        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 1536 * 32;
+        rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 2 * 1536 * 32;
     else if(isaVersion[0] == 9)
         if(archCaps["ArchAccUnifiedRegs"])
             rv["PhysicalMaxVgprCU"] = 2048 * 64;

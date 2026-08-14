@@ -21,6 +21,11 @@ on:
         type: string
       build_runs_on:
         type: string
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
@@ -168,14 +173,20 @@ jobs:
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          COMPONENT_NAME: ${{ inputs.projects_to_test }}
         run: |
           python3 .github/scripts/notify_teams.py \
             --failure-stage build \
             --log-path "${{ env.BUILD_DIR }}/logs" \
-            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --component-name "${{ inputs.projects_to_test }}"
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${COMPONENT_NAME}"
 
   therock-test-windows:
     name: Test (${{ inputs.amdgpu_families }})
@@ -188,4 +199,6 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "windows"
       test_type: ${{ inputs.test_type }}
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}

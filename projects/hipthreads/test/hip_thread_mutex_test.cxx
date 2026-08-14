@@ -1,5 +1,5 @@
 #include "hip/mutex"
-#include "hip/pseudo_mutex" // From hip::thread library
+#include "hip/pseudo_mutex" // From hip::wthread library
 #include "hip/hip_runtime.h"
 #include <iostream>
 #include <cassert>
@@ -124,11 +124,11 @@ __global__ void thread_test() {
 #endif // 0
 
 int main() {
-    hip::thread([] __device__(){gmain();}).join();
+    hip::wthread([] __device__(){gmain();}).join();
 
-    ::std::vector<hip::thread> threads(1<<16);
+    ::std::vector<hip::wthread> threads(1<<16);
     for (unsigned int i = 0; i < threads.size(); ++i) {
-        threads[i] = hip::thread([] __device__(){block_sync_test();});
+        threads[i] = hip::wthread([] __device__(){block_sync_test();});
         assert(threads[i].joinable());
     }
     for (unsigned int i = 0; i < threads.size(); ++i) {

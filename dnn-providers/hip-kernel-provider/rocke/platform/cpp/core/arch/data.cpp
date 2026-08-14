@@ -831,6 +831,52 @@ static const rocke_layout_map_t lm_wmma_gfx12_b = {ROCKE_MMA_ROLE_B, 8, 32, _wmm
 static const rocke_layout_map_t lm_wmma_gfx12_c
     = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_gfx12_acc_16x16};
 
+/* gfx1250 WMMA 16x16x4 fp32 A operand (wave32): kABKLane=2, kAK1PerLane=2.
+ * row = lane / 2  (M index 0..15);  K = (lane % 2) * 2 + slot  (slot in {0,1}).
+ * Mirrors _wmma_gfx1250_a_16x16x4_f32 in target.py. */
+static void _wmma_gfx1250_a_16x16x4_f32(rocke_ir_builder_t* b,
+                                        rocke_value_t* lane,
+                                        int slot,
+                                        rocke_value_t** out0,
+                                        rocke_value_t** out1)
+{
+    rocke_value_t *c2, *row, *k_lane, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c2 = rocke_b_const_i32(b, 2);
+    row = rocke_b_div(b, lane, c2);
+    k_lane = rocke_b_mod(b, lane, c2);
+    k = rocke_b_add(b, rocke_b_mul(b, k_lane, c2), rocke_b_const_i32(b, slot));
+    if(out0)
+        *out0 = row;
+    if(out1)
+        *out1 = k;
+}
+
+/* gfx1250 WMMA 16x16x4 fp32 B operand (wave32): col = lane / 2, K = (lane % 2) * 2 + slot. */
+static void _wmma_gfx1250_b_16x16x4_f32(rocke_ir_builder_t* b,
+                                        rocke_value_t* lane,
+                                        int slot,
+                                        rocke_value_t** out0,
+                                        rocke_value_t** out1)
+{
+    rocke_value_t *c2, *col, *k_lane, *k;
+    ROCKE_ATI_COORD_GUARD(b, out0, out1);
+    c2 = rocke_b_const_i32(b, 2);
+    col = rocke_b_div(b, lane, c2);
+    k_lane = rocke_b_mod(b, lane, c2);
+    k = rocke_b_add(b, rocke_b_mul(b, k_lane, c2), rocke_b_const_i32(b, slot));
+    if(out0)
+        *out0 = k;
+    if(out1)
+        *out1 = col;
+}
+
+/* --- wmma_gfx1250_f32_16x16x4_f32: a/b/c present (frag 2/2/8, wave32) --- */
+static const rocke_layout_map_t lm_wmma_gfx1250_f32_a
+    = {ROCKE_MMA_ROLE_A, 2, 32, _wmma_gfx1250_a_16x16x4_f32};
+static const rocke_layout_map_t lm_wmma_gfx1250_f32_b
+    = {ROCKE_MMA_ROLE_B, 2, 32, _wmma_gfx1250_b_16x16x4_f32};
+
 /* =========================================================================
  * op_id -> accumulator fragment length (the c_frag_len projection of
  * target.py::_MMA_FRAGMENT_INFO).
@@ -839,9 +885,8 @@ static const rocke_layout_map_t lm_wmma_gfx12_c
  * This is the arch SSOT that rocke.core.ir.IRBuilder.mma (rocke_b_mma) consults
  * to size a tile.mma result vector from a bare op_id string; the ir bucket keeps
  * no private copy. It mirrors _MMA_FRAGMENT_INFO's c_frag_len column exactly.
- * Only atoms this engine can emit are listed: the Python SSOT also registers the
- * gfx1250 WMMA atoms, but the C99 arch registry has no gfx1250 target, so those
- * op_ids are intentionally absent here (the (0,0,0,64) fallback / unknown path).
+ * Only atoms this engine can emit are listed: this table mirrors the Python SSOT
+ * including the gfx1250 WMMA atoms.
  *
  * `ati` = arch-target internal (see arch_target_internal.h): the naming prefix
  * reserved for storage private to this arch-target port, kept out of the public
@@ -910,6 +955,14 @@ static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
     /* --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) --- */
     {"wmma_gfx12_f32_16x16x16_f16", 8},
     {"wmma_gfx12_f32_16x16x16_bf16", 8},
+    /* --- WMMA fp32 / f16 / bf16 / fp8 / bf8 (wave32, gfx1250 CDNA) --- */
+    {"wmma_gfx1250_f32_16x16x4_f32", 8},
+    {"wmma_gfx1250_f32_16x16x32_f16", 8},
+    {"wmma_gfx1250_f32_16x16x32_bf16", 8},
+    {"wmma_gfx1250_f32_16x16x64_fp8_fp8", 8},
+    {"wmma_gfx1250_f32_16x16x64_fp8_bf8", 8},
+    {"wmma_gfx1250_f32_16x16x64_bf8_fp8", 8},
+    {"wmma_gfx1250_f32_16x16x64_bf8_bf8", 8},
 };
 
 int rocke_arch_mma_c_frag_len(const char* op_id)
@@ -1576,6 +1629,124 @@ static const rocke_mma_op_t k_mma_gfx11_generic[] = {
      &lm_wmma_iu4_c},
 };
 
+/* ----------------------------- gfx1250 (CDNA/GFX12) ---------------------- */
+/* gfx1250: wave32, WMMA only (no MFMA). fp32 K=4 atom: A/B are scalar float
+ * per lane (same lane layout as mfma_f32_16x16x4_f32 on CDNA — reuses
+ * lm_mfma_16x16x4_f32_{a,b}); accumulator is <8 x float> in the gfx12
+ * column-distributed layout (lm_wmma_gfx12_c, c_frag_len=8).
+ * Primary fp16/bf16 atom is 16x16x32 (K=32, not the gfx12 RDNA 16x16x16).
+ * A/B frag_len=16 (16 fp16/bf16 elements per lane); A/B layout maps are NULL
+ * pending the gfx1250 ISA backend port (rocke_ll_backend_for); the accumulator
+ * reuses lm_wmma_gfx12_c (same 16x16 tile layout). FP8/BF8 K=64 atoms carry
+ * frag_len=8 (8 i32 per lane) with NULL A/B maps. */
+static const rocke_mma_op_t k_mma_gfx1250[] = {
+    {"wmma",
+     "fp32",
+     "fp32",
+     "fp32",
+     16,
+     16,
+     4,
+     "wmma_gfx1250_f32_16x16x4_f32",
+     2,
+     2,
+     8,
+     32,
+     &lm_wmma_gfx1250_f32_a,
+     &lm_wmma_gfx1250_f32_b,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "fp16",
+     "fp16",
+     "fp32",
+     16,
+     16,
+     32,
+     "wmma_gfx1250_f32_16x16x32_f16",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "bf16",
+     "bf16",
+     "fp32",
+     16,
+     16,
+     32,
+     "wmma_gfx1250_f32_16x16x32_bf16",
+     16,
+     16,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "fp8",
+     "fp8",
+     "fp32",
+     16,
+     16,
+     64,
+     "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+     32,
+     32,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "fp8",
+     "bf8",
+     "fp32",
+     16,
+     16,
+     64,
+     "wmma_gfx1250_f32_16x16x64_fp8_bf8",
+     32,
+     32,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "bf8",
+     "fp8",
+     "fp32",
+     16,
+     16,
+     64,
+     "wmma_gfx1250_f32_16x16x64_bf8_fp8",
+     32,
+     32,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+    {"wmma",
+     "bf8",
+     "bf8",
+     "fp32",
+     16,
+     16,
+     64,
+     "wmma_gfx1250_f32_16x16x64_bf8_bf8",
+     32,
+     32,
+     8,
+     32,
+     NULL,
+     NULL,
+     &lm_wmma_gfx12_c},
+};
+
 /* =========================================================================
  * Per-arch rocke_arch_target_t singletons (the embedded arches[gfx] entries).
  * =========================================================================
@@ -1648,6 +1819,18 @@ static const rocke_arch_target_t k_target_gfx1201 = {
     {1024, 256, 0, 106},
 };
 
+static const rocke_arch_target_t k_target_gfx1250 = {
+    "gfx1250",
+    "cdna",
+    "gfx12_cdna",
+    32,
+    163840,
+    6,
+    {k_mma_gfx1250, K_NUM(k_mma_gfx1250)},
+    {false, false, 4},
+    {1024, 256, 0, 106},
+};
+
 static const rocke_arch_target_t k_target_gfx11_generic = {
     "gfx11-generic",
     "rdna",
@@ -1676,18 +1859,20 @@ const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic},
     {"gfx1151", &k_target_gfx1151},
     {"gfx1201", &k_target_gfx1201},
+    {"gfx1250", &k_target_gfx1250},
     {"gfx90a", &k_target_gfx90a},
     {"gfx942", &k_target_gfx942},
     {"gfx950", &k_target_gfx950},
     {NULL, NULL}, /* terminator */
 };
 
-const int rocke_ati_arch_registry_len = 6;
+const int rocke_ati_arch_registry_len = 7;
 
 const char* const rocke_ati_known_arches[] = {
     "gfx11-generic",
     "gfx1151",
     "gfx1201",
+    "gfx1250",
     "gfx90a",
     "gfx942",
     "gfx950",

@@ -67,11 +67,10 @@ protected:
     hipdnnHandle_t _handle = nullptr;
 };
 
-// Builds an SDPA backward graph via the frontend API, lowers it to the backend
-// via build_operation_graph_via_descriptors, retrieves the serialized graph,
-// and verifies ALL tensor and operation attributes match the values set
-// in the frontend.
-TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdGraphRoundTrip)
+// Builds an SDPA backward graph with a tensor attention scale, lowers it to the backend
+// via build_operation_graph_via_descriptors, retrieves the serialized graph, and verifies
+// the scale tensor and operation attributes match the frontend inputs.
+TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdTensorScaleRoundTrip)
 {
     auto graph = std::make_shared<TestableGraph>();
     graph->set_name("TestSdpaBwdGraph")
@@ -104,8 +103,13 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdGraphRoundTrip)
     stats->set_dim(toVec(K_SDPA_BWD_TENSOR_STATS_DIMS))
         .set_stride(toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES));
 
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(K_SDPA_BWD_TENSOR_SCALE_UID).set_name("SCALE");
+    scale->set_value(0.125f);
+
     SdpaBackwardAttributes sdpaAttrs;
     sdpaAttrs.set_name("sdpa_bwd_op");
+    sdpaAttrs.set_attn_scale(scale);
 
     auto [dq, dk, dv] = graph->sdpa_backward(q, k, v, o, dO, stats, std::move(sdpaAttrs));
     dq->set_uid(K_SDPA_BWD_TENSOR_DQ_UID).set_output(true).set_name("dQ");
@@ -144,8 +148,8 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdGraphRoundTrip)
     EXPECT_EQ(graphT.intermediate_data_type, DataTypeSdk::FLOAT);
     EXPECT_EQ(graphT.io_data_type, DataTypeSdk::FLOAT);
 
-    // -- Verify tensors (Q, K, V, O, dO, Stats, dQ, dK, dV = 9 tensors) --
-    ASSERT_EQ(graphT.tensors.size(), 9u);
+    // -- Verify tensors (Q, K, V, O, dO, Stats, dQ, dK, dV, Scale = 10 tensors) --
+    ASSERT_EQ(graphT.tensors.size(), 10u);
 
     std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
         tensorMap;
@@ -208,6 +212,14 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdGraphRoundTrip)
     EXPECT_EQ(statsT->strides, toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES));
     EXPECT_FALSE(statsT->virtual_);
 
+    // Verify Scale tensor
+    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SCALE_UID), 0u);
+    auto* scaleT = tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID];
+    EXPECT_EQ(scaleT->name, "SCALE");
+    EXPECT_EQ(scaleT->data_type, DataTypeSdk::FLOAT);
+    EXPECT_EQ(scaleT->dims, toVec(K_SDPA_BWD_TENSOR_SCALAR_DIMS));
+    EXPECT_EQ(scaleT->strides, toVec(K_SDPA_BWD_TENSOR_SCALAR_STRIDES));
+
     // Verify dQ tensor (output) - UID, name, data type, dims, strides
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DQ_UID), 0u);
     auto* dqT = tensorMap[K_SDPA_BWD_TENSOR_DQ_UID];
@@ -256,8 +268,9 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdGraphRoundTrip)
     EXPECT_EQ(sdpa->dk_tensor_uid, K_SDPA_BWD_TENSOR_DK_UID);
     EXPECT_EQ(sdpa->dv_tensor_uid, K_SDPA_BWD_TENSOR_DV_UID);
 
-    // Verify optional tensor UIDs are absent when not set
-    EXPECT_FALSE(sdpa->scale_tensor_uid.has_value());
+    // Verify the scale tensor UID while other optional tensor UIDs are absent
+    ASSERT_TRUE(sdpa->scale_tensor_uid.has_value());
+    EXPECT_EQ(sdpa->scale_tensor_uid.value(), K_SDPA_BWD_TENSOR_SCALE_UID);
     EXPECT_FALSE(sdpa->attn_mask_tensor_uid.has_value());
     EXPECT_FALSE(sdpa->seq_len_q_tensor_uid.has_value());
     EXPECT_FALSE(sdpa->seq_len_kv_tensor_uid.has_value());
@@ -280,7 +293,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdGraphRoundTrip)
     EXPECT_FALSE(sdpa->right_bound.has_value());
 }
 
-// Sets ALL optional tensors and all non-default scalar/boolean/enum values,
+// Sets all compatible optional tensors and non-default scalar/boolean/enum values,
 // then verifies every tensor property and every field survives the round-trip.
 TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndScalars)
 {
@@ -317,12 +330,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
         .set_data_type(DataType::FLOAT);
     statsTensor->set_dim(toVec(K_SDPA_BWD_TENSOR_STATS_DIMS))
         .set_stride(toVec(K_SDPA_BWD_TENSOR_STATS_STRIDES));
-
-    // -- ALL optional input tensors --
-    auto scale = std::make_shared<TensorAttributes>();
-    scale->set_uid(K_SDPA_BWD_TENSOR_SCALE_UID).set_name("SCALE");
-    scale->set_value(0.125f);
-
+    // -- Compatible optional input tensors --
     auto attnMask = std::make_shared<TensorAttributes>();
     attnMask->set_uid(K_SDPA_BWD_TENSOR_ATTN_MASK_UID)
         .set_name("ATTN_MASK")
@@ -378,7 +386,6 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
 
     SdpaBackwardAttributes sdpaAttrs;
     sdpaAttrs.set_name("sdpa_bwd_all_optionals");
-    sdpaAttrs.set_attn_scale(scale);
     sdpaAttrs.set_bias(attnMask);
     sdpaAttrs.set_seq_len_q(seqLenQ);
     sdpaAttrs.set_seq_len_kv(seqLenKv);
@@ -426,8 +433,8 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     hipdnn_flatbuffers_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
 
-    // 9 required + 10 optional input/output tensors (including scale) = 19
-    ASSERT_EQ(graphT.tensors.size(), 19u);
+    // 9 required + 9 compatible optional input/output tensors = 18
+    ASSERT_EQ(graphT.tensors.size(), 18u);
 
     std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT*>
         tensorMap;
@@ -447,8 +454,7 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DQ_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DK_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DV_UID), 0u);
-    // Optional tensors (all present when all optionals are set)
-    ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SCALE_UID), 0u);
+    // Compatible optional tensors are present; attention scale is a scalar attribute.
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_ATTN_MASK_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SEQ_LEN_Q_UID), 0u);
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_SEQ_LEN_KV_UID), 0u);
@@ -460,10 +466,6 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     ASSERT_NE(tensorMap.count(K_SDPA_BWD_TENSOR_DBIAS_UID), 0u);
 
     // -- Verify optional tensor properties --
-    auto* scaleT = tensorMap[K_SDPA_BWD_TENSOR_SCALE_UID];
-    EXPECT_EQ(scaleT->name, "SCALE");
-    EXPECT_EQ(scaleT->dims, toVec(K_SDPA_BWD_TENSOR_SCALAR_DIMS));
-    EXPECT_EQ(scaleT->strides, toVec(K_SDPA_BWD_TENSOR_SCALAR_STRIDES));
 
     auto* attnMaskT = tensorMap[K_SDPA_BWD_TENSOR_ATTN_MASK_UID];
     EXPECT_EQ(attnMaskT->name, "ATTN_MASK");
@@ -540,9 +542,8 @@ TEST_F(IntegrationSdpaBwdDescriptorLowering, SdpaBwdWithAllOptionalTensorsAndSca
     EXPECT_EQ(sdpa->dk_tensor_uid, K_SDPA_BWD_TENSOR_DK_UID);
     EXPECT_EQ(sdpa->dv_tensor_uid, K_SDPA_BWD_TENSOR_DV_UID);
 
-    // ALL optional tensor UIDs should be present
-    ASSERT_TRUE(sdpa->scale_tensor_uid.has_value());
-    EXPECT_EQ(sdpa->scale_tensor_uid.value(), K_SDPA_BWD_TENSOR_SCALE_UID);
+    // Attention scale is represented by the scalar attribute below.
+    EXPECT_FALSE(sdpa->scale_tensor_uid.has_value());
 
     ASSERT_TRUE(sdpa->attn_mask_tensor_uid.has_value());
     EXPECT_EQ(sdpa->attn_mask_tensor_uid.value(), K_SDPA_BWD_TENSOR_ATTN_MASK_UID);

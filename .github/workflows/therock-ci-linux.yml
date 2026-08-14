@@ -18,16 +18,34 @@ on:
         type: string
       test_type:
         type: string
+      run_rocjitsu_race_check:
+        type: boolean
+        default: false
       amdgpu_families:
         type: string
       test_runs_on:
         type: string
       build_runs_on:
         type: string
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
 
+# Each Linux matrix row follows the MultiArch/MI455 pattern. One build job
+# provides artifacts to two consumers:
+#
+#   therock-build-linux
+#   - therock-test-linux: blocking package validation
+#   - rocjitsu-race-check-linux: advisory instrumentation
+#
+# Both consumers use artifacts from the build. The rocjitsu job uses
+# `continue-on-error`, so its failure stays visible without failing this Linux
+# workflow. ROCm/rocm-libraries#10072 verifies this behavior.
 jobs:
   therock-build-linux:
     name: Build (${{ inputs.amdgpu_families }})
@@ -36,7 +54,6 @@ jobs:
       id-token: write
     container:
       image: ${{ inputs.docker_image }}
-      options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
     env:
@@ -44,7 +61,6 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -148,20 +164,27 @@ jobs:
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          COMPONENT_NAME: ${{ inputs.projects_to_test }}
         run: |
           python3 .github/scripts/notify_teams.py \
             --failure-stage build \
             --log-path TheRock/build/logs \
-            --webhook-urls '{"miopen":"${{ secrets.MIOPEN_CI_WEBHOOK_URL }}","hipdnn":"${{ secrets.HIPDNN_CI_WEBHOOK_URL }}"}' \
-            --pr-number "${{ github.event.pull_request.number }}" \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --component-name "${{ inputs.projects_to_test }}"
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${COMPONENT_NAME}"
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
@@ -170,4 +193,19 @@ jobs:
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+
+  rocjitsu-race-check-linux:
+    name: rocjitsu race check (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    # The matrix boolean records that projects/hipblaslt selected this row. The
+    # `tensilelite` token confirms that this is the hipBLASLt library row, not a
+    # provider row containing a name such as `hipblasltprovider`.
+    if: ${{ inputs.run_rocjitsu_race_check && inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950')) && contains(inputs.projects_to_test, 'tensilelite') }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      build_runs_on: ${{ inputs.build_runs_on }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}

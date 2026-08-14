@@ -24,7 +24,6 @@ jobs:
     name: ${{ matrix.name }}
     container:
       image: rocm/miopen-dev:latest
-      options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: false
       matrix:

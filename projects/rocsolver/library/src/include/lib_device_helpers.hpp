@@ -194,30 +194,25 @@ __device__ void
 
 /** FIND_MAX_TRIDIAG finds the element with the largest magnitude in the
     tridiagonal matrix **/
-template <typename T>
-__device__ __host__ T find_max_tridiag(const rocblas_int start, const rocblas_int end, T* D, T* E)
+template <typename T, typename I>
+__device__ __host__ T find_max_tridiag(const I start, const I end, T* D, T* E)
 {
     T anorm = abs(D[end]);
-    for(int i = start; i < end; i++)
+    for(I i = start; i < end; i++)
         anorm = std::fmax(anorm, std::fmax(abs(D[i]), abs(E[i])));
     return anorm;
 }
 
 /** SCALE_TRIDIAG scales the elements of the tridiagonal matrix by a given
     scale factor **/
-template <typename T>
-__device__ __host__ void scale_tridiag(const rocblas_int start,
-                                       const rocblas_int end,
-                                       T* D,
-                                       T* E,
-                                       T scale,
-                                       const rocblas_int tid = 0,
-                                       const rocblas_int tid_inc = 1)
+template <typename T, typename I>
+__device__ __host__ void
+    scale_tridiag(const I start, const I end, T* D, T* E, T scale, const I tid = 0, const I tid_inc = 1)
 {
     if(tid == 0)
         D[end] *= scale;
 
-    for(int i = tid + start; i < end; i += tid_inc)
+    for(I i = tid + start; i < end; i += tid_inc)
     {
         D[i] *= scale;
         E[i] *= scale;

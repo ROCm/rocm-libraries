@@ -24,7 +24,7 @@ int main(int, char**)
   ::std::latch l(2);
 
   l.count_down();
-  hip::thread t = support::make_test_thread([&](){
+  hip::wthread t = support::make_test_thread([&](){
     l.count_down();
   });
   l.wait();

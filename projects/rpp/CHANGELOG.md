@@ -2,13 +2,15 @@
 
 Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/rpp/en/latest](https://rocm.docs.amd.com/projects/rpp/en/latest)
 
-## (Unreleased) RPP 3.1.2
+## (Unreleased) RPP 3.2.0
 
 ### Added
 
 - Single-image processing support for 8 kernels (Brightness, Blend, Box Filter, Crop, Flip, Gaussian Filter, Median Filter, Resize Nearest Neighbor) to match performance with OpenCV
 - Runtime backend selection parameter (`RppBackend executionBackend`) for all RPP tensor API functions
 - Backend tracking in `rppHandle_t` to store backend type (HOST or HIP)
+- `RPP_ERROR_HIP_LAUNCH` error type for reporting HIP kernel launch errors
+- `rpp_BACKEND_TYPE` and `rpp_AUDIO_AUGMENTATIONS_SUPPORT` variables to RPP CMake package config
 
 ### Changed
 
@@ -17,27 +19,16 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 - Enhanced layout validation for image augmentations within unified API
 - Test suite dependency on TurboJPEG removed. Updated to use .rgb files as input.
 - OpenCV and pandas are changed to optional dependency for the test suite
-
-## (Unreleased) RPP 3.0.0
-* Runtime backend selection parameter (`RppBackend executionBackend`) for all RPP tensor API functions
-* Backend tracking in `rppHandle_t` to store backend type (HOST or HIP)
-* Added `RPP_ERROR_HIP_LAUNCH` error type for reporting HIP kernel launch errors.
-* Added `rpp_BACKEND_TYPE` and `rpp_AUDIO_AUGMENTATIONS_SUPPORT` variables to RPP CMake package config.
+- CMakeLists.txt updated to remove batch PD references
+- Updated test suite to use `rpp_BACKEND_TYPE` and `rpp_AUDIO_AUGMENTATIONS_SUPPORT` variables from RPP CMake package config instead of header parsing
+- `find_package(rpp)` now automatically passes on public include directories to the target link interface
 
 ### Removed
-* BatchPD legacy support completely removed
-* LEGACY_SUPPORT compilation flag and all code enclosed within it
-* OpenCL backend support
-* Batch PD test suite and installation
 
-### Changed
-
-* All RPP tensor API functions now unified with a single function signature
-* Updated all test suite calls to use unified API with backend parameter
-* Enhanced layout validation for image augmentations within unified API
-* CMakeLists.txt updated to remove batch PD references
-* Updated test suite to use `rpp_BACKEND_TYPE` and `rpp_AUDIO_AUGMENTATIONS_SUPPORT` variables from RPP CMake package config instead of header parsing.
-* `find_package(rpp)` now automatically passes on public include directories to the target link interface.
+- BatchPD legacy support completely removed
+- LEGACY_SUPPORT compilation flag and all code enclosed within it
+- OpenCL backend support
+- Batch PD test suite and installation
 
 
 ## RPP 2.2.1 for ROCm 7.2.1

@@ -102,7 +102,7 @@ BenchmarkProblems:
           # - Exact: [128, 128, 1, 129] # classic format
           # - Exact: [256, 256, 1, 64] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
-          # - Exact: [1024, 1024, 1, 1024] # classic format
+          - Exact: [1024, 1024, 1, 1024] # classic format
         - BiasTypeArgs: ['s', 'h']
         - FactorDimArgs: [0,1]
         - ActivationArgs:

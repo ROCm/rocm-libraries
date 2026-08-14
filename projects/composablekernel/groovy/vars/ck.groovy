@@ -547,13 +547,16 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                attemptNode = env.NODE_NAME
-                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                // Derive GPU requirement from the node label: only "nogpu" stages
-                // skip the driver/device checks. A new non-GPU label would need
-                // adding here (otherwise preflight would wrongly demand a GPU).
-                preflight(!label.contains('nogpu'))
-                runInPlace(body, transientRetries)
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
+                    sh 'echo "The updated workspace is: $WORKSPACE"'
+                    attemptNode = env.NODE_NAME
+                    echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
+                    // Derive GPU requirement from the node label: only "nogpu" stages
+                    // skip the driver/device checks. A new non-GPU label would need
+                    // adding here (otherwise preflight would wrongly demand a GPU).
+                    preflight(!label.contains('nogpu'))
+                    runInPlace(body, transientRetries)
+                }
             }
             return
         }
@@ -1234,7 +1237,7 @@ def run_downstream_tests(Map conf=[:]){
         try
         {
             echo "Pulling image: ${conf.image}"
-            retimage = docker.image("${conf.image}")
+            def retimage = docker.image("${conf.image}")
             withDockerRegistry([ credentialsId: "ck_docker_cred", url: "" ]) {
                 retimage.pull()
             }
@@ -1448,11 +1451,8 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
                 -D BATCHED_GEMM_DATATYPE="fp16" \
                 -D BATCHED_GEMM_LAYOUT="rcr" \
-                -D CONTRACTION_MULTI_ABD_DATATYPE="fp16" \
-                -D CONTRACTION_MULTI_ABD_LAYOUT="rcr" \
-                -D CONTRACTION_MULTI_ABD_CONFIG_FILE="smoke_ci_config.json" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all benchmark_contraction_multi_abd_all && \
+            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all  benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_gemm_tensor_quant_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_batched_gemm_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \
@@ -1479,11 +1479,8 @@ def runTileEngineGemmTests(String arch, String compiler) {
                 -D GEMM_PRESHUFFLE_LAYOUT="rcr" \
                 -D MX_GEMM_DATATYPE="fp4;fp8" \
                 -D MX_GEMM_LAYOUT="rcr" \
-                -D CONTRACTION_MULTI_ABD_DATATYPE="fp16" \
-                -D CONTRACTION_MULTI_ABD_LAYOUT="rcr" \
-                -D CONTRACTION_MULTI_ABD_CONFIG_FILE="smoke_ci_config.json" \
                 -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_contraction_multi_abd_all && \
+            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all && \
             python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_preshuffle_results.json && \
             python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_multi_d_results.json && \

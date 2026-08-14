@@ -99,7 +99,7 @@ int main(int, char**) {
     const auto st = ss.get_token();
     assert(!st.stop_requested());
 
-    hip::thread t = support::make_test_thread([&]() { ss.request_stop(); });
+    hip::wthread t = support::make_test_thread([&]() { ss.request_stop(); });
 
     t.join();
     assert(st.stop_requested());
@@ -111,7 +111,7 @@ int main(int, char**) {
     const auto st = ss.get_token();
     assert(!st.stop_requested());
 
-    hip::thread t = support::make_test_thread([&]() { ss.request_stop(); });
+    hip::wthread t = support::make_test_thread([&]() { ss.request_stop(); });
 
     while (!st.stop_requested()) {
       // should eventually exit the loop
@@ -131,7 +131,7 @@ int main(int, char**) {
 
     bool flag = false;
 
-    hip::thread t = support::make_test_thread([&]() {
+    hip::wthread t = support::make_test_thread([&]() {
       using namespace ::std::chrono_literals;
       hip::this_thread::sleep_for(1ms);
 

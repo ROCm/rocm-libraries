@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -48,8 +48,29 @@ Tests:
   fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+
+- name: spsm_csr
+  category: quick
+  function: spsm_csr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [50]
+  K: [22]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_ROW]
+  orderC: [HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
 
@@ -69,8 +90,32 @@ Tests:
   fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  filename: [nos1,
+             nos3, 
+             nos5]
+
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [22]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_ROW]
+  orderC: [HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
   filename: [nos1,
@@ -93,8 +138,32 @@ Tests:
   fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  orderB: [HIPSPARSE_ORDER_COL]
+  orderC: [HIPSPARSE_ORDER_COL]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  filename: [scircuit,
+             shipsec1,
+             bmwcra_1]
+
+- name: spsm_csr
+  category: pre_checkin
+  function: spsm_csr
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 1
+  K: [18]
+  alpha: [2.0]
+  alphai: [0.0]
+  beta: [1.0]
+  betai: [0.0]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  orderB: [HIPSPARSE_ORDER_ROW]
+  orderC: [HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ONE]
   spsm_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
   filename: [scircuit,

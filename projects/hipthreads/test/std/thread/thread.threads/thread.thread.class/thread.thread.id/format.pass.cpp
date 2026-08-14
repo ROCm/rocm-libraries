@@ -14,7 +14,7 @@
 // <thread>
 
 // template<class charT>
-// struct formatter<thread::id, charT>;
+// struct formatter<wthread::id, charT>;
 
 // template<class FormatContext>
 //   typename FormatContext::iterator
@@ -38,13 +38,13 @@
 #define SV(S) MAKE_STRING_VIEW(CharT, S)
 
 template <class StringViewT>
-void test_format(StringViewT expected, hip::thread::id arg) {
+void test_format(StringViewT expected, hip::wthread::id arg) {
   using CharT      = typename StringViewT::value_type;
   using String     = ::std::basic_string<CharT>;
   using OutIt      = ::std::back_insert_iterator<String>;
   using FormatCtxT = ::std::basic_format_context<OutIt, CharT>;
 
-  const ::std::formatter<hip::thread::id, CharT> formatter;
+  const ::std::formatter<hip::wthread::id, CharT> formatter;
 
   String result;
   OutIt out             = ::std::back_inserter(result);
@@ -56,9 +56,9 @@ void test_format(StringViewT expected, hip::thread::id arg) {
 template <class CharT>
 void test_fmt() {
 #if !defined(__APPLE__) && !defined(__FreeBSD__)
-  test_format(SV("0"), hip::thread::id());
+  test_format(SV("0"), hip::wthread::id());
 #else
-  test_format(SV("0x0"), hip::thread::id());
+  test_format(SV("0x0"), hip::wthread::id());
 #endif
 }
 

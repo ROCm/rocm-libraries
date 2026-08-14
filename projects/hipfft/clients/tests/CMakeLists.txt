@@ -65,6 +65,7 @@ set( hipfft-test_source
   accuracy_test_callback.cpp
   accuracy_test_emulation.cpp
   hipfftw_test.cpp
+  hipfftxt_test.cpp
   multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
@@ -255,7 +256,9 @@ foreach( target ${TEST_TARGETS} )
     # On Linux, always include amdgcnspirv target so the clients work
     # on an architecture that the runtime supports but was not
     # specified a build time
-    if( NOT WIN32 )
+    # TODO: amdgcnspirv is not compatible with ASAN.
+    get_target_property(test_opts ${target} COMPILE_OPTIONS)
+    if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
       target_compile_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
       target_link_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
     endif()

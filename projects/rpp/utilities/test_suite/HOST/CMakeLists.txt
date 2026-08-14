@@ -153,7 +153,6 @@ else()
         endif()
 
         if(OpenMP_CXX_FOUND)
-            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
             set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} OpenMP::OpenMP_CXX)
             message("-- ${Green}${PROJECT_NAME} All Tensor HOST tests set to build with OpenMP${ColourReset}")
 
@@ -191,13 +190,13 @@ else()
 
             # HOST test set 3 - RPP Tensor-Audio HOST test suite
             if(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
-                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAUDIO_SUPPORT=1")
                 message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with RPP_AUDIO_SUPPORT set to ON${ColourReset}")
                 if(libsnd_LIBS)
                     include_directories(${SndFile_INCLUDE_DIRS})
                     link_directories(${SndFile_LIBRARIES_DIR} /usr/local/lib/)
                     message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with libsnd${ColourReset}")
                     add_executable(Tensor_audio_host Tensor_audio_host.cpp)
+                    target_compile_definitions(Tensor_audio_host PRIVATE AUDIO_SUPPORT=1)
                     target_link_libraries(Tensor_audio_host ${libsnd_LIBS} -lsndfile ${LINK_LIBRARY_LIST})
                 else()
                     message("-- ${Yellow}Warning: libsnd must be installed to install ${PROJECT_NAME} Tensor-Audio tests successfully!${ColourReset}")

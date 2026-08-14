@@ -2942,6 +2942,7 @@ namespace TensileLite
             inputs->d             = (void*)ptrs[ContractionProblemGemm::TENSOR::D];
             inputs->e             = (void*)ptrs[ContractionProblemGemm::TENSOR::E];
             inputs->bias          = (void*)ptrs[ContractionProblemGemm::TENSOR::BIAS];
+            inputs->gateResidual  = (void*)ptrs[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
             inputs->scaleA        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEA];
             inputs->scaleB        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEB];
             inputs->scaleC        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEC];
@@ -2958,7 +2959,8 @@ namespace TensileLite
             inputs->batchB    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::B];
             inputs->batchC    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::C];
             inputs->batchD    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::D];
-            inputs->batchBias = (void**)batchPtrs[ContractionProblemGemm::TENSOR::BIAS];
+            inputs->batchBias         = (void**)batchPtrs[ContractionProblemGemm::TENSOR::BIAS];
+            inputs->batchGateResidual = (void**)batchPtrs[ContractionProblemGemm::TENSOR::GATE_RESIDUAL];
 
             inputs->gpu = isGPU;
 
