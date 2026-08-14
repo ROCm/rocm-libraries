@@ -32,11 +32,10 @@ inline bool isRuntimeGemmAccumulator(ScalarType type) {
     }
 }
 
-inline void validateRuntimeGemm(const GemmRequest& problem) {
+inline void validateRuntimeGemmProblem(const GemmProblem& problem) {
     requireRank(problem.a.values.shape(), 2, "Reference GEMM", "A");
     requireRank(problem.b.values.shape(), 2, "Reference GEMM", "B");
     requireRank(problem.c.shape(), 2, "Reference GEMM", "C");
-    requireRank(problem.d.shape(), 2, "Reference GEMM", "D");
 
     const size_t m = problem.a.values.shape()[0];
     const size_t k = problem.a.values.shape()[1];
@@ -45,8 +44,6 @@ inline void validateRuntimeGemm(const GemmRequest& problem) {
         throw std::invalid_argument("Reference GEMM K dimension mismatch.");
     if (problem.c.shape() != Shape{m, n})
         throw std::invalid_argument("Reference GEMM C shape mismatch.");
-    if (problem.d.shape() != Shape{m, n})
-        throw std::invalid_argument("Reference GEMM D shape mismatch.");
     if (!isRuntimeGemmAccumulator(problem.accumulatorType))
         throw std::invalid_argument(
             "Runtime reference GEMM currently supports F16, BF16, F32, F64, I32, C64, and "
@@ -71,8 +68,8 @@ inline void validateRuntimeGemm(const GemmRequest& problem) {
     validateOperandType(problem.a.values.type(), "A");
     validateOperandType(problem.b.values.type(), "B");
     validateOperandType(problem.c.type(), "C");
-    validateOperandType(problem.d.type(), "D");
-    if (complexAccumulator != isComplexScalarType(problem.d.type()))
+    validateOperandType(problem.outputType, "D");
+    if (complexAccumulator != isComplexScalarType(problem.outputType))
         throw std::invalid_argument("Reference GEMM complex accumulator/output mismatch.");
 
     auto validateComputeType = [&](const GemmOperand& operand, const char* name) {
@@ -126,7 +123,7 @@ inline void validateRuntimeGemm(const GemmRequest& problem) {
          problem.epilogue.outputScale.imag() != 0.0))
         throw std::invalid_argument("Reference GEMM real accumulator has a complex scalar.");
     if (problem.epilogue.outputConversion == OutputConversion::SaturatingInt8 &&
-        problem.d.type() != ScalarType::Int8)
+        problem.outputType != ScalarType::Int8)
         throw std::invalid_argument(
             "Reference GEMM saturating output conversion currently requires Int8 output.");
 
@@ -174,6 +171,18 @@ inline void validateRuntimeGemm(const GemmRequest& problem) {
         if (complexAccumulator)
             throw std::invalid_argument("Complex reference GEMM does not support block scaling.");
     }
+}
+
+inline void validateRuntimeGemm(const GemmRequest& problem) {
+    validateRuntimeGemmProblem(problem);
+    requireRank(problem.d.shape(), 2, "Reference GEMM", "D");
+
+    const Shape expectedShape{problem.a.values.shape()[0], problem.b.values.shape()[1]};
+    if (problem.d.shape() != expectedShape)
+        throw std::invalid_argument("Reference GEMM D shape mismatch.");
+    if (problem.d.type() != problem.outputType)
+        throw std::invalid_argument(
+            "Reference GEMM destination type does not match the problem output type.");
     (void)problem.outputSelection.selectedCount(problem.d.shape().elementCount());
 }
 
@@ -181,11 +190,10 @@ template <typename Accumulator>
 class RuntimeGemmFinalizer {
    public:
     explicit RuntimeGemmFinalizer(
-        const GemmRequest& problem,
+        const GemmProblem& problem,
         RuntimeQuantizer<Accumulator> quantizeAccumulator = RuntimeQuantizer<Accumulator>())
         : m_problem(problem),
           m_c(problem.c),
-          m_d(problem.d, problem.epilogue.outputConversion),
           m_quantizeAccumulator(std::move(quantizeAccumulator)),
           m_alpha(
               m_quantizeAccumulator(runtimeScalar<Accumulator>(problem.epilogue.alpha, "alpha"))),
@@ -216,7 +224,7 @@ class RuntimeGemmFinalizer {
     }
 
     // Finalize a backend-produced raw accumulator.
-    void store(size_t row, size_t column, Accumulator accumulation) const {
+    Accumulator finalize(size_t row, size_t column, Accumulator accumulation) const {
         Accumulator effectiveAlpha = m_alpha;
         if (!m_alphaIsZero) {
             if (m_scaleA) effectiveAlpha = multiply(effectiveAlpha, (*m_scaleA)[row]);
@@ -230,12 +238,12 @@ class RuntimeGemmFinalizer {
 
         Accumulator result = multiply(effectiveAlpha, accumulation);
         if (!m_betaIsZero) result = add(result, multiply(m_beta, m_c(row, column)));
-        storeCombined(row, column, result);
+        return finalizeCombined(row, column, result);
     }
 
     // Finalize a value whose alpha/beta combination was already performed by
     // the backend, preserving that backend's established floating-point order.
-    void storeCombined(size_t row, size_t column, Accumulator result) const {
+    Accumulator finalizeCombined(size_t row, size_t column, Accumulator result) const {
         if (m_bias) {
             const MatrixAxis axis = m_problem.epilogue.bias->axis;
             result = add(result, (*m_bias)[axis == MatrixAxis::Row ? row : column]);
@@ -243,13 +251,12 @@ class RuntimeGemmFinalizer {
         result = m_quantizeAccumulator(applyActivation(
             m_problem.epilogue.activation, result, m_activationParameter0, m_activationParameter1));
         result = multiply(result, m_outputScale);
-        m_d.store(row, column, result);
+        return result;
     }
 
    private:
-    const GemmRequest& m_problem;
+    const GemmProblem& m_problem;
     RuntimeMatrixReader<Accumulator> m_c;
-    RuntimeMatrixOutputWriter<Accumulator> m_d;
     RuntimeQuantizer<Accumulator> m_quantizeAccumulator;
     std::optional<RuntimeVectorReader<Accumulator>> m_bias;
     std::optional<RuntimeVectorReader<Accumulator>> m_scaleAlpha;
@@ -279,6 +286,8 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
     const RuntimeQuantizer<Accumulator> quantizeAccumulator(
         roundAfterEachStep ? std::optional<ScalarType>(problem.accumulatorType) : std::nullopt);
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem, quantizeAccumulator);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
+                                                        problem.epilogue.outputConversion);
     const RuntimeMathFunction<Accumulator> operandMath =
         runtimeMathFunction<Accumulator>(problem.mathMode);
 
@@ -370,7 +379,7 @@ GemmRunInfo runPointwiseGemmTyped(const GemmRequest& problem) {
             }
         }
 
-        finalizer.store(row, column, sum);
+        output.store(row, column, finalizer.finalize(row, column, sum));
     };
 
     const size_t logicalElements = problem.d.shape().elementCount();

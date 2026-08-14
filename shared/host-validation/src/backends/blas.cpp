@@ -314,9 +314,12 @@ GemmRunInfo runTransforming(const GemmRequest& problem) {
 
     const RuntimeMatrixReader<Accumulator> stagedOutput(stagedC.view());
     const RuntimeGemmFinalizer<Accumulator> finalizer(problem);
+    const RuntimeMatrixOutputWriter<Accumulator> output(problem.d,
+                                                        problem.epilogue.outputConversion);
     for (size_t row = 0; row < problem.d.shape()[0]; ++row)
         for (size_t column = 0; column < problem.d.shape()[1]; ++column)
-            finalizer.storeCombined(row, column, stagedOutput(row, column));
+            output.store(row, column,
+                         finalizer.finalizeCombined(row, column, stagedOutput(row, column)));
 
     return {
         .backendUsed = GemmBackend::Blas,
