@@ -518,6 +518,12 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, I>(
             uplo, n, kd, nb, batch_count, &size_scalars, &size_D, &size_V, &size_W, &size_X,
             &size_Z, &size_work, &size_workArr_he2hb);
+        assert(size_D % sizeof(T) == 0);
+        assert(size_V % sizeof(T) == 0);
+        assert(size_W % sizeof(T) == 0);
+        assert(size_X % sizeof(T) == 0);
+        assert(size_Z % sizeof(T) == 0);
+        assert(size_work % sizeof(T) == 0);
         T* he2hb_D = he2hb_work;
         T* he2hb_V = he2hb_D + size_D / sizeof(T);
         T* he2hb_W = he2hb_V + size_V / sizeof(T);
@@ -540,7 +546,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // V_hb2st and tau_hb2st store the hb2st Householder data
         ROCBLAS_CHECK(rocsolver_sb2st_hb2st_template<BATCHED, STRIDED, T, I>(
             handle, rocblas_fill_lower, n, kd, // opts
-            Aband, 0, ldab, strideAband, // A
+            Aband, 0, ldab, strideAband, // Aband
             D, strideD, // D
             E, strideE, // E
             V_hb2st, ldv_hb2st, strideV_hb2st, // V
@@ -818,6 +824,12 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, I>(
             uplo, n, kd, nb, batch_count, &size_scalars, &size_D, &size_V, &size_W, &size_X,
             &size_Z, &size_work, &size_workArr_he2hb);
+        assert(size_D % sizeof(T) == 0);
+        assert(size_V % sizeof(T) == 0);
+        assert(size_W % sizeof(T) == 0);
+        assert(size_X % sizeof(T) == 0);
+        assert(size_Z % sizeof(T) == 0);
+        assert(size_work % sizeof(T) == 0);
         T* he2hb_D = he2hb_work;
         T* he2hb_V = he2hb_D + size_D / sizeof(T);
         T* he2hb_W = he2hb_V + size_V / sizeof(T);
@@ -844,7 +856,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
             D, strideD, // D
             E, strideE, // E
             V_hb2st, ldv_hb2st, strideV_hb2st, // V
-            tau_hb2st, strideTau_hb2st, batch_count));
+            tau_hb2st, strideTau_hb2st, // tau
+            batch_count));
 
         if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
         {

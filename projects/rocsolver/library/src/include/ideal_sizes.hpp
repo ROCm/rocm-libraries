@@ -330,7 +330,7 @@
 /*! \brief Block size nb used by he2hb in the 2-stage algorithm in SYEVD/HEEVD.
     Must satisfy nb >= kd and nb % kd == 0. */
 #ifndef SYEVD_2STAGE_NB
-#define SYEVD_2STAGE_NB 128
+#define SYEVD_2STAGE_NB (2*SYEVD_2STAGE_KD)
 #endif
 
 /*************************** sytf2/sytrf **************************************
