@@ -43,6 +43,7 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <span>
 #include <tuple>
 
 namespace TensileLite
@@ -1795,7 +1796,6 @@ namespace TensileLite
                                      TensorDescriptor const& scaleDesc,
                                      size_t                  mxBlock,
                                      rocisa::DataType        scaleEltType,
-                                     bool                    transposed,
                                      bool                    isMatrixA,
                                      MXScaleLayout           swizzleLayout,
                                      bool*                   preswizzledFlag) {
@@ -1838,6 +1838,16 @@ namespace TensileLite
                         = multiplyElementSize(dataDesc.strides()[2], dataDesc.elementBytes());
                     scaleBatchStrideBytes = scaleDesc.strides()[scaleDesc.sizes().size() - 1];
                 }
+                auto mxBatchOutput =
+                    [](void* buffer, size_t bufferBytes, size_t offset, size_t batchBytes) {
+                        if(offset > bufferBytes)
+                            throw std::invalid_argument(
+                                "MX output offset exceeds host buffer capacity.");
+                        size_t capacity = bufferBytes - offset;
+                        if(batchBytes != 0)
+                            capacity = std::min(capacity, batchBytes);
+                        return std::span<uint8_t>(static_cast<uint8_t*>(buffer) + offset, capacity);
+                    };
 
                 auto dataInitMode  = m_vdata[dataTensorEnum].init;
                 auto scaleInitMode = m_vdata[scaleTensorEnum].init;
@@ -1869,21 +1879,23 @@ namespace TensileLite
                 bool const   kFast          = (boundIdx == 0);
                 for(size_t b = 0; b < batchCount; b++)
                 {
-                    auto* dataPtr  = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
-                                     + b * dataBatchStrideBytes;
-                    auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
-                                     + b * scaleBatchStrideBytes;
+                    auto dataOutput  = mxBatchOutput(pristineData.cpuInput.valid.get(),
+                                                     dataDesc.totalAllocatedBytes(),
+                                                     b * dataBatchStrideBytes,
+                                                     dataBatchStrideBytes);
+                    auto scaleOutput = mxBatchOutput(pristineScale.cpuInput.valid.get(),
+                                                     scaleDesc.totalAllocatedBytes(),
+                                                     b * scaleBatchStrideBytes,
+                                                     scaleBatchStrideBytes);
                     generateMXInput(hipDataT,
                                     hipScaleT,
-                                    dataPtr,
-                                    scalePtr,
+                                    dataOutput,
+                                    scaleOutput,
                                     rows,
                                     cols,
                                     stride,
-                                    transposed,
                                     scaleBlockRowSize,
                                     scaleBlockColSize,
-                                    isMatrixA,
                                     MXScaleLayout::None,
                                     initModeToMXMethod(dataInitMode),
                                     -1.0f,
@@ -1892,7 +1904,7 @@ namespace TensileLite
                                     m_initializationSeed);
                     if(kFast)
                         ::restrideMXScaleBufferKFast(
-                            scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
+                            scaleOutput, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
                 }
 
                 // When the kernel needs a swizzled scale, regenerate it with the
@@ -1925,20 +1937,22 @@ namespace TensileLite
                     std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
                     for(size_t b = 0; b < batchCount; b++)
                     {
-                        auto* dataPtr  = static_cast<uint8_t*>(pristineData.cpuInput.valid.get())
-                                         + b * dataBatchStrideBytes;
-                        auto* scalePtr = gpuScaleBuf.data() + b * swizzledScaleBytesPerBatch;
+                        auto dataOutput  = mxBatchOutput(pristineData.cpuInput.valid.get(),
+                                                         dataDesc.totalAllocatedBytes(),
+                                                         b * dataBatchStrideBytes,
+                                                         dataBatchStrideBytes);
+                        auto scaleOutput = std::span<uint8_t>(gpuScaleBuf.data()
+                                                                  + b * swizzledScaleBytesPerBatch,
+                                                              swizzledScaleBytesPerBatch);
                         generateMXInput(hipDataT,
                                         hipScaleT,
-                                        dataPtr,
-                                        scalePtr,
+                                        dataOutput,
+                                        scaleOutput,
                                         rows,
                                         cols,
                                         stride,
-                                        transposed,
                                         scaleBlockRowSize,
                                         scaleBlockColSize,
-                                        isMatrixA,
                                         swizzleLayout,
                                         initModeToMXMethod(dataInitMode),
                                         -1.0f,
@@ -1992,7 +2006,6 @@ namespace TensileLite
                               problem.mxsa(),
                               problem.mxBlockA(),
                               problem.mxTypeA(),
-                              problem.transA(),
                               /*isMatrixA=*/true,
                               layoutA,
                               &m_mxPreswizzledA);
@@ -2016,7 +2029,6 @@ namespace TensileLite
                               problem.mxsb(),
                               problem.mxBlockB(),
                               problem.mxTypeB(),
-                              problem.transB(),
                               /*isMatrixA=*/false,
                               layoutB,
                               &m_mxPreswizzledB);
