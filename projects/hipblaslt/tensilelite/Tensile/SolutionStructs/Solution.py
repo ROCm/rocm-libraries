@@ -2688,6 +2688,15 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
 
+    # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
+    # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
+    if state["TDMLoadWaveSync"]:
+      if state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "TDMLoadWaveSync requires ScheduleIterAlg=4 (StinkyTofu backend)")
+        return
+      if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
+        state["TDMLoadWaveSync"] = False
+
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]

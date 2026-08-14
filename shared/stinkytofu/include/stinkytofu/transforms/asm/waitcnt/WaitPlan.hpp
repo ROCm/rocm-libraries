@@ -48,6 +48,12 @@ struct WaitCountSpec {
     int tensorCount = kUnused;  // tlcnt -> s_wait_tensorcnt
     int asyncCount = kUnused;   // asynccnt -> s_wait_asynccnt
 
+    // Memory tokens of the tensor_load ops this tensorcnt wait drains (union,
+    // sorted-unique). Attached to the emitted s_wait_tensorcnt as MemTokenData so
+    // later passes (e.g. TDMLoadWaveSyncPass) can identify the drained wait group.
+    // Empty when tensorCount is kUnused or no drained load carries a token.
+    std::vector<int> tensorTokens;
+
     bool isValid() const {
         return dsCount != kUnused || bufferCount != kUnused || kmCount != kUnused ||
                tensorCount != kUnused || asyncCount != kUnused;

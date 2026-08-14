@@ -141,6 +141,9 @@ void setPseudoRegistersInBlock(BasicBlock& bb, PassContext& passCtx) {
         else if (isDSRead(*inst) || isGlobalStoreAsyncFromLds(*inst))
             processLdsReader(*inst, *mt, bb.getLabel());
         else
+            // StinkyWaitCntInsertionPass tags s_wait_tensorcnt with MemTokenData,
+            // which would hit this assert — safe only because it runs strictly after
+            // this pass. If reordered, teach this branch to tolerate wait-cnt insts.
             assert(false &&
                    "instruction has MemTokenData but is not a barrier, fence, "
                    "tensor_load, ds_write, ds_read, or global_store_async_from_lds");

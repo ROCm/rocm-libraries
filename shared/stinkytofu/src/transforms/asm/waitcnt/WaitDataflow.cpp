@@ -129,6 +129,31 @@ bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
     return false;
 }
 
+// Sorted-unique union of the memory tokens of the tensor_load ops a tensorcnt wait
+// of value `tensorCount` drains: a wait of W keeps the W newest ops of each per-pred
+// queue in flight and drains the older prefix q.ops[0 .. size-W-1]. Since the emitted
+// W is a min across predecessor queues, at a CFG merge this union is a conservative
+// superset of what any single path drains. Drained ops without MemTokenData
+// contribute nothing (no token to add).
+std::vector<int> drainedTensorTokens(const DataflowState& state, int tensorCount) {
+    std::vector<int> out;
+    if (tensorCount < 0) return out;
+    for (const auto& q : state.queues[CK_Tensor]) {
+        const int qsize = static_cast<int>(q.ops.size());
+        const int drainedEnd = qsize - tensorCount;  // ops [0, drainedEnd) are drained
+        for (int idx = 0; idx < drainedEnd; ++idx) {
+            StinkyInstruction* op = q.ops[idx];
+            if (op == nullptr) continue;
+            const auto* mt = op->getModifier<MemTokenData>();
+            if (mt == nullptr) continue;
+            out.insert(out.end(), mt->tokens.begin(), mt->tokens.end());
+        }
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -904,6 +929,14 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
                 // Emit the optimizer's planned wait where present (floor),
                 // else the freshly recomputed requirement.
                 WaitCountSpec applySpec = mergePlanAndComputed(optimizerPlan, inst, computed, emit);
+
+                // Capture the drained tensor-token union from the LIVE (pre-trim)
+                // queues, so the emitted s_wait_tensorcnt can carry it. This is the
+                // final anchor set (finalizePlan overwrites plan.anchorWaits below),
+                // and the queues here are exactly those the wait drains.
+                if (applySpec.tensorCount != WaitCountSpec::kUnused) {
+                    applySpec.tensorTokens = drainedTensorTokens(state, applySpec.tensorCount);
+                }
 
                 for (int c = 0; c < CK_Count; ++c) {
                     int w = getCounterField(applySpec, static_cast<CounterKind>(c));
