@@ -796,7 +796,14 @@ def _grComputeAllOffsets_legacy(module, writer, tileInfo, colId, rowId, rowOffse
     module.add(VAddU32(dst=vgpr(rowOffset), src0=offset, src1=vgpr(rowOffset), comment="%s: advance row for GR offset %u"%(tileInfo.tc, i)))
     rotatedcolId = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_rotatedcolId")
     loadWidth = tileInfo.loadWidthGR
-    if tileInfo.loadRatioGR == 0.5:
+    # The rotation below is one half of a pair: GR writes the second load of a
+    # subtile at a rotated column, and the reader rotates back. Only two readers
+    # do that -- the swizzle branch of _lraTileAssignment_legacy, and the FP8
+    # path, which de-rotates unconditionally. SourceSwap turns the swizzle off in
+    # favour of the interleaved row map (see states.subtileLdsSwizzle), leaving
+    # nothing to undo the rotation, so rows written by the second load would be
+    # read back from the wrong columns. Rotate only when a de-rotation exists.
+    if tileInfo.loadRatioGR == 0.5 and (tileInfo.bpe == 1 or writer.states.subtileLdsSwizzle):
       if tileInfo.bpe == 1:  # FP8: intra-block K_group +2 rotation, preserving block bit
         tmpBlock = writer.vgprPool.checkOut(1, tag="_grComputeAllOffsets_legacy_tmpBlock")
         module.add(VAndB32(dst=vgpr(tmpBlock), src0=vgpr(colId), src1=hex(4), comment="%s: block_bit = colId & 4"%tileInfo.tc))
