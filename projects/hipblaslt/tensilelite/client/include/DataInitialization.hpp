@@ -2285,6 +2285,68 @@ namespace TensileLite
         {
             return std::numeric_limits<int8_t>::min();
         }
+        // uint8_t is used for E8 (e8m0) MX scale bytes; exact-byte comparison only.
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::Zero>()
+        {
+            return 0;
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::One>()
+        {
+            return 1;
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::Two>()
+        {
+            return 2;
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::NegOne>()
+        {
+            // Unsigned: no negative representation; treat as zero.
+            return 0;
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::Max>()
+        {
+            return std::numeric_limits<uint8_t>::max();
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::DenormMin>()
+        {
+            throw std::runtime_error("denormMin not available for uint8_t");
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::DenormMax>()
+        {
+            throw std::runtime_error("denormMax not available for uint8_t");
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::NaN>()
+        {
+            throw std::runtime_error("NaN not available for uint8_t");
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for uint8_t");
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::Random>()
+        {
+            return static_cast<uint8_t>(getThreadLocalRandInt() % 256);
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::BadInput>()
+        {
+            return std::numeric_limits<uint8_t>::max();
+        }
+        template <>
+        inline uint8_t DataInitialization::getValue<uint8_t, InitMode::BadOutput>()
+        {
+            return std::numeric_limits<uint8_t>::max() - 1u;
+        }
 #ifndef _WIN32
 #ifdef TENSILE_USE_FP6
         template <>
@@ -2613,7 +2675,9 @@ namespace TensileLite
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::Zero>()
         {
-            throw std::runtime_error("Zero not available for E8.");
+            // e8m0 has no representable zero; byte 0 is the canonical fill for a
+            // zero-initialized scale/output buffer (matches the reference memset).
+            return E8(static_cast<uint8_t>(0));
         }
         template <>
         inline E8 DataInitialization::getValue<E8, InitMode::One>()
@@ -2931,6 +2995,12 @@ namespace TensileLite
         inline bool DataInitialization::isBadOutput<int8_t>(int8_t value)
         {
             return value == DataInitialization::getValue<int8_t, InitMode::BadOutput>();
+        }
+
+        template <>
+        inline bool DataInitialization::isBadOutput<uint8_t>(uint8_t value)
+        {
+            return value == DataInitialization::getValue<uint8_t, InitMode::BadOutput>();
         }
 
 #ifndef _WIN32

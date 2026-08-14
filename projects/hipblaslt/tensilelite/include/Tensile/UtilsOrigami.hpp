@@ -83,6 +83,9 @@ namespace TensileLite
             return origami::data_type_t::BFloat6;   
         case rocisa::DataType::Float4:
             return origami::data_type_t::Float4;
+        case rocisa::DataType::None:
+            // None is an unset sentinel; fall back to Float for analytical sizing.
+            return origami::data_type_t::Float;
 
         default:
             throw std::runtime_error("Unsupported data type: " + std::to_string(static_cast<int>(type)));

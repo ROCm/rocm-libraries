@@ -447,12 +447,21 @@ namespace TensileLite
                     return true;
                 }
 
+                // Each command-line occurrence is one opaque string. The caller
+                // (parse_arg_nums / parse_arg_ints) does the comma splitting in a
+                // second pass, which is required for options like --problem-size
+                // where commas separate dimensions, not multiple values.
                 std::function<std::any(std::string const&)> parser() const override
                 {
-                    return [](std::string const& s) { return std::any(split_string(s)); };
+                    return [](std::string const& s) {
+                        std::string t = trim_opt(s);
+                        if(t.empty())
+                            return std::any(std::vector<std::string>{});
+                        return std::any(std::vector<std::string>{std::move(t)});
+                    };
                 }
 
-                /** Boost config file behaviour: each line is one value (no comma split). */
+                /** Config file behaviour: each line is one value (no comma split). */
                 std::any parse_config_line(std::string const& value) const override
                 {
                     std::string t = trim_opt(value);

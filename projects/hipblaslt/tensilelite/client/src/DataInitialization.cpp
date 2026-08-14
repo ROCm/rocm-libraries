@@ -947,6 +947,71 @@ namespace TensileLite
             return 1.5;
         }
 
+        // Fill a buffer with valid E8M0 scale bytes near 1.0 (exponents 124..127 ->
+        // 2^-3..2^0) so the kernel and reference decode identical, non-degenerate scales.
+        static void initE8M0Array(void* array, size_t elements)
+        {
+            uint8_t* bytes = static_cast<uint8_t*>(array);
+            for(size_t i = 0; i < elements; ++i)
+                bytes[i] = static_cast<uint8_t>(0x7c + (i & 0x3));
+        }
+
+        // Fill a DeepseekScale buffer with broadcast fp32 values.
+        //
+        // Layout: [nRowGroups, nKBlocks, 64] fp32 for scaleA (nRowGroups = ceil(M/64))
+        //         [nNBlocks,   nKBlocks, 64] fp32 for scaleB (nNBlocks  = ceil(N/bq1))
+        //
+        // Broadcast semantics: every (group, K-block) slot has the same fp32 value in
+        // all 64 lane positions. For scaleA, all slots within the same Aq0-row block
+        // also receive the same value so the reference formula "waveGroup = m/64" works
+        // regardless of the kernel's wave-group configuration (wg_m, MT0).
+        static void initDeepseekScaleArray(ContractionProblemGemm const& problem,
+                                           size_t                         tensorIdx,
+                                           void*                          buf)
+        {
+            float*  fbuf    = static_cast<float*>(buf);
+            size_t  K       = problem.boundSize(0);
+            int     aq1     = problem.deepseekScaleAq1();
+            size_t  nKBlocks = (K + static_cast<size_t>(aq1) - 1) / static_cast<size_t>(aq1);
+
+            if(tensorIdx == ContractionProblemGemm::TENSOR::SCALEA_DS)
+            {
+                size_t M          = problem.d().sizes()[0];
+                int    aq0        = problem.deepseekScaleAq0();
+                size_t nRowGroups = (M + 63) / 64;
+                size_t slotsPerAq0 = static_cast<size_t>(aq0) / 64;
+                size_t nAq0Blocks  = (M + static_cast<size_t>(aq0) - 1) / static_cast<size_t>(aq0);
+                for(size_t aq0Block = 0; aq0Block < nAq0Blocks; ++aq0Block)
+                {
+                    for(size_t kb = 0; kb < nKBlocks; ++kb)
+                    {
+                        // Values cycle in [1.0, 1.25, 1.5, 1.75] per (block, K-block).
+                        float val = 1.0f + static_cast<float>((aq0Block * nKBlocks + kb) % 4) * 0.25f;
+                        size_t slotStart = aq0Block * slotsPerAq0;
+                        size_t slotEnd   = std::min(slotStart + slotsPerAq0, nRowGroups);
+                        for(size_t slot = slotStart; slot < slotEnd; ++slot)
+                            for(size_t lane = 0; lane < 64; ++lane)
+                                fbuf[slot * nKBlocks * 64 + kb * 64 + lane] = val;
+                    }
+                }
+            }
+            else
+            {
+                size_t N        = problem.d().sizes()[1];
+                int    bq1      = problem.deepseekScaleBq1();
+                size_t nNBlocks = (N + static_cast<size_t>(bq1) - 1) / static_cast<size_t>(bq1);
+                for(size_t nBlock = 0; nBlock < nNBlocks; ++nBlock)
+                {
+                    for(size_t kb = 0; kb < nKBlocks; ++kb)
+                    {
+                        float val = 1.0f + static_cast<float>((nBlock * nKBlocks + kb) % 4) * 0.25f;
+                        for(size_t lane = 0; lane < 64; ++lane)
+                            fbuf[nBlock * nKBlocks * 64 + kb * 64 + lane] = val;
+                    }
+                }
+            }
+        }
+
         DataInitialization::DataInitialization(po::variables_map const&    args,
                                                ClientProblemFactory const& problemFactory)
             : m_maxBatch(0)
@@ -1391,6 +1456,12 @@ namespace TensileLite
                 m_problemDependentData = true;
             if(args.count("mx-b-block") && args["mx-b-block"].as<int>() > 0)
                 m_problemDependentData = true;
+            // Force problem-dependent initialization for DeepseekScale so the broadcast
+            // fill in initializeCPUInputs can use the actual problem dimensions.
+            if(args.count("use-deepseek-scale-a") && args["use-deepseek-scale-a"].as<bool>())
+                m_problemDependentData = true;
+            if(args.count("use-deepseek-scale-b") && args["use-deepseek-scale-b"].as<bool>())
+                m_problemDependentData = true;
 
             allocNewCPUInputs();
             allocNewGPUInputs();
@@ -1405,6 +1476,7 @@ namespace TensileLite
                     if(!m_problemDependentData)
                     {
 
+                        // scaleADeepseek/scaleBDeepseek are fp32; use the normal initArray path.
                         initArray(p.first, it.init, pUnit.cpuInput.valid.get(), pUnit.maxElements);
                         HIP_CHECK_EXC(
                             hipMemcpy(pUnit.gpuInput.valid.get(),
@@ -1846,6 +1918,18 @@ namespace TensileLite
                         if(p.second.initDescriptor[0] != tensors[i])
                         {
                             p.second.initDescriptor[0] = tensors[i];
+                            // DeepseekScale tensors need a broadcast fill (all 64 lanes
+                            // in each (group, K-block) slot hold the same value) so the
+                            // CPU reference can index without knowing the kernel config.
+                            if((i == ContractionProblemGemm::TENSOR::SCALEA_DS
+                                && problem.useDeepseekScaleA())
+                               || (i == ContractionProblemGemm::TENSOR::SCALEB_DS
+                                   && problem.useDeepseekScaleB()))
+                            {
+                                initDeepseekScaleArray(problem, i,
+                                                       p.second.cpuInput.valid.get());
+                                continue;
+                            }
                             initArray(p.first,
                                       m_vdata[i].init,
                                       p.second.cpuInput.valid.get(),
@@ -2954,6 +3038,14 @@ namespace TensileLite
             inputs->Synchronizer  = (void*)ptrs[ContractionProblemGemm::TENSOR::Synchronizer];
             inputs->amaxD         = (void*)ptrs[ContractionProblemGemm::TENSOR::AMAXD];
             inputs->compressed    = (void*)ptrs[ContractionProblemGemm::TENSOR::COMPRESSED];
+            inputs->partialBuf    = (void*)ptrs[ContractionProblemGemm::TENSOR::PARTIALBUF];
+            inputs->rmsGamma      = (void*)ptrs[ContractionProblemGemm::TENSOR::RMSGAMMA];
+            inputs->residual      = (void*)ptrs[ContractionProblemGemm::TENSOR::RESIDUAL];
+            inputs->residualOut   = (void*)ptrs[ContractionProblemGemm::TENSOR::RESIDUAL_OUT];
+            inputs->quantScale      = (void*)ptrs[ContractionProblemGemm::TENSOR::QUANTSCALE];
+            inputs->mxScale         = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSCALE];
+            inputs->scaleADeepseek = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEA_DS];
+            inputs->scaleBDeepseek = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEB_DS];
 
             inputs->batchA    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::A];
             inputs->batchB    = (void**)batchPtrs[ContractionProblemGemm::TENSOR::B];
@@ -3192,6 +3284,31 @@ namespace TensileLite
                 rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::METADATA]
                                     .totalAllocatedBytes();
             }
+            if(inputs.partialBuf != nullptr)
+            {
+                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::PARTIALBUF]
+                                    .totalAllocatedBytes();
+            }
+            if(inputs.quantScale != nullptr)
+            {
+                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::QUANTSCALE]
+                                    .totalAllocatedBytes();
+            }
+            if(inputs.mxScale != nullptr)
+            {
+                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::MXSCALE]
+                                    .totalAllocatedBytes();
+            }
+            if(inputs.scaleADeepseek != nullptr)
+            {
+                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEA_DS]
+                                    .totalAllocatedBytes();
+            }
+            if(inputs.scaleBDeepseek != nullptr)
+            {
+                rotatingSize += problem.tensors()[ContractionProblemGemm::TENSOR::SCALEB_DS]
+                                    .totalAllocatedBytes();
+            }
             return rotatingSize;
         }
 
@@ -3242,6 +3359,36 @@ namespace TensileLite
                 newInputs.e,
                 rotatingPtr,
                 problem.tensors()[ContractionProblemGemm::TENSOR::E].totalAllocatedBytes(),
+                offset,
+                stream);
+            newInputs.partialBuf = copyRotatingInput(
+                newInputs.partialBuf,
+                rotatingPtr,
+                problem.tensors()[ContractionProblemGemm::TENSOR::PARTIALBUF].totalAllocatedBytes(),
+                offset,
+                stream);
+            newInputs.quantScale = copyRotatingInput(
+                newInputs.quantScale,
+                rotatingPtr,
+                problem.tensors()[ContractionProblemGemm::TENSOR::QUANTSCALE].totalAllocatedBytes(),
+                offset,
+                stream);
+            newInputs.mxScale = copyRotatingInput(
+                newInputs.mxScale,
+                rotatingPtr,
+                problem.tensors()[ContractionProblemGemm::TENSOR::MXSCALE].totalAllocatedBytes(),
+                offset,
+                stream);
+            newInputs.scaleADeepseek = copyRotatingInput(
+                newInputs.scaleADeepseek,
+                rotatingPtr,
+                problem.tensors()[ContractionProblemGemm::TENSOR::SCALEA_DS].totalAllocatedBytes(),
+                offset,
+                stream);
+            newInputs.scaleBDeepseek = copyRotatingInput(
+                newInputs.scaleBDeepseek,
+                rotatingPtr,
+                problem.tensors()[ContractionProblemGemm::TENSOR::SCALEB_DS].totalAllocatedBytes(),
                 offset,
                 stream);
             newInputs.scaleA = copyRotatingInput(
