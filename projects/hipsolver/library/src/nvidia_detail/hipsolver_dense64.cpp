@@ -402,6 +402,7 @@ hipsolverStatus_t hipsolverDnXlarft_bufferSize(hipsolverDnHandle_t   handle,
                                                size_t*               lworkOnHost)
 try
 {
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
@@ -425,6 +426,9 @@ try
                                     computeType,
                                     lworkOnDevice,
                                     lworkOnHost));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -452,6 +456,7 @@ hipsolverStatus_t hipsolverDnXlarft(hipsolverDnHandle_t   handle,
                                     size_t                lworkOnHost)
 try
 {
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
@@ -476,6 +481,9 @@ try
                                                        lworkOnDevice,
                                                        workOnHost,
                                                        lworkOnHost));
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {

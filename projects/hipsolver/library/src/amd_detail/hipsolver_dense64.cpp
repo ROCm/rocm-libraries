@@ -136,50 +136,6 @@ rocblas_status rocsolver_zpotrf_info32(rocblas_handle          handle,
                                        const int64_t           lda,
                                        rocblas_int*            info);
 
-rocblas_status rocsolver_slarft_64(rocblas_handle       handle,
-                                   const rocblas_direct direct,
-                                   const rocblas_storev storev,
-                                   const int64_t        n,
-                                   const int64_t        k,
-                                   float*               V,
-                                   const int64_t        ldv,
-                                   float*               tau,
-                                   float*               T,
-                                   const int64_t        ldt);
-
-rocblas_status rocsolver_dlarft_64(rocblas_handle       handle,
-                                   const rocblas_direct direct,
-                                   const rocblas_storev storev,
-                                   const int64_t        n,
-                                   const int64_t        k,
-                                   double*              V,
-                                   const int64_t        ldv,
-                                   double*              tau,
-                                   double*              T,
-                                   const int64_t        ldt);
-
-rocblas_status rocsolver_clarft_64(rocblas_handle         handle,
-                                   const rocblas_direct   direct,
-                                   const rocblas_storev   storev,
-                                   const int64_t          n,
-                                   const int64_t          k,
-                                   rocblas_float_complex* V,
-                                   const int64_t          ldv,
-                                   rocblas_float_complex* tau,
-                                   rocblas_float_complex* T,
-                                   const int64_t          ldt);
-
-rocblas_status rocsolver_zlarft_64(rocblas_handle          handle,
-                                   const rocblas_direct    direct,
-                                   const rocblas_storev    storev,
-                                   const int64_t           n,
-                                   const int64_t           k,
-                                   rocblas_double_complex* V,
-                                   const int64_t           ldv,
-                                   rocblas_double_complex* tau,
-                                   rocblas_double_complex* T,
-                                   const int64_t           ldt);
-
 /******************** PARAMS ********************/
 struct hipsolverParams
 {
@@ -1184,6 +1140,7 @@ hipsolverStatus_t hipsolverDnXlarft_bufferSize(hipsolverDnHandle_t   handle,
                                                size_t*               lworkOnHost)
 try
 {
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
@@ -1264,6 +1221,9 @@ try
 
     rocblas_stop_device_memory_size_query((rocblas_handle)handle, lworkOnDevice);
     return status;
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -1291,6 +1251,7 @@ hipsolverStatus_t hipsolverDnXlarft(hipsolverDnHandle_t   handle,
                                     size_t                lworkOnHost)
 try
 {
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
     if(!handle)
         return HIPSOLVER_STATUS_NOT_INITIALIZED;
     if(!params)
@@ -1387,6 +1348,9 @@ try
     {
         return HIPSOLVER_STATUS_NOT_SUPPORTED;
     }
+#else
+    return HIPSOLVER_STATUS_NOT_SUPPORTED;
+#endif
 }
 catch(...)
 {
@@ -1597,7 +1561,7 @@ catch(...)
     return hipsolver::exception2hip_status();
 }
 
-#if defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 // rocSOLVER's 64-bit eigensolvers report convergence status through an int64_t* info,
 // but the cuSOLVER-compatible public API exposes it as int*. Copy the low word of each
 // int64_t back into the caller's int array (little-endian two's-complement truncation).
@@ -1624,7 +1588,7 @@ static hipsolverStatus_t narrow_info64_to_int(hipsolverDnHandle_t handle,
 }
 #endif
 
-#if defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 /******************** SYEVD ********************/
 hipsolverStatus_t hipsolverDnXsyevd_bufferSize(hipsolverDnHandle_t handle,
                                                hipsolverDnParams_t params,
@@ -2147,7 +2111,7 @@ catch(...)
 }
 #endif
 
-#if defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+#if defined(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
 /******************** SYEV_BATCHED ********************/
 hipsolverStatus_t hipsolverDnXsyevBatched_bufferSize(hipsolverDnHandle_t handle,
                                                      hipsolverDnParams_t params,

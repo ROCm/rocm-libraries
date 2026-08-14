@@ -223,6 +223,7 @@ void testing_larft_bad_arg()
     I                      stT    = 1;
     int                    bc     = 1;
 
+#ifdef HIPSOLVER_ENABLE_EIGENSOLVERS_64
     if(BATCHED)
     {
         // memory allocations
@@ -313,6 +314,7 @@ void testing_larft_bad_arg()
                                 size_hW,
                                 bc);
     }
+#endif
 }
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Th>
@@ -681,6 +683,39 @@ void testing_larft(Arguments& argus)
     I stVRes   = (argus.unit_check || argus.norm_check) ? stV : 0;
     I stTauRes = (argus.unit_check || argus.norm_check) ? stTau : 0;
     I stTRes   = (argus.unit_check || argus.norm_check) ? stT : 0;
+
+#ifndef HIPSOLVER_ENABLE_EIGENSOLVERS_64
+    // 64-bit API disabled: entry points must report not_implemented.
+    if constexpr(std::is_same<I, int64_t>::value)
+    {
+        EXPECT_ROCBLAS_STATUS(hipsolver_larft(API,
+                                              handle,
+                                              params,
+                                              direct,
+                                              storev,
+                                              n,
+                                              k,
+                                              (T*)nullptr,
+                                              ldv,
+                                              stV,
+                                              (T*)nullptr,
+                                              stTau,
+                                              (T*)nullptr,
+                                              ldt,
+                                              stT,
+                                              (T*)nullptr,
+                                              0,
+                                              (T*)nullptr,
+                                              0,
+                                              bc),
+                              HIPSOLVER_STATUS_NOT_SUPPORTED);
+
+        if(argus.timing)
+            rocsolver_bench_inform(inform_not_implemented);
+
+        return;
+    }
+#endif
 
     // check non-supported values
 #if !defined(__HIP_PLATFORM_HCC__) && !defined(__HIP_PLATFORM_AMD__)

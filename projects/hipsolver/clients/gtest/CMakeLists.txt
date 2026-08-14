@@ -169,6 +169,11 @@ else()
   target_link_libraries(hipsolver-test PRIVATE ${CUDA_LIBRARIES} Threads::Threads)
 endif()
 
+# Mirror feature flags to test behaviour
+if(HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(hipsolver-test PRIVATE HIPSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+
 set_target_properties(hipsolver-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
 
 # Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
