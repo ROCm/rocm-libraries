@@ -54,23 +54,33 @@ struct GemmEpilogue {
     double activationParameter1 = 0.0;
 };
 
-struct GemmRequest {
-    GemmRequest(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor,
-                MutableTensorView dTensor, ScalarType accumulator)
+struct GemmProblem {
+    GemmProblem(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor, ScalarType output,
+                ScalarType accumulator)
         : a(std::move(aOperand)),
           b(std::move(bOperand)),
           c(std::move(cTensor)),
-          d(std::move(dTensor)),
+          outputType(output),
           accumulatorType(accumulator) {}
 
     GemmOperand a;
     GemmOperand b;
     TensorView c;
-    MutableTensorView d;
+    ScalarType outputType;
     ScalarType accumulatorType;
     AccumulationRounding accumulationRounding = AccumulationRounding::TypeDefault;
     MathMode mathMode = MathMode::Default;
     GemmEpilogue epilogue;
+};
+
+struct GemmRequest : GemmProblem {
+    GemmRequest(GemmOperand aOperand, GemmOperand bOperand, TensorView cTensor,
+                MutableTensorView dTensor, ScalarType accumulator)
+        : GemmProblem(std::move(aOperand), std::move(bOperand), std::move(cTensor), dTensor.type(),
+                      accumulator),
+          d(std::move(dTensor)) {}
+
+    MutableTensorView d;
     OutputSelection outputSelection = OutputSelection::all();
 };
 
