@@ -25,7 +25,7 @@ interface that does not change regardless of the chosen backend. It currently su
 **Where it sits in the ROCm stack:** portability layer above rocSPARSE (and cuSPARSE). It is API-
 compatible with cuSPARSE v2, so porting a CUDA application is largely mechanical.
 
-**Key architectural constraint that shapes testing:** hipSPARSE is thin — it owns almost no compute.
+**Key architectural constraint that shapes testing:** hipSPARSE is thin.
 Its job is to translate the hipSPARSE API to the backend correctly, so testing is dominated by
 integration tests that call real backend routines on a GPU and validate the marshalled result. The
 tested surface differs by backend: the HIP backend compiles and runs additional legacy routines that
@@ -52,11 +52,21 @@ cmake --build build --parallel
 Presets are also available: `cmake --preset default:release`, `debug`, `coverage`, `asan`.
 Test binaries land in `build/<release|debug|release-debug>/clients/staging/`.
 
-**2. Provision the test matrices** (functional suites read `.bin` matrices):
+**2. Provision the test matrices** (functional suites read `.bin` matrices): the build in step 1
+(`./install.sh -dc`) downloads and converts them automatically, so no separate step is required.
 
-```bash
-./install.sh --matrices-dir-install <path>/hipsparse_matrices
-```
+> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrices>`
+> to the install script to reuse them and avoid re-downloading on a rebuild:
+>
+> ```bash
+> ./install.sh -dc --matrices-dir <path>/hipsparse_matrices
+> ```
+>
+> To populate such a folder once (e.g. a shared location outside the build tree), use `--matrices-dir-install`:
+>
+> ```bash
+> ./install.sh --matrices-dir-install <path>/hipsparse_matrices
+> ```
 
 **3. Run the tests that match what you touched:**
 
@@ -133,6 +143,21 @@ GoogleTest styles: a matrix-file `TestWithParam` in `test_csrilusv.cpp`, and a t
 | `nightly` | extended coverage | nightly (`extended.groovy`, filter `*nightly*`) |
 | `stress` | instantiated in code but no `stress` cases in YAML today | — |
 | `known_bug` | auto-promoted by gentest from a YAML `Known bugs:` rule | excluded from all gating runs |
+
+**Per-routine time budgets (rough guidelines):** each tier has a target maximum wall-clock time for
+a *single routine's* cases in that tier. The budget applies to the total time of one routine's cases
+at one tier — e.g. `./hipsparse-test --gtest_filter=*quick*csrmv*` should finish in under 1000 ms.
+
+| Tier | Target max time per routine | Example filter |
+|---|---|---|
+| `quick` | < 1000 ms (1 s) | `--gtest_filter=*quick*csrmv*` |
+| `pre_checkin` | < 10000 ms (10 s) | `--gtest_filter=*pre_checkin*csrmv*` |
+| `nightly` | < 100000 ms (100 s) | `--gtest_filter=*nightly*csrmv*` |
+
+> These budgets are rough guidelines, not hard limits: actual run time depends on the hardware. They
+> exist to keep any one routine from dominating a tier's total run time; a routine that consistently
+> and substantially exceeds its budget is a signal to trim redundant cases (see the test-size guidance
+> below).
 
 > Note: the Jenkins `*checkin*` filter matches the `pre_checkin` tier only; the `quick` tier is
 > picked up by TheRock's CTest `standard` category (`quick` + `pre_checkin`), which is the actual PR

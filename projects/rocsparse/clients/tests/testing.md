@@ -152,6 +152,21 @@ standard case matrix rather than requiring hand-written variants.
 | `stress` | largest / longest cases | weekly / release |
 | `known_bug` | cases exposing a tracked defect | excluded from all gating runs |
 
+**Per-routine time budgets (rough guidelines):** each tier has a target maximum wall-clock time for
+a *single routine's* cases in that tier. The budget applies to the total time of one routine's cases
+at one tier — e.g. `./rocsparse-test --gtest_filter=*quick/csrmv*` should finish in under 1000 ms.
+
+| Tier | Target max time per routine | Example filter |
+|---|---|---|
+| `quick` | < 1000 ms (1 s) | `--gtest_filter=*quick/csrmv*` |
+| `pre_checkin` | < 10000 ms (10 s) | `--gtest_filter=*pre_checkin/csrmv*` |
+| `nightly` | < 100000 ms (100 s) | `--gtest_filter=*nightly/csrmv*` |
+
+> These budgets are rough guidelines, not hard limits: actual run time depends on the hardware. They
+> exist to keep any one routine from dominating a tier's total run time; a routine that consistently
+> and substantially exceeds its budget is a signal to trim redundant cases (see the test-size guidance
+> below).
+
 **Test data / matrices:** functional suites read `.csr` matrices converted from **24 SuiteSparse**
 matrices (e.g. `nos1`–`nos7`, `amazon0312`, `webbase-1M`) downloaded and MD5-verified by
 `cmake/ClientMatrices.cmake` (mirror overridable via `ROCSPARSE_TEST_MIRROR`). The runtime matrix
