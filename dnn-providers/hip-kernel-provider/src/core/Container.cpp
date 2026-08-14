@@ -80,18 +80,33 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // per engine, so adding one costs no edit here.
         for(auto& set : kernel_ingestor_engine::discoverDescriptorSets())
         {
-            // Registered at enumeration, where a collision is catchable and can name the
-            // engine; the id is what hipDNN identifies it by.
-            const auto engineId = kernel_ingestor_engine::registerEngineName(set.engine.name);
-            definitions.push_back(
-                {engineId,
-                 [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
-                     -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
-                     // Device facts are resolved per call from the handle, not from the
-                     // construction-time provider.
-                     return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
-                         set, kernel_ingestor_engine::deviceResolver());
-                 }});
+            try
+            {
+                // Registered at enumeration, where a collision is catchable and can name
+                // the engine; the id is what hipDNN identifies it by.
+                const auto engineId = kernel_ingestor_engine::registerEngineName(set.engine.name);
+                definitions.push_back(
+                    {engineId,
+                     [set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
+                         -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
+                         // Device facts are resolved per call from the handle, not from
+                         // the construction-time provider.
+                         return hipdnn_plugin_sdk::ingestor::makeEngine<Handle, Settings, Context>(
+                             set, kernel_ingestor_engine::deviceResolver());
+                     }});
+            }
+            catch(const std::exception& error)
+            {
+                // Per set, not around the loop. This list is a function-local static's
+                // initializer: an escaping throw costs HIP_MLOPS and ASM_SDPA their rows
+                // and leaves the static uninitialized, so the next call rebuilds the
+                // whole vector and throws again. One bad set costs only itself.
+                HIPDNN_PLUGIN_LOG_ERROR("ingestor: descriptor set '"
+                                        << set.engine.name
+                                        << "' failed to register its engine name and is "
+                                           "excluded: "
+                                        << error.what());
+            }
         }
 #endif
 
