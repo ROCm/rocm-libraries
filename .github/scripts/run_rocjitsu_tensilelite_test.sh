@@ -170,7 +170,7 @@ configure_rocjitsu() {
 }
 
 build_rocjitsu() {
-  cmake --build "${ROCJITSU_BUILD_DIR}" --target rocjitsu_bin rocjitsu_shared
+  cmake --build "${ROCJITSU_BUILD_DIR}" --target rocjitsu_bin rocjitsu_shared hsa_hotswap_rocjitsu
 }
 
 ROCJITSU_BIN="${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu"
@@ -182,6 +182,16 @@ show_rocjitsu_version() {
 run_timed "configure rocjitsu" configure_rocjitsu
 run_timed "build rocjitsu" build_rocjitsu
 run_timed "rocjitsu version" show_rocjitsu_version
+
+# The HSA hotswap hook lets rocjitsu intercept the HIP runtime's device query.
+# Without it, tensilelite-client fails with hipErrorNoDevice.
+HOTSWAP_LIB=$(find "${ROCJITSU_BUILD_DIR}" -name "libhsa_hotswap_rocjitsu.so" -type f | head -1)
+if [[ -n "${HOTSWAP_LIB}" ]]; then
+  cp "${HOTSWAP_LIB}" "${ROCM_PATH}/lib/"
+  echo "Installed hotswap lib: ${ROCM_PATH}/lib/libhsa_hotswap_rocjitsu.so"
+else
+  echo "::warning::libhsa_hotswap_rocjitsu.so not found — tests may fail with hipErrorNoDevice"
+fi
 
 # ── Install pytest dependencies ───────────────────────────────────────────────
 
