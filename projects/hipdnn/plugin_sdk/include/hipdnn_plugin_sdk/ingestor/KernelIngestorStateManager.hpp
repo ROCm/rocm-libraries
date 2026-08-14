@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -211,10 +212,17 @@ public:
     }
 
 private:
+    /// Validates every pack's references and builds the KernelDefinition for each of
+    /// its kernels. Every field of a definition is context-independent, so this is the
+    /// only place they are ever computed: buildCatalog copies them per query rather
+    /// than completing each kernel's metadata again on every graph.
     void validateAndIndexPacks()
     {
-        std::vector<MetadataValues> seenKeys;
+        // set, not a scanned vector: the check is quadratic otherwise, and the tuple is
+        // an ordered map, so it already orders.
+        std::set<MetadataValues> seenKeys;
 
+        _definitions.reserve(_packs.size());
         for(const auto& pack : _packs)
         {
             for(const auto& matcherId : pack.matcherIds)
@@ -233,6 +241,8 @@ private:
                                             + toString(pack.dispatchId) + "'");
             }
 
+            std::vector<KernelDefinition> packDefinitions;
+            packDefinitions.reserve(pack.kernels.size());
             for(const auto& kernel : pack.kernels)
             {
                 if(kernel.source.kind != KernelSourceKind::EMBEDDED_SOURCE)
@@ -244,15 +254,22 @@ private:
                 }
 
                 auto key = completeMetadata(kernel);
-                if(std::find(seenKeys.begin(), seenKeys.end(), key) != seenKeys.end())
+                if(!seenKeys.insert(key).second)
                 {
                     throw std::invalid_argument(
                         "kernel '" + toString(kernel.id)
                         + "' duplicates the metadata tuple of another kernel under schema '"
                         + _schema.name + "'; the tuple is the catalog key and must be unique");
                 }
-                seenKeys.push_back(std::move(key));
+
+                packDefinitions.push_back(KernelDefinition{kernel.id,
+                                                           pack.id,
+                                                           pack.dispatchId,
+                                                           kernel.source,
+                                                           std::move(key),
+                                                           kernel.priority});
             }
+            _definitions.push_back(std::move(packDefinitions));
         }
     }
 
@@ -322,7 +339,9 @@ private:
             {
                 HIPDNN_PLUGIN_LOG_TRACE("ingestor: catalog cache hit for device "
                                         << context.deviceId);
-                return *cached;
+                // get() already returned a copy; moving out of that local avoids a
+                // second one on the hot path.
+                return std::move(*cached);
             }
         }
         else
@@ -360,8 +379,10 @@ private:
         Catalog catalog;
         GraphMatcherMemo graphVerdicts;
 
-        for(const auto& pack : _packs)
+        for(size_t packIndex = 0; packIndex < _packs.size(); ++packIndex)
         {
+            const auto& pack = _packs[packIndex];
+
             if(!archSupports(pack.arch, context.deviceProperties.gcnArchName))
             {
                 HIPDNN_PLUGIN_LOG_INFO("ingestor: pack "
@@ -381,14 +402,11 @@ private:
             mergeBound(catalog.bound, packBound, describeDescriptor("pack", pack.name, pack.id));
 
             size_t admitted = 0;
-            for(const auto& kernel : pack.kernels)
+            for(const auto& precomputed : _definitions[packIndex])
             {
-                KernelDefinition definition{kernel.id,
-                                            pack.id,
-                                            pack.dispatchId,
-                                            kernel.source,
-                                            completeMetadata(kernel),
-                                            kernel.priority};
+                // Copied, not rebuilt: every field was settled at construction, and the
+                // kernel matcher below reads the definition without mutating it.
+                KernelDefinition definition = precomputed;
 
                 if(kernelLevelMatchersPass(pack, context, definition))
                 {
@@ -492,6 +510,9 @@ private:
     std::unordered_map<DescriptorId, ResolvedMatcher, DescriptorIdHash> _matchers;
     std::unordered_map<DescriptorId, ResolvedDispatch<THandle>, DescriptorIdHash> _dispatches;
     std::vector<KernelDescriptorPack> _packs;
+    /// One entry per pack, parallel to _packs: its kernels' context-independent
+    /// definitions, completed once at construction.
+    std::vector<std::vector<KernelDefinition>> _definitions;
     std::shared_ptr<IKernelHeuristic> _heuristic;
     mutable LruCache<CatalogKey, Catalog, CatalogKeyHash> _catalogCache;
 };
