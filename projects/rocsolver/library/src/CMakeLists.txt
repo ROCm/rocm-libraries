@@ -143,6 +143,10 @@ set(rocsolver_lapack_source
   lapack/roclapack_gerqf.cpp
   lapack/roclapack_gerqf_batched.cpp
   lapack/roclapack_gerqf_strided_batched.cpp
+  # - Cholesky QR
+  lapack/roclapack_cholqr.cpp
+  lapack/roclapack_cholqr_strided_batched.cpp
+  lapack/roclapack_cholqr_batched.cpp
   #### Problem and Matrix Reductions (Diagonalizations) ####
   ##########################################################
   #- bidiagonalization
@@ -511,6 +515,14 @@ endif()
 
 if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+endif()
+
+# Feature flags
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
 
 target_compile_definitions(rocsolver PRIVATE

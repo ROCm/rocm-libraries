@@ -16,6 +16,11 @@ on:
         type: string
       test_type:
         type: string
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
@@ -98,4 +103,6 @@ jobs:
         }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
-    secrets: inherit
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}

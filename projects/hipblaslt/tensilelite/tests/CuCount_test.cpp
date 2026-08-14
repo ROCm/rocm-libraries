@@ -697,8 +697,9 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
 
-    // The workspace must be at least partialTileSize; the +2048 queue
-    // region is included by both query and launch so they agree.
+    // The workspace must be at least partialTileSize; the per-XCD work-queue
+    // region (cacheLineBytes * numXCD = 128 * 8 = 1024 B on gfx942/gfx950) is
+    // included by both query and launch so they agree.
     EXPECT_GE(ws, env.solution.partialTileSize(grid))
         << "Workspace must cover at least partialTileSize(grid)";
 }
@@ -723,7 +724,7 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
 
     // Static (SK3) path does not use the work-queue, so workspace
-    // should be exactly partialTileSize — no +2048.
+    // should be exactly partialTileSize — no per-XCD work-queue region.
     EXPECT_EQ(ws, env.solution.partialTileSize(grid))
         << "OFF workspace must equal partialTileSize(staticGrid)";
 }
@@ -803,4 +804,201 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
     if(sk3Pack.grid > sk3Pack.tiles)
         EXPECT_NE(sk3Pack.grid, sk5OnPack.grid)
             << "512^3 static path oversubscribes; dynamic path should not match";
+}
+
+// ===========================================================================
+// StreamKDynamicQueueXcdGateTest -- MI300A (NUM_XCD=6) reject-and-continue.
+//
+// SK4 / SK5-dynamic work-stealing kernels bake a fixed power-of-two per-XCD
+// queue count (8 for gfx942/gfx950) and mask indices with (Q-1), so they are
+// valid only when the device's runtime NUM_XCD equals that baked count. MI300A
+// reports gfx942 (baked 8) but has 6 XCDs; a mismatched partition (e.g. a 4-XCD
+// slice of an 8-XCD gfx942) is likewise rejected. The host excludes such a
+// solution from selection (streamKDynamicQueueSupported wired into
+// softwarePredicate) and warns once instead of silently degrading. The
+// production predicates live in a .cpp anonymous namespace, so -- like
+// computeStreamKHostPack above -- this test mirrors them over a hip::HipAMDGPU
+// mock (6 -> reject, 4 -> reject, 8 -> allow, unknown -> allow). Not run on
+// real MI300A silicon.
+// ===========================================================================
+namespace
+{
+    // Mirror of the anonymous-namespace helper in ContractionSolution.cpp
+    // (streamKBakedQueueCount): the baked per-XCD queue count comes from
+    // origami's per-arch XCD count. Kept in lockstep with the production code.
+    inline size_t streamKBakedQueueCountRef(Hardware const& hardware)
+    {
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+            return 0;
+        try
+        {
+            return origami::hardware_t::get_default_num_xcds(
+                hipAMDGPU->analyticalHardware->arch);
+        }
+        catch(std::exception const&)
+        {
+            return 0;
+        }
+    }
+
+    // Byte-for-byte mirror of the anonymous-namespace numeric predicate in
+    // ContractionSolution.cpp (streamKDynamicQueueUnsupported). Kept in lockstep
+    // with the production code; if that predicate changes, update this too.
+    // Unknown hardware (not a HipAMDGPU, no analytical hardware, or no baked
+    // per-XCD queue count) is treated as UNSUPPORTED (returns true).
+    inline bool streamKDynamicQueueUnsupportedRef(Hardware const& hardware)
+    {
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+            return true;
+        size_t baked  = streamKBakedQueueCountRef(hardware);
+        size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
+        return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0
+               || numXCD != baked;
+    }
+
+    // Mirror of ContractionSolution::streamKDynamicQueueSupported(). Returns
+    // true when the solution is SELECTABLE, false when it must be EXCLUDED
+    // (dynamic-queue / work-stealing on a non-power-of-two XCD device). streamK
+    // is sizeMapping.streamK; effectiveDynamic is the SK5 sub-mode result
+    // (ignored for streamK != 5). Kept in lockstep with the production member.
+    inline bool streamKDynamicQueueSupportedRef(int             streamK,
+                                                bool            effectiveDynamic,
+                                                Hardware const& hardware)
+    {
+        if(streamK != 4 && streamK != 5)
+            return true;
+        if(!streamKDynamicQueueUnsupportedRef(hardware))
+            return true;
+        const bool dynamicQueue = (streamK == 4) || (streamK == 5 && effectiveDynamic);
+        return !dynamicQueue; // dynamic-queue on non-pow2 XCD -> excluded
+    }
+
+    // gfx942 analytical hardware with a caller-chosen XCD count. NUM_XCD is the
+    // 5th positional arg of origami::hardware_t (see origami/hardware.hpp).
+    origami::hardware_t makeGfx942HardwareWithXcd(size_t numXCD)
+    {
+        using arch_t = origami::hardware_t::architecture_t;
+        return origami::hardware_t(arch_t::gfx942,
+                                   304, // N_CU (MI300X SPX)
+                                   163840,
+                                   262144,
+                                   numXCD,
+                                   1.0,
+                                   1.0,
+                                   1.0,
+                                   4000000,
+                                   1.2,
+                                   1,
+                                   std::make_tuple(0.0, 0.008, 0.0));
+    }
+
+    hip::HipAMDGPU makeGfx942DeviceWithXcd(size_t numXCD)
+    {
+        hip::HipAMDGPU device;
+        device.processor          = AMDGPU::Processor::gfx942;
+        device.computeUnitCount   = 304;
+        device.deviceName         = "test-gfx942-xcd";
+        device.analyticalHardware = std::make_shared<origami::hardware_t>(
+            makeGfx942HardwareWithXcd(numXCD));
+        return device;
+    }
+} // namespace
+
+TEST(StreamKDynamicQueueXcdGateTest, RejectsMi300aSixXcd)
+{
+    hip::HipAMDGPU mi300a = makeGfx942DeviceWithXcd(6);
+    Hardware const& hw    = mi300a;
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+        << "MI300A (NUM_XCD=6, not a power of two) must flag the dynamic-queue "
+           "work-stealing path as unsupported";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, AllowsMi300xEightXcd)
+{
+    hip::HipAMDGPU mi300x = makeGfx942DeviceWithXcd(8);
+    Hardware const& hw    = mi300x;
+    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
+        << "MI300X (NUM_XCD=8, power of two) must keep the dynamic-queue path";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, RejectsGfx942FourXcdPowerOfTwoButMismatched)
+{
+    // A 4-XCD partition (e.g. a CPX-style slice) of an 8-XCD gfx942: 4 IS a
+    // power of two, but the kernel bakes Q=8, so runtime NUM_XCD (4) != baked
+    // (8) and the fixed Q=8 masking would mis-map queues. Must be rejected.
+    hip::HipAMDGPU  gfx942Cpx = makeGfx942DeviceWithXcd(4);
+    Hardware const& hw        = gfx942Cpx;
+    EXPECT_EQ(streamKBakedQueueCountRef(hw), 8u)
+        << "gfx942 must bake origami's per-arch XCD count (8)";
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+        << "gfx942 with NUM_XCD=4 (power of two but != baked 8) must be rejected";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, AllowsGfx950EightXcd)
+{
+    // gfx950 (local MI355X) analytical hardware advertises 8 XCDs.
+    hip::HipAMDGPU gfx950   = makeHipDeviceWithAnalytical(makeGfx950AnalyticalHardware());
+    Hardware const& hw      = gfx950;
+    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
+        << "gfx950 (NUM_XCD=8) must keep the dynamic-queue work-stealing path";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
+{
+    // Unknown hardware (null analyticalHardware -> unknown NUM_XCD / baked
+    // queue count == 0) must be treated as UNSUPPORTED so the dynamic-queue
+    // solution is excluded from selection and a non-dynamic-queue solution
+    // serves the GEMM, rather than staying selectable while the per-XCD counter
+    // workspace is sized with an unknown (0) queue count (under-allocation).
+    hip::HipAMDGPU noAnalytical;
+    noAnalytical.processor     = AMDGPU::Processor::gfx942;
+    noAnalytical.deviceName    = "test-gfx942-no-analytical";
+    Hardware const& hwNoAnalyt = noAnalytical;
+    ASSERT_EQ(noAnalytical.analyticalHardware, nullptr);
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hwNoAnalyt))
+        << "Missing analyticalHardware (unknown NUM_XCD) must be treated as unsupported";
+    // And the selection predicate must therefore EXCLUDE the dynamic-queue
+    // solution (SK4) while keeping non-dynamic-queue solutions selectable.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwNoAnalyt))
+        << "SK4 work-stealing solution must be excluded when NUM_XCD is unknown";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwNoAnalyt))
+        << "SK3-static solution must remain selectable when NUM_XCD is unknown";
+}
+
+// Selection-predicate contract: on MI300A (6 XCD) the dynamic-queue solution is
+// EXCLUDED from selection (supported == false) so a different solution serves
+// the GEMM, while on MI300X (8 XCD) the identical solution stays selectable.
+TEST(StreamKDynamicQueueXcdGateTest, ExcludesDynamicQueueSolutionOnMi300a)
+{
+    hip::HipAMDGPU  mi300a = makeGfx942DeviceWithXcd(6);
+    hip::HipAMDGPU  mi300x = makeGfx942DeviceWithXcd(8);
+    Hardware const& hwA    = mi300a;
+    Hardware const& hwX    = mi300x;
+
+    // SK4 is always dynamic-queue.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwA))
+        << "SK4 work-stealing solution must be excluded from selection on MI300A";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwX))
+        << "SK4 work-stealing solution must remain selectable on MI300X";
+
+    // SK5 only takes the dynamic-queue path when it resolves to the dynamic
+    // sub-mode; the static (SK3) sub-mode stays selectable even on MI300A.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(5, /*effectiveDynamic=*/true, hwA))
+        << "SK5-dynamic must be excluded from selection on MI300A";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(5, /*effectiveDynamic=*/false, hwA))
+        << "SK5-static (SK3 sub-path) must remain selectable on MI300A";
+}
+
+// Non-dynamic-queue solutions must never be excluded, so the GEMM still runs.
+TEST(StreamKDynamicQueueXcdGateTest, KeepsNonDynamicQueueSolutionsOnMi300a)
+{
+    hip::HipAMDGPU  mi300a = makeGfx942DeviceWithXcd(6);
+    Hardware const& hwA    = mi300a;
+
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(0, /*effectiveDynamic=*/false, hwA))
+        << "Non-StreamK solution must remain selectable on MI300A";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwA))
+        << "SK3-static solution must remain selectable on MI300A";
 }

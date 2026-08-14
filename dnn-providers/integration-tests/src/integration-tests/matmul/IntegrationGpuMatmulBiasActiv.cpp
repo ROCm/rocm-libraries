@@ -129,7 +129,7 @@ protected:
         this->registerValidator(outputs.c, this->getTolerance(graphObj, outputs.c));
 
         this->setTestCaseNote(activTestCase.note);
-        this->synthesis().setGlobalSeed(matmulTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(matmulTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

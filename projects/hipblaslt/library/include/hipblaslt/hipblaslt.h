@@ -163,15 +163,25 @@ typedef enum {
    * ``int64_t``
    */
   HIPBLASLT_MATRIX_LAYOUT_LD = 6,
+
   /** Matrix Batch Mode.
    * Batched GEMM can be either:
    * 1. Strided Batch: Single contiguous memory allocation and stride between matrices in
    * the batch is specified in terms of number of elements.
-   * 2. General Batched: This uses pointer array with each pointer storing the base address 
+   * 2. General Batched: This uses pointer array with each pointer storing the base address
    * of the matrices in the batch.
    * See hipblasLtBatchMode_t
    */
-  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,   
+  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
+
+  /** Matrix Offset.
+   *
+   * For ``General Batched GEMM``, we can support for users to access a sub-matrix of
+   * the original matrix by adding an ``offset`` value (in elements) from the base address.
+   * Note that for non-batched or Strided Batch GEMM case, we can directly apply
+   * the offset value by using the strided-offset value.
+   */
+  HIPBLASLT_MATRIX_LAYOUT_OFFSET = 8
 } hipblasLtMatrixLayoutAttribute_t;
 
 /*! \ingroup types_module

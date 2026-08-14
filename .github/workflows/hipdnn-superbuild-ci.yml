@@ -113,25 +113,24 @@ jobs:
 
       - name: Configure superbuild
         run: |
-          cmake --preset hipdnn-providers-all -GNinja \
+          cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
             -DGPU_TARGETS="$GPU_TARGET" \
             -DROCM_LIBS_ENABLE_ROOT_CTEST=ON \
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DENABLE_CLANG_TIDY=OFF
 
       - name: Build
         run: cmake --build build
 
-      # Windows tests have a few issues where we are loading plugins and thats causing issues with super build tests
-      # as they end up trying to init a gpu on a non gpu machine.  This work is ticketed to be fixed later.
-      #- name: Add ROCm bin to PATH
-      #  run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
+      - name: Add ROCm bin to PATH
+        run: echo "$ROCM_SDK_PATH/bin" >> "$GITHUB_PATH"
 
-      #- name: Run tests
-      #  run: ctest --test-dir build --output-on-failure
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Patch ROCm SDK with superbuild outputs
         shell: pwsh
@@ -274,7 +273,7 @@ jobs:
 
       - name: Configure superbuild
         run: |
-          cmake --preset hipdnn-providers-all -GNinja \
+          cmake --preset hipdnn-dev-all -GNinja \
             -DROCM_PATH="$ROCM_SDK_PATH" \
             -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
             -DGPU_TARGETS="$GPU_TARGET" \
@@ -282,6 +281,7 @@ jobs:
             -DENABLE_CLANG_FORMAT=OFF \
             -DENABLE_CLANG_TIDY=ON \
             -DHIPKERNELPROVIDER_ENABLE_ROCKE=ON \
+            -DHIPDNN_ENABLE_CUDNN_COMPATIBILITY=ON \
             -DCMAKE_CXX_CLANG_TIDY=/usr/bin/clang-tidy-20
 
       - name: Build

@@ -180,7 +180,7 @@ TEST(TestSdpaBackwardAttributes, SetScalarAttributes)
 {
     SdpaBackwardAttributes attrs;
 
-    attrs.set_attn_scale_value(0.5f);
+    attrs.set_attn_scale(0.5f);
     ASSERT_TRUE(attrs.attn_scale_value.has_value());
     EXPECT_FLOAT_EQ(*attrs.attn_scale_value, 0.5f);
 
@@ -202,4 +202,122 @@ TEST(TestSdpaBackwardAttributes, SetEnumAttributes)
 
     attrs.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
     EXPECT_EQ(attrs.diagonal_alignment, DiagonalAlignment::TOP_LEFT);
+}
+
+//==============================================================================
+// cuDNN source-compatibility setters (native surface)
+//==============================================================================
+
+TEST(TestSdpaBackwardAttributes, NativeSetAttnScaleFloatPopulatesValueNotTensor)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_attn_scale(0.25f);
+    ASSERT_TRUE(attrs.attn_scale_value.has_value());
+    EXPECT_FLOAT_EQ(*attrs.attn_scale_value, 0.25f);
+    EXPECT_EQ(attrs.get_attn_scale(), nullptr);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeSetSlidingWindowLengthMapsToLeftBound)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_sliding_window_length(128);
+    ASSERT_TRUE(attrs.left_bound.has_value());
+    EXPECT_EQ(*attrs.left_bound, 128);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeFusedDropoutThreeArg)
+{
+    SdpaBackwardAttributes attrs;
+    auto mask = makeTensor(64);
+    auto scale = makeTensor(65);
+    auto scaleInv = makeTensor(66);
+    attrs.set_dropout(mask, scale, scaleInv);
+    EXPECT_EQ(attrs.get_dropout_mask(), mask);
+    EXPECT_EQ(attrs.get_dropout_scale(), scale);
+    EXPECT_EQ(attrs.get_dropout_scale_inv(), scaleInv);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedScoreMod)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_score_mod([](int) { return 0; });
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("score modifier"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedScoreModBprop)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_score_mod_bprop([](int) { return 0; });
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("score-modifier backprop"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedMaxTotalSeqLenQ)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_max_total_seq_len_q(4096);
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("max_total_seq_len_q"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedMaxTotalSeqLenKv)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_max_total_seq_len_kv(4096);
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("max_total_seq_len_kv"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedRngDump)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_rng_dump(makeTensor(70));
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("RNG dump"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedSinkToken)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_sink_token(makeTensor(71));
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("sink token"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeUnsupportedDsinkToken)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_dsink_token(makeTensor(72));
+    ASSERT_TRUE(attrs.hasUnsupportedUsage());
+    EXPECT_NE(attrs.getUnsupportedReason().find("sink-token gradient"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, NativeDeterministicAlgorithmTrueUnsupportedFalseIgnored)
+{
+    SdpaBackwardAttributes falseAttrs;
+    falseAttrs.set_deterministic_algorithm(false);
+    EXPECT_FALSE(falseAttrs.hasUnsupportedUsage());
+
+    SdpaBackwardAttributes trueAttrs;
+    trueAttrs.set_deterministic_algorithm(true);
+    ASSERT_TRUE(trueAttrs.hasUnsupportedUsage());
+    EXPECT_NE(trueAttrs.getUnsupportedReason().find("Deterministic"), std::string::npos);
+}
+
+TEST(TestSdpaBackwardAttributes, UnsupportedReasonFirstWinsLatch)
+{
+    // First unsupported setter wins: max_total_seq_len_q recorded, score mod not.
+    SdpaBackwardAttributes seqFirst;
+    seqFirst.set_max_total_seq_len_q(1).set_score_mod([](int) { return 0; });
+    ASSERT_TRUE(seqFirst.hasUnsupportedUsage());
+    EXPECT_NE(seqFirst.getUnsupportedReason().find("max_total_seq_len_q"), std::string::npos);
+    EXPECT_EQ(seqFirst.getUnsupportedReason().find("score modifier"), std::string::npos);
+
+    // Reverse order: score modifier recorded first and retained.
+    SdpaBackwardAttributes scoreFirst;
+    scoreFirst.set_score_mod([](int) { return 0; }).set_max_total_seq_len_q(1);
+    ASSERT_TRUE(scoreFirst.hasUnsupportedUsage());
+    EXPECT_NE(scoreFirst.getUnsupportedReason().find("score modifier"), std::string::npos);
+    EXPECT_EQ(scoreFirst.getUnsupportedReason().find("max_total_seq_len_q"), std::string::npos);
 }

@@ -1094,13 +1094,7 @@ __device__ void dot(const rocblas_int tid,
 
     /** <========= Next do the reduction on the shared memory array =========> **/
 
-    val += shift_left(val, 1);
-    val += shift_left(val, 2);
-    val += shift_left(val, 4);
-    val += shift_left(val, 8);
-    val += shift_left(val, 16);
-    if(warpSize > 32)
-        val += shift_left(val, 32);
+    reduce_wave_sum(val);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = val;
     __syncthreads();
@@ -3168,6 +3162,104 @@ __device__ rocblas_int seq_solve_ext(const rocblas_int dd,
     return converged ? 0 : 1;
 }
 
+// -----------------------------
+// Initialize matrix
+// motivated by xLASET in LAPACK
+//
+// matrix A is m by n
+//
+// uplo == rocblas_fill_upper : assign to upper triangular matrix
+// uplo == rocblas_fill_lower : assign to lower triangular matrix
+// uplo == rocblas_fill_full : assign to entire matrix
+//
+// assign beta to diagonal
+// assign alpha to off-diagonal
+// -----------------------------
+
+template <typename T, typename I, typename UA>
+__global__ static void laset_kernel(const rocblas_fill uplo,
+                                    const I m,
+                                    const I n,
+                                    const T alpha,
+                                    const T beta,
+                                    UA AA,
+                                    const rocblas_stride shiftA,
+                                    const I lda,
+                                    const rocblas_stride strideA,
+                                    const I batch_count)
+{
+    I const bid_start = blockIdx.z;
+    I const bid_inc = gridDim.z;
+
+    I const i_start = threadIdx.x + blockIdx.x * blockDim.x;
+    I const i_inc = blockDim.x * gridDim.x;
+
+    I const j_start = threadIdx.y + blockIdx.y * blockDim.y;
+    I const j_inc = blockDim.y * gridDim.y;
+
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    {
+        T* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+
+        if(uplo == rocblas_fill_lower)
+        {
+            // ---------------------------------
+            // assign to lower triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = j + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else if(uplo == rocblas_fill_upper)
+        {
+            // ---------------------------------
+            // assign to upper triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < std::min(m, j + 1); i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else
+        {
+            // ------------------------
+            // assign to entire matrix
+            // ------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+
+        __syncthreads();
+    }
+}
+
 /** This local gemm adapts rocblas_gemm to multiply complex*real, and
     overwrite result: A = A*B **/
 template <bool BATCHED,
@@ -3391,13 +3483,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     }
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    sum += shift_left(sum, 2);
-    sum += shift_left(sum, 4);
-    sum += shift_left(sum, 8);
-    sum += shift_left(sum, 16);
-    if(WarpSize > 32)
-        sum += shift_left(sum, 32);
+    reduce_wave_sum(sum);
 
     if(tid % WarpSize == 0)
         sval[tid / WarpSize] = sum;
@@ -3490,21 +3576,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     }
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    repeated = repeated & __shfl_down(repeated, 1);
-    sum += shift_left(sum, 2);
-    repeated = repeated & __shfl_down(repeated, 2);
-    sum += shift_left(sum, 4);
-    repeated = repeated & __shfl_down(repeated, 4);
-    sum += shift_left(sum, 8);
-    repeated = repeated & __shfl_down(repeated, 8);
-    sum += shift_left(sum, 16);
-    repeated = repeated & __shfl_down(repeated, 16);
-    if(WarpSize > 32)
-    {
-        sum += shift_left(sum, 32);
-        repeated = repeated & __shfl_down(repeated, 32);
-    }
+    reduce_wave_sum(sum);
+    reduce_wave_and(repeated);
 
     if(tid % WarpSize == 0)
     {
@@ -3679,13 +3752,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump5(const I n, 
         sum += rocblas_abs(x[i]);
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    sum += shift_left(sum, 2);
-    sum += shift_left(sum, 4);
-    sum += shift_left(sum, 8);
-    sum += shift_left(sum, 16);
-    if(WarpSize > 32)
-        sum += shift_left(sum, 32);
+    reduce_wave_sum(sum);
 
     if(tid % WarpSize == 0)
         sval[tid / WarpSize] = sum;

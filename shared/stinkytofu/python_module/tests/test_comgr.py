@@ -217,6 +217,33 @@ class TestAsmCapsVsCompiler:
         if asm["HasXcnt"]:
             assert asm["MaxXcnt"] == 63
 
+    def test_has_th_modifier(self):
+        asm = self._caps()
+        expected = int(
+            self._asm_any(
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT",
+            )
+        )
+        assert asm["HasTHModifier"] == expected
+
+    def test_has_nv_modifier(self):
+        asm = self._caps()
+        expected = int(
+            self._asm_any(
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv",
+            )
+        )
+        assert asm["HasNVModifier"] == expected
+
+    def test_has_global_prefetch(self):
+        asm = self._caps()
+        expected = int(
+            self._asm("global_prefetch_b8 v[0:1], off scope:SCOPE_SE th:TH_LOAD_NT")
+        )
+        assert asm["HasGlobalPrefetch"] == expected
+
 
 class TestArchCaps:
     """Verify archCaps values for gfx1250 are correct based on ISA version checks."""

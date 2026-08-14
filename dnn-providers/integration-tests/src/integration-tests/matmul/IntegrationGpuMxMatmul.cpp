@@ -21,8 +21,10 @@ using namespace test_mx_matmul_common;
 namespace
 {
 
-template <typename InputDataType, typename OutputDataType>
-class MxMatmul : public IntegrationGraphVerificationHarness<OutputDataType, MatmulTestCase>
+// MX dequantize -> GEMM with independent A/B input element types, for mixed
+// operands (e.g. FP8 OCP A + FP4 B), which hipBLASLt supports.
+template <typename InputDataTypeA, typename InputDataTypeB, typename OutputDataType>
+class MxMatmulMixed : public IntegrationGraphVerificationHarness<OutputDataType, MatmulTestCase>
 {
 public:
     struct GraphOutputs
@@ -41,7 +43,8 @@ public:
             .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(outType);
 
-        const auto inType = getDataTypeEnumFromType<InputDataType>();
+        const auto aType = getDataTypeEnumFromType<InputDataTypeA>();
+        const auto bType = getDataTypeEnumFromType<InputDataTypeB>();
 
         // Logical matmul dims live in the last two axes; any leading axes are
         // batch (which MX requires to be 1). A is [..., M, K], B is [..., K, N].
@@ -51,7 +54,7 @@ public:
 
         // A from the case (transA → col-major, opA=T).
         auto aAttr = graph::makeTensorAttributes(
-            "a", inType, aDims, generateInputStrideOrder(aDims, tc.transA));
+            "a", aType, aDims, generateInputStrideOrder(aDims, tc.transA));
         auto aTensor = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         // Scale_A mirrors A's shape with the K axis split into 32-wide blocks.
@@ -69,7 +72,7 @@ public:
 
         // B from the case (transB → row-major, opB=N).
         auto bAttr = graph::makeTensorAttributes(
-            "b", inType, bDims, generateInputStrideOrder(bDims, tc.transB));
+            "b", bType, bDims, generateInputStrideOrder(bDims, tc.transB));
         auto bTensor = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         // Scale_B mirrors B's shape with the K axis split into 32-wide blocks.
@@ -115,13 +118,17 @@ protected:
         auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
         // MX block-scale dequantization introduces additional quantization
-        // error beyond plain matmul; use the MX-specific tolerance directly
-        // rather than the generic MatmulNode dispatch in getTolerance().
+        // error beyond plain matmul; use the MX-specific tolerance directly.
         this->registerValidator(outputs.c, matmul::getMxTolerance<OutputDataType>());
 
-        this->synthesis().setGlobalSeed(testCase.seed);
+        this->inputFillRecipes().setGlobalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
+};
+
+template <typename InputDataType, typename OutputDataType>
+class MxMatmul : public MxMatmulMixed<InputDataType, InputDataType, OutputDataType>
+{
 };
 
 // Input (FP8 OCP) × output (FP16 / BF16 / FP32) combinations.
@@ -131,6 +138,15 @@ using IntegrationGpuMxMatmulE4M3ToFp32 = MxMatmul<fp8_e4m3, float>;
 using IntegrationGpuMxMatmulE5M2ToFp16 = MxMatmul<fp8_e5m2, half>;
 using IntegrationGpuMxMatmulE5M2ToBf16 = MxMatmul<fp8_e5m2, bfloat16>;
 using IntegrationGpuMxMatmulE5M2ToFp32 = MxMatmul<fp8_e5m2, float>;
+
+// Input (FP4 E2M1) × output (FP16 / BF16 / FP32) combinations.
+using IntegrationGpuMxMatmulE2M1ToFp16 = MxMatmul<fp4_e2m1, half>;
+using IntegrationGpuMxMatmulE2M1ToBf16 = MxMatmul<fp4_e2m1, bfloat16>;
+using IntegrationGpuMxMatmulE2M1ToFp32 = MxMatmul<fp4_e2m1, float>;
+
+// Mixed operands: FP8 OCP A × FP4 B (and the reverse) → FP16.
+using IntegrationGpuMxMatmulMixedE4M3E2M1ToFp16 = MxMatmulMixed<fp8_e4m3, fp4_e2m1, half>;
+using IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16 = MxMatmulMixed<fp4_e2m1, fp8_e4m3, half>;
 
 } // namespace
 
@@ -170,6 +186,36 @@ TEST_P(IntegrationGpuMxMatmulE5M2ToFp32, Correctness)
     runGraphTest();
 }
 
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE2M1ToFp16);
+TEST_P(IntegrationGpuMxMatmulE2M1ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE2M1ToBf16);
+TEST_P(IntegrationGpuMxMatmulE2M1ToBf16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulE2M1ToFp32);
+TEST_P(IntegrationGpuMxMatmulE2M1ToFp32, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulMixedE4M3E2M1ToFp16);
+TEST_P(IntegrationGpuMxMatmulMixedE4M3E2M1ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16);
+TEST_P(IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16, Correctness)
+{
+    runGraphTest();
+}
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuMxMatmulE4M3ToFp16,
                          testing::ValuesIn(getMxMatmulTestCases()));
@@ -192,4 +238,24 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuMxMatmulE5M2ToFp32,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE2M1ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE2M1ToBf16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulE2M1ToFp32,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulMixedE4M3E2M1ToFp16,
+                         testing::ValuesIn(getMxMatmulTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuMxMatmulMixedE2M1E4M3ToFp16,
                          testing::ValuesIn(getMxMatmulTestCases()));

@@ -24,6 +24,7 @@ using namespace hipdnn_integration_tests;
 namespace
 {
 
+using test_bn_common::AffineShapeMode;
 using test_bn_common::BatchnormTestCase;
 
 struct BatchnormFwdTrainingTensorIds
@@ -53,7 +54,7 @@ enum class BatchnormTrainingScenario
 using BnFwdTrainingTestCase
     = std::tuple<TensorLayout, BatchnormTrainingScenario, test_bn_common::BatchnormTestCase>;
 
-template <typename InputType>
+template <typename InputType, AffineShapeMode Mode = AffineShapeMode::FULL_RANK>
 class BatchnormForwardTraining
     : public IntegrationGraphVerificationHarness<InputType, BnFwdTrainingTestCase>
 {
@@ -74,6 +75,12 @@ public:
         auto dims = bnTestCase.dims;
         auto derivedDims = getDerivedShape(dims);
 
+        // Full-rank {1, C, 1, ...} or reduced-rank per-channel scale/bias (PR #7566);
+        // running statistics remain full-rank as required by all providers.
+        const auto affineDims = Mode == AffineShapeMode::REDUCED_RANK
+                                    ? test_bn_common::getReducedAffineShape(layout, dims)
+                                    : derivedDims;
+
         auto inputDataType = getDataTypeEnumFromType<InputType>();
         auto intermediateDataType = hipdnn_frontend::DataType::FLOAT;
 
@@ -91,12 +98,12 @@ public:
 
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
         auto scaleAttr = graph::makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "scale", intermediateDataType, affineDims, generateStrides(affineDims));
         scaleAttr.set_uid(BatchnormFwdTrainingTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = graph::makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "bias", intermediateDataType, affineDims, generateStrides(affineDims));
         biasAttr.set_uid(BatchnormFwdTrainingTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
@@ -209,7 +216,7 @@ public:
 
     BatchnormForwardTraining()
     {
-        this->synthesis()
+        this->inputFillRecipes()
             .setRange(BatchnormFwdTrainingTensorIds::X_UID, -1.0f, 1.0f)
             .setRange(BatchnormFwdTrainingTensorIds::SCALE_UID, -2.0f, 2.0f)
             .setRange(BatchnormFwdTrainingTensorIds::BIAS_UID, -2.0f, 2.0f)
@@ -245,7 +252,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis()
+        this->inputFillRecipes()
             .setSeed(BatchnormFwdTrainingTensorIds::X_UID, bnTestCase.seed)
             .setSeed(BatchnormFwdTrainingTensorIds::SCALE_UID, bnTestCase.seed + 1)
             .setSeed(BatchnormFwdTrainingTensorIds::BIAS_UID, bnTestCase.seed + 2)
@@ -270,6 +277,22 @@ using IntegrationGpuBatchnormFwdTraining2dFp16 = BatchnormForwardTraining<half>;
 using IntegrationGpuBatchnormFwdTraining3dFp32 = BatchnormForwardTraining<float>;
 using IntegrationGpuBatchnormFwdTraining3dBfp16 = BatchnormForwardTraining<bfloat16>;
 using IntegrationGpuBatchnormFwdTraining3dFp16 = BatchnormForwardTraining<half>;
+
+// Reduced-rank affine (scale/bias) coverage (PR #7566). Runs against every
+// engine; providers that only accept full-rank affine tensors skip these.
+// 1D is omitted: no provider currently runs reduced-affine 1D batchnorm.
+using IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp32
+    = BatchnormForwardTraining<float, AffineShapeMode::REDUCED_RANK>;
+using IntegrationGpuBatchnormFwdTrainingReducedAffine2dBfp16
+    = BatchnormForwardTraining<bfloat16, AffineShapeMode::REDUCED_RANK>;
+using IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp16
+    = BatchnormForwardTraining<half, AffineShapeMode::REDUCED_RANK>;
+using IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp32
+    = BatchnormForwardTraining<float, AffineShapeMode::REDUCED_RANK>;
+using IntegrationGpuBatchnormFwdTrainingReducedAffine3dBfp16
+    = BatchnormForwardTraining<bfloat16, AffineShapeMode::REDUCED_RANK>;
+using IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp16
+    = BatchnormForwardTraining<half, AffineShapeMode::REDUCED_RANK>;
 
 } // namespace
 
@@ -482,3 +505,97 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
                                      BatchnormTrainingScenario::WITH_BATCH_STATS),
                      testing::ValuesIn(test_bn_common::getBnFwdTrainingFull3dTestCases())));
+
+// ============================================================================
+// Reduced-rank affine (scale/bias) tests (PR #7566)
+// ============================================================================
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp32);
+TEST_P(IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp32, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
+                                     BatchnormTrainingScenario::WITH_BATCH_STATS),
+                     testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    IntegrationGpuBatchnormFwdTrainingReducedAffine2dBfp16);
+TEST_P(IntegrationGpuBatchnormFwdTrainingReducedAffine2dBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingReducedAffine2dBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
+                                     BatchnormTrainingScenario::WITH_BATCH_STATS),
+                     testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp16);
+TEST_P(IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingReducedAffine2dFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
+                                     BatchnormTrainingScenario::WITH_BATCH_STATS),
+                     testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke2dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp32);
+TEST_P(IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp32, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
+                                     BatchnormTrainingScenario::WITH_BATCH_STATS),
+                     testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    IntegrationGpuBatchnormFwdTrainingReducedAffine3dBfp16);
+TEST_P(IntegrationGpuBatchnormFwdTrainingReducedAffine3dBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingReducedAffine3dBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
+                                     BatchnormTrainingScenario::WITH_BATCH_STATS),
+                     testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases())));
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(
+    IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp16);
+TEST_P(IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormFwdTrainingReducedAffine3dFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::Values(BatchnormTrainingScenario::FULL_TRAINING,
+                                     BatchnormTrainingScenario::WITH_BATCH_STATS),
+                     testing::ValuesIn(test_bn_common::getBnFwdTrainingSmoke3dTestCases())));

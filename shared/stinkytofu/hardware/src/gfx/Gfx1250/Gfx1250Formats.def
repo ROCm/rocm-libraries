@@ -472,7 +472,7 @@ DEF_FORMAT(WMMA,
     .encoding = {64},
     .maxOperands = 4,
     .cost = {1, 8},
-    .coissue = 0x00F0,
+    .coissue = 0x00CC,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -485,7 +485,7 @@ DEF_FORMAT(WMMA,
 DEF_FORMAT(WMMA_INT8,
     .parent = WMMA,
     .cost = {1, 16},
-    .coissue = 0xFF00,
+    .coissue = 0xCCCC,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
@@ -497,7 +497,7 @@ DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
     .parent = WMMA,
     .cost = {1, 8},
-    .coissue = 0x00E0,
+    .coissue = 0x00C8,
 )
 
 // Sparse Wave Matrix Multiply-Accumulate
@@ -730,9 +730,10 @@ DEF_FORMAT(VGLOBAL,
 // hazards bucket it as VMEM (EV_VGPR_VMEM_READ) -- not FLAT. NOTE: like all returning
 // atomics, it is NOT tracked by the waitcnt dataflow (returning atomics are untracked) --
 // the consumer's wait is emitted manually by the caller.
+// ImplicitReadEXEC: the hardware reads EXEC.
 DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
     .parent = VGLOBAL,
-    .flags = {GLOBALAtomic},
+    .flags = {GLOBALAtomic, ImplicitReadEXEC},
     .fields = {
         {D0, vdst, vgpr, 32},
         {S0, vaddr, vgpr, 32},

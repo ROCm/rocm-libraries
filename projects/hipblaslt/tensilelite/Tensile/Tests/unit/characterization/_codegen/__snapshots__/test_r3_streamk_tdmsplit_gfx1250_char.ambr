@@ -2,7 +2,7 @@
 # name: test_r3_streamk_tdmsplit_gfx1250_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgZMQJ-hHyLz5yAyZk2P0zHciaExSDGnjyuEM24FkFLYA=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgRTb8_28SDU2S5aKZHEQM10z4b86hnOEYR4I_Cfu-3L8=',
       'err': 0,
     }),
   ])

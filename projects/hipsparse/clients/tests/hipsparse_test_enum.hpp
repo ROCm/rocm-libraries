@@ -23,7 +23,7 @@
 * ************************************************************************ */
 #pragma once
 #include "hipsparse_arguments.hpp"
-#include <hipsparse/hipsparse-version.h>
+#include <hipsparse/hipsparse-config.h>
 template <std::size_t N, typename T>
 static constexpr std::size_t countof2(T (&)[N])
 {
@@ -34,6 +34,18 @@ static constexpr std::size_t countof2(T (&)[N])
 #define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
 #else
 #define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_SPMV_BSR(enum)
+#endif
+
+#ifdef HIPSPARSE_WITH_CSC_TRSV
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSV(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
+#else
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSV(enum)
+#endif
+
+#ifdef HIPSPARSE_WITH_CSC_TRSM
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSM(enum) TRANSFORM_HIPSPARSE_TEST_ENUM(enum)
+#else
+#define TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSM(enum)
 #endif
 
 // clang-format off
@@ -124,6 +136,7 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(sparse_to_dense_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spgeam_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spgemm_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spgemmreuse_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmat_descr) \
@@ -143,10 +156,12 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_sell) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_coo) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSM(spsm_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_ex_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_ex_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsv_coo) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM_IF_CSC_TRSV(spsv_csc) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsv_csr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsv_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spvec_descr) \

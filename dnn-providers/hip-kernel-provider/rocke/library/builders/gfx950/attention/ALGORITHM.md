@@ -4,7 +4,10 @@ This file explains *what* the CK DSL `unified_attention` kernels compute and
 *why* they are shaped the way they are on CDNA (gfx950, MI355X, wave64, MFMA).
 The [`README.md`](README.md) is the parity + optimization history; this file is
 the specification, the data layout, and the two kernel strategies (2D and 3D
-split-KV) the production dispatcher chooses between.
+split-KV) the production dispatcher chooses between. §8 additionally documents the
+**dense prefill kernel** — a non-paged, compile-time-sized peak-TFLOPS sibling
+(persistent grid-stride + on-chip ragged support) for the contiguous
+`[B, S, H, d]` prefill regime.
 
 > The harness in this folder benchmarks against AITER's Triton
 > `unified_attention`; the CK DSL kernels mirror that Triton reference 1:1 in
@@ -237,7 +240,7 @@ selector so CK DSL and Triton make the same algorithmic choice. The rule, in
 spirit:
 
 - **2D** when the q-block × kv-head grid already saturates the device
-  (`target = num_sms · 4`), or for short context ($S_k \le 512$), or under a
+  (`target = num_cus · 4`), or for short context ($S_k \le 512$), or under a
   sliding window — the split-KV segments would only add launch overhead.
 - **3D split-KV** otherwise — long, full-context sequences where the 2D grid is
   too small to fill the device.
@@ -311,25 +314,163 @@ mul-hi **magic division** so a compile-time constant divisor folds to a
 
 ---
 
-## 8. Where the algorithm ends and tuning begins
+## 8. The dense prefill kernel — peak-TFLOPS sibling (`attention_dense.py`)
+
+The 2D/3D kernels above serve the *paged, varlen* deployment layout. Dense
+prefill (a contiguous `[B, S, H, d]` batch, no page table, self-attention
+$S_q = S_k$) is a different regime: the shape is known up front and there is no
+paging indirection to hide, so a dedicated kernel
+(`kernels/gfx950/attention_dense.py`) trades generality for **peak MFMA
+throughput**. It computes the exact same streaming-softmax core (§2) but bakes
+the shape into the kernel and reshapes the schedule around a 256-row query tile.
+
+- **Compile-time-sized ABI.** `batch / seqlen / heads / head_size / causal /
+  dtype` are constants baked at build time (dense, statically-sized). The only
+  runtime args are the `q/k/v/o` pointers and the `f32` softmax scale. `block_n`
+  (KV tile), `waves_per_eu`, and the persistent knobs are the tuning parameters;
+  every algorithmic lever below is always-on.
+- **256-row query tile, `32×32×16` MFMA.** `_BLOCK_M = 256` query rows per CTA
+  (8 wave64s = 512 threads) run QK/PV on gfx950's wide-K `mfma_f32_32x32x16`
+  atom. QK produces $S^\top = K Q^\top$ so the key lands on the per-lane
+  accumulator regs — the layout that keeps the softmax a cheap in-lane reduce +
+  one `lane^32` exchange and lets PV consume $P$ with no relayout shuffle.
+- **head_size 64 and 128** (bf16 / fp16), MHA and GQA including non-power-of-2
+  group sizes (e.g. 40/8, 28/4).
+
+### 8.1 The winning levers (all always-on)
+
+| lever | what it does | measured |
+|---|---|---|
+| **CK-1 transposed PV** | $P$ feeds the PV MFMA in its native QK-output layout via a half-local V load (`pv32_v_load_paired`); the cross-half P-relayout shuffle is gone (~96 `ds_bpermute` removed). | +35% |
+| **LDS bank-conflict pad on K** (`[NBUF, BN, D+8]`) | kills the 8-way conflict on the QK K-reads. | +80% (base win) |
+| **LDS V pad** (`+32`) | the transposed PV read (`ds_read_b64_tr_b16`) has a stricter bank pattern than K; a `+32` V-row pad fully clears its conflicts. | +~5% |
+| **native `exp2_fast`** (`v_exp_f32`, no overflow guard — softmax arg ≤ 0) | one instruction per exp. | +11.5% |
+| **depth-1 cluster** | fuses `exp2(s − m)` into the PV-MFMA loop so the softmax VALU/TRANS co-executes in the MFMA shadow (`sched_group_barrier` names the full DS_READ/MFMA/VALU/TRANS population per step). | — |
+| **partial-vmcnt software prefetch** | per-tile K/V DMA drains to a *partial* `vmcnt` (keeps the freshest V prefetch in flight across the barrier) instead of a full `vmcnt(0)` serialize. | raises MfmaUtil |
+| **PV-only `s_setprio`** | the PV MFMA cluster is bracketed at raised priority so it wins issue slots; paired with the prefetch. | +3.5% |
+| **lazy online rescale** | keep the running max as a *lazy* max that only re-anchors when a tile exceeds it by >8 (log2); when every lane is within 8 (a `wave_all` vote) skip the O/ℓ rescale entirely (a 0/1-trip `scf.for` → a wave-uniform scalar branch), cutting the VALU between the QK and PV clusters. Numerically approximate ($P$ bounded by $2^8$) but parity-identical at bf16/fp16 tolerance. | +~2% |
+
+**Diagonal-only causal masking.** For causal, below-diagonal KV tiles need no
+mask (~94% of tiles at $S = 8192$); the KV loop is split into a mask-free body
+`[1, diag)` and a masked diagonal tail `[diag, n_upper)`, and the causal row
+limit clamps `n_upper` so fully-future tiles are never visited.
+
+**head_size and the DMA loader.** One `async_buffer_load_lds` instruction moves
+64 lanes × 2 bf16 = 128 elements. At **D=128** that is exactly one padded K/V row
+per instruction (the fast path). At **D=64** the loader packs `128//D = 2` rows
+per instruction into an *unpadded* contiguous LDS tile (lane $l$ → row
+$l/(D/2)$, col $2\,(l \bmod D/2)$); the padded fast path is emitted
+byte-identically for D=128, so D=64 support costs the D=128 schedule nothing.
+
+### 8.2 Two grids: default and persistent
+
+Same inner pipeline, different outer work assignment:
+
+- **Default** — one CTA per $(\text{q-block}, \text{query-head}, \text{batch})$.
+  Grid `(⌈S_q/256⌉, H_q, B)`. Simple; the per-CTA launch/dispatch + scalar setup
+  + K/V-prime cold-start (~4.5 tile-equivalents) is paid once **per query block**.
+- **Persistent (grid-stride)** — a 1-D grid of `num_persistent` long-lived CTAs
+  (256 = exactly one 8-wave block per CU on MI355X's 256 CUs at 2 waves/SIMD).
+  Each CTA grid-strides over the flattened work-item space
+  $W = ⌈S_q/256⌉ \cdot H_q \cdot B$, so the fixed per-CTA cold-start is amortized
+  once **per CU** instead of once per query block. The inner compute is
+  byte-identical to the default path; the difference is the outer work loop, the
+  work-item decode, and per-item state reset.
+
+**Persistent work-item decode (`persist_decode`).** How $W$ is unflattened to
+$(\text{qb}, h_q, \text{bt})$ decides load balance *and* L2 locality:
+
+- **`qb_major`** — `wi = qb·(H_q·B) + h_q·B + bt`. Putting the triangular causal
+  cost index `qb` in the MSB spreads cheap + expensive query blocks across each
+  CTA under grid-stride. But every 256-CTA grid-stride phase spans *all* KV
+  heads at once → large L2 footprint (57% L2 hit at GQA-8).
+- **`hkv_major`** — `wi = hkv·(NQB·g·B) + blk·(g·B) + h_ql·B + bt`, with `blk`
+  folded to a **low/high-paired** query-block index (`blk < half → qb = blk`;
+  else `qb = NQB−1−(blk−half)`). Putting `hkv` in the MSB keeps each grid-stride
+  phase within ~1 KV head so the shared GQA K/V stays L2-resident across its $g$
+  query heads (**L2 hit 57% → ~93%, HBM misses 5.9× lower**); the low/high qb
+  pairing preserves `qb_major`'s causal-triangle balance. Valid only when the
+  CTA grid-strides across both halves of a KV head ($g\cdot NQB\cdot B \ge 2\,NP$).
+- **`auto`** (default) — `hkv_major` when it is balance-safe **and** GQA
+  ($g>1$), else `qb_major`. Strictly ≥ `qb_major`.
+
+**Measured (MI355X, bf16, D=128, causal, $S = 8192$, 128/8 GQA, 0 spill, err
+≈1.46e-3).** Absolute MI355X TFLOPS swing **±25–30% with auto-clock**, so only
+**same-session ratios are load-bearing**; the numbers below are one representative
+session, each pinned to its config (grid / decode / V-pad / lazy):
+
+| config | grid | decode | V-pad | lazy | TFLOPS |
+|---|---|---|---|---:|---:|
+| default grid | one-CTA/q-block | — | 32 | on | ≈543 |
+| persistent baseline | persistent NP=256 | qb-major | 0 | off | ≈877 |
+| persistent + V-pad | persistent NP=256 | qb-major | 32 | off | ≈912 |
+| **persistent (shipped default)** | persistent NP=256 | **hkv-major** | 32 | on | **≈948** |
+
+The clock-invariant deltas are the load-bearing part: **hkv/qb ≈ 1.04×** (L2 hit
+57%→~93%), **V-pad 0→32 ≈ +5%**, **lazy ≈ +2%** — and the shipped default
+(`persistent=True`, `persist_decode="auto"`, `lazy_rescale=True`,
+`ROCKE_DENSE_VPAD=32`, the last row) is byte-identical IR to a re-measure, so the
+ratio reproduces regardless of the absolute clock. The persistent variant is the
+production choice for dense prefill.
+
+### 8.3 Ragged sequence lengths — on-chip boundary padding
+
+The 256-row / `block_n`-key tile geometry assumes aligned lengths. Real prompts
+are arbitrary, and this layout **cannot pad on the host** (no room to grow the
+dense buffers). Instead a **separate kernel path** (`ragged=True`, its own
+`kernel_name`) pads the boundary tiles *on-chip* — everything else is the §8.1
+pipeline unchanged. Because seqlen is compile-time, the raggedness is fully known
+at build time:
+
+- **Grid ceil'd** — `⌈S_q/256⌉` query blocks (persistent: the work-item count is
+  ceil'd), so the partial last query block is covered.
+- **OOB query rows → register-zero pad.** Q is loaded through a bounds-checked
+  `buffer_load_vN` (buffer-resource extent = the real Q buffer); rows past
+  $S_q$ return 0 instead of faulting.
+- **OOB keys → LDS-zero pad.** The K/V async DMA already goes through buffer
+  resources, so keys past $S_k$ load as 0 into LDS.
+- **Masking is nearly free for causal.** A padded key has token index
+  $\ge S_k > $ every real query index, so the causal mask ($k_j \le q_i$)
+  *already* drops it — causal ragged needs **no extra key mask**. Non-causal
+  adds a compile-time `k_j < S_k` key mask on the partial tile.
+- **Partial output rows dropped.** The epilogue store is wrapped in a per-lane
+  `q_i < S_q` guard, so padded rows never write (and never clobber a neighbouring
+  batch's real rows — correct for any $B$).
+
+Self-attention only ($S_q = S_k$); not combined with varlen or the sliding
+window (the validator rejects those). The aligned path is emitted
+**byte-identically** when `ragged=False`, so ragged support costs the aligned
+schedule nothing; the ragged kernel itself runs at **~890 TFLOPS** (≈94% of the
+948 aligned headline), the delta being the bounds-checked load + guarded store.
+
+---
+
+## 9. Where the algorithm ends and tuning begins
 
 The math above is fixed and exact: online softmax, the bias/mask order of §1, the
 associative split-KV merge. Everything the README tunes — the combo flag bundle,
 `waves_per_eu`, `num_warps`, `tile_size`, async-DMA issue order, i64 addressing,
 fp8 dequant — changes only **how these steps are scheduled onto gfx950**, never
 what is computed. Correctness is pinned by bit-exact parity against Triton and
-ULP-level agreement with `ref_paged_attn`; performance is the per-CTA schedule
-and the 2D-vs-3D occupancy choice.
+ULP-level agreement with `ref_paged_attn` (unified paths) / torch SDPA (dense);
+for the dense kernel a golden LLVM-IR SHA gate additionally pins that every
+tuning change to one variant leaves the others' machine code byte-identical.
+Performance is the per-CTA schedule, the 2D-vs-3D occupancy choice, and the
+dense default-vs-persistent grid.
 
 ---
 
-## 9. Where to go next
+## 10. Where to go next
 
 - [`README.md`](README.md) — the parity harness, the three-table methodology, the
   prefill-2D optimization history (combo, `waves_per_eu`, i64 addressing, fp8),
   and the substantiated speedups.
 - `parity_unified_attention.py` — the canonical parity + benchmark harness
   (default / creative / fmha scenario sets).
-- The kernels themselves live in `rocke.instances` (not in this folder):
-  `gfx950/attention_tiled_2d.py`, `gfx950/attention_tiled_3d.py`, and
-  `common/attention_unified.py` (the dispatcher and shared spec).
+- The kernels themselves live in `rocke` (not in this folder): the unified paged
+  kernels are `kernels/gfx950/attention_tiled_2d.py`,
+  `kernels/gfx950/attention_tiled_3d.py`, and `kernels/common/attention_unified.py`
+  (the dispatcher and shared spec); the dense prefill kernel (§8) is
+  `kernels/gfx950/attention_dense.py`, gated by the `attention_dense` family of
+  the platform parity harness (IR-SHA, in CI via `rocke_golden_static`) plus
+  `tests/test_attention_ir_cpp_parity.py` (C++/Python byte-identity).

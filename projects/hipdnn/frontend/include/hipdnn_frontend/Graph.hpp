@@ -91,6 +91,7 @@
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
+#include <hipdnn_frontend/attributes/MoeGroupedMatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormBackwardAttributes.hpp>
@@ -128,11 +129,13 @@
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
 #include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
+#include <hipdnn_frontend/node/MoeGroupedMatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/RMSNormBackwardNode.hpp>
 #include <hipdnn_frontend/node/RMSNormNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
+#include <hipdnn_frontend/node/ResampleBwdNode.hpp>
 #include <hipdnn_frontend/node/ResampleFwdNode.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
@@ -5415,6 +5418,70 @@ public:
         return c;
     }
 
+    /**
+     * @brief Performs forward mixture-of-experts grouped matrix multiplication.
+     *
+     * `token`, `weight`, and `firstTokenOffset` are always required. Routing tensors
+     * are mode-dependent: `tokenIndex` is required for `GATHER` and `SCATTER`;
+     * `tokenKs` and a positive `top_k` not exceeding the expert count are required
+     * for `SCATTER`.
+     *
+     * @param token Token activations.
+     * @param weight Per-expert weight matrices, shaped `[experts, K, N]`.
+     * @param firstTokenOffset First routed-token offset for every batch/expert pair.
+     * @param tokenIndex Source-token index, or `nullptr` for `NONE`.
+     * @param tokenKs Expert index for each routed token, or `nullptr` unless `SCATTER`.
+     * @param attributes Routing configuration including mode and top_k.
+     * @return Output tensor.
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes>
+        moe_grouped_matmul(std::shared_ptr<TensorAttributes> token,
+                           std::shared_ptr<TensorAttributes> weight,
+                           std::shared_ptr<TensorAttributes> firstTokenOffset,
+                           std::shared_ptr<TensorAttributes> tokenIndex,
+                           std::shared_ptr<TensorAttributes> tokenKs,
+                           MoeGroupedMatmulAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("MoeGroupedMatmul_" + std::to_string(_sub_nodes.size()));
+        }
+        if(token->get_name().empty())
+        {
+            token->set_name(attributes.get_name() + "::TOKEN");
+        }
+        if(weight->get_name().empty())
+        {
+            weight->set_name(attributes.get_name() + "::WEIGHT");
+        }
+        if(firstTokenOffset->get_name().empty())
+        {
+            firstTokenOffset->set_name(attributes.get_name() + "::FIRST_TOKEN_OFFSET");
+        }
+        if(tokenIndex && tokenIndex->get_name().empty())
+        {
+            tokenIndex->set_name(attributes.get_name() + "::TOKEN_INDEX");
+        }
+        if(tokenKs && tokenKs->get_name().empty())
+        {
+            tokenKs->set_name(attributes.get_name() + "::TOKEN_KS");
+        }
+
+        auto output = outputTensor(attributes.get_name() + "::OUTPUT");
+        attributes.set_token(std::move(token));
+        attributes.set_weight(std::move(weight));
+        attributes.set_first_token_offset(std::move(firstTokenOffset));
+        attributes.set_token_index(std::move(tokenIndex));
+        attributes.set_token_ks(std::move(tokenKs));
+        attributes.set_output(output);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<MoeGroupedMatmulNode>(std::move(attributes), graph_attributes));
+        return output;
+    }
+
     /** @brief Add a custom operation to the graph
      *
      * Custom ops let users coordinate directly with plugins without requiring
@@ -5501,6 +5568,11 @@ public:
         if(attributes.get_name().empty())
         {
             attributes.set_name("SdpaFwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(attributes.unfuse_fma_hint)
+        {
+            HIPDNN_FE_LOG_WARN("Ignoring SDPA unfuse-FMA hint on node '"
+                               << attributes.get_name() << "'; hipDNN selects fusion internally");
         }
         if(q->get_name().empty())
         {
@@ -5636,7 +5708,7 @@ public:
      *         - [0] y: Resampled output tensor
      *         - [1] index: Max-pool indices when requested; nullptr otherwise
      *
-     * @see hipdnn_frontend::graph::ResampleFwdAttributes
+      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
     // NOLINTBEGIN(readability-identifier-naming)
     std::array<std::shared_ptr<TensorAttributes>, 2> resample(std::shared_ptr<TensorAttributes> x,
@@ -5658,7 +5730,7 @@ public:
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
         {
             index = outputTensor(attributes.get_name() + "::Index");
-            // Index tensor needs to be a integer data type, default to int32
+            // Index tensor needs to be an integer data type, default to int32.
             index->set_data_type(DataType::INT32);
             attributes.set_index(index);
         }
@@ -5690,7 +5762,7 @@ public:
      * @param x Input activation tensor (batch, channels, spatial dimensions)
      * @param attributes Resample parameters: mode, padding mode, pre/post padding, stride,
      *        window size. Optional max-pool index generation parameter is ignored.
-     * @return  y: Resampled output tensor
+     * @return y Resampled output tensor
      *
      * @see hipdnn_frontend::graph::ResampleFwdAttributes
      */
@@ -5710,6 +5782,7 @@ public:
 
         auto y = outputTensor(attributes.get_name() + "::Y");
 
+        attributes.set_generate_index(false);
         attributes.set_x(std::move(x));
         attributes.set_y(y);
 
@@ -5717,6 +5790,49 @@ public:
             std::make_shared<ResampleFwdNode>(std::move(attributes), graph_attributes));
 
         return y;
+    }
+
+    /**
+     * @brief Add a resample backward (pooling gradient) operation to the graph
+     *
+     * @param dy: Input gradient tensor
+     * @param attributes: Resample backward operation attributes
+     * @param index: Optional max-pool index tensor produced by resample_fwd
+     * @return dx: Output gradient tensor
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> resample_bwd(std::shared_ptr<TensorAttributes> dy,
+                                                   ResampleBwdAttributes attributes,
+                                                   std::shared_ptr<TensorAttributes> index
+                                                   = nullptr)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("ResampleBwd_" + std::to_string(_sub_nodes.size()));
+        }
+        if(dy->get_name().empty())
+        {
+            dy->set_name(attributes.get_name() + "::DY");
+        }
+        if(index && index->get_name().empty())
+        {
+            index->set_name(attributes.get_name() + "::INDEX");
+        }
+
+        auto dx = outputTensor(attributes.get_name() + "::DX");
+
+        attributes.set_dy(std::move(dy));
+        if(index)
+        {
+            attributes.set_index(std::move(index));
+        }
+        attributes.set_dx(dx);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<ResampleBwdNode>(std::move(attributes), graph_attributes));
+
+        return dx;
     }
 
     // NOLINTBEGIN(readability-identifier-naming)

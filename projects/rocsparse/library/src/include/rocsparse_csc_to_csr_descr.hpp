@@ -30,6 +30,34 @@
 namespace rocsparse
 {
     //
+    // \brief Build a CSR matrix descriptor from a CSC one for triangular solve.
+    //
+    // CSR is the transpose of the CSC matrix that shares the same arrays, so the
+    // descriptor (type, diagonal type, index base, storage mode, ...) is copied
+    // unchanged and only the triangular fill mode is flipped (lower <-> upper).
+    //
+    // The output is a caller-provided stack object, so no heap allocation is
+    // performed and there is nothing to free.
+    //
+    // \param[in]  csc_descr the source CSC matrix descriptor.
+    // \param[out] csr_descr the CSR matrix descriptor (csc_descr with fill flipped).
+    //
+    static inline void build_csr_descr_from_csc(const _rocsparse_mat_descr& csc_descr,
+                                                _rocsparse_mat_descr&       csr_descr)
+    {
+        csr_descr = csc_descr;
+        switch(csc_descr.fill_mode)
+        {
+        case rocsparse_fill_mode_lower:
+            csr_descr.fill_mode = rocsparse_fill_mode_upper;
+            break;
+        case rocsparse_fill_mode_upper:
+            csr_descr.fill_mode = rocsparse_fill_mode_lower;
+            break;
+        }
+    }
+
+    //
     // \brief Build a CSR view of a CSC sparse matrix descriptor for triangular solve.
     //
     // A CSC matrix is the transpose of the CSR matrix that shares the same arrays:
@@ -49,12 +77,9 @@ namespace rocsparse
                                           _rocsparse_spmat_descr&       csr,
                                           _rocsparse_mat_descr&         csr_descr)
     {
-        // Copy the matrix descriptor (type, diagonal type, index base, storage
-        // mode, ...) and flip only the fill mode, since CSR is the transpose of CSC.
-        csr_descr           = *csc.descr;
-        csr_descr.fill_mode = (csc.descr->fill_mode == rocsparse_fill_mode_lower)
-                                  ? rocsparse_fill_mode_upper
-                                  : rocsparse_fill_mode_lower;
+        // Copy the matrix descriptor and flip only the fill mode, since CSR is
+        // the transpose of CSC.
+        rocsparse::build_csr_descr_from_csc(*csc.descr, csr_descr);
 
         // Reinterpret the CSC arrays as the transposed CSR matrix.
         csr                = csc;

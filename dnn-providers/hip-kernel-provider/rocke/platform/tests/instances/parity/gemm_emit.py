@@ -238,6 +238,32 @@ def _spec(idx: int) -> UniversalGemmSpec:
             ),
             "gfx942",
         )
+    if idx == 10:
+        # cshuffle epilogue with cshuffle_no_alias=True: the C staging tile gets
+        # its own exclusive LDS bytes (not aliased onto A/B) and the step-0 reuse
+        # barrier is elided. Same shape as idx 1 (the aliased cshuffle config) so
+        # the two configs isolate the no-alias knob. Both engines must agree.
+        return UniversalGemmSpec(
+            name="test_noalc",
+            tile=TileSpec(
+                tile_m=256,
+                tile_n=256,
+                tile_k=64,
+                warp_m=4,
+                warp_n=4,
+                warp_k=1,
+                warp_tile_m=32,
+                warp_tile_n=32,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv4", epilogue="cshuffle", cshuffle_no_alias=True
+            ),
+            data=DataSpec(dtype_a="fp16"),
+            wave_size=64,
+            block_size=1024,
+            batched=False,
+        )
     raise SystemExit(f"unknown config index {idx}")
 
 
@@ -245,7 +271,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..9>\n",
+        usage="usage: gemm_emit.py <config_index 0..10>\n",
     )
 
 

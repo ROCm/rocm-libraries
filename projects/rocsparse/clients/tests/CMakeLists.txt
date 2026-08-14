@@ -44,9 +44,12 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
-# CSC triangular solve support (rocsparse_spsv / rocsparse_sptrsv) ?
 if(BUILD_WITH_CSC_TRSV)
   add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
 endif()
 
 #
@@ -191,8 +194,10 @@ set(ROCSPARSE_TEST_SOURCES
   test_spsv_coo.cpp
   test_sptrsv_coo.cpp
   test_spsm_csr.cpp
+  test_spsm_csc.cpp
   test_spsm_coo.cpp
   test_sptrsm_csr.cpp
+  test_sptrsm_csc.cpp
   test_sptrsm_coo.cpp
   test_spmm_bsr.cpp
   test_spmm_csr.cpp
@@ -244,6 +249,19 @@ endif()
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_TEST_SOURCES
+    test_sddmm_batched_ell.cpp
+    test_sddmm_batched_coo.cpp
+    test_sddmm_batched_coo_aos.cpp
+    test_sddmm_batched_csr.cpp
+    test_sddmm_batched_csc.cpp)
 endif()
 
 set(ROCSPARSE_CLIENTS_TESTINGS
@@ -354,8 +372,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spsv_coo.cpp
 ../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spsm_csr.cpp
+../testings/testing_spsm_csc.cpp
 ../testings/testing_spsm_coo.cpp
 ../testings/testing_sptrsm_csr.cpp
+../testings/testing_sptrsm_csc.cpp
 ../testings/testing_sptrsm_coo.cpp
 ../testings/testing_spmm_bsr.cpp
 ../testings/testing_spmm_csr.cpp
@@ -402,6 +422,19 @@ rocsparse_test_listeners.cpp
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SDDMM_BATCHED)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS
+    ../testings/testing_sddmm_batched_ell.cpp
+    ../testings/testing_sddmm_batched_coo.cpp
+    ../testings/testing_sddmm_batched_coo_aos.cpp
+    ../testings/testing_sddmm_batched_csr.cpp
+    ../testings/testing_sddmm_batched_csc.cpp)
 endif()
 
 

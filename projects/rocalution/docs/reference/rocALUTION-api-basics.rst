@@ -34,17 +34,14 @@ Local operators and vectors
 
 The local operators and vectors correspond to the local matrices and stencils, and local vectors. The term "local" implies the fact that they stay on a single system. A system can contain several CPUs via UMA or NUMA memory system, as well as an accelerator.
 
-.. doxygenclass:: rocalution::LocalMatrix
-.. doxygenclass:: rocalution::LocalStencil
-.. doxygenclass:: rocalution::LocalVector
+The local API classes are :cpp:class:`LocalMatrix <rocalution::LocalMatrix>`, :cpp:class:`LocalStencil <rocalution::LocalStencil>`, and :cpp:class:`LocalVector <rocalution::LocalVector>`. Member lists and signatures are on the :ref:`api` page.
 
 Global operators and vectors
 ----------------------------
 
 Global operators and vectors correspond to the global matrix and global vectors. The term "global" implies the fact that they stay on a single or multiple nodes in a network. For this type of computation, the communication is based on MPI.
 
-.. doxygenclass:: rocalution::GlobalMatrix
-.. doxygenclass:: rocalution::GlobalVector
+The global API classes are :cpp:class:`GlobalMatrix <rocalution::GlobalMatrix>` and :cpp:class:`GlobalVector <rocalution::GlobalVector>`. Member lists and signatures are on the :ref:`api` page.
 
 Backend descriptor and user control
 ===================================
@@ -60,8 +57,7 @@ Initialization of rocALUTION
 The body of a rocALUTION code should simply contain the header file and the namespace of the library.
 The program must contain an initialization call to :cpp:func:`init_rocalution <rocalution::init_rocalution>` that checks and allocates the hardware and a finalizing call to :cpp:func:`stop_rocalution <rocalution::stop_rocalution>` that releases the allocated hardware.
 
-.. doxygenfunction:: rocalution::init_rocalution
-.. doxygenfunction:: rocalution::stop_rocalution
+Runtime and host utility functions (including device selection and OpenMP settings) are documented under Backend Module on the :ref:`api` page.
 
 Thread-core mapping
 -------------------

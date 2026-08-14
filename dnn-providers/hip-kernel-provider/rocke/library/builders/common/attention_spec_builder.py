@@ -14,7 +14,7 @@ callers that already import from that module do not need to change.
 """
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
@@ -26,6 +26,8 @@ from kernels.common.attention_unified import (
     _enable_gfx942_bf16_flash,
     _enable_gfx942_flash_k_sliced_ldsseq,
     _enable_gfx942_flash_k_sliced_ring,
+    _select_gfx942_flash_ring_depth,
+    _select_gfx942_flash_k_slice_hd,
     _enable_gfx942_flash_mask_limit,
     _enable_gfx942_flash_q_direct,
     _enable_gfx942_fp16_flash,
@@ -60,6 +62,11 @@ from kernels.common.attention_unified import (
     _tiled_2d_impl,
     _tiled_3d_impl,
 )
+
+# Imported as a module (not a bound symbol) so tests that
+# ``mock.patch.object(attention_unified, "_d256_gfx950_fast", ...)`` still steer
+# the builder's fast-route branch below (a bound import would freeze the ref).
+from kernels.common import attention_unified as _kau
 
 
 def _tiled_spec_from_problem(
@@ -134,6 +141,8 @@ def _tiled_spec_from_problem(
             use_conflict_free_v_store=use_cfvst,
             use_k_single_buffer=single_k,
             use_k_sliced_ring=use_ring,
+            ring_depth=_select_gfx942_flash_ring_depth(problem),
+            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
             use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
             use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
             kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
@@ -170,6 +179,8 @@ def _tiled_spec_from_problem(
             use_conflict_free_v_store=use_cfvst,
             use_k_single_buffer=use_single,
             use_k_sliced_ring=_enable_gfx942_flash_k_sliced_ring(problem),
+            ring_depth=_select_gfx942_flash_ring_depth(problem),
+            k_slice_hd=_select_gfx942_flash_k_slice_hd(problem),
             use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
             use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
             kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
@@ -225,7 +236,7 @@ def _tiled_spec_from_problem(
     # no-fp8 preconditions so it can never fire on an incompatible spec.
     if "use_k_single_buffer" in _spec_field_names and _enable_k_single_buffer(problem):
         _gfx950_schedule_fields["use_k_single_buffer"] = True
-    return UnifiedAttention2DTiledSpec(
+    _spec = UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
         num_query_heads=problem.num_query_heads,
@@ -274,6 +285,11 @@ def _tiled_spec_from_problem(
             and not problem.use_fp8
             and problem.num_query_heads == 64
             and problem.num_kv_heads == 8
+            # self-consistency: fast_paged_kv_desc requires T==64. Only enable it
+            # when the tile selector actually picks 64 for this shape, so the flag
+            # can never be set with an incompatible tile (which trips the spec
+            # validator). _select_2d_tile_size forces T=64 for this family.
+            and _select_2d_tile_size(problem) == 64
         ),
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
@@ -288,6 +304,17 @@ def _tiled_spec_from_problem(
         # below -- gfx942's spec class does not declare it.)
         **_gfx950_schedule_fields,
     )
+    if _kau._d256_gfx950_fast(problem):
+        # D256 gfx950 bf16 prefill fast route. Authored here in the builder
+        # (was a post-build override in kernels.common ``_tiled_spec_from_problem``,
+        # so the winning spec is created in the builder, not
+        # baked into the dispatch layer). Geometry (num_warps / tile_size /
+        # block_m_per_warp) already comes from the gated selectors above; this
+        # pins the 32x32 transposed + FA3 softmax<->MFMA-interleave codegen
+        # constellation. The cohort is discriminated in ``_tiled_cache_key`` by
+        # ``_d256_gfx950_fast`` so the key stays faithful to the built kernel.
+        _spec = replace(_spec, **_kau._d256_gfx950_spec_overrides())
+    return _spec
 
 
 def _tiled_3d_spec_from_problem(

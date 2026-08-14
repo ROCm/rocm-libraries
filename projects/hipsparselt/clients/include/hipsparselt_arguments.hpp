@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -62,7 +62,8 @@ struct Arguments
     int64_t stride_a; //  stride_a > transA == 'N' ? lda * K : lda * M
     int64_t stride_b; //  stride_b > transB == 'N' ? ldb * N : ldb * K
     int64_t stride_c; //  stride_c > ldc * N
-    int64_t stride_d; //  stride_d > ldd * N
+    int64_t stride_d;    //  stride_d > ldd * N
+    int64_t stride_gate; //  stride_gate > ldg * N
 
     size_t user_allocated_workspace;
 
@@ -74,6 +75,7 @@ struct Arguments
     int64_t ldb;
     int64_t ldc;
     int64_t ldd;
+    int64_t ldg;
 
     int32_t batch_count;
 
@@ -123,6 +125,9 @@ struct Arguments
     int64_t     bias_stride;
     hipDataType bias_type;
 
+    bool        gate_residual;
+    hipDataType gate_type;
+
     bool c_noalias_d;
     bool HMM;
 
@@ -163,6 +168,7 @@ struct Arguments
     OPER(stride_b) SEP               \
     OPER(stride_c) SEP               \
     OPER(stride_d) SEP               \
+    OPER(stride_gate) SEP            \
     OPER(user_allocated_workspace) SEP \
     OPER(M) SEP                      \
     OPER(N) SEP                      \
@@ -171,6 +177,7 @@ struct Arguments
     OPER(ldb) SEP                    \
     OPER(ldc) SEP                    \
     OPER(ldd) SEP                    \
+    OPER(ldg) SEP                    \
     OPER(batch_count) SEP            \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
@@ -200,6 +207,8 @@ struct Arguments
     OPER(bias_vector) SEP            \
     OPER(bias_stride) SEP            \
     OPER(bias_type) SEP              \
+    OPER(gate_residual) SEP          \
+    OPER(gate_type) SEP              \
     OPER(c_noalias_d) SEP            \
     OPER(HMM) SEP                    \
     OPER(search) SEP                 \

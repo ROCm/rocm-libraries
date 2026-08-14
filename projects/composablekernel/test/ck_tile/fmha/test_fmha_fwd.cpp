@@ -224,7 +224,11 @@ INSTANTIATE_TEST_SUITE_P(
                    std::tuple{3, 2, 1, -1, -1, 200, 520, -1, "t:128,30"},
                    std::tuple{2, 1, -1, -1, -1, 99, 32, -1, "b:4,35"},
                    std::tuple{1, 2, 1, -1, -1, 33, 0, -1, "2"},
-                   std::tuple{1, 2, 1, -1, -1, 1, 10, 32, "2"})));
+                   std::tuple{1, 2, 1, -1, -1, 1, 10, 32, "2"},
+                   // d=128 on gfx1250: seqlen<2048 selects the qr_tdm decode (b64) tile,
+                   // seqlen>=2048 the prefill (b128) tile
+                   std::tuple{1, 2, 1, 128, 128, 512, 512, -1, "0"},
+                   std::tuple{1, 2, 1, 128, 128, 2048, 2048, -1, "0"})));
 
 TEST_P(AllLong, DataTypeConfig)
 {
@@ -1393,4 +1397,21 @@ TEST(FmhaBatchPrefillKvLoadMode, PerTensorIndependence)
     EXPECT_EQ(fmha_batch_prefill_select_kv_load_mode(
                   32, 128, pages, 1, 1, ebytes, as_ptr(low), as_ptr(low)),
               kBuffer);
+}
+
+// Scattered 1D paged KV (page_size=1 LINEAR + SGLANG_PAGE_TABLE_1D): the page
+// table holds arbitrary physical-page indices into the whole KV pool, so
+// num_total_pages does not bound the per-page voffset and the signed int32 SRD
+// offset can wrap independently of base[31:0] + pool_bytes. Single-token pages
+// (page_block_size == 1) must always take GLOBAL_LOAD_LDS, even when the
+// address-overflow check alone would keep BUFFER_LOAD.
+TEST(FmhaBatchPrefillKvLoadMode, SinglePageAlwaysGlobalLoad)
+{
+    // Low base, tiny in-bounds pool: the #9214 overflow check alone would pick
+    // BUFFER_LOAD, but a single-token page must be routed to GLOBAL_LOAD_LDS.
+    EXPECT_EQ(select(1, 128, 1'000, 64, 2, 0x0010'0000ULL), kGlobal);
+    // A >1 sub-tile page with the same in-bounds address keeps the BUFFER_LOAD
+    // fast path: the guard is scoped to page_block_size == 1 and does not regress
+    // the cases #9214 already handles.
+    EXPECT_EQ(select(32, 128, 1'000, 64, 2, 0x0010'0000ULL), kBuffer);
 }

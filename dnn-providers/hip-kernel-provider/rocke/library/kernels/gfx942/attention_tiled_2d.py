@@ -74,6 +74,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
@@ -404,10 +405,41 @@ class UnifiedAttention2DTiledSpec:
     # slot). DEFAULT OFF -> gfx950 and every existing kernel are byte-identical.
     use_k_single_buffer: bool = False
     # Experimental CK-style sliced K staging for transposed-x8 D128 cfvst.
-    # Stages 32-head-dim K slices in a 3-slot ring instead of double-buffering
-    # full [T, HD] K tiles. This is the LDS prerequisite for NumPrefetchK/V=3
+    # Stages ``k_slice_hd``-wide K slices in a ``ring_depth``-slot ring instead of
+    # double-buffering full [T, HD] K tiles. This is the LDS prerequisite for
+    # NumPrefetchK/V=3
     # on MI300X; v1 syncs per slice before adding overlap.
     use_k_sliced_ring: bool = False
+    # Ring pipeline depth: how many K slices are staged/in-flight at once.
+    #   3 (default): depth-3 pipeline (live set {kg, kg+1, kg+2}), 3 LDS slots.
+    #     For k_groups=4 (D128) this map (kg % 3) reuses slot 0 for slice 3, so
+    #     the reusing DMA is fenced by a drain-on-reuse barrier (see the schedule
+    #     in build_unified_attention_2d_tiled). Depth-3 needs cfvst + the wide
+    #     nw=4 geometry.
+    #   2: depth-2 pipeline (live set {kg, kg+1}), 2 LDS slots (kg % 2). Never
+    #     reuses a slot within the k_groups=4 live set, uses less LDS (lower
+    #     register/occupancy pressure), and is the measured best for fp16 D128
+    #     prefill on gfx942 (~0.72-1.05x AOTriton flash, correct at magnitude).
+    ring_depth: int = 3
+    # Head-dim width of one K slice, so k_groups = head_size // k_slice_hd.
+    # K_lds is ``[slots, T, k_slice_hd]``, and the QK read has 32 lanes take 32
+    # consecutive K rows at a fixed column, so lane i lands on LDS bank
+    # ``(k_slice_hd * 2 // 4 * i) % 32`` -- the row stride in dwords sets the
+    # bank spread. gfx942 has 32 banks of 4 B, so distinct banks touched is
+    # ``32 // gcd(stride_dwords, 32)`` and the conflict degree is 32 lanes over
+    # that many banks: width 32 (16-dword stride) reaches 2 banks -> 16-way,
+    # width 16 (8-dword stride) reaches 4 banks -> 8-way. Narrowing therefore
+    # halves the conflict degree, at the cost of doubling k_groups and so the
+    # per-tile barrier/partial-wait count -- the two effects trade off and the
+    # width is a tuning axis rather than a monotone win.
+    #   32 (default): the shipped ring geometry.
+    # Slot reuse is independent of this field: with the plain modulo map,
+    # ``K_SLICE_SLOTS == ring_depth`` and the prefetch distance is
+    # ``ring_depth - 1``, so the DMA target ``(kg + ring_depth - 1) % ring_depth``
+    # is identically ``(kg - 1) % ring_depth`` -- always the slot slice(kg-1) was
+    # read from, for every depth and every k_groups. The drain-on-reuse fence in
+    # the ring schedule therefore covers any legal width without new analysis.
+    k_slice_hd: int = 32
     # Use CK Tile's explicit LDS buffer sequence for the sliced-K pipeline
     # instead of the conservative round-robin slot map. This is opt-in because
     # the sequence can reuse the previously consumed slot and therefore needs
@@ -427,6 +459,8 @@ class UnifiedAttention2DTiledSpec:
     # one-time Q scratch. This is tested independently from sliced K because it
     # can remove a barrier/prologue even when full-tile K buffering remains.
     use_q_direct_global: bool = False
+    use_v_hbm_direct: bool = False
+    use_k_hbm_direct: bool = False
     # Cache policy for async K/V buffer->LDS loads. Gfx942 interprets these aux
     # bits as sc0/nt/swz/sc1, so this stays explicit and benchmarked.
     kv_cache_policy: str = "stream"
@@ -440,6 +474,11 @@ class UnifiedAttention2DTiledSpec:
     # workgroups for one KV head walk q-blocks contiguously, improving L2/XCD
     # locality for long-prefill.
     use_q_major_grid: bool = False
+    # Two-phase causal loop: emit an unmasked bulk phase (skip_mask=True) for
+    # tiles fully below the diagonal, then a masked boundary phase. Pays off
+    # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
+    # path); no-op-guarded to sliding_window==0.
+    use_causal_mask_phase_split: bool = False
 
     def __post_init__(self):
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
@@ -672,15 +711,54 @@ class UnifiedAttention2DTiledSpec:
             if (
                 self.dtype not in ("fp16", "bf16")
                 or self.head_size not in (64, 128)
-                or self.head_size % 32 != 0
                 or self.tile_size_eff not in (64, 128)
             ):
                 raise ValueError(
-                    "use_k_sliced_ring requires fp16/bf16, head_size in {64,128} "
-                    "(HD %% 32 == 0 for the 32-wide K slices), T in {64,128}"
+                    "use_k_sliced_ring requires fp16/bf16, head_size in {64,128}, "
+                    "T in {64,128}"
+                )
+            if self.ring_depth not in (2, 3):
+                raise ValueError(
+                    f"ring_depth must be 2 or 3 when use_k_sliced_ring is set "
+                    f"(got {self.ring_depth})"
+                )
+            # The head dim must split into whole slices, or the last slice would
+            # read past the K_lds row.
+            if self.k_slice_hd <= 0 or self.head_size % self.k_slice_hd != 0:
+                raise ValueError(
+                    f"k_slice_hd must divide head_size={self.head_size} "
+                    f"(got {self.k_slice_hd})"
+                )
+            # The ring runs on the 32x32x8 path, so the QK atom consumes 8 head-dim
+            # elements per step and the schedule takes
+            # ``k_steps_per_group = k_slice_hd // QK_K_STEP``. Below one full step
+            # that floors to zero and the slice emits no MFMA at all, which is why
+            # 8 is the floor rather than merely the narrowest useful width.
+            _qk_k_step = 8
+            if self.k_slice_hd % _qk_k_step != 0:
+                raise ValueError(
+                    f"k_slice_hd must be a multiple of the QK k-step "
+                    f"{_qk_k_step} (got {self.k_slice_hd})"
+                )
+            # A single group is a ring with nothing to pipeline: the prologue's
+            # second issue and the in-loop prefetch are both skipped, yet
+            # ring_depth slots are still allocated and only slot 0 is ever
+            # touched. Reject it rather than reserve dead LDS.
+            if self.head_size // self.k_slice_hd < 2:
+                raise ValueError(
+                    f"k_slice_hd={self.k_slice_hd} gives k_groups="
+                    f"{self.head_size // self.k_slice_hd} at head_size="
+                    f"{self.head_size}; the ring needs at least 2 slices"
                 )
         if self.use_k_sliced_ldsseq and not self.use_k_sliced_ring:
             raise ValueError("use_k_sliced_ldsseq requires use_k_sliced_ring")
+        if self.use_k_sliced_ldsseq and self.ring_depth != 3:
+            # The CK LdsSeq slot maps are 3-slot layouts; they are undefined for
+            # the depth-2 ring (only slots {0, 1} exist).
+            raise ValueError(
+                f"use_k_sliced_ldsseq requires ring_depth == 3 "
+                f"(got {self.ring_depth})"
+            )
         if self.use_q_direct_global:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError("use_q_direct_global currently targets transposed-x8")
@@ -811,9 +889,9 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_register_pv v1 is restricted to dtype='bf16'")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_register_pv v1 does not support fp8 K/V cache")
-            if self.use_sinks or self.sliding_window > 0 or self.has_softcap:
+            if self.sliding_window > 0 or self.has_softcap:
                 raise ValueError(
-                    "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
+                    "use_register_pv v1 requires no sliding window and no softcap"
                 )
             if self.use_alibi or self.use_qq_bias:
                 raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
@@ -915,6 +993,8 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "qdir" if self.use_q_direct_global else "",
+            "vhbm" if self.use_v_hbm_direct else "",
+            "khbm" if self.use_k_hbm_direct else "",
             "qsgb" if self.use_qk_pv_sched_group_barrier else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "stream" else "",
             "gldlds" if self.use_global_load_lds_k else "",
@@ -938,8 +1018,24 @@ class UnifiedAttention2DTiledSpec:
                 else ""
             ),
             "ksring" if self.use_k_sliced_ring else "",
+            # depth-2 ring is a distinct schedule (fp16 D128); tag it so the HSACO
+            # cache key and kernel name differ from the default depth-3 ring.
+            (
+                f"rd{self.ring_depth}"
+                if self.use_k_sliced_ring and self.ring_depth != 3
+                else ""
+            ),
+            # A narrower slice changes k_groups, the K_lds extents and the barrier
+            # count, so it is a distinct kernel. Tagged only away from the default
+            # so every already-shipped ring kernel keeps its current name.
+            (
+                f"ks{self.k_slice_hd}"
+                if self.use_k_sliced_ring and self.k_slice_hd != 32
+                else ""
+            ),
             "ldsseq" if self.use_k_sliced_ldsseq else "",
             "iglp1" if self.use_iglp_opt else "",
+            "cmps" if self.use_causal_mask_phase_split else "",
             "k1buf" if self.use_k_single_buffer else "",
         )
 
@@ -964,6 +1060,9 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    ring_depth: int = 3,
+    k_slice_hd: int = 32,
+    use_d256_fast: bool = False,
 ) -> Tuple[bool, str]:
     # The gfx942 variant runs the narrow 16x16x16 default path. The arch gate
     # admits gfx942 (narrow atom present + non-transpose V pipeline selectable)
@@ -1066,6 +1165,19 @@ def supports_tiled_2d(
                 f"tiled 2D kernel: per-wave tokens {per_wave_tokens} exceeds "
                 f"block_size={block_size}; would need lane-divergent block lookup",
             )
+    # The D256 gfx942 fast path (build_gfx942_4warp_gqa) reads paged K direct
+    # HBM->reg, stages V through V_lds, and uses only its own softmax-reduction
+    # LDS (5-stage swizzle) -- so the conservative staged-tile LDS model below
+    # (K double-buffer + V + Q_lds + P_lds) does NOT apply. Validate the fast
+    # path's hard requirements explicitly instead of trusting the flag; earlier
+    # checks already covered dtype family, block_size, and tile_size % block_size.
+    if use_d256_fast:
+        if head_size == 256 and dtype == "bf16":
+            return True, "supported"
+        return (
+            False,
+            "tiled 2D kernel: d256 gfx942 fast path requires bf16 head_size=256",
+        )
     # LDS-budget gate (ahead-of-time compilability). The kernel stages its
     # tiles in LDS (the smem_alloc calls in build_unified_attention_2d_tiled);
     # comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a kernel whose static
@@ -1102,12 +1214,20 @@ def supports_tiled_2d(
         if use_mfma_32x32x8 and use_transposed_qk_32x32:
             if use_k_sliced_ring:
                 # Overlapped sliced-K ring (CK Tile geometry): K is staged as a
-                # 3-slot ring of 32-head-dim slices (not double-buffered at full
-                # HD), Q is fed direct-from-global (no Q_lds), and V uses the
-                # conflict-free CK packed layout. This is what lets T=128 fit the
-                # 64 KB cap where the naive 2*T*HD K buffer would not.
-                _K_SLICE_HD = 32
-                _K_SLICE_SLOTS = 3
+                # ``ring_depth``-slot ring of ``k_slice_hd``-wide slices (not
+                # double-buffered at full HD), Q is fed direct-from-global (no
+                # Q_lds), and V uses the conflict-free CK packed layout. This is
+                # what lets T=128 fit the 64 KB cap where the naive 2*T*HD K
+                # buffer would not.
+                #
+                # Both terms must track the spec, or this gate sizes a different
+                # kernel than the builder emits. It was pinned at 3 slots of 32
+                # while ring_depth already varied, which over-counted depth-2 by
+                # one slot; over-counting only ever over-rejects, so it was
+                # conservative rather than wrong, but it is no longer accurate
+                # once the width is tunable too.
+                _K_SLICE_HD = k_slice_hd
+                _K_SLICE_SLOTS = ring_depth
                 _k_bytes = _K_SLICE_SLOTS * _t_eff * _K_SLICE_HD * _BPE
                 # CK conflict-free transposed-V slot map (mirrors V_T_CK_SLOTS in
                 # build_unified_attention_2d_tiled): kgroups*ngroups*group_stride.
@@ -1286,6 +1406,7 @@ def build_unified_attention_2d_tiled(
     K_SLICED_LDSSEQ = spec.use_k_sliced_ldsseq
     USE_IGLP_OPT = spec.use_iglp_opt
     USE_QK_PV_SCHED_GROUP_BARRIER = spec.use_qk_pv_sched_group_barrier
+    CAUSAL_MASK_PHASE_SPLIT = spec.use_causal_mask_phase_split
     USE_GLOBAL_LOAD_LDS_K = spec.use_global_load_lds_k
     # DIAGNOSTIC ONLY (not signature-gated -- toggle re-JITs via env): read the
     # transposed cfv [HD,T+pad] V via 4 scalar n=1 reads instead of one n=4
@@ -1573,8 +1694,19 @@ def build_unified_attention_2d_tiled(
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     Q_BYTES = BLOCK_M * HD * 2
-    K_SLICE_HD = 32
-    K_SLICE_SLOTS = 3
+    # Head-dim width of one K slice (spec.k_slice_hd), so k_groups = HD // this.
+    # It sets the K_lds row stride and therefore the QK read's LDS bank spread;
+    # see the spec field docstring. Validated against head_size and the QK k-step
+    # in __post_init__ when the ring is active; unused when it is not.
+    K_SLICE_HD = spec.k_slice_hd
+    # Ring pipeline depth (spec.ring_depth): depth-3 keeps the live set
+    # {kg, kg+1, kg+2} in 3 slots; depth-2 keeps {kg, kg+1} in 2 slots (fewer
+    # LDS slots, lower occupancy pressure -- fp16 D128's best). See the spec
+    # field docstring and the schedule loop below.
+    # ring_depth is validated to {2, 3} in __post_init__ when the ring is active;
+    # when the ring is inactive it is unused (K_SLICED_ACTIVE gates the schedule).
+    RING_DEPTH = spec.ring_depth
+    K_SLICE_SLOTS = RING_DEPTH
     K_SLICED_ACTIVE = K_SLICED_RING and USE_MFMA_32X32X8 and TRANSPOSED_QK_32X32
     # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
     K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
@@ -1597,8 +1729,11 @@ def build_unified_attention_2d_tiled(
         (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
     )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
+    K_HBM_DIRECT = spec.use_k_hbm_direct
     if K_SLICED_ACTIVE:
         K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
+    elif K_HBM_DIRECT:
+        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, 1, 1], name_hint="KldsStub")
     else:
         K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
@@ -1717,7 +1852,7 @@ def build_unified_attention_2d_tiled(
         # and bf16. (The K=16 bf16 atom is gfx950-only, but cfvst rides the
         # gfx942-legal K=8 32x32x8 path, so bf16 is fine here.)
         and dtype in (F16, BF16)
-        and HD in (64, 128)
+        and HD in (64, 128, 256)
         and (HD % 8 == 0)
         and (T * HD) % THREADS == 0
         and _v_t_fits_eff
@@ -1726,6 +1861,7 @@ def build_unified_attention_2d_tiled(
     # transpose) when the store-path flag drove TRANSPOSED_V; the 2x2 f16
     # transpose needs T and HD both even (HD%8==0 already; T%2 below).
     TRANSPOSED_V_STORE = TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
+    V_HBM_DIRECT = spec.use_v_hbm_direct
     SWIZZLE_VLDS = (
         os.environ.get("HIPDNN_GFX942_SWIZZLE_VLDS", "1") == "1"
         and not FP8_MFMA_PV
@@ -1843,7 +1979,31 @@ def build_unified_attention_2d_tiled(
         else:
             b.smem_store_vN(V_lds, [b.const_i32(0), dim, tok], value, n)
 
+    _cur_kv_tile = [None]
+
+    def _v_hbm_elem(tile, tok, dim):
+        # direct-HBM V element V[local tok, dim] for tile (bypass V_lds).
+        _lin = b.add(b.mul(tok, b.const_i32(HD)), dim)
+        _vo, _vl = paged_kv_desc.offset(
+            b, tile_idx=tile, linear_half=_lin, kv_head=kv_head_idx
+        )
+        _ir = b.cmp_lt(b.add(b.mul(tile, b.const_i32(T)), tok), max_seq_prefix_len)
+        if _vl is not None:
+            _ir = b.land(_ir, _vl)
+        _se = b.select(_ir, _vo, b.const_i32(0))
+        _el = b.div(_se, b.const_i32(KV_BYTES)) if KV_BYTES != 1 else _se
+        _e = b.global_load(value, _el, dtype, align=2)
+        return b.select(_ir, _e, b.cast_f32_to(b.const_f32(0.0), dtype))
+
     def _v_t_load(dim: Value, tok: Value, *, n: int) -> Value:
+        if V_HBM_DIRECT:
+            return b.vec_pack(
+                [
+                    _v_hbm_elem(_cur_kv_tile[0], b.add(tok, b.const_i32(_i)), dim)
+                    for _i in range(n)
+                ],
+                dtype,
+            )
         v_buf0 = b.const_i32(0)
         if V_T_CK_LAYOUT:
             return b.smem_load_vN(V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n)
@@ -1860,6 +2020,8 @@ def build_unified_attention_2d_tiled(
         recompute -> VGPR-neutral). When the swizzle is off this is exactly the
         natural ``V_lds[v_buf, v_row, v_n_col]`` 3D access.
         """
+        if V_HBM_DIRECT:
+            return b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], v_row, v_n_col)], dtype)
         if not SWIZZLE_VLDS:
             return b.smem_load_vN(V_lds, v_buf, v_row, v_n_col, dtype=dtype, n=1)
         group = b.lshr(v_row, b.const_i32(V_GROUP_SHIFT))
@@ -2574,12 +2736,37 @@ def build_unified_attention_2d_tiled(
                     coherency=kv_cache_aux,
                 )
 
+    # This count is not just a loop bound: it is the value the ring's partial
+    # ``s_waitcnt(vmcnt=...)`` uses to leave exactly one slice's VMEM stream in
+    # flight. Partial waits are FIFO-count fences, so a floored division would
+    # silently fence the wrong number of calls. Checked for the same reason the
+    # full-tile ``kv_calls_per_tile`` above is, but raised rather than asserted:
+    # these are validation of a tunable geometry, and ``__post_init__`` cannot
+    # reach them because the count depends on ``num_warps`` through
+    # ``KV_HALVES_PER_CALL``. An ``assert`` here is stripped under ``python -O``,
+    # which would emit the mis-fenced kernel the message warns about.
+    if K_SLICED_ACTIVE:
+        if (T * K_SLICE_HD) % KV_HALVES_PER_CALL != 0:
+            raise ValueError(
+                f"T={T} * k_slice_hd={K_SLICE_HD} must be a multiple of "
+                f"KV_HALVES_PER_CALL={KV_HALVES_PER_CALL} so the ring's partial "
+                f"vmcnt fence counts whole slice prefetches"
+            )
+        # The count is also the operand of s_waitcnt(vmcnt=...), whose encoded
+        # field is 6 bits on this target. Widening the slice raises the count, so
+        # cap it explicitly rather than silently truncating the fence.
+        if (T * K_SLICE_HD) // KV_HALVES_PER_CALL > 63:
+            raise ValueError(
+                f"ring partial-vmcnt count {(T * K_SLICE_HD) // KV_HALVES_PER_CALL} "
+                f"exceeds the 6-bit vmcnt field (T={T}, k_slice_hd={K_SLICE_HD}, "
+                f"KV_HALVES_PER_CALL={KV_HALVES_PER_CALL})"
+            )
     K_SLICE_CALLS_PER_TILE = (T * K_SLICE_HD) // KV_HALVES_PER_CALL
 
     def _issue_k_slice_load_runtime(
         kv_tile_idx: Value, slice_idx: int, slot_idx: int
     ) -> None:
-        """Issue one 32-dim K slice into the sliced K ring."""
+        """Issue one ``K_SLICE_HD``-wide K slice into the sliced K ring."""
         slot_off_i64 = b.const_i64(slot_idx * K_BUF_BYTES)
         K_slot_base = b.smem_ptr_add(K_lds_addr, slot_off_i64)
         K_wave_base = b.smem_ptr_add(K_slot_base, wave_lds_offset_i64)
@@ -3147,11 +3334,12 @@ def build_unified_attention_2d_tiled(
     # store is one ``smem_store_vN(..., n=8)``.
     fp8_elems_per_chunk = 8
     fp8_total_chunks = (T * HD) // fp8_elems_per_chunk
-    assert fp8_total_chunks % THREADS == 0, (
-        f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
-        f"THREADS={THREADS} (T={T}, HD={HD})"
-    )
-    fp8_chunks_per_thread = fp8_total_chunks // THREADS
+    if KV_FP8:
+        assert fp8_total_chunks % THREADS == 0, (
+            f"fp8 loader: total chunks {fp8_total_chunks} must be divisible by "
+            f"THREADS={THREADS} (T={T}, HD={HD})"
+        )
+    fp8_chunks_per_thread = fp8_total_chunks // THREADS if KV_FP8 else 0
 
     def _issue_fp8_dequant_loads(
         kv_tile_idx: Value, buf_idx: Value, lds_token: str
@@ -3424,6 +3612,8 @@ def build_unified_attention_2d_tiled(
         """
         if K_SLICED_ACTIVE:
             return
+        if K_HBM_DIRECT:
+            return  # K streamed HBM->reg per QK-iter
         if K_FP8_MFMA:
             _issue_k_fp8_mfma_async(tile_idx, buf_idx)
         elif KV_FP8:
@@ -3449,6 +3639,8 @@ def build_unified_attention_2d_tiled(
         because ``_issue_v_load_runtime`` ignores ``buf_idx`` and uses
         ``V_lds_addr`` directly. Fix: always pin slot 0 for V.
         """
+        if V_HBM_DIRECT:
+            return  # V streamed HBM->reg on-demand (bare return, like K)
         if PV_FP8_MFMA:
             _issue_v_fp8_mfma_stripe(tile_idx)
         elif KV_FP8:
@@ -3477,6 +3669,14 @@ def build_unified_attention_2d_tiled(
         paths so both get the fp8 LDS-footprint win. (fp8 is rejected on
         gfx942, so the x8-transposed path always takes the plain bf16 read.)
         """
+        if K_HBM_DIRECT and not K_FP8_MFMA:
+            # direct-HBM K via buffer_load (HW OOB->0). Causal mask
+            # already zeros past-seq keys, so no software bounds-select (saves VALU).
+            _lin = b.add(b.mul(k_row, b.const_i32(HD)), k_off)
+            _vo, _ = paged_kv_desc.offset(
+                b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx
+            )
+            return b.buffer_load_vN(key_rsrc, _vo, b.const_i32(0), dtype, frag)
         if not K_FP8_MFMA:
             return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=dtype, n=frag)
         if FP8_NATIVE_QK:
@@ -3777,6 +3977,7 @@ def build_unified_attention_2d_tiled(
     # False here) so the experiment can be re-tried behind a flag if a future
     # change makes the kernel throughput-bound.
     def _emit_kv_body(kv_tile_iv, carry, skip_mask):
+        _cur_kv_tile[0] = kv_tile_iv
         if USE_IGLP_OPT:
             b.iglp_opt(1)
         m_vals = [carry[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
@@ -3951,32 +4152,49 @@ def build_unified_attention_2d_tiled(
                     k_groups = HD // K_SLICE_HD
                     k_steps_per_group = K_SLICE_HD // QK_K_STEP
 
+                    # Slices ahead of the current kg that are kept in flight:
+                    # depth-3 prefetches kg+2, depth-2 prefetches kg+1.
+                    prefetch = RING_DEPTH - 1
+
                     def _kslot(group_idx: int) -> int:
-                        if K_SLICED_LDSSEQ and k_groups == 4:
+                        # The CK LdsSeq maps are 3-slot layouts (they reference
+                        # slot 2), so they are only valid for the depth-3 ring.
+                        # Depth-2 has only slots {0, 1}; returning slot 2 would
+                        # index past the 2-slot K_lds allocation (out-of-bounds LDS
+                        # -> corruption). Depth-2 uses the plain modulo map, which
+                        # respects K_SLICE_SLOTS. (Guarded again in __post_init__.)
+                        if K_SLICED_LDSSEQ and RING_DEPTH == 3 and k_groups == 4:
                             return (1, 2, 0, 1)[group_idx]
-                        if K_SLICED_LDSSEQ and k_groups == 2:
+                        if K_SLICED_LDSSEQ and RING_DEPTH == 3 and k_groups == 2:
                             return (1, 2)[group_idx]
                         return group_idx % K_SLICE_SLOTS
 
                     _issue_k_slice_load_runtime(kv_tile_iv, 0, _kslot(0))
-                    if k_groups > 1:
+                    if k_groups > 1 and prefetch >= 2:
                         _issue_k_slice_load_runtime(kv_tile_iv, 1, _kslot(1))
                     for kg in range(k_groups):
                         slot = _kslot(kg)
-                        if kg + 2 < k_groups:
-                            next_slot = _kslot(kg + 2)
-                            if (
-                                K_SLICED_LDSSEQ
-                                and kg > 0
-                                and next_slot == _kslot(kg - 1)
-                            ):
-                                # CK's LdsSeq can reuse the slice consumed by the
-                                # previous kg. Drain LDS reads before overwriting
-                                # that slot; the VMEM prefetch still overlaps the
-                                # current slice's compute after the partial wait.
+                        nxt = kg + prefetch
+                        if nxt < k_groups:
+                            next_slot = _kslot(nxt)
+                            # Drain-on-reuse: if the slice we are about to DMA
+                            # reuses the LDS slot that slice(kg-1) was just read
+                            # from, the DMA must wait for those reads to retire or
+                            # it clobbers operands mid-flight. This fires for the
+                            # default kg%3 map at k_groups=4 (D128): at kg=1 the
+                            # depth-3 prefetch targets slice 3 -> slot 0, the slot
+                            # slice 0 used. Without this fence the QK accumulation
+                            # is corrupted (max_abs ~0.5-1.3 at magnitude). A ring
+                            # with k_groups <= ring_depth touches each slot at most
+                            # once and never reaches this branch -- that was D64 at
+                            # the 32-wide slice; D64 now routes to width 16, so it
+                            # is k_groups=4 and does reuse.
+                            # (CK's LdsSeq map hits the same reuse and always
+                            # relied on this drain; it now applies to every map.)
+                            if kg > 0 and next_slot == _kslot(kg - 1):
                                 b.s_waitcnt(lgkmcnt=0)
                                 b.s_barrier_bare()
-                            _issue_k_slice_load_runtime(kv_tile_iv, kg + 2, next_slot)
+                            _issue_k_slice_load_runtime(kv_tile_iv, nxt, next_slot)
                         # Leave one newer slice's VMEM stream in flight whenever
                         # such a slice exists; fully drain for the final slice.
                         if kg + 1 < k_groups:
@@ -4736,8 +4954,24 @@ def build_unified_attention_2d_tiled(
                                         b.const_i32(k * 8 + kk),
                                         b.mul(lane_half32, b.const_i32(4)),
                                     )
-                                    v1 = b.smem_load_vN(
-                                        V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
+                                    v1 = (
+                                        b.vec_pack(
+                                            [
+                                                _v_hbm_elem(
+                                                    _cur_kv_tile[0], v_row, v_dim32
+                                                )
+                                            ],
+                                            dtype,
+                                        )
+                                        if V_HBM_DIRECT
+                                        else b.smem_load_vN(
+                                            V_lds,
+                                            v_buf,
+                                            v_row,
+                                            v_dim32,
+                                            dtype=dtype,
+                                            n=1,
+                                        )
                                     )
                                     a_v_elems.append(b.vec_extract(v1, 0))
                                 A_v_t = b.vec_pack(a_v_elems, dtype)
@@ -4811,8 +5045,15 @@ def build_unified_attention_2d_tiled(
                                     b.const_i32(k_static),
                                     b.mul(lane_half32, b.const_i32(8)),
                                 )
-                                v1 = b.smem_load_vN(
-                                    V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
+                                v1 = (
+                                    b.vec_pack(
+                                        [_v_hbm_elem(_cur_kv_tile[0], v_row, v_dim32)],
+                                        dtype,
+                                    )
+                                    if V_HBM_DIRECT
+                                    else b.smem_load_vN(
+                                        V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
+                                    )
                                 )
                                 a_v_elems.append(b.vec_extract(v1, 0))
                             # Then assemble the P operand. Each kk picks (k0,
@@ -5155,9 +5396,39 @@ def build_unified_attention_2d_tiled(
     # softmax/acc/buffer carry is threaded from one phase into the next via
     # ``scf_for_iter`` results so the second loop resumes exactly where the
     # first left off (same K/V double-buffer slot, same online-softmax state).
-    kvloop = b.scf_for_iter(tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile")
-    with kvloop as (kv_tile_iv, carry):
-        _emit_kv_body(kv_tile_iv, carry, False)
+    _cmps = CAUSAL_MASK_PHASE_SPLIT and (spec.sliding_window == 0) and not GROUPED_KV2
+    if _cmps:
+        # Two-phase causal loop (re-enabled per the case-study note above, now
+        # that the 32x32x8 conflict-free-V path is VALU/throughput-bound rather
+        # than latency-bound): [tile_start, split) is fully below the diagonal
+        # (every key <= the block's MIN causal limit = context_len +
+        # qb_start_pos), so skip_mask=True is a bit-exact no-op there; only
+        # [split, tile_end) needs the per-element causal mask VALU.
+        _min_causal_lim = b.add(context_len, qb_start_pos)
+        _split_raw = b.div(_min_causal_lim, b.const_i32(T))
+        _split = b.select(b.cmp_lt(_split_raw, tile_start), tile_start, _split_raw)
+        _split = b.select(b.cmp_lt(tile_end, _split), tile_end, _split)
+        # Phase-1 iter-args need UNIQUE names: both loops lower into one flat
+        # LLVM function, so shared phi names (m0/l0/...) would collide. The body
+        # consumes the carry *values*, not names, so renaming is safe.
+        _iter_args_u = [(nm + "u", init) for (nm, init) in iter_args]
+        _ph1 = b.scf_for_iter(
+            tile_start, _split, kv_step, _iter_args_u, iv_name="kv_tile_u"
+        )
+        with _ph1 as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, True)
+        _iter_args2 = [(nm, res) for (nm, _i), res in zip(iter_args, _ph1.results)]
+        kvloop = b.scf_for_iter(
+            _split, tile_end, kv_step, _iter_args2, iv_name="kv_tile"
+        )
+        with kvloop as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, False)
+    else:
+        kvloop = b.scf_for_iter(
+            tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile"
+        )
+        with kvloop as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, False)
 
     # ---------------- epilogue ----------------
     # The loop issues a uniform "next K" async load every iteration, including
@@ -5408,4 +5679,267 @@ def build_unified_attention_2d_tiled(
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    return b.kernel
+
+
+# ===========================================================================
+# 4-warp GQA D256 paged attention -- production dispatch path.
+# ===========================================================================
+# BLOCK_M=128 / 4-wave64 CTA natural-QK D256 attention on the CDNA3 32x32x8 bf16
+# MFMA atom. Reads paged K direct HBM->register (global_load, element offset);
+# stages V through V_lds (conflict-free store). i32 paged element addressing
+# (the ``_d256_gfx942_fast`` gate excludes > 2 GiB caches that need i64). Varlen
+# token-major Q via q_desc
+# (TensorDescriptor.naive) + in-kernel binary_search_seq_idx on cu_seqlens_q,
+# bottom-right causal (context_off = seq_len - q_len; chunked-prefill/decode),
+# GQA head->kv_head = head // num_queries_per_kv, softmax scale*log2e fold, LDS
+# 5-stage swizzle reduction, conflict-free V. Every component GPU-validated
+# standalone (experiments/d256_4warp_gqa/build_e2e_T3_ragged_bf16o.py): parity+
+# with AITER at Sq4096/8192. Wired for the ``_d256_gfx942_fast`` cohort only.
+_4WGQA_LOG2E = 1.4426950408889634
+
+
+def build_gfx942_4warp_gqa(
+    spec: UnifiedAttention2DTiledSpec,
+    *,
+    arch: str = "gfx942",
+) -> KernelDef:
+    """Emit the gfx942 4-warp GQA D256 paged-attention ``KernelDef``."""
+    from ..common.attention_arch import require_tiled_attention_arch
+
+    require_tiled_attention_arch(arch)
+    if spec.dtype != "bf16":
+        raise NotImplementedError("4-warp GQA kernel is bf16-only")
+    dtype = spec.dtype_ir
+    HD = spec.head_size
+    if HD != 256:
+        raise NotImplementedError("4-warp GQA kernel is head_size=256 only")
+    H = spec.num_query_heads
+    HKV = spec.num_kv_heads
+    GQAG = spec.num_queries_per_kv
+    BS = spec.block_size
+    BN = 64  # 4-warp: 64-key tiles
+    BPT = BN // BS
+    at = MfmaAtom.bf16_32x32x8()
+    APL, BPL, CPL, K = at.a_per_lane, at.b_per_lane, at.c_per_lane, at.k
+    NKEYT = BN // 32
+    NK = HD // K
+    NDdim = HD // 32
+    NKpv = BN // K
+    ITERS = spec.binary_search_iters
+
+    b = IRBuilder(spec.kernel_name() + "_4wgqa")
+    b.kernel.attrs["max_workgroup_size"] = 256  # 4 wave64 warps
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+
+    # ---- production _attn_signature (18-arg paged ABI) ----
+    C = b.param(
+        "output_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
+    )
+    Q = b.param(
+        "query_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    Kp = b.param(
+        "key_cache_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    Vp = b.param(
+        "value_cache_ptr",
+        PtrType(dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
+    )
+    b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
+    BT = b.param("block_tables_ptr", PtrType(I32, "global"), readonly=True, align=16)
+    KL = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    CUQ = b.param(
+        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=16
+    )
+    scale_p = b.param("scale", F32)
+    b.param("k_scale", F32)
+    b.param("v_scale", F32)
+    b.param("out_scale", F32)
+    b.param("softcap", F32)
+    num_seqs_p = b.param("num_seqs", I32)
+    bt_stride_p = b.param("block_table_stride", I32)
+
+    tid = b.thread_id_x()
+    wid = b.div(tid, b.const_i32(64))
+    lane = b.mod(tid, b.const_i32(64))
+    ld = decode_mfma_lanes(b, at, lane)
+    wq = b.mul(wid, b.const_i32(32))
+    qhead = b.block_id_x()  # grid.x = num_query_heads
+    kvh = b.div(qhead, b.const_i32(GQAG))
+    gqb = b.block_id_y()  # grid.y = total_q_blocks (BLOCK_M=128)
+
+    # in-kernel CTA->seq via binary_search on cu_seqlens_q (mirrors :5590)
+    sid = binary_search_seq_idx(b, CUQ, gqb, num_seqs_p, block_q=128, iterations=ITERS)
+    cu_q_start = b.global_load_i32(CUQ, sid)
+    cu_q_stop = b.global_load_i32(CUQ, b.add(sid, b.const_i32(1)))
+    qlen = b.sub(cu_q_stop, cu_q_start)
+    q_block_start = b.add(b.div(cu_q_start, b.const_i32(128)), sid)
+    lqb = b.sub(gqb, q_block_start)
+    klen = b.global_load_i32(KL, sid)
+    qbase = b.mul(lqb, b.const_i32(128))
+    qstart = b.add(cu_q_start, qbase)
+    with b.scf_if(
+        b.cmp_ge(qbase, qlen)
+    ):  # padding q-block (AITER +num_seqs over-alloc) -> skip
+        b.ret()
+
+    V_lds = b.smem_alloc(dtype, [64, 256], name_hint="Vlds")
+    q_desc = TensorDescriptor.naive(
+        "query_ptr", lengths=[1 << 30, H, HD], coord_names=("token", "head", "dim")
+    )
+
+    def phys_key(kv, keytile):
+        lblk = b.add(
+            b.mul(sid, bt_stride_p),
+            b.add(b.mul(kv, b.const_i32(BPT)), b.div(keytile, b.const_i32(BS))),
+        )
+        pb = b.global_load_i32(BT, lblk)
+        return b.add(b.mul(pb, b.const_i32(BS)), b.mod(keytile, b.const_i32(BS)))
+
+    sc = b.fmul(scale_p, b.const_f32(_4WGQA_LOG2E))
+    ninf = b.const_f32(-1e30)
+    zf = b.const_f32(0.0)
+
+    def bperm(v):
+        partner = b.mul(b.xor(lane, b.const_i32(32)), b.const_i32(4))
+        return b.bitcast(b.ds_bpermute(partner, b.bitcast(v, I32)), F32)
+
+    iters = [("m", ninf), ("l", zf)] + [
+        (f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)
+    ]
+    context_off = b.sub(klen, qlen)  # prefix in KV cache (qlen!=klen: chunked/decode)
+    causal_t = b.div(
+        b.add(b.add(context_off, qbase), b.const_i32(128 + BN - 1)), b.const_i32(BN)
+    )
+    klen_t = b.div(b.add(klen, b.const_i32(BN - 1)), b.const_i32(BN))
+    kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
+    loop = b.scf_for_iter(b.const_i32(0), kvend, b.const_i32(1), iters, iv_name="kv")
+    with loop as (kv, carry):
+        m_old = carry[0]
+        l_old = carry[1]
+        accs = list(carry[2:])
+        for c in range(8):
+            lin = b.add(b.mul(tid, b.const_i32(64)), b.const_i32(c * 8))
+            key = b.div(lin, b.const_i32(256))
+            hd = b.mod(lin, b.const_i32(256))
+            pk = phys_key(kv, key)
+            velem = b.add(
+                b.mul(b.add(b.mul(pk, b.const_i32(HKV)), kvh), b.const_i32(HD)), hd
+            )
+            b.smem_store_vN(
+                V_lds, [key, hd], b.global_load_vN(Vp, velem, dtype, 8, align=16), 8
+            )
+        b.sync()
+        S_T = [at.zero_acc(b) for _ in range(NKEYT)]
+        pk_kt = [
+            phys_key(kv, b.add(b.const_i32(kt * 32), ld.m_in_atom))
+            for kt in range(NKEYT)
+        ]
+        for h in range(NK):
+            koff = b.add(
+                b.mul(b.const_i32(h), b.const_i32(K)), b.mul(ld.k_blk, b.const_i32(APL))
+            )
+            q_tok = b.add(b.add(qstart, wq), ld.n_in_atom)
+            q_off, _ = q_desc.offset(b, token=q_tok, head=qhead, dim=koff)
+            q = b.global_load_vN(Q, q_off, dtype, BPL, align=BPL * 2)
+            for kt in range(NKEYT):
+                kelem = b.add(
+                    b.mul(
+                        b.add(b.mul(pk_kt[kt], b.const_i32(HKV)), kvh), b.const_i32(HD)
+                    ),
+                    koff,
+                )
+                kf = b.global_load_vN(Kp, kelem, dtype, APL, align=APL * 2)
+                S_T[kt] = at.emit(b, kf, q, S_T[kt])
+        Sm = [[None] * CPL for _ in range(NKEYT)]
+        for kt in range(NKEYT):
+            for i in range(CPL):
+                rr, cc = at.lane_to_output(b, lane, i)
+                key_g = b.add(
+                    b.add(b.mul(kv, b.const_i32(BN)), b.const_i32(kt * 32)), rr
+                )
+                q_g = b.add(context_off, b.add(qbase, b.add(wq, cc)))
+                m_causal = b.cmp_gt(key_g, q_g)
+                m_varlen = b.cmp_ge(key_g, klen)
+                Sm[kt][i] = b.select(
+                    b.lor(m_causal, m_varlen), ninf, b.vec_extract(S_T[kt], i)
+                )
+        local = ninf
+        for kt in range(NKEYT):
+            for i in range(CPL):
+                local = b.fmax(local, b.fmul(Sm[kt][i], sc))
+        m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
+        alpha = b.exp2(b.fsub(m_old, m_new))
+        P = [[None] * CPL for _ in range(NKEYT)]
+        lsum = zf
+        for kt in range(NKEYT):
+            for i in range(CPL):
+                p = b.exp2(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
+                lsum = b.fadd(lsum, p)
+                P[kt][i] = b.cast_f32_to(p, dtype)
+        l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
+        Bp = [
+            b.vec_pack([P[kk // 4][(kk % 4) * 4 + j] for j in range(BPL)], dtype)
+            for kk in range(NKpv)
+        ]
+        newaccs = []
+        for nt in range(NDdim):
+            pv = at.zero_acc(b)
+            for kk in range(NKpv):
+                va = b.vec_pack(
+                    [
+                        b.vec_extract(
+                            b.smem_load_vN(
+                                V_lds,
+                                b.add(
+                                    b.mul(b.const_i32(kk), b.const_i32(K)),
+                                    b.add(
+                                        b.mul(ld.k_blk, b.const_i32(APL)),
+                                        b.const_i32(j),
+                                    ),
+                                ),
+                                b.add(
+                                    b.mul(b.const_i32(nt), b.const_i32(32)),
+                                    ld.m_in_atom,
+                                ),
+                                dtype=dtype,
+                                n=1,
+                            ),
+                            0,
+                        )
+                        for j in range(APL)
+                    ],
+                    dtype,
+                )
+                pv = at.emit(b, va, Bp[kk], pv)
+            na = b.vec_pack(
+                [
+                    b.fma(b.vec_extract(accs[nt], i), alpha, b.vec_extract(pv, i))
+                    for i in range(CPL)
+                ],
+                F32,
+            )
+            newaccs.append(na)
+        b.scf_yield(m_new, l_new, *newaccs)
+    m_f = loop.results[0]
+    l_f = loop.results[1]
+    accs_f = loop.results[2:]
+    recip = b.rcp_fast(l_f)
+    for nt in range(NDdim):
+        for i in range(CPL):
+            r, c = at.lane_to_output(b, lane, i)
+            dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
+            q_inseq = b.add(qbase, b.add(wq, c))
+            oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), b.const_i32(H)), qhead)
+            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            with b.scf_if(b.cmp_lt(q_inseq, qlen)):
+                b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
+    b.ret()
     return b.kernel

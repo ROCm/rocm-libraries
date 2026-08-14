@@ -22,6 +22,8 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <sstream>
+
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/core/PassManager.hpp"
@@ -96,16 +98,19 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
-    // Run with the ds_read in-flight credit-pool throttle enabled. perWmma is held
-    // generously high by default so the separate per-WMMA-window ds cap never binds,
-    // isolating queueDepth/drainLatency as the only active constraint (mirrors how
-    // runPassWithGlobalReadThrottle isolates globalReadQueueDepth/globalReadDrainLatency).
-    void runPassWithDsReadThrottle(int queueDepth, int drainLatency, int perWmma = 100) {
+    // Run with ds_read queue-depth + throttled-issue controls enabled.
+    // perWmma is held generously high by default so the separate per-WMMA-window
+    // ds cap never binds. throttleLatency drives queue-full pacing; drainLatency is
+    // kept for paths that still model data-return/drain behavior (e.g. barrier timing).
+    void runPassWithDsReadThrottle(int queueDepth, int throttleLatency, int perWmma = 100,
+                                   int drainLatency = -1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
         PassFeatureConfig pfc;
         pfc.loopConfig.unrollGemm = true;
         pfc.dagFeatures.dsReadQueueDepth = queueDepth;
+        pfc.dagFeatures.dsReadThrottleLatency = throttleLatency;
+        if (drainLatency <= 0) drainLatency = throttleLatency;
         pfc.dagFeatures.dsReadDrainLatency = drainLatency;
         pfc.dagFeatures.dsReadPerWmma = perWmma;
         ctx.setPassFeatureConfig(pfc);
@@ -221,6 +226,20 @@ class DAGSchedulerPassTest : public ::testing::Test {
                                                int ldsToken) {
         StinkyInstruction* inst = createTensorLoadInBlock(targetBB, arch, src0Reg, src1Reg);
         inst->addDestReg(StinkyRegister(RegType::LDS, ldsToken, 1));
+        return inst;
+    }
+
+    // global_prefetch_b8 (gfx1250 gl2-prefetch): reads vaddr = v[vaddrReg:vaddrReg+2)
+    // (64-bit vgpr) and saddr = s[saddrReg:saddrReg+2) (64-bit sreg). No destination,
+    // not HasSideEffect, so the scheduler treats it as a movable op. Used to exercise
+    // the ValuVgprToVmemAddr hazard rule against a prefetch consumer.
+    StinkyInstruction* createGlobalPrefetchB8(BasicBlock* targetBB, int vaddrReg, int saddrReg) {
+        AsmIRBuilder builder(*targetBB, arch);
+        const HwInstDesc* desc = getMCIDByUOp(GFX::global_prefetch_b8, arch);
+        if (!desc) return nullptr;
+        StinkyInstruction* inst = builder.create(desc);
+        inst->addSrcReg(StinkyRegister("v", vaddrReg, 2));
+        inst->addSrcReg(StinkyRegister("s", saddrReg, 2));
         return inst;
     }
 
@@ -883,10 +902,215 @@ TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
 }
 
+// SGPR->tensor_load hazard: a SALU that writes an SGPR a tensor_load reads must be
+// separated from that tensor_load by the fixed hardware gap (kCdna5HazardRules'
+// SaluSgprToMemAddr entry, 8 cycles). Mirrors the real case (wmma/ds fill around the
+// SALU): the scheduler hoists the SALU and/or holds the tensor_load so >= 8 cycles of
+// work sit between them. We assert the cycle invariant, not an exact order. A WMMA
+// counts as its latencyCycles (the co-issue window it opens, 8 here), other ops as
+// issueCycles.
+TEST_F(DAGSchedulerPassTest, SgprToTensorLoadHazard_AtLeast8CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Movable ds_loads (LDS token -> stay in one region, no side-effect boundary) as the
+    // fill work, a SALU writing s0, and a tensor_load reading s[0:4) so s0 is the hazard
+    // register. Enough ds fill (>= hazard) so the gap is filled by real work, observable
+    // in the emitted order rather than an invisible stall.
+    for (int i = 0; i < 12; i++)
+        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60, /*ldsToken=*/i + 2);
+
+    AsmIRBuilder builder(*body, arch);
+    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+    salu->addDestReg(StinkyRegister("s", 0, 1));
+    salu->addSrcReg(StinkyRegister(0));
+
+    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/1);
+
+    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
+
+    // Locate the SALU and the tensor_load in the scheduled order, and total the cycles
+    // of the work between them (WMMA -> latency window, else issue cycles).
+    int saluPos = -1, tensorPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == salu) saluPos = idx;
+        if (isTensorLoad(*inst)) tensorPos = idx;
+        idx++;
+    }
+    ASSERT_GE(saluPos, 0);
+    ASSERT_GE(tensorPos, 0);
+    ASSERT_LT(saluPos, tensorPos) << "SALU must be scheduled before the tensor_load it feeds";
+
+    int gap = 0;
+    for (int i = saluPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after the SALU writing its SGPR";
+}
+
+// Two-instruction SGPR address (e.g. low/high 64-bit split) where a second WMMA
+// becomes ready right as WMMA #0's window closes, stealing the slot the address
+// SALUs needed -- both must still end up >= 8 cycles ahead of the tensor_load.
+TEST_F(DAGSchedulerPassTest, SgprPairToTensorLoadHazard_StolenWindow_AtLeast8CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    auto createScalarAdd = [&](int dst, int src0, int src1) {
+        AsmIRBuilder builder(*body, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_add_u32, arch));
+        inst->addDestReg(StinkyRegister("s", dst, 1));
+        inst->addSrcReg(StinkyRegister("s", src0, 1));
+        inst->addSrcReg(StinkyRegister("s", src1, 1));
+        return inst;
+    };
+
+    // WMMA #0 fires first (Phase B); latency=8 keeps its co-issue window open.
+    createWmmaScaleF8_in(body, /*destStart=*/12, /*src0Start=*/50);
+
+    // RAW chain a0->a1->a2->a3: fills positions 2,4,6,8 exactly, saturating the window.
+    const int kChain = 4;
+    for (int i = 0; i < kChain; i++) {
+        const int src0 = (i == 0) ? 20 : (100 + i - 1);
+        StinkyInstruction* a = createScalarAdd(/*dst=*/100 + i, src0, /*src1=*/21);
+        a->issueCycles = 1;
+        a->latencyCycles = 2;
+    }
+
+    // Independent WMMA #1: ready the instant WMMA #0's window closes.
+    createWmmaScaleF8_in(body, /*destStart=*/200, /*src0Start=*/220);
+
+    // The hazard pair: address low/high, independently computed (no RAW between them),
+    // both feeding the same tensor_load's 4-SGPR base address s[150:154).
+    StinkyInstruction* addLow = createScalarAdd(/*dst=*/150, /*src0=*/160, /*src1=*/161);
+    StinkyInstruction* addHigh = createScalarAdd(/*dst=*/151, /*src0=*/162, /*src1=*/163);
+
+    createMovableTensorLoad(body, /*s0=*/150, /*s1=*/158, /*ldsToken=*/1);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithUnrollGemm();
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount)
+        << "scheduling must not drop instructions";
+
+    int addLowPos = -1, addHighPos = -1, tensorPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == addLow) addLowPos = idx;
+        if (inst == addHigh) addHighPos = idx;
+        if (isTensorLoad(*inst)) tensorPos = idx;
+        idx++;
+    }
+    ASSERT_GE(addLowPos, 0);
+    ASSERT_GE(addHighPos, 0);
+    ASSERT_GE(tensorPos, 0);
+    ASSERT_LT(addLowPos, tensorPos) << "low-address SALU must precede the tensor_load";
+    ASSERT_LT(addHighPos, tensorPos) << "high-address SALU must precede the tensor_load";
+
+    const int laterProducerPos = std::max(addLowPos, addHighPos);
+    int gap = 0;
+    for (int i = laterProducerPos + 1; i < tensorPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 8) << "tensor_load must be >= 8 cycles after BOTH address SALUs, "
+                         "including whichever one was scheduled later";
+}
+
+// Forces Phase G to fire while a SaluSgprToMemAddr gate is still live. Phase G's
+// wait is a clock-only advance with no emitted instruction, so this asserts on
+// the PASS_DEBUG trace instead of instruction order.
+TEST_F(DAGSchedulerPassTest, QueueFullDuringHazard_PhaseGPaysHazardWait) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Occupies the single global-read credit slot (unrelated address).
+    createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+    AsmIRBuilder builder(*body, arch);
+    StinkyInstruction* salu = builder.create(getMCIDByUOp(GFX::s_mov_b32, arch));
+    salu->addDestReg(StinkyRegister("s", 0, 1));
+    salu->addSrcReg(StinkyRegister(0));
+
+    // Hazarded: address s[0:4) written by the SALU above; credit pool still full.
+    createMovableTensorLoad(body, /*s0=*/0, /*s1=*/4, /*ldsToken=*/2);
+
+    PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+    std::ostringstream captured;
+    std::streambuf* oldBuf = std::cerr.rdbuf(captured.rdbuf());
+    runPassWithGlobalReadThrottle(/*depth=*/1, /*drainLatency=*/6);
+    std::cerr.rdbuf(oldBuf);
+    PassManagerDebugConfig::clearDebugOnly();
+
+    const std::string trace = captured.str();
+    const std::string marker = "Phase G fallback pick";
+    const size_t phaseGPos = trace.find(marker);
+    ASSERT_NE(phaseGPos, std::string::npos)
+        << "expected the credit-pool-exhaustion scenario to force Phase G; trace:\n"
+        << trace;
+
+    const std::string waitMarker = "wait=";
+    const size_t waitPos = trace.find(waitMarker, phaseGPos);
+    ASSERT_NE(waitPos, std::string::npos)
+        << "Phase G must record the hazard wait it paid before issuing (regression: it used "
+           "to pay only the credit-pool drain wait and skip the hazard gate entirely); trace:\n"
+        << trace;
+    const int paidWait = std::stoi(trace.substr(waitPos + waitMarker.size()));
+
+    // Safe clock is >= 9 (gate stamped at clock 1); Phase G is reached at clock 2, so
+    // it must pay >= 7 -- the pre-fix code paid only the credit-pool wait (6).
+    EXPECT_GE(paidWait, 7) << "Phase G must pay the full outstanding SaluSgprToMemAddr hazard "
+                              "wait, not just the credit-pool drain wait";
+}
+
+// VGPR->global_prefetch_b8 address hazard: a VALU that writes a VGPR the prefetch reads
+// as its vaddr must be separated from that prefetch by the ValuVgprToVmemAddr gap (16
+// cycles). Same structure as SgprToTensorLoadHazard, but exercises the vgpr-address rule
+// against a global_prefetch_b8 consumer. Regression for the bug where the prefetch was
+// missing IF_GLOBALLoad, so isBufferMemLoad (the rule's consumer predicate) never matched
+// it and the gate was skipped -- the prefetch could sit < 16 cycles after its address VALU.
+TEST_F(DAGSchedulerPassTest, VgprToGlobalPrefetchHazard_AtLeast16CycleGap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Movable ds_loads as fill work so the 16-cycle gap is paid by real intervening
+    // instructions (observable in emitted order rather than an invisible stall). Each
+    // ds_load_b128 is issueCycles=1, so >= 16 are needed to cover the 16-cycle gate; use
+    // the default ds in-flight queue depth (16) worth so they all pack between.
+    for (int i = 0; i < 16; i++)
+        createMovableDsLoad(/*destReg=*/8 + i * 4, /*addrReg=*/60, /*ldsToken=*/i + 2);
+
+    // VALU writes v100; prefetch reads v[100:102) as vaddr, so v100 is the hazard register.
+    StinkyInstruction* valu = createVAddInBlock(body, arch, /*destReg=*/100, /*src0Reg=*/101,
+                                                /*src1Reg=*/102);
+    StinkyInstruction* prefetch = createGlobalPrefetchB8(body, /*vaddrReg=*/100, /*saddrReg=*/0);
+
+    runPassWithGlobalReadThrottle(/*depth=*/4, /*drainLatency=*/8);
+
+    int valuPos = -1, prefetchPos = -1, idx = 0;
+    std::vector<int> cyclesAt;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        cyclesAt.push_back(isMatrixInstruction(*inst) ? inst->latencyCycles : inst->issueCycles);
+        if (inst == valu) valuPos = idx;
+        if (inst == prefetch) prefetchPos = idx;
+        idx++;
+    }
+    ASSERT_GE(valuPos, 0);
+    ASSERT_GE(prefetchPos, 0);
+    ASSERT_LT(valuPos, prefetchPos) << "VALU must be scheduled before the prefetch it feeds";
+
+    int gap = 0;
+    for (int i = valuPos + 1; i < prefetchPos; i++) gap += cyclesAt[i];
+    EXPECT_GE(gap, 16) << "global_prefetch_b8 must be >= 16 cycles after the VALU writing its "
+                          "vaddr VGPR";
+}
+
 // ---------------------------------------------------------------------------
-// dsReadQueueDepth / dsReadDrainLatency / dsReadPerWmma: same in-flight
-// credit-pool mechanism as globalReadQueueDepth/globalReadDrainLatency, but
-// gating ds_read_b128 instead of tensor_load_to_lds. Unlike global-read
+// dsReadQueueDepth / dsReadThrottleLatency / dsReadPerWmma: queue-full pacing
+// and in-flight depth control for ds_read_b128 (analogous to global-read
+// queue throttling, but with DS-specific queue + WMMA interactions). Unlike global-read
 // throttling, the ds_read gate additionally requires a WMMA to have been
 // picked at least once (it seeds maxDsPerWmmaWindow_), so each test below
 // includes one WMMA read (with dest/src registers disjoint from the ds_reads,
@@ -902,7 +1126,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth2_RespectsQueueDepth) {
         createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
-    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
@@ -918,10 +1142,76 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
         createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
-    runPassWithDsReadThrottle(/*queueDepth=*/1, /*drainLatency=*/8);
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*throttleLatency=*/8);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
+}
+
+// Queue-full ds_read pacing is controlled by dsReadThrottleLatency. In a
+// barrier-free region, changing dsReadDrainLatency alone should not change the
+// ds_read interleave pattern.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_QueuePacingIgnoresDrainLatency) {
+    auto runCase = [&](int drainLatency) {
+        // Reusing `am` across a new Function: without clearing, cached analysis
+        // results (e.g. loop info) from the previous (now-destroyed) Function can
+        // be reused if the allocator hands the new Function the same address —
+        // undetectable in isolation, but corrupts scheduling amid a full suite run.
+        am.clear();
+        func = std::make_unique<Function>("dag_sched_test_ds_throttle_drain_split");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 4; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8, /*perWmma=*/100,
+                                  /*drainLatency=*/drainLatency);
+        return mnemonicSequence(*bb);
+    };
+
+    const std::vector<std::string> seqDrain8 = runCase(/*drainLatency=*/8);
+    const std::vector<std::string> seqDrain80 = runCase(/*drainLatency=*/80);
+    EXPECT_EQ(maxConsecutiveDsReads(seqDrain8), 2);
+    EXPECT_EQ(maxConsecutiveDsReads(seqDrain80), 2);
+    EXPECT_EQ(seqDrain8, seqDrain80)
+        << "drainLatency must not change queue pacing order when throttleLatency is fixed";
+}
+
+// Smaller dsReadThrottleLatency should allow more aggressive ds_read bursts
+// under the same queue depth.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_ThrottleLatencyControlsBurstLength) {
+    auto runCase = [&](int throttleLatency) {
+        // See the am.clear() comment in DsReadThrottle_QueuePacingIgnoresDrainLatency
+        // above — same reused-`am`-across-a-new-Function hazard.
+        am.clear();
+        func = std::make_unique<Function>("dag_sched_test_ds_throttle_interval");
+        setFunctionArch(*func, arch);
+        bb = func->createBasicBlock("loop_body");
+        bb->addSuccessor(bb);
+
+        createWmmaF32_16x16x16_bf16_in(bb, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 4; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+        for (int i = 0; i < 30; i++) createVAddInBlock(bb, arch, 40 + i, 80 + i, 100 + i);
+
+        runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/throttleLatency,
+                                  /*perWmma=*/100, /*drainLatency=*/80);
+        return mnemonicSequence(*bb);
+    };
+
+    const std::vector<std::string> seqSlow = runCase(/*throttleLatency=*/8);
+    const std::vector<std::string> seqFast = runCase(/*throttleLatency=*/2);
+    const int burstSlow = maxConsecutiveDsReads(seqSlow);
+    const int burstFast = maxConsecutiveDsReads(seqFast);
+    EXPECT_EQ(burstSlow, 2);
+    EXPECT_GE(burstFast, burstSlow)
+        << "smaller throttleLatency should not reduce ds_read burst capacity";
+    EXPECT_GT(burstFast, burstSlow)
+        << "smaller throttleLatency should increase ds_read burst length under same queue depth";
 }
 
 // NOTE: the former DsReadThrottle_PerWmmaCap_RespectsCap test isolated the
@@ -951,7 +1241,7 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_NoWmma_LoadsDrainBeforeConsumerValu)
         createVAddInBlock(body, arch, /*dst=*/100 + i, /*src0=*/i * 4, /*src1=*/i * 4 + 1);
 
     // Queue depth 6 so all loads can be in flight at once; perWmma irrelevant (no WMMA).
-    runPassWithDsReadThrottle(/*queueDepth=*/6, /*drainLatency=*/8, /*perWmma=*/100);
+    runPassWithDsReadThrottle(/*queueDepth=*/6, /*throttleLatency=*/8, /*perWmma=*/100);
 
     std::vector<std::string> seq = mnemonicSequence(*body);
     // Every ds_load must precede every v_add: find the last load and first valu.
@@ -1004,6 +1294,38 @@ TEST_F(DAGSchedulerPassTest, WarOverwriteOfDsAddrDeferredByElapse) {
            "by elapse-time ordering, despite having the smallest DAG id";
 }
 
+// MSB bank affinity: among equal-priority free VALU candidates, the same-bank one wins
+// even with a larger DAG id, so no s_set_vgpr_msb switch is inserted. (Keys off VALU;
+// a pure SALU has no VGPR MSB opinion.)
+TEST_F(DAGSchedulerPassTest, MsbAffinity_SameBankPreferredAmongEqualPriority) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+
+    // Anchor establishes currentMsb_=0; then a bank-1 op (smaller id) and a bank-0 op
+    // (larger id). Plain id-order picks bank-1 next; affinity pulls bank-0 ahead.
+    createVAddInBlock(body, arch, /*dst=*/10, /*src0=*/11, /*src1=*/12);
+    StinkyInstruction* bank1 = createVAddInBlock(body, arch, /*dst=*/260, /*src0=*/261,
+                                                 /*src1=*/262);
+    StinkyInstruction* bank0 = createVAddInBlock(body, arch, /*dst=*/20, /*src0=*/21,
+                                                 /*src1=*/22);
+
+    runPass();
+
+    int bank0Pos = -1, bank1Pos = -1, idx = 0;
+    for (const IRBase& ir : *body) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst == bank0) bank0Pos = idx;
+        if (inst == bank1) bank1Pos = idx;
+        idx++;
+    }
+    ASSERT_GE(bank0Pos, 0);
+    ASSERT_GE(bank1Pos, 0);
+    EXPECT_LT(bank0Pos, bank1Pos)
+        << "same-bank VALU (matching currentMsb_) must be scheduled before the different-bank "
+           "VALU despite its larger DAG id, so no s_set_vgpr_msb switch is inserted between them";
+}
+
 // All instructions are preserved regardless of throttle (count invariant).
 TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     BasicBlock* body = bb;
@@ -1014,6 +1336,6 @@ TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
     for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
 
     int beforeCount = countStinkyInstructions(*body);
-    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*throttleLatency=*/8);
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
 }

@@ -10,25 +10,9 @@ rocALUTION API library
 
 This document provides the detailed API list.
 
-Host Utility Functions
-======================
-.. doxygenfunction:: rocalution::allocate_host
-.. doxygenfunction:: rocalution::free_host
-.. doxygenfunction:: rocalution::set_to_zero_host
-.. doxygenfunction:: rocalution::rocalution_time
-
-Backend Manager
-===============
-.. doxygenfunction:: rocalution::init_rocalution
-.. doxygenfunction:: rocalution::stop_rocalution
-.. doxygenfunction:: rocalution::set_device_rocalution
-.. doxygenfunction:: rocalution::set_omp_threads_rocalution
-.. doxygenfunction:: rocalution::set_omp_affinity_rocalution
-.. doxygenfunction:: rocalution::set_omp_threshold_rocalution
-.. doxygenfunction:: rocalution::info_rocalution(void)
-.. doxygenfunction:: rocalution::info_rocalution(const struct Rocalution_Backend_Descriptor& backend_descriptor)
-.. doxygenfunction:: rocalution::disable_accelerator_rocalution
-.. doxygenfunction:: rocalution::_rocalution_sync
+Backend Module
+==============
+.. doxygengroup:: backend_module
 
 Base Rocalution
 ===============
@@ -98,7 +82,6 @@ Base Classes
 
 .. doxygenclass:: rocalution::AcceleratorVector
    :members:
-
 
 Parallel Manager
 ================

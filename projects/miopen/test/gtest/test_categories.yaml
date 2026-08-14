@@ -346,6 +346,162 @@ test_categories:
       - "weekly"
       - "all"
 
+  ffm-quick:
+    description: "FFM Quick Tests - Quick tests for NPI PRs"
+    test_patterns:
+        # --- Batch normalization (fwd train / infer / bwd, 2D + 3D, per-act + spatial) ---
+      - "Smoke/GPU_BnPeract_FP32*"
+      - "Smoke/GPU_BnPeract_FP16*"
+      - "Smoke/GPU_BnPeract_BFP16*"
+      - "Smoke/GPU_BN_Spatial_FP32*"
+      - "Smoke/GPU_Bn3DSpatial_FP32*"
+      - "Smoke/GPU_Bn3DPeract_FP32*"
+      - "Smoke/GPU_Bn3DPeract_FP16*"
+      - "Smoke/GPU_Bn3DPeract_BFP16*"
+      - "Smoke/GPU_bn_fwd_infer_spatial_FP32*"
+      - "Smoke/GPU_bn_fwd_infer_spatial_FP16*"
+      - "Smoke/GPU_bn_fwd_infer_spatial_BFP16*"
+      - "Smoke/GPU_bn_fwd_infer_per_act_FP32*"
+      - "Smoke/GPU_bn_activ_infer_spatial_FP32*"
+      - "Smoke/GPU_bn_activ_infer_spatial_FP16*"
+      - "Smoke/GPU_bn_activ_infer_spatial_BFP16*"
+      - "Smoke/GPU_BNBWDSmall2D_FP32*"
+      # --- Activation ---
+      - "Smoke/GPU_UnitTestActivationDescriptor_FP32*"
+      - "Smoke/GPU_UnitTestActivationDescriptor_FP16*"
+      # --- Softmax ---
+      - "Smoke/GPU_Softmax_BetaZeroNaN_FP32*"
+      # --- Dropout ---
+      - "Smoke/GPU_Dropout_FP32*"
+      - "Smoke/GPU_Dropout_FP16*"
+      # --- LRN ---
+      - "Smoke/GPU_Lrn_FP32*"
+      - "Smoke/GPU_Lrn_FP16*"
+      # --- Reduce (extra coverage) ---
+      - "Smoke/GPU_Reduce_FP32*"
+      - "Smoke/GPU_Reduce_FP16*"
+      # --- Tensor ops (unary / binary cast+copy / transform) ---
+      - "Smoke/GPU_unaryTensorOps_FP32*"
+      - "Smoke/GPU_unaryTensorOps_FP16*"
+      - "Smoke/GPU_unaryTensorOps_BFP16*"
+      - "Smoke/GPU_unaryTensorOps_I32*"
+      - "Smoke/GPU_unaryTensorOps_I8*"
+      - "Smoke/GPU_binaryTensorOps_copy_FP32*"
+      - "Smoke/GPU_binaryTensorOps_copy_FP16*"
+      - "Smoke/GPU_binaryTensorOps_copy_BFP16*"
+      - "Smoke/GPU_TensorTrans_FP32*"
+      # --- CTC ---
+      - "Smoke/GPU_CTC_FP32*"
+      # --- RNN / GRU ---
+      - "Smoke/GPU_RNNVanilla_FP32*"
+      - "Smoke/GPU_RNNVanilla_FP16*"
+      - "Smoke/GPU_GRU_Base_FP32*"
+      - "Smoke/GPU_GRU_Base_FP16*"
+      # --- PReLU (extra coverage) ---
+      - "Smoke/GPU_PReLU_bwd_FP32*"
+      # --- Convolution: naive/reference (fwd/bwd/wrw, all dtypes) ---
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_BFP16*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveFwd_I8*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveBwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveBwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveBwd_BFP16*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverDirectNaiveWrw_BFP16*"
+      # --- Convolution: direct (Hip) ---
+      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdFwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdFwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdFwd_BFP16*"
+      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdBwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdBwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverHipDirectFwdBwd_BFP16*"
+      # --- Convolution: implicit GEMM (IGEMM) ---
+      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16*"
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_FP16*"
+      # --- Convolution: Winograd (extra coverage) ---
+      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSFwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverBinWinogradRxSBwd_FP16*"
+      # --- Convolution: GEMM ---
+      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16*"
+      - "Smoke/GPU_UnitTestConvSolverGemmFwdRestFwd_I8*"
+      - "Smoke/GPU_UnitTestConvSolverGemmBwdRestBwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverGemmBwdRestBwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverGemmBwdRestBwd_BFP16*"
+      - "Smoke/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverGemmWrw1x1Stride1Wrw_BFP16*"
+      # --- Convolution: assembly kernels (extra coverage) ---
+      - "Smoke/GPU_UnitTestConvSolverAsm1x1UFwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverAsm1x1UFwd_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverAsm3x3UFwd_FP32*"
+      # --- Convolution: FFT (extra coverage) ---
+      - "Smoke/GPU_UnitTestConvSolverFFTFwd_FP32*"
+      - "Smoke/GPU_UnitTestConvSolverFFTBwd_FP32*"
+      # --- Group convolution (extra coverage) ---
+      - "Smoke/GPU_GroupConv2D_Deterministic_BWD_FP32*"
+      - "Smoke/GPU_GroupConv2D_Deterministic_BWD_FP16*"
+      - "Smoke/GPU_GroupConv2D_Deterministic_BWD_BFP16*"
+      - "Smoke/GPU_GroupConv2D_Deterministic_WRW_FP32*"
+      - "Smoke/GPU_GroupConv3D_Deterministic_WRW_FP32*"
+      # --- Convolution + bias + activation fusion (extra coverage) ---
+      - "Smoke/GPU_ConvBiasActivInfer_FP32*"
+      - "Smoke/GPU_ConvBiasActivInfer_FP16*"
+      - "Smoke/GPU_na_fusion_test_bn_spatial_FP32*"
+      - "Smoke/GPU_na_fusion_test_bn_spatial_FP16*"
+      - "Smoke/GPU_na_fusion_inference_test_FP32*"
+      - "Smoke/GPU_FusionAux_FP32*"
+      # --- FP8 convolution (extra coverage) ---
+      - "Smoke/GPU_ConvFwd_FP8*"
+      # --- Reference kernel 3D conv (extra coverage) ---
+      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32*"
+      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16*"
+      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"
+
+    exclude:
+      - "*/GPU_MIOpenDriver*"
+      # ALMIOPEN-2206: HIPRTC fails to compile miopen_conv3d_depthwise_fwd.cpp
+      # ('hip/hip_runtime.h' not found). Re-enable once fixed. (Only FP16 and
+      # BFP16 GPU variants of this solver exist; there is no FP32 GPU variant.
+      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
+      - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
+      # OOM-killing on small shared-RAM runners (e.g. gfx1151).
+      - "CPU_PerfDb_NONE.*"
+      # Long-running Smoke suites excluded to keep ffm-quick under ~30s.
+      # Observed timings from on a real GPU (gfx942):
+      - "Smoke/GPU_BNBWDSmall2D_FP32*"         # ~7.6 s (28 tests)
+      - "Smoke/GPU_Reduce_FP32*"               # ~5.7 s
+      - "Smoke/GPU_Reduce_FP16*"               # ~5.2 s
+      - "Smoke/GPU_ConvBiasActivInfer_FP32*"   # ~4.7 s
+      - "Smoke/GPU_ConvBiasActivInfer_FP16*"   # ~3.9 s
+      - "Smoke/GPU_UnitTestActivationDescriptor_FP32*"  # ~3.9 s
+      - "Smoke/GPU_UnitTestActivationDescriptor_FP16*"  # ~3.5 s
+      - "Smoke/GPU_RNNVanilla_FP32*"           # ~3.5 s
+      - "Smoke/GPU_RNNVanilla_FP16*"           # ~3.2 s
+      - "Smoke/GPU_Softmax_BetaZeroNaN_FP32*"  # ~3.0 s
+      - "Smoke/GPU_GRU_Base_FP32*"             # ~2.9 s
+      - "Smoke/GPU_GRU_Base_FP16*"             # ~2.8 s
+      - "Smoke/GPU_Lrn_FP32*"                  # ~2.4 s
+      - "Smoke/GPU_Lrn_FP16*"                  # ~2.4 s
+      - "Smoke/GPU_Dropout_FP32*"              # ~2.1 s
+      - "Smoke/GPU_Dropout_FP16*"              # ~1.7 s
+      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"  # ~4.0 s (FP32/FP16 variants are fast)
+
+    exclude_windows: [] # Placeholder to show per-platform exclude support
+    exclude_linux: [] # Placeholder to show per-platform exclude support
+
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
 
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
@@ -426,4 +582,6 @@ execution_settings:
     quick: 300          # 5 minutes
     standard: 1800      # 30 minutes
     comprehensive: 7200 # 2 hours
+    ffm-quick:  7200    # 2 hours
+    ffm-full:  7200     # 2 hours
     full: 14400         # 4 hours

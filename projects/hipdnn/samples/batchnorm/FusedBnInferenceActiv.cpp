@@ -164,6 +164,8 @@ int main(int argc, char* argv[])
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         auto config = parseCommandLineArgs(argc, argv);
 
         auto [handle, handleError] = createHipdnnHandle();

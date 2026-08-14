@@ -1,0 +1,423 @@
+name: CI - Build and Test
+
+on:
+  # Run on push to main and develop branches
+  push:
+    branches: [ "main", "develop" ]
+  
+  # Run on pull requests to main and develop
+  pull_request:
+    branches: [ "main", "develop" ]
+  
+  # Run nightly at 5 AM UTC
+  schedule:
+    - cron: '0 5 * * *'
+  
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    if: github.repository == 'ArchSWTech/gpulib'
+    runs-on: self-hosted
+    env:
+      HIP_VISIBLE_DEVICES: 0
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Clean previous artifacts
+      run: |
+        echo "Cleaning up previous build artifacts..."
+        rm -rf .venv libhipcxx build-debug
+        # Clear pip cache to prevent accumulation
+        rm -rf ~/.cache/pip
+        echo "Cleanup complete"
+      
+    - name: Install system dependencies
+      run: |
+        # These deps are normally already present on the self-hosted runner.
+        # Only install what's actually missing, and never let an unrelated
+        # broken package sink the job: `apt-get install` implicitly runs
+        # `dpkg --configure -a`, which retries any half-configured packages
+        # (e.g. amdgpu-dkms failing to build against a freshly-pulled HWE
+        # kernel) — a machine-level issue independent of hipThreads.
+        missing=""
+        for pkg in g++ cmake git python3-venv; do
+          dpkg -s "$pkg" >/dev/null 2>&1 || missing="$missing $pkg"
+        done
+        if [ -n "$missing" ]; then
+          sudo apt-get update
+          sudo apt-get install -y $missing \
+            || echo "::warning::apt-get reported errors (likely pre-existing broken packages on the runner); continuing"
+        else
+          echo "All system dependencies already installed; skipping apt-get."
+        fi
+        
+    - name: Setup Python venv
+      run: |
+        python3 -m venv .venv
+        source .venv/bin/activate
+        pip install --upgrade pip
+        
+    - name: Install latest nightly ROCm
+      run: |
+        source .venv/bin/activate
+        pip install \
+          --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
+          "rocm[libraries,devel]"
+        rocm-sdk init
+        
+    - name: Setup ROCm structure for hipcc
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        
+        # Create symlink to match standard ROCm structure
+        cd $ROCM_PATH
+        ln -s lib/llvm/amdgcn amdgcn
+        
+        # Verify symlink
+        echo "Verifying symlink:"
+        ls -la $ROCM_PATH/amdgcn
+        
+    - name: Verify ROCm Installation
+      run: |
+        source .venv/bin/activate
+        echo "ROCm version:"
+        hipcc --version
+        echo ""
+        echo "ROCm SDK info:"
+        rocm-sdk version
+        echo ""
+        echo "Supported targets:"
+        rocm-sdk targets
+        echo ""
+        echo "Checking for AMD GPUs:"
+        rocminfo || echo "rocminfo failed"
+        echo ""
+        echo "Checking GPU devices:"
+        ls -la /dev/kfd /dev/dri/render* || echo "GPU device nodes not found"
+        echo ""
+        echo "Checking GPU permissions:"
+        groups
+        
+    - name: Install libhipcxx
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        
+        # Clone libhipcxx
+        git clone https://github.com/ROCm/libhipcxx.git
+        cd libhipcxx
+        
+        # Build and install to venv location
+        mkdir build && cd build
+        HIP_PLATFORM=amd cmake \
+              -DCMAKE_HIP_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++ \
+              -DCMAKE_HIP_ARCHITECTURES=gfx1200 \
+              -DCMAKE_INSTALL_PREFIX=$VIRTUAL_ENV \
+              -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH" \
+              -DLIBCUDACXX_ENABLE_LIBCUDACXX_TESTS=OFF ..
+        make -j$(nproc)
+        make install
+        
+        # Verify installation
+        echo "libhipcxx installed to $VIRTUAL_ENV"
+        ls -la $VIRTUAL_ENV/include/hip/std/ || echo "Warning: libhipcxx headers not found"
+        
+    - name: Configure CMake (Debug with tests)
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        mkdir -p build-debug
+        cd build-debug
+        HIP_PLATFORM=amd cmake .. \
+          -DCMAKE_CXX_COMPILER=$VIRTUAL_ENV/bin/hipcc \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DDISABLE_WERROR=ON \
+          -DCMAKE_CXX_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_HIP_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH"
+        
+    - name: Build and install library and tests
+      run: |
+        source .venv/bin/activate
+        cd build-debug
+        cmake --build . -j$(nproc)
+        cmake --install . --prefix $VIRTUAL_ENV
+        
+    - name: Verify build outputs
+      run: |
+        echo "=== Library ==="
+        ls -lh build-debug/lib/libhipthreads.a
+        echo ""
+        echo "=== Test Executables ==="
+        ls -lh build-debug/bin/hip_thread_*_test
+        
+    - name: Run mutex test
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd build-debug
+        echo "Running hip_thread_mutex_test..."
+        ./bin/hip_thread_mutex_test && echo "✓ hip_thread_mutex_test PASSED"
+        
+    - name: Run condvar test
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd build-debug
+        echo "Running hip_thread_condvar_test..."
+        ./bin/hip_thread_condvar_test && echo "✓ hip_thread_condvar_test PASSED"
+        
+    - name: Run lit unit tests
+      id: lit-tests
+      continue-on-error: true
+      run: |
+        source .venv/bin/activate
+        pip install lit
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        export HIPTHREADS_SOURCE_DIR=$GITHUB_WORKSPACE
+        export HIPTHREADS_BUILD_DIR=$GITHUB_WORKSPACE/build-debug
+        
+        echo "Running lit unit tests..."
+        cd $GITHUB_WORKSPACE
+        lit -a -v --echo-all-commands -j 1 test/
+        
+    - name: "Benchmark: SAXPY (step3-simdize)"
+      timeout-minutes: 4
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd examples/saxpy/step3-simdize
+        HIP_PLATFORM=amd cmake -B build \
+          -DCMAKE_HIP_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++ \
+          -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+          -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH" \
+          -DCMAKE_CXX_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_HIP_FLAGS="-isystem $VIRTUAL_ENV/include"
+        cmake --build build -j$(nproc)
+        ./build/bin/saxpy 2>&1 | tee /tmp/saxpy_output
+        NS=$(grep -oP '= \K[0-9,]+(?=ns)' /tmp/saxpy_output | tr -d ',')
+        THRESHOLD_NS=48742980  # 42385200ns (42.3852ms) * 1.15
+        echo "SAXPY: ${NS}ns (threshold: ${THRESHOLD_NS}ns)"
+        if [ "$NS" -gt "$THRESHOLD_NS" ]; then
+          echo "::error::SAXPY perf regression: ${NS}ns exceeds 115% of 42385200ns baseline"
+          exit 1
+        fi
+        
+    - name: "Benchmark: IoWRT (step4-simdize)"
+      timeout-minutes: 4
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd examples/InOneWeekendRaytracer/step4-simdize
+        HIP_PLATFORM=amd cmake -B build \
+          -DCMAKE_HIP_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++ \
+          -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+          -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH" \
+          -DCMAKE_CXX_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_HIP_FLAGS="-isystem $VIRTUAL_ENV/include"
+        cmake --build build -j$(nproc)
+        set +e
+        TIMEFORMAT='%R'
+        { time ./build/bin/inOneWeekend > image.ppm; } 2> /tmp/iowrt_time
+        EXIT_CODE=$?
+        set -e
+        if [ $EXIT_CODE -ne 0 ]; then
+          echo "::error::IoWRT binary crashed"
+          exit 1
+        fi
+        ELAPSED=$(cat /tmp/iowrt_time)
+        THRESHOLD=0.6522  # 0.5672s * 1.15
+        echo "IoWRT: ${ELAPSED}s (threshold: ${THRESHOLD}s)"
+        if [ "$(echo "$ELAPSED > $THRESHOLD" | bc)" -eq 1 ]; then
+          echo "::error::IoWRT perf regression: ${ELAPSED}s exceeds 115% of 0.5672s baseline"
+          exit 1
+        fi
+        
+    - name: "Benchmark: SpMM (step3-hipthread-port)"
+      timeout-minutes: 4
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd examples/sparse-mat-mul/step3-hipthread-port
+        HIP_PLATFORM=amd cmake -B build \
+          -DCMAKE_HIP_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++ \
+          -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+          -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH" \
+          -DCMAKE_CXX_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_HIP_FLAGS="-isystem $VIRTUAL_ENV/include"
+        cmake --build build -j$(nproc)
+        ./build/bin/spmm "/usr/local/share/hipthreads/pwtk.mtx" 2>&1 | tee /tmp/spmm_output
+        NS=$(grep -oP '= \K[0-9,]+(?=ns)' /tmp/spmm_output | tr -d ',')
+        THRESHOLD_NS=53384495000  # 46421300000ns (46.4213s) * 1.15
+        echo "SpMM: ${NS}ns (threshold: ${THRESHOLD_NS}ns)"
+        if [ "$NS" -gt "$THRESHOLD_NS" ]; then
+          echo "::error::SpMM perf regression: ${NS}ns exceeds 115% of 46421300000ns baseline"
+          exit 1
+        fi
+        
+    - name: "Benchmark: llama3.c (step4-simdize)"
+      timeout-minutes: 4
+      run: |
+        source .venv/bin/activate
+        export ROCM_PATH=$VIRTUAL_ENV/lib/python3.12/site-packages/_rocm_sdk_devel
+        export LD_LIBRARY_PATH=$ROCM_PATH/lib:$LD_LIBRARY_PATH
+        cd examples/llama3.c/step4-simdize
+        HIP_PLATFORM=amd cmake -B build \
+          -DCMAKE_HIP_COMPILER=$ROCM_PATH/lib/llvm/bin/clang++ \
+          -DCMAKE_HIP_ARCHITECTURES=gfx1201 \
+          -DCMAKE_PREFIX_PATH="$VIRTUAL_ENV;$ROCM_PATH" \
+          -DCMAKE_CXX_FLAGS="-isystem $VIRTUAL_ENV/include" \
+          -DCMAKE_HIP_FLAGS="-isystem $VIRTUAL_ENV/include"
+        cmake --build build -j$(nproc)
+        ./build/bin/llama3 \
+          /usr/local/share/hipthreads/llama3.2_3b_instruct.bin \
+          -z /usr/local/share/hipthreads/tokenizer.bin \
+          -s 42 -i "My car" -n 100 \
+          2>&1 | tee /tmp/llama3_output
+        TOKS=$(grep -oP 'achieved tok/s: \K[0-9.]+' /tmp/llama3_output)
+        THRESHOLD=6.7323  # 7.9204 tok/s * 0.85
+        echo "llama3.c: ${TOKS} tok/s (threshold: ${THRESHOLD} tok/s)"
+        if [ "$(echo "$TOKS < $THRESHOLD" | bc)" -eq 1 ]; then
+          echo "::error::llama3.c perf regression: ${TOKS} tok/s below 85% of 7.9204 tok/s baseline"
+          exit 1
+        fi
+        
+    - name: Fail if lit tests failed
+      # always() ensures this check runs even if a prior step (e.g. a benchmark)
+      # failed, so lit test failures are never silently hidden. Needed because
+      # the lit-tests step uses continue-on-error: true.
+      if: always() && steps.lit-tests.outcome == 'failure'
+      run: |
+        echo "::error::Lit unit tests failed (see 'Run lit unit tests' step for details)"
+        exit 1
+        
+    - name: Upload build artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-${{ github.sha }}
+        path: |
+          build-debug/CMakeFiles/*.log
+          build-debug/**/*.ii
+          build-debug/**/*.s
+        retention-days: 7
+        
+    - name: Cleanup temporary files
+      if: always()
+      run: |
+        echo "Cleaning up temporary files..."
+        rm -rf libhipcxx
+        rm -rf examples/*/step*/build examples/*/*/step*/build
+        echo "Cleanup complete"
+  
+  notify:
+    name: Send Email Notification
+    runs-on: gpu-thread-code-scan
+    needs: build-and-test
+    # always() overrides the default behavior where a job with 'needs' is skipped
+    # if the dependency failed. This ensures we send the email regardless of
+    # whether build-and-test succeeded or failed (especially useful for failures).
+    if: ${{ github.event_name == 'schedule' && always() }}
+    
+    steps:
+    - name: Send success email
+      if: needs.build-and-test.result == 'success'
+      continue-on-error: true
+      env:
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER_NAME }}
+        MAIL_FROM: ${{ secrets.MAIL_USERNAME }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.ref_name }}
+        COMMIT: ${{ github.sha }}
+        COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || '' }}
+        AUTHOR: ${{ github.actor }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        
+        cat <<EOF | sed 's/$/\r/' > email.txt
+        From: ${MAIL_FROM}
+        To: asavic@amd.com,charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
+        Subject: =?UTF-8?B?4pyFIENJIEJ1aWxkIFN1Y2Nlc3NmdWw=?= - hipThreads [${BRANCH}]
+        MIME-Version: 1.0
+        Content-Type: text/plain; charset=UTF-8
+
+        The CI workflow completed successfully.
+
+        Repository: ${REPO}
+        Branch: ${BRANCH}
+        Commit: ${COMMIT}
+        Commit Message: ${COMMIT_MSG}
+        Author: ${AUTHOR}
+
+        Workflow Run: ${RUN_URL}
+        EOF
+        
+        cat email.txt
+        
+        curl --connect-timeout 10 --max-time 30 \
+          --url "smtp://${SMTP_SERVER}:25" \
+          --mail-from "${MAIL_FROM}" \
+          --mail-rcpt "asavic@amd.com" \
+          --mail-rcpt "charboyd@amd.com" \
+          --mail-rcpt "dmcintos@amd.com" \
+          --mail-rcpt "kelvilui@amd.com" \
+          --mail-rcpt "marsavic@amd.com" \
+          --upload-file email.txt
+        
+    - name: Send failure email
+      if: needs.build-and-test.result == 'failure'
+      continue-on-error: true
+      env:
+        SMTP_SERVER: ${{ secrets.SMTP_SERVER_NAME }}
+        MAIL_FROM: ${{ secrets.MAIL_USERNAME }}
+        REPO: ${{ github.repository }}
+        BRANCH: ${{ github.ref_name }}
+        COMMIT: ${{ github.sha }}
+        COMMIT_MSG: ${{ github.event.head_commit.message || github.event.pull_request.title || '' }}
+        AUTHOR: ${{ github.actor }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+        
+        cat <<EOF | sed 's/$/\r/' > email.txt
+        From: ${MAIL_FROM}
+        To: asavic@amd.com,charboyd@amd.com,dmcintos@amd.com,kelvilui@amd.com,marsavic@amd.com
+        Subject: =?UTF-8?B?4p2MIENJIEJ1aWxkIEZhaWxlZA==?= - hipThreads [${BRANCH}]
+        MIME-Version: 1.0
+        Content-Type: text/plain; charset=UTF-8
+
+        The CI workflow has failed.
+
+        Repository: ${REPO}
+        Branch: ${BRANCH}
+        Commit: ${COMMIT}
+        Commit Message: ${COMMIT_MSG}
+        Author: ${AUTHOR}
+
+        Workflow Run: ${RUN_URL}
+        EOF
+        
+        cat email.txt
+        
+        curl --connect-timeout 10 --max-time 30 \
+          --url "smtp://${SMTP_SERVER}:25" \
+          --mail-from "${MAIL_FROM}" \
+          --mail-rcpt "asavic@amd.com" \
+          --mail-rcpt "charboyd@amd.com" \
+          --mail-rcpt "dmcintos@amd.com" \
+          --mail-rcpt "kelvilui@amd.com" \
+          --mail-rcpt "marsavic@amd.com" \
+          --upload-file email.txt

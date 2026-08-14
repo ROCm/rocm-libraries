@@ -1438,8 +1438,14 @@ class TestOperationConfigFieldFilters:
         ]
         cfg = self._make_config_with_fields(data_fields=fields)
         result = cfg.graph_verifiable_data_fields
-        assert len(result) == 3
-        assert [f.name for f in result] == ["padding", "mode", "data_type"]
+        assert len(result) == 5
+        assert [f.name for f in result] == [
+            "padding",
+            "mode",
+            "data_type",
+            "alpha",
+            "flag",
+        ]
 
     # --- Boolean properties ---
 

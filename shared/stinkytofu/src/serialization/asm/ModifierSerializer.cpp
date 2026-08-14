@@ -450,6 +450,14 @@ bool serializeVisit(const MatrixFmtModifiers& mod, std::ostream& os) {
         sep();
         os << "scaleFmtB = \"" << matrixScaleFmtToStr(mod.scaleFmtB) << "\"";
     }
+    if (mod.scaleSelA != 0) {
+        sep();
+        os << "scaleSelA = " << mod.scaleSelA;
+    }
+    if (mod.scaleSelB != 0) {
+        sep();
+        os << "scaleSelB = " << mod.scaleSelB;
+    }
     os << " }";
     return true;
 }
@@ -573,6 +581,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
             mod.scaleFmtA = parseMatrixScaleFmt(getStr(fields, "scaleFmtA"));
         if (fields.contains("scaleFmtB"))
             mod.scaleFmtB = parseMatrixScaleFmt(getStr(fields, "scaleFmtB"));
+        mod.scaleSelA = parseMatrixScaleSel(getStr(fields, "scaleSelA", "0"));
+        mod.scaleSelB = parseMatrixScaleSel(getStr(fields, "scaleSelB", "0"));
         inst->addModifier(mod);
     } else if (attrKey == "mod.delayalu") {
         auto toInstType = [](const std::string& s) {
@@ -635,6 +645,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
 
 void ModifierSerializer::deserialize(StinkyInstruction* inst, const ParsedModifierDict& modifiers) {
     for (const auto& [attrKey, fields] : modifiers) deserializeVisit(inst, attrKey, fields);
+    // Matrix data format is now known; apply any format-keyed hardware overrides.
+    inst->resolveMatrixFmtOverrides();
 }
 
 }  // namespace stinkytofu
