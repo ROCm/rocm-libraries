@@ -8925,7 +8925,9 @@ class KernelWriterAssembly(KernelWriter):
     numMIInput       = max(numMIInputA, numMIInputB)
     numMIInUnroll    = max(numMIInputA//numTileInInstA, numMIInputB//numTileInInstB)
 
-    miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(kernel, is_mfma)
+    miInInstType, miOutInstType, neg_flag = matrixInstructionTypes(
+        miInputTypeA, miInputTypeB, kernel["ProblemType"]["ComputeDataType"],
+        kernel["SourceSwap"], kernel["ProblemType"]["Sparse"], is_mfma)
     miInScaleAInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSA"].toNameAbbrev())
     miInScaleBInstType = dataTypeNameAbbrevToInstType(kernel["ProblemType"]["DataTypeMXSB"].toNameAbbrev())
     numReadsIterCoalescedA = self.states.numReadsIterCoalescedA

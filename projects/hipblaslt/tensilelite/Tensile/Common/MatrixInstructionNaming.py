@@ -8,12 +8,13 @@ exists (see ``SolutionStructs.Validators.MatrixInstruction``) ask the backend
 rather than carrying their own opcode table.
 """
 
+from contextlib import contextmanager
 from typing import Tuple
 
 from rocisa import rocIsa
 from rocisa.container import vgpr
 from rocisa.enum import InstType
-from rocisa.instruction import MFMAInstruction
+from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
 
 from .DataType import DataType
 
@@ -123,67 +124,114 @@ def dataTypeToMfmaInstTypePair(
     return miInInstType, miOutInstType
 
 
-def matrixInstructionTypes(solution: dict, hasMFMA: bool):
+def matrixInstructionTypes(
+    miInputTypeA: DataType,
+    miInputTypeB: DataType,
+    computeDataType: DataType,
+    sourceSwap: bool,
+    isSparse,
+    hasMFMA: bool,
+):
     """Return the (input, output, negFlag) instruction types the emitter uses.
 
-    The MAC data types are not the whole story: F32XdlMathOp replaces them, WMMA
-    spells i8 as iu8, and a WMMA output type comes from ComputeDataType. Callers
-    that need to know which instruction a solution emits have to agree with the
-    emitter on all of it, so this is the one place it is decided.
+    The input data types are not the whole story: WMMA spells i8 as iu8, and a WMMA
+    output type comes from ComputeDataType rather than the input type. Callers that
+    need to know which instruction a solution emits have to agree with the emitter
+    on all of it, so this is the one place it is decided.
+
+    Inputs are passed already resolved (F32XdlMathOp substituted, coerced to
+    DataType) so each caller keeps its own rules for reading them out of a solution.
     """
-    ptype = solution["ProblemType"]
-    # Validation runs before a solution is fully assigned, so these two can be absent
-    # there; a kernel reaching the emitter always carries them.
-    enableF32Xdl = solution.get("EnableF32XdlMathOp", False)
-    sourceSwap = solution.get("SourceSwap", False)
-
-    miInputTypeA = ptype["F32XdlMathOp"] if enableF32Xdl else ptype["MacDataTypeA"]
-    miInputTypeB = ptype["F32XdlMathOp"] if enableF32Xdl else ptype["MacDataTypeB"]
-
     miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(
         miInputTypeA, miInputTypeB, sourceSwap
     )
     negFlag = True if ((not hasMFMA) and (miInInstType == InstType.INST_I8)) else False
     miInInstType = InstType.INST_U8 if ((not hasMFMA) and miInInstType == InstType.INST_I8) else miInInstType
-    computeDataType = ptype["ComputeDataType"]
     # complex WMMA is emulated with real matrix ops, so the output inst type is the
     # real base (f32/f64), not the complex abbrev (f32c/f64c) which has no InstType.
     computeOutAbbrev = computeDataType.MIOutputTypeNameAbbrev() if computeDataType.isComplex() else computeDataType.toNameAbbrev()
-    miOutInstType = miOutInstType if (hasMFMA or ptype["Sparse"]) else dataTypeNameAbbrevToInstType(computeOutAbbrev)
+    miOutInstType = miOutInstType if (hasMFMA or isSparse) else dataTypeNameAbbrevToInstType(computeOutAbbrev)
     return miInInstType, miOutInstType, negFlag
 
 
-def matrixInstructionMnemonic(
-    solution: dict,
-    isa,
-    mi4: list,
-    hasMFMA: bool,
-) -> str:
-    """Return the mnemonic the backend emits for *mi4* in this solution.
+@contextmanager
+def _pinnedKernelIsa(isa, wavefrontSize: int):
+    """Pin the thread's kernel ISA, then put back everything setKernel disturbs.
 
-    The mnemonic depends on the ISA's capabilities (which suffix a type maps to,
-    whether a scaled WMMA encoding is forced), so the thread's kernel ISA is set
-    for the duration of the query and restored afterwards.
+    rocisa's setKernel does not only switch ISA: it also clears the thread's VGPR
+    index map and MSB (rocisa base.hpp). Saving and restoring those keeps this a
+    query rather than a mutation of whatever the thread was in the middle of.
     """
-    miInInstType, miOutInstType, _ = matrixInstructionTypes(solution, hasMFMA)
-    # F32 emulation multiplies bf16 halves, so bf16 is what actually gets emitted.
-    if solution.get("UseF32XEmulation", False):
-        miInInstType = InstType.INST_BF16
-
     ti = rocIsa.getInstance()
     prevKernel = ti.getKernel()
-    ti.setKernel(tuple(isa), solution["WavefrontSize"])
+    prevVgprIdx = ti.getVgprIdx()
+    prevVgprMsb = ti.getVgprMsb()
+
+    ti.setKernel(tuple(isa), wavefrontSize)
     try:
-        # Registers do not affect the mnemonic; preStr() reads only the types and variant.
-        inst = MFMAInstruction(
+        yield
+    finally:
+        # A thread that never pinned a kernel has no ISA to put back (the stinkytofu
+        # adaptor represents that as isa=None, which setKernel cannot express).
+        if prevKernel.isa is not None:
+            ti.setKernel(tuple(prevKernel.isa), prevKernel.wavefrontSize)
+        for name, idx in prevVgprIdx.items():
+            ti.setVgprIdx(name, idx)
+        ti.setVgprMsb(prevVgprMsb)
+
+
+def matrixInstructionMnemonic(
+    isa,
+    wavefrontSize: int,
+    mi4: list,
+    miInputTypeA: DataType,
+    miInputTypeB: DataType,
+    computeDataType: DataType,
+    sourceSwap: bool = False,
+    isSparse=0,
+    hasMFMA: bool = False,
+    mfma1k: bool = False,
+    useF32XEmulation: bool = False,
+    mxBlock: int = 0,
+) -> str:
+    """Return the mnemonic the backend emits for *mi4* with these types.
+
+    The mnemonic depends on the ISA's capabilities (which suffix a type maps to,
+    whether a scaled WMMA encoding is forced), so the thread's kernel ISA is pinned
+    for the duration of the query.
+
+    Raises RuntimeError from the backend for a data type that has no matrix
+    instruction spelling at all (complex, for one).
+    """
+    miInInstType, miOutInstType, _ = matrixInstructionTypes(
+        miInputTypeA, miInputTypeB, computeDataType, sourceSwap, isSparse, hasMFMA
+    )
+
+    with _pinnedKernelIsa(isa, wavefrontSize):
+        # Registers do not affect the mnemonic; preStr() reads only types, variant
+        # and block. The branch order mirrors the emitter (KernelWriterAssembly
+        # mfmaIter): emulation first, then MX, then the plain instruction.
+        if useF32XEmulation:
+            # F32 emulation multiplies bf16 halves, so bf16 is what gets emitted.
+            miInInstType = InstType.INST_BF16
+        elif mxBlock:
+            return MXMFMAInstruction(
+                instType=miInInstType,
+                accType=miOutInstType,
+                variant=list(mi4),
+                acc=vgpr(0, 1),
+                a=vgpr(0, 1),
+                b=vgpr(0, 1),
+                block=mxBlock,
+            ).preStr()
+
+        return MFMAInstruction(
             instType=miInInstType,
             accType=miOutInstType,
             variant=list(mi4),
-            mfma1k=solution.get("MFMA_BF16_1K", False),
+            # Solution dicts carry this as 0/1; the binding's bool is strict.
+            mfma1k=bool(mfma1k),
             acc=vgpr(0, 1),
             a=vgpr(0, 1),
             b=vgpr(0, 1),
-        )
-        return inst.preStr()
-    finally:
-        ti.setKernel(tuple(prevKernel.isa), prevKernel.wavefrontSize)
+        ).preStr()
