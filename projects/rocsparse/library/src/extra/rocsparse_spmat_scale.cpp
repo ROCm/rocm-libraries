@@ -22,12 +22,17 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse-config.h"
+
 #include "internal/generic/rocsparse_spmat_scale.h"
 #include "rocsparse_common.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_datatype_utils.hpp"
 #include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_utility.hpp"
+
+// rocsparse_spmat_scale is gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 
 namespace rocsparse
 {
@@ -287,3 +292,5 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+#endif /* ROCSPARSE_WITH_SPMAT_SCALE */

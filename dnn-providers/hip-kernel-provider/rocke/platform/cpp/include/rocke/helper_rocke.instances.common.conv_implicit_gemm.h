@@ -177,6 +177,32 @@ int rocke_conv_problem_k_gemm(const rocke_conv_problem_t* p);
  * int never hits. */
 long long rocke_conv_problem_flops(const rocke_conv_problem_t* p);
 
+/* ConvProblem.is_pointwise property:
+ *   Y == 1 and X == 1 and sH == 1 and sW == 1 and pH == 0 and pW == 0
+ *   and (not is_3d or (Z == 1 and sD == 1 and pD == 0))
+ * For pointwise convolutions A, B, D are flat 2-D matrices and the
+ * coordinate-transform DAG reduces to multiply+add. */
+static inline bool rocke_conv_problem_is_pointwise(const rocke_conv_problem_t* p)
+{
+    if(p->Y != 1 || p->X != 1 || p->sH != 1 || p->sW != 1 || p->pH != 0 || p->pW != 0)
+        return false;
+    if(p->is_3d && (p->Z != 1 || p->sD != 1 || p->pD != 0))
+        return false;
+    return true;
+}
+
+/* ConvProblem.cpg property: C / groups (channels per group). */
+static inline int rocke_conv_problem_cpg(const rocke_conv_problem_t* p)
+{
+    return p->groups > 1 ? p->C / p->groups : p->C;
+}
+
+/* ConvProblem.kpg property: K / groups (output channels per group). */
+static inline int rocke_conv_problem_kpg(const rocke_conv_problem_t* p)
+{
+    return p->groups > 1 ? p->K / p->groups : p->K;
+}
+
 /* ConvProblem.short() ->
  *   2-D: f"N{N}H{Hi}W{Wi}C{C}_K{K}Y{Y}X{X}"
  *   3-D: f"N{N}D{Di}H{Hi}W{Wi}C{C}_K{K}Z{Z}Y{Y}X{X}"
