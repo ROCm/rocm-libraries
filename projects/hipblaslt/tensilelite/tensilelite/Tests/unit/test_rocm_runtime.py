@@ -152,27 +152,15 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     assert result.toolchain_paths == (scripts.resolve(),)
 
 
-def test_runtime_reports_external_rocisa_import_failure(monkeypatch):
-    def fail_import(name):
-        assert name == "rocisa"
-        raise ImportError("dependency is unavailable")
-
-    monkeypatch.setattr(_runtime, "import_module", fail_import)
-
-    with pytest.raises(_rocm.TensileLiteRuntimeError, match="independently packaged"):
-        _runtime.initialize()
-
-
-def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
+def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
     root = _root(tmp_path)
     client = root / "libexec" / "hipblaslt" / "tensilelite" / "tensilelite-client"
-    imports = []
     client_requests = []
 
+    monkeypatch.delitem(sys.modules, "rocisa", raising=False)
     monkeypatch.setattr(_runtime, "_client", None)
     monkeypatch.setattr(_runtime, "_installation", None)
     _set_tensilelite_version(monkeypatch, "5.0.0+rocm7.2.4")
-    monkeypatch.setattr(_runtime, "import_module", lambda name: imports.append(name) or object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
@@ -190,7 +178,7 @@ def test_runtime_treats_rocisa_as_an_opaque_import(tmp_path, monkeypatch):
 
     _runtime.initialize()
 
-    assert imports == ["rocisa"]
+    assert "rocisa" not in sys.modules
     assert client_requests == []
     assert _runtime.toolchain_search_paths() == (root / "bin", root / "lib" / "llvm" / "bin")
     assert _runtime.client_executable() == client
@@ -215,7 +203,6 @@ def test_python_sdk_client_request_uses_sdk_client_trampoline(tmp_path, monkeypa
     monkeypatch.setattr(_runtime, "_client", None)
     monkeypatch.setattr(_runtime, "_installation", None)
     _set_tensilelite_version(monkeypatch, "5.0.0+rocm10.1.0a20260813")
-    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
@@ -245,7 +232,6 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
     monkeypatch.setattr(_runtime, "_client", None)
     monkeypatch.setattr(_runtime, "_installation", None)
     _set_tensilelite_version(monkeypatch, "5.0.0+rocm10.1.0a20260813")
-    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
@@ -274,7 +260,6 @@ def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(_runtime, "_client", None)
     monkeypatch.setattr(_runtime, "_installation", None)
     _set_tensilelite_version(monkeypatch, "5.0.0+rocm7.2.4")
-    monkeypatch.setattr(_runtime, "import_module", lambda name: object())
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",

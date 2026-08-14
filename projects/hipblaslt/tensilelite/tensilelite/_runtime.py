@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 from pathlib import Path
 
 from _tensilelite_client_binding import (
@@ -21,24 +20,12 @@ _client: Path | None = None
 _installation: ValidatedRocm | None = None
 
 
-def _require_rocisa() -> None:
-    """Require rocisa without interpreting its version or native layout."""
-    try:
-        import_module("rocisa")
-    except (ImportError, OSError) as exc:
-        raise TensileLiteRuntimeError(
-            "TensileLite requires an independently packaged, importable rocisa dependency. "
-            f"The rocisa import failed: {exc}"
-        ) from exc
-
-
 def initialize() -> None:
     """Validate generator prerequisites without requiring the optional client."""
     from tensilelite import __version__
 
     global _installation
 
-    _require_rocisa()
     _installation = validate_distribution("tensilelite", __version__)
 
 
