@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -188,9 +188,9 @@ int main(int argc, char* argv[])
             // run benchmark
             int best_solution_index = rocblas_gemm_dispatch<GEMMTunerDispatch>(arg);
 
-            // log result, if solution is found. Tensile solutions are now reported as
-            // negative indices so only the default index means no solution was found
-            if(best_solution_index != 0)
+            // log result, if solution is found. Tensile solutions are now reported as biased
+            // negative indices so only the default index 0 and invalid index -1 means no solution was found
+            if(best_solution_index != 0 && best_solution_index != -1)
             {
                 *current_entry = true;
                 *current_os << arg_key << DELIM << best_solution_index << "\n";
