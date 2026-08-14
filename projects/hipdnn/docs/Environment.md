@@ -124,10 +124,10 @@ Entries that are not among the current candidates are silently skipped. If no li
 **Example:**
 ```bash
 # By name
-export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOpenConvolutionFwdEngine,HipBLASLtMatmulEngine"
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="MIOPEN_ENGINE,HIPBLASLT_ENGINE"
 
 # By raw ID (or mixed names + IDs)
-export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOpenConvolutionFwdEngine"
+export HIPDNN_HEUR_FALLBACK_ENGINE_ORDER="0x1A2B3C4D5E6F7080,MIOPEN_ENGINE"
 ```
 
 ### Logging Variables
