@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/nv_target.h>
 #include <thrust/device_delete.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
@@ -31,7 +30,8 @@ struct Foo
 
   THRUST_HOST_DEVICE ~Foo()
   {
-    NV_IF_TARGET(NV_IS_DEVICE, (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
+    _THRUST_IF_TARGET(_THRUST_IS_DEVICE,
+                      (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
   }
 
   bool* set_me_upon_destruction;

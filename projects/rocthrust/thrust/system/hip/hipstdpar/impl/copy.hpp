@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,7 @@
 #if defined(__HIPSTDPAR__)
 
 #  include <thrust/copy.h>
+#  include <thrust/detail/config/namespace.h>
 #  include <thrust/execution_policy.h>
 
 #  include <algorithm>
@@ -58,7 +59,7 @@ inline O copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::copy(::thrust::device, fi, li, fo);
+  return THRUST_NS_QUALIFIER::copy(THRUST_NS_QUALIFIER::device, fi, li, fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -81,7 +82,7 @@ inline O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::copy_if(::thrust::device, fi, li, fo, ::std::move(p));
+  return THRUST_NS_QUALIFIER::copy_if(THRUST_NS_QUALIFIER::device, fi, li, fo, ::std::move(p));
 }
 
 template <typename I,
@@ -111,7 +112,7 @@ inline O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::copy_n(::thrust::device, fi, n, fo);
+  return THRUST_NS_QUALIFIER::copy_n(THRUST_NS_QUALIFIER::device, fi, n, fo);
 }
 
 template <typename I, typename N, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
@@ -131,7 +132,7 @@ inline O move(execution::parallel_unsequenced_policy, I fi, I li, O fo)
   ::hipstd::__maybe_bind_globals();
 
   ::hipstd::warn_if_no_xnack();
-  return ::thrust::copy(::thrust::device, make_move_iterator(fi), make_move_iterator(li), fo);
+  return THRUST_NS_QUALIFIER::copy(THRUST_NS_QUALIFIER::device, make_move_iterator(fi), make_move_iterator(li), fo);
 }
 
 template <typename I, typename O, enable_if_t<!::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>

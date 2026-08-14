@@ -18,8 +18,18 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/config/memory_resource.h>
 #include <thrust/mr/memory_resource.h>
+
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 namespace mr
@@ -28,7 +38,7 @@ namespace mr
 template <typename MR>
 struct validator
 {
-  static_assert(std::is_base_of<memory_resource<typename MR::pointer>, MR>::value,
+  static_assert(_THRUST_STD::is_base_of<memory_resource<typename MR::pointer>, MR>::value,
                 "a type used as a memory resource must derive from memory_resource");
 };
 

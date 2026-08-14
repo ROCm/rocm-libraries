@@ -1,5 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -39,7 +40,11 @@
 #include <ostream>
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
-#include <cuda_bf16.h>
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
+    #include <cuda_bf16.h>
+#else
+    #include <rocprim/type_traits.hpp>
 #endif
 
 #ifdef __GNUC__
@@ -48,6 +53,33 @@
 #pragma GCC diagnostic ignored "-Wstrict-aliasing"
 #endif
 
+struct bfloat16_t;
+
+#if defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
+
+using hip_bfloat16 = bfloat16_t;
+namespace cuda
+{
+namespace std
+{
+
+template<>
+struct is_floating_point<bfloat16_t> : true_type
+{};
+
+template<>
+class numeric_limits<bfloat16_t>
+{
+public:
+    static constexpr bool is_specialized = true;
+};
+
+} // namespace std
+} // namespace cuda
+
+#endif // __HIP_PLATFORM_NVIDIA__
 
 /******************************************************************************
  * bfloat16_t
@@ -86,18 +118,20 @@ struct bfloat16_t
         *this = bfloat16_t(float(a));
     }
 
-    /// Constructor from std::size_t
-    __host__ __device__ __forceinline__ bfloat16_t(std::size_t a)
+    /// Constructor from size_t
+    __host__ __device__ __forceinline__
+    bfloat16_t(size_t a)
     {
         *this = bfloat16_t(float(a));
     }
 
     /// Constructor from unsigned long long int
     template<typename T,
-             typename = typename std::enable_if<
-                 std::is_same<T, unsigned long long int>::value
-                 && (!std::is_same<std::size_t, unsigned long long int>::value)>::type>
-    __host__ __device__ __forceinline__ bfloat16_t(T a)
+             typename
+             = typename std::enable_if<std::is_same_v<T, unsigned long long int>
+                                       && (!std::is_same_v<size_t, unsigned long long int>)>::type>
+    __host__ __device__ __forceinline__
+    bfloat16_t(T a)
     {
         *this = bfloat16_t(float(a));
     }
@@ -263,40 +297,22 @@ inline std::ostream& operator<<(std::ostream &out, const bfloat16_t &x)
 
 #if defined(__HIP_PLATFORM_NVIDIA__)
 
-    /// Insert formatted \p __nv_bfloat16 into the output stream
-    inline std::ostream& operator<<(std::ostream &out, const __nv_bfloat16 &x)
-    {
-        return out << bfloat16_t(x);
-    }
+/// Insert formatted \p __nv_bfloat16 into the output stream
+inline std::ostream& operator<<(std::ostream& out, const __nv_bfloat16& x)
+{
+    return out << bfloat16_t(x);
+}
 
 #endif
-
-
-
 
 /******************************************************************************
  * Traits overloads
  ******************************************************************************/
 
-template <>
-struct hipcub::FpLimits<bfloat16_t>
-{
-    static __host__ __device__ __forceinline__ bfloat16_t Max() { return bfloat16_t::max(); }
-
-    static __host__ __device__ __forceinline__ bfloat16_t Lowest() { return bfloat16_t::lowest(); }
-};
-
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_PUSH
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-#endif
-template <> struct hipcub::NumericTraits<bfloat16_t> : hipcub::BaseTraits<FLOATING_POINT, true, false, unsigned short, bfloat16_t> {};
-#if defined(__HIP_PLATFORM_NVIDIA__)
-_CCCL_SUPPRESS_DEPRECATED_POP
-#else
-HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-#endif
+template<>
+struct hipcub::NumericTraits<bfloat16_t>
+    : hipcub::BaseTraits<hipcub::FLOATING_POINT, true, unsigned short, bfloat16_t>
+{};
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop

@@ -30,6 +30,10 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <utility>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 namespace mr

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,7 @@ __device__ auto warp_load_benchmark(T* d_input, T* d_output)
 
     WarpLoadT(temp_storage[warp_id]).Load(d_input + global_warp_id * tile_size, thread_data);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned striped_global_idx

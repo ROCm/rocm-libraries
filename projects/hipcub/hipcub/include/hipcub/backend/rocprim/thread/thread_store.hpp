@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -84,7 +84,7 @@ HIPCUB_FORCEINLINE void ThreadStore(OutputIteratorT itr, T val)
     ThreadStore(itr,
                 val,
                 detail::int_constant_t<MODIFIER>{},
-                ::std::bool_constant<::std::is_pointer<OutputIteratorT>::value>());
+                ::std::bool_constant<_HIPCUB_STD::is_pointer<OutputIteratorT>::value>());
 }
 
 namespace detail
@@ -127,9 +127,6 @@ struct iterate_thread_store<MAX, MAX>
 };
 
 } // namespace detail
-
-template<int COUNT, int MAX>
-using IterateThreadStore HIPCUB_DEPRECATED = detail::iterate_thread_store<COUNT, MAX>;
 
 END_HIPCUB_NAMESPACE
 #endif

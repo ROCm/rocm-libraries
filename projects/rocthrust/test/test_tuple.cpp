@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2024 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config/namespace.h>
 #include <thrust/generate.h>
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
@@ -28,11 +29,6 @@
 #endif
 
 TESTS_DEFINE(TupleTests, NumericalTestsParams);
-
-// Yes we're using 'thrust::null_type', I don't care >:(
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-THRUST_SUPPRESS_DEPRECATED_PUSH
-#endif
 
 TYPED_TEST(TupleTests, TestTupleConstructor)
 {
@@ -512,7 +508,11 @@ TEST(TupleTests, TestTupleSwap)
   thrust::tuple<int, int, int> t1(a, b, c);
   thrust::tuple<int, int, int> t2(x, y, z);
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
   using _THRUST_STD::swap;
+#else
+  using THRUST_NS_QUALIFIER::swap;
+#endif
   swap(t1, t2);
 
   ASSERT_EQ(x, thrust::get<0>(t1));
@@ -538,7 +538,6 @@ TEST(TupleTests, TestTupleSwap)
   ASSERT_EQ_QUIET(ref, (swappable_tuple) d_v1[0]);
 }
 
-#if THRUST_CPP_DIALECT >= 2017
 TEST(TupleTests, TestTupleStructuredBindings)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -568,108 +567,21 @@ TEST(TupleTests, TestTupleCTAD)
   ASSERT_EQ(b, b2);
   ASSERT_EQ(c, c2);
 }
-#endif // THRUST_CPP_DIALECT >= 2017
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-THRUST_SUPPRESS_DEPRECATED_POP
-#endif
+TEST(TupleTests, TestTupleOfIteratorReferenceAssignsFromConst)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-// Ensure that we are backwards compatible with the old thrust::tuple implementation
-THRUST_SUPPRESS_DEPRECATED_PUSH
-static_assert(
-  thrust::tuple_size<thrust::tuple<thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type>>::value
-    == 0,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type>>::value
-    == 1,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int,
-                                   int,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type>>::value
-    == 2,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int,
-                                   int,
-                                   int,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type>>::value
-    == 3,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int,
-                                   int,
-                                   int,
-                                   int,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type>>::value
-    == 4,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int,
-                                   int,
-                                   int,
-                                   int,
-                                   int,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type,
-                                   thrust::null_type>>::value
-    == 5,
-  "");
-static_assert(
-  thrust::tuple_size<
-    thrust::
-      tuple<int, int, int, int, int, int, thrust::null_type, thrust::null_type, thrust::null_type, thrust::null_type>>::value
-    == 6,
-  "");
-static_assert(
-  thrust::tuple_size<
-    thrust::tuple<int, int, int, int, int, int, int, thrust::null_type, thrust::null_type, thrust::null_type>>::value
-    == 7,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, thrust::null_type, thrust::null_type>>::value
-    == 8,
-  "");
-static_assert(
-  thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, thrust::null_type>>::value == 9, "");
-static_assert(thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, int>>::value == 10, "");
-THRUST_SUPPRESS_DEPRECATED_POP
+  // tuple of mutable references
+  thrust::device_vector<int> v(10);
+  using devref = decltype(v[0]);
+  auto refs    = thrust::detail::tuple_of_iterator_references<devref>{thrust::tuple<devref>(v[0])};
+
+  // tuple of const references
+  const thrust::device_vector<int> cv(10);
+  using devcref = decltype(cv[0]);
+  auto crefs    = thrust::detail::tuple_of_iterator_references<devcref>{thrust::tuple<devcref>(cv[0])};
+
+  // should compile:
+  refs = crefs;
+}

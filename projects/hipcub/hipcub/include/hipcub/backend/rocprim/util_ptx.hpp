@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -44,12 +44,6 @@ BEGIN_HIPCUB_NAMESPACE
 // * ThreadExit - not supported
 // * LogicShiftLeft
 // * LogicShiftRight
-// * ThreadTrap - not supported, deprecated in CUB
-// * FFMA_RZ, FMUL_RZ - not supported, deprecated in CUB
-// * SHFL_IDX_SYNC - not supported, deprecated in CUB
-// * WARP_SYNC - deprecated, deprecated in CUB
-// * CTA_SYNC_AND - not supported, deprecated in CUB
-// * CTA_SYNC_OR - not supported, deprecated in CUB
 // * MatchAny - not in CUB public API
 //
 // Differences:
@@ -69,18 +63,6 @@ HIPCUB_FORCEINLINE int RowMajorTid(int block_dim_x, int block_dim_y, int block_d
         + hipThreadIdx_x;
 }
 
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::lane_id() instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE unsigned int LaneId()
-{
-    return ::rocprim::lane_id();
-}
-
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::warp_id instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE unsigned int WarpId()
-{
-    return ::rocprim::warp_id();
-}
-
 template<int LOGICAL_WARP_THREADS, int /* ARCH */ = 0>
 HIPCUB_DEVICE
 HIPCUB_FORCEINLINE uint64_t WarpMask(unsigned int warp_id)
@@ -95,34 +77,6 @@ HIPCUB_FORCEINLINE uint64_t WarpMask(unsigned int warp_id)
     }
 
     return member_mask;
-}
-
-// Returns the warp lane mask of all lanes less than the calling thread
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::get_sreg_lanemask_lt instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE uint64_t LaneMaskLt()
-{
-    return (uint64_t(1) << ::rocprim::lane_id()) - 1;
-}
-
-// Returns the warp lane mask of all lanes less than or equal to the calling thread
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::get_sreg_lanemask_le instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE uint64_t LaneMaskLe()
-{
-    return ((uint64_t(1) << ::rocprim::lane_id()) << 1) - 1;
-}
-
-// Returns the warp lane mask of all lanes greater than the calling thread
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::get_sreg_lanemask_gt instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE uint64_t LaneMaskGt()
-{
-    return uint64_t(-1)^LaneMaskLe();
-}
-
-// Returns the warp lane mask of all lanes greater than or equal to the calling thread
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::get_sreg_lanemask_ge instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE uint64_t LaneMaskGe()
-{
-    return uint64_t(-1)^LaneMaskLt();
 }
 
 // Shuffle funcs
@@ -167,22 +121,6 @@ HIPCUB_FORCEINLINE T ShuffleIndex(T input, int src_lane, unsigned int member_mas
     );
 }
 
-// Other
-
-HIPCUB_DEPRECATED_BECAUSE("will be removed in the next major release")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE
-    unsigned int SHR_ADD(unsigned int x, unsigned int shift, unsigned int addend)
-{
-    return (x >> shift) + addend;
-}
-
-HIPCUB_DEPRECATED_BECAUSE("will be removed in the next major release")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE
-    unsigned int SHL_ADD(unsigned int x, unsigned int shift, unsigned int addend)
-{
-    return (x << shift) + addend;
-}
-
 namespace detail {
 
 template<typename UnsignedBits>
@@ -217,20 +155,23 @@ HIPCUB_FORCEINLINE auto
 // Extracts \p num_bits from \p source starting at bit-offset \p bit_start.
 // The input \p source may be an 8b, 16b, 32b, or 64b unsigned integer type.
 template<typename UnsignedBits>
+//! deprecated [Since 5.0]
+HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()")
 HIPCUB_DEVICE
-HIPCUB_FORCEINLINE unsigned int
-    BFE(UnsignedBits source, unsigned int bit_start, unsigned int num_bits)
+HIPCUB_FORCEINLINE
+    unsigned int BFE(UnsignedBits source, unsigned int bit_start, unsigned int num_bits)
 {
     static_assert(std::is_unsigned<UnsignedBits>::value, "UnsignedBits must be unsigned");
     return detail::unsigned_bit_extract(source, bit_start, num_bits);
 }
 
-#if HIPCUB_IS_INT128_ENABLED
+#if _CCCL_HAS_INT128()
 /**
  * Bitfield-extract for 128-bit types.
  */
 template<typename UnsignedBits>
-HIPCUB_DEVICE
+//! deprecated [Since 5.0]
+HIPCUB_DEPRECATED_BECAUSE("Use hip::bitfield_extract()") HIPCUB_DEVICE
 HIPCUB_FORCEINLINE unsigned int BFE(UnsignedBits source,
                                     unsigned int bit_start,
                                     unsigned int num_bits,
@@ -240,78 +181,6 @@ HIPCUB_FORCEINLINE unsigned int BFE(UnsignedBits source,
     return (source >> bit_start) & MASK;
 }
 #endif
-
-// Bitfield insert.
-// Inserts the \p num_bits least significant bits of \p y into \p x at bit-offset \p bit_start.
-HIPCUB_DEPRECATED_BECAUSE("will be removed in the next major release")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE void BFI(unsigned int& ret,
-                                          unsigned int  x,
-                                          unsigned int  y,
-                                          unsigned int  bit_start,
-                                          unsigned int  num_bits)
-{
-    #ifdef __HIP_PLATFORM_AMD__
-        ret = __bitinsert_u32(x, y, bit_start, num_bits);
-    #else
-        x <<= bit_start;
-        unsigned int MASK_X = ((1 << num_bits) - 1) << bit_start;
-        unsigned int MASK_Y = ~MASK_X;
-        ret = (y & MASK_Y) | (x & MASK_X);
-    #endif // __HIP_PLATFORM_AMD__
-}
-
-HIPCUB_DEPRECATED_BECAUSE("will be removed in the next major release")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE unsigned int IADD3(unsigned int x, unsigned int y, unsigned int z)
-{
-    return x + y + z;
-}
-
-HIPCUB_DEPRECATED_BECAUSE("will be removed in the next major release")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE int PRMT(unsigned int a, unsigned int b, unsigned int index)
-{
-    return ::__byte_perm(a, b, index);
-}
-
-HIPCUB_DEPRECATED_BECAUSE("will be removed in the next major release")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE void BAR(int count)
-{
-    (void) count;
-    __syncthreads();
-}
-
-HIPCUB_DEPRECATED_BECAUSE("use __syncthreads() instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE void CTA_SYNC()
-{
-    __syncthreads();
-}
-
-HIPCUB_DEPRECATED_BECAUSE("use ::rocprim::wave_barrier() instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE void WARP_SYNC(unsigned int member_mask)
-{
-    (void) member_mask;
-    ::rocprim::wave_barrier();
-}
-
-HIPCUB_DEPRECATED_BECAUSE("use ::__any(predicate) instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE int WARP_ANY(int predicate, uint64_t member_mask)
-{
-    (void) member_mask;
-    return ::__any(predicate);
-}
-
-HIPCUB_DEPRECATED_BECAUSE("use ::__all(predicate) instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE int WARP_ALL(int predicate, uint64_t member_mask)
-{
-    (void) member_mask;
-    return ::__all(predicate);
-}
-
-HIPCUB_DEPRECATED_BECAUSE("use ::__ballot(predicate) instead")
-HIPCUB_DEVICE HIPCUB_FORCEINLINE int64_t WARP_BALLOT(int predicate, uint64_t member_mask)
-{
-    (void) member_mask;
-    return __ballot(predicate);
-}
 
 namespace detail
 {

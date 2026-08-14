@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -89,7 +89,7 @@ template<typename T, typename Op>
 struct Benchmark;
 
 template<typename T>
-struct Benchmark<T, hipcub::Sum>
+struct Benchmark<T, benchmark_utils::plus>
 {
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
@@ -100,7 +100,7 @@ struct Benchmark<T, hipcub::Sum>
 };
 
 template<typename T>
-struct Benchmark<T, hipcub::Min>
+struct Benchmark<T, benchmark_utils::minimum>
 {
     static void run(benchmark::State& state, size_t size, const hipStream_t stream)
     {
@@ -166,11 +166,11 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {
-        CREATE_BENCHMARKS(hipcub::Sum),
-        CREATE_BENCHMARK(custom_double2, hipcub::Sum),
-        CREATE_BENCHMARKS(hipcub::Min),
+        CREATE_BENCHMARKS(benchmark_utils::plus),
+        CREATE_BENCHMARK(custom_double2, benchmark_utils::plus),
+        CREATE_BENCHMARKS(benchmark_utils::minimum),
 #ifdef HIPCUB_ROCPRIM_API
-        CREATE_BENCHMARK(custom_double2, hipcub::Min),
+        CREATE_BENCHMARK(custom_double2, benchmark_utils::minimum),
 #endif
         CREATE_BENCHMARKS(hipcub::ArgMin),
 #ifdef HIPCUB_ROCPRIM_API

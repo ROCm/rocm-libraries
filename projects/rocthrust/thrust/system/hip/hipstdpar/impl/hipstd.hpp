@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,11 @@
 
 #if defined(__HIPSTDPAR__)
 
+#  include <thrust/detail/config/namespace.h>
+#  include <thrust/system/hip/detail/util.h>
+
+#  include <hip/hip_runtime_api.h>
+
 #  include <cstddef>
 #  include <cstdio>
 #  include <cstdlib>
@@ -51,9 +56,6 @@
 #  include <new>
 #  include <type_traits>
 #  include <utility>
-
-#  include <hip/hip_runtime_api.h>
-#  include <thrust/system/hip/detail/util.h>
 
 namespace hipstd
 {
@@ -193,7 +195,7 @@ public:
 #  else
     hipError_t status = ::hipMalloc(reinterpret_cast<void**>(&fn_ptr_), sizeof(Fn));
 #  endif
-    ::thrust::hip_rocprim::throw_on_error(status, "hipstdpar: failed to allocate device callable");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(status, "hipstdpar: failed to allocate device callable");
     ::new (static_cast<void*>(fn_ptr_)) Fn(::std::move(fn));
   }
 
@@ -223,7 +225,7 @@ public:
     fn_ptr_->~Fn();
     hipError_t status = ::hipFree(fn_ptr_);
     fn_ptr_           = nullptr;
-    ::thrust::hip_rocprim::throw_on_error(status, "hipstdpar: failed to free device callable");
+    THRUST_NS_QUALIFIER::hip_rocprim::throw_on_error(status, "hipstdpar: failed to free device callable");
   }
 
 private:

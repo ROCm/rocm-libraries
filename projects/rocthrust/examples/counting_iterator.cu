@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,7 @@
 // SOFTWARE.
 
 #include <thrust/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>

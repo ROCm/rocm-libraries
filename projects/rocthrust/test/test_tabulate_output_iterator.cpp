@@ -1,6 +1,6 @@
 /*
  *  Copyright 2024 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
  */
 
 #include <thrust/copy.h>
+#include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 #include <thrust/gather.h>
@@ -32,6 +33,10 @@
 #include "test_utils.hpp"
 
 #include _THRUST_STD_INCLUDE(type_traits)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <iterator>
+#endif
 
 using VectorTestsParams = ::testing::Types<
   Params<thrust::host_vector<signed char>>,
@@ -111,6 +116,42 @@ struct index_to_gather_index_op
     return index * static_cast<IndexT>(gather_stride);
   }
 };
+
+// ensure that we properly support thrust::reverse_iterator from _THRUST_STD
+TEST(TabulateOutputIteratorTests, TestTabulateOutputIteratorTraits)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  using base_it = thrust::host_vector<int>::iterator;
+  using Op      = host_write_op<base_it>;
+
+  using it       = thrust::tabulate_output_iterator<Op>;
+  using traits   = _THRUST_STD::iterator_traits<it>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<_THRUST_STD::random_access_iterator_tag,
+                                                                               thrust::any_system_tag,
+                                                                               thrust::random_access_traversal_tag>;
+
+  static_assert(_THRUST_STD::is_same_v<traits::difference_type, ptrdiff_t>);
+  static_assert(_THRUST_STD::is_same_v<traits::value_type, void>);
+  static_assert(_THRUST_STD::is_same_v<traits::pointer, void>);
+  static_assert(
+    _THRUST_STD::is_same_v<traits::reference, thrust::detail::tabulate_output_iterator_proxy<Op, ptrdiff_t>>);
+  static_assert(_THRUST_STD::is_same_v<traits::iterator_category, category>);
+
+  static_assert(_THRUST_STD::is_same_v<thrust::iterator_traversal_t<it>, thrust::random_access_traversal_tag>);
+
+  static_assert(::internal::is_cpp17_random_access_iterator<it>::value);
+
+  // FIXME(bgruber): all up to and including random access should be true
+#if _THRUST_HAS_DEVICE_SYSTEM_STD || THRUST_STD_VER >= 2020
+  static_assert(!_THRUST_STD::output_iterator<it, int>);
+  static_assert(!_THRUST_STD::input_iterator<it>);
+  static_assert(!_THRUST_STD::forward_iterator<it>);
+  static_assert(!_THRUST_STD::bidirectional_iterator<it>);
+  static_assert(!_THRUST_STD::random_access_iterator<it>);
+  static_assert(!_THRUST_STD::contiguous_iterator<it>);
+#endif
+}
 
 TYPED_TEST(TabulateOutputIteratorVectorTests, TestTabulateOutputIterator)
 {

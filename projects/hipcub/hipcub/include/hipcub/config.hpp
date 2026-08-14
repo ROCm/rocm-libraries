@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,6 +34,14 @@
 
 // Version
 #include "hipcub_version.hpp" // IWYU pragma: export
+
+// Manage std implementation
+#include "libcxx.hpp" // IWYU pragma: export
+
+// For _CCCL_IMPLICIT_SYSTEM_HEADER
+#if _HIPCUB_HAS_DEVICE_SYSTEM_STD
+    #include _HIPCUB_LIBCXX_INCLUDE(__cccl_config) // IWYU pragma: export
+#endif
 
 #define HIPCUB_NAMESPACE hipcub
 
@@ -112,6 +120,8 @@ END_HIPCUB_NAMESPACE
     #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
 
     #include <cub/util_arch.cuh>
+    #include <cuda/std/limits>
+    #include <cuda/std/type_traits>
     #define HIPCUB_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_DEVICE_WARP_THREADS CUB_PTX_WARP_THREADS
     #define HIPCUB_HOST_WARP_THREADS CUB_PTX_WARP_THREADS
@@ -200,19 +210,6 @@ END_HIPCUB_NAMESPACE
     #define HipcubLog(msg) ::hipcub::Log(msg, __FILE__, __LINE__)
 #endif
 
-#if __cpp_if_constexpr
-    #define HIPCUB_IF_CONSTEXPR constexpr
-#else
-    #if defined(_MSC_VER) && !defined(__clang__)
-        // MSVC (and not Clang pretending to be MSVC) unconditionally exposes if constexpr (even in C++14 mode),
-        // moreover it triggers warning C4127 (conditional expression is constant) when not using it. nvcc will
-        // be calling cl.exe for host-side codegen.
-        #define HIPCUB_IF_CONSTEXPR constexpr
-    #else
-        #define HIPCUB_IF_CONSTEXPR
-    #endif
-#endif
-
 #ifdef DOXYGEN_SHOULD_SKIP_THIS // Documentation only
 
     /// \def HIPCUB_DEBUG_SYNC
@@ -241,5 +238,14 @@ END_HIPCUB_NAMESPACE
         #define HIPCUB_DETAIL_DEBUG_SYNC_VALUE false
     #endif
 #endif // HIPCUB_ROCPRIM_API
+
+// This API needs to be deprecated once libhipcxx is available.
+#if !defined(_CCCL_PRAGMA_UNROLL_FULL)
+    #define _CCCL_PRAGMA_UNROLL_FULL() _Pragma("unroll")
+#endif // !defined(_CCCL_PRAGMA_UNROLL_FULL)
+
+#if !defined(_CCCL_PRAGMA_NOUNROLL)
+    #define _CCCL_PRAGMA_NOUNROLL() _Pragma("nounroll")
+#endif // !defined(_CCCL_PRAGMA_NOUNROLL)
 
 #endif // HIPCUB_CONFIG_HPP_

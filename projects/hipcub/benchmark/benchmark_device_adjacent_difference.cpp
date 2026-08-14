@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,7 @@ namespace
 {
 
 #ifndef DEFAULT_N
-constexpr std::size_t DEFAULT_N = 1024 * 1024 * 128;
+constexpr size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
 constexpr unsigned int batch_size  = 10;
@@ -53,7 +53,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::true_type /*copy*/,
                                   void* const    temporary_storage,
-                                  std::size_t&   storage_size,
+                                  size_t&        storage_size,
                                   const InputIt  input,
                                   const OutputIt output,
                                   Args&&... args)
@@ -69,7 +69,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::true_type /*copy*/,
                                   void* const    temporary_storage,
-                                  std::size_t&   storage_size,
+                                  size_t&        storage_size,
                                   const InputIt  input,
                                   const OutputIt output,
                                   Args&&... args)
@@ -85,7 +85,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::true_type /*left*/,
                                   std::false_type /*copy*/,
                                   void* const   temporary_storage,
-                                  std::size_t&  storage_size,
+                                  size_t&       storage_size,
                                   const InputIt input,
                                   const OutputIt /*output*/,
                                   Args&&... args)
@@ -100,7 +100,7 @@ template<typename InputIt, typename OutputIt, typename... Args>
 auto dispatch_adjacent_difference(std::false_type /*left*/,
                                   std::false_type /*copy*/,
                                   void* const   temporary_storage,
-                                  std::size_t&  storage_size,
+                                  size_t&       storage_size,
                                   const InputIt input,
                                   const OutputIt /*output*/,
                                   Args&&... args)
@@ -112,7 +112,7 @@ auto dispatch_adjacent_difference(std::false_type /*left*/,
 }
 
 template<typename T, bool left, bool copy>
-void run_benchmark(benchmark::State& state, const std::size_t size, const hipStream_t stream)
+void run_benchmark(benchmark::State& state, const size_t size, const hipStream_t stream)
 {
     using output_type = T;
 
@@ -134,7 +134,7 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
     static constexpr std::integral_constant<bool, copy> copy_tag;
 
     // Allocate temporary storage
-    std::size_t temp_storage_size{};
+    size_t      temp_storage_size{};
     void*       d_temp_storage = nullptr;
 
     const auto launch = [&]
@@ -146,7 +146,7 @@ void run_benchmark(benchmark::State& state, const std::size_t size, const hipStr
                                             d_input,
                                             d_output,
                                             size,
-                                            hipcub::Sum{},
+                                            benchmark_utils::plus{},
                                             stream);
     };
     HIP_CHECK(launch());
@@ -237,7 +237,7 @@ int main(int argc, char* argv[])
     // Add benchmarks
     const std::vector<benchmark::internal::Benchmark*> benchmarks = {
         CREATE_BENCHMARKS(int),
-        CREATE_BENCHMARKS(std::int64_t),
+        CREATE_BENCHMARKS(_HIPCUB_STD::int64_t),
 
         CREATE_BENCHMARKS(uint8_t),
 

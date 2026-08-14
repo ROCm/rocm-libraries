@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/allocator_aware_execution_policy.h>
-#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -57,8 +56,7 @@ public:
       : stream(stream_)
   {}
 
-  THRUST_HIP_RUNTIME_FUNCTION
-  Derived on(hipStream_t const& s) const
+  THRUST_HIP_RUNTIME_FUNCTION Derived on(hipStream_t const& s) const
   {
     Derived result = derived_cast(*this);
     result.stream  = s;
@@ -122,11 +120,9 @@ struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_strea
       : base_t(stream){};
 };
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_t
     : execution_policy<par_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
 {
   using base_t = execution_policy<par_t>;
 
@@ -136,19 +132,15 @@ struct par_t
 
   using stream_attachment_type = execute_on_stream;
 
-  THRUST_HIP_RUNTIME_FUNCTION
-  stream_attachment_type on(hipStream_t const& stream) const
+  THRUST_HIP_RUNTIME_FUNCTION stream_attachment_type on(hipStream_t const& stream) const
   {
     return execute_on_stream(stream);
   }
 };
-THRUST_SUPPRESS_DEPRECATED_POP
 
-THRUST_SUPPRESS_DEPRECATED_PUSH
 struct par_nosync_t
     : execution_policy<par_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
 {
   using base_t = execution_policy<par_nosync_t>;
 
@@ -158,8 +150,7 @@ struct par_nosync_t
 
   using stream_attachment_type = execute_on_stream_nosync;
 
-  THRUST_HIP_RUNTIME_FUNCTION
-  stream_attachment_type on(hipStream_t const& stream) const
+  THRUST_HIP_RUNTIME_FUNCTION stream_attachment_type on(hipStream_t const& stream) const
   {
     return execute_on_stream_nosync(stream);
   }
@@ -206,7 +197,6 @@ struct execute_on_stream_deterministic : execute_on_stream_deterministic_base<ex
 struct par_det_t
     : execution_policy<par_det_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_deterministic_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_deterministic_base>
 {
   using base_t = execution_policy<par_det_t>;
 
@@ -263,7 +253,6 @@ struct execute_on_stream_nosync_deterministic
 struct par_det_nosync_t
     : execution_policy<par_det_nosync_t>
     , thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_deterministic_base>
-    , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_deterministic_base>
 {
   using base_t = execution_policy<par_det_nosync_t>;
 
@@ -285,12 +274,11 @@ private:
     return {};
   }
 };
-THRUST_SUPPRESS_DEPRECATED_POP
 
-THRUST_INLINE_CONSTANT par_t par;
+THRUST_GLOBAL_CONSTANT par_t par;
 
-/*! \p thrust::hip::par_nosync is a parallel execution policy targeting Thrust's HIP device backend.
- *  Similar to \p thrust::hip::par it allows execution of Thrust algorithms in a specific HIP stream.
+/*! \p thrust::hip::par_nosync is a parallel execution policy targeting Thrust's CUDA device backend.
+ *  Similar to \p thrust::hip::par it allows execution of Thrust algorithms in a specific CUDA stream.
  *
  *  \p thrust::hip::par_nosync indicates that an algorithm is free to avoid any synchronization of the
  *  associated stream that is not strictly required for correctness. Additionally, algorithms may return
@@ -336,9 +324,9 @@ THRUST_INLINE_CONSTANT par_t par;
  *  \endcode
  *
  */
-THRUST_INLINE_CONSTANT par_nosync_t par_nosync;
-THRUST_INLINE_CONSTANT par_det_t par_det;
-THRUST_INLINE_CONSTANT par_det_nosync_t par_det_nosync;
+THRUST_GLOBAL_CONSTANT par_nosync_t par_nosync;
+THRUST_GLOBAL_CONSTANT par_det_t par_det;
+THRUST_GLOBAL_CONSTANT par_det_nosync_t par_det_nosync;
 } // namespace hip_rocprim
 
 namespace system

@@ -31,13 +31,17 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/reference_forward_declaration.h>
-#include <thrust/detail/type_traits.h>
+#include <thrust/detail/type_traits.h> // for internal::remove_cvref_t
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/adl/assign_value.h>
 #include <thrust/system/detail/adl/get_value.h>
 #include <thrust/system/detail/adl/iter_swap.h>
 #include <thrust/system/detail/generic/memory.h>
 #include <thrust/system/detail/generic/select_system.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(type_traits)
+#endif
 
 #include <ostream>
 

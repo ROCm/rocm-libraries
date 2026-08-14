@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2023, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -123,14 +123,13 @@ void run_benchmark(
   BENCHMARK_VALUE_TYPE(key_type, int64_t, entropy)
 
 template <class Benchmark>
-void add_benchmarks(
-  const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
   constexpr int entropy_reductions[] = {0, 2, 6}; // 1.000, 0.544, 0.000;
 
   for (int entropy_reduction : entropy_reductions)
   {
-    std::vector<benchmark::internal::Benchmark*> bs;
+    std::vector<benchmark::Benchmark*> bs;
     BENCHMARK_KEY_TYPE_ENTROPY(int8_t, entropy_reduction)
     BENCHMARK_KEY_TYPE_ENTROPY(int16_t, entropy_reduction)
     BENCHMARK_KEY_TYPE_ENTROPY(int32_t, entropy_reduction)
@@ -156,7 +155,7 @@ int main(int argc, char* argv[])
   benchmark::AddCustomContext("seed", seed_type);
 
   // Add benchmark
-  std::vector<benchmark::internal::Benchmark*> benchmarks;
+  std::vector<benchmark::Benchmark*> benchmarks;
   add_benchmarks<pairs_custom>("pairs_custom", benchmarks, seed_type);
 
   // Use manual timing

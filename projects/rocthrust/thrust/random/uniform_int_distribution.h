@@ -22,9 +22,17 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/integer_traits.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/pair.h>
 #include <thrust/random/detail/random_core_access.h>
+
+#include _THRUST_STD_INCLUDE(limits)
 
 #include <iostream>
 
@@ -51,7 +59,7 @@ namespace random
  *  #include <thrust/random/linear_congruential_engine.h>
  *  #include <thrust/random/uniform_int_distribution.h>
  *
- *  int main(void)
+ *  int main()
  *  {
  *    // create a minstd_rand object to act as our source of randomness
  *    thrust::minstd_rand rng;
@@ -110,7 +118,7 @@ public:
    *           the platform.
    */
   THRUST_HOST_DEVICE explicit uniform_int_distribution(
-    IntType a = 0, IntType b = THRUST_NS_QUALIFIER::detail::integer_traits<IntType>::const_max);
+    IntType a = 0, IntType b = _THRUST_STD::numeric_limits<IntType>::max());
 
   /*! This constructor creates a new \p uniform_int_distribution from a \p param_type object
    *  encapsulating the range of the distribution.
@@ -121,7 +129,7 @@ public:
 
   /*! This does nothing.  It is included to conform to the requirements of the RandomDistribution concept.
    */
-  THRUST_HOST_DEVICE void reset(void);
+  THRUST_HOST_DEVICE void reset();
 
   // generating functions
 
@@ -151,21 +159,21 @@ public:
    *
    *  \return The lower bound of this \p uniform_int_distribution's range.
    */
-  THRUST_HOST_DEVICE result_type a(void) const;
+  THRUST_HOST_DEVICE result_type a() const;
 
   /*! This method returns the value of the parameter with which this \p uniform_int_distribution
    *  was constructed.
    *
    *  \return The upper bound of this \p uniform_int_distribution's range.
    */
-  THRUST_HOST_DEVICE result_type b(void) const;
+  THRUST_HOST_DEVICE result_type b() const;
 
   /*! This method returns a \p param_type object encapsulating the parameters with which this
    *  \p uniform_int_distribution was constructed.
    *
    *  \return A \p param_type object enapsulating the range of this \p uniform_int_distribution.
    */
-  THRUST_HOST_DEVICE param_type param(void) const;
+  THRUST_HOST_DEVICE param_type param() const;
 
   /*! This method changes the parameters of this \p uniform_int_distribution using the values encapsulated
    *  in a given \p param_type object.
@@ -178,13 +186,13 @@ public:
    *
    *  \return The lower bound of this \p uniform_int_distribution's range.
    */
-  THRUST_HOST_DEVICE result_type min THRUST_PREVENT_MACRO_SUBSTITUTION(void) const;
+  THRUST_HOST_DEVICE result_type min THRUST_PREVENT_MACRO_SUBSTITUTION() const;
 
   /*! This method returns the largest integer this \p uniform_int_distribution can potentially produce.
    *
    *  \return The upper bound of this \p uniform_int_distribution's range.
    */
-  THRUST_HOST_DEVICE result_type max THRUST_PREVENT_MACRO_SUBSTITUTION(void) const;
+  THRUST_HOST_DEVICE result_type max THRUST_PREVENT_MACRO_SUBSTITUTION() const;
 
   /*! \cond
    */

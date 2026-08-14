@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -70,7 +70,7 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* keys_input, in
                                Descending,
                                BenchmarkKind == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>;
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
         unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
@@ -78,7 +78,7 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* keys_input, in
 
     int ranks[ItemsPerThread];
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         __shared__ typename RankType::TempStorage storage;

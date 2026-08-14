@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ struct blocked_to_striped
         T input[ItemsPerThread];
         hipcub::LoadDirectBlocked(lid, d_input + block_offset, input);
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
@@ -78,7 +78,7 @@ struct striped_to_blocked
         T input[ItemsPerThread];
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
@@ -102,7 +102,7 @@ struct blocked_to_warp_striped
         T input[ItemsPerThread];
         hipcub::LoadDirectBlocked(lid, d_input + block_offset, input);
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
@@ -126,7 +126,7 @@ struct warp_striped_to_blocked
         T input[ItemsPerThread];
         hipcub::LoadDirectWarpStriped(lid, d_input + block_offset, input);
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
@@ -152,7 +152,7 @@ struct scatter_to_blocked
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectStriped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;
@@ -178,7 +178,7 @@ struct scatter_to_striped
         hipcub::LoadDirectStriped<BlockSize>(lid, d_input + block_offset, input);
         hipcub::LoadDirectStriped<BlockSize>(lid, d_ranks + block_offset, ranks);
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             hipcub::BlockExchange<T, BlockSize, ItemsPerThread> exchange;

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,7 @@ void run_benchmark(benchmark::State& state,
     while(offset < size)
     {
         const size_t key_count = key_counts[unique_count % key_counts.size()];
-        const size_t end       = std::min(size, offset + key_count);
+        const size_t end       = _HIPCUB_STD::min(size, offset + key_count);
         for(size_t i = offset; i < end; i++)
         {
             keys_input[i] = unique_count;
@@ -187,11 +187,11 @@ void add_benchmarks(size_t                                        max_length,
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     std::vector<benchmark::internal::Benchmark*> bs = {
-        CREATE_BENCHMARKS(hipcub::Sum),
-        CREATE_BENCHMARK(long long, custom_double2, hipcub::Sum),
-        CREATE_BENCHMARKS(hipcub::Min),
+        CREATE_BENCHMARKS(benchmark_utils::plus),
+        CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::plus),
+        CREATE_BENCHMARKS(benchmark_utils::minimum),
 #ifdef HIPCUB_ROCPRIM_API
-        CREATE_BENCHMARK(long long, custom_double2, hipcub::Min),
+        CREATE_BENCHMARK(long long, custom_double2, benchmark_utils::minimum),
 #endif
     };
 

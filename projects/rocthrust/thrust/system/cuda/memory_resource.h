@@ -22,6 +22,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/memory_resource.h>
 #include <thrust/system/cuda/detail/util.h>
@@ -87,6 +95,7 @@ using managed_memory_resource =
   detail::cuda_memory_resource<detail::cudaMallocManaged, cudaFree, thrust::cuda::universal_pointer<void>>;
 using pinned_memory_resource =
   detail::cuda_memory_resource<cudaMallocHost, cudaFreeHost, thrust::cuda::universal_pointer<void>>;
+
 } // namespace detail
 //! \endcond
 

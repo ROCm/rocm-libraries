@@ -1,35 +1,33 @@
-/******************************************************************************
- * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+/*
+ *  Copyright 2021 NVIDIA Corporation
+ *  Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of the NVIDIA CORPORATION nor the
- *       names of its contributors may be used to endorse or promote products
- *       derived from this software without specific prior written permission.
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *      http://www.apache.org/licenses/LICENSE-2.0
  *
- ******************************************************************************/
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #pragma once
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if THRUST_HAS_HIP_COMPILER()
 #  include <rocprim/rocprim.hpp>
 
 #  include <thrust/binary_search.h>
@@ -55,7 +53,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt lower_bound(
   OutputIt result,
   CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
   const size_type needles_size  = thrust::distance(needles_begin, needles_end);
   const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
@@ -119,7 +117,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt upper_bound(
   OutputIt result,
   CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
   const size_type needles_size  = thrust::distance(needles_begin, needles_end);
   const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
@@ -183,7 +181,7 @@ THRUST_HIP_RUNTIME_FUNCTION OutputIt binary_search(
   OutputIt result,
   CompareOp compare_op)
 {
-  using size_type = typename iterator_traits<NeedlesIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<NeedlesIt>;
 
   const size_type needles_size  = thrust::distance(needles_begin, needles_end);
   const size_type haystack_size = thrust::distance(haystack_begin, haystack_end);
@@ -269,7 +267,7 @@ OutputIt THRUST_HIP_FUNCTION lower_bound(
     {
       return __binary_search::lower_bound(policy, first, last, values_first, values_last, result, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -285,7 +283,7 @@ OutputIt THRUST_HIP_FUNCTION lower_bound(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
 #  else
   return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
@@ -328,7 +326,7 @@ OutputIt THRUST_HIP_FUNCTION upper_bound(
     {
       return __binary_search::upper_bound(policy, first, last, values_first, values_last, result, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -344,7 +342,7 @@ OutputIt THRUST_HIP_FUNCTION upper_bound(
 # endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
 #  else
   return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
@@ -387,7 +385,7 @@ OutputIt THRUST_HIP_FUNCTION binary_search(
     {
       return __binary_search::binary_search(policy, first, last, values_first, values_last, result, compare_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy,
         HaystackIt first,
@@ -403,7 +401,7 @@ OutputIt THRUST_HIP_FUNCTION binary_search(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, values_first, values_last, result, compare_op);
 #  else
   return workaround::seq(policy, first, last, values_first, values_last, result, compare_op);
@@ -432,9 +430,7 @@ template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
 THRUST_HIP_FUNCTION HaystackIt
 lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-  using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
-  using values_type     = typename thrust::detail::temporary_array<T, Derived>;
-  using results_type    = typename thrust::detail::temporary_array<difference_type, Derived>;
+  using difference_type = thrust::detail::it_difference_t<HaystackIt>;
 
   // struct workaround is required for HIP-clang
   struct workaround
@@ -442,6 +438,8 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
     THRUST_HOST static HaystackIt
     par(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
+      using values_type  = typename thrust::detail::temporary_array<T, Derived>;
+      using results_type = typename thrust::detail::temporary_array<difference_type, Derived>;
       values_type values(policy, 1);
       results_type result(policy, 1);
 
@@ -472,7 +470,7 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 
       return first + h_result;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static HaystackIt
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -483,7 +481,7 @@ lower_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 # endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, value, compare_op);
 #  else
   return workaround::seq(policy, first, last, value, compare_op);
@@ -494,9 +492,7 @@ template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
 THRUST_HIP_FUNCTION HaystackIt
 upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-  using difference_type = typename thrust::iterator_traits<HaystackIt>::difference_type;
-  using values_type     = typename thrust::detail::temporary_array<T, Derived>;
-  using results_type    = typename thrust::detail::temporary_array<difference_type, Derived>;
+  using difference_type = thrust::detail::it_difference_t<HaystackIt>;
 
   // struct workaround is required for HIP-clang
   struct workaround
@@ -504,6 +500,8 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
     THRUST_HOST static HaystackIt
     par(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
+      using values_type  = typename thrust::detail::temporary_array<T, Derived>;
+      using results_type = typename thrust::detail::temporary_array<difference_type, Derived>;
       values_type values(policy, 1);
       results_type result(policy, 1);
 
@@ -534,7 +532,7 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 
       return first + h_result;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static HaystackIt
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -545,7 +543,7 @@ upper_bound(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last
 # endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, value, compare_op);
 #  else
   return workaround::seq(policy, first, last, value, compare_op);
@@ -556,15 +554,14 @@ template <typename Derived, typename HaystackIt, typename T, typename CompareOp>
 THRUST_HIP_FUNCTION bool binary_search(
   execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
 {
-  using values_type  = typename thrust::detail::temporary_array<T, Derived>;
-  using results_type = typename thrust::detail::temporary_array<int, Derived>;
-
   // struct workaround is required for HIP-clang
   struct workaround
   {
     THRUST_HOST static bool
     par(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
+      using values_type  = typename thrust::detail::temporary_array<T, Derived>;
+      using results_type = typename thrust::detail::temporary_array<int, Derived>;
       values_type values(policy, 1);
       results_type result(policy, 1);
 
@@ -595,7 +592,7 @@ THRUST_HIP_FUNCTION bool binary_search(
 
       return h_result != 0;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static bool
     seq(execution_policy<Derived>& policy, HaystackIt first, HaystackIt last, const T& value, CompareOp compare_op)
     {
@@ -606,7 +603,7 @@ THRUST_HIP_FUNCTION bool binary_search(
 #  endif
   };
 
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, value, compare_op);
 #  else
   return workaround::seq(policy, first, last, value, compare_op);

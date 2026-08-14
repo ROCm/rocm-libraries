@@ -1,5 +1,5 @@
 // Copyright (c) 2018 NVIDIA Corporation
-// Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Modifications Copyright© 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 // Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
 //
 // Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
@@ -18,12 +18,14 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/addressof.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/memory_wrapper.h>
-#include <thrust/detail/nv_target.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
+#endif
 
 #include <new>
 #include <utility>
@@ -57,7 +59,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last) noexcept
 {
   for (; first != last; ++first)
   {
-    destroy_at(addressof(*first));
+    destroy_at(_THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -66,7 +68,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last) noexcept
 template <typename Allocator, typename ForwardIt>
 THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last) noexcept
 {
-  using T      = typename iterator_traits<ForwardIt>::value_type;
+  using T      = detail::it_value_t<ForwardIt>;
   using traits = typename detail::allocator_traits<
     _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
@@ -74,7 +76,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, Fo
 
   for (; first != last; ++first)
   {
-    destroy_at(alloc_T, addressof(*first));
+    destroy_at(alloc_T, _THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -85,7 +87,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n) noexcept
 {
   for (; n > 0; (void) ++first, --n)
   {
-    destroy_at(addressof(*first));
+    destroy_at(_THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -94,7 +96,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n) noexcept
 template <typename Allocator, typename ForwardIt, typename Size>
 THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n) noexcept
 {
-  using T      = typename iterator_traits<ForwardIt>::value_type;
+  using T      = detail::it_value_t<ForwardIt>;
   using traits = typename detail::allocator_traits<
     _THRUST_STD::remove_cv_t<_THRUST_STD::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
@@ -102,7 +104,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, 
 
   for (; n > 0; (void) ++first, --n)
   {
-    destroy_at(alloc_T, addressof(*first));
+    destroy_at(alloc_T, _THRUST_STD::addressof(*first));
   }
 
   return first;
@@ -111,30 +113,30 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, 
 template <typename ForwardIt, typename... Args>
 THRUST_HOST_DEVICE void uninitialized_construct(ForwardIt first, ForwardIt last, Args const&... args)
 {
-  using T = typename iterator_traits<ForwardIt>::value_type;
+  using T = detail::it_value_t<ForwardIt>;
 
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; current != last; ++current)
         {
-          ::new (static_cast<void*>(addressof(*current))) T(args...);
+          ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...);
         }
       } catch (...) {
         destroy(first, current);
         throw;
       }),
-    (for (; current != last; ++current) { ::new (static_cast<void*>(addressof(*current))) T(args...); }));
+    (for (; current != last; ++current) { ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...); }));
 }
 
 template <typename Allocator, typename ForwardIt, typename... Args>
 void uninitialized_construct_with_allocator(Allocator const& alloc, ForwardIt first, ForwardIt last, Args const&... args)
 {
-  using T      = typename iterator_traits<ForwardIt>::value_type;
+  using T      = detail::it_value_t<ForwardIt>;
   using traits = typename detail::allocator_traits<
     typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
 
@@ -143,48 +145,48 @@ void uninitialized_construct_with_allocator(Allocator const& alloc, ForwardIt fi
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; current != last; ++current)
         {
-          traits::construct(alloc_T, addressof(*current), args...);
+          traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...);
         }
       } catch (...) {
         destroy(alloc_T, first, current);
         throw;
       }),
-    (for (; current != last; ++current) { traits::construct(alloc_T, addressof(*current), args...); }));
+    (for (; current != last; ++current) { traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...); }));
 }
 
 template <typename ForwardIt, typename Size, typename... Args>
 void uninitialized_construct_n(ForwardIt first, Size n, Args const&... args)
 {
-  using T = typename iterator_traits<ForwardIt>::value_type;
+  using T = detail::it_value_t<ForwardIt>;
 
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; n > 0; ++current, --n)
         {
-          ::new (static_cast<void*>(addressof(*current))) T(args...);
+          ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...);
         }
       } catch (...) {
         destroy(first, current);
         throw;
       }),
-    (for (; n > 0; ++current, --n) { ::new (static_cast<void*>(addressof(*current))) T(args...); }));
+    (for (; n > 0; ++current, --n) { ::new (static_cast<void*>(_THRUST_STD::addressof(*current))) T(args...); }));
 }
 
 template <typename Allocator, typename ForwardIt, typename Size, typename... Args>
 void uninitialized_construct_n_with_allocator(Allocator const& alloc, ForwardIt first, Size n, Args const&... args)
 {
-  using T      = typename iterator_traits<ForwardIt>::value_type;
+  using T      = detail::it_value_t<ForwardIt>;
   using traits = typename detail::allocator_traits<
     typename std::remove_cv<typename std::remove_reference<Allocator>::type>::type>::template rebind_traits<T>;
 
@@ -193,19 +195,19 @@ void uninitialized_construct_n_with_allocator(Allocator const& alloc, ForwardIt 
   ForwardIt current = first;
 
   // No exceptions in CUDA.
-  NV_IF_TARGET(
-    NV_IS_HOST,
+  _THRUST_IF_TARGET(
+    _THRUST_IS_HOST,
     (
       try {
         for (; n > 0; (void) ++current, --n)
         {
-          traits::construct(alloc_T, addressof(*current), args...);
+          traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...);
         }
       } catch (...) {
         destroy(alloc_T, first, current);
         throw;
       }),
-    (for (; n > 0; (void) ++current, --n) { traits::construct(alloc_T, addressof(*current), args...); }));
+    (for (; n > 0; (void) ++current, --n) { traits::construct(alloc_T, _THRUST_STD::addressof(*current), args...); }));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

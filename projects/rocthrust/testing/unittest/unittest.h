@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -41,13 +41,11 @@
 #define CHECK_ASAN_ENABLEMENT()
 #endif
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  define THRUST_DEVICE_BACKEND                 hip
 #  define THRUST_DEVICE_BACKEND_DETAIL          hip_rocprim
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) hip##name
-#elif defined(__NVCC__) || defined(_NVHPC_CUDA)                                \
-  || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#elif THRUST_HAS_CUDA_COMPILER()
 #  define THRUST_DEVICE_BACKEND                 cuda
 #  define THRUST_DEVICE_BACKEND_DETAIL          cuda_cub
 #  define SPECIALIZE_DEVICE_RESOURCE_NAME(name) cuda##name

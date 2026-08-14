@@ -22,11 +22,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -49,19 +47,29 @@
 #include <algorithm>
 #endif
 
+#include <hipcub/libcxx.hpp>
+
+#include _HIPCUB_LIBCXX_INCLUDE(cmath)
+#include _HIPCUB_STD_INCLUDE(limits)
+
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp
 // Including test_utils.hpp by itself will cause a compile error.
-#define TEST_UTILS_INCLUDE_GAURD
+#define TEST_UTILS_INCLUDE_GUARD
 #include "test_utils.hpp"
 
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-    #define GTEST_SKIP_ASAN()                           \
-        do                                              \
-        {                                               \
-            GTEST_SKIP() << "Skipping test under ASan"; \
-        }                                               \
-        while(0)
+#if defined(__clang__)
+    #if defined(__SANITIZE_ADDRESS__) \
+        || (defined(__has_feature) && __has_feature(address_sanitizer))
+        #define GTEST_SKIP_ASAN()                           \
+            do                                              \
+            {                                               \
+                GTEST_SKIP() << "Skipping test under ASan"; \
+            }                                               \
+            while(0)
+    #else
+        #define GTEST_SKIP_ASAN()
+    #endif
 #else
     #define GTEST_SKIP_ASAN()
 #endif

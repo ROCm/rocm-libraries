@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,17 +41,13 @@ __device__ auto warp_exchange_benchmark(T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     T thread_data[ItemsPerThread];
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i] = static_cast<T>(i);
     }
 
-    using WarpExchangeT                                           = ::hipcub::WarpExchange<T,
-                                                 ItemsPerThread,
-                                                 LogicalWarpSize,
-                                                 1, // ARCH
-                                                 Algorithm>;
+    using WarpExchangeT = ::hipcub::WarpExchange<T, ItemsPerThread, LogicalWarpSize, Algorithm>;
     constexpr unsigned                             warps_in_block = BlockSize / LogicalWarpSize;
     __shared__ typename WarpExchangeT::TempStorage temp_storage[warps_in_block];
     const unsigned                                 warp_id = threadIdx.x / LogicalWarpSize;
@@ -59,7 +55,7 @@ __device__ auto warp_exchange_benchmark(T* d_output)
     WarpExchangeT warp_exchange(temp_storage[warp_id]);
     Op{}(warp_exchange, thread_data);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
@@ -99,7 +95,7 @@ __device__ auto warp_exchange_scatter_to_striped_benchmark(T* d_output)
     const unsigned warp_id = threadIdx.x / LogicalWarpSize;
     T              thread_data[ItemsPerThread];
     OffsetT        thread_ranks[ItemsPerThread];
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i]  = static_cast<T>(i);
@@ -112,7 +108,7 @@ __device__ auto warp_exchange_scatter_to_striped_benchmark(T* d_output)
 
     WarpExchangeT(temp_storage[warp_id]).ScatterToStriped(thread_data, thread_ranks);
 
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned striped_global_idx

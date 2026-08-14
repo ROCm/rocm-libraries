@@ -1,5 +1,5 @@
 # MIT License #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -257,12 +257,10 @@ add_hipcub_test_parallel("hipcub.DeviceSegmentedRadixSort" test_hipcub_device_se
 add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_reduce.cpp)
 add_hipcub_test_parallel("hipcub.DeviceSegmentedSort" test_hipcub_device_segmented_sort.cpp.in)
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
-add_hipcub_test("hipcub.DeviceSpmv" test_hipcub_device_spmv.cpp)
 add_hipcub_test("hipcub.DeviceTransform" test_hipcub_device_transform.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)
 add_hipcub_test("hipcub.UtilPtx" test_hipcub_util_ptx.cpp)
-add_hipcub_test("hipcub.UtilDevice" test_hipcub_util_device.cpp)
 add_hipcub_test("hipcub.Vector" test_hipcub_vector.cpp)
 add_hipcub_test("hipcub.WarpExchange" test_hipcub_warp_exchange.cpp)
 add_hipcub_test("hipcub.WarpLoad" test_hipcub_warp_load.cpp)
