@@ -30,6 +30,14 @@ if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
 endif()
 
+if(BUILD_WITH_CSC_TRSV)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
+endif()
+
 set(ROCSPARSE_BENCHMARK_SOURCES
   client.cpp
   rocsparse_bench_app.cpp
@@ -112,6 +120,11 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmm_batched_csc.cpp
 ../testings/testing_spmm_batched_coo.cpp
 ../testings/testing_spmm_batched_bell.cpp
+../testings/testing_sddmm_batched_ell.cpp
+../testings/testing_sddmm_batched_coo.cpp
+../testings/testing_sddmm_batched_coo_aos.cpp
+../testings/testing_sddmm_batched_csr.cpp
+../testings/testing_sddmm_batched_csc.cpp
 ../testings/testing_csrsm.cpp
 ../testings/testing_bsrsm.cpp
 ../testings/testing_gemmi.cpp
@@ -178,19 +191,24 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_v2_spmv_sell.cpp
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spsv_coo.cpp
+../testings/testing_spsv_csc.cpp
 ../testings/testing_sptrsv_csr.cpp
+../testings/testing_sptrsv_csc.cpp
 ../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spitsv_csr.cpp
 ../testings/testing_spic0.cpp
 ../testings/testing_spilu0.cpp
 ../testings/testing_sptrsv.cpp
 ../testings/testing_spsm_csr.cpp
+../testings/testing_spsm_csc.cpp
 ../testings/testing_spsm_coo.cpp
 ../testings/testing_sptrsm_csr.cpp
+../testings/testing_sptrsm_csc.cpp
 ../testings/testing_sptrsm_coo.cpp
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
 ../testings/testing_sparse_to_dense_csc.cpp
+../testings/testing_dense_to_sparse_bell.cpp
 ../testings/testing_dense_to_sparse_coo.cpp
 ../testings/testing_dense_to_sparse_csr.cpp
 ../testings/testing_dense_to_sparse_csc.cpp

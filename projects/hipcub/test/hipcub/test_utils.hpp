@@ -30,7 +30,13 @@
     #include <hipcub/backend/rocprim/util_ptx.hpp>
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #include <cub/util_ptx.cuh>
+<<<<<<< HEAD
     #include <hipcub/config.hpp>
+=======
+    #include <cuda/std/array>
+    #include <cuda/std/mdspan>
+    #include <hipcub/hipcub.hpp>
+>>>>>>> parent of b91a3e7b7c2 (fix(hipcub): drop removed headers from hipCUB and tests (#10120))
 #endif
 
 #include "test_utils_assertions.hpp"

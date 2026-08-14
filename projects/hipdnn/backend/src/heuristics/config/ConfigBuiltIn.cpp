@@ -652,6 +652,8 @@ hipdnnPluginStatus_t handleCreate(hipdnnHeuristicHandle_t* outHandle)
     try
     {
         auto h = std::make_unique<Handle>();
+        // Ownership transfers to the caller across the C-ABI boundary.
+        // The caller must invoke handleDestroy() to release this allocation.
         *outHandle = reinterpret_cast<hipdnnHeuristicHandle_t>(h.release());
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }
@@ -665,6 +667,7 @@ hipdnnPluginStatus_t handleCreate(hipdnnHeuristicHandle_t* outHandle)
 hipdnnPluginStatus_t handleDestroy(hipdnnHeuristicHandle_t handle)
 {
     HIPDNN_PLUGIN_REQUIRE_NOT_NULL(handle, CONFIG_BUILTIN_LOG, "handleDestroy: null handle");
+    // Reclaims ownership transferred by handleCreate() across the C-ABI boundary.
     delete reinterpret_cast<Handle*>(handle);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }
@@ -711,6 +714,8 @@ hipdnnPluginStatus_t policyDescriptorCreate(hipdnnHeuristicHandle_t pluginHandle
     try
     {
         auto desc = std::make_unique<PolicyDescriptor>(reinterpret_cast<Handle*>(pluginHandle));
+        // Ownership transfers to the caller across the C-ABI boundary.
+        // The caller must invoke policyDescriptorDestroy() to release this allocation.
         *outDesc = reinterpret_cast<hipdnnHeuristicPolicyDescriptor_t>(desc.release());
         return HIPDNN_PLUGIN_STATUS_SUCCESS;
     }
@@ -725,6 +730,7 @@ hipdnnPluginStatus_t policyDescriptorDestroy(hipdnnHeuristicPolicyDescriptor_t d
 {
     HIPDNN_PLUGIN_REQUIRE_NOT_NULL(
         desc, CONFIG_BUILTIN_LOG, "policyDescriptorDestroy: null descriptor");
+    // Reclaims ownership transferred by policyDescriptorCreate() across the C-ABI boundary.
     delete reinterpret_cast<PolicyDescriptor*>(desc);
     return HIPDNN_PLUGIN_STATUS_SUCCESS;
 }

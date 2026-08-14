@@ -21,10 +21,13 @@ target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
@@ -34,6 +37,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
@@ -101,8 +105,9 @@ function(add_cpu_gemm_test TEST_NAME)
 endfunction()
 
 # Default test sizes. Non-tile-aligned to stress remainder handling.
-# f32 and f16/bf16 use different sizes to increase coverage diversity.
+# f32, f64, and f16/bf16 use different sizes to increase coverage diversity.
 set(F32_SIZES -M 133 -N 147 -K 165)
+set(F64_SIZES -M 137 -N 149 -K 163)
 set(F16_SIZES -M 131 -N 141 -K 151)
 set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
@@ -210,6 +215,12 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
+add_test(
+    NAME "CPUGemm.validation_InjectedFailure_Rejected"
+    COMMAND cpu-gemm-driver -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
+)
+set_tests_properties("CPUGemm.validation_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
+
 #################################################
 #        FP8 tests (fast & slow)                #
 #################################################
@@ -297,6 +308,90 @@ if(NOT WIN32)
         )
     endforeach()
 endif()
+
+#################################################
+#     F64 (double precision) tests              #
+#################################################
+# F64 uses double storage and accumulation.
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(${PATH}_f64_${TRANS}
+            ARGS ${F64_SIZES} ${TFLAGS} --type f64 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_f64_Beta
+        ARGS ${F64_SIZES} --type f64 --beta 1.0 --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_Bias
+        ARGS ${F64_SIZES} --type f64 --validate --bias ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_AllFeatures
+        ARGS ${F64_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_TN_AllFeatures
+        ARGS ${F64_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(${PATH}_f64_ScaleAB_${MODE}
+            ARGS ${F64_SIZES} --type f64 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+        )
+    endforeach()
+endforeach()
+
+#################################################
+#     TF32 (XFloat32 math-op) tests             #
+#################################################
+# TF32 uses float storage with XFloat32 truncation on multiply.
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(${PATH}_tf32_${TRANS}
+            ARGS ${F32_SIZES} ${TFLAGS} --type tf32 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_tf32_Beta
+        ARGS ${F32_SIZES} --type tf32 --beta 1.0 --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_Bias
+        ARGS ${F32_SIZES} --type tf32 --validate --bias ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_AllFeatures
+        ARGS ${F32_SIZES} --type tf32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_TN_AllFeatures
+        ARGS ${F32_SIZES} --transA --type tf32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(${PATH}_tf32_ScaleAB_${MODE}
+            ARGS ${F32_SIZES} --type tf32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+        )
+    endforeach()
+endforeach()
+
+add_test(
+    NAME "CPUGemm.tf32_MixedA_Rejected"
+    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
+)
+set_tests_properties("CPUGemm.tf32_MixedA_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME "CPUGemm.tf32_MixedB_Rejected"
+    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
+)
+set_tests_properties("CPUGemm.tf32_MixedB_Rejected" PROPERTIES WILL_FAIL TRUE)
 
 #################################################
 #        FP4 / MX Scale tests (fast & slow)     #

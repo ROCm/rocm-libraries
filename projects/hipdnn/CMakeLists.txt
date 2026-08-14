@@ -60,9 +60,16 @@ else()
     message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
+# Gates the generic kernel ingestor build-time logic (dynamic engine loading,
+# kpack bundling/packaging, dynamic engine registration). See RFC 0017
+# (docs/rfcs/0017_UniversalKernelDescriptor.md). No gated code exists yet;
+# this option is declared ahead of it so TheRock's forwarded
+# -DHIPDNN_ENABLE_KERNEL_INGESTOR=<value> (FLAGS.cmake) has a receiver.
+option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
+
 # Gates install of the cuDNN-compatibility shim headers and build/run of its
-# tests (RFC 0012). The shim sources always exist in the tree;
-# this option controls only whether they are installed and tested.
+# tests. The shim sources always exist in the tree; this option controls only
+# whether they are installed and tested.
 option(HIPDNN_ENABLE_CUDNN_COMPATIBILITY
     "Enable the cuDNN compatibility shim (headers + tests)" OFF
 )
@@ -248,6 +255,7 @@ list(
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
     $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wunused-template> # Clang: catch unused internal-linkage templates (matches llvm-project CI)
     -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )

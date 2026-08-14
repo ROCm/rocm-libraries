@@ -3,17 +3,58 @@
 
 Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/projects/MIOpen/en/latest/)
 
+## MIOpen 3.6.0 for ROCm 10.0.0
+### Added
+* [Conv] Added gfx950 (MI350X/MI355X) 7x7 depthwise forward and backward-data convolution support (fp16/bf16), fixing a slow fallback-to-naive-kernel regression in ConvNeXt-style depthwise convolutions.
+
+### Changed
+* [Conv] Restored gfx12x support in the Winograd Rage solver, recovering performance that regressed when earlier gfx12 support was reverted.
+* [Conv] Refreshed the gfx1100, gfx1102, and gfx1201 (Navi) SystemDBs with updated tuned find/perf-database entries.
+* [Conv] Refreshed the gfx950 SystemDB with additional tuned entries to cover more models.
+
+### Resolved Issues
+* [BatchNorm] Fixed an off-by-stride indexing bug in the backward CalcStats mean/variance remainder loop that caused a ~1% systematic bias in NCHW batch normalization backward results.
+* [Conv][gfx1250] Fixed an integer overflow in tensor operation kernels for large allocations that could cause memory access faults.
+* [Conv] Fixed a naive convolution solver failure mode where a global work size of 2^32 or more work-items silently failed to launch and left a stale HIP error visible after Find returned success; such launches are now rejected up front.
+
+### Removed
+* Removed the OpenCL (OCL) backend; MIOpen now supports the HIP backend only.
+
 ## MIOpen 3.5.2 for ROCm 7.14.0
 ### Added
 * Added an informational log when the Composable Kernel (CK) dynamic library is loaded.
+* [Conv] Added a gfx950 (MI350X/MI355X) SystemDB, so gfx950 runs use tuned find/perf-database entries instead of falling back to runtime tuning on every invocation.
+* [Conv] Added initial gfx1250 architecture support.
+* Added JSON-formatted performance logs (`MIOPEN_PERFORMANCE_LOGS`) for convolution driver commands, replacing ad hoc text logs to simplify parsing kernel names and execution times.
+
 ### Changed
 * [Conv] Load the Composable Kernel (CK) dynamic library during handle creation (`miopenCreate`) instead of on first CK use, so the one-time library-load cost is paid at a predictable setup point rather than as an unpredictable mid-run stall.
 * [Conv] Naive convolution solvers are now skipped by default during find when any non-naive solver succeeds across any algorithm. Set `MIOPEN_NAIVE_DISABLE_IF_ALT=0` to restore the previous behavior.
+* [Conv] Refreshed the gfx942 SystemDB with updated tuned entries from recent perf-eval runs.
+* [Conv] Refined the 2D AI heuristics (Tunanet solver selection and kernel-tuning-network candidate ranking) with feature-engineered inputs for gfx942 and gfx950, improving selection for grouped implicit-GEMM convolutions.
 
 ### Resolved Issues
 * [RNN] Fix RNN workspace tensor descriptor int overflow
 * [Conv] Enabled grouped Composable Kernel (CK) xdlops fwd, bwd, and wrw convolution (2D and 3D) for tensors whose strides exceed the int32 range.
 * [Conv] Fixed `miopenStatusInternalError` thrown by Find on depthwise NHWC grouped convolutions under `MIOPEN_FIND_MODE=NORMAL`.
+* Fixed a thread-safety issue where concurrent access to the AI-heuristic model caches was not guarded by a mutex.
+* [Conv] Fixed Composable Kernel (CK) grouped-convolution solvers not always being registered in host code.
+* [Conv][gfx1250] Fixed a legacy CK buffer resource descriptor issue.
+* [Conv] Removed stale gfx942 SystemDB entries that incorrectly recorded the naive convolution solver as fastest, allowing the correct (non-naive) solver to be selected.
+* [Softmax] Fixed a NaN result when `beta=0`.
+* [BatchNorm] Fixed a cross-channel vectorized memory access bug in the backward spatial variant 1 kernel.
+* [Conv] Fixed a use-after-free of `kernel_id` in `InitInvokerFactoryNCHW`.
+* Fixed a kernarg corruption bug in the SoftMarginLoss forward reduce kernel.
+* Fixed a build failure when compiling with `MIOPEN_ENABLE_AI_KERNEL_TUNING=OFF`.
+* Fixed the install RPATH for `MIOpenDriver` and Composable Kernel (CK) backend libraries.
+* Fixed a dangling lambda capture that could cause a segfault at `MIOPEN_LOG_LEVEL=6`.
+* [Windows] Enabled long-path support for `addkernels`.
+
+### Removed
+* Removed OpenCL solver `ConvOclDirectFwd1x1`.
+* Removed OpenCL convolution solver `conv_ocl_dir2Dfwdgen`.
+* Removed OpenCL solvers `ConvOclBwdWrW1x1` and `ConvOclBwdWrW2`.
+* Removed OpenCL solvers `OpTensorLeadingOnes` and `Op5dTensorGeneric` (replaced by HIP equivalents).
 
 ## MIOpen 3.5.1 for ROCm 7.13.0
 ### Added

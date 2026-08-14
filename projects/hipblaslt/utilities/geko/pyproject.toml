@@ -1,0 +1,93 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geko"
+version = "0.1.0"
+description = "GEMM kernel optimization framework for hipBLASLt"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "AMD"}]
+# Runtime dependencies are kept in requirements.txt as the single source of truth.
+dynamic = ["dependencies"]
+
+[project.scripts]
+geko = "geko.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "invoke",
+    "flake8",
+    "black==24.4",
+    "isort==5.13.2",
+]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["geko*"]
+
+[tool.setuptools.package-data]
+geko = [
+    "config_generator/config.yaml",
+    "config_generator/README.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Markers and CLI options are registered in tests/conftest.py.
+
+[tool.coverage.run]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/.tox/*",
+    "*/site-packages/*",
+    "*/conftest.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_empty = true
+sort = "Cover"
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "def __str__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstract",
+    "@abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "GEKO Code Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
+
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"

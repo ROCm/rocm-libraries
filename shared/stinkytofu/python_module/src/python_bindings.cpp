@@ -24,6 +24,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -40,11 +41,13 @@
 #include "stinkytofu/hardware/GfxIsa.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/ir/logical/IntrinsicCall.hpp"
 #include "stinkytofu/ir/logical/IntrinsicLibrary.hpp"
 #include "stinkytofu/ir/logical/IntrinsicRegistry.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/transforms/logical/LowerLogicalModulePipeline.hpp"
 
 namespace nb = nanobind;
 using namespace stinkytofu;
@@ -122,6 +125,50 @@ NB_MODULE(_stinkytofu, m) {
         .value("InnerRegionEnd", PipelineExtensionPoint::InnerRegionEnd)
         .value("AfterRegionPasses", PipelineExtensionPoint::AfterRegionPasses);
 
+    // ------------------------------------------------------------------------
+    // Bind CloneSpec so Python can construct entries for ModuleOptions::CloneList.
+    // ------------------------------------------------------------------------
+    nb::class_<CloneSpec>(m, "CloneSpec")
+        .def(nb::init<std::string, std::string>(), nb::arg("name"), nb::arg("startLabel"))
+        .def_rw("name", &CloneSpec::name)
+        .def_rw("startLabel", &CloneSpec::startLabel);
+
+    // ------------------------------------------------------------------------
+    // Logical-IR -> Asm-IR one-shot lowering helper
+    // ------------------------------------------------------------------------
+    // Left-path entry point for KernelWriter-style Python code: build a
+    // LogicalModule, then call lower_logical_module(...) to get back a
+    // StinkyAsmModule ready for .emitAssembly() / .runOptimizationPipeline().
+    // Mirrors the right path (toStinkyTofuModule for rocisa::Module). The
+    // returned StinkyAsmModule borrows the LogicalInstructions from @p module
+    // for IR-list membership but does NOT own them: keep @p module alive for
+    // as long as the returned asm module is in use.
+    m.def(
+        "lower_logical_module",
+        [](PyLogicalModule& module, std::array<int, 3> arch, const nb::object& options_obj) {
+            StinkyAsmModule::ModuleOptions moduleOptions{};
+            // Abs SW-prefetch base SGPR defaults to -1 (off); Tensile overrides via the
+            // options dict below. (Replaces the removed SwPrefetchScratchSgpr default.)
+            moduleOptions.SwInstructionPrefetchAbsBaseSgpr = -1;
+            if (nb::isinstance<nb::dict>(options_obj)) {
+                nb::dict options = nb::cast<nb::dict>(options_obj);
+#define SET_MODULE_OPTION_LLM(name, type) \
+    if (options.contains(#name)) nb::try_cast<type>(options[#name], moduleOptions.name);
+                MODULE_OPTIONS_LIST(SET_MODULE_OPTION_LLM)
+#undef SET_MODULE_OPTION_LLM
+            }
+            return lowerLogicalModuleToAsm(module, arch, moduleOptions);
+        },
+        nb::arg("module"), nb::arg("arch"), nb::arg("options") = nb::none(),
+        "Run the standard logical-IR lowering pipeline on @p module and "
+        "return the resulting StinkyAsmModule. @p arch is "
+        "[major, minor, stepping] (e.g. [12, 5, 0] for gfx1250) and is used "
+        "to look up the per-arch logical-to-asm mnemonic map. Keep @p module "
+        "alive while using the returned StinkyAsmModule (it borrows "
+        "LogicalInstruction nodes from it for IR-list membership). "
+        "Optional @p options dict sets ModuleOptions fields (same keys as "
+        "toStinkyTofuModule: CloneList, OptLevel, wavefrontSize, etc.).");
+
     // ========================================================================
     // Register Types
     // ========================================================================
@@ -129,6 +176,7 @@ NB_MODULE(_stinkytofu, m) {
         .value("V", RegType::V, "Vector Register (VGPR)")
         .value("S", RegType::S, "Scalar Register (SGPR)")
         .value("A", RegType::A, "Accumulator Register (AGPR)")
+        .value("M", RegType::M, "Memory descriptor register (MGPR)")
         .value("ACC", RegType::ACC, "Accumulator Register (alternative)")
         .value("AGPR", RegType::AGPR, "Accumulator GPR")
         .value("VCC", RegType::VCC, "Vector Condition Code")
@@ -148,11 +196,37 @@ NB_MODULE(_stinkytofu, m) {
     // We need to expose StinkyRegister so nanobind can convert it properly.
     // However, users typically don't construct Register directly - they use helper functions.
     nb::class_<StinkyRegister>(m, "Register")
+        // --- Constructors ---------------------------------------------------
         .def(nb::init<>(), "Create a null register")
-        .def(nb::init<const std::string&, uint32_t, uint16_t>(), nb::arg("type"), nb::arg("index"),
-             nb::arg("count") = 1, "Create a register (e.g., Register('v', 0, 1) for v0)")
+        // Reg ctor with validation: silently accepting unknown type strings (the
+        // raw nb::init binding) lets typos like Register("vgprFoo", 0, 1) build
+        // a UNKNOWN-typed register that fails far away from the call site.
+        .def(
+            "__init__",
+            [](StinkyRegister* self, const std::string& type, uint32_t index, uint16_t count) {
+                if (!isValidRegTypeString(type)) {
+                    throw nb::value_error(("Register: unknown register type '" + type +
+                                           "'; expected one of v/s/a/m/... (see RegisterType.def)")
+                                              .c_str());
+                }
+                new (self) StinkyRegister(type, index, count);
+            },
+            nb::arg("type"), nb::arg("index"), nb::arg("count") = 1,
+            "Create a register (e.g., Register('v', 0, 1) for v0). Raises on unknown type.")
         .def(nb::init<float>(), nb::arg("value"), "Create a float literal")
         .def(nb::init<int>(), nb::arg("value"), "Create an int literal")
+        // Single-string ctor → LiteralString. Used for keywords like MUBUF "off".
+        // Distinct from the (type,index,count) overload by arg count.
+        .def(
+            "__init__",
+            [](StinkyRegister* self, const std::string& literal_string) {
+                new (self) StinkyRegister(literal_string);
+            },
+            nb::arg("literal_string"),
+            "Create a literal string register (e.g., Register('off') for the MUBUF "
+            "'off' keyword). Stored as LiteralString.")
+
+        // --- Type / identity properties ------------------------------------
         .def_prop_ro(
             "reg_type",
             [](const StinkyRegister& r) -> RegType {
@@ -161,7 +235,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return RegType::UNKNOWN;
             },
-            "Get the register type (V, S, A, etc.)")
+            "Get the register type (V, S, A, etc.). UNKNOWN for non-Register values.")
         .def_prop_ro(
             "index",
             [](const StinkyRegister& r) -> int {
@@ -170,7 +244,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return -1;
             },
-            "Get the register index")
+            "Get the register index (-1 for non-Register values).")
         .def_prop_ro(
             "count",
             [](const StinkyRegister& r) -> int {
@@ -179,14 +253,162 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return 0;
             },
-            "Get the register count (number of consecutive registers)")
+            "Get the register count (number of consecutive registers).")
+        .def_prop_ro(
+            "is_register",
+            [](const StinkyRegister& r) { return r.dataType == StinkyRegister::Type::Register; },
+            "True iff this carries a register reference (not a literal).")
         .def_prop_ro(
             "is_literal",
             [](const StinkyRegister& r) -> bool {
                 return r.dataType == StinkyRegister::Type::LiteralInt ||
-                       r.dataType == StinkyRegister::Type::LiteralDouble;
+                       r.dataType == StinkyRegister::Type::LiteralDouble ||
+                       r.dataType == StinkyRegister::Type::LiteralString;
             },
-            "Check if this is a literal value")
+            "True iff this is any literal (int/double/string).")
+        .def_prop_ro(
+            "is_literal_string",
+            [](const StinkyRegister& r) {
+                return r.dataType == StinkyRegister::Type::LiteralString;
+            },
+            "True iff this is a LiteralString (e.g., MUBUF 'off' keyword).")
+        .def_prop_ro(
+            "literal_string",
+            [](const StinkyRegister& r) -> std::optional<std::string> {
+                if (r.dataType == StinkyRegister::Type::LiteralString) {
+                    return r.literalValue;
+                }
+                return std::nullopt;
+            },
+            "Get the literal string content, or None if not a LiteralString.")
+
+        // --- RegName accessors (rocisa-style symbolic name carrier) --------
+        // stinkytofu's literalValue field doubles as the symbolic name slot for
+        // Register-typed values. We marshal rocisa's (name, offsets[]) struct
+        // to a "name+1+2+..." string at the binding boundary so stinkytofu's
+        // existing IR transforms (e.g. LegalizationUtils::adjustSymbolicRegName)
+        // can act on it without learning a new struct type.
+        .def(
+            "set_reg_name",
+            [](StinkyRegister& r, const std::string& name, const std::vector<int>& offsets) {
+                std::string full = name;
+                for (int o : offsets) {
+                    full += "+" + std::to_string(o);
+                }
+                r.setSymbolicName(full);
+            },
+            nb::arg("name"), nb::arg("offsets") = std::vector<int>{},
+            "Attach a rocisa-style RegName (name + offsets) to this register. "
+            "Stored on `literalValue`; encoded as 'name+offset1+offset2+...'.")
+        .def(
+            "get_reg_name",
+            [](const StinkyRegister& r) -> std::pair<std::string, std::vector<int>> {
+                std::string s = r.getSymbolicName();
+                std::vector<int> offsets;
+                if (s.empty()) {
+                    return {"", offsets};
+                }
+                auto pos = s.find('+');
+                std::string base = (pos == std::string::npos) ? s : s.substr(0, pos);
+                while (pos != std::string::npos) {
+                    auto next = s.find('+', pos + 1);
+                    std::string token = s.substr(
+                        pos + 1, next == std::string::npos ? std::string::npos : next - pos - 1);
+                    offsets.push_back(std::stoi(token));
+                    pos = next;
+                }
+                return {base, offsets};
+            },
+            "Read the attached RegName as (name, offsets[]). Returns ('', []) when no name set.")
+        .def(
+            "has_reg_name", [](const StinkyRegister& r) { return r.hasSymbolicName(); },
+            "Whether this register currently carries a symbolic RegName.")
+        .def(
+            "clear_reg_name", [](StinkyRegister& r) { r.setSymbolicName(""); },
+            "Detach any RegName, leaving the numeric (type,index,count) identity.")
+
+        // --- Modifier flags (isMinus / isAbs) ------------------------------
+        // C++ already stores isMinus/isAbs as 1-bit fields on reg; we just
+        // expose Python toggles. Both setters are no-ops on literals.
+        .def_prop_ro(
+            "is_minus",
+            [](const StinkyRegister& r) -> bool {
+                return r.dataType == StinkyRegister::Type::Register && r.reg.isMinus;
+            },
+            "Whether the `-` (negate) modifier is set (`-v0`).")
+        .def(
+            "set_minus",
+            [](StinkyRegister& r, bool value) {
+                if (r.dataType == StinkyRegister::Type::Register) {
+                    r.reg.isMinus = value ? 1u : 0u;
+                }
+            },
+            nb::arg("value"), "Toggle the `-` modifier. No-op on literals.")
+        .def_prop_ro(
+            "is_abs",
+            [](const StinkyRegister& r) -> bool {
+                return r.dataType == StinkyRegister::Type::Register && r.reg.isAbs;
+            },
+            "Whether the `abs(...)` modifier is set (`abs(v0)`).")
+        .def(
+            "set_abs",
+            [](StinkyRegister& r, bool value) {
+                if (r.dataType == StinkyRegister::Type::Register) {
+                    r.reg.isAbs = value ? 1u : 0u;
+                }
+            },
+            nb::arg("value"), "Toggle the `abs(...)` modifier. No-op on literals.")
+
+        // --- MSB offset (VGPR bank selector for idx >= 256) -----------------
+        .def_prop_ro(
+            "offset",
+            [](const StinkyRegister& r) -> int {
+                return r.dataType == StinkyRegister::Type::Register ? r.reg.offset : 0;
+            },
+            "The register offset (e.g. -512 for VGPR MSB bank 2).")
+        .def(
+            "set_offset",
+            [](StinkyRegister& r, int value) {
+                if (r.dataType == StinkyRegister::Type::Register) {
+                    r.reg.offset = static_cast<int16_t>(value);
+                }
+            },
+            nb::arg("value"),
+            "Set the register offset for MSB encoding (e.g. -512 = bank 2). No-op on literals.")
+
+        // --- Hash / equality (KernelWriter uses Registers as dict keys) ----
+        .def("__hash__",
+             [](const StinkyRegister& r) -> Py_hash_t { return static_cast<Py_hash_t>(r.hash()); })
+        .def(
+            "__eq__",
+            [](const StinkyRegister& r, const nb::object& other) -> bool {
+                if (!nb::isinstance<StinkyRegister>(other)) {
+                    return false;
+                }
+                return r == nb::cast<StinkyRegister>(other);
+            },
+            nb::arg("other").none(true))
+        .def(
+            "__ne__",
+            [](const StinkyRegister& r, const nb::object& other) -> bool {
+                if (!nb::isinstance<StinkyRegister>(other)) {
+                    return true;
+                }
+                return r != nb::cast<StinkyRegister>(other);
+            },
+            nb::arg("other").none(true))
+
+        // --- Copy semantics (KernelWriter does copy.deepcopy on registers) -
+        // StinkyRegister is value-like (trivially copyable for the union; the
+        // std::string literalValue copies fine). Same impl for both shallow
+        // and deep copy because there are no nested references.
+        .def("__copy__", [](const StinkyRegister& r) { return StinkyRegister(r); })
+        .def(
+            "__deepcopy__",
+            [](const StinkyRegister& r, nb::handle /*memo*/) { return StinkyRegister(r); },
+            nb::arg("memo"))
+
+        // --- Debug repr -----------------------------------------------------
         .def("__repr__", [](const StinkyRegister& r) -> std::string {
             if (r.dataType == StinkyRegister::Type::Register) {
                 std::string typeStr;
@@ -204,16 +426,27 @@ NB_MODULE(_stinkytofu, m) {
                         typeStr = "?";
                         break;
                 }
+                std::string body;
                 if (r.reg.num == 1) {
-                    return "<Register " + typeStr + std::to_string(r.reg.idx) + ">";
+                    body = typeStr + std::to_string(r.reg.idx);
                 } else {
-                    return "<Register " + typeStr + "[" + std::to_string(r.reg.idx) + ":" +
-                           std::to_string(r.reg.idx + r.reg.num - 1) + "]>";
+                    body = typeStr + "[" + std::to_string(r.reg.idx) + ":" +
+                           std::to_string(r.reg.idx + r.reg.num - 1) + "]";
                 }
+                std::string mods;
+                if (r.reg.isMinus) mods += " -";
+                if (r.reg.isAbs) mods += " abs";
+                std::string name;
+                if (!r.literalValue.empty()) {
+                    name = " name=" + r.literalValue;
+                }
+                return "<Register " + body + mods + name + ">";
             } else if (r.dataType == StinkyRegister::Type::LiteralInt) {
                 return "<Literal " + std::to_string(r.literalInt) + ">";
             } else if (r.dataType == StinkyRegister::Type::LiteralDouble) {
                 return "<Literal " + std::to_string(r.literalDouble) + ">";
+            } else if (r.dataType == StinkyRegister::Type::LiteralString) {
+                return "<LiteralString \"" + r.literalValue + "\">";
             }
             return std::string("<Register (invalid)>");
         });
@@ -239,13 +472,21 @@ NB_MODULE(_stinkytofu, m) {
         "Create an accumulator VGPR register (alias for agpr)");
 
     m.def(
+        "mgpr", [](int index, int count) { return StinkyRegister("m", index, count); },
+        nb::arg("index"), nb::arg("count") = 1, "Create an MGPR (Memory descriptor) register");
+
+    m.def(
         "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
         "Create a float literal");
 
     // ========================================================================
     // Architecture IDs
     // ========================================================================
-    nb::enum_<GfxArchID>(m, "GfxArch").value("Gfx1250", GfxArchID::Gfx1250, "GFX12.5.0");
+    // Only the architectures this library was built for exist in GfxArchID, so the enum is
+    // exposed from the same list rather than hand-maintained.
+    auto gfxArch = nb::enum_<GfxArchID>(m, "GfxArch");
+#define STINKYTOFU_ARCH(archName) gfxArch.value(#archName, GfxArchID::archName);
+#include "Config/Archs.def"
 
     // ========================================================================
     // Toolchain capability probing (via comgr)
@@ -295,6 +536,13 @@ NB_MODULE(_stinkytofu, m) {
         .value("MSB8", VgprMsbMode::Msb8)
         .value("MSB16", VgprMsbMode::Msb16);
 
+    nb::enum_<MUBUFScope>(m, "MUBUFScope")
+        .value("SCOPE_NONE", MUBUFScope::SCOPE_NONE)
+        .value("SCOPE_CU", MUBUFScope::SCOPE_CU)
+        .value("SCOPE_SE", MUBUFScope::SCOPE_SE)
+        .value("SCOPE_DEV", MUBUFScope::SCOPE_DEV)
+        .value("SCOPE_SYS", MUBUFScope::SCOPE_SYS);
+
     // ========================================================================
     // PyLogicalModule - Python-Specific High-Level IR Container
     // ========================================================================
@@ -304,6 +552,18 @@ NB_MODULE(_stinkytofu, m) {
              "Create a new IR module with the given kernel name")
         .def("add", &PyLogicalModule::add, nb::arg("instruction"),
              "Add a high-level IR instruction to the module (shared ownership)")
+        .def("add_set_directive", &PyLogicalModule::addSetDirective, nb::arg("symbol"),
+             nb::arg("value"),
+             "Record a .set directive at the current position in the instruction stream")
+        .def("add_label", &PyLogicalModule::addLabel, nb::arg("label_name"),
+             nb::arg("alignment") = 1, nb::arg("comment") = "",
+             "Record a label at the current position in the instruction stream")
+        .def("add_textblock", &PyLogicalModule::addTextBlock, nb::arg("text"),
+             "Record a textblock (comment/raw text) at the current position")
+        .def("begin_group", &PyLogicalModule::beginGroup, nb::arg("name"),
+             "Mark the beginning of a named instruction-group scope")
+        .def("end_group", &PyLogicalModule::endGroup, nb::arg("name"),
+             "Mark the end of a named instruction-group scope")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
             "dump",
@@ -334,7 +594,41 @@ NB_MODULE(_stinkytofu, m) {
                 inst.dump(oss);
                 return oss.str();
             },
-            "Dump the instruction to a string");
+            "Dump the instruction to a string")
+        .def(
+            "set_ds",
+            [](LogicalInstruction& inst, int na, int offset, int offset0, int offset1, bool gds) {
+                inst.ds = DSModifiers(na, offset, offset0, offset1, gds);
+            },
+            nb::arg("na") = 1, nb::arg("offset") = 0, nb::arg("offset0") = 0,
+            nb::arg("offset1") = 0, nb::arg("gds") = false, "Set DS (LDS/GDS) modifiers")
+        .def(
+            "set_mubuf",
+            [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
+               int scope, int th, bool isStore) {
+                MUBUFScope mScope = static_cast<MUBUFScope>(scope);
+                TemporalHint mTh = static_cast<TemporalHint>(th);
+                inst.mubuf = MUBUFModifiers(
+                    offen, offset, glc, slc, nt, /*lds=*/false, isStore, /*hasMUBUFConst=*/false,
+                    /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false, mScope, mTh);
+            },
+            nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
+            nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0, nb::arg("th") = -1,
+            nb::arg("is_store") = false,
+            "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store)")
+        .def(
+            "add_src",
+            [](LogicalInstruction& inst, const StinkyRegister& reg) { inst.srcs.push_back(reg); },
+            nb::arg("reg"), "Add an additional source register operand")
+        .def(
+            "set_vop3",
+            [](LogicalInstruction& inst, const std::vector<int>& op_sel,
+               const std::vector<int>& op_sel_hi, const std::vector<int>& byte_sel) {
+                inst.vop3 = VOP3PModifiers(op_sel, op_sel_hi, byte_sel);
+            },
+            nb::arg("op_sel") = std::vector<int>{}, nb::arg("op_sel_hi") = std::vector<int>{},
+            nb::arg("byte_sel") = std::vector<int>{},
+            "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers");
 
     // ========================================================================
     // Auto-generated Python bindings for all IR instructions (~273 classes)
@@ -350,15 +644,18 @@ NB_MODULE(_stinkytofu, m) {
         "MFMA",
         [](const std::string& instType, const std::string& accType, int m, int n, int k, int blocks,
            bool mfma1k, const StinkyRegister& acc, const StinkyRegister& a, const StinkyRegister& b,
-           std::optional<StinkyRegister> acc2, bool neg, const std::string& comment) {
-            return makeLogicalInstructionShared(MFMA(instType, accType, m, n, k, blocks, mfma1k,
-                                                     acc, a, b, acc2 ? &(*acc2) : nullptr, neg,
-                                                     comment));
+           std::optional<StinkyRegister> acc2, bool neg, const std::string& matrixAFmt,
+           const std::string& matrixBFmt, bool scaled, bool scaleOperands,
+           const std::string& comment) {
+            return makeLogicalInstructionShared(MFMA(
+                instType, accType, m, n, k, blocks, mfma1k, acc, a, b, acc2 ? &(*acc2) : nullptr,
+                neg, matrixAFmt, matrixBFmt, scaled, scaleOperands, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("m"), nb::arg("n"), nb::arg("k"),
         nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
-        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("comment") = "",
-        "Create an MFMA instruction");
+        nb::arg("acc2") = std::nullopt, nb::arg("neg") = false, nb::arg("matrixAFmt") = "",
+        nb::arg("matrixBFmt") = "", nb::arg("scaled") = false, nb::arg("scaleOperands") = false,
+        nb::arg("comment") = "", "Create an MFMA instruction");
 
     // MXMFMA - Mixed-precision Matrix Fused Multiply-Add
     m.def(
@@ -367,16 +664,18 @@ NB_MODULE(_stinkytofu, m) {
            const std::string& mxScaleATypeStr, const std::string& mxScaleBTypeStr, int m, int n,
            int k, int block, const StinkyRegister& acc, const StinkyRegister& a,
            const StinkyRegister& b, const StinkyRegister& acc2, const StinkyRegister& mxsa,
-           const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& comment) {
-            return makeLogicalInstructionShared(MXMFMA(instType, accType, mxScaleATypeStr,
-                                                       mxScaleBTypeStr, m, n, k, block, acc, a, b,
-                                                       acc2, mxsa, mxsb, reuseA, reuseB, comment));
+           const StinkyRegister& mxsb, bool reuseA, bool reuseB, const std::string& matrixAFmt,
+           const std::string& matrixBFmt, const std::string& comment) {
+            return makeLogicalInstructionShared(
+                MXMFMA(instType, accType, mxScaleATypeStr, mxScaleBTypeStr, m, n, k, block, acc, a,
+                       b, acc2, mxsa, mxsb, reuseA, reuseB, matrixAFmt, matrixBFmt, comment));
         },
         nb::arg("instType"), nb::arg("accType"), nb::arg("mxScaleATypeStr"),
         nb::arg("mxScaleBTypeStr"), nb::arg("m"), nb::arg("n"), nb::arg("k"), nb::arg("block"),
         nb::arg("acc"), nb::arg("a"), nb::arg("b"), nb::arg("acc2"), nb::arg("mxsa"),
         nb::arg("mxsb"), nb::arg("reuseA") = false, nb::arg("reuseB") = false,
-        nb::arg("comment") = "", "Create an MXMFMA instruction");
+        nb::arg("matrixAFmt") = "", nb::arg("matrixBFmt") = "", nb::arg("comment") = "",
+        "Create an MXMFMA instruction");
 
     // SMFMA - Sparse Matrix Fused Multiply-Add
     m.def(
@@ -391,6 +690,32 @@ NB_MODULE(_stinkytofu, m) {
         nb::arg("blocks"), nb::arg("mfma1k"), nb::arg("acc"), nb::arg("a"), nb::arg("b"),
         nb::arg("metadata"), nb::arg("neg") = false, nb::arg("comment") = "",
         "Create an SMFMA instruction");
+
+    // SWaitAlu - Dependency counter wait instruction
+    m.def(
+        "SWaitAlu",
+        [](int va_vdst, int va_sdst, int va_ssrc, int hold_cnt, int vm_vsrc, int va_vcc,
+           int sa_sdst, const std::string& comment) {
+            auto* inst = IRBase::createIR<LogicalInstruction>(logical::SWaitAlu);
+            auto* data = new SWaitAluLogicalData(va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc,
+                                                 va_vcc, sa_sdst);
+            inst->setSpecialData(data);
+            inst->comment = comment;
+            return makeLogicalInstructionShared(inst);
+        },
+        nb::arg("va_vdst") = -1, nb::arg("va_sdst") = -1, nb::arg("va_ssrc") = -1,
+        nb::arg("hold_cnt") = -1, nb::arg("vm_vsrc") = -1, nb::arg("va_vcc") = -1,
+        nb::arg("sa_sdst") = -1, nb::arg("comment") = "", "Create an SWaitAlu instruction");
+
+    // SchedulingFence - Scheduling barrier pseudo-instruction
+    m.def(
+        "SchedulingFence",
+        [](const std::string& comment) {
+            auto* inst = IRBase::createIR<LogicalInstruction>(logical::SchedulingFence);
+            inst->comment = comment;
+            return makeLogicalInstructionShared(inst);
+        },
+        nb::arg("comment") = "", "Create a SchedulingFence pseudo-instruction");
 
     // TensorLoadToLds - Higher-level tensor load operation
     m.def(
@@ -509,6 +834,37 @@ NB_MODULE(_stinkytofu, m) {
         "    - float literals (0.0, 1.0, 3.14, etc.)\n"
         "    - string literals (for special values)\n\n"
         "The intrinsic will be expanded during optimization by IntrinsicExpansionPass.");
+
+    // ========================================================================
+    // SRD Upper Value (rocisa.code.SrdUpperValue replacement)
+    // ========================================================================
+    // Mirrors rocisa::SrdUpperValue (rocisa/src/code.cpp:56-82). Tensile
+    // calls SrdUpperValue(IsaVersion) -> BitfieldUnion and immediately
+    // reads .desc() / .getValue() to embed the SRD upper 32 bits as a
+    // packed literal in the kernel signature (KernelWriterAssembly.py:1497).
+    //
+    // ISA dispatch lives in createSrdUpperValue(); Python receives a thin
+    // BitfieldUnion handle with the rocisa-shaped surface API.
+    nb::class_<BitfieldUnion>(m, "BitfieldUnion")
+        .def("__str__", &BitfieldUnion::toString)
+        .def("getValue", &BitfieldUnion::getValue)
+        .def("toString", &BitfieldUnion::toString)
+        .def("desc", &BitfieldUnion::desc);
+
+    m.def(
+        "SrdUpperValue",
+        [](const nb::object& isa) {
+            std::array<int, 3> version{};
+            if (nb::isinstance<nb::tuple>(isa) || nb::isinstance<nb::list>(isa)) {
+                version = {nb::cast<int>(isa[0]), nb::cast<int>(isa[1]), nb::cast<int>(isa[2])};
+            } else {
+                version = nb::cast<std::array<int, 3>>(isa);
+            }
+            return createSrdUpperValue(version);
+        },
+        nb::arg("isa"),
+        "Create the SRD upper-32-bit literal for the given ISA "
+        "(major, minor, stepping) tuple or 3-element array.");
 
     // ========================================================================
     // Architecture support query

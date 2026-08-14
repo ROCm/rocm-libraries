@@ -23,7 +23,9 @@
 ################################################################################
 
 
+import contextlib
 import functools
+import io
 import sys
 import threading
 import time
@@ -35,12 +37,18 @@ from typing import FrozenSet, List, Dict, NamedTuple, Tuple
 from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, setVerbosity
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Common.GlobalParameters import assignGlobalParameters
+from Tensile.Common.GlobalParameters import assignGlobalParameters, defaultSolution
+from Tensile.CustomYamlLoader import load_logic_gfx_arch, archMatch
 from Tensile.LibraryIO import readYAML
 from Tensile.Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments
-from .KnownBugs import KnownBugKey, is_known_bug, load_known_bugs
+from .KnownBugs import (
+    KnownBugKey,
+    is_known_bug,
+    load_known_bugs,
+    normalize_logic_relative_path,
+)
 from .ValidChipId import _validateChipId
 from .ValidMatrixInstruction import _validateMatrixInstruction
 from .ValidWorkGroup import _validateWorkGroup
@@ -59,7 +67,7 @@ def _runChecks(
     check: Check,
     known_bugs: FrozenSet[KnownBugKey],
     files: List[Path],
-) -> Tuple[int, int, int, int]:
+) -> Tuple[int, int, int, int, int]:
     """
     Run checks on the given logic files.
 
@@ -70,13 +78,17 @@ def _runChecks(
         files: List of logic files to check.
 
     Returns:
-        Tuple of (keep, total, known_bug_skips, chip_id_failures) where keep is
-        the number of unrejected solutions, total is the total number of
-        solutions parsed, known_bug_skips counts solutions accepted via the
-        known-bugs list only, and chip_id_failures is the number of files that
-        failed chip-ID validation (independent of per-solution accounting).
+        Tuple of (keep, total, known_bug_skips, chip_id_failures, stale_known_bugs)
+        where keep is the number of unrejected solutions, total is the total
+        number of solutions parsed, known_bug_skips counts solutions accepted via
+        the known-bugs list that still fail validation, chip_id_failures is the
+        number of files that failed chip-ID validation (independent of
+        per-solution accounting), and stale_known_bugs counts known-bugs entries
+        whose solution now passes validation (a landed fix; the entry can be
+        removed).
     """
     keep, total, known_bug_skips, chip_id_failures = 0, 0, 0, 0
+    stale_known_bugs = 0
     for file in files:
         if "Experimental" in file.parts:
             continue
@@ -101,13 +113,28 @@ def _runChecks(
         # --- Solution level validation ---
         solutions = []
         data = readYAML(file)
-        problemType = data[4]
+        if isinstance(data, dict):
+            problemType = data.get("ProblemType")
+            all_solutions = data.get("Solutions") or []
+
+            # Per-file defaults: fill missing solution keys from this first, then defaultSolution.            
+            for solution in all_solutions:
+                for key, val in data.get("DefaultSolution", {}).items():
+                    if key not in solution:
+                        solution[key] = val
+                for key, val in defaultSolution.items():
+                    if key not in solution:
+                        solution[key] = val
+            
+        else:
+            problemType = data[4]
+            all_solutions = data[5]
         if check.OnlyCustomKernels and hasCustomKernel(file):
             print2(f">> {rel}")
-            solutions = data[5]  # Solutions are the 5th index
+            solutions = all_solutions
         elif check.All:
             print2(f">> {rel}")
-            solutions = data[5]  # Solutions are the 5th index
+            solutions = all_solutions
 
         for list_idx, s in enumerate(solutions):
             s, isCustom = handleCustomKernel(s, isaInfoMap)
@@ -115,14 +142,35 @@ def _runChecks(
                 continue
 
             s["ProblemType"] = problemType
-            sol_index = int(s.get("SolutionIndex", list_idx))
+            sol_name = s.get("SolutionNameMin")
 
-            if known_bugs and is_known_bug(known_bugs, rel, sol_index):
+            if known_bugs and is_known_bug(known_bugs, rel, sol_name):
+                # Re-validate documented known bugs so a landed fix is detected
+                # rather than silently skipped forever. A still-failing known bug
+                # is expected, so suppress the validators' own error output; only
+                # a now-passing solution is worth surfacing. XCC gets report=False
+                # so this expected re-failure does not bump its per-file dedup
+                # counter and swallow a later *real* XCC failure's message.
+                with contextlib.redirect_stdout(io.StringIO()):
+                    now_valid = all(
+                        [
+                            _validateMatrixInstruction(s, isaInfoMap, rel),
+                            _validateWorkGroup(s, rel),
+                            _validateWorkGroupMappingXCC(s, rel, report=False),
+                        ]
+                    )
                 keep += 1
                 total += 1
-                known_bug_skips += 1
+                if now_valid:
+                    stale_known_bugs += 1
+                    print(
+                        "WARNING: known-bugs entry no longer fails validation: "
+                        f"{normalize_logic_relative_path(rel)} :: {sol_name} "
+                        "-- fix confirmed; remove this entry from the known-bugs YAML."
+                    )
+                else:
+                    known_bug_skips += 1
                 continue
-
             if all(
                 [
                     _validateMatrixInstruction(s, isaInfoMap, rel),
@@ -133,7 +181,7 @@ def _runChecks(
                 keep += 1
             total += 1
 
-    return keep, total, known_bug_skips, chip_id_failures
+    return keep, total, known_bug_skips, chip_id_failures, stale_known_bugs
 
 
 def _setup():
@@ -160,6 +208,13 @@ def _setup():
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)
+
+    archs = args.Architecture.split(";")
+    if "all" not in archs:
+        files = [f for f in files if archMatch(load_logic_gfx_arch(f), archs)]
+        if len(files) == 0:
+            print1(f"No files found in {logicPath} for architectures: {', '.join(archs)}")
+            exit(1)
     print2(f"Found {len(files)} files")
 
     isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, str(cxxCompiler))
@@ -212,6 +267,7 @@ def main():
     keep, total = 0, 0
     known_bug_skips = 0
     chip_id_failures = 0
+    stale_known_bugs = 0
 
     # Show periodic progress when in quiet mode (no per-file output)
     progress_stop = threading.Event()
@@ -225,11 +281,12 @@ def main():
     try:
         results = ParallelMap2(fn, batches, multiArg=False, procs=jobs, return_as="list")
 
-        for _keep, _total, _kb, _cid in results:
+        for _keep, _total, _kb, _cid, _stale in results:
             keep += _keep
             total += _total
             known_bug_skips += _kb
             chip_id_failures += _cid
+            stale_known_bugs += _stale
     finally:
         progress_stop.set()
         if progress_thread is not None:
@@ -243,6 +300,12 @@ def main():
         print(f"Known-bugs skip  {known_bug_skips} solutions (see --known-bugs YAML)")
     if chip_id_failures > 0:
         print(f"Chip-ID failures  {chip_id_failures} files")
+    if stale_known_bugs > 0:
+        print(
+            f"Stale known-bugs  {stale_known_bugs} entries now pass validation "
+            "(remove them from the known-bugs YAML)"
+        )
 
-    if rejects > 0 or chip_id_failures > 0:
+    strict_stale = getattr(args, "StrictKnownBugs", False) and stale_known_bugs > 0
+    if rejects > 0 or chip_id_failures > 0 or strict_stale:
         exit(1)

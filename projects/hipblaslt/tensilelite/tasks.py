@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
@@ -68,6 +69,128 @@ def detect_gpu_arch():
 @task
 def get_gpu_arch(c):
     print(detect_gpu_arch())
+
+
+# gfx1250 ships as two silicon revisions (v0 and v1) that share the same ISA and
+# compiler arch name "gfx1250", so rocm_agent_enumerator/amdgpu-arch cannot tell
+# them apart. The only in-process signal is hipDeviceProp_t::asicRevision
+# (empirically v0 -> 0, v1 -> 1). The functions below let tox generate/test v0
+# kernels on a v0 machine while defaulting to the shipping v1 everywhere else.
+_REVISION_PROBE_SRC = _TASKS_DIR / "tools" / "gpu_revision_probe.cpp"
+
+
+def _revision_to_gpu_target(base_arch, asic_revision):
+    """Map a detected base arch + ASIC revision to a Tensile --gpu-targets value.
+
+    Only gfx1250 revision 0 is the pre-production v0. Everything else -- the
+    shipping v1 (revision 1), an unknown revision (-1 when HIP is too old to
+    expose the field), any future/unexpected value, and every non-gfx1250 arch --
+    is returned unchanged so tests default to the shipping stepping.
+    """
+    if base_arch == "gfx1250" and asic_revision == 0:
+        return "gfx1250v0"
+    return base_arch
+
+
+def _probe_asic_revision(build_dir=None, device_id=0):
+    """Compile (once, cached) and run the HIP revision probe.
+
+    Returns a (arch, revision) tuple on success, or None on any failure (hipcc
+    missing, build error, no device, non-zero exit, or unparsable output) so the
+    caller can fall back to the shipping default. Never raises.
+    """
+    hipcc = shutil.which("hipcc")
+    if not hipcc:
+        print("warning: hipcc not found; cannot probe gfx1250 ASIC revision.", file=sys.stderr)
+        return None
+
+    out_dir = pathlib.Path(build_dir) if build_dir else _TASKS_DIR / "build_tmp"
+    probe_bin = out_dir / "gpu_revision_probe"
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stale = (not probe_bin.exists()
+                 or probe_bin.stat().st_mtime < _REVISION_PROBE_SRC.stat().st_mtime)
+        if stale:
+            # Compile to a unique temp file then atomically rename, so concurrent
+            # callers (e.g. pytest-xdist workers) can never observe or run a
+            # half-written binary (ETXTBSY / truncated exe).
+            fd, tmp_bin = tempfile.mkstemp(
+                dir=str(out_dir), prefix=".gpu_revision_probe.", suffix=".tmp")
+            os.close(fd)
+            try:
+                subprocess.run(
+                    [hipcc, "-O0", str(_REVISION_PROBE_SRC), "-o", tmp_bin],
+                    check=True, capture_output=True, text=True, timeout=180,
+                )
+                os.chmod(tmp_bin, 0o755)
+                os.replace(tmp_bin, str(probe_bin))
+            finally:
+                if os.path.exists(tmp_bin):
+                    os.remove(tmp_bin)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"warning: failed to build ASIC revision probe: {e}", file=sys.stderr)
+        return None
+
+    try:
+        result = subprocess.run(
+            [str(probe_bin), str(device_id)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"warning: ASIC revision probe failed to run: {e}", file=sys.stderr)
+        return None
+
+    if result.returncode != 0:
+        print(f"warning: ASIC revision probe exited {result.returncode}: "
+              f"{result.stderr.strip()}", file=sys.stderr)
+        return None
+
+    lines = result.stdout.splitlines()  # arch on line 1, revision on line 2
+    if len(lines) < 2:
+        print(f"warning: unexpected ASIC revision probe output: {result.stdout!r}",
+              file=sys.stderr)
+        return None
+    try:
+        revision = int(lines[1].strip())
+    except ValueError:
+        print(f"warning: could not parse ASIC revision from: {result.stdout!r}",
+              file=sys.stderr)
+        return None
+    return (lines[0].strip(), revision)
+
+
+def detect_gpu_revision_target(build_dir=None, device_id=0):
+    """Detect the Tensile --gpu-targets value, distinguishing gfx1250 v0 from v1.
+
+    Non-gfx1250 arches are returned unchanged without probing. For gfx1250, the
+    ASIC revision is probed via HIP: revision 0 -> gfx1250v0, otherwise (and on
+    any probe failure or arch mismatch) -> gfx1250 (the shipping v1 default).
+    """
+    base_arch = detect_gpu_arch()
+    if base_arch != "gfx1250":
+        return base_arch
+
+    probed = _probe_asic_revision(build_dir=build_dir, device_id=device_id)
+    if probed is None:
+        print("warning: could not determine gfx1250 ASIC revision; "
+              "defaulting to gfx1250 (v1).", file=sys.stderr)
+        return "gfx1250"
+
+    probe_arch, revision = probed
+    # gcnArchName carries feature suffixes on real hardware
+    # (e.g. "gfx1250:sramecc+:xnack-"); compare only the base arch token.
+    if probe_arch.split(":")[0] != "gfx1250":
+        print(f"warning: revision probe reported arch '{probe_arch}' != detected "
+              "'gfx1250'; defaulting to gfx1250 (v1).", file=sys.stderr)
+        return "gfx1250"
+
+    return _revision_to_gpu_target("gfx1250", revision)
+
+
+@task
+def get_gpu_revision_target(c):
+    """Print the Tensile --gpu-targets value, split by gfx1250 v0/v1 revision."""
+    print(detect_gpu_revision_target())
 
 @task(
     help={
@@ -237,6 +360,8 @@ def _maybe_rebuild_rocisa(c, rocisa_dir=None):
         "enable_rocprof": "Build tensilelite-client with rocprof.",
         "cxx_flags_release": "Override CMAKE_CXX_FLAGS_RELEASE (for example, -O3 to keep asserts enabled in Release).",
         "rebuild_rocisa": "Re-install the editable rocisa (if present) so rocisa C++ edits are picked up; pass --no-rebuild-rocisa to skip.",
+        "enable_asan": "Enable AddressSanitizer.",
+        "enable_tsan": "Enable ThreadSanitizer.",
     }
 )
 def build_client(
@@ -253,6 +378,8 @@ def build_client(
     enable_rocprof=False,
     cxx_flags_release=None,
     rebuild_rocisa=True,
+    enable_asan=False,
+    enable_tsan=False,
 ):
     """Build the tensilelite-client C++ executable.
 
@@ -263,11 +390,13 @@ def build_client(
     refreshed to pick up C++ edits (disable with --no-rebuild-rocisa).
     """
 
+    if enable_asan and enable_tsan:
+        raise Exit("Error: ASAN and TSAN cannot be enabled simultaneously", code=1)
+
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
         if not gpu_targets:
-            print("Error: No GPU detected and no gpu_targets provided. Skipping build.")
-            return
+            raise Exit("Error: No GPU detected and no gpu_targets provided", code=1)
         print(f"warning: No GPU targets specified. Detected and using: {gpu_targets}")
 
     if rocm_path:
@@ -278,11 +407,9 @@ def build_client(
             try:
                 subprocess.run([compiler, "--version"], capture_output=True, timeout=5, check=True)
             except FileNotFoundError:
-                print(f"Error: compiler not found at {compiler}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler not found at {compiler}", code=1)
             except subprocess.SubprocessError as e:
-                print(f"Error: compiler check failed for {compiler}: {e}", file=sys.stderr)
-                return
+                raise Exit(f"Error: compiler check failed for {compiler}: {e}", code=1)
 
     if rebuild_rocisa:
         _maybe_rebuild_rocisa(c)
@@ -319,6 +446,10 @@ def build_client(
             cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
         if export_compile_commands:
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+        if enable_asan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_ASAN=ON")
+        if enable_tsan:
+            cmake_cmd.append("-DTENSILELITE_ENABLE_HOST_TSAN=ON")
         cmake_cmd.append(f"-DHIPBLASLT_BUNDLE_PYTHON_DEPS={_cmake_bool(bundle_python_deps)}")
 
         c.run(shlex.join(cmake_cmd))

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,12 +25,21 @@
 #pragma once
 
 #include "rocsparse-types.h"
+#include "rocsparse_line_nnz_profile.hpp"
 
 struct _rocsparse_spmat_descr
 {
     bool init{};
 
-    mutable bool analysed{};
+    // Cached structural summary of the matrix's line lengths (rows for CSR,
+    // columns for CSC) - an objective property of the sparsity pattern with no
+    // algorithm policy baked in, so it can be reused by any routine operating on
+    // this descriptor (e.g. both SpMM and SpMV). Computed once (lazily, during
+    // the preprocess/analysis stage, since it needs a device reduction +
+    // device->host copy that is illegal under HIP graph capture) and reused
+    // thereafter, which keeps the capture-sensitive compute path free of kernel
+    // launches/copies. See rocsparse::compute_line_nnz_profile.
+    mutable rocsparse::line_nnz_profile line_profile{};
 
     int64_t rows{};
     int64_t cols{};
@@ -70,7 +79,6 @@ struct _rocsparse_spmat_descr
 
     _rocsparse_spmat_descr() = default;
     _rocsparse_spmat_descr(rocsparse_format     format,
-                           bool                 analysed,
                            int64_t              batch_count,
                            int64_t              m,
                            int64_t              n,
@@ -92,7 +100,6 @@ struct _rocsparse_spmat_descr
                            rocsparse_mat_info   info);
 
     _rocsparse_spmat_descr(rocsparse_format     format,
-                           bool                 analysed,
                            int64_t              batch_count,
                            int64_t              mb,
                            int64_t              nb,

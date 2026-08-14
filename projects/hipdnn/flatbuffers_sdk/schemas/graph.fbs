@@ -23,6 +23,9 @@ include "sdpa_backward_attributes.fbs";
 include "custom_op_attributes.fbs";
 include "reduction_attributes.fbs";
 include "resample_fwd_attributes.fbs";
+include "resample_bwd_attributes.fbs";
+include "moe_grouped_matmul_attributes.fbs";
+include "moe_grouped_matmul_bwd_attributes.fbs";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -46,13 +49,33 @@ union NodeAttributes {
 	RMSNormBackwardAttributes,
 	ReductionAttributes,
 	ResampleFwdAttributes,
-	LayernormBackwardAttributes
+	LayernormBackwardAttributes,
+	ResampleBwdAttributes,
+	MoeGroupedMatmulAttributes,
+	MoeGroupedMatmulBwdAttributes
 }
 
 table Node {
 	name: string;
 	compute_data_type: DataType;
 	attributes: NodeAttributes;
+}
+
+// Semantic version (MAJOR.MINOR.PATCH) of the engine plugin API this graph
+// requires. Mirrors hipdnn_plugin_sdk::hipdnn_data_sdk::utilities::Version.
+// Stamped by GraphDescriptor::buildGraphFromOperations() from the same
+// computeMinimumEnginePluginApiVersion() used by EnginePluginResourceManager's
+// applicability filter, so both the deserialize-time reader guard and the
+// plugin-version floor derive from a single source of truth.
+struct EngineApiVersion {
+	major: uint;
+	minor: uint;
+	patch: uint;
+}
+
+// Opaque 128-bit value used for graph identities.
+struct Uuid {
+	bytes: [ubyte:16];
 }
 
 // Hipdnn expects that the serialized graph is sorted in topological order, has no cycles,
@@ -67,6 +90,18 @@ table Graph {
 	preferred_engine_id: long = null;
 	// Graph-level opt-in for execute-time override shapes.
 	is_override_shape_enabled: bool = false;
+	// Minimum engine plugin API version required to execute this graph (RFC 0016 §4.2).
+	// Absent on graphs a writer didn't stamp (e.g. hand-built fixtures, JSON-sourced
+	// graphs) -- callers must treat a missing field as the baseline "1.0.0" floor,
+	// exactly like the field's absence used to mean min_reader_version == 0.
+	min_required_engine_api_version: EngineApiVersion;
+	// Stable logical graph identity across serialization round trips. hipDNN mints UUID v4
+	// values at finalization; readers preserve any 128-bit value without enforcing a UUID
+	// version or variant. It is neither a content hash nor a unique live-object token:
+	// distinct IDs may have identical content, while one ID must not represent different
+	// immutable graph content. Absent on legacy and locally constructed, unfinalized graphs;
+	// an ID inherited through deserialization may be present before local finalization.
+	id: Uuid;
 }
 
 root_type Graph;

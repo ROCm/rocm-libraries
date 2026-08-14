@@ -14,6 +14,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -28,6 +29,23 @@ public:
         return test_utilities::createValidGraph();
     }
 
+    static std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
+        unpack(const GraphDescriptor& descriptor)
+    {
+        const auto serialized = descriptor.getSerializedGraph();
+        return hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+            static_cast<const uint8_t*>(serialized.ptr));
+    }
+
+    static void setHandle(GraphDescriptor& descriptor)
+    {
+        auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                HIPDNN_TYPE_HANDLE,
+                                1,
+                                static_cast<const void*>(&handle));
+    }
+
     static void verifyGraph(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph)
     {
         EXPECT_EQ(graph.name, "test");
@@ -37,34 +55,6 @@ public:
         EXPECT_EQ(graph.io_data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
-    }
-
-    static void verifyGraphsEquivalent(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph1,
-                                       const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph2)
-    {
-        EXPECT_EQ(graph1.name, graph2.name);
-        EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
-        EXPECT_EQ(graph1.intermediate_data_type, graph2.intermediate_data_type);
-        EXPECT_EQ(graph1.io_data_type, graph2.io_data_type);
-        EXPECT_EQ(graph1.preferred_engine_id, graph2.preferred_engine_id);
-
-        ASSERT_EQ(graph1.tensors.size(), graph2.tensors.size());
-        for(size_t i = 0; i < graph1.tensors.size(); ++i)
-        {
-            SCOPED_TRACE("tensor[" + std::to_string(i) + "]");
-            ASSERT_NE(graph1.tensors[i], nullptr);
-            ASSERT_NE(graph2.tensors[i], nullptr);
-            EXPECT_EQ(*graph1.tensors[i], *graph2.tensors[i]);
-        }
-
-        ASSERT_EQ(graph1.nodes.size(), graph2.nodes.size());
-        for(size_t i = 0; i < graph1.nodes.size(); ++i)
-        {
-            SCOPED_TRACE("node[" + std::to_string(i) + "]");
-            ASSERT_NE(graph1.nodes[i], nullptr);
-            ASSERT_NE(graph2.nodes[i], nullptr);
-            EXPECT_EQ(*graph1.nodes[i], *graph2.nodes[i]);
-        }
     }
 };
 
@@ -320,7 +310,48 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
+}
+
+TEST_F(TestGraphDescriptor, JsonRoundTripPreservesMinimumApiVersionAndRuntimePassByValue)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto builder = createValidGraph();
+    const auto* graph = GetGraph(builder.GetBufferPointer());
+    auto graphT = std::unique_ptr<GraphT>(graph->UnPack());
+    ASSERT_NE(graphT, nullptr);
+    ASSERT_FALSE(graphT->tensors.empty());
+
+    graphT->tensors.front()->is_runtime_pass_by_value = true;
+    graphT->min_required_engine_api_version = std::make_unique<EngineApiVersion>(1, 2, 0);
+
+    flatbuffers::FlatBufferBuilder versionedBuilder;
+    versionedBuilder.Finish(Graph::Pack(versionedBuilder, graphT.get()));
+
+    GraphDescriptor original;
+    original.deserializeGraph(versionedBuilder.GetBufferPointer(), versionedBuilder.GetSize());
+    original.buildSerializedGraph();
+
+    const auto jsonStr = original.getSerializedJsonGraph();
+    const auto parsed = nlohmann::json::parse(jsonStr);
+    EXPECT_EQ(parsed.at("min_required_engine_api_version"),
+              nlohmann::json({{"major", 1}, {"minor", 2}, {"patch", 0}}));
+
+    GraphDescriptor roundTripped;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(roundTripped, jsonStr.c_str(), jsonStr.size()));
+    roundTripped.buildSerializedGraph();
+
+    const auto binary = roundTripped.getSerializedGraph();
+    const auto restored = UnPackGraph(static_cast<const uint8_t*>(binary.ptr));
+    ASSERT_NE(restored, nullptr);
+    ASSERT_NE(restored->min_required_engine_api_version, nullptr);
+    EXPECT_EQ(restored->min_required_engine_api_version->major(), 1);
+    EXPECT_EQ(restored->min_required_engine_api_version->minor(), 2);
+    EXPECT_EQ(restored->min_required_engine_api_version->patch(), 0);
+    ASSERT_FALSE(restored->tensors.empty());
+    EXPECT_TRUE(restored->tensors.front()->is_runtime_pass_by_value);
 }
 
 TEST_F(TestGraphDescriptor, JsonSerializationEmitsOverrideShapeTrue)
@@ -572,7 +603,7 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
 }
 
 TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
@@ -635,6 +666,27 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
                                             &count,
                                             nameBuffer.data()));
     EXPECT_EQ(std::string(nameBuffer.data()), "graphB");
+}
+
+TEST_F(TestGraphDescriptor, DeserializeFailsAfterFinalizeAndPreservesIdentity)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serialized.data(), serialized.size());
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto original = unpack(descriptor);
+    ASSERT_NE(original->id, nullptr);
+    const auto originalId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*original->id);
+
+    ASSERT_THROW_HIPDNN_STATUS(descriptor.deserializeGraph(serialized.data(), serialized.size()),
+                               HIPDNN_STATUS_NOT_INITIALIZED);
+    EXPECT_TRUE(descriptor.isFinalized());
+    const auto preserved = unpack(descriptor);
+    ASSERT_NE(preserved->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*preserved->id), originalId);
 }
 
 // ============================================================================
@@ -840,7 +892,164 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
         static_cast<const uint8_t*>(binary2.ptr));
 
-    verifyGraphsEquivalent(*graph1, *graph2);
+    EXPECT_EQ(*graph1, *graph2);
+}
+
+TEST_F(TestGraphDescriptor, FinalizingLegacyGraphGeneratesValidStableUuid)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    descriptor.buildSerializedGraph();
+    ASSERT_EQ(unpack(descriptor)->id, nullptr);
+
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto first = unpack(descriptor);
+    ASSERT_NE(first->id, nullptr);
+    const auto firstId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*first->id);
+    EXPECT_TRUE(hipdnn_flatbuffers_sdk::utilities::isUuidV4(firstId));
+
+    const auto second = unpack(descriptor);
+    ASSERT_NE(second->id, nullptr);
+    EXPECT_EQ(firstId, hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*second->id));
+}
+
+TEST_F(TestGraphDescriptor, EquivalentGraphsReceiveDifferentUuids)
+{
+    auto firstBuilder = createValidGraph();
+    auto firstSerialized = firstBuilder.Release();
+    GraphDescriptor first;
+    first.deserializeGraph(firstSerialized.data(), firstSerialized.size());
+    setHandle(first);
+    first.finalize();
+
+    auto secondBuilder = createValidGraph();
+    auto secondSerialized = secondBuilder.Release();
+    GraphDescriptor second;
+    second.deserializeGraph(secondSerialized.data(), secondSerialized.size());
+    setHandle(second);
+    second.finalize();
+
+    const auto firstGraph = unpack(first);
+    const auto secondGraph = unpack(second);
+    ASSERT_NE(firstGraph->id, nullptr);
+    ASSERT_NE(secondGraph->id, nullptr);
+    EXPECT_NE(*firstGraph->id, *secondGraph->id);
+}
+
+TEST_F(TestGraphDescriptor, ExistingUuidSurvivesDeserializeHandleAndFinalize)
+{
+    auto legacyBuilder = createValidGraph();
+    auto legacySerialized = legacyBuilder.Release();
+    GraphDescriptor original;
+    original.deserializeGraph(legacySerialized.data(), legacySerialized.size());
+    setHandle(original);
+    original.finalize();
+    const auto originalGraph = unpack(original);
+    ASSERT_NE(originalGraph->id, nullptr);
+    const auto expectedId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
+
+    const auto originalData = original.getSerializedGraph();
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(originalData.ptr), originalData.size);
+    setHandle(revived);
+    revived.finalize();
+    const auto revivedGraph = unpack(revived);
+    ASSERT_NE(revivedGraph->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*revivedGraph->id), expectedId);
+}
+
+TEST_F(TestGraphDescriptor, ContentMutationReplacesInheritedUuid)
+{
+    auto legacyBuilder = createValidGraph();
+    auto legacySerialized = legacyBuilder.Release();
+    GraphDescriptor original;
+    original.deserializeGraph(legacySerialized.data(), legacySerialized.size());
+    setHandle(original);
+    original.finalize();
+    const auto originalGraph = unpack(original);
+    ASSERT_NE(originalGraph->id, nullptr);
+    const auto originalId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
+
+    const auto originalData = original.getSerializedGraph();
+    GraphDescriptor mutated;
+    mutated.deserializeGraph(static_cast<const uint8_t*>(originalData.ptr), originalData.size);
+    const std::array name{'m', 'u', 't', 'a', 't', 'e', 'd', '\0'};
+    mutated.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT,
+                         HIPDNN_TYPE_CHAR,
+                         static_cast<int64_t>(name.size()),
+                         name.data());
+    setHandle(mutated);
+    mutated.finalize();
+    const auto mutatedGraph = unpack(mutated);
+    ASSERT_NE(mutatedGraph->id, nullptr);
+    EXPECT_NE(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*mutatedGraph->id), originalId);
+}
+
+TEST_F(TestGraphDescriptor, PreservesOpaqueSerializedGraphId)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(serialized.data());
+    std::array<uint8_t, 16> opaqueId{};
+    opaqueId[6] = 0x30;
+    opaqueId[8] = 0x40;
+    graph->id = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::Uuid>(
+        flatbuffers::span<const uint8_t, 16>(opaqueId));
+
+    flatbuffers::FlatBufferBuilder identifiedBuilder;
+    identifiedBuilder.Finish(
+        hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(identifiedBuilder, graph.get()));
+    auto identified = identifiedBuilder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(identified.data(), identified.size());
+    descriptor.buildSerializedGraph();
+    const auto roundTripped = unpack(descriptor);
+    ASSERT_NE(roundTripped->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*roundTripped->id), opaqueId);
+}
+
+TEST_F(TestGraphDescriptor, JsonRoundTripPreservesUuid)
+{
+    auto legacyBuilder = createValidGraph();
+    auto legacySerialized = legacyBuilder.Release();
+    GraphDescriptor original;
+    original.deserializeGraph(legacySerialized.data(), legacySerialized.size());
+    setHandle(original);
+    original.finalize();
+    const auto originalGraph = unpack(original);
+    ASSERT_NE(originalGraph->id, nullptr);
+    const auto expectedId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*originalGraph->id);
+
+    const auto json = original.getSerializedJsonGraph();
+    EXPECT_EQ(nlohmann::json::parse(json).at("id"),
+              hipdnn_flatbuffers_sdk::utilities::formatUuid(expectedId));
+
+    GraphDescriptor revived;
+    GraphDescriptor::createFromJsonGraph(revived, json.c_str(), json.size());
+    revived.buildSerializedGraph();
+    const auto revivedGraph = unpack(revived);
+    ASSERT_NE(revivedGraph->id, nullptr);
+    EXPECT_EQ(hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*revivedGraph->id), expectedId);
+}
+
+TEST_F(TestGraphDescriptor, ToStringReportsGraphId)
+{
+    auto builder = createValidGraph();
+    auto serialized = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serialized.data(), serialized.size());
+    EXPECT_NE(descriptor.toString().find("id=(none)"), std::string::npos);
+
+    setHandle(descriptor);
+    descriptor.finalize();
+    const auto id = hipdnn_flatbuffers_sdk::utilities::formatUuid(
+        hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*unpack(descriptor)->id));
+    EXPECT_NE(descriptor.toString().find("id=" + id), std::string::npos);
 }
 
 // ============================================================================
@@ -939,4 +1148,77 @@ TEST_F(TestGraphDescriptor, LegacyGraphWithoutOverrideShapeFieldRoundTripsToFals
                                 &count,
                                 &value));
     EXPECT_FALSE(value);
+}
+
+// ============================================================================
+// GraphDescriptor::hasRaggedTensors() (RFC 0014)
+// ============================================================================
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForNonRaggedGraph)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForEmptyDescriptor)
+{
+    // No operations => no tensors => not ragged.
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsTrueWhenTensorCarriesRaggedOffset)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesSerializationRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                          HIPDNN_TYPE_HANDLE,
+                                          1,
+                                          static_cast<const void*>(&handle)));
+    ASSERT_NO_THROW(original.finalize());
+
+    auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    EXPECT_TRUE(revived.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    EXPECT_TRUE(fromJson.hasRaggedTensors());
 }

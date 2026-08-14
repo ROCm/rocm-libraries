@@ -12,31 +12,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.0456018590927124,
-    "aoTriton_ms": 0.028075098991394043,
+    "triton_ms": 0.047846221923828126,
+    "aoTriton_ms": 0.02915355920791626,
     "dsl": {
       "30": {
-        "ms": 0.05544295787811279,
+        "ms": 0.058418598175048825,
         "path": "2d"
       },
       "60": {
-        "ms": 0.058234181404113766,
+        "ms": 0.060609259605407716,
         "path": "2d"
       },
       "80": {
-        "ms": 0.054544081687927244,
+        "ms": 0.056694622039794924,
         "path": "2d"
       },
       "120": {
-        "ms": 0.05677802085876465,
+        "ms": 0.05871208190917969,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.054544081687927244,
-    "best_speedup_vs_triton": 0.8360551260835672,
-    "best_speedup_vs_aoTriton": 0.5147231032694821,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.056694622039794924,
+    "best_speedup_vs_triton": 0.8439287573033655,
+    "best_speedup_vs_aoTriton": 0.5142208936052679,
+    "best_path": "2d",
+    "flydsl_ms": 0.13860413551330567,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 2.4447492641544915
   },
   {
     "label": "llama3_8b_b1_kv1024",
@@ -51,31 +56,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08846302032470703,
-    "aoTriton_ms": 0.04755035877227783,
+    "triton_ms": 0.09142423629760742,
+    "aoTriton_ms": 0.047418861389160155,
     "dsl": {
       "30": {
-        "ms": 0.02925057888031006,
+        "ms": 0.030699539184570312,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027333381175994872,
+        "ms": 0.028139240741729736,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027101640701293946,
+        "ms": 0.02768779993057251,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026928460597991942,
+        "ms": 0.02754024028778076,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026928460597991942,
-    "best_speedup_vs_triton": 3.2851124186171905,
-    "best_speedup_vs_aoTriton": 1.765803084036065,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.02754024028778076,
+    "best_speedup_vs_triton": 3.319660080749954,
+    "best_speedup_vs_aoTriton": 1.7218027473129665,
+    "best_path": "3d",
+    "flydsl_ms": 0.13815914154052733,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.016628035806453
   },
   {
     "label": "llama3_8b_b1_kv2048",
@@ -90,31 +100,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08943408012390136,
-    "aoTriton_ms": 0.09122699737548828,
+    "triton_ms": 0.09129435539245606,
+    "aoTriton_ms": 0.09099366188049317,
     "dsl": {
       "30": {
-        "ms": 0.028017361164093018,
+        "ms": 0.030224039554595947,
         "path": "3d"
       },
       "60": {
-        "ms": 0.028060638904571535,
+        "ms": 0.02780725955963135,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02763967990875244,
+        "ms": 0.028186559677124023,
         "path": "3d"
       },
       "120": {
-        "ms": 0.02915518045425415,
+        "ms": 0.028204178810119628,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.02763967990875244,
-    "best_speedup_vs_triton": 3.2357133085170413,
-    "best_speedup_vs_aoTriton": 3.3005808199175326,
-    "best_path": "3d"
+    "best_cus": 60,
+    "best_ms": 0.02780725955963135,
+    "best_speedup_vs_triton": 3.2831122821247325,
+    "best_speedup_vs_aoTriton": 3.2722987925279576,
+    "best_path": "3d",
+    "flydsl_ms": 0.1418163776397705,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.0999767645442375
   },
   {
     "label": "llama3_8b_b1_kv4096",
@@ -129,31 +144,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08883748054504395,
-    "aoTriton_ms": 0.1876980781555176,
+    "triton_ms": 0.09197431564331054,
+    "aoTriton_ms": 0.1868745994567871,
     "dsl": {
       "30": {
-        "ms": 0.04282025814056396,
+        "ms": 0.04455383777618408,
         "path": "3d"
       },
       "60": {
-        "ms": 0.029717280864715576,
+        "ms": 0.028519320487976074,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02828197956085205,
+        "ms": 0.029501581192016603,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027237160205841063,
+        "ms": 0.027448039054870605,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.027237160205841063,
-    "best_speedup_vs_triton": 3.2616278596471515,
-    "best_speedup_vs_aoTriton": 6.891249922422726,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.027448039054870605,
+    "best_speedup_vs_triton": 3.3508519664901115,
+    "best_speedup_vs_aoTriton": 6.80830419554604,
+    "best_path": "3d",
+    "flydsl_ms": 0.27092023849487307,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 9.870294848870042
   },
   {
     "label": "llama3_8b_b1_kv8192",
@@ -168,31 +188,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08854080200195312,
-    "aoTriton_ms": 0.37042232513427736,
+    "triton_ms": 0.09335989952087402,
+    "aoTriton_ms": 0.36900543212890624,
     "dsl": {
       "30": {
-        "ms": 0.07365851879119872,
+        "ms": 0.07539772033691407,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04367102146148682,
+        "ms": 0.045272321701049806,
         "path": "3d"
       },
       "80": {
-        "ms": 0.032708160877227783,
+        "ms": 0.03499022006988525,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03271620035171509,
+        "ms": 0.03371288061141968,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.032708160877227783,
-    "best_speedup_vs_triton": 2.706994206561989,
-    "best_speedup_vs_aoTriton": 11.325073474007961,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03371288061141968,
+    "best_speedup_vs_triton": 2.7692649761067853,
+    "best_speedup_vs_aoTriton": 10.945532551256145,
+    "best_path": "3d",
+    "flydsl_ms": 0.5354192733764649,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 15.881742042390186
   },
   {
     "label": "llama3_8b_b1_kv16384",
@@ -207,31 +232,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08822810173034668,
-    "aoTriton_ms": 0.7368000030517579,
+    "triton_ms": 0.09239649772644043,
+    "aoTriton_ms": 0.7337802886962891,
     "dsl": {
       "30": {
-        "ms": 0.13634453773498534,
+        "ms": 0.1376114845275879,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07532154083251953,
+        "ms": 0.0797814416885376,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05296204090118408,
+        "ms": 0.05325389862060547,
         "path": "3d"
       },
       "120": {
-        "ms": 0.05289787769317627,
+        "ms": 0.05321944236755371,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.05289787769317627,
-    "best_speedup_vs_triton": 1.6678949246715797,
-    "best_speedup_vs_aoTriton": 13.928725218909939,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.05321944236755371,
+    "best_speedup_vs_triton": 1.7361417860847748,
+    "best_speedup_vs_aoTriton": 13.78782369849957,
+    "best_path": "3d",
+    "flydsl_ms": 1.0653443145751953,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 20.01795334903215
   },
   {
     "label": "llama3_8b_b1_kv32768",
@@ -246,31 +276,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08824432373046875,
-    "aoTriton_ms": 1.59133056640625,
+    "triton_ms": 0.09416217803955078,
+    "aoTriton_ms": 1.5874594116210938,
     "dsl": {
       "30": {
-        "ms": 0.2650442886352539,
+        "ms": 0.2662021636962891,
         "path": "3d"
       },
       "60": {
-        "ms": 0.140045862197876,
+        "ms": 0.14136252403259278,
         "path": "3d"
       },
       "80": {
-        "ms": 0.09239447593688965,
+        "ms": 0.09185724258422852,
         "path": "3d"
       },
       "120": {
-        "ms": 0.09227902412414551,
+        "ms": 0.09175862312316894,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.09227902412414551,
-    "best_speedup_vs_triton": 0.9562771666478748,
-    "best_speedup_vs_aoTriton": 17.244770211975684,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.09175862312316894,
+    "best_speedup_vs_triton": 1.0261943219565917,
+    "best_speedup_vs_aoTriton": 17.300383959447863,
+    "best_path": "3d",
+    "flydsl_ms": 2.1244189453125,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 23.152253957220584
   },
   {
     "label": "llama3_8b_fp16_b1_kv512",
@@ -285,31 +320,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.044551458358764645,
-    "aoTriton_ms": 0.028409459590911866,
+    "triton_ms": 0.045221781730651854,
+    "aoTriton_ms": 0.029208099842071532,
     "dsl": {
       "30": {
-        "ms": 0.06578757762908935,
+        "ms": 0.14189897537231444,
         "path": "2d"
       },
       "60": {
-        "ms": 0.06638415813446046,
+        "ms": 0.14478721618652343,
         "path": "2d"
       },
       "80": {
-        "ms": 0.06490876197814942,
+        "ms": 0.13660998344421388,
         "path": "2d"
       },
       "120": {
-        "ms": 0.06615561962127686,
+        "ms": 0.16960922241210938,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.06490876197814942,
-    "best_speedup_vs_triton": 0.6863704837532141,
-    "best_speedup_vs_aoTriton": 0.4376829679862866,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.13660998344421388,
+    "best_speedup_vs_triton": 0.33102838160520415,
+    "best_speedup_vs_aoTriton": 0.21380648109073935,
+    "best_path": "2d",
+    "flydsl_ms": 0.13820161819458007,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 1.011650940218554
   },
   {
     "label": "llama3_8b_fp16_b1_kv1024",
@@ -324,31 +364,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0886081600189209,
-    "aoTriton_ms": 0.04462681770324707,
+    "triton_ms": 0.19875879287719728,
+    "aoTriton_ms": 0.06754764080047608,
     "dsl": {
       "30": {
-        "ms": 0.02729327917098999,
+        "ms": 0.06661426067352295,
         "path": "3d"
       },
       "60": {
-        "ms": 0.028127200603485107,
+        "ms": 0.06348227977752685,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026252501010894776,
+        "ms": 0.06484864234924316,
         "path": "3d"
       },
       "120": {
-        "ms": 0.02645133972167969,
+        "ms": 0.0652591609954834,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.026252501010894776,
-    "best_speedup_vs_triton": 3.375227372894817,
-    "best_speedup_vs_aoTriton": 1.6999072844422314,
-    "best_path": "3d"
+    "best_cus": 60,
+    "best_ms": 0.06348227977752685,
+    "best_speedup_vs_triton": 3.130933444320933,
+    "best_speedup_vs_aoTriton": 1.0640393041522178,
+    "best_path": "3d",
+    "flydsl_ms": 0.2853254318237305,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.494568134976425
   },
   {
     "label": "llama3_8b_fp16_b1_kv2048",
@@ -363,31 +408,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08808615684509277,
-    "aoTriton_ms": 0.08586263656616211,
+    "triton_ms": 0.20245689392089844,
+    "aoTriton_ms": 0.08625955581665039,
     "dsl": {
       "30": {
-        "ms": 0.029641098976135254,
+        "ms": 0.06199001789093018,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027211480140686035,
+        "ms": 0.05940489768981934,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026828219890594484,
+        "ms": 0.05766808032989502,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027005419731140137,
+        "ms": 0.05817403793334961,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.026828219890594484,
-    "best_speedup_vs_triton": 3.2833396030116138,
-    "best_speedup_vs_aoTriton": 3.2004596993878107,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.05766808032989502,
+    "best_speedup_vs_triton": 3.5107271260414263,
+    "best_speedup_vs_aoTriton": 1.4957937792136564,
+    "best_path": "3d",
+    "flydsl_ms": 0.30365007400512695,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.265479139726372
   },
   {
     "label": "llama3_8b_fp16_b1_kv4096",
@@ -402,31 +452,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0876956558227539,
-    "aoTriton_ms": 0.18424774169921876,
+    "triton_ms": 0.20544139862060548,
+    "aoTriton_ms": 0.18456127166748046,
     "dsl": {
       "30": {
-        "ms": 0.041673622131347655,
+        "ms": 0.06215680122375488,
         "path": "3d"
       },
       "60": {
-        "ms": 0.029048540592193604,
+        "ms": 0.058965477943420413,
         "path": "3d"
       },
       "80": {
-        "ms": 0.0271834397315979,
+        "ms": 0.05961254119873047,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026483440399169923,
+        "ms": 0.05821653842926025,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026483440399169923,
-    "best_speedup_vs_triton": 3.3113392558129484,
-    "best_speedup_vs_aoTriton": 6.957092391402202,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.05821653842926025,
+    "best_speedup_vs_triton": 3.5289181418823152,
+    "best_speedup_vs_aoTriton": 3.170254993634558,
+    "best_path": "3d",
+    "flydsl_ms": 0.3046756362915039,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.233489391708159
   },
   {
     "label": "llama3_8b_fp16_b1_kv8192",
@@ -441,31 +496,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08839808464050293,
-    "aoTriton_ms": 0.3638062286376953,
+    "triton_ms": 0.20144655227661132,
+    "aoTriton_ms": 0.3628432846069336,
     "dsl": {
       "30": {
-        "ms": 0.07154243946075439,
+        "ms": 0.0733105182647705,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04267111778259278,
+        "ms": 0.044170560836791994,
         "path": "3d"
       },
       "80": {
-        "ms": 0.032234280109405516,
+        "ms": 0.03305615901947021,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03233288049697876,
+        "ms": 0.03291264057159424,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.032234280109405516,
-    "best_speedup_vs_triton": 2.7423626133567534,
-    "best_speedup_vs_aoTriton": 11.286314675026407,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03291264057159424,
+    "best_speedup_vs_triton": 6.120643885695178,
+    "best_speedup_vs_aoTriton": 11.024435545292926,
+    "best_path": "3d",
+    "flydsl_ms": 0.5416048049926758,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 16.455829601837422
   },
   {
     "label": "llama3_8b_fp16_b1_kv16384",
@@ -480,31 +540,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08855323791503907,
-    "aoTriton_ms": 0.7220821380615234,
+    "triton_ms": 0.09172154426574707,
+    "aoTriton_ms": 0.7193895721435547,
     "dsl": {
       "30": {
-        "ms": 0.1321340560913086,
+        "ms": 0.13387887954711913,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07320467948913574,
+        "ms": 0.0747370195388794,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05165502071380615,
+        "ms": 0.05506608009338379,
         "path": "3d"
       },
       "120": {
-        "ms": 0.051582040786743166,
+        "ms": 0.05225639820098877,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.051582040786743166,
-    "best_speedup_vs_triton": 1.7167455293431833,
-    "best_speedup_vs_aoTriton": 13.998712091420431,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.05225639820098877,
+    "best_speedup_vs_triton": 1.7552213207073188,
+    "best_speedup_vs_aoTriton": 13.766535714471473,
+    "best_path": "3d",
+    "flydsl_ms": 1.0714913177490235,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 20.504500016014294
   },
   {
     "label": "llama3_8b_fp16_b1_kv32768",
@@ -519,31 +584,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0887483024597168,
-    "aoTriton_ms": 1.5994796752929688,
+    "triton_ms": 0.093614501953125,
+    "aoTriton_ms": 1.5971255493164063,
     "dsl": {
       "30": {
-        "ms": 0.2568092918395996,
+        "ms": 0.25823177337646486,
         "path": "3d"
       },
       "60": {
-        "ms": 0.13568061828613281,
+        "ms": 0.13730917930603026,
         "path": "3d"
       },
       "80": {
-        "ms": 0.08837242126464843,
+        "ms": 0.08992480278015137,
         "path": "3d"
       },
       "120": {
-        "ms": 0.08826257705688477,
+        "ms": 0.08985664367675782,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.08826257705688477,
-    "best_speedup_vs_triton": 1.0055031862769992,
-    "best_speedup_vs_aoTriton": 18.12183292883135,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.08985664367675782,
+    "best_speedup_vs_triton": 1.0418205947006585,
+    "best_speedup_vs_aoTriton": 17.77415095829488,
+    "best_path": "3d",
+    "flydsl_ms": 2.1362725830078126,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 23.77423077021046
   },
   {
     "label": "llama3_70b_b1_kv512",
@@ -558,31 +628,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.045001277923583986,
-    "aoTriton_ms": 0.030519120693206787,
+    "triton_ms": 0.0462842607498169,
+    "aoTriton_ms": 0.029335579872131347,
     "dsl": {
       "30": {
-        "ms": 0.055666661262512206,
+        "ms": 0.15398841857910156,
         "path": "2d"
       },
       "60": {
-        "ms": 0.05882996082305908,
+        "ms": 0.1539146614074707,
         "path": "2d"
       },
       "80": {
-        "ms": 0.05562096118927002,
+        "ms": 0.12010233879089355,
         "path": "2d"
       },
       "120": {
-        "ms": 0.05667779922485352,
+        "ms": 0.1380941963195801,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.05562096118927002,
-    "best_speedup_vs_triton": 0.809070482806854,
-    "best_speedup_vs_aoTriton": 0.5486981893274852,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.12010233879089355,
+    "best_speedup_vs_triton": 0.385373517416684,
+    "best_speedup_vs_aoTriton": 0.24425485937627422,
+    "best_path": "2d",
+    "flydsl_ms": 0.18061937332153322,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 1.5038789014425773
   },
   {
     "label": "llama3_70b_b1_kv1024",
@@ -597,31 +672,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.09233996391296387,
-    "aoTriton_ms": 0.04828968048095703,
+    "triton_ms": 0.13057767868041992,
+    "aoTriton_ms": 0.04825679779052734,
     "dsl": {
       "30": {
-        "ms": 0.02874703884124756,
+        "ms": 0.03966337919235229,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02782572031021118,
+        "ms": 0.03644717931747436,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027049520015716554,
+        "ms": 0.035699059963226316,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026830620765686035,
+        "ms": 0.03288857936859131,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026830620765686035,
-    "best_speedup_vs_triton": 3.441588799580009,
-    "best_speedup_vs_aoTriton": 1.7997973622255963,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03288857936859131,
+    "best_speedup_vs_triton": 3.970304622069568,
+    "best_speedup_vs_aoTriton": 1.4672813091043002,
+    "best_path": "3d",
+    "flydsl_ms": 0.17891063690185546,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.439901641744844
   },
   {
     "label": "llama3_70b_b1_kv2048",
@@ -636,31 +716,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.089166259765625,
-    "aoTriton_ms": 0.09671483993530273,
+    "triton_ms": 0.09309289932250976,
+    "aoTriton_ms": 0.09634599685668946,
     "dsl": {
       "30": {
-        "ms": 0.02782249927520752,
+        "ms": 0.03797950029373169,
         "path": "3d"
       },
       "60": {
-        "ms": 0.030800580978393555,
+        "ms": 0.039759600162506105,
         "path": "3d"
       },
       "80": {
-        "ms": 0.03012701988220215,
+        "ms": 0.041724138259887696,
         "path": "3d"
       },
       "120": {
-        "ms": 0.02964751958847046,
+        "ms": 0.05382641792297363,
         "path": "3d"
       }
     },
-    "best_sms": 30,
-    "best_ms": 0.02782249927520752,
-    "best_speedup_vs_triton": 3.204825665862469,
-    "best_speedup_vs_aoTriton": 3.476137746600098,
-    "best_path": "3d"
+    "best_cus": 30,
+    "best_ms": 0.03797950029373169,
+    "best_speedup_vs_triton": 2.4511354441878805,
+    "best_speedup_vs_aoTriton": 2.5367894814716885,
+    "best_path": "3d",
+    "flydsl_ms": 0.14337034225463868,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 3.7749401952584716
   },
   {
     "label": "llama3_70b_b1_kv4096",
@@ -675,31 +760,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08993202209472656,
-    "aoTriton_ms": 0.18871723175048827,
+    "triton_ms": 0.24910438537597657,
+    "aoTriton_ms": 0.1885793113708496,
     "dsl": {
       "30": {
-        "ms": 0.0430584192276001,
+        "ms": 0.06216001987457275,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02977260112762451,
+        "ms": 0.05982503890991211,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027494540214538576,
+        "ms": 0.03455562114715576,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026732800006866456,
+        "ms": 0.03334403991699219,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026732800006866456,
-    "best_speedup_vs_triton": 3.364107840242214,
-    "best_speedup_vs_aoTriton": 7.059388904342803,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03334403991699219,
+    "best_speedup_vs_triton": 7.470731980770947,
+    "best_speedup_vs_aoTriton": 5.655562788441517,
+    "best_path": "3d",
+    "flydsl_ms": 0.29905948638916013,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 8.968903802108239
   },
   {
     "label": "llama3_70b_b1_kv8192",
@@ -714,31 +804,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.09003625869750977,
-    "aoTriton_ms": 0.372541618347168,
+    "triton_ms": 0.09469017982482911,
+    "aoTriton_ms": 0.3705746841430664,
     "dsl": {
       "30": {
-        "ms": 0.07413884162902833,
+        "ms": 0.07552281856536865,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04388751983642578,
+        "ms": 0.045330839157104494,
         "path": "3d"
       },
       "80": {
-        "ms": 0.03298882007598877,
+        "ms": 0.033093059062957765,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03285650014877319,
+        "ms": 0.03338733911514282,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.03285650014877319,
-    "best_speedup_vs_triton": 2.740287562273171,
-    "best_speedup_vs_aoTriton": 11.338444954889027,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.033093059062957765,
+    "best_speedup_vs_triton": 2.861330517819043,
+    "best_speedup_vs_aoTriton": 11.197957959645494,
+    "best_path": "3d",
+    "flydsl_ms": 0.5395993041992188,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 16.305512983029466
   },
   {
     "label": "llama3_70b_b1_kv16384",
@@ -753,31 +848,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.0908372974395752,
-    "aoTriton_ms": 0.8037422943115234,
+    "triton_ms": 0.09283692359924317,
+    "aoTriton_ms": 0.803419189453125,
     "dsl": {
       "30": {
-        "ms": 0.13675909996032715,
+        "ms": 0.1419767189025879,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07558135986328125,
+        "ms": 0.08162247657775878,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05273752212524414,
+        "ms": 0.06610429763793946,
         "path": "3d"
       },
       "120": {
-        "ms": 0.0527278995513916,
+        "ms": 0.0622418212890625,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.0527278995513916,
-    "best_speedup_vs_triton": 1.7227558505538423,
-    "best_speedup_vs_aoTriton": 15.243207128479499,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.0622418212890625,
+    "best_speedup_vs_triton": 1.4915521698520255,
+    "best_speedup_vs_aoTriton": 12.908028280886866,
+    "best_path": "3d",
+    "flydsl_ms": 1.0725064086914062,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 17.23128254410308
   },
   {
     "label": "llama3_70b_b1_kv32768",
@@ -792,31 +892,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08840510368347168,
-    "aoTriton_ms": 1.6082568359375,
+    "triton_ms": 0.2105545425415039,
+    "aoTriton_ms": 1.602291259765625,
     "dsl": {
       "30": {
-        "ms": 0.26605863571166993,
+        "ms": 0.27195783615112307,
         "path": "3d"
       },
       "60": {
-        "ms": 0.14066729545593262,
+        "ms": 0.1462979030609131,
         "path": "3d"
       },
       "80": {
-        "ms": 0.09089422225952148,
+        "ms": 0.0962818431854248,
         "path": "3d"
       },
       "120": {
-        "ms": 0.09086855888366699,
+        "ms": 0.09647188186645508,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.09086855888366699,
-    "best_speedup_vs_triton": 0.9728899057005063,
-    "best_speedup_vs_aoTriton": 17.698716208281073,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.0962818431854248,
+    "best_speedup_vs_triton": 2.1868561670138216,
+    "best_speedup_vs_aoTriton": 16.641676215938713,
+    "best_path": "3d",
+    "flydsl_ms": 2.1411593627929686,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 22.238454229313074
   },
   {
     "label": "llama3_70b_fp16_b1_kv512",
@@ -831,31 +936,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.044979639053344726,
-    "aoTriton_ms": 0.028791940212249754,
+    "triton_ms": 0.10519760131835937,
+    "aoTriton_ms": 0.06688933849334716,
     "dsl": {
       "30": {
-        "ms": 0.06576352119445801,
+        "ms": 0.0703508996963501,
         "path": "2d"
       },
       "60": {
-        "ms": 0.06689174175262451,
+        "ms": 0.07207086086273193,
         "path": "2d"
       },
       "80": {
-        "ms": 0.06504265785217285,
+        "ms": 0.07045194149017334,
         "path": "2d"
       },
       "120": {
-        "ms": 0.07906538009643554,
+        "ms": 0.08410818099975587,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.06504265785217285,
-    "best_speedup_vs_triton": 0.6915406064059252,
-    "best_speedup_vs_aoTriton": 0.44266241821924435,
-    "best_path": "2d"
+    "best_cus": 30,
+    "best_ms": 0.0703508996963501,
+    "best_speedup_vs_triton": 1.4953270217213324,
+    "best_speedup_vs_aoTriton": 0.9507957791877034,
+    "best_path": "2d",
+    "flydsl_ms": 0.13850711822509765,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 1.9688037938807426
   },
   {
     "label": "llama3_70b_fp16_b1_kv1024",
@@ -870,31 +980,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0874855613708496,
-    "aoTriton_ms": 0.04548882007598877,
+    "triton_ms": 0.09960951805114746,
+    "aoTriton_ms": 0.04544310092926025,
     "dsl": {
       "30": {
-        "ms": 0.027396719455718994,
+        "ms": 0.03276750087738037,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02683543920516968,
+        "ms": 0.03222143888473511,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026452159881591795,
+        "ms": 0.031697840690612794,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027401540279388428,
+        "ms": 0.03288938045501709,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.026452159881591795,
-    "best_speedup_vs_triton": 3.3073125885546792,
-    "best_speedup_vs_aoTriton": 1.7196637355743751,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.031697840690612794,
+    "best_speedup_vs_triton": 3.1424701456287676,
+    "best_speedup_vs_aoTriton": 1.4336339617833358,
+    "best_path": "3d",
+    "flydsl_ms": 0.15214737892150879,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.799928815547575
   },
   {
     "label": "llama3_70b_fp16_b1_kv2048",
@@ -909,31 +1024,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0889762020111084,
-    "aoTriton_ms": 0.09491310119628907,
+    "triton_ms": 0.09235841751098633,
+    "aoTriton_ms": 0.09471261978149415,
     "dsl": {
       "30": {
-        "ms": 0.027806479930877686,
+        "ms": 0.033358480930328366,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02758836030960083,
+        "ms": 0.03241388082504273,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027181038856506346,
+        "ms": 0.032442760467529294,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027177019119262694,
+        "ms": 0.03236655950546265,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.027177019119262694,
-    "best_speedup_vs_triton": 3.2739500097729004,
-    "best_speedup_vs_aoTriton": 3.4924029298347876,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03236655950546265,
+    "best_speedup_vs_triton": 2.8535135931083007,
+    "best_speedup_vs_aoTriton": 2.9262492284825354,
+    "best_path": "3d",
+    "flydsl_ms": 0.1435892391204834,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.4363454539012475
   },
   {
     "label": "llama3_70b_fp16_b1_kv4096",
@@ -948,31 +1068,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08831310272216797,
-    "aoTriton_ms": 0.1852444267272949,
+    "triton_ms": 0.09119494438171387,
+    "aoTriton_ms": 0.1845756721496582,
     "dsl": {
       "30": {
-        "ms": 0.0420143985748291,
+        "ms": 0.04344572067260742,
         "path": "3d"
       },
       "60": {
-        "ms": 0.029275460243225096,
+        "ms": 0.037099080085754396,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027938780784606935,
+        "ms": 0.04261579990386963,
         "path": "3d"
       },
       "120": {
-        "ms": 0.028197760581970214,
+        "ms": 0.04227099895477295,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.027938780784606935,
-    "best_speedup_vs_triton": 3.1609504868166862,
-    "best_speedup_vs_aoTriton": 6.6303690256003085,
-    "best_path": "3d"
+    "best_cus": 60,
+    "best_ms": 0.037099080085754396,
+    "best_speedup_vs_triton": 2.4581457052551454,
+    "best_speedup_vs_aoTriton": 4.975208865637966,
+    "best_path": "3d",
+    "flydsl_ms": 0.27405065536499024,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 7.386993282084706
   },
   {
     "label": "llama3_70b_fp16_b1_kv8192",
@@ -987,31 +1112,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08881423950195312,
-    "aoTriton_ms": 0.36550777435302734,
+    "triton_ms": 0.1222342586517334,
+    "aoTriton_ms": 0.36408611297607424,
     "dsl": {
       "30": {
-        "ms": 0.07217269897460937,
+        "ms": 0.07374032020568848,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04299026012420654,
+        "ms": 0.04438868045806885,
         "path": "3d"
       },
       "80": {
-        "ms": 0.03272742033004761,
+        "ms": 0.03304574012756348,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03280839920043945,
+        "ms": 0.033172440528869626,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.03272742033004761,
-    "best_speedup_vs_triton": 2.7137561899558347,
-    "best_speedup_vs_aoTriton": 11.16824273550972,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.03304574012756348,
+    "best_speedup_vs_triton": 3.6989414726340994,
+    "best_speedup_vs_aoTriton": 11.017641353185784,
+    "best_path": "3d",
+    "flydsl_ms": 0.5427257156372071,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 16.423469819171007
   },
   {
     "label": "llama3_70b_fp16_b1_kv16384",
@@ -1026,31 +1156,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08911312103271485,
-    "aoTriton_ms": 0.8088990020751953,
+    "triton_ms": 0.09344951629638672,
+    "aoTriton_ms": 0.8064389801025391,
     "dsl": {
       "30": {
-        "ms": 0.13337692260742187,
+        "ms": 0.1382890224456787,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07382612228393555,
+        "ms": 0.07904369831085205,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05120997905731201,
+        "ms": 0.06249917984008789,
         "path": "3d"
       },
       "120": {
-        "ms": 0.051262102127075194,
+        "ms": 0.06538186073303223,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.05120997905731201,
-    "best_speedup_vs_triton": 1.7401514836196919,
-    "best_speedup_vs_aoTriton": 15.795729991803164,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.06249917984008789,
+    "best_speedup_vs_triton": 1.4952118817477158,
+    "best_speedup_vs_aoTriton": 12.903193004546875,
+    "best_path": "3d",
+    "flydsl_ms": 1.077226104736328,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 17.235843854152137
   },
   {
     "label": "llama3_70b_fp16_b1_kv32768",
@@ -1065,31 +1200,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08814408302307129,
-    "aoTriton_ms": 1.6142866516113281,
+    "triton_ms": 0.20832542419433595,
+    "aoTriton_ms": 1.6107160949707031,
     "dsl": {
       "30": {
-        "ms": 0.25890134811401366,
+        "ms": 0.2648919486999512,
         "path": "3d"
       },
       "60": {
-        "ms": 0.13674548149108887,
+        "ms": 0.14335590362548828,
         "path": "3d"
       },
       "80": {
-        "ms": 0.09165038108825684,
+        "ms": 0.09452095985412598,
         "path": "3d"
       },
       "120": {
-        "ms": 0.09168326377868652,
+        "ms": 0.09508308410644531,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.09165038108825684,
-    "best_speedup_vs_triton": 0.9617426788241167,
-    "best_speedup_vs_aoTriton": 17.61352907040085,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.09452095985412598,
+    "best_speedup_vs_triton": 2.2040129989776256,
+    "best_speedup_vs_aoTriton": 17.040835148696313,
+    "best_path": "3d",
+    "flydsl_ms": 2.1508839416503904,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 22.75562949180632
   },
   {
     "label": "llama31_405b_b1_kv512",
@@ -1104,31 +1244,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.04507905960083008,
-    "aoTriton_ms": 0.02874382019042969,
+    "triton_ms": 0.105760498046875,
+    "aoTriton_ms": 0.06672493934631347,
     "dsl": {
       "30": {
-        "ms": 0.05536595821380615,
+        "ms": 0.058344821929931644,
         "path": "2d"
       },
       "60": {
-        "ms": 0.056996941566467285,
+        "ms": 0.06118820190429688,
         "path": "2d"
       },
       "80": {
-        "ms": 0.054440641403198244,
+        "ms": 0.0577915620803833,
         "path": "2d"
       },
       "120": {
-        "ms": 0.05614215850830078,
+        "ms": 0.06872876167297363,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.054440641403198244,
-    "best_speedup_vs_triton": 0.8280405674680718,
-    "best_speedup_vs_aoTriton": 0.527984598446356,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.0577915620803833,
+    "best_speedup_vs_triton": 1.8300335592204768,
+    "best_speedup_vs_aoTriton": 1.154579266321,
+    "best_path": "2d",
+    "flydsl_ms": 0.47587486267089846,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 8.234331198886712
   },
   {
     "label": "llama31_405b_b1_kv1024",
@@ -1143,31 +1288,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.09279301643371582,
-    "aoTriton_ms": 0.05153153896331787,
+    "triton_ms": 0.1298704433441162,
+    "aoTriton_ms": 0.05133347988128662,
     "dsl": {
       "30": {
-        "ms": 0.027747139930725098,
+        "ms": 0.034699161052703854,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027781620025634765,
+        "ms": 0.03354290008544922,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026323859691619874,
+        "ms": 0.031851780414581296,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026744821071624757,
+        "ms": 0.033234980106353756,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.026323859691619874,
-    "best_speedup_vs_triton": 3.525053602350578,
-    "best_speedup_vs_aoTriton": 1.9575981473462567,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.031851780414581296,
+    "best_speedup_vs_triton": 4.077337017074981,
+    "best_speedup_vs_aoTriton": 1.611636122475178,
+    "best_path": "3d",
+    "flydsl_ms": 0.1538737392425537,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.830930555207284
   },
   {
     "label": "llama31_405b_b1_kv2048",
@@ -1182,31 +1332,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08860896110534668,
-    "aoTriton_ms": 0.09785987854003907,
+    "triton_ms": 0.09226617813110352,
+    "aoTriton_ms": 0.0974357032775879,
     "dsl": {
       "30": {
-        "ms": 0.027875421047210695,
+        "ms": 0.03519949913024902,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027792840003967284,
+        "ms": 0.03436959981918335,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027780001163482667,
+        "ms": 0.03320050001144409,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027802460193634033,
+        "ms": 0.03240668058395386,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.027780001163482667,
-    "best_speedup_vs_triton": 3.189667292808642,
-    "best_speedup_vs_aoTriton": 3.522673665999615,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03240668058395386,
+    "best_speedup_vs_triton": 2.847134494138503,
+    "best_speedup_vs_aoTriton": 3.0066548477610233,
+    "best_path": "3d",
+    "flydsl_ms": 0.14304800033569337,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.414151581033063
   },
   {
     "label": "llama31_405b_b1_kv4096",
@@ -1221,31 +1376,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08992881774902343,
-    "aoTriton_ms": 0.1905278205871582,
+    "triton_ms": 0.09218759536743164,
+    "aoTriton_ms": 0.1900090217590332,
     "dsl": {
       "30": {
-        "ms": 0.04296140193939209,
+        "ms": 0.04429647922515869,
         "path": "3d"
       },
       "60": {
-        "ms": 0.0428964376449585,
+        "ms": 0.04449051856994629,
         "path": "3d"
       },
       "80": {
-        "ms": 0.03393739938735962,
+        "ms": 0.03313796043395996,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03301448106765747,
+        "ms": 0.03342180013656616,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.03301448106765747,
-    "best_speedup_vs_triton": 2.7239203779920054,
-    "best_speedup_vs_aoTriton": 5.771037872644564,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.03313796043395996,
+    "best_speedup_vs_triton": 2.781933292217867,
+    "best_speedup_vs_aoTriton": 5.7338779837612135,
+    "best_path": "3d",
+    "flydsl_ms": 0.272558422088623,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 8.224960695206326
   },
   {
     "label": "llama31_405b_b1_kv8192",
@@ -1260,31 +1420,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.0890413761138916,
-    "aoTriton_ms": 0.41119384765625,
+    "triton_ms": 0.0922413444519043,
+    "aoTriton_ms": 0.4092990875244141,
     "dsl": {
       "30": {
-        "ms": 0.07379161834716796,
+        "ms": 0.07690120220184327,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07339230060577392,
+        "ms": 0.07444513797760009,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05137998104095459,
+        "ms": 0.052262039184570314,
         "path": "3d"
       },
       "120": {
-        "ms": 0.0514176607131958,
+        "ms": 0.05210085868835449,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.05137998104095459,
-    "best_speedup_vs_triton": 1.732997449783358,
-    "best_speedup_vs_aoTriton": 8.002997263243257,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.05210085868835449,
+    "best_speedup_vs_triton": 1.7704380844018976,
+    "best_speedup_vs_aoTriton": 7.855899073999331,
+    "best_path": "3d",
+    "flydsl_ms": 0.5382722473144531,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 10.331350785102645
   },
   {
     "label": "llama31_405b_b1_kv16384",
@@ -1299,31 +1464,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08870557785034179,
-    "aoTriton_ms": 0.8168212890625,
+    "triton_ms": 0.09440312385559083,
+    "aoTriton_ms": 0.8134976196289062,
     "dsl": {
       "30": {
-        "ms": 0.1353382396697998,
+        "ms": 0.13672464370727538,
         "path": "3d"
       },
       "60": {
-        "ms": 0.13534946441650392,
+        "ms": 0.1366789436340332,
         "path": "3d"
       },
       "80": {
-        "ms": 0.08831950187683106,
+        "ms": 0.0896978759765625,
         "path": "3d"
       },
       "120": {
-        "ms": 0.08822648048400879,
+        "ms": 0.08928892135620117,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.08822648048400879,
-    "best_speedup_vs_triton": 1.0054303125740105,
-    "best_speedup_vs_aoTriton": 9.258232727650858,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.08928892135620117,
+    "best_speedup_vs_triton": 1.0572770106493672,
+    "best_speedup_vs_aoTriton": 9.110846085637121,
+    "best_path": "3d",
+    "flydsl_ms": 1.0717206573486329,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 12.00284023001249
   },
   {
     "label": "llama31_405b_b1_kv32768",
@@ -1338,31 +1508,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08800919532775879,
-    "aoTriton_ms": 1.634215087890625,
+    "triton_ms": 0.09366401672363281,
+    "aoTriton_ms": 1.6214617919921874,
     "dsl": {
       "30": {
-        "ms": 0.2626940727233887,
+        "ms": 0.2627518081665039,
         "path": "3d"
       },
       "60": {
-        "ms": 0.26278228759765626,
+        "ms": 0.26304370880126954,
         "path": "3d"
       },
       "80": {
-        "ms": 0.16474920272827148,
+        "ms": 0.16735200881958007,
         "path": "3d"
       },
       "120": {
-        "ms": 0.16466421127319336,
+        "ms": 0.16580043792724608,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.16466421127319336,
-    "best_speedup_vs_triton": 0.5344767672784907,
-    "best_speedup_vs_aoTriton": 9.924531112466868,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.16580043792724608,
+    "best_speedup_vs_triton": 0.5649202010234313,
+    "best_speedup_vs_aoTriton": 9.779598970080475,
+    "best_path": "3d",
+    "flydsl_ms": 2.131558685302734,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 12.856170417584005
   },
   {
     "label": "llama31_405b_fp16_b1_kv512",
@@ -1377,31 +1552,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.04533805847167969,
-    "aoTriton_ms": 0.028132820129394533,
+    "triton_ms": 0.06020914077758789,
+    "aoTriton_ms": 0.0379265809059143,
     "dsl": {
       "30": {
-        "ms": 0.06560555934906005,
+        "ms": 0.06560957908630372,
         "path": "2d"
       },
       "60": {
-        "ms": 0.06834867954254151,
+        "ms": 0.06727742195129395,
         "path": "2d"
       },
       "80": {
-        "ms": 0.06513807773590088,
+        "ms": 0.06538745880126953,
         "path": "2d"
       },
       "120": {
-        "ms": 0.06627992153167725,
+        "ms": 0.06667282104492188,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.06513807773590088,
-    "best_speedup_vs_triton": 0.6960300341606733,
-    "best_speedup_vs_aoTriton": 0.4318951542208178,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.06538745880126953,
+    "best_speedup_vs_triton": 0.9208056389005731,
+    "best_speedup_vs_aoTriton": 0.5800283663138464,
+    "best_path": "2d",
+    "flydsl_ms": 0.13793379783630372,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 2.109483995325808
   },
   {
     "label": "llama31_405b_fp16_b1_kv1024",
@@ -1416,31 +1596,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.09251155853271484,
-    "aoTriton_ms": 0.0507794189453125,
+    "triton_ms": 0.09332703590393067,
+    "aoTriton_ms": 0.050550079345703124,
     "dsl": {
       "30": {
-        "ms": 0.028225839138031006,
+        "ms": 0.03462538003921509,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027027881145477294,
+        "ms": 0.034443359375,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026645400524139405,
+        "ms": 0.034554820060729984,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026113760471343995,
+        "ms": 0.03361825942993164,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026113760471343995,
-    "best_speedup_vs_triton": 3.542636405592854,
-    "best_speedup_vs_aoTriton": 1.9445464011602402,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03361825942993164,
+    "best_speedup_vs_triton": 2.7760817331559404,
+    "best_speedup_vs_aoTriton": 1.503649510798183,
+    "best_path": "3d",
+    "flydsl_ms": 0.14190298080444336,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.221009154272324
   },
   {
     "label": "llama31_405b_fp16_b1_kv2048",
@@ -1455,31 +1640,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.09079400062561035,
-    "aoTriton_ms": 0.09634679794311524,
+    "triton_ms": 0.09122859954833984,
+    "aoTriton_ms": 0.09595789909362792,
     "dsl": {
       "30": {
-        "ms": 0.028393421173095703,
+        "ms": 0.030944099426269533,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02823146104812622,
+        "ms": 0.02879434108734131,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02762605905532837,
+        "ms": 0.027978858947753905,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027657320499420168,
+        "ms": 0.02818173885345459,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.02762605905532837,
-    "best_speedup_vs_triton": 3.2865346607625705,
-    "best_speedup_vs_aoTriton": 3.487533192850841,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.027978858947753905,
+    "best_speedup_vs_triton": 3.2606261648730857,
+    "best_speedup_vs_aoTriton": 3.4296573449551366,
+    "best_path": "3d",
+    "flydsl_ms": 0.14378089904785157,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.138912180669686
   },
   {
     "label": "llama31_405b_fp16_b1_kv4096",
@@ -1494,31 +1684,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08829383850097657,
-    "aoTriton_ms": 0.18741264343261718,
+    "triton_ms": 0.10034239768981934,
+    "aoTriton_ms": 0.1868288803100586,
     "dsl": {
       "30": {
-        "ms": 0.04261260032653809,
+        "ms": 0.04413609981536865,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04255805969238281,
+        "ms": 0.044775161743164066,
         "path": "3d"
       },
       "80": {
-        "ms": 0.033874039649963376,
+        "ms": 0.036410279273986816,
         "path": "3d"
       },
       "120": {
-        "ms": 0.033635900020599366,
+        "ms": 0.050718460083007816,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.033635900020599366,
-    "best_speedup_vs_triton": 2.624988136095763,
-    "best_speedup_vs_aoTriton": 5.571804034315762,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.036410279273986816,
+    "best_speedup_vs_triton": 2.7558810229041164,
+    "best_speedup_vs_aoTriton": 5.131212504693359,
+    "best_path": "3d",
+    "flydsl_ms": 0.27412363052368166,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 7.528742871234394
   },
   {
     "label": "llama31_405b_fp16_b1_kv8192",
@@ -1533,31 +1728,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.089725341796875,
-    "aoTriton_ms": 0.41206703186035154,
+    "triton_ms": 0.18318227767944337,
+    "aoTriton_ms": 0.4127189636230469,
     "dsl": {
       "30": {
-        "ms": 0.07289196014404296,
+        "ms": 0.07473137855529785,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07292404174804687,
+        "ms": 0.07466643810272217,
         "path": "3d"
       },
       "80": {
-        "ms": 0.050614237785339355,
+        "ms": 0.05212090015411377,
         "path": "3d"
       },
       "120": {
-        "ms": 0.050541257858276366,
+        "ms": 0.051990180015563964,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.050541257858276366,
-    "best_speedup_vs_triton": 1.775289052925343,
-    "best_speedup_vs_aoTriton": 8.153082240569397,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.051990180015563964,
+    "best_speedup_vs_triton": 3.5234014889851366,
+    "best_speedup_vs_aoTriton": 7.938402280959479,
+    "best_path": "3d",
+    "flydsl_ms": 0.5429237747192383,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 10.44281390363924
   },
   {
     "label": "llama31_405b_fp16_b1_kv16384",
@@ -1572,31 +1772,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0897864818572998,
-    "aoTriton_ms": 0.8200230407714844,
+    "triton_ms": 0.09236924171447754,
+    "aoTriton_ms": 0.8161613464355468,
     "dsl": {
       "30": {
-        "ms": 0.13409618377685548,
+        "ms": 0.1356301212310791,
         "path": "3d"
       },
       "60": {
-        "ms": 0.133944616317749,
+        "ms": 0.13554909706115723,
         "path": "3d"
       },
       "80": {
-        "ms": 0.08971792221069336,
+        "ms": 0.08923602104187012,
         "path": "3d"
       },
       "120": {
-        "ms": 0.08969867706298829,
+        "ms": 0.08921998023986816,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.08969867706298829,
-    "best_speedup_vs_triton": 1.0009788861685203,
-    "best_speedup_vs_aoTriton": 9.141974749478713,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.08921998023986816,
+    "best_speedup_vs_triton": 1.0352977154460534,
+    "best_speedup_vs_aoTriton": 9.147741842592824,
+    "best_path": "3d",
+    "flydsl_ms": 1.0766519927978515,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 12.067386586538909
   },
   {
     "label": "llama31_405b_fp16_b1_kv32768",
@@ -1611,31 +1816,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08800357818603516,
-    "aoTriton_ms": 1.6411614990234376,
+    "triton_ms": 0.09340581893920899,
+    "aoTriton_ms": 1.6275196838378907,
     "dsl": {
       "30": {
-        "ms": 0.2601089286804199,
+        "ms": 0.26155784606933596,
         "path": "3d"
       },
       "60": {
-        "ms": 0.26014421463012694,
+        "ms": 0.26156187057495117,
         "path": "3d"
       },
       "80": {
-        "ms": 0.16899820327758788,
+        "ms": 0.1659872627258301,
         "path": "3d"
       },
       "120": {
-        "ms": 0.1689837646484375,
+        "ms": 0.1640668487548828,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.1689837646484375,
-    "best_speedup_vs_triton": 0.5207812618515294,
-    "best_speedup_vs_aoTriton": 9.711947786450338,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.1640668487548828,
+    "best_speedup_vs_triton": 0.5693156152389934,
+    "best_speedup_vs_aoTriton": 9.919857035039529,
+    "best_path": "3d",
+    "flydsl_ms": 2.146290283203125,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 13.081803542223815
   },
   {
     "label": "qwen3_30b_b1_kv512",
@@ -1650,31 +1860,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.04420825958251953,
-    "aoTriton_ms": 0.028420701026916503,
+    "triton_ms": 0.04567483901977539,
+    "aoTriton_ms": 0.02939974069595337,
     "dsl": {
       "30": {
-        "ms": 0.055137438774108885,
+        "ms": 0.05855331897735596,
         "path": "2d"
       },
       "60": {
-        "ms": 0.05861266136169434,
+        "ms": 0.06016662120819092,
         "path": "2d"
       },
       "80": {
-        "ms": 0.05526254177093506,
+        "ms": 0.057648019790649416,
         "path": "2d"
       },
       "120": {
-        "ms": 0.05782201766967773,
+        "ms": 0.059903621673583984,
         "path": "2d"
       }
     },
-    "best_sms": 30,
-    "best_ms": 0.055137438774108885,
-    "best_speedup_vs_triton": 0.8017829729747727,
-    "best_speedup_vs_aoTriton": 0.5154519625649012,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.057648019790649416,
+    "best_speedup_vs_triton": 0.792305428454351,
+    "best_speedup_vs_aoTriton": 0.5099870004680029,
+    "best_path": "2d",
+    "flydsl_ms": 0.13738134384155273,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 2.3831060345256847
   },
   {
     "label": "qwen3_30b_b1_kv1024",
@@ -1689,31 +1904,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.09269118309020996,
-    "aoTriton_ms": 0.04760168075561524,
+    "triton_ms": 0.09329496383666992,
+    "aoTriton_ms": 0.047465357780456546,
     "dsl": {
       "30": {
-        "ms": 0.028255500793457032,
+        "ms": 0.03024087905883789,
         "path": "3d"
       },
       "60": {
-        "ms": 0.026503479480743407,
+        "ms": 0.02760279893875122,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02620919942855835,
+        "ms": 0.028212199211120604,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026571619510650634,
+        "ms": 0.028296399116516113,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.02620919942855835,
-    "best_speedup_vs_triton": 3.536589636889511,
-    "best_speedup_vs_aoTriton": 1.8162203269645458,
-    "best_path": "3d"
+    "best_cus": 60,
+    "best_ms": 0.02760279893875122,
+    "best_speedup_vs_triton": 3.379909553508876,
+    "best_speedup_vs_aoTriton": 1.719584955343805,
+    "best_path": "3d",
+    "flydsl_ms": 0.14049734115600587,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.089967197448352
   },
   {
     "label": "qwen3_30b_b1_kv2048",
@@ -1728,31 +1948,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.0907218360900879,
-    "aoTriton_ms": 0.0911404037475586,
+    "triton_ms": 0.09290526390075683,
+    "aoTriton_ms": 0.09095598220825195,
     "dsl": {
       "30": {
-        "ms": 0.027978079319000246,
+        "ms": 0.030762081146240235,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02634310007095337,
+        "ms": 0.028407061100006105,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02670151948928833,
+        "ms": 0.02889378070831299,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026656620502471924,
+        "ms": 0.028443939685821533,
         "path": "3d"
       }
     },
-    "best_sms": 60,
-    "best_ms": 0.02634310007095337,
-    "best_speedup_vs_triton": 3.4438557286627134,
-    "best_speedup_vs_aoTriton": 3.4597448099152355,
-    "best_path": "3d"
+    "best_cus": 60,
+    "best_ms": 0.028407061100006105,
+    "best_speedup_vs_triton": 3.2704989641021633,
+    "best_speedup_vs_aoTriton": 3.201879345703678,
+    "best_path": "3d",
+    "flydsl_ms": 0.1438241958618164,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.062973440141807
   },
   {
     "label": "qwen3_30b_b1_kv4096",
@@ -1767,31 +1992,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08673266410827636,
-    "aoTriton_ms": 0.18755374908447264,
+    "triton_ms": 0.11951457977294921,
+    "aoTriton_ms": 0.1875080680847168,
     "dsl": {
       "30": {
-        "ms": 0.0287758994102478,
+        "ms": 0.06212714195251465,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027432820796966552,
+        "ms": 0.06211750030517578,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02771346092224121,
+        "ms": 0.06568493843078613,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027459259033203124,
+        "ms": 0.05895423889160156,
         "path": "3d"
       }
     },
-    "best_sms": 60,
-    "best_ms": 0.027432820796966552,
-    "best_speedup_vs_triton": 3.161638562442949,
-    "best_speedup_vs_aoTriton": 6.8368379056816435,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.05895423889160156,
+    "best_speedup_vs_triton": 2.027243197774111,
+    "best_speedup_vs_aoTriton": 3.1805697369698143,
+    "best_path": "3d",
+    "flydsl_ms": 0.6224991226196289,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 10.559022291242034
   },
   {
     "label": "qwen3_30b_b1_kv8192",
@@ -1806,31 +2036,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08940600395202637,
-    "aoTriton_ms": 0.370882568359375,
+    "triton_ms": 0.20452808380126952,
+    "aoTriton_ms": 0.3700912094116211,
     "dsl": {
       "30": {
-        "ms": 0.043399200439453126,
+        "ms": 0.06135498046875,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02877671957015991,
+        "ms": 0.06408443927764892,
         "path": "3d"
       },
       "80": {
-        "ms": 0.028844060897827147,
+        "ms": 0.03189909934997558,
         "path": "3d"
       },
       "120": {
-        "ms": 0.028807981014251707,
+        "ms": 0.03026171922683716,
         "path": "3d"
       }
     },
-    "best_sms": 60,
-    "best_ms": 0.02877671957015991,
-    "best_speedup_vs_triton": 3.106886583581825,
-    "best_speedup_vs_aoTriton": 12.888285179800778,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03026171922683716,
+    "best_speedup_vs_triton": 6.758640587078305,
+    "best_speedup_vs_aoTriton": 12.229682214598409,
+    "best_path": "3d",
+    "flydsl_ms": 0.5362860870361328,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 17.721600118493445
   },
   {
     "label": "qwen3_30b_b1_kv16384",
@@ -1845,31 +2080,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08896657943725586,
-    "aoTriton_ms": 0.7369083404541016,
+    "triton_ms": 0.09262784004211426,
+    "aoTriton_ms": 0.7338565063476562,
     "dsl": {
       "30": {
-        "ms": 0.07429518222808838,
+        "ms": 0.0758227014541626,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04415373802185059,
+        "ms": 0.04579914093017578,
         "path": "3d"
       },
       "80": {
-        "ms": 0.038428540229797366,
+        "ms": 0.039853420257568356,
         "path": "3d"
       },
       "120": {
-        "ms": 0.038398880958557126,
+        "ms": 0.03978368043899536,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.038398880958557126,
-    "best_speedup_vs_triton": 2.316905524754096,
-    "best_speedup_vs_aoTriton": 19.19088062095942,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.03978368043899536,
+    "best_speedup_vs_triton": 2.328287353507944,
+    "best_speedup_vs_aoTriton": 18.44616934003776,
+    "best_path": "3d",
+    "flydsl_ms": 1.0571029663085938,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 26.571271301295628
   },
   {
     "label": "qwen3_30b_b1_kv32768",
@@ -1884,31 +2124,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08905318260192871,
-    "aoTriton_ms": 1.591803741455078,
+    "triton_ms": 0.09572296142578125,
+    "aoTriton_ms": 1.586676025390625,
     "dsl": {
       "30": {
-        "ms": 0.1366468620300293,
+        "ms": 0.13850394248962403,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07566314220428466,
+        "ms": 0.07795482158660888,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05785170078277588,
+        "ms": 0.05829671859741211,
         "path": "3d"
       },
       "120": {
-        "ms": 0.05782926082611084,
+        "ms": 0.05829751968383789,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.05782926082611084,
-    "best_speedup_vs_triton": 1.539932922015143,
-    "best_speedup_vs_aoTriton": 27.525922322291784,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.05829671859741211,
+    "best_speedup_vs_triton": 1.641995702825554,
+    "best_speedup_vs_aoTriton": 27.217244187412295,
+    "best_path": "3d",
+    "flydsl_ms": 2.1423095703125,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 36.74837318215027
   },
   {
     "label": "qwen3_30b_fp16_b1_kv512",
@@ -1923,31 +2168,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.044889822006225585,
-    "aoTriton_ms": 0.028620340824127198,
+    "triton_ms": 0.10031435966491699,
+    "aoTriton_ms": 0.06293941974639893,
     "dsl": {
       "30": {
-        "ms": 0.0658156394958496,
+        "ms": 0.06511404037475586,
         "path": "2d"
       },
       "60": {
-        "ms": 0.07647702217102051,
+        "ms": 0.06690135955810547,
         "path": "2d"
       },
       "80": {
-        "ms": 0.06483580112457275,
+        "ms": 0.06553339958190918,
         "path": "2d"
       },
       "120": {
-        "ms": 0.06569697856903076,
+        "ms": 0.06642183780670166,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.06483580112457275,
-    "best_speedup_vs_triton": 0.6923616463067401,
-    "best_speedup_vs_aoTriton": 0.4414280432679052,
-    "best_path": "2d"
+    "best_cus": 30,
+    "best_ms": 0.06511404037475586,
+    "best_speedup_vs_triton": 1.5405949175872056,
+    "best_speedup_vs_aoTriton": 0.966602892159031,
+    "best_path": "2d",
+    "flydsl_ms": 0.13844216346740723,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 2.126149178742716
   },
   {
     "label": "qwen3_30b_fp16_b1_kv1024",
@@ -1962,31 +2212,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08907485961914062,
-    "aoTriton_ms": 0.044630842208862306,
+    "triton_ms": 0.09285475730895996,
+    "aoTriton_ms": 0.044458441734313965,
     "dsl": {
       "30": {
-        "ms": 0.027693419456481932,
+        "ms": 0.029533660411834715,
         "path": "3d"
       },
       "60": {
-        "ms": 0.026848258972167968,
+        "ms": 0.02909183979034424,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026192340850830078,
+        "ms": 0.027739119529724122,
         "path": "3d"
       },
       "120": {
-        "ms": 0.02604882001876831,
+        "ms": 0.02765412092208862,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.02604882001876831,
-    "best_speedup_vs_triton": 3.419535301597605,
-    "best_speedup_vs_aoTriton": 1.71335370188383,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.02765412092208862,
+    "best_speedup_vs_triton": 3.357718640580348,
+    "best_speedup_vs_aoTriton": 1.6076606397856226,
+    "best_path": "3d",
+    "flydsl_ms": 0.14134407997131349,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.111139868431524
   },
   {
     "label": "qwen3_30b_fp16_b1_kv2048",
@@ -2001,31 +2256,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.09032974243164063,
-    "aoTriton_ms": 0.08602060317993164,
+    "triton_ms": 0.09349461555480958,
+    "aoTriton_ms": 0.08577843666076661,
     "dsl": {
       "30": {
-        "ms": 0.028189759254455566,
+        "ms": 0.029051740169525147,
         "path": "3d"
       },
       "60": {
-        "ms": 0.026867499351501466,
+        "ms": 0.03001715898513794,
         "path": "3d"
       },
       "80": {
-        "ms": 0.027014238834381102,
+        "ms": 0.028678081035614013,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026614940166473387,
+        "ms": 0.028200180530548097,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026614940166473387,
-    "best_speedup_vs_triton": 3.3939487320519413,
-    "best_speedup_vs_aoTriton": 3.2320419524478607,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.028200180530548097,
+    "best_speedup_vs_triton": 3.315390674663614,
+    "best_speedup_vs_aoTriton": 3.041769061295418,
+    "best_path": "3d",
+    "flydsl_ms": 0.14279702186584473,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.063691762936006
   },
   {
     "label": "qwen3_30b_fp16_b1_kv4096",
@@ -2040,31 +2300,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.09064805984497071,
-    "aoTriton_ms": 0.184149112701416,
+    "triton_ms": 0.09283869743347167,
+    "aoTriton_ms": 0.18340660095214845,
     "dsl": {
       "30": {
-        "ms": 0.027656519412994386,
+        "ms": 0.03092083930969238,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02733897924423218,
+        "ms": 0.028954720497131346,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02742640018463135,
+        "ms": 0.02898277997970581,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026449759006500245,
+        "ms": 0.028605899810791015,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026449759006500245,
-    "best_speedup_vs_triton": 3.4271790462322627,
-    "best_speedup_vs_aoTriton": 6.962222705173225,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.028605899810791015,
+    "best_speedup_vs_triton": 3.245438809739874,
+    "best_speedup_vs_aoTriton": 6.411495606335093,
+    "best_path": "3d",
+    "flydsl_ms": 0.2701424598693848,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 9.4435924636595
   },
   {
     "label": "qwen3_30b_fp16_b1_kv8192",
@@ -2079,31 +2344,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08993441581726075,
-    "aoTriton_ms": 0.363888053894043,
+    "triton_ms": 0.09279862403869629,
+    "aoTriton_ms": 0.36204463958740235,
     "dsl": {
       "30": {
-        "ms": 0.04249392032623291,
+        "ms": 0.043861861228942874,
         "path": "3d"
       },
       "60": {
-        "ms": 0.028272340297698973,
+        "ms": 0.028900198936462403,
         "path": "3d"
       },
       "80": {
-        "ms": 0.028530540466308593,
+        "ms": 0.02889940023422241,
         "path": "3d"
       },
       "120": {
-        "ms": 0.028481619358062746,
+        "ms": 0.029456679821014405,
         "path": "3d"
       }
     },
-    "best_sms": 60,
-    "best_ms": 0.028272340297698973,
-    "best_speedup_vs_triton": 3.1810035840782636,
-    "best_speedup_vs_aoTriton": 12.870814727836983,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.02889940023422241,
+    "best_speedup_vs_triton": 3.211091693481064,
+    "best_speedup_vs_aoTriton": 12.527756169786262,
+    "best_path": "3d",
+    "flydsl_ms": 0.5340906524658203,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 18.48102895344364
   },
   {
     "label": "qwen3_30b_fp16_b1_kv16384",
@@ -2118,31 +2388,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08970749855041504,
-    "aoTriton_ms": 0.7218479919433594,
+    "triton_ms": 0.09234155654907227,
+    "aoTriton_ms": 0.7195283508300782,
     "dsl": {
       "30": {
-        "ms": 0.07234990119934082,
+        "ms": 0.07625088214874268,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04325967788696289,
+        "ms": 0.044779181480407715,
         "path": "3d"
       },
       "80": {
-        "ms": 0.03797068119049072,
+        "ms": 0.03939558029174805,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03797068119049072,
+        "ms": 0.03941802024841309,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.03797068119049072,
-    "best_speedup_vs_triton": 2.3625464631611917,
-    "best_speedup_vs_aoTriton": 19.01066742316272,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.03939558029174805,
+    "best_speedup_vs_triton": 2.3439572628509926,
+    "best_speedup_vs_aoTriton": 18.26418967563205,
+    "best_path": "3d",
+    "flydsl_ms": 1.062569122314453,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 26.971785018661674
   },
   {
     "label": "qwen3_30b_fp16_b1_kv32768",
@@ -2157,31 +2432,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08845179557800292,
-    "aoTriton_ms": 1.599663543701172,
+    "triton_ms": 0.09216998100280761,
+    "aoTriton_ms": 1.595675048828125,
     "dsl": {
       "30": {
-        "ms": 0.1330770206451416,
+        "ms": 0.13490203857421876,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07412280082702637,
+        "ms": 0.0754995584487915,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05636106014251709,
+        "ms": 0.060862641334533694,
         "path": "3d"
       },
       "120": {
-        "ms": 0.056324977874755856,
+        "ms": 0.05934234142303467,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.056324977874755856,
-    "best_speedup_vs_triton": 1.5703831393362322,
-    "best_speedup_vs_aoTriton": 28.400606694567756,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.05934234142303467,
+    "best_speedup_vs_triton": 1.5531908379845352,
+    "best_speedup_vs_aoTriton": 26.889317316501074,
+    "best_path": "3d",
+    "flydsl_ms": 2.1195518493652346,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 35.71736130624763
   },
   {
     "label": "qwen3_235b_b1_kv512",
@@ -2196,31 +2476,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.04488984107971192,
-    "aoTriton_ms": 0.0287951397895813,
+    "triton_ms": 0.10518877983093261,
+    "aoTriton_ms": 0.0628640604019165,
     "dsl": {
       "30": {
-        "ms": 0.05560492038726807,
+        "ms": 0.06763184070587158,
         "path": "2d"
       },
       "60": {
-        "ms": 0.05834564208984375,
+        "ms": 0.06897974014282227,
         "path": "2d"
       },
       "80": {
-        "ms": 0.05495222091674805,
+        "ms": 0.06317997932434082,
         "path": "2d"
       },
       "120": {
-        "ms": 0.05656633853912354,
+        "ms": 0.06498573780059815,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.05495222091674805,
-    "best_speedup_vs_triton": 0.8168885684842381,
-    "best_speedup_vs_aoTriton": 0.5240032033137585,
-    "best_path": "2d"
+    "best_cus": 80,
+    "best_ms": 0.06317997932434082,
+    "best_speedup_vs_triton": 1.6649068416267654,
+    "best_speedup_vs_aoTriton": 0.9949996988634245,
+    "best_path": "2d",
+    "flydsl_ms": 0.2189340400695801,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 3.4652439334565153
   },
   {
     "label": "qwen3_235b_b1_kv1024",
@@ -2235,31 +2520,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.09206893920898437,
-    "aoTriton_ms": 0.048240737915039064,
+    "triton_ms": 0.097009916305542,
+    "aoTriton_ms": 0.04814132213592529,
     "dsl": {
       "30": {
-        "ms": 0.028501660823822023,
+        "ms": 0.03113976001739502,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02725882053375244,
+        "ms": 0.030607318878173827,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02656280040740967,
+        "ms": 0.030180740356445312,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026729578971862792,
+        "ms": 0.029443840980529785,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.02656280040740967,
-    "best_speedup_vs_triton": 3.4660855706803346,
-    "best_speedup_vs_aoTriton": 1.8161013588605799,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.029443840980529785,
+    "best_speedup_vs_triton": 3.294743928609429,
+    "best_speedup_vs_aoTriton": 1.6350218087293542,
+    "best_path": "3d",
+    "flydsl_ms": 0.14208900451660156,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.82576320835859
   },
   {
     "label": "qwen3_235b_b1_kv2048",
@@ -2274,31 +2564,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.09045561790466308,
-    "aoTriton_ms": 0.09681026458740234,
+    "triton_ms": 0.10175206184387207,
+    "aoTriton_ms": 0.09634920120239258,
     "dsl": {
       "30": {
-        "ms": 0.02790911912918091,
+        "ms": 0.03041248083114624,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027597200870513917,
+        "ms": 0.029840760231018067,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026666240692138674,
+        "ms": 0.02899482011795044,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026412060260772707,
+        "ms": 0.029002020359039305,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026412060260772707,
-    "best_speedup_vs_triton": 3.4247846253405725,
-    "best_speedup_vs_aoTriton": 3.665381027892978,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.02899482011795044,
+    "best_speedup_vs_triton": 3.5093186103568295,
+    "best_speedup_vs_aoTriton": 3.322979787784358,
+    "best_path": "3d",
+    "flydsl_ms": 0.14171374320983887,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.887553798690585
   },
   {
     "label": "qwen3_235b_b1_kv4096",
@@ -2313,31 +2608,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.0873661231994629,
-    "aoTriton_ms": 0.18880943298339845,
+    "triton_ms": 0.09279301643371582,
+    "aoTriton_ms": 0.18794746398925782,
     "dsl": {
       "30": {
-        "ms": 0.04285714149475098,
+        "ms": 0.04655285835266113,
         "path": "3d"
       },
       "60": {
-        "ms": 0.029591379165649415,
+        "ms": 0.02869731903076172,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02852734088897705,
+        "ms": 0.029546480178833007,
         "path": "3d"
       },
       "120": {
-        "ms": 0.027249979972839355,
+        "ms": 0.02817291975021362,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.027249979972839355,
-    "best_speedup_vs_triton": 3.206098620495964,
-    "best_speedup_vs_aoTriton": 6.928791623758582,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.02817291975021362,
+    "best_speedup_vs_triton": 3.2936954087980963,
+    "best_speedup_vs_aoTriton": 6.671210000796339,
+    "best_path": "3d",
+    "flydsl_ms": 0.26975116729736326,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 9.574838876801822
   },
   {
     "label": "qwen3_235b_b1_kv8192",
@@ -2352,31 +2652,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08877094268798828,
-    "aoTriton_ms": 0.37275646209716795,
+    "triton_ms": 0.09300709724426269,
+    "aoTriton_ms": 0.3707117462158203,
     "dsl": {
       "30": {
-        "ms": 0.07356872081756592,
+        "ms": 0.0752726411819458,
         "path": "3d"
       },
       "60": {
-        "ms": 0.04355234146118164,
+        "ms": 0.04512157917022705,
         "path": "3d"
       },
       "80": {
-        "ms": 0.0325325608253479,
+        "ms": 0.03339456081390381,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03252213954925537,
+        "ms": 0.03367038011550903,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.03252213954925537,
-    "best_speedup_vs_triton": 2.7295542027160633,
-    "best_speedup_vs_aoTriton": 11.461621752548647,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.03339456081390381,
+    "best_speedup_vs_triton": 2.7850971828184434,
+    "best_speedup_vs_aoTriton": 11.100961868660798,
+    "best_path": "3d",
+    "flydsl_ms": 0.5320611572265626,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 15.932569384324383
   },
   {
     "label": "qwen3_235b_b1_kv16384",
@@ -2391,31 +2696,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.08894094467163086,
-    "aoTriton_ms": 0.8054093933105468,
+    "triton_ms": 0.09442797660827637,
+    "aoTriton_ms": 0.8029517364501954,
     "dsl": {
       "30": {
-        "ms": 0.13500867843627928,
+        "ms": 0.13823692321777345,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07434892177581787,
+        "ms": 0.07604321956634522,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05206155776977539,
+        "ms": 0.053624358177185055,
         "path": "3d"
       },
       "120": {
-        "ms": 0.05210244178771973,
+        "ms": 0.053688521385192874,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.05206155776977539,
-    "best_speedup_vs_triton": 1.7083803958564219,
-    "best_speedup_vs_aoTriton": 15.470328353834457,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.053624358177185055,
+    "best_speedup_vs_triton": 1.760915744600027,
+    "best_speedup_vs_aoTriton": 14.973638170122063,
+    "best_path": "3d",
+    "flydsl_ms": 1.05683349609375,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 19.708086623652846
   },
   {
     "label": "qwen3_235b_b1_kv32768",
@@ -2430,31 +2740,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "bf16",
-    "triton_ms": 0.0886867618560791,
-    "aoTriton_ms": 1.6079008483886719,
+    "triton_ms": 0.11989465713500977,
+    "aoTriton_ms": 1.6019767761230468,
     "dsl": {
       "30": {
-        "ms": 0.25982667922973635,
+        "ms": 0.2610847854614258,
         "path": "3d"
       },
       "60": {
-        "ms": 0.13682565689086915,
+        "ms": 0.13826899528503417,
         "path": "3d"
       },
       "80": {
-        "ms": 0.0913095760345459,
+        "ms": 0.09316987991333008,
         "path": "3d"
       },
       "120": {
-        "ms": 0.09127511978149414,
+        "ms": 0.09044921875,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.09127511978149414,
-    "best_speedup_vs_triton": 0.9716422401678423,
-    "best_speedup_vs_aoTriton": 17.615981794796514,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.09044921875,
+    "best_speedup_vs_triton": 1.325546630384906,
+    "best_speedup_vs_aoTriton": 17.711339006154176,
+    "best_path": "3d",
+    "flydsl_ms": 2.109609832763672,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 23.32369324929821
   },
   {
     "label": "qwen3_235b_fp16_b1_kv512",
@@ -2469,31 +2784,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.044984440803527835,
-    "aoTriton_ms": 0.02837739944458008,
+    "triton_ms": 0.04650556087493896,
+    "aoTriton_ms": 0.029111061096191406,
     "dsl": {
       "30": {
-        "ms": 0.06576432228088379,
+        "ms": 0.06552457809448242,
         "path": "2d"
       },
       "60": {
-        "ms": 0.0668596601486206,
+        "ms": 0.06758451938629151,
         "path": "2d"
       },
       "80": {
-        "ms": 0.06541711807250977,
+        "ms": 0.06554463863372803,
         "path": "2d"
       },
       "120": {
-        "ms": 0.06596960067749023,
+        "ms": 0.0668532419204712,
         "path": "2d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.06541711807250977,
-    "best_speedup_vs_triton": 0.6876554964354451,
-    "best_speedup_vs_aoTriton": 0.43379164782413593,
-    "best_path": "2d"
+    "best_cus": 30,
+    "best_ms": 0.06552457809448242,
+    "best_speedup_vs_triton": 0.7097422406578612,
+    "best_speedup_vs_aoTriton": 0.44427697121857146,
+    "best_path": "2d",
+    "flydsl_ms": 0.13752406120300292,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 2.0988164319761307
   },
   {
     "label": "qwen3_235b_fp16_b1_kv1024",
@@ -2508,31 +2828,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0881214427947998,
-    "aoTriton_ms": 0.04545032024383545,
+    "triton_ms": 0.09317629814147949,
+    "aoTriton_ms": 0.04538537979125976,
     "dsl": {
       "30": {
-        "ms": 0.027949199676513672,
+        "ms": 0.030035600662231446,
         "path": "3d"
       },
       "60": {
-        "ms": 0.026525120735168457,
+        "ms": 0.028631560802459717,
         "path": "3d"
       },
       "80": {
-        "ms": 0.02577860116958618,
+        "ms": 0.02801094055175781,
         "path": "3d"
       },
       "120": {
-        "ms": 0.02625730037689209,
+        "ms": 0.02910386085510254,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.02577860116958618,
-    "best_speedup_vs_triton": 3.4183950562362653,
-    "best_speedup_vs_aoTriton": 1.7631026580859683,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.02801094055175781,
+    "best_speedup_vs_triton": 3.3264251862343217,
+    "best_speedup_vs_aoTriton": 1.6202733252529655,
+    "best_path": "3d",
+    "flydsl_ms": 0.13946696281433105,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 4.979017486279263
   },
   {
     "label": "qwen3_235b_fp16_b1_kv2048",
@@ -2547,31 +2872,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08767642021179199,
-    "aoTriton_ms": 0.09485535621643067,
+    "triton_ms": 0.09184924125671387,
+    "aoTriton_ms": 0.09467975616455078,
     "dsl": {
       "30": {
-        "ms": 0.028471999168395996,
+        "ms": 0.029803059101104735,
         "path": "3d"
       },
       "60": {
-        "ms": 0.027374279499053956,
+        "ms": 0.028913021087646484,
         "path": "3d"
       },
       "80": {
-        "ms": 0.026719160079956054,
+        "ms": 0.028397419452667237,
         "path": "3d"
       },
       "120": {
-        "ms": 0.026230840682983397,
+        "ms": 0.029183239936828614,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.026230840682983397,
-    "best_speedup_vs_triton": 3.342493718421685,
-    "best_speedup_vs_aoTriton": 3.6161767502162334,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.028397419452667237,
+    "best_speedup_vs_triton": 3.2344221069033403,
+    "best_speedup_vs_aoTriton": 3.3340971816950766,
+    "best_path": "3d",
+    "flydsl_ms": 0.1443189239501953,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 5.082114034718746
   },
   {
     "label": "qwen3_235b_fp16_b1_kv4096",
@@ -2586,31 +2916,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.09001540184020997,
-    "aoTriton_ms": 0.1853005599975586,
+    "triton_ms": 0.09259495735168458,
+    "aoTriton_ms": 0.18468793869018554,
     "dsl": {
       "30": {
-        "ms": 0.04154612064361572,
+        "ms": 0.04300387859344482,
         "path": "3d"
       },
       "60": {
-        "ms": 0.02888495922088623,
+        "ms": 0.029123098850250245,
         "path": "3d"
       },
       "80": {
-        "ms": 0.028716559410095214,
+        "ms": 0.02915760040283203,
         "path": "3d"
       },
       "120": {
-        "ms": 0.02776236057281494,
+        "ms": 0.02988565921783447,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.02776236057281494,
-    "best_speedup_vs_triton": 3.2423540355697833,
-    "best_speedup_vs_aoTriton": 6.674524650436459,
-    "best_path": "3d"
+    "best_cus": 60,
+    "best_ms": 0.029123098850250245,
+    "best_speedup_vs_triton": 3.179433542694202,
+    "best_speedup_vs_aoTriton": 6.341630732355894,
+    "best_path": "3d",
+    "flydsl_ms": 0.2702851867675781,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 9.280783894508385
   },
   {
     "label": "qwen3_235b_fp16_b1_kv8192",
@@ -2625,31 +2960,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08826335906982422,
-    "aoTriton_ms": 0.36562889099121093,
+    "triton_ms": 0.09216196060180665,
+    "aoTriton_ms": 0.3637116622924805,
     "dsl": {
       "30": {
-        "ms": 0.07130750179290772,
+        "ms": 0.07292883872985839,
         "path": "3d"
       },
       "60": {
-        "ms": 0.042390480041503906,
+        "ms": 0.04386988162994385,
         "path": "3d"
       },
       "80": {
-        "ms": 0.032393839359283444,
+        "ms": 0.032855699062347414,
         "path": "3d"
       },
       "120": {
-        "ms": 0.03242671966552734,
+        "ms": 0.03304493904113769,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.032393839359283444,
-    "best_speedup_vs_triton": 2.724695831540254,
-    "best_speedup_vs_aoTriton": 11.286988459008604,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.032855699062347414,
+    "best_speedup_vs_triton": 2.805052494147785,
+    "best_speedup_vs_aoTriton": 11.069971806178781,
+    "best_path": "3d",
+    "flydsl_ms": 0.5340481567382812,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 16.254353794903718
   },
   {
     "label": "qwen3_235b_fp16_b1_kv16384",
@@ -2664,31 +3004,36 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.08976041793823242,
-    "aoTriton_ms": 0.8092534637451172,
+    "triton_ms": 0.09304400444030762,
+    "aoTriton_ms": 0.8068270111083984,
     "dsl": {
       "30": {
-        "ms": 0.13074206352233886,
+        "ms": 0.13206188201904298,
         "path": "3d"
       },
       "60": {
-        "ms": 0.07218070030212402,
+        "ms": 0.07654037952423096,
         "path": "3d"
       },
       "80": {
-        "ms": 0.05109131813049316,
+        "ms": 0.05181218147277832,
         "path": "3d"
       },
       "120": {
-        "ms": 0.051117777824401855,
+        "ms": 0.05182422161102295,
         "path": "3d"
       }
     },
-    "best_sms": 80,
-    "best_ms": 0.05109131813049316,
-    "best_speedup_vs_triton": 1.7568624420488406,
-    "best_speedup_vs_aoTriton": 15.839353795456791,
-    "best_path": "3d"
+    "best_cus": 80,
+    "best_ms": 0.05181218147277832,
+    "best_speedup_vs_triton": 1.795793996614332,
+    "best_speedup_vs_aoTriton": 15.572149023146196,
+    "best_path": "3d",
+    "flydsl_ms": 1.0621337890625,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 20.499692521546038
   },
   {
     "label": "qwen3_235b_fp16_b1_kv32768",
@@ -2703,30 +3048,35 @@
     "head_size": 128,
     "block_size": 16,
     "dtype": "fp16",
-    "triton_ms": 0.0879610824584961,
-    "aoTriton_ms": 1.6157373046875,
+    "triton_ms": 0.0934238624572754,
+    "aoTriton_ms": 1.6092970275878906,
     "dsl": {
       "30": {
-        "ms": 0.25100074768066405,
+        "ms": 0.25208803176879885,
         "path": "3d"
       },
       "60": {
-        "ms": 0.13238825798034667,
+        "ms": 0.13395586013793945,
         "path": "3d"
       },
       "80": {
-        "ms": 0.08947735786437988,
+        "ms": 0.08862662315368652,
         "path": "3d"
       },
       "120": {
-        "ms": 0.08942846298217773,
+        "ms": 0.08848228454589843,
         "path": "3d"
       }
     },
-    "best_sms": 120,
-    "best_ms": 0.08942846298217773,
-    "best_speedup_vs_triton": 0.9835915716903905,
-    "best_speedup_vs_aoTriton": 18.067371961983756,
-    "best_path": "3d"
+    "best_cus": 120,
+    "best_ms": 0.08848228454589843,
+    "best_speedup_vs_triton": 1.0558482179425828,
+    "best_speedup_vs_aoTriton": 18.18778793796966,
+    "best_path": "3d",
+    "flydsl_ms": 2.1177357482910155,
+    "flydsl_kv_path": "dense",
+    "flydsl_skip_reason": "",
+    "flydsl_error": null,
+    "best_speedup_vs_flydsl": 23.934008475928106
   }
 ]

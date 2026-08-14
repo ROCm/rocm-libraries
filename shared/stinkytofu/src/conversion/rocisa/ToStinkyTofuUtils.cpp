@@ -49,6 +49,7 @@
 #include "instruction/cvt.hpp"
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
+#include "stinkytofu/Config/Config.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
@@ -549,6 +550,11 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
     if (!aScaleVal.empty()) fmts.scaleFmtA = parseMatrixScaleFmt(aScaleVal);
     if (!bScaleVal.empty()) fmts.scaleFmtB = parseMatrixScaleFmt(bScaleVal);
 
+    auto aScaleSel = extractValue("matrix_a_scale:");
+    auto bScaleSel = extractValue("matrix_b_scale:");
+    if (!aScaleSel.empty()) fmts.scaleSelA = parseMatrixScaleSel(aScaleSel);
+    if (!bScaleSel.empty()) fmts.scaleSelB = parseMatrixScaleSel(bScaleSel);
+
     return fmts;
 }
 
@@ -556,14 +562,20 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
 void handleMXMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     // MXMFMA does not support neg_lo/neg_hi modifiers; only matrix formats.
     auto fmts = extractMatrixFormats(instString);
-    if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+    if (!fmts.empty()) {
+        stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+        stinkyInst->resolveMatrixFmtOverrides();
+    }
     stinkyInst->addModifier<MFMAModifiers>(MFMAModifiers{});
 }
 
 /// Helper to handle MFMA instruction modifiers
 void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     auto fmts = extractMatrixFormats(instString);
-    if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+    if (!fmts.empty()) {
+        stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
+        stinkyInst->resolveMatrixFmtOverrides();
+    }
 
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
@@ -986,8 +998,22 @@ namespace stinkytofu {
 static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     const rocisa::Module& module, std::array<int, 3> arch, const std::string& moduleName,
     const StinkyAsmModule::ModuleOptions& moduleOptions) {
-    // Get GfxArchID from architecture array
+    // Resolve the GfxArchID from this kernel's ISA triple. Steppings that share a triple (e.g.
+    // gfx1250 v0/v1 on {12,5,0}) are indistinguishable by triple alone, so the lookup returns the
+    // first-registered stepping. ModuleOptions.ArchName carries the concrete stepping to pick
+    // instead -- but only to disambiguate *within the same triple*. In a multi-arch build (e.g.
+    // gfx942;gfx1250v0) ArchName is set build-wide, so we must not retag a kernel of a different
+    // arch: honor the name only when the named arch's triple matches this kernel's triple.
     GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    if (!moduleOptions.ArchName.empty()) {
+        const GfxArchID named = getGfxArchID(moduleOptions.ArchName);
+        const auto* namedInfo = ArchHelper::getInstance().getArchInfo(named);
+        if (namedInfo && namedInfo->major == static_cast<uint32_t>(arch[0]) &&
+            namedInfo->minor == static_cast<uint32_t>(arch[1]) &&
+            namedInfo->stepping == static_cast<uint32_t>(arch[2])) {
+            archId = named;
+        }
+    }
 
     // VgprMsbMode is auto-probed by Backend::configurePassManager() when it
     // sees VgprMsbMode::None, so no need to read it from rocisa caps here.
@@ -1525,8 +1551,6 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 
             // Override with options dict if provided
             StinkyAsmModule::ModuleOptions moduleOptions{};
-            // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
-            moduleOptions.SwPrefetchScratchSgpr = -1;
             // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
             // is itself a valid (if extreme) value for the former and a valid enumerator for the
             // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
@@ -1554,8 +1578,6 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
 #undef DEBUG_SET_MODULE_OPTION
             }
 
-            // Convert module to StinkyAsmModule (StinkyAsmModule ctor sets
-            // EnableSwPrefetchInsertion from Sgpr != -1)
             auto stinkyModule =
                 stinkytofu::toStinkyTofuModule(module, archArray, moduleName, moduleOptions);
 

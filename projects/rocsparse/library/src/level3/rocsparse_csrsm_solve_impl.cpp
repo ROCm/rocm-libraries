@@ -21,7 +21,6 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
@@ -92,7 +91,8 @@ namespace rocsparse
                                                  rocsparse_mat_info        info,
                                                  rocsparse_solve_policy    policy,
                                                  rocsparse_csrsm_info      csrsm_info,
-                                                 void*                     temp_buffer)
+                                                 void*                     temp_buffer,
+                                                 bool                      force_conj = false)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -129,10 +129,10 @@ namespace rocsparse
             ptr += ((sizeof(T) * m * nrhs - 1) / 256 + 1) * 256;
         }
 
-        // Temporary array to store transpose of A
+        // Temporary array to store transpose of A (or conjugated values for force_conj)
         T* At = nullptr;
         if(trans_A == rocsparse_operation_transpose
-           || trans_A == rocsparse_operation_conjugate_transpose)
+           || trans_A == rocsparse_operation_conjugate_transpose || force_conj)
         {
             At = reinterpret_cast<T*>(ptr);
         }
@@ -196,8 +196,24 @@ namespace rocsparse
             local_csr_col_ind = (const J*)trm_info->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_lower:
+                fill_mode = rocsparse_fill_mode_upper;
+                break;
+            case rocsparse_fill_mode_upper:
+                fill_mode = rocsparse_fill_mode_lower;
+                break;
+            }
+        }
+        else if(force_conj)
+        {
+            // CSC conjugate_transpose case: values are already in A^T layout (CSC as CSR),
+            // so we only need to conjugate them
+            RETURN_IF_HIP_ERROR(
+                hipMemcpyAsync(At, csr_val, sizeof(T) * nnz, hipMemcpyDeviceToDevice, stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, At));
+            local_csr_val = (const T*)At;
         }
         {
             const dim3 csrsm_blocks(((nrhs - 1) / blockdim + 1) * m);
@@ -521,7 +537,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                              rocsparse_mat_info        info,
                                              rocsparse_solve_policy    policy,
                                              rocsparse_csrsm_info      csrsm_info,
-                                             void*                     temp_buffer)
+                                             void*                     temp_buffer,
+                                             bool                      force_conj)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -545,22 +562,50 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
         const int64_t b_inc
             = (trans_B == rocsparse_operation_none && order_B == rocsparse_order_column) ? 1 : ldb;
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_solve_template<I, J, T>(handle,
-                                                                            trans_A,
-                                                                            m,
-                                                                            nnz,
-                                                                            alpha,
-                                                                            descr,
-                                                                            csr_val,
-                                                                            csr_row_ptr,
-                                                                            csr_col_ind,
-                                                                            info,
-                                                                            B,
-                                                                            b_inc,
-                                                                            y,
-                                                                            policy,
-                                                                            csrsm_info,
-                                                                            temp_buffer)));
+        {
+            const int64_t batch_count     = static_cast<int64_t>(1);
+            const int64_t batch_dist_zero = static_cast<int64_t>(0);
+            const int64_t inc_y           = static_cast<int64_t>(1);
+
+            _rocsparse_spmat_descr csr(rocsparse_format_csr,
+                                       batch_count,
+                                       m,
+                                       m,
+                                       nnz,
+                                       rocsparse::get_datatype<T>(),
+                                       csr_val,
+                                       nullptr,
+                                       batch_dist_zero,
+                                       rocsparse::get_indextype<I>(),
+                                       csr_row_ptr,
+                                       nullptr,
+                                       batch_dist_zero,
+                                       rocsparse::get_indextype<J>(),
+                                       csr_col_ind,
+                                       nullptr,
+                                       batch_dist_zero,
+                                       descr->base,
+                                       descr,
+                                       info);
+
+            _rocsparse_dnvec_descr dnx(
+                batch_count, m, rocsparse::get_datatype<T>(), B, nullptr, b_inc, batch_dist_zero);
+            _rocsparse_dnvec_descr dny(
+                batch_count, m, rocsparse::get_datatype<T>(), y, y, inc_y, batch_dist_zero);
+
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
+                                                             trans_A,
+                                                             rocsparse::get_datatype<T>(),
+                                                             alpha,
+                                                             batch_dist_zero,
+                                                             &csr,
+                                                             &dnx,
+                                                             &dny,
+                                                             policy,
+                                                             csrsm_info,
+                                                             temp_buffer,
+                                                             force_conj));
+        }
 
         if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column))
         {
@@ -601,7 +646,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                                               info,
                                                               policy,
                                                               csrsm_info,
-                                                              temp_buffer));
+                                                              temp_buffer,
+                                                              force_conj));
     return rocsparse_status_success;
 }
 
@@ -826,7 +872,8 @@ namespace rocsparse
         rocsparse_mat_info        info,                             \
         rocsparse_solve_policy    policy,                           \
         rocsparse_csrsm_info      csrsm_info,                       \
-        void*                     temp_buffer);
+        void*                     temp_buffer,                      \
+        bool                      force_conj);
 
 INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
