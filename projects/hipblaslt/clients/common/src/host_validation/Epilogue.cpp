@@ -14,31 +14,28 @@ namespace roc::host_validation::hipblaslt_adapter
 {
     namespace
     {
-        size_t storageBytes(ScalarType type, size_t elements)
+        std::span<const std::byte> constStorage(
+            const void* pointer, ScalarType type, const Layout& layout, const char* name)
         {
-            return (elements * scalarTypeInfo(type).storageBits + 7) / 8;
+            const size_t bytes = storageBytesForLayout(type, layout);
+            if(pointer == nullptr && bytes != 0)
+                throw std::invalid_argument(std::string("Null hipBLASLt epilogue ") + name + ".");
+            return {static_cast<const std::byte*>(pointer), bytes};
         }
 
-        std::span<const std::byte>
-            constStorage(const void* pointer, ScalarType type, size_t elements, const char* name)
+        std::span<std::byte> mutableStorage(
+            void* pointer, ScalarType type, const Layout& layout, const char* name)
         {
-            if(pointer == nullptr && elements != 0)
+            const size_t bytes = storageBytesForLayout(type, layout);
+            if(pointer == nullptr && bytes != 0)
                 throw std::invalid_argument(std::string("Null hipBLASLt epilogue ") + name + ".");
-            return {static_cast<const std::byte*>(pointer), storageBytes(type, elements)};
-        }
-
-        std::span<std::byte>
-            mutableStorage(void* pointer, ScalarType type, size_t elements, const char* name)
-        {
-            if(pointer == nullptr && elements != 0)
-                throw std::invalid_argument(std::string("Null hipBLASLt epilogue ") + name + ".");
-            return {static_cast<std::byte*>(pointer), storageBytes(type, elements)};
+            return {static_cast<std::byte*>(pointer), bytes};
         }
 
         std::complex<double> scalarValue(const void* pointer, ScalarType type, const char* name)
         {
-            TensorView value(
-                type, Layout::contiguous(Shape{1}), constStorage(pointer, type, 1, name));
+            const Layout layout = Layout::contiguous(Shape{1});
+            TensorView   value(type, layout, constStorage(pointer, type, layout, name));
             return {value.loadAs<double>({0}), 0.0};
         }
     } // namespace
@@ -59,24 +56,22 @@ namespace roc::host_validation::hipblaslt_adapter
         const ScalarType outputType  = scalarType(arguments.outputType);
         const Layout     matrixLayout(Shape{rows, columns},
                                       {1, static_cast<ptrdiff_t>(leadingDimension)});
-        const size_t     matrixStorageElements = leadingDimension * columns;
 
         EpilogueProblem problem(
             TensorView(computeType,
                        matrixLayout,
-                       constStorage(arguments.input, computeType, matrixStorageElements, "input")),
+                       constStorage(arguments.input, computeType, matrixLayout, "input")),
             MutableTensorView(
                 outputType,
                 matrixLayout,
-                mutableStorage(arguments.output, outputType, matrixStorageElements, "output")),
+                mutableStorage(arguments.output, outputType, matrixLayout, "output")),
             computeType);
 
         if(arguments.rawOutput != nullptr)
             problem.rawOutput = MutableTensorView(
                 computeType,
                 matrixLayout,
-                mutableStorage(
-                    arguments.rawOutput, computeType, matrixStorageElements, "raw output"));
+                mutableStorage(arguments.rawOutput, computeType, matrixLayout, "raw output"));
 
         if(arguments.auxiliary != nullptr)
         {
@@ -86,23 +81,24 @@ namespace roc::host_validation::hipblaslt_adapter
                                                     matrixLayout,
                                                     constStorage(arguments.auxiliary,
                                                                  auxiliaryType,
-                                                                 matrixStorageElements,
+                                                                 matrixLayout,
                                                                  "auxiliary input"));
             else
                 problem.auxiliaryOutput = MutableTensorView(auxiliaryType,
                                                             matrixLayout,
                                                             mutableStorage(arguments.auxiliary,
                                                                            auxiliaryType,
-                                                                           matrixStorageElements,
+                                                                           matrixLayout,
                                                                            "auxiliary output"));
         }
 
         if(arguments.amax != nullptr)
         {
-            problem.amax
-                = MutableTensorView(computeType,
-                                    Layout::contiguous(Shape{1}),
-                                    mutableStorage(arguments.amax, computeType, 1, "AMax output"));
+            const Layout amaxLayout = Layout::contiguous(Shape{1});
+            problem.amax = MutableTensorView(
+                computeType,
+                amaxLayout,
+                mutableStorage(arguments.amax, computeType, amaxLayout, "AMax output"));
             problem.accumulateAmax = arguments.accumulateAmax;
         }
 
@@ -110,16 +106,19 @@ namespace roc::host_validation::hipblaslt_adapter
         {
             const ScalarType biasType     = scalarType(arguments.biasType);
             const size_t     biasElements = arguments.biasAxis == MatrixAxis::Row ? rows : columns;
+            const Layout     biasLayout   = Layout::contiguous(Shape{biasElements});
             problem.bias                  = VectorBinding{
                 TensorView(biasType,
-                           Layout::contiguous(Shape{biasElements}),
-                           constStorage(arguments.bias, biasType, biasElements, "bias")),
+                           biasLayout,
+                           constStorage(arguments.bias, biasType, biasLayout, "bias")),
                 arguments.biasAxis};
         }
 
-        problem.outputScale = scalarValue(arguments.outputScale, computeType, "output scale");
-        problem.auxiliaryScale
-            = scalarValue(arguments.auxiliaryScale, computeType, "auxiliary scale");
+        if(arguments.outputScale != nullptr)
+            problem.outputScale = scalarValue(arguments.outputScale, computeType, "output scale");
+        if(arguments.auxiliaryScale != nullptr)
+            problem.auxiliaryScale
+                = scalarValue(arguments.auxiliaryScale, computeType, "auxiliary scale");
         if(outputType == ScalarType::Int8)
             problem.outputConversion = OutputConversion::SaturatingInt8;
         problem.activation            = arguments.activation;

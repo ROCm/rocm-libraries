@@ -24,6 +24,7 @@ namespace roc::host_validation::hipblaslt_adapter
         bool                  accumulateAmax        = true;
         void*                 auxiliary             = nullptr;
         hipDataType           auxiliaryType         = HIP_R_32F;
+        // Null scale pointers select the multiplicative identity.
         const void*           outputScale           = nullptr;
         const void*           auxiliaryScale        = nullptr;
         const void*           bias                  = nullptr;
