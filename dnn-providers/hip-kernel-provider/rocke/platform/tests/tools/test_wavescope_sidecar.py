@@ -11,7 +11,10 @@ these instructions. Everything here is about refusing to guess:
   * a dispatch is matched to the code object it actually ran, independently of
     the other dispatches in the trace;
   * a trace whose objects cannot be told apart is reported, not guessed at;
-  * rows belonging to another object are skipped rather than joined on address.
+  * rows belonging to another object are skipped rather than joined on address;
+  * a sidecar from an earlier run over the same folder is gone before this run
+    decides anything, so an unresolvable dispatch cannot keep serving the
+    previous run's attribution.
 """
 
 from __future__ import annotations
@@ -132,8 +135,12 @@ class TestBuildSidecar(unittest.TestCase):
         self.assertEqual(sidecar["code_object_id"], "1")
 
 
-class TestMainPerDispatch(unittest.TestCase):
-    """End to end over a trace with two dispatches of two different kernels."""
+class TwoObjectTrace:
+    """A trace holding two code objects that both place a symbol at address 100.
+
+    The shared address is the point: a dispatch attributed to the wrong object
+    still joins, so every wrong answer here looks like a right one.
+    """
 
     def setUp(self):
         self.tmp = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -162,6 +169,10 @@ class TestMainPerDispatch(unittest.TestCase):
     def sidecar_of(self, d: Path) -> dict:
         return json.loads((d / efi.SIDECAR).read_text())
 
+
+class TestMainPerDispatch(TwoObjectTrace, unittest.TestCase):
+    """End to end over a trace with two dispatches of two different kernels."""
+
     def test_each_dispatch_gets_its_own_object(self):
         one = self.dispatch("1", 1)
         two = self.dispatch("2", 2)
@@ -170,9 +181,16 @@ class TestMainPerDispatch(unittest.TestCase):
         self.assertEqual(self.sidecar_of(two)["functions"], ["from_object_two"])
 
     def test_a_dispatch_with_no_matching_object_is_skipped_not_mislabelled(self):
+        """Skipping one dispatch is still a successful run.
+
+        The dispatches that did resolve have their sidecars, so reporting
+        failure would have the caller tell the user no sidecar was written and
+        that the Source tab has lost its inlining, when most of the trace has
+        it.
+        """
         good = self.dispatch("1", 1)
         orphan = self.dispatch("9", 9)
-        self.assertEqual(efi.main([str(self.tmp)]), 1)
+        self.assertEqual(efi.main([str(self.tmp)]), 0)
         self.assertTrue((good / efi.SIDECAR).is_file())
         self.assertFalse((orphan / efi.SIDECAR).is_file())
 
@@ -180,6 +198,66 @@ class TestMainPerDispatch(unittest.TestCase):
         self.dispatch("9", 9)
         with self.assertRaises(SystemExit):
             efi.main([str(self.tmp)])
+
+
+class TestRerunOverAnExistingSidecar(TwoObjectTrace, unittest.TestCase):
+    """A trace folder gets re-decoded and re-run over; stale answers must go.
+
+    The dangerous case is a dispatch that resolved on a previous run and cannot
+    on this one -- a different ``--code-object``, a re-decode that dropped the
+    matching dump. Leaving the old file behind means the viewer keeps reading
+    it, and because addresses repeat across code objects it joins cleanly and
+    reports the wrong kernel's source rather than falling back.
+    """
+
+    def stale(self, d: Path) -> Path:
+        """A sidecar a previous run left, naming a function from another object."""
+        path = d / efi.SIDECAR
+        path.write_text(
+            json.dumps(
+                {
+                    "version": efi.SIDECAR_VERSION,
+                    "functions": ["from_a_previous_run"],
+                    "files": ["/src/old.py"],
+                    "stacks": {"9:100": [[0, 0, 1, 0]]},
+                    "resolved": 1,
+                }
+            )
+        )
+        return path
+
+    def test_stale_sidecar_is_gone_when_the_dispatch_cannot_be_resolved(self):
+        orphan = self.dispatch("9", 9)
+        good = self.dispatch("1", 1)
+        self.stale(orphan)
+        self.assertEqual(efi.main([str(self.tmp)]), 0)
+        self.assertFalse((orphan / efi.SIDECAR).exists())
+        self.assertEqual(self.sidecar_of(good)["functions"], ["from_object_one"])
+
+    def test_stale_sidecar_is_replaced_when_the_dispatch_resolves(self):
+        d = self.dispatch("1", 1)
+        self.stale(d)
+        self.assertEqual(efi.main([str(self.tmp)]), 0)
+        self.assertEqual(self.sidecar_of(d)["functions"], ["from_object_one"])
+        self.assertEqual(list(self.sidecar_of(d)["stacks"]), ["1:100"])
+
+    def test_stale_sidecar_is_gone_even_when_the_whole_run_fails(self):
+        """Nothing resolves, so the run reports failure -- with no stale file
+        left to be read as though it had succeeded."""
+        orphan = self.dispatch("9", 9)
+        self.stale(orphan)
+        with self.assertRaises(SystemExit):
+            efi.main([str(self.tmp)])
+        self.assertFalse((orphan / efi.SIDECAR).exists())
+
+    def test_no_temporary_file_is_left_beside_the_sidecar(self):
+        """The write goes through a temp name; it must not survive the run."""
+        d = self.dispatch("1", 1)
+        self.assertEqual(efi.main([str(self.tmp)]), 0)
+        self.assertEqual(
+            [p.name for p in d.iterdir() if p.name.startswith(efi.SIDECAR)],
+            [efi.SIDECAR],
+        )
 
 
 if __name__ == "__main__":

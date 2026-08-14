@@ -23,6 +23,7 @@
 #include "rocke/arena.h"
 #include "rocke/ir.h"
 #include "rocke/lower_llvm_internal.h"
+#include "rocke/py_path_split.h"
 #include "rocke/strbuf.h"
 #include "rocke/vec.h"
 
@@ -70,36 +71,23 @@ static const char* dbg_escape(rocke_lower_t* L, const char* text)
     return out;
 }
 
-/* "!DIFile(filename: ..., directory: ...)" -- os.path.split semantics: the
- * directory keeps no trailing separator, and a bare filename yields "". */
+/* "!DIFile(filename: ..., directory: ...)" -- split exactly as the Python
+ * lowerer's os.path.split does, including on Windows, where a native path
+ * carries backslashes and a drive that posixpath would leave in the filename. */
 static const char* dbg_di_file(rocke_lower_t* L, const char* path)
 {
-    const char* slash = strrchr(path, '/');
-    const char* filename = slash ? slash + 1 : path;
-    char* directory = NULL;
-    if(slash == NULL)
+    const rocke_py_path_split_t cut
+        = rocke_py_path_split(path, strlen(path), ROCKE_PY_PATH_WINDOWS);
+    char* directory = (char*)rocke_arena_alloc(&L->arena, cut.head_len + 1);
+    if(directory == NULL)
     {
-        directory = rocke_arena_strdup(&L->arena, "");
+        rocke_ll_fail(L, ROCKE_ERR_OOM, "debug difile");
     }
-    else
-    {
-        /* os.path.split keeps a lone leading "/" as the directory. */
-        size_t n = (size_t)(slash - path);
-        if(n == 0)
-        {
-            n = 1;
-        }
-        directory = (char*)rocke_arena_alloc(&L->arena, n + 1);
-        if(directory == NULL)
-        {
-            rocke_ll_fail(L, ROCKE_ERR_OOM, "debug difile");
-        }
-        memcpy(directory, path, n);
-        directory[n] = '\0';
-    }
+    memcpy(directory, path, cut.head_len);
+    directory[cut.head_len] = '\0';
     return rocke_arena_printf(&L->arena,
                               "!DIFile(filename: \"%s\", directory: \"%s\")",
-                              dbg_escape(L, filename),
+                              dbg_escape(L, path + cut.tail_off),
                               dbg_escape(L, directory));
 }
 

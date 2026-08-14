@@ -14,7 +14,9 @@ Covers:
     ``!dbg`` per instruction and never two on one instruction;
   * multi-file kernels are attributed per file via ``DILexicalBlockFile``;
   * locations survive the ``ck.dsl.ir/v1`` round-trip, so the C++ engine sees
-    them too, and the C++ engine emits the same bytes from them;
+    them too, and the C++ engine emits the same bytes from them -- including
+    for a native Windows path, which the two ``os.path`` modules split
+    differently;
   * an installed rocke captures the same locations as a checkout;
   * the metadata survives assembly and codegen into a real AMDGPU object, which
     is where every downstream consumer actually reads it from.
@@ -22,12 +24,16 @@ Covers:
 
 from __future__ import annotations
 
+import itertools
+import ntpath
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from rocke.core import ir as ir_mod
 from rocke.core.ir import F32, IRBuilder, PtrType
@@ -441,15 +447,260 @@ class TestBothEnginesEmitTheSameDebugInfo(unittest.TestCase):
             self.lower_with("cpp", kernel), self.lower_with("python", kernel)
         )
 
+    def test_engines_agree_on_a_windows_style_location(self):
+        """A drive-letter path has to split the same way in both engines.
+
+        The Python side names files with ``os.path.split``, which is ntpath on
+        Windows and posixpath everywhere else, so on this host the backslashes
+        are ordinary filename bytes and the whole path is the basename. A C++
+        side that split on backslash regardless of platform would disagree here,
+        and one that never split on it would disagree on Windows -- where it did,
+        emitting the entire path as the filename with no directory at all.
+        """
+        engine_or_skip()
+        kernel = build_flat(capture_loc=True)
+        kernel.body.ops[-1].loc = r"C:\proj\rocke\emit.py:42"
+        cpp = self.lower_with("cpp", kernel)
+        self.assertEqual(cpp, self.lower_with("python", kernel))
+        # Backslashes survive as escaped pairs in the metadata string.
+        directory, filename = os.path.split(r"C:\proj\rocke\emit.py")
+        self.assertIn(
+            'filename: "{}", directory: "{}"'.format(
+                filename.replace("\\", "\\\\"), directory.replace("\\", "\\\\")
+            ),
+            cpp,
+        )
+
+
+# Enough to pin the separator handling: absolute and relative paths on both
+# platforms, the roots, UNC and verbatim prefixes, drive-relative paths, and the
+# doubled separators where off-by-one splits hide.
+PATH_SPLIT_CASES = (
+    r"C:\Users\me\proj\file.py",
+    r"C:\file.py",
+    r"C:file.py",
+    "C:\\",
+    "C:",
+    "C",
+    "file.py",
+    r"\file.py",
+    r"a\b\c.py",
+    "",
+    r"\\server\share\file.py",
+    r"\\server\share",
+    "\\\\server\\share\\\\",
+    r"\\server",
+    "\\\\",
+    r"\\?\C:\long\path\file.py",
+    r"\\?\UNC\srv\shr\f.py",
+    r"\\?\unc\srv\shr\f.py",
+    r"\\.\device\f.py",
+    "//server/share/file.py",
+    "/usr/lib/x.py",
+    "/x.py",
+    "//x.py",
+    "///x.py",
+    "/a//x.py",
+    "/",
+    "//",
+    "dir/",
+    "dir//",
+    "dir\\",
+    "C:/Users/me/file.py",
+    "C:\\Users\\me/file.py",
+    "/tmp/od:d/weird.py",
+    "/:",
+    "/:/",
+    ".",
+    "..",
+)
+
+# Reads paths on stdin and reports where the mirror cuts each one, under both
+# platforms' rules, as byte offsets the caller resolves against its own copy.
+_SPLIT_DRIVER = """
+#include <stdio.h>
+#include <string.h>
+#include "rocke/py_path_split.h"
+
+int main(void)
+{
+    char line[8192];
+    while(fgets(line, sizeof(line), stdin))
+    {
+        size_t n = strlen(line);
+        while(n && (line[n - 1] == '\\n' || line[n - 1] == '\\r'))
+            n--;
+        rocke_py_path_split_t nt = rocke_py_path_split(line, n, true);
+        rocke_py_path_split_t px = rocke_py_path_split(line, n, false);
+        printf("%zu %zu %zu %zu\\n", nt.head_len, nt.tail_off, px.head_len, px.tail_off);
+    }
+    return 0;
+}
+"""
+
+
+class TestPythonPathSplitMirror(unittest.TestCase):
+    """The C++ DIFile split must agree with ``os.path.split`` on both platforms.
+
+    Byte-identity between the engines is a per-host property: the Python side
+    calls ``os.path.split``, which is a different module on Windows than it is
+    here. Only the POSIX half of that is reachable through the lowerers on this
+    host, so this compiles the split by itself and checks each half against the
+    module it mirrors -- ntpath included, since a Windows host is exactly where
+    the divergence this covers was invisible.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.compiler = shutil.which("c++") or shutil.which("g++")
+        if cls.compiler is None:
+            raise unittest.SkipTest("no host C++ compiler")
+        cls.include = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(THIS_FILE))),
+            "cpp",
+            "include",
+        )
+        header = os.path.join(cls.include, "rocke", "py_path_split.h")
+        if not os.path.isfile(header):
+            raise unittest.SkipTest(f"missing {header}")
+
+    def splits(self, paths):
+        """``(ntpath, posixpath)`` splits of each path, as the C++ mirror cuts them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "driver.cpp")
+            exe = os.path.join(tmp, "driver")
+            with open(src, "w") as fh:
+                fh.write(_SPLIT_DRIVER)
+            subprocess.run(
+                [self.compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror"]
+                + ["-I", self.include, "-o", exe, src],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            out = subprocess.run(
+                [exe],
+                input="\n".join(paths) + "\n",
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+        self.assertEqual(len(out), len(paths))
+        cuts = []
+        for path, line in zip(paths, out):
+            nt_head, nt_tail, px_head, px_tail = (int(v) for v in line.split())
+            cuts.append(
+                (
+                    (path[:nt_head], path[nt_tail:]),
+                    (path[:px_head], path[px_tail:]),
+                )
+            )
+        return cuts
+
+    def test_matches_ntpath_and_posixpath(self):
+        for path, got in zip(PATH_SPLIT_CASES, self.splits(PATH_SPLIT_CASES)):
+            self.assertEqual(
+                got, (ntpath.split(path), posixpath.split(path)), f"splitting {path!r}"
+            )
+
+    def test_matches_over_every_short_separator_string(self):
+        """Exhaustive over the alphabet that decides a split, to length four.
+
+        The fixed cases above are the paths a Python frame really produces; this
+        is the part that catches an off-by-one in a root or prefix nobody thought
+        to write down.
+        """
+        alphabet = "/\\:aCUN?"
+        paths = [
+            "".join(combo)
+            for n in range(1, 5)
+            for combo in itertools.product(alphabet, repeat=n)
+        ]
+        want = [(ntpath.split(p), posixpath.split(p)) for p in paths]
+        self.assertEqual(self.splits(paths), want)
+
+
+LLVM_BIN_ENV = "ROCKE_TEST_LLVM_BIN"
+
 
 def llvm_tool(name):
-    """An LLVM tool from PATH or the ROCm install, or None."""
+    """An LLVM tool from the configured toolchain, PATH, or the ROCm default.
+
+    An explicitly set ``ROCM_PATH`` (or ``ROCKE_TEST_LLVM_BIN``) is preferred
+    over PATH, because a system LLVM of a different major version shadowing the
+    AMD one is a normal state for a host to be in, and the kernel is going to be
+    built by the AMD one. The system tool assembles the IR happily and then
+    reports none of the inlining, which reads as this test failing rather than
+    as the wrong ``llc`` having answered. PATH stays the route when nothing is
+    configured, so a hand-arranged toolchain still wins.
+    """
+    configured = []
+    if os.environ.get(LLVM_BIN_ENV):
+        configured.append(os.environ[LLVM_BIN_ENV])
+    if os.environ.get("ROCM_PATH"):
+        configured.append(os.path.join(os.environ["ROCM_PATH"], "llvm", "bin"))
+    for directory in configured:
+        candidate = os.path.join(directory, name)
+        if os.path.isfile(candidate):
+            return candidate
     found = shutil.which(name)
     if found:
         return found
-    rocm = os.environ.get("ROCM_PATH", "/opt/rocm")
-    candidate = os.path.join(rocm, "llvm", "bin", name)
+    candidate = os.path.join("/opt/rocm", "llvm", "bin", name)
     return candidate if os.path.isfile(candidate) else None
+
+
+class TestLlvmToolDiscovery(unittest.TestCase):
+    """Which ``llc`` answers decides whether the round trip below means anything.
+
+    A host with a distro LLVM ahead of the AMD one on PATH is ordinary, and the
+    older tool assembles the IR without complaint while reporting none of the
+    inlining -- so the round trip failed on a host that had a perfectly good
+    toolchain installed, and the failure pointed at the metadata instead of at
+    the toolchain.
+    """
+
+    def fake_bin(self, tmp, name):
+        directory = os.path.join(tmp, "llvm", "bin")
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, name)
+        with open(path, "w"):
+            pass
+        return path
+
+    def test_configured_rocm_wins_over_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = self.fake_bin(tmp, "llc")
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}):
+                self.assertEqual(llvm_tool("llc"), expected)
+
+    def test_explicit_llvm_bin_wins_over_rocm_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            override = os.path.join(tmp, "override")
+            os.makedirs(override)
+            expected = os.path.join(override, "llc")
+            with open(expected, "w"):
+                pass
+            self.fake_bin(tmp, "llc")
+            with mock.patch.dict(
+                os.environ, {"ROCM_PATH": tmp, LLVM_BIN_ENV: override}
+            ):
+                self.assertEqual(llvm_tool("llc"), expected)
+
+    def test_path_answers_when_nothing_is_configured(self):
+        """PATH stays the normal route for a deliberately arranged toolchain."""
+        with mock.patch.dict(os.environ, {}, clear=False) as env:
+            env.pop("ROCM_PATH", None)
+            env.pop(LLVM_BIN_ENV, None)
+            on_path = shutil.which("llc")
+            if on_path is None:
+                self.skipTest("no llc on PATH")
+            self.assertEqual(llvm_tool("llc"), on_path)
+
+    def test_a_configured_root_without_the_tool_falls_through(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"ROCM_PATH": tmp}):
+                self.assertEqual(llvm_tool("llc"), shutil.which("llc"))
 
 
 class TestObjectRoundTrip(unittest.TestCase):

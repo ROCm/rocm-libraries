@@ -314,9 +314,7 @@ python3 dsl_docs/optimization/utilities/tools/wavescope/capture_wavescope_trace.
   times and reports stall figures exceeding the kernel's wall-clock.
 - For the underlying rocprofv3 flags, the PMC fallback when the trace decoder is
   unavailable, and ISA-only analysis, see
-  `dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md` — note
-  its debug-info section predates `ROCKE_DEBUG_LOC` and still says rocke emits no
-  DWARF.
+  `dsl_docs/optimization/utilities/skills/capture-kernel-trace-rocke.md`.
 
 ## helpers/ placement
 

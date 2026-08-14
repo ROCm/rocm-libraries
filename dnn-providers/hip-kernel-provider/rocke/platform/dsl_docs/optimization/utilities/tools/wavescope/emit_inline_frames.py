@@ -22,6 +22,11 @@ Entries are keyed ``"<codeobj>:<vaddr>"``. Virtual addresses are per code object
 and collide across objects, so a trace that loaded more than one needs both
 columns to identify an instruction.
 
+Re-running over a folder that already has sidecars is safe and is the expected
+way to use this: each dispatch's old sidecar goes away before its new one is
+resolved, so a dispatch this run cannot attribute is left with no sidecar rather
+than the previous run's answer.
+
     python emit_inline_frames.py <att-output-dir>
     python emit_inline_frames.py <att-output-dir> --code-object k.hsaco
 """
@@ -353,6 +358,17 @@ def main(argv=None) -> int:
         rows = json.loads(code_json.read_text())["code"]
         present = row_code_objects(rows)
 
+        # Drop any sidecar from an earlier run before deciding anything. Traces
+        # get re-decoded and this tool re-run over the same folder, so a stale
+        # file left beside a dispatch this run cannot resolve is worse than no
+        # file at all: the viewer would load it and attribute the dispatch to
+        # whichever code object the previous run picked, which is the
+        # address-overlap mis-attribution the selection below exists to stop.
+        stale = d / SIDECAR
+        if stale.exists():
+            stale.unlink()
+            print(f"  {d.name}: removed the sidecar from an earlier run")
+
         code_object, code_object_id, problem = select_code_object(
             candidates, present, args.code_object
         )
@@ -381,7 +397,12 @@ def main(argv=None) -> int:
         sidecar = build_sidecar(rows, frames, code_object_id)
         total = len([r for r in rows if r and r[0] and not r[0].startswith(";")])
         out = d / SIDECAR
-        out.write_text(json.dumps(sidecar))
+        # Rename over the destination so the viewer only ever sees a whole file:
+        # a partial write, from a full disk or an interrupt, would otherwise be
+        # indistinguishable from a valid sidecar until it failed to parse.
+        tmp = out.with_name(out.name + ".tmp")
+        tmp.write_text(json.dumps(sidecar))
+        tmp.replace(out)
         written += 1
         print(
             f"  {d.name}: {sidecar['resolved']}/{total} instructions resolved, "
@@ -390,7 +411,16 @@ def main(argv=None) -> int:
         )
     if written == 0:
         raise SystemExit(f"no sidecar written ({skipped} dispatch(es) skipped)")
-    return 1 if skipped else 0
+    if skipped:
+        # Success: the dispatches named above have a sidecar each. The skipped
+        # ones have none, having had any stale file removed, so they fall back
+        # to innermost-frame attribution. Reporting failure here would have the
+        # caller announce that nothing was written at all.
+        print(
+            f"  {written} dispatch(es) resolved, {skipped} left without a "
+            "sidecar (innermost frame only)"
+        )
+    return 0
 
 
 if __name__ == "__main__":

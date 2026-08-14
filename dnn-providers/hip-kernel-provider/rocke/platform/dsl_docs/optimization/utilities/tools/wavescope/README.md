@@ -146,7 +146,7 @@ already have.
 | One helper line owns most of the stalls | no `inline_frames.json`; re-run `emit_inline_frames.py`, then use `+ inlined` |
 | Console warns the sidecar matched few or no instructions | it was built from a different build of the kernel — re-run `emit_inline_frames.py` against *this* trace |
 | No dispatch folder decoded at all | the kernel regex matched nothing, or the trace decoder is missing — the capture script says which |
-| `emit_inline_frames.py` skipped a dispatch | it ran a code object none of the dumped DWARF belongs to; pass `--code-object` to name the right one. Skipping is deliberate — addresses repeat across objects, so a guess would attribute another kernel's source rather than fail |
+| `emit_inline_frames.py` skipped a dispatch | it ran a code object none of the dumped DWARF belongs to; pass `--code-object` to name the right one. Skipping is deliberate — addresses repeat across objects, so a guess would attribute another kernel's source rather than fail. A skipped dispatch is left with no sidecar, including one from an earlier run, and the run still succeeds if any other dispatch resolved |
 | Stall totals exceed wall-clock | `code.json` columns are totals over every execution; divide by `Hit`, don't multiply |
 
 ## Related
