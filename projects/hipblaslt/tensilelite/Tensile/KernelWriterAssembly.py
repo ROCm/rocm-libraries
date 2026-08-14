@@ -19128,7 +19128,25 @@ class KernelWriterAssembly(KernelWriter):
     return lbspp // bytes_per_row
 
   def _emitTdmIterateInit(self, mod, kernel, tc, dtype, du, mt, perIssueLoadRowDivisor,
-                          descSgprName, strideRefName):
+                          descSgprName, strideRefName, rowsSgprIdx=None):
+    """Program the iterate-mode fields of the TDM descriptor (D# Group 2).
+
+    In iterate mode the engine repeats the tile fetch `iter_count + 1` times,
+    stepping the global address `tile_dim1` rows per iteration. That walk is driven
+    by `iter_count` alone: the descriptor's dim1 extent selects which fetched rows
+    reach LDS, but each iteration issues its access either way. So the count must
+    span exactly the rows the component owns and no more:
+
+        iters = min(ceil(rows / tile_dim1), rows_per_il / tile_dim1)
+
+    `rows` is the extent left from the component's base, which is larger than a
+    tile for every workgroup but the last, hence the cap at `rows_per_il`.
+
+    `rowsSgprIdx` holds that row count, floored at 0, and must still be live here.
+    Pass None only when no row count is available; the descriptor then walks a full
+    `rows_per_il`, which is correct only where every component is guaranteed a whole
+    tile -- an edge tile reads past the end of the tensor.
+    """
     comp = TensorDataMoverLoad.find(self)
     bpe = dtype.numBytes()
     dss = TensorDataMoverLoad.dataSizeShift(dtype)
@@ -19160,8 +19178,23 @@ class KernelWriterAssembly(KernelWriter):
                                 "fp4 sub-byte: bytes = elements / 2"))
       mod.add(comp.setIterationEnabled(descSgprName(1), True))
       mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, sGInc))
-      mod.add(SMovB32(sgpr(sIter), hex(iter_count - 1),
-                      f"TDM iter_count = rows_per_il({rows_per_il}) / tile_dim1({tile_dim1}) - 1"))
+      if rowsSgprIdx is None:
+        mod.add(SMovB32(sgpr(sIter), hex(iter_count - 1),
+                        f"TDM iter_count = rows_per_il({rows_per_il}) / tile_dim1({tile_dim1}) - 1"))
+      else:
+        if tile_dim1 & (tile_dim1 - 1):
+          raise RuntimeError(
+              f"TDM iterate {tc}: tile_dim1({tile_dim1}) must be a power of 2 to derive the "
+              "iteration count from the runtime row count.")
+        mod.add(SAddU32(sgpr(sIter), sgpr(rowsSgprIdx), tile_dim1 - 1,
+                        f"TDM iter_count: round rows up to tile_dim1({tile_dim1})"))
+        mod.add(SLShiftRightB32(sgpr(sIter), int(log2(tile_dim1)), sgpr(sIter),
+                                "TDM iter_count = ceil(rows / tile_dim1)"))
+        mod.add(SMinU32(dst=sgpr(sIter), src0=sgpr(sIter), src1=iter_count,
+                        comment=f"clamp to the full-tile count ({iter_count})"))
+        mod.add(SMaxU32(dst=sgpr(sIter), src0=sgpr(sIter), src1=1,
+                        comment="rows=0: field encodes n-1, and a 0 extent fetches nothing"))
+        mod.add(SSubU32(sgpr(sIter), sgpr(sIter), 1, "TDM iter_count field encodes n-1"))
       mod.add(comp.setIterations(descSgprName(2), sIter))
 
   def _emitTdmWaveParitySCC(self, module: Module, kernel: Mapping, dstTmpIdx: Optional[int] = None,
@@ -19576,6 +19609,15 @@ class KernelWriterAssembly(KernelWriter):
           mod.add(comp.setTensorDim1(descSgprName(1), dim1, self, 0, False, isSparseTrack if not unrolledMajor else False, isMetadata if not unrolledMajor else False))
           # The descriptor now holds the full per-wave dim1; TDMSplit recomputes
           # the half boundaries from it in globalReadDo.
+          if isTdmIter:
+            # Emitted here, not after the tile/stride setup below, because the
+            # iteration count is derived from dim1 and that register dies with
+            # this scope. Group 2 is independent of the fields written below.
+            self._emitTdmIterateInit(mod, kernel, tc, dtype, du, mt,
+                                     perIssueLoadRowDivisor=numComp * dim1Divisor,
+                                     descSgprName=descSgprName,
+                                     strideRefName=strideRefName,
+                                     rowsSgprIdx=dim1 if unrolledMajor else None)
 
     if tc.startswith("MX"):
       #reset to 0 since scale of sizeTile0 and stride for MX is not required
@@ -19615,12 +19657,6 @@ class KernelWriterAssembly(KernelWriter):
 
     # Multi-wave TDMSplit recomputes the LDS/global split increments transiently at
     # point of use (see _tdmSplitMultiWaveInc); nothing is initialized here.
-    if isTdmIter:
-      self._emitTdmIterateInit(mod, kernel, tc, dtype, du, mt,
-                               perIssueLoadRowDivisor=numComp * dim1Divisor,
-                               descSgprName=descSgprName,
-                               strideRefName=strideRefName)
-
     return mod
 
   def initTDMDescriptorWaveSeparated(self, kernel, tPA, tPB, waveIdxSgpr: int | str = "WaveIdx") -> Module:
