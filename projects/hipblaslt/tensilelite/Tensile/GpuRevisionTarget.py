@@ -29,13 +29,14 @@ def detect_gpu_arch():
             ["rocm_agent_enumerator", "-v"],
             capture_output=True, text=True, timeout=5, check=True,
         )
-        target = next(
-            (line.strip() for line in result.stdout.splitlines()
-             if line.startswith("gfx") and line.strip() != "gfx000"),
-            None,
-        )
-        if target:
-            return target
+        if result.returncode == 0:
+            target = next(
+                (line.strip() for line in result.stdout.splitlines()
+                 if line.startswith("gfx") and line.strip() != "gfx000"),
+                None,
+            )
+            if target:
+                return target
     except FileNotFoundError:
         print(
             "Error: 'rocm_agent_enumerator' command not found. "
