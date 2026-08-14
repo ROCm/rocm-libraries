@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <windows.h>
 
 #include "StringUtil.hpp"
@@ -148,7 +149,12 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
         throw std::runtime_error("Failed to get loaded library path for address");
     }
 
-    return std::filesystem::path(result.data()).parent_path();
+    // Canonicalized for the same reason as the dladdr form: callers resolve sibling paths
+    // against this, so a module reached through a symlink must answer with the directory
+    // its siblings actually sit in.
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(result.data(), failed);
+    return (failed ? std::filesystem::path(result.data()) : resolved).parent_path();
 }
 
 } // namespace hipdnn_data_sdk::utilities

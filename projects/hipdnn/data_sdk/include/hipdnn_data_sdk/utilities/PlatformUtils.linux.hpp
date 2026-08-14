@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unistd.h>
 
 namespace hipdnn_data_sdk::utilities
@@ -93,11 +94,18 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
     return dlsym(handle, symbolName);
 }
 
-/// The directory of the module @p address belongs to.
+/// The directory of the module @p address belongs to, as an absolute, symlink-resolved
+/// path.
 ///
 /// Works under every dlopen flag and needs nothing exported: the address already names
 /// the module. Prefer this over the symbol-name form when asking "where am I loaded
 /// from" about the calling module itself -- pass the address of one of its own functions.
+///
+/// dladdr reports the name the module was *loaded with*, which is not necessarily usable
+/// as a base for other paths: dlopen("./sub/lib.so") reports it verbatim, so anything
+/// resolved against it would follow the process's current directory rather than the
+/// module, and a .so reached through a symlink reports the link rather than the file its
+/// siblings sit beside. Canonicalized here so callers get a stable base either way.
 inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
 {
     Dl_info info{};
@@ -106,7 +114,11 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
         throw std::runtime_error("Failed to find loaded library for address");
     }
 
-    return std::filesystem::path(info.dli_fname).parent_path();
+    // error_code overload: a module path that cannot be canonicalized is still better
+    // answered as-is than by throwing out of a lookup the caller treats as best-effort.
+    std::error_code failed;
+    const auto resolved = std::filesystem::weakly_canonical(info.dli_fname, failed);
+    return (failed ? std::filesystem::path(info.dli_fname) : resolved).parent_path();
 }
 
 /// The directory of the module exporting @p symbolName.
