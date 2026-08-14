@@ -354,10 +354,11 @@ validParameters = { # we need to make sure this matches develop
     # 0: disable
     # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
     # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
-    # Currently we do not support StaggerU (forced off), general batch, or Stream-K
-    # other than DP-first (StreamK==3). GSU is supported, but only at the value the
-    # solution was tuned with (SupportUserGSU is forced off, so it cannot be
-    # overridden at runtime). May remove these limitations in the future.
+    # Currently we do not support general batch, or Stream-K other than DP-first
+    # (StreamK==3). GSU is supported, but only at the value the solution was tuned
+    # with (SupportUserGSU is forced off, so it cannot be overridden at runtime).
+    # StaggerU is supported, except under PrefetchAcrossPersistent where it is
+    # forced off. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
