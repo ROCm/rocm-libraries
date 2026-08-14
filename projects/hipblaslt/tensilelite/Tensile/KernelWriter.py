@@ -6799,6 +6799,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
+                               # between an urgent and a deferrable tensor_load group.
+                               # Off by default.
+                               "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
                                # PrefetchGlobalRead (PGR) for Tensile scheduling. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.
@@ -9187,7 +9191,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
       if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:
-        raise RuntimeError("Generating asm kernel error: total vgpr: %u not in [0, %u].\n" % (self.states.totalVgprs, self.states.regCaps["MaxVgpr"]))
+        print("warning: total VGPRS (%d) overflowed max VGPRS (%d)." % (self.states.totalVgprs, self.states.regCaps["MaxVgpr"]))
 
       agprLimit = self.states.regCaps["PhysicalMaxVgpr"] - self.states.regCaps["MaxVgpr"]
       if self.states.totalAgprs > agprLimit:

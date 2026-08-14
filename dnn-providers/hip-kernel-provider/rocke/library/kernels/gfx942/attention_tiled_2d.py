@@ -889,9 +889,9 @@ class UnifiedAttention2DTiledSpec:
                 raise ValueError("use_register_pv v1 is restricted to dtype='bf16'")
             if self.kv_storage_dtype is not None:
                 raise ValueError("use_register_pv v1 does not support fp8 K/V cache")
-            if self.use_sinks or self.sliding_window > 0 or self.has_softcap:
+            if self.sliding_window > 0 or self.has_softcap:
                 raise ValueError(
-                    "use_register_pv v1 requires no sinks, no sliding window, and no softcap"
+                    "use_register_pv v1 requires no sliding window and no softcap"
                 )
             if self.use_alibi or self.use_qq_bias:
                 raise ValueError("use_register_pv v1 does not support ALiBi or QQ bias")
@@ -1202,12 +1202,9 @@ def supports_tiled_2d(
         # to gfx950's; gfx942 is tile-limited rather than starved, so the only
         # effect is that the largest T/HD combos (which exceed 64 KB) are
         # rejected here with a clean reason instead of a comgr CODEGEN abort.
-        from rocke.core.arch import ArchTarget
+        from ..common.attention_arch import attention_lds_capacity_bytes
 
-        try:
-            _LDS_CAPACITY_BYTES = ArchTarget.from_gfx(arch).lds_capacity_bytes
-        except KeyError:
-            _LDS_CAPACITY_BYTES = 65536
+        _LDS_CAPACITY_BYTES = attention_lds_capacity_bytes(arch)
         _BPE = 2  # fp16/bf16
         _t_eff = tile_size if tile_size is not None else block_size
         _block_m = num_warps * block_m_per_warp
@@ -1782,12 +1779,9 @@ def build_unified_attention_2d_tiled(
     # (unpadded) figure, so disable the swizzle if the pad would push the total
     # estimate past the gfx942 LDS budget (otherwise a borderline config would
     # comgr-abort only when the env flag is set). Mirrors the gate's formula.
-    try:
-        from rocke.core.arch import ArchTarget as _ArchTarget
+    from ..common.attention_arch import attention_lds_capacity_bytes
 
-        _LDS_CAP = _ArchTarget.from_gfx(arch).lds_capacity_bytes
-    except Exception:  # noqa: BLE001
-        _LDS_CAP = 65536
+    _LDS_CAP = attention_lds_capacity_bytes(arch)
     _swz_extra_bytes = (T // max(V_ROWS_PER_CALL, 1)) * V_ROWS_PER_CALL * 8 * 2
     _out_stripe_b = 32 if HD <= 64 else HD
     _lds_natural = (
@@ -4184,8 +4178,11 @@ def build_unified_attention_2d_tiled(
                             # default kg%3 map at k_groups=4 (D128): at kg=1 the
                             # depth-3 prefetch targets slice 3 -> slot 0, the slot
                             # slice 0 used. Without this fence the QK accumulation
-                            # is corrupted (max_abs ~0.5-1.3 at magnitude); D64
-                            # (k_groups=2) never reuses a slot so it is unaffected.
+                            # is corrupted (max_abs ~0.5-1.3 at magnitude). A ring
+                            # with k_groups <= ring_depth touches each slot at most
+                            # once and never reaches this branch -- that was D64 at
+                            # the 32-wide slice; D64 now routes to width 16, so it
+                            # is k_groups=4 and does reuse.
                             # (CK's LdsSeq map hits the same reuse and always
                             # relied on this drain; it now applies to every map.)
                             if kg > 0 and next_slot == _kslot(kg - 1):
