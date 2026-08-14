@@ -20,8 +20,8 @@ def _root(tmp_path: Path, version: str = "7.2.4") -> Path:
     return root
 
 
-def _resolved(root: Path, source: str = "test") -> _rocm.ResolvedRocmRoot:
-    return _rocm.ResolvedRocmRoot(root, source)
+def _system_rocm(root: Path, source: str = "test") -> _rocm.SystemRocmRoot:
+    return _rocm.SystemRocmRoot(root, source)
 
 
 def _set_tensilelite_version(monkeypatch, version: str) -> None:
@@ -41,13 +41,13 @@ def test_expected_rocm_version_rejects_unmatched_distribution(version):
 def test_validate_distribution_uses_base_info_version_without_python_core(tmp_path, monkeypatch):
     root = _root(tmp_path, "10.1.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
-    monkeypatch.setattr(_rocm, "resolve_rocm_root", lambda: _resolved(root))
+    monkeypatch.setattr(_rocm, "resolve_system_rocm", lambda: _system_rocm(root))
 
     result = _rocm.validate_distribution(
         "tensilelite", "5.0.0+rocm10.1.0a20260813"
     )
 
-    assert isinstance(result, _rocm.PrefixRocm)
+    assert isinstance(result, _rocm.SystemRocm)
     assert result.root == root
     assert result.version == "10.1.0"
     assert result.source == "test"
@@ -57,7 +57,7 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
 def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
     root = _root(tmp_path, "7.3.0")
     monkeypatch.setattr(_rocm, "_python_sdk_version", lambda: None)
-    monkeypatch.setattr(_rocm, "resolve_rocm_root", lambda: _resolved(root, "active Python rocm_sdk"))
+    monkeypatch.setattr(_rocm, "resolve_system_rocm", lambda: _system_rocm(root, "active Python rocm_sdk"))
 
     with pytest.raises(
         _rocm.TensileLiteRuntimeError,
@@ -66,32 +66,32 @@ def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
         _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.2.4")
 
 
-def test_resolve_rocm_root_prefers_environment(tmp_path, monkeypatch):
+def test_resolve_system_rocm_prefers_environment(tmp_path, monkeypatch):
     root = _root(tmp_path)
     monkeypatch.setenv("ROCM_PATH", str(root))
 
-    result = _rocm.resolve_rocm_root()
+    result = _rocm.resolve_system_rocm()
 
     assert result.root == root.resolve()
     assert result.source == "explicit ROCM_PATH"
 
 
-def test_resolve_rocm_root_uses_hipconfig_on_path(tmp_path, monkeypatch):
+def test_resolve_system_rocm_uses_hipconfig_on_path(tmp_path, monkeypatch):
     root = _root(tmp_path)
     hipconfig = tmp_path / "hipconfig"
     hipconfig.write_text("#!/bin/sh\n", encoding="utf-8")
     hipconfig.chmod(0o755)
     monkeypatch.delenv("ROCM_PATH", raising=False)
-    monkeypatch.setattr(_rocm, "_path_rocm_root", lambda: _resolved(root, "hipconfig on PATH"))
+    monkeypatch.setattr(_rocm, "_path_system_rocm", lambda: _system_rocm(root, "hipconfig on PATH"))
     monkeypatch.setattr(_rocm.Path, "is_dir", lambda path: False if path == _rocm.Path("/opt/rocm") else path.exists())
 
-    result = _rocm.resolve_rocm_root()
+    result = _rocm.resolve_system_rocm()
 
     assert result.root == root.resolve()
     assert result.source == "hipconfig on PATH"
 
 
-def test_path_rocm_root_uses_hipconfig_rocmpath(tmp_path, monkeypatch):
+def test_path_system_rocm_uses_hipconfig_rocmpath(tmp_path, monkeypatch):
     root = _root(tmp_path)
     monkeypatch.setattr(_rocm.shutil, "which", lambda name: "/usr/bin/hipconfig")
     monkeypatch.setattr(
@@ -102,9 +102,9 @@ def test_path_rocm_root_uses_hipconfig_rocmpath(tmp_path, monkeypatch):
         ),
     )
 
-    result = _rocm._path_rocm_root()
+    result = _rocm._path_system_rocm()
 
-    assert result == _resolved(root, "hipconfig on PATH")
+    assert result == _system_rocm(root, "hipconfig on PATH")
 
 
 def test_python_sdk_version_uses_distribution_version(monkeypatch):
@@ -138,7 +138,7 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     monkeypatch.setattr(_rocm.sysconfig, "get_path", lambda name: str(scripts))
     monkeypatch.setattr(
         _rocm,
-        "resolve_rocm_root",
+        "resolve_system_rocm",
         lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
     )
 
@@ -146,7 +146,7 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
         "tensilelite", "5.0.0+rocm10.1.0a20260813"
     )
 
-    assert isinstance(result, _rocm.PythonSdkRocm)
+    assert isinstance(result, _rocm.PythonRocm)
     assert result.version == "10.1.0a20260813"
     assert result.source == "active Python rocm_sdk_core"
     assert result.toolchain_paths == (scripts.resolve(),)
@@ -164,7 +164,7 @@ def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.PrefixRocm(
+        lambda distribution, version: _rocm.SystemRocm(
             root, "7.2.4", "test", (root / "bin", root / "lib" / "llvm" / "bin")
         ),
     )
@@ -206,7 +206,7 @@ def test_python_sdk_client_request_uses_sdk_client_trampoline(tmp_path, monkeypa
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.PythonSdkRocm(
+        lambda distribution, version: _rocm.PythonRocm(
             "10.1.0a20260813", (scripts,)
         ),
     )
@@ -235,11 +235,11 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.PythonSdkRocm("10.1.0a20260813", (scripts,)),
+        lambda distribution, version: _rocm.PythonRocm("10.1.0a20260813", (scripts,)),
     )
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: configured)
     monkeypatch.setattr(
-        _rocm.PythonSdkRocm,
+        _rocm.PythonRocm,
         "default_client",
         lambda self: (_ for _ in ()).throw(AssertionError("SDK client was probed")),
     )
@@ -263,7 +263,7 @@ def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.PrefixRocm(
+        lambda distribution, version: _rocm.SystemRocm(
             root, "7.2.4", "test", (root / "bin", root / "lib" / "llvm" / "bin")
         ),
     )

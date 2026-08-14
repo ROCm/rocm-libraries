@@ -25,7 +25,7 @@ class TensileLiteRuntimeError(ImportError):
 
 
 @dataclass(frozen=True)
-class PythonSdkRocm:
+class PythonRocm:
     version: str
     toolchain_paths: tuple[Path, ...]
     source: str = "active Python rocm_sdk_core"
@@ -39,7 +39,7 @@ class PythonSdkRocm:
 
 
 @dataclass(frozen=True)
-class PrefixRocm:
+class SystemRocm:
     root: Path
     version: str
     source: str
@@ -49,11 +49,11 @@ class PrefixRocm:
         return ClientCandidate(standard_client_path(self.root), self.source)
 
 
-ValidatedRocm: TypeAlias = PythonSdkRocm | PrefixRocm
+ValidatedRocm: TypeAlias = PythonRocm | SystemRocm
 
 
 @dataclass(frozen=True)
-class ResolvedRocmRoot:
+class SystemRocmRoot:
     root: Path
     source: str
 
@@ -99,14 +99,14 @@ def rocm_base_version(value: str) -> str:
     return match.group(1)
 
 
-def _validated_root(root: Path, source: str) -> ResolvedRocmRoot:
+def _validated_system_rocm_root(root: Path, source: str) -> SystemRocmRoot:
     if not root.is_dir():
         raise TensileLiteRuntimeError(
             "ROCm installation not found.\n"
             f"  selected root: {root}\n"
             f"  selected by: {source}"
         )
-    return ResolvedRocmRoot(root.resolve(), source)
+    return SystemRocmRoot(root.resolve(), source)
 
 
 def _python_sdk_version() -> str | None:
@@ -135,7 +135,7 @@ def _python_sdk_toolchain_paths() -> tuple[Path, ...]:
     return (Path(scripts).resolve(),)
 
 
-def _path_rocm_root() -> ResolvedRocmRoot | None:
+def _path_system_rocm() -> SystemRocmRoot | None:
     hipconfig = shutil.which("hipconfig")
     if hipconfig is None:
         return None
@@ -150,16 +150,16 @@ def _path_rocm_root() -> ResolvedRocmRoot | None:
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
     root = result.stdout.strip()
-    return _validated_root(Path(root), "hipconfig on PATH") if root else None
+    return _validated_system_rocm_root(Path(root), "hipconfig on PATH") if root else None
 
 
-def resolve_rocm_root() -> ResolvedRocmRoot:
+def resolve_system_rocm() -> SystemRocmRoot:
     explicit = os.environ.get("ROCM_PATH")
     if explicit:
-        return _validated_root(Path(explicit).expanduser(), "explicit ROCM_PATH")
+        return _validated_system_rocm_root(Path(explicit).expanduser(), "explicit ROCM_PATH")
     if sys.platform != "win32" and Path("/opt/rocm").is_dir():
-        return _validated_root(Path("/opt/rocm"), "/opt/rocm")
-    path_root = _path_rocm_root()
+        return _validated_system_rocm_root(Path("/opt/rocm"), "/opt/rocm")
+    path_root = _path_system_rocm()
     if path_root is not None:
         return path_root
     raise TensileLiteRuntimeError(
@@ -179,7 +179,7 @@ def _validate_version(
         shown_version = distribution_version or package_version(distribution)
         selected = (
             f"  selected root: {validated.root}\n"
-            if isinstance(validated, PrefixRocm)
+            if isinstance(validated, SystemRocm)
             else ""
         )
         raise TensileLiteRuntimeError(
@@ -198,8 +198,8 @@ def _validate_python_sdk(
     distribution_version: str | None,
     expected: str,
     python_sdk_version: str,
-) -> PythonSdkRocm:
-    validated = PythonSdkRocm(
+) -> PythonRocm:
+    validated = PythonRocm(
         canonical_rocm_version(python_sdk_version),
         _python_sdk_toolchain_paths(),
     )
@@ -207,12 +207,12 @@ def _validate_python_sdk(
     return validated
 
 
-def _validate_rocm_prefix(
+def _validate_system_rocm(
     distribution: str,
     distribution_version: str | None,
     expected: str,
-) -> PrefixRocm:
-    resolved = resolve_rocm_root()
+) -> SystemRocm:
+    resolved = resolve_system_rocm()
     version_file = resolved.root / ".info" / "version"
     try:
         actual = canonical_rocm_version(version_file.read_text(encoding="utf-8"))
@@ -223,7 +223,7 @@ def _validate_rocm_prefix(
             f"  selected by: {resolved.source}\n"
             f"  expected file: {version_file}"
         ) from exc
-    validated = PrefixRocm(
+    validated = SystemRocm(
         resolved.root,
         actual,
         resolved.source,
@@ -242,12 +242,9 @@ def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
     expected = expected_rocm_version(distribution, distribution_version)
+    
     python_sdk_version = _python_sdk_version()
     if python_sdk_version is not None:
-        return _validate_python_sdk(
-            distribution,
-            distribution_version,
-            expected,
-            python_sdk_version,
-        )
-    return _validate_rocm_prefix(distribution, distribution_version, expected)
+        return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
+    
+    return _validate_system_rocm(distribution, distribution_version, expected)
