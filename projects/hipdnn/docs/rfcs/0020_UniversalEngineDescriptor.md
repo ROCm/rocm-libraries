@@ -175,7 +175,7 @@ possible from the `addedInVersion` data but is not part of this schema's own val
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "ued.json",
-  "title": "hipdnn UED",
+  "title": "hipDNN UED",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "id", "name", "heuristic", "metadata"],
