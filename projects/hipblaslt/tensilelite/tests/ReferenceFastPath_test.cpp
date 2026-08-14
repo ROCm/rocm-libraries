@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <span>
 #include <variant>
@@ -232,6 +233,33 @@ TEST(ReferenceGemmSelection, KeepsSparseHalfRequestsCanonical)
         EXPECT_EQ(d[index], Half(-99)) << "index=" << index;
 }
 
+TEST(ReferenceGemmSelection, ZeroRequestedElementsUsesSelectAllPolicy)
+{
+    const size_t M       = 1;
+    const size_t N       = 2;
+    const size_t K       = 64;
+    auto         problem = makePackedProblem(
+        rocisa::DataType::Half, rocisa::DataType::Half, rocisa::DataType::Half, M, N, K);
+    std::vector<Half> a(M * K, Half(0.1f));
+    std::vector<Half> b(K * N, Half(0.1f));
+    std::vector<Half> c(M * N, Half(0));
+    std::vector<Half> d(M * N, Half(-99));
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), Half(1), Half(0));
+
+    Half  canonicalExpected = Half(0);
+    float tiledExpected     = 0;
+    for(size_t reduction = 0; reduction < K; ++reduction)
+    {
+        canonicalExpected = Half(canonicalExpected + Half(a[reduction] * b[reduction]));
+        tiledExpected += static_cast<float>(a[reduction]) * static_cast<float>(b[reduction]);
+    }
+    ASSERT_NE(canonicalExpected, Half(tiledExpected));
+
+    const auto runInfo = SolveGemmCPU(problem, inputs, /*elementsToValidate=*/0);
+    EXPECT_EQ(runInfo.backendUsed, roc::host_validation::GemmBackend::Tiled);
+    EXPECT_EQ(d, std::vector<Half>(M * N, Half(tiledExpected)));
+}
+
 TEST(ReferenceGemmSelection, UsesTiledTilesForSparseFloatValidation)
 {
     const size_t M                  = 384;
@@ -370,6 +398,31 @@ TEST(ReferenceStandaloneEpilogue, HandlesEAndAmaxScaleAndGate)
     EXPECT_EQ(amaxD, 6);
 }
 
+TEST(ReferenceStandaloneEpilogue, CompletesDForPartialAmax)
+{
+    const size_t M = 2;
+    const size_t N = 2;
+    const size_t K = 1;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setOutputAmaxD(true);
+    problem.setAmaxD(rocisa::DataType::Float, true);
+
+    std::vector<float> a{1, 2};
+    std::vector<float> b{1, 10};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    float              amaxD = 0;
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.amaxD = &amaxD;
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    EXPECT_EQ(d, (std::vector<float>{1, 2, 10, 20}));
+    EXPECT_EQ(amaxD, 20);
+}
+
 TEST(ReferenceStandaloneEpilogue, HandlesGradientAuxiliaryInput)
 {
     const size_t M = 2;
@@ -440,9 +493,63 @@ TEST(ReferenceStandaloneEpilogue, HandlesGradientBiasReduction)
     inputs.e    = e.data();
     inputs.bias = bias.data();
 
-    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/-1));
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
     EXPECT_EQ(d, (std::vector<float>{3, 6, 4, 8}));
     EXPECT_EQ(bias, (std::vector<float>{7, 14}));
+}
+
+TEST(ReferenceStandaloneEpilogue, SamplesGradientBiasSourceA)
+{
+    const size_t M = 2;
+    const size_t N = 3;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseGradient(true);
+    problem.setUseBias(1);
+    problem.setBias(
+        rocisa::DataType::Float, M, M, true, ContractionProblemGemm::A, /*factorDim=*/0);
+
+    std::vector<float> a{1, 2, 3, 4};
+    std::vector<float> b(K * N, 1);
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> bias(M, 0);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.bias = bias.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    EXPECT_EQ(d, (std::vector<float>{4, -99, -99, 6, -99, -99}));
+    EXPECT_EQ(bias, (std::vector<float>{4, 6}));
+}
+
+TEST(ReferenceStandaloneEpilogue, SamplesGradientBiasSourceB)
+{
+    const size_t M = 2;
+    const size_t N = 3;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseGradient(true);
+    problem.setUseBias(1);
+    problem.setBias(
+        rocisa::DataType::Float, N, N, true, ContractionProblemGemm::B, /*factorDim=*/1);
+
+    std::vector<float> a(M * K, 1);
+    std::vector<float> b{1, 2, 3, 4, 5, 6};
+    std::vector<float> c(M * N, 0);
+    std::vector<float> d(M * N, -99);
+    std::vector<float> bias(N, 0);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.bias = bias.data();
+
+    ASSERT_TRUE(tryRuntimeCanonicalGemm(problem, inputs, /*elementsToValidate=*/2));
+    EXPECT_EQ(d, (std::vector<float>{3, -99, -99, 7, -99, -99}));
+    EXPECT_EQ(bias, (std::vector<float>{3, 7, 11}));
 }
 
 TEST(ReferenceStandaloneEpilogue, PreservesLegacySharedFactorAxisWhenMEqualsN)
@@ -831,6 +938,82 @@ TEST(ReferenceProblemAdapter, OwnsStandaloneTemporariesAcrossAdapterLifetime)
 
     EXPECT_EQ(d, (std::vector<float>{3, 6, 4, 8}));
     EXPECT_EQ(e, d);
+}
+
+TEST(ReferenceProblemAdapter, RejectsDescriptorStrideThatCannotFitPtrdiff)
+{
+    if constexpr(std::numeric_limits<size_t>::digits <= std::numeric_limits<ptrdiff_t>::digits)
+        GTEST_SKIP() << "size_t has no values outside ptrdiff_t range";
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, 1, 1, 1);
+    const size_t oversizedStride = static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) + 1;
+    problem.resetTensor(
+        ContractionProblemGemm::A, rocisa::DataType::Float, {1, 1, 1}, {1, oversizedStride, 1});
+
+    std::vector<float> a{1};
+    std::vector<float> b{1};
+    std::vector<float> c{0};
+    std::vector<float> d{-99};
+    ContractionInputs  inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+
+    const auto translation
+        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/0);
+    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
+              reference_adapter::TranslationFailureCode::InvalidDescriptor);
+}
+
+TEST(ReferenceProblemAdapter, RejectsMirroredOffsetMultiplicationOverflow)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 3;
+
+    ContractionProblemGemm::FreeIndices freeIndices{
+        {true, 0, 0, 0},
+        {false, 1, 1, 1},
+    };
+    ContractionProblemGemm::BatchIndices batchIndices{{2, 2, 2, 2}};
+    ContractionProblemGemm::BoundIndices boundIndices{{1, 0, true, false}};
+    TensorOps                            noOperations;
+    const size_t                         oversizedMirroredStride
+        = static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max()) / 2 + 1;
+    auto problem = ContractionProblemGemm::FromIndexSizes(freeIndices,
+                                                          batchIndices,
+                                                          boundIndices,
+                                                          {M, N, 1, K},
+                                                          rocisa::DataType::Float,
+                                                          {1, oversizedMirroredStride, 1},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, K, K * N},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, M, M * N},
+                                                          noOperations,
+                                                          rocisa::DataType::Float,
+                                                          {1, M, M * N},
+                                                          noOperations,
+                                                          0.0);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+
+    std::vector<float> a(K, 1);
+    std::vector<float> b(K, 1);
+    std::vector<float> c{0};
+    std::vector<float> d{-99};
+    const void*        batchA[] = {a.data()};
+    ContractionInputs  inputs(nullptr, b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    inputs.batchA = batchA;
+
+    const auto translation
+        = reference_adapter::translateGemmProblem(problem, inputs, /*elementsToValidate=*/0);
+    ASSERT_TRUE(std::holds_alternative<reference_adapter::TranslationFailure>(translation));
+    EXPECT_EQ(std::get<reference_adapter::TranslationFailure>(translation).code,
+              reference_adapter::TranslationFailureCode::InvalidDescriptor);
 }
 
 TEST(ReferenceRuntimeCanonical, HandlesFloat16Accumulation)

@@ -11,6 +11,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -25,6 +26,33 @@ namespace TensileLite::Client::reference_adapter
         inline TranslationFailure failure(TranslationFailureCode code, std::string reason)
         {
             return {code, std::move(reason)};
+        }
+
+        template <typename Integer>
+        inline ptrdiff_t checkedToPtrdiff(Integer value)
+        {
+            if(!std::in_range<ptrdiff_t>(value))
+                throw std::overflow_error("TensileLite adapter offset exceeds ptrdiff_t.");
+            return static_cast<ptrdiff_t>(value);
+        }
+
+        inline ptrdiff_t checkedMultiply(size_t left, size_t right)
+        {
+            constexpr uintmax_t maximum
+                = static_cast<uintmax_t>(std::numeric_limits<ptrdiff_t>::max());
+            const uintmax_t unsignedLeft  = static_cast<uintmax_t>(left);
+            const uintmax_t unsignedRight = static_cast<uintmax_t>(right);
+            if(unsignedLeft != 0 && unsignedRight > maximum / unsignedLeft)
+                throw std::overflow_error("TensileLite adapter offset multiplication overflow.");
+            return static_cast<ptrdiff_t>(unsignedLeft * unsignedRight);
+        }
+
+        inline ptrdiff_t checkedAdd(ptrdiff_t left, ptrdiff_t right)
+        {
+            if((right > 0 && left > std::numeric_limits<ptrdiff_t>::max() - right)
+               || (right < 0 && left < std::numeric_limits<ptrdiff_t>::min() - right))
+                throw std::overflow_error("TensileLite adapter offset addition overflow.");
+            return left + right;
         }
 
         inline bool supportedAccumulator(ScalarType type)
@@ -90,7 +118,7 @@ namespace TensileLite::Client::reference_adapter
             std::vector<ptrdiff_t> strides;
             strides.reserve(descriptor.strides().size());
             for(const size_t stride : descriptor.strides())
-                strides.push_back(static_cast<ptrdiff_t>(stride));
+                strides.push_back(checkedToPtrdiff(stride));
             return Layout(Shape(descriptor.sizes()), std::move(strides));
         }
 
@@ -378,8 +406,11 @@ namespace TensileLite::Client::reference_adapter
             for(auto const& operation : problem.bOps())
                 bConjugate |= operation.type == TensorOp::Type::ComplexConjugate;
 
+            const bool requiresCompleteD = problem.outputAmaxD()
+                                           || (problem.useGradient() && problem.useBias()
+                                               && problem.biasSrc() == ContractionProblemGemm::D);
             const OutputSelection globalSelection
-                = problem.useGradient() && problem.useBias()
+                = requiresCompleteD
                       ? OutputSelection::all()
                       : OutputSelection::primeStride(problem.d().totalLogicalElements(),
                                                      problem.d().totalAllocatedElements(),
@@ -420,29 +451,31 @@ namespace TensileLite::Client::reference_adapter
                 }
             }
 
+            const ptrdiff_t batchOffsetA = detail::checkedToPtrdiff(inputs.batchOffsetA);
+            const ptrdiff_t batchOffsetB = detail::checkedToPtrdiff(inputs.batchOffsetB);
+            const ptrdiff_t batchOffsetC = detail::checkedToPtrdiff(inputs.batchOffsetC);
+            const ptrdiff_t batchOffsetD = detail::checkedToPtrdiff(inputs.batchOffsetD);
+
             std::span<const std::byte> aStorage;
             std::span<const std::byte> bStorage;
             std::span<const std::byte> cStorage;
             std::span<std::byte>       dStorage;
             if(inputs.batchA == nullptr)
             {
-                aStorage
-                    = detail::descriptorStorage(typeA, problem.a(), inputs.a, inputs.batchOffsetA);
+                aStorage = detail::descriptorStorage(typeA, problem.a(), inputs.a, batchOffsetA);
             }
             if(inputs.batchB == nullptr)
             {
-                bStorage
-                    = detail::descriptorStorage(typeB, problem.b(), inputs.b, inputs.batchOffsetB);
+                bStorage = detail::descriptorStorage(typeB, problem.b(), inputs.b, batchOffsetB);
             }
             if(inputs.batchC == nullptr)
             {
-                cStorage
-                    = detail::descriptorStorage(typeC, problem.c(), inputs.c, inputs.batchOffsetC);
+                cStorage = detail::descriptorStorage(typeC, problem.c(), inputs.c, batchOffsetC);
             }
             if(inputs.batchD == nullptr)
             {
-                dStorage = detail::mutableDescriptorStorage(
-                    typeD, problem.d(), inputs.d, inputs.batchOffsetD);
+                dStorage
+                    = detail::mutableDescriptorStorage(typeD, problem.d(), inputs.d, batchOffsetD);
             }
 
             std::optional<ScalarType>  biasType;
@@ -554,76 +587,77 @@ namespace TensileLite::Client::reference_adapter
             {
                 ptrdiff_t offsetA
                     = inputs.batchA == nullptr
-                          ? static_cast<ptrdiff_t>(batch * problem.a().strides()[batchA])
+                          ? detail::checkedMultiply(batch, problem.a().strides()[batchA])
                           : 0;
                 ptrdiff_t offsetB
                     = inputs.batchB == nullptr
-                          ? static_cast<ptrdiff_t>(batch * problem.b().strides()[batchB])
+                          ? detail::checkedMultiply(batch, problem.b().strides()[batchB])
                           : 0;
                 const ptrdiff_t offsetC
                     = inputs.batchC == nullptr
-                          ? static_cast<ptrdiff_t>(batch * problem.c().strides()[batchC])
+                          ? detail::checkedMultiply(batch, problem.c().strides()[batchC])
                           : 0;
                 const ptrdiff_t offsetD
                     = inputs.batchD == nullptr
-                          ? static_cast<ptrdiff_t>(batch * problem.d().strides()[batchD])
+                          ? detail::checkedMultiply(batch, problem.d().strides()[batchD])
                           : 0;
-                ptrdiff_t strideKA = static_cast<ptrdiff_t>(problem.a().strides()[indexKA]);
-                ptrdiff_t strideKB = static_cast<ptrdiff_t>(problem.b().strides()[indexKB]);
+                ptrdiff_t strideKA = detail::checkedToPtrdiff(problem.a().strides()[indexKA]);
+                ptrdiff_t strideKB = detail::checkedToPtrdiff(problem.b().strides()[indexKB]);
                 if(problem.boundIndices()[0].aMirror && k != 0)
                 {
-                    offsetA += static_cast<ptrdiff_t>(k - 1) * strideKA;
+                    const ptrdiff_t mirroredOffset
+                        = detail::checkedMultiply(k - 1, problem.a().strides()[indexKA]);
+                    offsetA  = detail::checkedAdd(offsetA, mirroredOffset);
                     strideKA = -strideKA;
                 }
                 if(problem.boundIndices()[0].bMirror && k != 0)
                 {
-                    offsetB += static_cast<ptrdiff_t>(k - 1) * strideKB;
+                    const ptrdiff_t mirroredOffset
+                        = detail::checkedMultiply(k - 1, problem.b().strides()[indexKB]);
+                    offsetB  = detail::checkedAdd(offsetB, mirroredOffset);
                     strideKB = -strideKB;
                 }
 
                 const Layout layoutA(
                     Shape{m, k},
-                    {static_cast<ptrdiff_t>(problem.a().strides()[indexMA]), strideKA},
+                    {detail::checkedToPtrdiff(problem.a().strides()[indexMA]), strideKA},
                     offsetA);
                 const Layout layoutB(
                     Shape{k, n},
-                    {strideKB, static_cast<ptrdiff_t>(problem.b().strides()[indexNB])},
+                    {strideKB, detail::checkedToPtrdiff(problem.b().strides()[indexNB])},
                     offsetB);
                 const Layout layoutC(Shape{m, n},
-                                     {static_cast<ptrdiff_t>(problem.c().strides()[indexMD]),
-                                      static_cast<ptrdiff_t>(problem.c().strides()[indexND])},
+                                     {detail::checkedToPtrdiff(problem.c().strides()[indexMD]),
+                                      detail::checkedToPtrdiff(problem.c().strides()[indexND])},
                                      offsetC);
                 const Layout layoutD(Shape{m, n},
-                                     {static_cast<ptrdiff_t>(problem.d().strides()[indexMD]),
-                                      static_cast<ptrdiff_t>(problem.d().strides()[indexND])},
+                                     {detail::checkedToPtrdiff(problem.d().strides()[indexMD]),
+                                      detail::checkedToPtrdiff(problem.d().strides()[indexND])},
                                      offsetD);
 
                 const auto currentAStorage
                     = inputs.batchA == nullptr
                           ? aStorage
                           : std::span<const std::byte>(
-                                static_cast<const std::byte*>(inputs.batchA[batch])
-                                    + inputs.batchOffsetA,
+                                static_cast<const std::byte*>(inputs.batchA[batch]) + batchOffsetA,
                                 storageBytesForLayout(typeA, layoutA));
                 const auto currentBStorage
                     = inputs.batchB == nullptr
                           ? bStorage
                           : std::span<const std::byte>(
-                                static_cast<const std::byte*>(inputs.batchB[batch])
-                                    + inputs.batchOffsetB,
+                                static_cast<const std::byte*>(inputs.batchB[batch]) + batchOffsetB,
                                 storageBytesForLayout(typeB, layoutB));
                 const auto currentCStorage
                     = inputs.batchC == nullptr
                           ? cStorage
                           : std::span<const std::byte>(
-                                static_cast<const std::byte*>(inputs.batchC[batch])
-                                    + inputs.batchOffsetC,
+                                static_cast<const std::byte*>(inputs.batchC[batch]) + batchOffsetC,
                                 storageBytesForLayout(typeC, layoutC));
                 const auto currentDStorage
                     = inputs.batchD == nullptr
                           ? dStorage
                           : std::span<std::byte>(static_cast<std::byte*>(inputs.batchD[batch])
-                                                     + inputs.batchOffsetD,
+                                                     + batchOffsetD,
                                                  storageBytesForLayout(typeD, layoutD));
 
                 std::optional<VectorBinding>     runtimeBias;
@@ -638,11 +672,9 @@ namespace TensileLite::Client::reference_adapter
                     std::span<std::byte>       currentBiasOutputStorage = biasOutputStorage;
                     if(inputs.batchBias == nullptr)
                     {
-                        std::vector<int64_t> biasCoordinate(problem.bias().dimensions(), 0);
-                        if(biasCoordinate.size() > 2)
-                            biasCoordinate[2] = static_cast<int64_t>(batch);
-                        runtimeBiasOffset
-                            = static_cast<ptrdiff_t>(problem.bias().index(biasCoordinate));
+                        if(problem.bias().dimensions() > 2)
+                            runtimeBiasOffset
+                                = detail::checkedMultiply(batch, problem.bias().strides()[2]);
                     }
                     else
                     {
@@ -672,11 +704,11 @@ namespace TensileLite::Client::reference_adapter
                 if(problem.useE())
                 {
                     const ptrdiff_t offsetE
-                        = static_cast<ptrdiff_t>(batch * auxiliaryDescriptor->strides()[batchD]);
+                        = detail::checkedMultiply(batch, auxiliaryDescriptor->strides()[batchD]);
                     const Layout layoutE(
                         Shape{m, n},
-                        {static_cast<ptrdiff_t>(auxiliaryDescriptor->strides()[indexMD]),
-                         static_cast<ptrdiff_t>(auxiliaryDescriptor->strides()[indexND])},
+                        {detail::checkedToPtrdiff(auxiliaryDescriptor->strides()[indexMD]),
+                         detail::checkedToPtrdiff(auxiliaryDescriptor->strides()[indexND])},
                         offsetE);
                     if(problem.useGradient())
                         auxiliaryInput = TensorView(*auxiliaryType, layoutE, auxiliaryStorage);
@@ -690,12 +722,12 @@ namespace TensileLite::Client::reference_adapter
                 {
                     const ptrdiff_t offsetGate
                         = inputs.batchGateResidual == nullptr
-                              ? static_cast<ptrdiff_t>(batch * gateDescriptor->strides()[batchD])
+                              ? detail::checkedMultiply(batch, gateDescriptor->strides()[batchD])
                               : 0;
                     const Layout gateLayout(
                         Shape{m, n},
-                        {static_cast<ptrdiff_t>(gateDescriptor->strides()[indexMD]),
-                         static_cast<ptrdiff_t>(gateDescriptor->strides()[indexND])},
+                        {detail::checkedToPtrdiff(gateDescriptor->strides()[indexMD]),
+                         detail::checkedToPtrdiff(gateDescriptor->strides()[indexND])},
                         offsetGate);
                     std::span<const std::byte> currentGateStorage = gateStorage;
                     if(inputs.batchGateResidual != nullptr)
