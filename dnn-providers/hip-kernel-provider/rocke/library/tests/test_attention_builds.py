@@ -1165,6 +1165,433 @@ class TestAttentionHelpers(unittest.TestCase):
                 self.assertGreater(art.hsaco_bytes, 0)
                 _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
 
+    def test_gfx950_dense_paged_spec_admission(self):
+        """Paged spec fields + validation: accept the fp16/bf16 D128 SW single-seq
+        cohort, reject illegal / not-yet-validated combos. Pure-Python (no GPU)."""
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            supports_attention_dense,
+        )
+
+        base = dict(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+        )
+        # Accept: fp16 D128 SW single-seq, page size divides block_n.
+        ok, why = supports_attention_dense(
+            AttentionDenseSpec(paged=True, block_size=16, num_kv_blocks=512, **base)
+        )
+        self.assertTrue(ok, why)
+        # kernel name carries the paged tag (distinct binary / cache key).
+        self.assertIn(
+            "pgd16",
+            AttentionDenseSpec(
+                paged=True, block_size=16, num_kv_blocks=512, **base
+            ).kernel_name(),
+        )
+        # num_kv_blocks is IR-live (sets the paged buffer-rsrc bound) so it MUST be part
+        # of the kernel identity -- else two cache sizes collide in the launcher cache and
+        # the larger reads later blocks as 0. Assert distinctness.
+        n512 = AttentionDenseSpec(
+            paged=True, block_size=16, num_kv_blocks=512, **base
+        ).kernel_name()
+        n1024 = AttentionDenseSpec(
+            paged=True, block_size=16, num_kv_blocks=1024, **base
+        ).kernel_name()
+        self.assertNotEqual(n512, n1024)
+        self.assertIn("nb512", n512)
+        self.assertIn("nb1024", n1024)
+        # Accept: bf16 too -- the paged mechanism is dtype-generic (both 2-byte).
+        ok_bf, why_bf = supports_attention_dense(
+            AttentionDenseSpec(
+                paged=True,
+                block_size=16,
+                num_kv_blocks=512,
+                **{**base, "dtype": "bf16"},
+            )
+        )
+        self.assertTrue(ok_bf, why_bf)
+        # Rejections (each a ValueError from __post_init__).
+        for kw in (
+            dict(block_size=0, num_kv_blocks=512),  # page size 0
+            dict(block_size=128, num_kv_blocks=512),  # not a divisor of block_n (pow2)
+            dict(
+                block_size=24, num_kv_blocks=512
+            ),  # non-power-of-two (shift/mask gate)
+            dict(block_size=4, num_kv_blocks=512),  # < ROWS_PER_WAVE (8)
+            dict(block_size=16, num_kv_blocks=0),  # num_kv_blocks 0
+            dict(block_size=16, num_kv_blocks=70000),  # cache > 2 GiB (i32 overflow)
+            dict(block_size=16, num_kv_blocks=512, batch=2),  # multi-seq
+            dict(block_size=16, num_kv_blocks=512, varlen=True),
+            dict(block_size=16, num_kv_blocks=512, persistent=True),
+            dict(
+                block_size=16, num_kv_blocks=512, sliding_window=0
+            ),  # not validated yet
+        ):
+            with self.subTest(kw=kw), self.assertRaises(ValueError):
+                AttentionDenseSpec(paged=True, **{**base, **kw})
+        # 0-cost when off: a non-paged spec is unaffected.
+        s = AttentionDenseSpec(**base)
+        self.assertFalse(s.paged)
+        self.assertNotIn("pgd", s.kernel_name())
+
+    def test_gfx950_dense_paged_builds_and_signature(self):
+        """Paged ABI: the signature carries block_tables/kv_lens/block_table_stride,
+        and the paged spec builds on host (load path still contiguous at this stage)."""
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            attention_dense_signature,
+            build_attention_dense,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=512,
+        )
+        names = [p["name"] for p in attention_dense_signature(spec)]
+        for req in ("block_tables", "kv_lens", "block_table_stride"):
+            self.assertIn(req, names)
+        self.assertIsNotNone(build_attention_dense(spec, arch="gfx950"))
+
+    def test_gfx950_dense_paged_prefill_compiles_and_fits_budget(self):
+        """comgr build + resource-budget net for the PAGED gfx950 dense prefill
+        (fp16/bf16 D128 sliding-window, single-seq). Mirrors the non-paged dense
+        budget test; the block_tables indirection adds a load but must still fit."""
+        from kernels import AttentionDenseSpec, build_attention_dense
+
+        for dt in ("fp16", "bf16"):
+            spec = AttentionDenseSpec(
+                batch=1,
+                seqlen_q=8192,
+                seqlen_kv=8192,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                causal=True,
+                dtype=dt,
+                sliding_window=4096,
+                block_n=64,
+                paged=True,
+                block_size=16,
+                num_kv_blocks=512,
+            )
+            with self.subTest(dtype=dt):
+                self.assertIn("pgd16", spec.kernel_name())
+                k = build_attention_dense(spec, arch="gfx950")
+                art = _compile_or_skip(k, arch="gfx950")
+                self.assertGreater(art.hsaco_bytes, 0)
+                _assert_resources_fit(art, arch="gfx950", kernel_name=k.name)
+
+    def test_gfx950_dense_paged_launcher_rejects_kv_cache_shape_mismatch(self):
+        """The launcher must reject a paged K/V cache whose shape disagrees with
+        the spec that sizes the buffer-resource bound
+        (num_kv_blocks*block_size*num_kv_heads*head_size). A too-small cache
+        under a too-large ``num_kv_blocks`` sets an oversized hardware bound and lets
+        a block-table entry drive an OOB read. Host-only: the shape check raises
+        before any comgr compile / GPU launch, so no torch or GPU is required (only
+        ``.shape`` is read pre-launch, so lightweight stand-ins suffice)."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=8192,
+            seqlen_kv=8192,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=16,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        wrong = (256, spec.block_size, spec.num_kv_heads, spec.head_size)  # 256 != 512
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        block_tables = SimpleNamespace(shape=(1, 512))
+        kv_lens = SimpleNamespace(shape=(1,))
+
+        # Negative (K): fewer physical blocks than the spec claims -> reject.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=SimpleNamespace(shape=wrong),
+                v=SimpleNamespace(shape=want),
+                out=out,
+                scale=1.0,
+                block_tables=block_tables,
+                kv_lens=kv_lens,
+            )
+        msg = str(ctx.exception)
+        self.assertIn("paged k cache shape", msg)
+        self.assertIn("(256,", msg)  # the offending shape is reported
+        self.assertIn("OOB", msg)
+
+        # Negative (V): the same defect on the value cache is also caught.
+        with self.assertRaises(ValueError):
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=SimpleNamespace(shape=want),
+                v=SimpleNamespace(shape=wrong),
+                out=out,
+                scale=1.0,
+                block_tables=block_tables,
+                kv_lens=kv_lens,
+            )
+
+        # Positive control: MATCHING shapes pass the shape gate and reach compile.
+        # Patch compile_kernel to a sentinel so the launcher stays host-only (no
+        # comgr, no GPU) yet proves it did NOT raise our shape ValueError. Clear the
+        # launcher cache so a prior test cannot let us skip compile. validate_paged
+        # is off here to isolate the SHAPE gate (block-table CONTENTS validation is
+        # covered by test_..._validates_block_table_bounds).
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        sentinel = RuntimeError("reached-compile")
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok_ctx:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=SimpleNamespace(shape=want),
+                    v=SimpleNamespace(shape=want),
+                    out=out,
+                    scale=1.0,
+                    block_tables=block_tables,
+                    kv_lens=kv_lens,
+                    validate_paged=False,
+                )
+            self.assertIs(ok_ctx.exception, sentinel)
+
+    def test_gfx950_dense_paged_launcher_validates_block_table_bounds(self):
+        """Gated CONTENTS check on paged block tables: an entry outside
+        [0, num_kv_blocks) reads 0 via the bounds-checked cache SRD (silent wrong
+        output), so validate_paged=True rejects it loudly, validate_paged=False
+        skips it (sync-free hot path), and only DEREFERENCED pages are checked.
+        Host-only: block_tables/kv_lens are plain Python lists (only ints + slicing
+        are read), so no torch / GPU."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=64,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=want)
+        v = SimpleNamespace(shape=want)
+        kv_lens = [256]  # == seqlen_kv (enforced) -> ceil(256/64)=4 pages deref
+        good_bt = [[0, 1, 2, 3]]  # all in [0, 512)
+        bad_bt = [[0, 1, 600, 3]]  # 600 >= num_kv_blocks at a USED page
+        sentinel = RuntimeError("reached-compile")
+
+        # Negative (validate on, default): a used entry >= num_kv_blocks -> reject
+        # loudly, before any compile / launch.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                block_tables=bad_bt,
+                kv_lens=kv_lens,
+            )
+        msg = str(ctx.exception)
+        self.assertIn("600", msg)
+        self.assertIn("num_kv_blocks=512", msg)
+
+        # Only DEREFERENCED pages are checked: a bad id in a column BEYOND n_pages
+        # (index >= ceil(256/64)=4) is never read, so it is ignored.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as beyond:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=[[0, 1, 2, 3, 600]],
+                    kv_lens=kv_lens,
+                )
+            self.assertIs(beyond.exception, sentinel)
+
+        # Gate off: the bad table is skipped entirely -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as gated:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=bad_bt,
+                    kv_lens=kv_lens,
+                    validate_paged=False,
+                )
+            self.assertIs(gated.exception, sentinel)
+
+        # Positive (validate on, valid table): passes the gate -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=kv_lens,
+                )
+            self.assertIs(ok.exception, sentinel)
+
+    def test_gfx950_dense_paged_launcher_validates_kv_len_contract(self):
+        """Gated CONTENTS check: the kernel visits ALL compile-time seqlen_kv
+        tiles but the page-bounds mask uses the runtime kv_len, so a kv_len
+        shorter than seqlen_kv leaves uncovered tiles reading page 0 (the masked
+        block-table default) -> silently wrong output. validate_paged=True
+        enforces kv_lens[i] == seqlen_kv; validate_paged=False skips it (hot
+        path). Host-only (plain lists), no torch / GPU."""
+        from types import SimpleNamespace
+        from unittest import mock
+
+        import kernels.gfx950.attention_dense as ad
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            run_attention_dense_torch,
+        )
+
+        spec = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=256,
+            seqlen_kv=256,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="fp16",
+            sliding_window=4096,
+            block_n=64,
+            paged=True,
+            block_size=64,
+            num_kv_blocks=512,
+        )
+        want = (spec.num_kv_blocks, spec.block_size, spec.num_kv_heads, spec.head_size)
+        qshape = (1, spec.seqlen_q, spec.num_query_heads, spec.head_size)
+        q = SimpleNamespace(shape=qshape)
+        out = SimpleNamespace(shape=qshape)
+        k = SimpleNamespace(shape=want)
+        v = SimpleNamespace(shape=want)
+        good_bt = [[0, 1, 2, 3]]
+        sentinel = RuntimeError("reached-compile")
+
+        # Negative (validate on, default): kv_len < seqlen_kv -> reject loudly.
+        with self.assertRaises(ValueError) as ctx:
+            run_attention_dense_torch(
+                spec=spec,
+                q=q,
+                k=k,
+                v=v,
+                out=out,
+                scale=1.0,
+                block_tables=good_bt,
+                kv_lens=[128],
+            )
+        msg = str(ctx.exception)
+        self.assertIn("kv_lens[0]=128", msg)
+        self.assertIn("seqlen_kv=256", msg)
+
+        # Gate off: the contract is not checked -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as gated:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=[128],
+                    validate_paged=False,
+                )
+            self.assertIs(gated.exception, sentinel)
+
+        # Positive (kv_len == seqlen_kv): passes the gate -> reaches compile.
+        ad._DENSE_LAUNCHER_CACHE.clear()
+        with mock.patch("rocke.helpers.compile.compile_kernel", side_effect=sentinel):
+            with self.assertRaises(RuntimeError) as ok:
+                run_attention_dense_torch(
+                    spec=spec,
+                    q=q,
+                    k=k,
+                    v=v,
+                    out=out,
+                    scale=1.0,
+                    block_tables=good_bt,
+                    kv_lens=[256],
+                )
+            self.assertIs(ok.exception, sentinel)
+
     def test_attention_3d_workspace_size_matches_shapes(self):
         p = UnifiedAttentionProblem(
             total_q=3,
