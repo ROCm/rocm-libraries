@@ -1014,8 +1014,14 @@ class Solution(collections.abc.Mapping):
       #   4 // regPerElem = 8, and a buffer_store tops out at 16 bytes = 8 two-byte
       #   elements. Floor and ceiling meet at 8, so MIWaveTile[0] must be exactly 8:
       #   at 4 SS1 ties SS0 while paying for LDS padding and a disabled swizzle, and at
-      #   2 it stores half as wide. MIWaveTile[1] must match it because A and B share the
-      #   LDS rowOffset (SubtileLREmit assert).
+      #   2 it stores half as wide.
+      #
+      #   MIWaveTile[1] is only required to be a multiple of VectorWidthB. It carries no
+      #   store-width bound of its own -- N is the strided store axis -- it only has to
+      #   let the local read tile the wave's rows, which the two-level interleaved map
+      #   does for any multiple (see SubtileLREmit.emitSingleDsRead). VectorWidthB is
+      #   derived below as a power-of-two divisor of MIWaveTile[1], so the auto case
+      #   always qualifies; only an explicit VectorWidthB can fail here.
       #
       #   Destination size. With a 4-byte destination SS0's 4 elements already fill the
       #   16-byte store, so there is nothing left for SS1 to widen.
@@ -1026,9 +1032,14 @@ class Solution(collections.abc.Mapping):
       miwt = state.get("MIWaveTile", [])
       inputOK = (state["ProblemType"]["DataTypeA"].numBytes() == 2
                  or state["ProblemType"]["DataTypeA"].isFloat4())
+      # -1 means "derive below", which always yields a power-of-two divisor of MIWaveTile.
+      vwAOK = state["VectorWidthA"] in (-1, 8)
+      vwBOK = (state["VectorWidthB"] == -1
+               or (state["VectorWidthB"] > 0 and len(miwt) == 2
+                   and miwt[1] % state["VectorWidthB"] == 0))
       ssSupported = (inputOK
                      and state["ProblemType"]["DestDataType"].numBytes() == 2
-                     and len(miwt) == 2 and miwt[0] == 8 and miwt[1] == 8)
+                     and len(miwt) == 2 and miwt[0] == 8 and vwAOK and vwBOK)
       if not (state["SourceSwap"] and ssSupported):
         state["VectorWidthA"] = 1
         state["VectorWidthB"] = 1

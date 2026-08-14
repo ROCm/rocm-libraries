@@ -397,6 +397,30 @@ def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
 # Legacy LR emit functions (moved from SubtileBasedKernel.py)
 ################################################################################
 
+def _emitLaneRowBase(module, writer, tileInfo, ldsRowStride, vw, lane16, dstVgpr):
+  """Emit the per-lane LDS row base for one tensor: lane16 * ldsRowStride * vw.
+
+  `vw` is the tensor's own interleave factor, so A and B can differ. Block padding
+  is folded straight into the stride constant: a lane's base is a whole number of
+  blocks, so its pad is exactly proportional to lane16 and costs no extra
+  instructions -- only a wider multiplier.
+  """
+  tc = tileInfo.tc
+  laneRowStride = ldsRowStride * vw
+  assert laneRowStride % SUBTILE_LDS_BLOCK_BYTES == 0 or not int(getattr(tileInfo, "ldsBlockPadBytes", 0)), \
+    "subtile LDS block pad: %s lane row stride %d must be a multiple of %d" % (tc, laneRowStride, SUBTILE_LDS_BLOCK_BYTES)
+  laneRowStride = ldsBlockPadOffset(tileInfo, laneRowStride)
+  # TDM pad (and any non-pow2 interleave) breaks the shift; fall back to VMul.
+  if laneRowStride & (laneRowStride - 1) == 0:
+    module.add(VLShiftLeftB32(dst=vgpr(dstVgpr), shiftHex=hex(laneRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % laneRowStride))
+  else:
+    # VOP3 takes no 32-bit literal, so the stride has to come from an SGPR.
+    strideSgpr = writer.sgprPool.checkOut(1, tag="_lraTileAssignment_legacy_laneRowStride")
+    module.add(SMovB32(dst=sgpr(strideSgpr), src=hex(laneRowStride), comment="lane row stride %d" % laneRowStride))
+    module.add(VMulLOU32(dst=vgpr(dstVgpr), src0=sgpr(strideSgpr), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % laneRowStride))
+    writer.sgprPool.checkIn(strideSgpr)
+
+
 def _computeLROffset(module, tileInfo, colOffset, rowOffset, swizzled):
   tc = tileInfo.tc
   subIterKBytes = tileInfo.subIterKBytes
@@ -626,29 +650,17 @@ def _lraTileAssignment_legacy(writer, kernel):
   # Without swizzling, the LDS M-row stride is depthUBytes (contiguous K row).
   # With swizzling, GR writes individual subtile K-groups, so subIterKBytes applies.
   # Under the interleaved map each lane owns a group of VW rows rather than one row,
-  # so its base advances by VW rows. A and B share this rowOffset, so their interleave
-  # factors must agree.
+  # so its base advances by VW rows. A and B interleave by their own VectorWidth, so
+  # each needs its own base; they share one register when the factors agree.
   vwA = int(getattr(tileInfoA, "lrInterleaveVW", 1))
   vwB = int(getattr(tileInfoB, "lrInterleaveVW", 1))
-  assert vwA == vwB, "subtile LR: A/B interleave factors must match (%d vs %d)" % (vwA, vwB)
-  laneRowStride = ldsRowStride * vwA
-  # Block padding is folded straight into the stride constant: a lane's base is a
-  # whole number of blocks, so its pad is exactly proportional to lane16 and costs
-  # no extra instructions -- only a wider multiplier.
-  assert laneRowStride % SUBTILE_LDS_BLOCK_BYTES == 0 or not int(getattr(tileInfoA, "ldsBlockPadBytes", 0)), \
-    "subtile LDS block pad: lane row stride %d must be a multiple of %d" % (laneRowStride, SUBTILE_LDS_BLOCK_BYTES)
-  laneRowStride = ldsBlockPadOffset(tileInfoA, laneRowStride)
-  # TDM pad (and any non-pow2 interleave) breaks the shift; fall back to VMul.
-  if laneRowStride & (laneRowStride - 1) == 0:
-    module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(laneRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % laneRowStride))
-  else:
-    # VOP3 takes no 32-bit literal, so the stride has to come from an SGPR.
-    strideSgpr = writer.sgprPool.checkOut(1, tag="_lraTileAssignment_legacy_laneRowStride")
-    module.add(SMovB32(dst=sgpr(strideSgpr), src=hex(laneRowStride), comment="lane row stride %d" % laneRowStride))
-    module.add(VMulLOU32(dst=vgpr(rowOffset), src0=sgpr(strideSgpr), src1=vgpr(lane16), comment="offsetRow = %d*lane16" % laneRowStride))
-    writer.sgprPool.checkIn(strideSgpr)
+  _emitLaneRowBase(module, writer, tileInfoA, ldsRowStride, vwA, lane16, rowOffset)
+  rowOffsetB = rowOffset
+  if vwB != vwA:
+    rowOffsetB = tmpVgpr + 5
+    _emitLaneRowBase(module, writer, tileInfoB, ldsRowStride, vwB, lane16, rowOffsetB)
   _computeLROffset(module, tileInfoA, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
-  _computeLROffset(module, tileInfoB, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
+  _computeLROffset(module, tileInfoB, colOffset, rowOffsetB, writer.states.subtileLdsSwizzle)
   writer.vgprPool.checkIn(tmpVgpr)
   _lraWavePartitioning_legacy(module, writer, kernel)
   for vgprId in range(len(tileInfoB.sharedVgprLROffset)):
@@ -708,14 +720,22 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     # Add padding
     rowPadBytes = getattr(tileInfo, "ldsRowPadBytes", 0)
     rowStride = depthUBytes + rowPadBytes
-    if int(getattr(tileInfo, "lrInterleaveVW", 1)) > 1:
-      # Interleaved: consecutive subtile rows are adjacent M rows, so the tile stride
-      # is one row. Combined with the per-lane base of VW rows this places subtile row
-      # j of lane a at M row VW*a + j.
-      offsetStride = rowStride
+    vw = int(getattr(tileInfo, "lrInterleaveVW", 1))
+    if vw > 1:
+      # Interleaved: the per-lane base already covers VW rows, so a lane's own VW
+      # subtile rows are the adjacent M rows VW*a .. VW*a+VW-1. That accounts for
+      # instM*VW of the wave's rows; the remaining subtile rows repeat the pattern
+      # one such group higher. So subtile row j of lane a is M row
+      #   VW*a + (j % VW) + instM*VW*(j // VW)
+      # which is a bijection over the wave's instM*MIWaveTile rows for any
+      # MIWaveTile that VW divides, and degenerates to VW*a + j when VW covers
+      # them all. j is a compile-time constant here, so the two-level form costs
+      # nothing beyond a different immediate. The epilogue reads the same map out
+      # of (VectorWidth, MIWaveTile) -- see AsmStoreState.getStoreElementsInfoForBatch.
+      rowIdx = (sId0 % vw) + (instM * vw) * (sId0 // vw)
     else:
-      offsetStride = subtileShapeM * instM * rowStride
-    offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
+      rowIdx = sId0 * subtileShapeM * instM
+    offset = rowIdx * rowStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
     # These immediates cross block boundaries (unlike the non-subtile path, whose
     # reads all sit inside one block), so they need the pad applied too. The base
     # they are added to contributes at most one K-row below a block boundary.

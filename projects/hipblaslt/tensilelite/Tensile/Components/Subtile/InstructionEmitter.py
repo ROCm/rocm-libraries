@@ -242,7 +242,7 @@ class InstructionEmitter:
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
-                if scaleRemapEnabled(self.kernel):
+                if scaleRemapEnabled(self.kernel, tc):
                     # The interleaved map puts all K-blocks of a line inside the lane's
                     # own base offset, so a second K group would address a line this
                     # scheme has not been derived for. Fail loudly instead of emitting

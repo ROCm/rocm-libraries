@@ -477,7 +477,10 @@ class TileInfo:
       # DirectToLds path. It replaces row padding rather than stacking with it,
       # matching every non-subtile call site (`LdsPad if LdsBlockSizePerPad == 0`).
       # TDM pads through its own descriptor fields, so that path keeps row padding.
-      self.ldsBlockPadBytes = 0 if isTDM else subtileLdsBlockPadBytes(kernel)
+      # The LDS M-row stride is depthUBytes here: SourceSwap turns the swizzle off,
+      # so a row is one contiguous DepthU, and row padding is mutually exclusive
+      # with block padding.
+      self.ldsBlockPadBytes = 0 if isTDM else subtileLdsBlockPadBytes(kernel, self.depthUBytes)
       self.ldsRowPadBytes = 0 if self.ldsBlockPadBytes else (16 if isTDM else 0)
 
       # Local-read tile->row interleave factor.
@@ -487,14 +490,26 @@ class TileInfo:
       # can only reassemble a run of 8 if consecutive subtile rows are adjacent M rows.
       # That is what the interleaved map provides. See LAYOUT_MODEL.md sections 4 and 8.
       self.lrInterleaveVW = int(kernel.get("VectorWidth%s" % tc, 1)) if kernel.get("SourceSwap", False) else 1
+      # Interleave groups per wave: VW consecutive rows per lane covers instM*VW of
+      # the wave's rows in one pass, so MIWaveTile/VW passes cover them all. 1 is the
+      # exact-tiling case (MIWaveTile == VW); above that the local read uses the
+      # two-level map in SubtileLREmit.emitSingleDsRead.
+      self.lrInterleaveRepeat = 1
       if self.lrInterleaveVW > 1:
-        # The interleave only tiles the row space exactly when the number of subtile
-        # rows equals the interleave factor. Anything else needs a mixed map that is
-        # not implemented, and would silently permute the output rather than fail.
+        # The interleave partitions the row space only when it divides the subtile row
+        # count; a leftover would make two subtile rows claim one M row and silently
+        # permute the output rather than fail.
         miWaveTile = int(kernel["MIWaveTile"][0 if tc == 'A' else 1])
-        assert self.lrInterleaveVW == miWaveTile, (
-          "subtile SourceSwap: VectorWidth%s(%d) must equal MIWaveTile[%d](%d)"
-          % (tc, self.lrInterleaveVW, 0 if tc == 'A' else 1, miWaveTile))
+        assert miWaveTile % self.lrInterleaveVW == 0, (
+          "subtile SourceSwap: MIWaveTile[%d](%d) must be a multiple of VectorWidth%s(%d)"
+          % (0 if tc == 'A' else 1, miWaveTile, tc, self.lrInterleaveVW))
+        # The row/dword/byte split of the two-level map is derived from bit slices of
+        # the interleave factor (see the scale map in SubtileScaleEmit), so it has to
+        # be a power of two.
+        assert self.lrInterleaveVW & (self.lrInterleaveVW - 1) == 0, (
+          "subtile SourceSwap: VectorWidth%s(%d) must be a power of two"
+          % (tc, self.lrInterleaveVW))
+        self.lrInterleaveRepeat = miWaveTile // self.lrInterleaveVW
 
       # Convenience counts for scheduler / diagram
       self.mmaTileLocalTotalCount = self.localMMATileGrid[0] * self.localMMATileGrid[1]

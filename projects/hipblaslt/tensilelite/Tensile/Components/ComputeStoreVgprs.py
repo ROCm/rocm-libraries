@@ -24,11 +24,44 @@
 
 from rocisa.code import Module
 from rocisa.container import ContinuousRegister, vgpr, sgpr
-from rocisa.instruction import SMulI32, VAddLShiftLeftU32, VAddU32, VMovB32, VMulLOU32
+from rocisa.instruction import SMovB32, SMulI32, VAddLShiftLeftU32, VAddU32, VMovB32, VMulLOU32
 from rocisa.functions import vectorStaticRemainder, vectorStaticDivideAndRemainder, vectorStaticDivide, vectorStaticMultiply
 
 from ..Component import ComputeStoreVgprs
 from ..Common import DataDirection, log2
+from .Subtile.SubtileGeometry import subtileInterleaveVW
+
+
+VOP3_MAX_INLINE_CONST = 64
+
+
+def subtileWaveTileRepeat(kernel, dim: int) -> int:
+    """MIWaveTile[dim] // VectorWidth for the dim's tensor (1 when they are equal).
+
+    The wave's row/col block is MIWaveTile tiles wide, but the store's per-lane
+    coordinate is expressed in units of VectorWidth. This is the factor between them.
+    """
+    vw = subtileInterleaveVW(kernel, 'A' if dim == 0 else 'B')
+    wt = int(kernel["MIWaveTile"][dim])
+    assert wt % vw == 0, "MIWaveTile[%d](%d) must be a multiple of VectorWidth(%d)" % (dim, wt, vw)
+    return wt // vw
+
+
+def waveCoordScale(dstVgpr, stride: int, tmpSgpr, comment: str) -> Module:
+    """dstVgpr *= stride.
+
+    v_mul_lo_u32 is VOP3 and takes no 32-bit literal, so a stride past the
+    inline-constant range has to be staged through an SGPR. Wave tiles wider than
+    four MI blocks reach that range.
+    """
+    module = Module()
+    if stride <= VOP3_MAX_INLINE_CONST:
+        module.add(VMulLOU32(dst=dstVgpr, src0=hex(stride), src1=dstVgpr, comment=comment))
+    else:
+        module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(stride), comment="wave coord stride %d" % stride))
+        module.add(VMulLOU32(dst=dstVgpr, src0=sgpr(tmpSgpr), src1=dstVgpr, comment=comment))
+    return module
+
 
 class ComputeStoreVgprsVALU(ComputeStoreVgprs):
     kernel = {"EnableMatrixInstruction": False,
@@ -317,7 +350,14 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             module.add(vectorStaticDivide(tmpVgpr0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res))
             if kernel["LocalSplitU"] > 1:
                 module.add(vectorStaticRemainder(dummy, tmpVgpr0, tmpVgpr0, kernel["MIWaveGroup"][1], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tmpVgpr0), src0=hex(MIBShape1), src1=vgpr(tmpVgpr0), comment="wave coordination offset 1"))
+            # Subtile kernels: each wave owns a contiguous block of MIWaveTile[1]*MIBShape1
+            # cols. The wave part is pre-divided by VectorWidthB because the shift below
+            # scales it back up; that shift exists for the per-lane part, which really is
+            # in units of VectorWidthB. The two agree whenever MIWaveTile[1] equals
+            # VectorWidthB, which is why the plain MIBShape1 held until the wave tile
+            # stopped being square.
+            waveStride1 = MIBShape1 * subtileWaveTileRepeat(kernel, 1) if kernel.get("UseSubtileImpl") else MIBShape1
+            module.add(waveCoordScale(vgpr(tmpVgpr0), waveStride1, tmpSgpr, "wave coordination offset 1"))
 
             # coord 1 : thread part
             module.add(vectorStaticRemainder(dummy, tid1, "Serial", writer.states.kernel["WavefrontSize"], tmpVgpr1Res, tmpSgprInfo))
@@ -343,7 +383,9 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
 
             # coord 0 : wave part
             module.add(vectorStaticRemainder(dummy, tid0, wave_id, kernel["MIWaveGroup"][0], tmpVgpr1Res, tmpSgprInfo))
-            module.add(VMulLOU32(dst=vgpr(tid0), src0=hex(MIBShape0), src1=vgpr(tid0), comment="wave coordination offset 0"))
+            # Pre-divided by VectorWidthA for the same reason as coord 1 above.
+            waveStride0 = MIBShape0 * subtileWaveTileRepeat(kernel, 0) if kernel.get("UseSubtileImpl") else MIBShape0
+            module.add(waveCoordScale(vgpr(tid0), waveStride0, tmpSgpr, "wave coordination offset 0"))
 
             # coord 0 : thread part
             module.add(vectorStaticRemainder(dummy, tmpVgpr0, "Serial", matrixInstM, tmpVgpr1Res, tmpSgprInfo))
