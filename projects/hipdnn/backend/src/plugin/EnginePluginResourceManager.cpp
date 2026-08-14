@@ -207,16 +207,7 @@ const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() c
 std::string EnginePluginResourceManager::resolveEngineName(
     int64_t engineId, std::optional<std::string_view> detailsName) const
 {
-    const EnginePlugin* owningPlugin = nullptr;
-    const auto handleIt = _engineIdToHandle.find(engineId);
-    if(handleIt != _engineIdToHandle.end())
-    {
-        const auto pluginIt = _handleToPlugin.find(handleIt->second);
-        if(pluginIt != _handleToPlugin.end())
-        {
-            owningPlugin = pluginIt->second;
-        }
-    }
+    const EnginePlugin* owningPlugin = _pm ? _pm->engineOwner(engineId) : nullptr;
 
     const std::string_view pluginName = owningPlugin != nullptr
                                             ? std::string_view(owningPlugin->cachedName())

@@ -6,10 +6,11 @@
 3. [Design Goals](#design-goals)
 4. [Proposed Solution](#proposed-solution)
 5. [Implementation Details](#implementation-details)
-6. [Engine Name Registration](#engine-name-registration)
-7. [Error Handling](#error-handling)
-8. [Examples](#examples)
-9. [Future Improvments](#future-improvments)
+6. [Plugin-Supplied Engine Names](#plugin-supplied-engine-names)
+7. [Engine Name Registration](#engine-name-registration)
+8. [Error Handling](#error-handling)
+9. [Examples](#examples)
+10. [Future Improvments](#future-improvments)
 
 ## Executive Summary
 
@@ -72,9 +73,9 @@ The solution consists of two main components:
                        │ int64_t
 ┌──────────────────────▼──────────────────────────────────┐
 │                   Backend                               │
-│  - Only deals with int64_t engine IDs                   │
-│  - No knowledge of string names                         │
-│  - Detects duplicate IDs and warns                      │
+│  - Routes and dispatches by int64_t engine IDs          │
+│  - Requires a declared name to hash to its ID           │
+│  - Drops duplicate IDs and logs an error                │
 └──────────────────────┬──────────────────────────────────┘
                        │ int64_t
 ┌──────────────────────▼──────────────────────────────────┐
@@ -307,7 +308,8 @@ without colliding on the ID first.
    - Good: `"VENDOR_FAST_CONV_V2"`
    - Bad: `"ENGINE_1"`, `"FAST"`
 
-2. **Test Locally**: Use the name in your plugin without modifying the header, the code will throw a warning but its safe to ignore
+2. **Test Locally**: Use the name in your plugin without modifying the header. An unregistered name
+   loads like any other, as long as the engine's ID is the hash of it.
 
 3. **Submit PR**: Add your engine name to `EngineNames.hpp`
    ```cpp
@@ -325,7 +327,7 @@ without colliding on the ID first.
 
 ### Forward Compatibility
 
-If a plugin name is not known (not in the shared header), the hash function can still generate a unique ID.  The usage of a unknown plugin name will generate a warning but thats it.  This allows newer plugins to be used without needing to update the shared header.
+If a plugin name is not known (not in the shared header), the hash function can still generate a unique ID.  An unregistered name is not an error in itself; what the backend enforces is that the engine's ID is the hash of the name it declares.  This allows newer plugins to be used without needing to update the shared header.
 
 ## Error Handling
 
@@ -374,7 +376,7 @@ void setupGraph() {
     graph.set_preferred_engine_id_ext(hipdnn::engine_names::MIOPEN_LEGACY);
 
     // Option 3: Use custom engine name (not in header)
-    graph.set_preferred_engine_id_ext("MY_CUSTOM_ENGINE_V2");  // Works, with warning
+    graph.set_preferred_engine_id_ext("MY_CUSTOM_ENGINE_V2");  // Works, no warning
 
     // Option 4: Still support int64_t for compatibility
     graph.set_preferred_engine_id_ext(0x123456789ABCDEF0LL);

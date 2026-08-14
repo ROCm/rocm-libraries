@@ -15,11 +15,8 @@ install(TARGETS hipdnn_list_engines RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # suffix is required: discovery is non-recursive, and default/ holds exactly one plugin,
 # ${TEST_GOOD_DEFAULT_PLUGIN_NAME}, which reports the engine name asserted below.
 if(NOT HIPDNN_SKIP_TESTS AND TARGET ${TEST_GOOD_DEFAULT_PLUGIN_NAME})
-    # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME in tests/test_plugins/TestPluginEngineIdMap.hpp.
-    # The trailing " (" anchors the match to the engine line, whose remainder is the ID: a plugin
-    # that named no engine would print that ID in both positions, so the name appearing here at all
-    # is what the assertion is after. The ID itself is deliberately left out -- it is a hash of the
-    # name, and NamedPluginFixtureIdsAreTheHashOfTheirNames already proves that, so repeating the
+    # Mirrors K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME in tests/test_plugins/TestPluginEngineIdMap.hpp. The
+    # ID is left out: NamedPluginFixtureIdsAreTheHashOfTheirNames covers it, and a hand-copied
     # literal here would only give it a second place to drift.
     set(HIPDNN_LIST_ENGINES_SMOKE_EXPECTED "TEST_GOOD_DEFAULT_ENGINE (")
 

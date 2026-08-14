@@ -6014,6 +6014,24 @@ TEST_F(TestGraph, SetPreferredEngineIdByIdThenByName)
     EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), expectedId);
 }
 
+TEST_F(TestGraph, SetPreferredEngineIdByHexIdSpellingResolvesToThatEngine)
+{
+    Graph graph;
+
+    // An engine that declares no name is enumerated as its hexadecimal ID, so
+    // that spelling has to reach the engine itself rather than hash like a
+    // name. Only the ID survives a round trip through a backend graph
+    // descriptor, so hashing here would silently drop the preference.
+    const int64_t unnamedEngineId = 0x1A2B3C4D5E6F7080LL;
+    const std::string hexSpelling = hipdnn_data_sdk::utilities::formatEngineIdHex(unnamedEngineId);
+
+    graph.set_preferred_engine_id_ext(hexSpelling);
+
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(graph.get_preferred_engine_id_ext().value(), unnamedEngineId);
+    EXPECT_NE(hipdnn_data_sdk::utilities::engineNameToId(hexSpelling), unnamedEngineId);
+}
+
 TEST_F(TestGraph, MethodChaining)
 {
     Graph graph;
@@ -8430,7 +8448,8 @@ TEST_F(TestGraph, DeselectEnginesCompiledPlanPath)
 TEST_F(TestGraph, DeselectEnginesUnregisteredNameIsHashed)
 {
     // A plugin-supplied engine is absent from the frontend's engine name
-    // registry, so every name is hashed whether or not it is registered.
+    // registry, so a name that is neither registered nor a number falls
+    // through to the hash.
     const std::string unregisteredName = "nonexistent_engine_xyz";
     ASSERT_FALSE(hipdnn_data_sdk::utilities::isEngineNameRegistered(unregisteredName));
 
@@ -8443,6 +8462,23 @@ TEST_F(TestGraph, DeselectEnginesUnregisteredNameIsHashed)
 
     auto barredIds = graph.getBarredEngineIds();
     EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(unregisteredName)), 1u);
+}
+
+TEST_F(TestGraph, DeselectEnginesHexIdSpellingBarsThatEngine)
+{
+    // The hexadecimal spelling an unnamed engine is enumerated under bars that
+    // engine, not the engine its spelling happens to hash to.
+    const int64_t unnamedEngineId = 0x1A2B3C4D5E6F7080LL;
+    const std::string hexSpelling = hipdnn_data_sdk::utilities::formatEngineIdHex(unnamedEngineId);
+
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.injectPlanSpec(1, 0);
+
+    graph.deselect_engines({hexSpelling});
+
+    auto barredIds = graph.getBarredEngineIds();
+    EXPECT_EQ(barredIds.count(unnamedEngineId), 1u);
+    EXPECT_EQ(barredIds.count(hipdnn_data_sdk::utilities::engineNameToId(hexSpelling)), 0u);
 }
 
 TEST_F(TestGraph, DeselectEnginesEmptyList)

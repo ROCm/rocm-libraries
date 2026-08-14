@@ -4396,9 +4396,11 @@ public:
      * along with the rest of the filter state by @c create_execution_plans().
      *
      * Matching happens at plan-build time against the name each candidate engine
-     * displays under. Each name is also hashed to an engine ID and added to the
-     * barred engine ID set, which bars registered names before any candidate
-     * engine is known.
+     * displays under. Each name is also resolved to an engine ID and added to the
+     * barred engine ID set, which bars an engine before any candidate is known.
+     * Resolution goes through @c engineNameOrIdToId, so a registered name, a
+     * declared name, and the hexadecimal ID an unnamed engine displays under all
+     * reach the engine they name.
      *
      * A name that matches no candidate bars nothing and is reported once as a
      * warning when the plans are built.
@@ -4414,7 +4416,7 @@ public:
         }
         for(const auto& name : engine_names)
         {
-            const int64_t engineId = hipdnn_data_sdk::utilities::engineNameToId(name);
+            const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(name);
             HIPDNN_FE_LOG_INFO("deselect_engines(): '" << name << "' -> engine ID " << engineId);
             _barredEngineIds.insert(engineId);
             _barredEngineNames.insert(name);
@@ -6320,9 +6322,15 @@ public:
      *
      * The name is matched at plan-build time against the name each candidate
      * engine displays under; the first match wins. If no candidate carries the
-     * name, selection falls back to the engine whose ID is the hash of the name,
-     * then to the heuristics' own top choice. The hashed ID is stored, so
+     * name, selection falls back to the engine the name resolves to, then to the
+     * heuristics' own top choice. That ID is stored, so
      * @c get_preferred_engine_id_ext() returns a value as soon as this returns.
+     *
+     * Resolution goes through @c engineNameOrIdToId, so the hexadecimal ID an
+     * unnamed engine displays under resolves to that engine rather than to the
+     * hash of its spelling. Only the ID survives a round trip through a backend
+     * graph descriptor, so this is what keeps such a preference from being
+     * silently dropped on deserialize.
      *
      * @param engineName Engine name to look up; empty string clears the preference
      * @return Reference to this Graph for method chaining
@@ -6339,7 +6347,7 @@ public:
             return *this;
         }
 
-        auto engineId = hipdnn_data_sdk::utilities::engineNameToId(engineName);
+        auto engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(engineName);
         _preferredEngineId = engineId;
         _preferredEngineName = engineName;
 

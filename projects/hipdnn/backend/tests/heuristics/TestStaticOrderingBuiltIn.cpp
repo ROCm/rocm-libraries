@@ -432,13 +432,8 @@ TEST_F(TestStaticOrderingBuiltIn, FallbackEnvAcceptsADecimalEngineId)
     EXPECT_EQ(sorted[0], MIOPEN_DETERMINISTIC_ID);
 }
 
-TEST_F(TestStaticOrderingBuiltIn, FallbackEnvLetsARegisteredNameOutrankItsNumericReading)
+TEST_F(TestStaticOrderingBuiltIn, FallbackEnvResolvesARegisteredName)
 {
-    // A registered name is answered from the registry before the numeric parse
-    // is tried, so a name that happens to look like a number still names its
-    // engine. None of the in-tree names do, so assert the precedence directly.
-    EXPECT_EQ(hipdnn_data_sdk::utilities::engineNameOrIdToId("MIOPEN_ENGINE"), MIOPEN_ENGINE_ID);
-
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter env(FALLBACK_ORDERING_ENV,
                                                                           "MIOPEN_ENGINE");
 

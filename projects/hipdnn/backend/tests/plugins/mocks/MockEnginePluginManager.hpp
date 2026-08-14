@@ -11,6 +11,7 @@
 #include <gmock/gmock.h>
 #include <map>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -49,8 +50,26 @@ public:
         return it != _accepted.end() ? it->second : plugin.getAllEngineIds();
     }
 
+    /// Ownership is what name resolution reads, and the inherited live set is
+    /// filled by admission hooks a mock plugin never runs. Stand in for them on
+    /// the same terms acceptedEngineIds() does: a plugin owns what it contributes,
+    /// and the first plugin to claim an ID keeps it.
+    const std::unordered_map<int64_t, const EnginePlugin*>& liveEngines() const override
+    {
+        _live.clear();
+        for(const auto& plugin : getPlugins())
+        {
+            for(const auto id : acceptedEngineIds(*plugin))
+            {
+                _live.emplace(id, plugin.get());
+            }
+        }
+        return _live;
+    }
+
 private:
     std::map<const EnginePlugin*, std::vector<int64_t>> _accepted;
+    mutable std::unordered_map<int64_t, const EnginePlugin*> _live;
 };
 
 } // namespace hipdnn_backend::plugin

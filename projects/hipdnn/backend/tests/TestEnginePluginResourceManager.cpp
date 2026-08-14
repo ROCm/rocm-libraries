@@ -2978,6 +2978,40 @@ TEST(TestEnginePluginResourceManager, GetEngineInfosFallsBackToHexWhenPluginExpo
     }
 }
 
+TEST(TestEnginePluginResourceManager, GetEngineInfosNamesAnEngineWhosePluginHasNoHandle)
+{
+    // A plugin whose createHandle() fails is absent from the routing maps, but
+    // enumeration walks the accepted set, so its engines are still listed. Names
+    // come from load-time ownership, which no handle is involved in, so the
+    // engine is listed under its own name rather than the hexadecimal fallback.
+    auto plugin = std::make_shared<MockEnginePlugin>();
+    auto pluginManager = std::make_shared<MockEnginePluginManager>();
+    const std::vector<std::shared_ptr<EnginePlugin>> plugins{plugin};
+
+    EXPECT_CALL(*pluginManager, getPlugins()).WillRepeatedly(::testing::ReturnRef(plugins));
+    EXPECT_CALL(*plugin, createHandle())
+        .WillOnce(::testing::Return(hipdnnEnginePluginHandle_t(nullptr)));
+    EXPECT_CALL(*plugin, destroyHandle(::testing::_)).Times(0);
+    EXPECT_CALL(*plugin, getAllEngineIds())
+        .WillRepeatedly(::testing::Return(std::vector<int64_t>{100}));
+    EXPECT_CALL(*plugin, name()).WillRepeatedly(::testing::Return("handleless-plugin"));
+    EXPECT_CALL(*plugin, version()).WillRepeatedly(::testing::Return("1.0"));
+    EXPECT_CALL(*plugin, type()).WillRepeatedly(::testing::Return(HIPDNN_PLUGIN_TYPE_ENGINE));
+    EXPECT_CALL(*plugin, hasEngineName()).WillRepeatedly(::testing::Return(true));
+    EXPECT_CALL(*plugin, getEngineName(100))
+        .WillRepeatedly(::testing::Return(std::optional<std::string>("HANDLELESS_ENGINE")));
+
+    {
+        const EnginePluginResourceManager resourceManager(pluginManager);
+
+        auto infos = resourceManager.getEngineInfos();
+
+        ASSERT_EQ(infos.size(), 1);
+        EXPECT_EQ(infos[0].engineId, 100);
+        EXPECT_EQ(infos[0].engineName, "HANDLELESS_ENGINE");
+    }
+}
+
 TEST(TestEnginePluginResourceManager, GetEngineInfosUsesEngineNameRegardlessOfReportedApiVersion)
 {
     const SingleEnginePluginHarness harness(100);
