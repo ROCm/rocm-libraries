@@ -949,7 +949,7 @@ def createLibraryLogic(
                 del solutionState["ProblemType"]
             solutionList.append(solutionState)
 
-    exactLogicList = [[list(k), v] for k, v in exactLogic.items()] if exactLogic else None
+    exactLogicList = [[list(k), v] for k, v in exactLogic.items()] if exactLogic else []
     perfMetric = logicTuple[7]
 
     problemTypeForDict = dict(sorted(problemTypeState.items()))

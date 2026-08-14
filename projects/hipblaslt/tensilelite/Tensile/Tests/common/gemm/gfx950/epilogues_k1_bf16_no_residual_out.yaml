@@ -1,0 +1,198 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Variant of epilogues_k1_bf16.yaml exercising the no-ResidualOut path:
+# PartialRMS + ResidualAdd active but PartialRMSStoreBf16D DISABLED, so the
+# always-bf16 ResidualOut write-back is skipped. DestDataType is bf16 (b) since
+# there is no fp8 quant store split. Same solution configs and problem sizes as
+# the store-back file.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  ExitOnFails: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+
+  ########################################
+  # bf16 in, bf16 out — PartialRMS + ResidualAdd, no bf16 ResidualOut write-back
+  # DepthU=64, PGR=[1,2], MT1=128, WG0<=2. Three sibling size groups share one
+  # ProblemType.
+  ########################################
+  -
+    - # ProblemType — bf16 in, bf16 out, f32 compute, residual add, no bf16 ResidualOut
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: True
+      PartialRMSStoreBf16D: False
+
+    ########################################
+    # Size group 1 (idx 00): WG 1x1 and WG 2x1 tiles.
+    ########################################
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 1x1 (WG0=1, MT1=128)
+            - [16, 16, 32, 1, 1,  4,  8, 1, 1]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1, 12,  8, 1, 1]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1, 16,  8, 1, 1]  # MT0=256  MT1=128
+            # WG 2x1 (WG0=2, MT1=128)
+            - [16, 16, 32, 1, 1,  2,  8, 2, 1]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1,  6,  8, 2, 1]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1,  8,  8, 2, 1]  # MT0=256  MT1=128
+            # WG 1x2 (WG0=1, WG1=2, MIWT_N=4) — added coverage
+            - [16, 16, 32, 1, 1,  4,  4, 1, 2]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  8,  4, 1, 2]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1, 12,  4, 1, 2]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1, 16,  4, 1, 2]  # MT0=256  MT1=128
+            # Larger tile (WG 2x1, MT0=320) — added coverage
+            - [16, 16, 32, 1, 1, 10,  8, 2, 1]  # MT0=320  MT1=128
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [768, 768, 1, 768]
+            - Exact: [513, 513, 1, 513]
+            - Exact: [768, 513, 1, 512]   # unaligned: N=513 not mult of 8 (dwordx2 fallback)
+
+    ########################################
+    # Size group 2 (idx 01): WG 2x2 and WG 1x4 tiles. Second sibling size group
+    # under the SAME ProblemType as group 1 (NOT a separate outer entry), so it
+    # gets results file idx 01 instead of clobbering group 1's _00.csv.
+    ########################################
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 2x2 (WG0=2, MT1=128)
+            - [16, 16, 32, 1, 1,  2,  4, 2, 2]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  4,  4, 2, 2]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1,  6,  4, 2, 2]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1,  8,  4, 2, 2]  # MT0=256  MT1=128
+            # WG 1x4 (WG0=1, MT1=128)
+            - [16, 16, 32, 1, 1,  4,  2, 1, 4]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  8,  2, 1, 4]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1, 12,  2, 1, 4]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1, 16,  2, 1, 4]  # MT0=256  MT1=128
+            # Larger tiles (MT0=320/384) — added coverage
+            - [16, 16, 32, 1, 1, 10,  4, 2, 2]  # MT0=320  MT1=128 (WG 2x2)
+            - [16, 16, 32, 1, 1, 12,  4, 2, 2]  # MT0=384  MT1=128 (WG 2x2)
+            - [16, 16, 32, 1, 1, 20,  2, 1, 4]  # MT0=320  MT1=128 (WG 1x4)
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [768, 768, 1, 768]
+            - Exact: [513, 513, 1, 513]
+            - Exact: [768, 513, 1, 512]   # unaligned: N=513 not mult of 8 (dwordx2 fallback)
+
+    ########################################
+    # Size group 3 (idx 02): MT1=320 large-symmetric tile from subtile_bf16.yaml.
+    # Sibling size group under the SAME ProblemType (uniform MT1 per benchmark
+    # pass), so it gets results file idx 02 instead of clobbering groups 1-2.
+    # DISABLED: the only tile exhausts VGPR on all variants (occupancy limit,
+    # vgprs=275); no valid solutions survive, so the group is commented out.
+    ########################################
+    # - InitialSolutionParameters:
+    #   BenchmarkCommonParameters:
+    #     - KernelLanguage: ["Assembly"]
+    #   ForkParameters:
+    #     - MatrixInstruction:
+    #         # WG 2x2, MT1=320 (WG0=2, WG1=2, MIWT_N=10)
+    #         # FAILS: VGPR overflow (occupancy limit, vgprs=275)
+    #         # - [16, 16, 32, 1, 1, 10, 10, 2, 2]  # MT0=320  MT1=320
+    #     - PartialRMS: [True]
+    #     - PartialRMSResidualAdd: [True]
+    #     - PartialRMSQuant: [False]
+    #     - PartialRMSStoreBf16D: [False]
+    #     - StreamK: [3]
+    #     - StreamKForceDPOnly: [0, 1]
+    #     - StreamKAtomic: [0]
+    #     - GlobalSplitU: [1]
+    #     - ScheduleIterAlg: [3]
+    #     - PrefetchGlobalRead: [1, 2]
+    #     - PrefetchAcrossPersistent: [0]
+    #     - DirectToLds: [1]
+    #     - UseSubtileImpl: [True]
+    #     - StaggerU: [0]
+    #     - DepthU: [64]
+    #     - LdsPadA: [-1]
+    #     - LdsPadB: [-1]
+    #     - StoreVectorWidth: [-1]
+    #     - GlobalReadVectorWidthA: [-1]
+    #     - GlobalReadVectorWidthB: [-1]
+    #     - PreloadKernArgs: [False]
+    #     - 1LDSBuffer: [0]
+    #   BenchmarkJoinParameters:
+    #   BenchmarkFinalParameters:
+    #     - ProblemSizes:
+    #         - Exact: [768, 768, 1, 768]
+    #         - Exact: [513, 513, 1, 513]
+    #         - Exact: [768, 513, 1, 512]

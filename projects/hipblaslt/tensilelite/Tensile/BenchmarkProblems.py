@@ -53,6 +53,7 @@ from .backends import BackendFactory
 from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
+from Tensile.Common.DataType import DataType
 from .KernelWriterAssembly import KernelWriterAssembly
 from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
@@ -778,12 +779,34 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
                         f"have been partially deleted; remove the parent caches/ "
                         f"directory and re-run without --use-cache.")
 
+                # PartialRMS side-input types are solution-level; for the cache-hit path
+                # the type is uniform within a benchmark group (enforced on first build), so
+                # reading from constantParams (single-value fork params land there) is correct.
+                gammaChar    = str(benchmarkStep.constantParams.get("PartialRMSGammaType",    "b")).lower()
+                residualChar = str(benchmarkStep.constantParams.get("PartialRMSResidualType", "b")).lower()
+                # DQuant + StoreBf16D: recover from single-value fork params on the cache path,
+                # mirroring the gamma/residual recovery above. Without this the INI omits
+                # dquant-type and the runtime rejects every MXFP8 kernel (prob=0 != sol=2).
+                dquantType = str(benchmarkStep.constantParams.get(
+                    "DQuantType", getattr(conProblemType, "dquantType", "None")))
+                dquantSize0 = int(benchmarkStep.constantParams.get("DQuantSize0", 0))
+                dquantSize1 = int(benchmarkStep.constantParams.get("DQuantSize1", 0))
+                dquantSize0 = dquantSize0 if dquantSize0 > 0 else 0
+                dquantSize1 = dquantSize1 if dquantSize1 > 0 else 0
+                storeBf16D = bool(benchmarkStep.constantParams.get(
+                    "PartialRMSStoreBf16D", getattr(conProblemType, "partialRMSStoreBf16D", False)))
                 writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                                     benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                     benchmarkStep.icacheFlushArgs, conProblemType,
                                     sourcePath, codeObjectFiles, resultsFileName,
                                     outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
-                                    gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap)
+                                    gateTypeArgs=getattr(benchmarkStep, "gateTypeArgs", None), probSolMap=probSolMap,
+                                    partialRMSGammaType=DataType(gammaChar).toName(),
+                                    partialRMSResidualType=DataType(residualChar).toName(),
+                                    dquantType=dquantType,
+                                    dquantSize0=dquantSize0,
+                                    dquantSize1=dquantSize1,
+                                    partialRMSStoreBf16D=storeBf16D)
 
             # I think the size portion of this yaml could be removed,
             # but for now it's needed, so we update it even in the cache case

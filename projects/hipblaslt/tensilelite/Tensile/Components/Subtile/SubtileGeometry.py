@@ -204,6 +204,14 @@ class MMAScaleLayout:
 #   Scale tile = instM(16) x 4 x 1B = 64B / 64 lanes = 1B per lane = 0.25 VGPRs.
 #   The 2x2 subtile shape covers 4 MMA scale tiles → 4 x 0.25 = 1 full VGPR per subtile.
 MFMA_SCALE_16x16_1B_MX32_8V = MMAScaleLayout(instM=16, blocks=1, vgprs=0.25, mxBlock=32, waveSize=64)
+#
+# DeepseekScale (16x16x128, mxBlock=128, host pre-broadcast: 4 bytes per row per K-block):
+#   bpe=4 models the 4-byte pre-broadcast layout; mmaTileSize = 16*1*4 = 64B.
+#   mmaTileRegCount = 64/64/4 = 0.25; one LR subtile per MMA tile → ceil(0.25)=1 VGPR.
+#   scaleA uses subtileShape=(1,1): sAsel=0 always for the per-row scale.
+#   scaleB uses subtileShape=(8,1): one VGPR per 128-col N-block (8 MMA tiles share one
+#   E8M0 byte), and sel is forced to 0 because the byte is broadcast to all 4 bytes.
+MFMA_SCALE_16x16_DS = MMAScaleLayout(instM=16, blocks=1, vgprs=0.25, mxBlock=128, waveSize=64)
 
 
 ################################################################################

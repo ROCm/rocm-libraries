@@ -36,20 +36,20 @@ import re
 def parseDeviceNameToHex(deviceName: Optional[str]) -> Optional[str]:
     """Parse 'Device 75a3' into 75a3 (hex).
     Args:
-        deviceName: Of format 'Device XXXX'
+        deviceName: Of format 'Device XXXX'.
     Returns:
-        Hex-formatted chip ID string (without "id=" prefix), e.g. "75a3"
-    Raise:
-        SystemExit if format is invalid, enforces library logic at build time.
+        Hex-formatted chip ID string (without "id=" prefix), e.g. "75a3", or None
+        when deviceName is None.
+    Raises:
+        ValueError: for unrecognised names (e.g. 'fallback'); callers that want
+        to treat unknown names as all-devices should catch this.
     """
     if deviceName is None:
         return None
     match = re.match(r'^Device\s+([0-9a-fA-F]+)$', deviceName.strip())
     if match:
         return match.group(1)
-        #return int(match.group(1), 16)
-
-    raise ValueError(f"Invalid device name format: '{deviceName}', expected 'Device XXXX'")
+    raise ValueError(f"unrecognised device name: {deviceName!r}")
 
 
 def _extractPciChipIds(pred: Optional[Properties.Predicate]) -> frozenset[int]:
@@ -169,9 +169,8 @@ class HardwarePredicate(Properties.Predicate):
 
         pciChipIds = []
         for chipId in supportedChipIds:
-            if chipId is not None:
-                # Serialize chip IDs as integers so YAML emits decimal numeric values.
-                pciChipIds.append(int(chipId, 16) if isinstance(chipId, str) else int(chipId))
+            # Serialize chip IDs as integers so YAML emits decimal numeric values.
+            pciChipIds.append(int(chipId, 16) if isinstance(chipId, str) else int(chipId))
 
         if len(pciChipIds) == 0:
             return None
@@ -186,13 +185,24 @@ class HardwarePredicate(Properties.Predicate):
     def _collectSupportedChipIds(
         cls, deviceNames: Optional[List[str]], gfx: str, logicFile: Optional[str] = None
     ) -> List[str]:
-        chipIdsRaw = [parseDeviceNameToHex(name) for name in deviceNames] if deviceNames else []
-        chipIds = [chipId for chipId in chipIdsRaw if chipId is not None]
+        chipIds = []
+        for name in (deviceNames or []):
+            if name is None:
+                continue
+            try:
+                chipId = parseDeviceNameToHex(name)
+                chipIds.append(chipId)
+            except ValueError:
+                # Silently skip non-'Device XXXX' tokens (e.g. 'fallback'),
+                # which are treated as all-devices by the caller.
+                pass
         expectedIds = GFX_CHIP_IDS.get(gfx, [])
         supportedChipIds = [chipId for chipId in chipIds if f"id={chipId.lower()}" in SUPPORTED_BUILD_CHIP_IDS]
         unsupportedChipIds = [chipId for chipId in chipIds if f"id={chipId.lower()}" not in SUPPORTED_BUILD_CHIP_IDS]
 
-        if expectedIds and (not supportedChipIds or unsupportedChipIds):
+        # Only warn when device names were actually provided; an empty chip-id
+        # set is the legitimate fallback-for-all-devices path (e.g. benchmarking).
+        if expectedIds and chipIds and (not supportedChipIds or unsupportedChipIds):
             print1("")
             print1("********************************************************************************")
             print1("* WARNING: Logic file has invalid or unsupported chip IDs")

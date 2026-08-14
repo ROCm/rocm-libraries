@@ -45,6 +45,8 @@ For local single-machine testing (build + run in one pytest session) see
 subprocesses to exercise the same artifact round-trip.
 """
 
+import csv
+import glob
 import os
 
 import py
@@ -53,6 +55,56 @@ import pytest
 from Tensile import Tensile
 
 from artifact_helpers import artifact_name_for_config, extract_artifact
+
+
+def _countSolutions(solutionsYamlPath):
+    """Return the number of solution columns in a benchmark CSV, from the paired YAML header."""
+    from Tensile import LibraryIO
+    data = LibraryIO.readYAML(solutionsYamlPath)
+    # First element is version dict, second is ProblemSizes; remaining are solutions.
+    startIdx = 2
+    if len(data) > startIdx and isinstance(data[startIdx], dict):
+        key = next(iter(data[startIdx]))
+        if key in ("BiasTypeArgs", "ActivationArgs", "GateTypeArgs"):
+            startIdx += 1
+    return max(len(data) - startIdx, 0)
+
+
+def _assertBenchmarkProducedResults(output_dir):
+    """Fail if every benchmark result in the run's CSV is -1 (no kernel launched)."""
+    csvs = [f for f in glob.glob(os.path.join(output_dir, "2_BenchmarkData", "*.csv"))
+            if not f.endswith("_Granularity.csv")]
+    if not csvs:
+        return  # no benchmark data at all — let other assertions catch it
+    for csvPath in csvs:
+        yamlPath = csvPath.replace(".csv", ".yaml")
+        if not os.path.exists(yamlPath):
+            continue
+        numSolutions = _countSolutions(yamlPath)
+        if numSolutions == 0:
+            continue
+        sawPositive = False
+        dataRows = 0
+        with open(csvPath) as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header is None:
+                continue
+            solutionStartIdx = len(header) - numSolutions
+            for row in reader:
+                dataRows += 1
+                for cell in row[solutionStartIdx:]:
+                    try:
+                        if float(cell) > 0:
+                            sawPositive = True
+                    except ValueError:
+                        pass
+        if dataRows > 0:
+            assert sawPositive, (
+                f"All benchmark results are -1 in {csvPath}: no kernel launched or validated. "
+                f"Likely cause: DQuantType/epilogue params missing from ClientParameters.ini "
+                f"(cache-path writeClientConfigIni not passing dquantType/partialRMSStoreBf16D)."
+            )
 
 
 def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
@@ -66,6 +118,7 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
     Tensile.Tensile([config, output_dir, "--use-cache", *tensile_args])
+    _assertBenchmarkProducedResults(output_dir)
 
 
 def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:

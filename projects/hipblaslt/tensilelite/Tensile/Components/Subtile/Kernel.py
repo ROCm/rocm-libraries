@@ -1,13 +1,8 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-import math
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
-from copy import deepcopy
-from dataclasses import dataclass, field
 from functools import singledispatch
-from typing import Dict, List, NamedTuple, Optional, Tuple, Type
 from Tensile.Components.Subtile.LogicalScheduler import (
       LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
       ReadGranularity, GRPlacementStrategy)
@@ -71,6 +66,7 @@ from .SubtileGeometry import (
   MFMA_16x16_1B_4K_8V,
   MFMA_16x16_1B_4N_4V,
   MFMA_SCALE_16x16_1B_MX32_8V,
+  MFMA_SCALE_16x16_DS,
   TileGeometry,
   ABInputGeometry,
   ABGRGeometry,
@@ -126,6 +122,7 @@ from .SubtileScaleEmit import (
     globalReadDoScaleSubtile, localReadDoScaleSubtile,
     globalReadScalePtrUpdates, globalReadScaleSwizzledDTLInitCommonSgpr,
     emitSubtileScaleDsRead,
+    usesScaleA, usesScaleB, isDeepseekScale, initDeepseekScaleSrd,
 )
 
 class ABGRTile:
@@ -332,6 +329,19 @@ MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXSc
 MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
+# DeepseekScale: pre-broadcast fp8 per-row / per-K-block. bpe=4 models the 4-byte host
+# pre-broadcast layout so mmaTileRegCount = 16*1*4/64/4 = 0.25 (1 VGPR per subtile via ceil).
+# GR: loadWidth=4 (b32 per lane), subtileShape derived from kernel as (mt_mma, 1).
+# LR scaleA: subtileShape=(1,1) — one value per M-tile, sAsel=0 always.
+# LR scaleB: subtileShape=(8,1) — scaleB is uniform across the 128-column N-block
+#   (128 / instM = 128 / 16 = 8 MMA tiles share the same E8M0 byte), so one VGPR
+#   covers all 8 N-tiles and sBsel=0 always.
+_DS_SCALE = dict(scaleLayout=MFMA_SCALE_16x16_DS, instK=128, bpe=4, supportedTypes=('fp8', 'bf8'))
+DS_SCALE_A = MXScaleTilePair(gr=MXScaleGRGeometry(**_DS_SCALE, loadWidth=4),
+                              lr=MXScaleLRGeometry(**_DS_SCALE, loadWidth=4, subtileShape=(1, 1)))
+DS_SCALE_B = MXScaleTilePair(gr=MXScaleGRGeometry(**_DS_SCALE, loadWidth=4),
+                              lr=MXScaleLRGeometry(**_DS_SCALE, loadWidth=4, subtileShape=(8, 1)))
+
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
 # Wave32 f32 output: 8 VGPRs per lane (WMMA V3 gfx1250)
@@ -339,12 +349,17 @@ CD_F32_W32 = CDTile_1x1(mmaLayout=MMALayout(instM=16, blocks=1, vgprs=8, waveSiz
 
 def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   """Return the MXScaleTilePair for scale tensor tc ('MXSA' or 'MXSB')."""
-  data_tc = 'A' if tc == 'MXSA' else 'B'
+  isA = tc == 'MXSA'
+  # DeepseekScale: per-row E8M0, host pre-broadcast layout, mxBlock=128.
+  use_ds = kernel.get("UseDeepseekScaleA", False) if isA else kernel.get("UseDeepseekScaleB", False)
+  if use_ds:
+    return DS_SCALE_A if isA else DS_SCALE_B
+  data_tc = 'A' if isA else 'B'
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   if dtype.is6bitFloat() or dtype.isFloat4():
-    return MXSA_B4 if tc == 'MXSA' else MXSB_B4
+    return MXSA_B4 if isA else MXSB_B4
   if dtype.is8bitFloat():
-    return MXSA_B8 if tc == 'MXSA' else MXSB_B8
+    return MXSA_B8 if isA else MXSB_B8
   raise NotImplementedError(f"selectMXScaleGeometry: unsupported dtype {dtype} for tc={tc}")
 
 
@@ -467,6 +482,10 @@ class TileInfo:
 
       # Derived byte-counts for emit logic
       self.depthUBytes   = int(self.depthU * geometry.bpe)
+      assert self.localSubtileGrid[1] > 0, (
+        "subtile K grid is zero for tc=%s (depthU=%d, mmaTileShape=%s); "
+        "MX-scaled fp8 subtile requires DepthU >= 2 * MatrixInstK, filter upstream in Solution.py"
+        % (self.tc, self.depthU, self.mmaTileShape))
       self.subIterKBytes = self.depthUBytes // self.localSubtileGrid[1]
       # TDM path. We apply 16 Bytes padding to each row.
       # TDM only exists on gfx1250, which is never swizzled (gfx950-only).
@@ -1092,15 +1111,22 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
   if miK == 128:
     # MX FP4: 16x16x128
     mxInstType = _selectF8F6F4InstType(kernel)
-    if scaleAVgpr >= 0 and scaleBVgpr >= 0:
-      # Use actual loaded scale VGPRs
+    if scaleAVgpr >= 0 or scaleBVgpr >= 0:
+      # MX E8M0 path: at least one real scale VGPR; substitute unit for the absent side.
+      unitScaleVgpr = kernel.get("_subtileUnitScaleVgpr", -1)
+      assert unitScaleVgpr >= 0 or (scaleAVgpr >= 0 and scaleBVgpr >= 0), \
+          "emitMfmaInstruction: mixed/absent scale requires _subtileUnitScaleVgpr"
+      aScaleV = scaleAVgpr if scaleAVgpr >= 0 else unitScaleVgpr
+      bScaleV = scaleBVgpr if scaleBVgpr >= 0 else unitScaleVgpr
+      aSel = scaleAsel if scaleAVgpr >= 0 else 0
+      bSel = scaleBsel if scaleBVgpr >= 0 else 0
       module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
                                    acc=dAccAlias(vgprDStart,opDSize), \
                                    a=aOperand, \
                                    b=bOperand, \
                                    acc2=cAccAlias(vgprCStart,opCSize), \
-                                   mxsa=vgpr(scaleAVgpr), mxsb=vgpr(scaleBVgpr), \
-                                   vop3=VOP3PModifiers(op_sel=[scaleAsel%2, scaleBsel%2], op_sel_hi=[(scaleAsel>>1)%2, (scaleBsel>>1)%2]), \
+                                   mxsa=vgpr(aScaleV), mxsb=vgpr(bScaleV), \
+                                   vop3=VOP3PModifiers(op_sel=[aSel%2, bSel%2], op_sel_hi=[(aSel>>1)%2, (bSel>>1)%2]), \
                                    comment=comment))
     else:
       # Fallback: use unit scale VGPR pre-initialized to 0x7f7f7f7f (scale=1.0 E8M0).
@@ -1117,8 +1143,10 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    mxsa=vgpr(unitScaleVgpr), mxsb=vgpr(unitScaleVgpr), \
                                    comment=comment))
   else:
-    # BF16: 16x16x32
-    module.add(MFMAInstruction(instType=InstType.INST_BF16, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
+    # 16x16x32: use the MFMA variant that matches the actual input element type.
+    dt = kernel["ProblemType"]["DataType"]
+    instType = InstType.INST_F16 if dt.isHalf() else InstType.INST_BF16
+    module.add(MFMAInstruction(instType=instType, accType=InstType.INST_F32, variant=[16,16,miK,1], mfma1k=False, \
                                acc=dAccAlias(vgprDStart,opDSize), \
                                a=aOperand, \
                                b=bOperand, \
@@ -1147,14 +1175,12 @@ def emitMfmaCode(writer, kernel):
   tiA = writer.states.a.tileInfo
   tiB = writer.states.b.tileInfo
   dtileInfo = writer.states.d.tileInfo  # D has no TileInfo yet
-  tiMXSA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) > 0 else None
-  tiMXSB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) > 0 else None
+  tiMXSA = writer.states.mxsa.tileInfo if usesScaleA(kernel) else None
+  tiMXSB = writer.states.mxsb.tileInfo if usesScaleB(kernel) else None
 
-  # Use loaded scale VGPRs when MX block scaling is active.
-  # Note: scaleVgprTiles is only populated by the scheduler path;
-  # in the non-scheduler path we use vgprTiles (populated by localReadDoScaleSubtile).
-  hasScaleA = tiMXSA is not None and tiMXSA.mxBlock > 0
-  hasScaleB = tiMXSB is not None and tiMXSB.mxBlock > 0
+  # Use loaded scale VGPRs when MX block scaling or DeepseekScale is active.
+  hasScaleA = tiMXSA is not None
+  hasScaleB = tiMXSB is not None
 
   # LR subtile shape governs the MFMA register layout (always (1,2) for current geometries).
   # Use ti.lr.subtileShape rather than ti.subtileShape (= GR subtileShape, which differs for
@@ -1184,23 +1210,33 @@ def emitMfmaCode(writer, kernel):
         btiles = tiB.vgprTiles[btileId]
         dtiles = dtileInfo.vgprTiles[mma0 + mma1 * dtileInfo.localMMATileGrid[0]]
 
-        if hasScaleA:
-          # Scale group index: one VGPR per lrSubtileShape[0] M-tiles x lrSubtileShape[1] K-tiles
-          scaleMShapeA = tiMXSA.lrSubtileShape[0]
-          scaleMShapeB = tiMXSB.lrSubtileShape[0]
-          scaleKShapeA = tiMXSA.lrSubtileShape[1]
-          scaleKShapeB = tiMXSB.lrSubtileShape[1]
-          # Use the scale's own K LR subtile grid (not the data's K subtile grid).
-          scaleKGridA = tiMXSA.lrLocalSubtileGrid[1]
-          scaleKGridB = tiMXSB.lrLocalSubtileGrid[1]
-          scaleGroupA = (mma0 // scaleMShapeA) * scaleKGridA + mmak // scaleKShapeA
-          scaleGroupB = (mma1 // scaleMShapeB) * scaleKGridB + mmak // scaleKShapeB
-
-          scaleAVgpr = tiMXSA.vgprTiles[4 * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
-          scaleBVgpr = tiMXSB.vgprTiles[4 * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
-
-          sAsel = (mma0 % scaleMShapeA) + scaleMShapeA * (mmak % scaleKShapeA)
-          sBsel = (mma1 % scaleMShapeB) + scaleMShapeB * (mmak % scaleKShapeB)
+        if hasScaleA or hasScaleB:
+          # Scale group index: one VGPR per lrSubtileShape[0] M-tiles x lrSubtileShape[1] K-tiles.
+          # Guard each side independently so A-only / B-only kernels do not crash.
+          if hasScaleA:
+            scaleMShapeA = tiMXSA.lrSubtileShape[0]
+            scaleKShapeA = tiMXSA.lrSubtileShape[1]
+            scaleKGridA  = tiMXSA.lrLocalSubtileGrid[1]
+            scaleGroupA  = (mma0 // scaleMShapeA) * scaleKGridA + mmak // scaleKShapeA
+            scaleAVgpr   = tiMXSA.vgprTiles[4 * scaleGroupA].regList.indices[0] if tiMXSA.mxBlock else -1
+            sAsel        = (mma0 % scaleMShapeA) + scaleMShapeA * (mmak % scaleKShapeA)
+          else:
+            scaleAVgpr = -1
+            sAsel      = 0
+          if hasScaleB:
+            scaleMShapeB = tiMXSB.lrSubtileShape[0]
+            scaleKShapeB = tiMXSB.lrSubtileShape[1]
+            scaleKGridB  = tiMXSB.lrLocalSubtileGrid[1]
+            scaleGroupB  = (mma1 // scaleMShapeB) * scaleKGridB + mmak // scaleKShapeB
+            scaleBVgpr   = tiMXSB.vgprTiles[4 * scaleGroupB].regList.indices[0] if tiMXSB.mxBlock else -1
+            sBsel        = (mma1 % scaleMShapeB) + scaleMShapeB * (mmak % scaleKShapeB)
+          else:
+            scaleBVgpr = -1
+            sBsel      = 0
+          # DeepseekScale broadcasts the E8M0 byte to all 4 bytes of the b32 VGPR,
+          # so the correct selector is always 0 for both sides.
+          if isDeepseekScale(kernel):
+            sAsel = sBsel = 0
         else:
           scaleAVgpr = -1
           scaleBVgpr = -1
@@ -1332,8 +1368,8 @@ def mainLoop(writer, kernel):
 
   tiA = writer.states.a.tileInfo
   tiB = writer.states.b.tileInfo
-  scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
-  scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
+  scaleTiA = writer.states.mxsa.tileInfo if usesScaleA(kernel) else None
+  scaleTiB = writer.states.mxsb.tileInfo if usesScaleB(kernel) else None
 
   lrAGran = ReadGranularity(mn=1, k=1)
   lrBGran = ReadGranularity(mn=1, k=1)
@@ -1403,11 +1439,38 @@ def mainLoop(writer, kernel):
   # asymmetric mixed-scale case where one of A/B has an MX scale and the other
   # does not). Requiring both unscaled would leave the fallback asserting on a
   # missing _subtileUnitScaleVgpr.
-  if miK == 128 and (scaleTiA is None or scaleTiB is None):
+  # For DeepseekScale (fp32 software rescale), we also need the unit scale VGPR
+  # because the MFMA is issued with -1,-1 scale and uses the unit fallback.
+  needUnitScale = miK == 128 and (not usesScaleA(kernel) or not usesScaleB(kernel)
+                                  or isDeepseekScale(kernel))
+  if needUnitScale:
       unitScaleVgpr = writer.vgprPool.checkOut(1)
       module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
       kernel["_subtileUnitScaleVgpr"] = unitScaleVgpr
+
+  # DeepseekScale fp32 software rescale resources:
+  #   partialTile: 4 AGPRs — receives A*B with unit scale from each partial MFMA.
+  #   zeroTile:    4 AGPRs — constant 0.0, used as C input so partialTile = A*B.
+  #   factorVgpr:  2 VGPRs — scratch for fold: f0 = partial, f1 = master.
+  if isDeepseekScale(kernel):
+      partialBase = writer.agprPool.checkOutAligned(4, 4, tag="ds_partialTile")
+      partialTile = RegisterTileInfo(writer.agprPool, RegisterType.Accvgpr)
+      for r in range(4):
+          partialTile.append(partialBase + r)
+
+      zeroBase = writer.agprPool.checkOutAligned(4, 4, tag="ds_zeroTile")
+      zeroTile = RegisterTileInfo(writer.agprPool, RegisterType.Accvgpr)
+      for r in range(4):
+          zeroTile.append(zeroBase + r)
+          module.add(VAccvgprWrite(dst=accvgpr(zeroBase + r), src=0,
+                                   comment=f"DS fp32: init zeroTile AGPR[{r}] = 0.0"))
+
+      factorVgprBase = writer.vgprPool.checkOut(2, tag="ds_factorVgpr")
+
+      kernel["_dsFp32PartialTile"] = partialTile
+      kernel["_dsFp32ZeroTile"] = zeroTile
+      kernel["_dsFp32FactorVgprBase"] = factorVgprBase
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
@@ -1486,5 +1549,10 @@ def mainLoop(writer, kernel):
 
   if unitScaleVgpr >= 0:
       writer.vgprPool.checkIn(unitScaleVgpr)
+
+  if isDeepseekScale(kernel):
+      factorVgprBase = kernel.get("_dsFp32FactorVgprBase", -1)
+      if factorVgprBase >= 0:
+          writer.vgprPool.checkIn(factorVgprBase)
 
   return module

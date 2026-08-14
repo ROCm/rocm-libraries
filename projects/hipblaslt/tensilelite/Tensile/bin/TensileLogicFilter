@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+try:
+    from Tensile import LogicFilter
+except ImportError:
+    import os.path
+    import sys
+    parentdir = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
+    sys.path.append(parentdir)
+
+    from Tensile import LogicFilter
+
+# script run from commandline
+if __name__ == "__main__":
+    LogicFilter.main()

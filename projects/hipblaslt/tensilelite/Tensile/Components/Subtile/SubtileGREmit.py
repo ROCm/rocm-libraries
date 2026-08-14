@@ -737,8 +737,18 @@ def _grComputeRowPartition_legacy(module, kernel, writer, tileInfo, waveId, rowO
     module.add(VMovB32(dst=vgpr(localRow), src=0, comment="%s"%tc))
     module.add(VMovB32(dst=vgpr(partitionRow), src=vgpr(waveId), comment="%s"%tc))
   elif tileInfo.loadRatioGR == 2.0:
-    module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
-    module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
+    wg_n = kernel["MIWaveGroup"][1]
+    if tc == 'B' and wg_n > 1:
+      # With multiple N-waves each N-wave owns a separate B LDS region. Split
+      # waveId into waveM (local row within the N-wave's M-strip) and waveN
+      # (which N-partition owns this wave). waveN maps to partitionRow so the
+      # final byte offset separates the two B regions correctly.
+      wg_m = kernel["MIWaveGroup"][0]
+      module.add(VAndB32(dst=vgpr(localRow), src0=hex(wg_m - 1), src1=vgpr(waveId), comment="%s: waveM = waveId %% %d"%(tc, wg_m)))
+      module.add(VLShiftRightB32(dst=vgpr(partitionRow), shiftHex=hex(wg_m.bit_length()-1), src=vgpr(waveId), comment="%s: waveN = waveId / %d"%(tc, wg_m)))
+    else:
+      module.add(VMovB32(dst=vgpr(localRow), src=vgpr(waveId), comment="%s"%tc))
+      module.add(VMovB32(dst=vgpr(partitionRow), src=0, comment="%s"%tc))
   else:
     raise NotImplementedError("Unsupported loadRatioGR for wave partition: %s"%str(tileInfo.loadRatioGR))
   module.add(VLShiftLeftB32(dst=vgpr(localRow), shiftHex=hex(numRowsPerWave.bit_length()-1), src=vgpr(localRow), comment="%s: local row offset"%tc))

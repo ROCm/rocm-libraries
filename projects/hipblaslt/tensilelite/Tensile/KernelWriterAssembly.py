@@ -659,29 +659,32 @@ class KernelWriterAssembly(KernelWriter):
   def removeGRSrdVariableSgprsFromPool(self, kernel):
     module = Module("RemoveGRSrdSgprsFromPool")
 
+    _usesScaleA = kernel["ProblemType"]["MXBlockA"] or kernel.get("UseDeepseekScaleA", False)
+    _usesScaleB = kernel["ProblemType"]["MXBlockB"] or kernel.get("UseDeepseekScaleB", False)
+
     if kernel["BufferLoad"]:
        # resource descriptor (SRD) A and B, must be aligned on 4-SGPR boundary
       self.removeSgprVarFromPool("SrdA")
       self.removeSgprVarFromPool("SrdB")
-      if kernel["ProblemType"]["MXBlockA"]:
+      if _usesScaleA:
         self.removeSgprVarFromPool("SrdMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
+      if _usesScaleB:
         self.removeSgprVarFromPool("SrdMXSB")
 
     if self.states.use64bShadowLimit:
       self.removeSgprVarFromPool("ShadowLimitA")
       self.removeSgprVarFromPool("ShadowLimitB")
     if self.states.use64bShadowLimitMX:
-      if kernel["ProblemType"]["MXBlockA"]:
+      if _usesScaleA:
         self.removeSgprVarFromPool("ShadowLimitMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
+      if _usesScaleB:
         self.removeSgprVarFromPool("ShadowLimitMXSB")
 
     self.removeSgprVarFromPool("WrapUA")
     self.removeSgprVarFromPool("WrapUB")
-    if kernel["ProblemType"]["MXBlockA"]:
+    if _usesScaleA:
       self.removeSgprVarFromPool("WrapUMXSA")
-    if kernel["ProblemType"]["MXBlockB"]:
+    if _usesScaleB:
       self.removeSgprVarFromPool("WrapUMXSB")
 
     return module
@@ -707,12 +710,14 @@ class KernelWriterAssembly(KernelWriter):
     # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here,
     # UNLESS stagger code needs them (calculateStagger references GlobalReadIncs for all tensors).
     needsStaggerSgprs = kernel["StaggerU"] > 0 or kernel["InternalSupportParams"]["SupportCustomStaggerU"]
+    _usesScaleA = kernel["ProblemType"]["MXBlockA"] or kernel.get("UseDeepseekScaleA", False)
+    _usesScaleB = kernel["ProblemType"]["MXBlockB"] or kernel.get("UseDeepseekScaleB", False)
     if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs:
       self.removeSgprVarFromPool("GlobalReadIncsA")
       self.removeSgprVarFromPool("GlobalReadIncsB")
-      if kernel["ProblemType"]["MXBlockA"]:
+      if _usesScaleA:
         self.removeSgprVarFromPool("GlobalReadIncsMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
+      if _usesScaleB:
         self.removeSgprVarFromPool("GlobalReadIncsMXSB")
 
     return module
@@ -727,13 +732,15 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
     if not self.isTdmWaveSeparated(kernel):
       return module
+    _usesScaleA = kernel["ProblemType"]["MXBlockA"] or kernel.get("UseDeepseekScaleA", False)
+    _usesScaleB = kernel["ProblemType"]["MXBlockB"] or kernel.get("UseDeepseekScaleB", False)
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsA"))
     if self.states.b.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsB"))
-    if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
+    if _usesScaleA and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsMXSA"))
-    if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
+    if _usesScaleB and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsMXSB"))
     return module
 
@@ -759,12 +766,18 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMB"]:
         module.add(self.defineSgpr("SrdB", 4, 4))
         self.addSgprVarToPool("SrdB")
-      if kernel["ProblemType"]["MXBlockA"] and not kernel["enableTDMA"]:
+      _usesScaleA = kernel["ProblemType"]["MXBlockA"] or kernel.get("UseDeepseekScaleA", False)
+      _usesScaleB = kernel["ProblemType"]["MXBlockB"] or kernel.get("UseDeepseekScaleB", False)
+      if _usesScaleA and not kernel["enableTDMA"]:
         module.add(self.defineSgpr("SrdMXSA", 4, 4))
         self.addSgprVarToPool("SrdMXSA")
-      if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
+      if _usesScaleB and not kernel["enableTDMB"]:
         module.add(self.defineSgpr("SrdMXSB", 4, 4))
         self.addSgprVarToPool("SrdMXSB")
+        if kernel.get("UseDeepseekScaleB", False):
+          from Tensile.Components.Subtile.SubtileScaleEmit import deepseekScaleBNBlocksPerWave
+          if deepseekScaleBNBlocksPerWave(kernel) > 1:
+            module.add(self.defineSgpr("DsScaleBBlockStride", 1))
       if not kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("SrdMetadata", 4, 4))
 
@@ -778,10 +791,10 @@ class KernelWriterAssembly(KernelWriter):
       if not kernel["enableTDMMetadata"] and kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("ShadowLimitMetadata", 2, 2))
     if self.states.use64bShadowLimitMX:
-      if kernel["ProblemType"]["MXBlockA"] and not kernel["enableTDMA"]:
+      if _usesScaleA and not kernel["enableTDMA"]:
         module.add(self.defineSgpr("ShadowLimitMXSA", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSA")
-      if kernel["ProblemType"]["MXBlockB"] and not kernel["enableTDMB"]:
+      if _usesScaleB and not kernel["enableTDMB"]:
         module.add(self.defineSgpr("ShadowLimitMXSB", 2, 2))
         self.addSgprVarToPool("ShadowLimitMXSB")
 
@@ -794,9 +807,9 @@ class KernelWriterAssembly(KernelWriter):
       wrapAlignment = 2 if self.states.asmCaps["s_sub_u64"] and self.states.asmCaps["HasWMMA_V3"] else 1
       module.add(self.defineSgpr("WrapUA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressA
       module.add(self.defineSgpr("WrapUB", 2, wrapAlignment))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
-      if kernel["ProblemType"]["MXBlockA"]:
+      if _usesScaleA:
         module.add(self.defineSgpr("WrapUMXSA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSA
-      if kernel["ProblemType"]["MXBlockB"]:
+      if _usesScaleB:
         module.add(self.defineSgpr("WrapUMXSB", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSB
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
@@ -808,7 +821,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
       if kernel["NumWaves"] < 2:
         self.addSgprVarToPool("GlobalReadIncsA")
-    if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
+    if _usesScaleA and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
       if kernel["NumWaves"] < 2:
         self.addSgprVarToPool("GlobalReadIncsMXSA")
@@ -816,7 +829,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
       if kernel["NumWaves"] < 2:
         self.addSgprVarToPool("GlobalReadIncsB")
-    if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
+    if _usesScaleB and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
       if kernel["NumWaves"] < 2:
         self.addSgprVarToPool("GlobalReadIncsMXSB")
@@ -1644,7 +1657,8 @@ class KernelWriterAssembly(KernelWriter):
       module.addSpaceLine()
       module.addComment0("StreamK Parallel Reduction Assignments")
       module.add(RegSet("s", "sgprSkSplit", "sgprskTiles", 0))
-      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
+      if kernel["ProblemType"]["UseBeta"]:
+        module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
       if kernel["StreamK"] == 5:
         # SK5 hybrid: the kernel only declares the 6 SK3-named kernarg slots
         # (see KernelWriter.py SK5 defineSgpr block). The SK4 code path still
@@ -1666,7 +1680,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("s", "sgprStreamKIter",    "sgprStreamKTileIdx",    0))
         module.add(RegSet("s", "sgprStreamKIterEnd", "sgprStreamKPartialIdx", 0))
     elif kernel["StreamK"] == 4:
-      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
+      if kernel["ProblemType"]["UseBeta"]:
+        module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
 
     module.addSpaceLine()
     module.addComment0("Size Assignments")
@@ -8358,6 +8373,33 @@ class KernelWriterAssembly(KernelWriter):
           self.argLoader.setOffset(offset + ((self.states.rpga * self.states.bpr) * 2))
       return (item, startVgprName, numStoreSgprToLoad)
 
+    # 64-bit epilogue pointers that the host aligns to an 8-byte kernarg boundary
+    # via appendAligned<>().  The loader must advance to the same boundary before
+    # reading each of them; no pad SGPR is used.
+    forceAlignedEpilogue = frozenset([
+        "RMSNormGamma", "AddressResidualOut", "QuantScale",
+        "MXScale", "ScaleABuf", "ScaleBBuf",
+    ])
+
+    def loadStoreSgprsAligned(startSgpr, numRemaining):
+      """Load the remaining store-block SGPRs, advancing the kernarg byte
+      offset to the next 8-byte boundary before each force-aligned epilogue
+      pointer so the load matches the host-side appendAligned<>() gaps."""
+      consumed = self.states.numStoreSgprToLoad - numRemaining
+      sgprIdx = startSgpr
+      accumulated = 0
+      loadMod = Module("store sgprs aligned")
+      for name, size in zip(self.states.numStoreSgprNames, self.states.numStoreSgprNameSizes):
+        if accumulated < consumed:
+          accumulated += size
+          continue
+        if name in forceAlignedEpilogue:
+          cur = self.argLoader.getOffset()
+          self.argLoader.setOffset((cur + 7) & ~7)
+        loadMod.addModuleAsFlatItems(self.argLoader.loadAllKernArg(sgprIdx, "KernArgAddress", size))
+        sgprIdx += size
+      return loadMod
+
     if self.states.numStoreSgprToLoad:
       sgpxIdxVec = self.defineMultiSgprIndex(self.states.numStoreSgprNames, self.states.numStoreSgprNameSizes, align=4)
       for name in self.states.numStoreSgprNames:
@@ -8380,7 +8422,7 @@ class KernelWriterAssembly(KernelWriter):
         (item, startVgprName, numStoreSgprToLoad) = fixPreloadOffset(argOffset, sgpxIdxVec, numStoreSgprToLoad)
         if item:
           module.add(item)
-        loadModule = module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
+        loadModule = module.addModuleAsFlatItems(loadStoreSgprsAligned(startVgprName, numStoreSgprToLoad))
         self.states.numStoreSgprInst = countSMemLoad(loadModule)
         self.argLoader.setOffset(argOffset) # Restore offset
         module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
@@ -8473,7 +8515,7 @@ class KernelWriterAssembly(KernelWriter):
         (item, startVgprName, numStoreSgprToLoad) = fixPreloadOffset(argOffset, sgpxIdxVec, numStoreSgprToLoad)
         if item:
           module.add(item)
-        loadModule = module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
+        loadModule = module.addModuleAsFlatItems(loadStoreSgprsAligned(startVgprName, numStoreSgprToLoad))
         self.states.numStoreSgprInst = countSMemLoad(loadModule)
         self.argLoader.setOffset(argOffset) # Restore offset
       if noSkipLoad and kernel["GlobalSplitU"] != 0:
@@ -8521,6 +8563,14 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("SrdC", 4, 4)
       module.add(RegSet("s", "sgprSrdC", self.sgprs["SrdC"]))
       module.add(RegSet("s", "sgprSrdD", self.sgprs["SrdD"]))
+      if kernel["PartialRMSStoreBf16D"]:
+        if not kernel["ProblemType"]["UseBeta"]:
+          # SrdC is unused when beta=0; alias SrdResidualOut to the same physical
+          # SGPR range to avoid exceeding the 106-SGPR hardware limit.
+          self.sgprs["SrdResidualOut"] = self.sgprs["SrdC"]
+        else:
+          self.defineSgpr("SrdResidualOut", 4, 4)
+        module.add(RegSet("s", "sgprSrdResidualOut", self.sgprs["SrdResidualOut"]))
     if (kernel["ProblemType"]["UseScaleAB"] == "Vector"):
       self.defineSgpr("SrdScaleA", 4, 4)
       self.defineSgpr("SrdScaleB", 4, 4)
@@ -14526,7 +14576,16 @@ class KernelWriterAssembly(KernelWriter):
     # print("len(elements)= ", len(elements_1))
     noGSUBranch = (kernel["GlobalSplitU"] == 0 and (not self.states.streamK.requiresWorkspaceReductionStorePath or kernel["StreamKForceDPOnly"]))
     module = Module("notLocalSplitUGlobalWrite")
-    storeModule, deferredGSU0 = self.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1, noGSUBranch=noGSUBranch)
+    # TileQuant and MXFP8Quant apply alpha and handle beta=0 in their epilogues.
+    ownsEpilogue = kernel.get("DQuantType", "None") != "None"
+    applyAlpha = not ownsEpilogue
+    betas = [False] if ownsEpilogue else None
+
+    storeModule, deferredGSU0 = self.globalWriteElements(
+        kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1,
+        noGSUBranch=noGSUBranch,
+        applyAlpha=applyAlpha,
+        **({"betas": betas} if betas is not None else {}))
     module.add(storeModule)
 
     self.cleanupGlobalWrite(kernel)
@@ -15231,11 +15290,37 @@ class KernelWriterAssembly(KernelWriter):
     vgprActCopy: int = -1
     calleeLabelsByGwvw: Optional[Mapping[int, Tuple[str, ...]]] = None
 
+  def emitSubtileFusedEpilogue(self, kernel):
+    # Only complete-tile subtile waves reach here (StreamK Role C branched away earlier).
+    module = Module("SubtileFusedEpilogue")
+    if not kernel.get("UseSubtileImpl"):
+      return module
+    vgprTiles = self.states.d.tileInfo.vgprTiles
+    if not vgprTiles:
+      return module
+    if kernel["PartialRMS"]:
+      if kernel["PartialRMSResidualAdd"] or kernel["PartialRMSStoreBf16D"]:
+        from .Components.Subtile.SubtileResidualAddEmit import SubtileResidualAddEmitter
+        module.addComment1("ResidualAdd: load residual, H = GEMM + residual, store ResidualOut bf16.")
+        module.add(SubtileResidualAddEmitter(self, kernel).emit(vgprTiles))
+      from .Components.Subtile.SubtilePartialRMSEmit import SubtilePartialRMSEmitter
+      module.addComment1("PartialRMS: fused partial sum-of-squares + gamma epilogue.")
+      module.add(SubtilePartialRMSEmitter(self, kernel).emit(vgprTiles))
+    if kernel["DQuantType"] == "Tile":
+      from .Components.Subtile.SubtileDynamicQuant import SubtileTileQuantEmitter
+      module.addComment1("TileQuant: per-tile amax pre-scale for fp8 D output.")
+      module.add(SubtileTileQuantEmitter(self, kernel).emit(vgprTiles))
+    if kernel["DQuantType"] == "MXFP8":
+      from .Components.Subtile.SubtileDynamicQuant import SubtileMXFP8QuantEmitter
+      module.addComment1("MXFP8Quant: per-block e8m0 dynamic quant for fp8 D output.")
+      module.add(SubtileMXFP8QuantEmitter(self, kernel).emit(vgprTiles))
+    return module
+
   def globalWriteElements(self, kernel, tPA, tPB, vectorWidths_2, vectorWidths_1, elements_2, elements_1,
                           noGSUBranch=False,
                           applyAlpha=True, # defaults to generating *=alpha codes
                           betas=None, # if left unspecified, then let global parameter decide
-                          edge=True # defaults to using edge write
+                          edge=True, # defaults to using edge write
                           ):
     if not self.do["PostLoop"]: return Module("GlobalWriteElements (Empty)"), Module("DeferredGSU0 (Empty)")
     module = Module("GlobalWriteElements")
@@ -15921,6 +16006,14 @@ class KernelWriterAssembly(KernelWriter):
       skPartialsLabel = Label(label=self.labels.getNameInc("SK_Partials"), comment="")
       skComponent = Component.StreamK.find(self)
       module.add(skComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
+      # Emit the subtile fused epilogue after the StreamK Role-C branch (inside
+      # storeBranches) so only complete-tile waves (Roles A+B) run it. Guard to
+      # the final store iteration: on SKFDPO0 gsuLimit==2 and gsuLimitIdx==0 is
+      # the GSU-MB reduction path (not a PartialRMS/DQuant use case), while
+      # gsuLimitIdx==1 emits the real skStoreLabel. On SKFDPO1 / non-StreamK,
+      # gsuLimit==1 so gsuLimitIdx==0 == gsuLimit-1 and the epilogue runs once.
+      if gsuLimitIdx == gsuLimit - 1:
+        module.add(self.emitSubtileFusedEpilogue(kernel))
 
       # support dynamic MBSK/MB selection by checking synchronizer after bias write
       if kernel["AdaptiveGemmGSUA"] == 1:
@@ -16098,6 +16191,7 @@ class KernelWriterAssembly(KernelWriter):
     kernel["GlobalSplitU"] = gsuBackup
     kernel["_GlobalAccumulation"] = gsuAccumBackup
     self.states.bpeCexternal = bpeCexternalBackup
+
     return module, deferredGSU0
 
   def getMBSKGSUTotal(self, kernel):

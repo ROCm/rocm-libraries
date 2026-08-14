@@ -142,6 +142,7 @@ class UserArgumentsInfo:
     gateSize: int = 0
     activationSize: int = 0
     factorDimSize: int = 0
+    rmsNormSize: int = 0
     # Total argument size
     totalSize: int = 0
 
@@ -162,6 +163,15 @@ def getSrcValueType(kernel, isTypeA):
 
     srcValueType = srcValueType.lower()
     return srcValueType
+
+
+def _partialRMSSideValueType(typeChar):
+    """Return the value-type string for a PartialRMS side buffer (gamma/residual).
+
+    Side types resolve to bf16 by default; 's' selects f32.
+    """
+    from Tensile.Common.DataType import DataType
+    return DataType(typeChar or "b").toNameAbbrev().lower()
 
 
 # Creates kernel header, compatible with code object version 4 and up. V2 and V3 no longer supported.
@@ -407,17 +417,75 @@ class SignatureDefault(Signature):
             signature.addArg(    "AmaxWS",      SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(    "AmaxSync",    SVK.SIG_GLOBALBUFFER, "u32",        "generic")
 
+        activationType = ActivationType("all")
+        for name in activationType.getAdditionalArgStringList():
+            userArgumentsInfo.activationSize += userArgumentsInfo.actMaxSize
+        userArgumentsInfo.activationSize += 4  # Type size
+
+        if kernel["PartialRMS"]:
+            # PartialRMS (K1) epilogue appends in this order:
+            #   RMSNormGamma: global buffer pointer (8 bytes) — per-column gamma weight;
+            #     element type set by PartialRMSGammaType (bf16 by default).
+            #   PartialBuf:   fp32 global buffer pointer (8 bytes) — output Σx² per (row, N-tile).
+            # No RMSNormEps: K2 uses eps, not K1.
+            # NTilesN is not a kernarg: the device computes it from SizesFree[1] and the
+            # compile-time MT1 constant to avoid consuming a permanent named-SGPR slot.
+            gammaValueType = _partialRMSSideValueType(kernel.get("PartialRMSGammaType"))
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            signature.addArg("RMSNormGamma", SVK.SIG_GLOBALBUFFER, gammaValueType, "generic")
+            signature.addArg("PartialBuf",   SVK.SIG_GLOBALBUFFER, "f32",          "generic")
+            userArgumentsInfo.rmsNormSize += 8 + 8  # gamma ptr + partialBuf ptr
+            if kernel["PartialRMSResidualAdd"]:
+                resValueType = _partialRMSSideValueType(kernel.get("PartialRMSResidualType"))
+                signature.addArg("ResidualBuf", SVK.SIG_GLOBALBUFFER, resValueType, "generic")
+                userArgumentsInfo.rmsNormSize += 8  # residual ptr
+            if kernel["PartialRMSStoreBf16D"]:
+                # AddressResidualOut: 64-bit ptr for the bf16 pre-quant output.
+                # Advance the kernarg offset to the next 8-byte boundary so the
+                # following 64-bit pointer is aligned. The host mirrors this with
+                # appendAligned<>() and the device loader with (offset+7)&~7; no
+                # named pad kernarg is emitted.
+                userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+                signature.addArg("AddressResidualOut", SVK.SIG_GLOBALBUFFER, "bf16", "generic")
+                userArgumentsInfo.rmsNormSize += 8  # residualOut ptr
+
+        if kernel["DQuantType"] == "Tile":
+            # TileQuant epilogue appends QuantScale: fp32 global buffer pointer (8 bytes).
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            signature.addArg("QuantScale", SVK.SIG_GLOBALBUFFER, "f32", "generic")
+            userArgumentsInfo.rmsNormSize += 8  # 8B quantScale ptr
+
+        if kernel["DQuantType"] == "MXFP8":
+            # MXFP8Quant epilogue appends MXScale: u8 global buffer pointer (8 bytes).
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            signature.addArg("MXScale", SVK.SIG_GLOBALBUFFER, "u8", "generic")
+            userArgumentsInfo.rmsNormSize += 8  # 8B MXScale ptr
+
+        # The dstD/Synchronizer/GSUSync block and batchOffset block are appended after
+        # the PartialRMS/MXFP8 epilogue args to match the host append order in
+        # ContractionSolution.cpp: singleCallArgs (which contains PartialRMS/MXFP8) is
+        # called first, then dstD/Synchronizer and batchOffset are appended outside it.
         if (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1):
             signature.addArg(    "dstD", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
             signature.addArg(               "Synchronizer", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg(               "GSUSync", SVK.SIG_VALUE,              "u32")
 
         # Batch offset support for general batched mode (pointer array).
-        # Placed at the tail of the kernarg buffer (after the dstD/Synchronizer block)
-        # so no later arg is shifted; the host appends them in the same position,
-        # after the dstD/Synchronizer/seed block. Record each arg's kernarg byte
-        # offset so the assembly loads them from the accurate position rather
-        # than re-deriving it.
+        # Placed after the dstD/Synchronizer block to match the host append order.
+        # Record each arg's kernarg byte offset so the assembly loads them from
+        # the accurate position rather than re-deriving it.
         #
         # signature.offset counts from the very first arg including the common header.
         # The assembly loads these args with KernArgAddress already advanced past
@@ -459,6 +527,27 @@ class SignatureDefault(Signature):
         for name in activationType.getAdditionalArgStringList():
             userArgumentsInfo.activationSize += userArgumentsInfo.actMaxSize
         userArgumentsInfo.activationSize += 4  # Type size
+        if kernel.get("UseDeepseekScaleA", False):
+            # DeepseekScaleA epilogue appends ScaleABuf: fp32 global buffer pointer (8 bytes).
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            writer.states.scaleABufKernArgOffset = signature.offset - userArgumentsInfo.commonArgsSize
+            signature.addArg("ScaleABuf", SVK.SIG_GLOBALBUFFER, "f32", "generic")
+            userArgumentsInfo.rmsNormSize += 8  # 8B scaleA ptr.
+
+        if kernel.get("UseDeepseekScaleB", False):
+            # DeepseekScaleB epilogue appends ScaleBBuf: fp32 global buffer pointer (8 bytes).
+            # Advance the kernarg offset to the next 8-byte boundary so the
+            # following 64-bit pointer is aligned. The host mirrors this with
+            # appendAligned<>() and the device loader with (offset+7)&~7; no
+            # named pad kernarg is emitted.
+            userArgumentsInfo.rmsNormSize += signature.alignKernArg(8)
+            writer.states.scaleBBufKernArgOffset = signature.offset - userArgumentsInfo.commonArgsSize
+            signature.addArg("ScaleBBuf", SVK.SIG_GLOBALBUFFER, "f32", "generic")
+            userArgumentsInfo.rmsNormSize += 8  # 8B scaleB ptr.
 
         # Calculate total size
         userArgumentsInfo.totalSize = userArgumentsInfo.gemmArgumentSize + \
@@ -471,7 +560,8 @@ class SignatureDefault(Signature):
                                       userArgumentsInfo.factorDimSize + \
                                       userArgumentsInfo.eSize + \
                                       userArgumentsInfo.activationSize + \
-                                      userArgumentsInfo.gateSize
+                                      userArgumentsInfo.gateSize + \
+                                      userArgumentsInfo.rmsNormSize
 
         writer.states.userArgsInfo = userArgumentsInfo
 
