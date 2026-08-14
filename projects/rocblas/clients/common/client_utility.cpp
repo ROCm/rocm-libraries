@@ -29,12 +29,30 @@
 #include "client_utility.hpp"
 #include "d_vector.hpp"
 #include "gtest_helpers.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
 #include <thread>
+#include <vector>
+
+// Guard appended to a user allocated workspace to catch library overruns.
+//
+// The guard begins at the end of what the test allocated, not at the end of what
+// the library asked for, so it sees an overrun only once that overrun clears the
+// slack between the two. A test wanting detection has to size
+// user_allocated_workspace close to the library's requirement; the rows added for
+// syrk and herk leave 64 KiB against an overrun of 256 KiB or more. Within that
+// limit a bounded guard is as good as a workspace-sized one, since an overrun
+// starts at the first byte past the workspace: the cap has to exceed the slack, not
+// the overrun, which the client could never promise to contain. The floor matters
+// for the opposite case, a workspace of a few KiB, where a proportional guard would
+// be too small to catch anything that overshoots by more than the request itself.
+static constexpr unsigned char c_workspace_guard_byte = 0xA5;
+static constexpr size_t        c_workspace_guard_min  = 64 * 1024;
+static constexpr size_t        c_workspace_guard_max  = 1024 * 1024;
 
 #ifdef BUILD_WITH_HIPBLASLT
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -499,12 +517,52 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
 
     if(status == rocblas_status_success)
     {
-        // If the test specifies user allocated workspace, allocate and use it
+        // If the test specifies user allocated workspace, allocate and use it.
+        // A guard region is appended and rocBLAS is told only about the requested
+        // size, so anything the library writes past the end of its own workspace
+        // lands in the guard and is caught on destruction.
+        //
+        // Worth guarding because an overrun of internal scratch is not reliably
+        // visible in the results. Whether it corrupts anything depends on what the
+        // pool happens to place behind it, and the pool grows itself by a default
+        // slab beyond each request when rocBLAS owns it, so an overrun can land in
+        // memory nothing is using and leave every value correct. That makes a
+        // value comparison an unreliable detector of a real memory error, in
+        // either direction.
         if(arg.user_allocated_workspace)
         {
-            if((hipMalloc)(&m_memory, arg.user_allocated_workspace) != hipSuccess)
+            m_memory_size = arg.user_allocated_workspace;
+#ifdef GOOGLE_TEST
+            // Only the tests check the guard, so only the tests pay for it. Sized
+            // from the workspace but capped: an overrun begins at the first byte
+            // past the end, so detecting one needs the start of it rather than all
+            // of it, and every byte here is copied back and scanned on each handle.
+            // trsm asks for up to 32 MB across thousands of pre_checkin cases,
+            // which a workspace-sized guard would add to the suite for nothing.
+            m_memory_guard_size = m_memory_size;
+            if(m_memory_guard_size < c_workspace_guard_min)
+                m_memory_guard_size = c_workspace_guard_min;
+            if(m_memory_guard_size > c_workspace_guard_max)
+                m_memory_guard_size = c_workspace_guard_max;
+#endif
+            if((hipMalloc)(&m_memory, m_memory_size + m_memory_guard_size) != hipSuccess)
                 throw std::bad_alloc();
-            status = rocblas_set_workspace(m_handle, m_memory, arg.user_allocated_workspace);
+            if(m_memory_guard_size)
+            {
+                if(hipMemset((char*)m_memory + m_memory_size,
+                             c_workspace_guard_byte,
+                             m_memory_guard_size)
+                   != hipSuccess)
+                    throw std::runtime_error("cannot initialize user workspace guard");
+                // Ordered on the null stream, while the library runs on the handle's
+                // stream, which a test may replace with a non-blocking one. Wait here
+                // so a late memset cannot erase what the guard is meant to catch.
+                if(hipStreamSynchronize(nullptr) != hipSuccess)
+                    throw std::runtime_error(
+                        "cannot synchronize the user workspace guard initialization");
+            }
+
+            status = rocblas_set_workspace(m_handle, m_memory, m_memory_size);
         }
     }
 
@@ -526,6 +584,65 @@ rocblas_local_handle::~rocblas_local_handle()
 
     if(m_memory)
     {
+#ifdef GOOGLE_TEST
+        if(m_memory_guard_size)
+        {
+            // Every step of the read back is asserted rather than skipped on failure.
+            // A guard that could not be read has to say so, because skipping quietly
+            // leaves this check reporting success long after it stopped working, and
+            // that is the one failure mode a detector must not have. EXPECT and not
+            // the ASSERT that CHECK_HIP_ERROR would give: returning early from a
+            // destructor would skip the free below and the handle destruction after it.
+            //
+            // The copy is blocking against the null stream only, and a test may have
+            // installed its own stream on this handle, so wait on that stream rather
+            // than assume the writes have landed.
+            hipStream_t stream   = nullptr;
+            bool        readable = rocblas_get_stream(m_handle, &stream) == rocblas_status_success;
+            EXPECT_TRUE(readable) << "cannot query the handle's stream, so the guard on the "
+                                     "user allocated workspace cannot be read";
+
+            if(readable)
+            {
+                hipError_t status = hipStreamSynchronize(stream);
+                EXPECT_EQ(status, hipSuccess)
+                    << "cannot synchronize before reading the guard on the user allocated "
+                       "workspace: "
+                    << hipGetErrorName(status);
+                readable = status == hipSuccess;
+            }
+
+            std::vector<unsigned char> guard;
+            if(readable)
+            {
+                guard.resize(m_memory_guard_size);
+                hipError_t status = hipMemcpy(guard.data(),
+                                              (char*)m_memory + m_memory_size,
+                                              m_memory_guard_size,
+                                              hipMemcpyDeviceToHost);
+                EXPECT_EQ(status, hipSuccess)
+                    << "cannot read the guard on the user allocated workspace: "
+                    << hipGetErrorName(status);
+                readable = status == hipSuccess;
+            }
+
+            if(readable)
+            {
+                auto   first = std::find_if(guard.begin(), guard.end(), [](unsigned char b) {
+                    return b != c_workspace_guard_byte;
+                });
+                size_t differing = std::count_if(first, guard.end(), [](unsigned char b) {
+                    return b != c_workspace_guard_byte;
+                });
+                // A count of differing bytes, not the span of the overrun: a byte the
+                // library wrote is invisible here if it happens to equal the fill.
+                EXPECT_EQ(differing, size_t(0))
+                    << differing << " guard byte(s) differ, the first "
+                    << std::distance(guard.begin(), first) << " byte(s) past the end of the "
+                    << m_memory_size << " byte user allocated workspace";
+            }
+        }
+#endif
         PRINT_IF_HIP_ERROR((hipFree)(m_memory));
     }
 

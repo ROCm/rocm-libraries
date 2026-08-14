@@ -211,6 +211,28 @@ Tests:
     - herk_strided_batched: *single_precision_complex
   stride_scale: 1
 
+# herk shares rocblas_copy_triangular_syrk_herk with syrk; see the comment on
+# syrk_large_batch_only_gemm for why K must reach 500 to select this path.
+- name: herk_large_batch_only_gemm
+  category: stress
+  uplo: [ U, L ]
+  arguments:
+    # Boundary coverage only; as in syrk, this batch_count cannot detect the defect.
+    - { N: 2, K: 500, lda: 500, ldc: 2, stride_a: 1000, stride_c: 4, batch_count: *c_grid_yz_require_passes, transA: C }
+    # tri(2) * 131070 * sizeof(rocblas_float_complex) = 1048560, rounded to
+    # 1048576, plus 64 KiB of slack. See syrk_large_batch_only_gemm for why the
+    # workspace is supplied here rather than left to rocBLAS. About 1 GB of device
+    # memory for A, plus a host mirror, hence stress.
+    - { N: 2, K: 500, lda: 500, ldc: 2, stride_a: 1000, stride_c: 4, batch_count: 131070, transA: C, user_allocated_workspace: 1114112 }
+  alpha_beta:
+    - { alpha:  1.0, beta:  1.0 }
+  os_flags: [ LINUX ]
+  # See syrk_large_batch_only_gemm: the workspace path is gated to these two.
+  gpu_arch: ['90a','942']
+  function:
+    - herk_batched: *single_precision_complex
+    - herk_strided_batched: *single_precision_complex
+
 - name: herk_ILP64
   category: stress
   uplo: [ U, L ]

@@ -114,6 +114,8 @@ class rocblas_local_handle
 {
     rocblas_handle m_handle{nullptr};
     void*          m_memory{nullptr};
+    size_t         m_memory_size{0};
+    size_t         m_memory_guard_size{0};
     hipStream_t    m_graph_stream{nullptr};
     hipStream_t    m_old_stream{nullptr};
     std::string    m_hipblaslt_saved_status    = "";
