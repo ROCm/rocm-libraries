@@ -508,10 +508,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const I nt = ceildiv(n - 1, kd);
         const I nv = kd * nt * (nt + 1) / 2;
 
-        // Strides for band and V arrays (zero for non-strided, non-zero for strided batched)
-        const rocblas_stride strideAband = STRIDED ? (rocblas_stride)ldab * n : 0;
-        const rocblas_stride strideV_hb2st = STRIDED ? (rocblas_stride)ldv_hb2st * nv : 0;
-        const rocblas_stride strideTau_hb2st = STRIDED ? (rocblas_stride)nv : 0;
+        // Strides for band and V arrays, applies to both pointer batched and strided.
+        const rocblas_stride strideAband = rocblas_stride(ldab * n);
+        const rocblas_stride strideV_hb2st = rocblas_stride(ldv_hb2st * nv);
+        const rocblas_stride strideTau_hb2st = rocblas_stride(nv);
 
         // Partition he2hb_work into sub-workspaces
         size_t size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr_he2hb;
@@ -808,10 +808,10 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const I nt = ceildiv(n - 1, kd);
         const I nv = kd * nt * (nt + 1) / 2;
 
-        // Strides for band and V arrays (zero for non-strided, non-zero for strided batched)
-        const rocblas_stride strideAband = STRIDED ? (rocblas_stride)ldab * n : 0;
-        const rocblas_stride strideV_hb2st = STRIDED ? (rocblas_stride)ldv_hb2st * nv : 0;
-        const rocblas_stride strideTau_hb2st = STRIDED ? (rocblas_stride)nv : 0;
+        // Strides for band and V arrays, applies to both pointer batched and strided.
+        const rocblas_stride strideAband = rocblas_stride(ldab * n);
+        const rocblas_stride strideV_hb2st = rocblas_stride(ldv_hb2st * nv);
+        const rocblas_stride strideTau_hb2st = rocblas_stride(nv);
 
         // Partition he2hb_work into sub-workspaces
         size_t size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr_he2hb;
