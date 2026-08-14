@@ -75,6 +75,10 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
         par.weight_type = hipconv::DataType::tf32;
         par.output_type = hipconv::DataType::fp32;
     }
+    else
+    {
+        MIOPEN_THROW("ConvHipConv: unsupported data type.");
+    }
 
     par.order = problem.IsLayoutNHWC() ? hipconv::TensorOrder::NHWC : hipconv::TensorOrder::NCHW;
 
