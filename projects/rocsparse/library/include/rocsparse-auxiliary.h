@@ -3165,6 +3165,7 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p const_values is invalid.
  *  \retval rocsparse_status_invalid_value if \p data_type or \p pointer_mode is invalid.
  */
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
                                                      rocsparse_dnvec_descr* descr,
@@ -3173,6 +3174,7 @@ rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       hand
                                                      const void*            const_values,
                                                      void*                  values,
                                                      rocsparse_error*       p_error);
+#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a dense vector descriptor.

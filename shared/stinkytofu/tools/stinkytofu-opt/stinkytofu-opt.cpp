@@ -641,13 +641,13 @@ int main(int argc, char** argv) {
         std::string origFuncName = parsed.functions[0]->funcName;
         auto originalInsts = std::move(parsed.functions[0]->blocks[0]->instructions);
 
-        // Find from-label and to-label positions
+        // Find from-label and to-label positions (first occurrence, in case a
+        // label name repeats elsewhere in the file).
         int fromIdx = -1, toIdx = -1;
         for (int idx = 0; idx < (int)originalInsts.size(); ++idx) {
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == fromLabel)
-                fromIdx = idx;
-            if (originalInsts[idx]->isLabel && originalInsts[idx]->opcodeStr == toLabel)
-                toIdx = idx;
+            if (!originalInsts[idx]->isLabel) continue;
+            if (fromIdx < 0 && originalInsts[idx]->opcodeStr == fromLabel) fromIdx = idx;
+            if (toIdx < 0 && originalInsts[idx]->opcodeStr == toLabel) toIdx = idx;
         }
         if (fromIdx < 0) {
             std::cerr << "Error: --from-label '" << fromLabel << "' not found in assembly\n";
@@ -734,6 +734,10 @@ int main(int argc, char** argv) {
         emitVerbatim(preResult);
     }
 
+    // Set to true if any analysis/verification pass reports a failure; surfaced as a
+    // non-zero exit code after all functions and output have been processed.
+    bool analysisFailed = false;
+
     // Process each function independently
     for (auto& parsedFunc : parsed.functions) {
         if (optLevel >= 0) {
@@ -776,6 +780,8 @@ int main(int argc, char** argv) {
             passManager.setGemmTileConfig(gemmTileConfig);
             auto caps = stinkytofu::ToolchainCaps::probe(archID);
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
+            // Stand in for rocisa's archCaps, which only TensileLite can supply.
+            caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
             passManager.setAsmCapsConfig(caps);
             if (enableRemarks) passManager.getPassContext().setRemarksEnabled(true);
 
@@ -800,6 +806,7 @@ int main(int argc, char** argv) {
             }
 
             passManager.run(func);
+            if (passManager.getPassContext().getAnalysisFailed()) analysisFailed = true;
 
             emitFunction(func);
         }
@@ -807,5 +814,5 @@ int main(int argc, char** argv) {
 
     emitVerbatim(postResult);
 
-    return 0;
+    return analysisFailed ? 1 : 0;
 }

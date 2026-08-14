@@ -53,6 +53,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
+    unit/asm/ModuleAdaptorsTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
     unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
@@ -83,7 +84,10 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
+    unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/Gfx1250HazardProfileTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp

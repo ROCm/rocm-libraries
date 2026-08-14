@@ -7,6 +7,7 @@ set(GPU_REF_KERNEL_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/convolution/GpuRefConvWrw.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/GpuRefRMSNormFwd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/GpuRefRMSNormBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseUnary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/pointwise/GpuRefPointwiseBinary.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/validator/GpuRefValidator.cpp

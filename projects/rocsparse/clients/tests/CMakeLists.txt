@@ -225,7 +225,6 @@ set(ROCSPARSE_TEST_SOURCES
   test_spgeam_reuse_csr.cpp
   test_spgeam_csr_2.cpp
   test_spgeam_reuse_csr_2.cpp
-  test_spmat_scale.cpp
   test_gtsv.cpp
   test_gemvi.cpp
   test_sddmm.cpp
@@ -250,6 +249,10 @@ endif()
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_TEST_SOURCES test_spildlt0.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_TEST_SOURCES test_spmat_scale.cpp)
 endif()
 
 set(ROCSPARSE_CLIENTS_TESTINGS
@@ -391,7 +394,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spgeam_reuse_csr.cpp
 ../testings/testing_spgeam_csr_2.cpp
 ../testings/testing_spgeam_reuse_csr_2.cpp
-../testings/testing_spmat_scale.cpp
 ../testings/testing_gtsv.cpp
 ../testings/testing_gemvi.cpp
 ../testings/testing_sddmm.cpp
@@ -411,6 +413,10 @@ rocsparse_test_listeners.cpp
 
 if(BUILD_WITH_ILDLT0)
   list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spildlt0.cpp)
+endif()
+
+if(ROCSPARSE_ENABLE_SPMAT_SCALE)
+  list(APPEND ROCSPARSE_CLIENTS_TESTINGS ../testings/testing_spmat_scale.cpp)
 endif()
 
 

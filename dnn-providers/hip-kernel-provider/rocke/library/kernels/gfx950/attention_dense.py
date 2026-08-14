@@ -42,11 +42,14 @@ lane's tile-max is within 8 log2 of the running max) is ALWAYS-ON by default
 
 Head-size / seqlen coverage:
   * ``head_size`` is 64 or 128 (bf16/fp16, MHA + GQA incl. non-power-of-2 NQK).
-    D=128 uses the padded LDS fast path (1 K/V row per async-DMA instr); D=64
-    packs 2 rows per instr into an UNPADDED contiguous tile (64 lanes x 2 bf16 =
-    128 elems = 2 D=64 rows), so its reads take some LDS bank conflict (V-pad is
-    a future D=64 perf lever). D=128 codegen is byte-identical to before this
-    change (same IR hash -> same TFLOPS).
+    D=128 uses the per-row padded LDS fast path (1 K/V row per async-DMA instr).
+    D=64 packs 2 rows per instr (64 lanes x 2 bf16 = 128 elems = 2 D=64 rows),
+    which rules out a per-row pad because a padded row is not contiguous with
+    the next -- so K instead pads between DMA row-GROUPS (``lds_k_group_pad``):
+    the group stays contiguous for the DMA while the group pitch restores the
+    QK read's bank spread. V still uses the unpadded packed pitch, so a
+    conflict-free transposed-V layout remains an open D=64 lever. D=128 codegen
+    is byte-identical across this change (same IR hash -> same TFLOPS).
   * ``seqlen_q``/``seqlen_kv`` must be a multiple of 256 / ``block_n`` on the
     default (aligned) kernel. Non-multiple lengths are handled by a SEPARATE
     ``ragged=True`` kernel path (its own kernel_name) that pads the boundary
@@ -153,6 +156,24 @@ class AttentionDenseSpec:
     # waves_per_eu: occupancy hint. 2 is a free win (tighter allocation, still 2
     #   waves/SIMD); 3 is a measured trap (VGPR<=170 forces spills -> -20%).
     waves_per_eu: int = 2
+    # lds_k_group_pad: bf16 elements of K padding between DMA row-GROUPS, on the
+    #   packed head_size<128 path only (ignored at 128, which pads per row via
+    #   _LDS_PAD). The async DMA writes 128//head_size rows contiguously, so a
+    #   per-row pad is impossible there -- but the pad can sit BETWEEN groups and
+    #   still break the QK ds_read_b128 bank pattern. A wave64 b128 read moves
+    #   1024 B while LDS delivers 64 banks x 4 B = 256 B/cycle, so 4 lanes per
+    #   bank is the conflict-free floor. Aggregated over all 64 lanes (4 dwords
+    #   each): unpadded D=64 touches 16 of 64 banks at 16 lanes deep; a group pad
+    #   of 8, 16 or 24 reaches all 64 banks at that floor; 32 falls back to 32
+    #   banks at 8 deep. The whole-wave model does not separate 8/16/24, but a
+    #   16-lane phase (16 x 4 dwords = one full 64-bank sweep) does: pad 8 gives
+    #   16 distinct start banks, pad 16 repeats each twice -- hence 8, which is
+    #   also the cheaper of the two in LDS. Must be a non-negative multiple of 8
+    #   elements (16 B) because smem_load_vN stamps `align 16` on the n=8 read
+    #   unconditionally, so an 8-byte-aligned pitch would keep the ds_read_b128
+    #   while silently breaking its alignment contract. 0 reproduces the old
+    #   unpadded layout for A/B.
+    lds_k_group_pad: int = 8
     # persistent: emit the grid-stride PERSISTENT variant instead of one CTA per
     #   (query-block, head, batch). A 1-D grid of ``num_persistent`` long-lived CTAs
     #   grid-strides over the W = (seqlen_q//256)*Hq*B work items, so the per-CTA
@@ -205,6 +226,17 @@ class AttentionDenseSpec:
         # 128 % head_size == 0 so it packs a whole number of rows per instr.
         if self.head_size not in (64, 128):
             raise ValueError(f"head_size must be 64 or 128, got {self.head_size}")
+        # A group pitch that is not 16-byte aligned would keep the QK
+        # ds_read_b128 while breaking its alignment contract (smem_load_vN stamps
+        # `align 16` on the n=8 read unconditionally) -- wrong data or a fault,
+        # silently. Checked for every head size so an unused value cannot go
+        # stale and then bite when head_size changes.
+        if self.lds_k_group_pad < 0 or self.lds_k_group_pad % 8 != 0:
+            raise ValueError(
+                "lds_k_group_pad must be a non-negative multiple of 8 bf16 "
+                "elements (16 bytes) so the K group pitch stays "
+                f"ds_read_b128-aligned, got {self.lds_k_group_pad}"
+            )
         if self.block_n % 32 != 0:
             raise ValueError(f"block_n must be a multiple of 32, got {self.block_n}")
         if self.ragged:
@@ -297,6 +329,14 @@ class AttentionDenseSpec:
             f"kv{self.num_kv_heads}",
             f"bn{self.block_n}",
             self.dtype,
+        ]
+        # The K group pad changes the emitted layout, so it has to be part of the
+        # kernel identity or two kernels that differ only in pad share a symbol
+        # name (and a launcher-cache entry). Only live on the packed path, so the
+        # head_size=128 name is unchanged.
+        if 128 // self.head_size > 1:
+            parts.append(f"kpad{self.lds_k_group_pad}")
+        parts += [
             f"sq{self.seqlen_q}",
             f"sk{self.seqlen_kv}",
             "causal" if self.causal else "full",
@@ -370,8 +410,9 @@ def build_attention_dense(
     stride_k_tok = Hkv * D
     # DMA row packing: one async_buffer_load_lds instr moves 64 lanes x 2 bf16 =
     # 128 elems. D==128 => 1 row/instr (the padded fast path, byte-identical).
-    # D<128 => pack 128//D rows/instr into an UNPADDED contiguous LDS tile (the
-    # transpose/K reads still get correct pitch from the [BN, LDROW] tensor).
+    # D<128 => pack 128//D rows/instr into one contiguous LDS group; K places
+    # those groups at a padded pitch, V at the plain packed pitch. Reads get the
+    # correct pitch from their LDS tensor shape either way.
     ROWS_PER_INSTR = 128 // D
 
     b = IRBuilder(spec.kernel_name())
@@ -448,13 +489,32 @@ def build_attention_dense(
         )
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
-    #     PV read bank-conflict pad). Row padding requires 1 row/instr (a padded
-    #     row is not contiguous with the next); the packed D<128 loader must use
-    #     an unpadded pitch (LDROW==D) so its multi-row DMA lands row-aligned. ---
-    LDROW = D + PAD if ROWS_PER_INSTR == 1 else D
+    #     PV read bank-conflict pad). A per-ROW pad requires 1 row/instr (a
+    #     padded row is not contiguous with the next), so the packed D<128 K
+    #     loader pads between DMA row-GROUPS instead: the group stays contiguous
+    #     for the multi-row DMA while the group pitch still breaks the QK read's
+    #     bank pattern (see the ``lds_k_group_pad`` spec field). V keeps the
+    #     unpadded packed pitch. ---
+    if ROWS_PER_INSTR == 1:
+        K_GROUP = 1
+        K_ROWS_LDS = BN
+        LDROW = D + PAD
+    else:
+        K_GROUP = ROWS_PER_INSTR
+        K_ROWS_LDS = BN // K_GROUP
+        LDROW = K_GROUP * D + spec.lds_k_group_pad
     VROW = D + _LDS_PAD_V if ROWS_PER_INSTR == 1 else D
-    K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
+    K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
+    # Packed-K read decode, hoisted out of the KV loop: krow = nsub*32 + lane_m
+    # with nsub*32 even, so the group/sub-row split is a shift+and on lane_m
+    # plus a compile-time nsub scale.
+    if K_GROUP > 1:
+        k_lane_grp = b.div(lane_m, b.const_i32(K_GROUP))
+        k_sub_col = b.mul(b.mod(lane_m, b.const_i32(K_GROUP)), b.const_i32(D))
+    else:
+        k_lane_grp = None
+        k_sub_col = None
 
     # Q packs (B operand), scaled once by qk_scale = softmax_scale * log2(e).
     # ragged: a bounds-checked buffer load returns 0 for OOB query rows (the
@@ -483,11 +543,22 @@ def build_attention_dense(
     n_ktiles = ((Skv + BN - 1) // BN) if RAGGED else (Skv // BN)
     n_per = BLOCK_M // BN
 
-    K_BYTES_PER_BUF = BN * LDROW * 2
-    K_LDROW_BYTES = LDROW * 2
+    K_BYTES_PER_BUF = K_ROWS_LDS * LDROW * 2
+    # Bytes per DMA destination group. ROWS_PER_INSTR==1 => one row, so this is
+    # the row pitch and the D=128 emission is unchanged.
+    K_GROUP_BYTES = LDROW * 2
     V_BYTES_PER_BUF = BN * VROW * 2
-    V_LDROW_BYTES = VROW * 2
+    # NOT a padded pitch: the DMA writes ROWS_PER_INSTR*D CONTIGUOUS elements, so
+    # a padded V would need its second row at +D, not +D+pad. Padding V requires
+    # a pad-aware transposed read, not a wider stride here.
+    V_GROUP_BYTES = ROWS_PER_INSTR * VROW * 2
     ROWS_PER_WAVE = BN // WAVES
+    # Group indexing uses floor division; keep it exact so a future head size or
+    # tile width fails loudly instead of silently mis-addressing LDS.
+    assert BN % K_GROUP == 0 and ROWS_PER_WAVE % ROWS_PER_INSTR == 0, (
+        f"K row-group split must divide evenly: BN={BN} K_GROUP={K_GROUP} "
+        f"ROWS_PER_WAVE={ROWS_PER_WAVE} ROWS_PER_INSTR={ROWS_PER_INSTR}"
+    )
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
     zero_soff = b.const_i32(0)
@@ -497,19 +568,23 @@ def build_attention_dense(
     v_rsrc = b.buffer_rsrc(v, b.const_i32(B * Skv * Hkv * D * 2))
     v_wave_off_i64 = b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(WAVE_BYTES))), I64)
 
-    def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
-        """Async DMA one K/V tile into the [BN, LDROW] LDS layout.
+    def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
+        """Async DMA one K/V tile into its LDS layout.
 
         ROWS_PER_INSTR==1 (D==128): one instr per padded row -- 64 lanes x 2 bf16
-        fill exactly one D-wide row (the original byte-identical fast path).
-        ROWS_PER_INSTR>1 (D<128): pack ROWS_PER_INSTR rows per instr into the
-        unpadded contiguous tile (lane l -> row l//(D/2), col 2*(l%(D/2)))."""
+        fill exactly one D-wide row (the original byte-identical fast path), and
+        a group IS a row.
+        ROWS_PER_INSTR>1 (D<128): pack ROWS_PER_INSTR rows per instr into one
+        contiguous group (lane l -> row l//(D/2), col 2*(l%(D/2))). The group is
+        placed at group_bytes stride, which carries K's inter-group pad; V's
+        group_bytes is the plain unpadded ROWS_PER_INSTR*D pitch, so its layout
+        is unchanged."""
         buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
         if ROWS_PER_INSTR == 1:
             for r in range(ROWS_PER_WAVE):
                 row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
                 row_lds_off = b.add(
-                    buf_off, b.zext(b.mul(row, b.const_i32(ldrow_bytes)), I64)
+                    buf_off, b.zext(b.mul(row, b.const_i32(group_bytes)), I64)
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(tile_key0, row)
@@ -524,13 +599,15 @@ def build_attention_dense(
             lanes_per_row = D // 2
             sub_row = b.div(lane, b.const_i32(lanes_per_row))
             col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
-            for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
+            groups_per_wave = ROWS_PER_WAVE // ROWS_PER_INSTR
+            for it in range(groups_per_wave):
                 row0 = b.add(
                     b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
                     b.const_i32(it * ROWS_PER_INSTR),
                 )
+                grp = b.add(b.mul(wave, b.const_i32(groups_per_wave)), b.const_i32(it))
                 row_lds_off = b.add(
-                    buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                    buf_off, b.zext(b.mul(grp, b.const_i32(group_bytes)), I64)
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
@@ -541,12 +618,12 @@ def build_attention_dense(
 
     def async_load_k(lds_base, buf_val, tile_key0):
         _async_load(
-            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+            k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
         )
 
     def async_load_v(lds_base, buf_val, tile_key0):
         _async_load(
-            v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
+            v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
         )
 
     def load_tile(buf_val, tile_idx):
@@ -564,9 +641,14 @@ def build_attention_dense(
         s_reg = []
         for nsub in range(N_SUB):
             acc = b.zero_vec_f32(16)
-            krow = b.add(b.const_i32(nsub * 32), lane_m)
+            if K_GROUP == 1:
+                krow = b.add(b.const_i32(nsub * 32), lane_m)
+            else:
+                krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
             for ks in range(K_STEPS):
                 col = b.add(b.const_i32(ks * 16), d_base)
+                if K_GROUP > 1:
+                    col = b.add(k_sub_col, col)
                 k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
                 acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
@@ -970,7 +1052,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     stride_q_tok = Hq * D
     stride_k_tok = Hkv * D
     # DMA row packing (see default builder): 1 row/instr for D==128 (padded fast
-    # path), else pack 128//D rows/instr into an unpadded contiguous LDS tile.
+    # path), else pack 128//D rows/instr into one contiguous LDS group, with K's
+    # groups at a padded pitch and V's at the plain packed pitch.
     ROWS_PER_INSTR = 128 // D
     RAGGED = spec.ragged
     # ragged: ceil both the KV tiles and the query-block count so the partial
@@ -1012,17 +1095,37 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     d_base = b.mul(lane_h, b.const_i32(8))
     neg_inf = b.const_f32(-1e30)
 
-    # 1 row/instr => padded pitch (bank-conflict fix); packed D<128 => unpadded.
-    LDROW = D + PAD if ROWS_PER_INSTR == 1 else D
+    # 1 row/instr => per-row padded pitch (bank-conflict fix); packed D<128 =>
+    # pad between DMA row-GROUPS on K, unpadded on V (see the default builder).
+    if ROWS_PER_INSTR == 1:
+        K_GROUP = 1
+        K_ROWS_LDS = BN
+        LDROW = D + PAD
+    else:
+        K_GROUP = ROWS_PER_INSTR
+        K_ROWS_LDS = BN // K_GROUP
+        LDROW = K_GROUP * D + spec.lds_k_group_pad
     VROW = (D + _LDS_PAD_V) if ROWS_PER_INSTR == 1 else D
-    K_lds = b.smem_alloc(dtype, [NBUF, BN, LDROW], name_hint="Klds")
+    K_lds = b.smem_alloc(dtype, [NBUF, K_ROWS_LDS, LDROW], name_hint="Klds")
     V_lds = b.smem_alloc(dtype, [NBUF, BN, VROW], name_hint="Vlds")
+    if K_GROUP > 1:
+        k_lane_grp = b.div(lane_m, b.const_i32(K_GROUP))
+        k_sub_col = b.mul(b.mod(lane_m, b.const_i32(K_GROUP)), b.const_i32(D))
+    else:
+        k_lane_grp = None
+        k_sub_col = None
 
-    K_BYTES_PER_BUF = BN * LDROW * 2
-    K_LDROW_BYTES = LDROW * 2
+    K_BYTES_PER_BUF = K_ROWS_LDS * LDROW * 2
+    K_GROUP_BYTES = LDROW * 2
     V_BYTES_PER_BUF = BN * VROW * 2
-    V_LDROW_BYTES = VROW * 2
+    # Not a padded pitch -- see the default builder: the DMA writes contiguous
+    # rows, so padding V needs a pad-aware transposed read, not a wider stride.
+    V_GROUP_BYTES = ROWS_PER_INSTR * VROW * 2
     ROWS_PER_WAVE = BN // WAVES
+    assert BN % K_GROUP == 0 and ROWS_PER_WAVE % ROWS_PER_INSTR == 0, (
+        f"K row-group split must divide evenly: BN={BN} K_GROUP={K_GROUP} "
+        f"ROWS_PER_WAVE={ROWS_PER_WAVE} ROWS_PER_INSTR={ROWS_PER_INSTR}"
+    )
     WAVE_BYTES = 64 * 16
     V_DMA_PASSES = (BN * D) // (WAVES * 64 * 8)
     zero_soff = b.const_i32(0)
@@ -1113,16 +1216,18 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             ]
             q_packs.append(b.vec_pack(elems, dtype))
 
-        def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, ldrow_bytes):
+        def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
             """Async DMA one K/V tile (see default builder ``_async_load``).
             ROWS_PER_INSTR==1 (D==128): incremental one-instr-per-padded-row fast
-            path (byte-identical). ROWS_PER_INSTR>1 (D<128): pack rows per instr
-            into the unpadded contiguous tile."""
+            path (byte-identical), where a group IS a row.
+            ROWS_PER_INSTR>1 (D<128): pack rows per instr into one contiguous
+            group placed at ``group_bytes`` stride (K carries the inter-group pad,
+            V's stride is the plain unpadded ROWS_PER_INSTR*D pitch)."""
             buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
             if ROWS_PER_INSTR == 1:
                 row0 = b.mul(wave, b.const_i32(ROWS_PER_WAVE))
                 row_lds_off = b.add(
-                    buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                    buf_off, b.zext(b.mul(row0, b.const_i32(group_bytes)), I64)
                 )
                 gcol = b.mul(lane, b.const_i32(2))
                 voff = b.add(
@@ -1138,19 +1243,23 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                         rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
                     )
                     if r + 1 < ROWS_PER_WAVE:
-                        row_lds_off = b.add(row_lds_off, b.const_i64(ldrow_bytes))
+                        row_lds_off = b.add(row_lds_off, b.const_i64(group_bytes))
                         voff = b.add(voff, b.const_i32(stride_k_tok))
             else:
                 lanes_per_row = D // 2
                 sub_row = b.div(lane, b.const_i32(lanes_per_row))
                 col = b.mul(b.mod(lane, b.const_i32(lanes_per_row)), b.const_i32(2))
-                for it in range(ROWS_PER_WAVE // ROWS_PER_INSTR):
+                groups_per_wave = ROWS_PER_WAVE // ROWS_PER_INSTR
+                for it in range(groups_per_wave):
                     row0 = b.add(
                         b.mul(wave, b.const_i32(ROWS_PER_WAVE)),
                         b.const_i32(it * ROWS_PER_INSTR),
                     )
+                    grp = b.add(
+                        b.mul(wave, b.const_i32(groups_per_wave)), b.const_i32(it)
+                    )
                     row_lds_off = b.add(
-                        buf_off, b.zext(b.mul(row0, b.const_i32(ldrow_bytes)), I64)
+                        buf_off, b.zext(b.mul(grp, b.const_i32(group_bytes)), I64)
                     )
                     row_base = b.smem_ptr_add(lds_base, row_lds_off)
                     gkey = b.add(b.add(tile_key0, row0), sub_row)
@@ -1163,12 +1272,12 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
 
         def async_load_k(lds_base, buf_val, tile_key0):
             _async_load(
-                k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_LDROW_BYTES
+                k_rsrc, lds_base, buf_val, tile_key0, K_BYTES_PER_BUF, K_GROUP_BYTES
             )
 
         def async_load_v(lds_base, buf_val, tile_key0):
             _async_load(
-                v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_LDROW_BYTES
+                v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
             )
 
         def load_tile(buf_val, tile_idx):
@@ -1180,9 +1289,14 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             s_reg = []
             for nsub in range(N_SUB):
                 acc = b.zero_vec_f32(16)
-                krow = b.add(b.const_i32(nsub * 32), lane_m)
+                if K_GROUP == 1:
+                    krow = b.add(b.const_i32(nsub * 32), lane_m)
+                else:
+                    krow = b.add(b.const_i32(nsub * (32 // K_GROUP)), k_lane_grp)
                 for ks in range(K_STEPS):
                     col = b.add(b.const_i32(ks * 16), d_base)
+                    if K_GROUP > 1:
+                        col = b.add(k_sub_col, col)
                     k_pack = b.smem_load_vN(K_lds, kbuf, krow, col, dtype=dtype, n=8)
                     acc = mfma_32x32x16_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
                 s_reg.append([b.vec_extract(acc, i) for i in range(16)])
@@ -1640,7 +1754,12 @@ def run_attention_dense_torch(
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig
 
-    key = spec.kernel_name()
+    # `batch` is baked into the kernel (K/V buffer extents, and the persistent
+    # work-item count W = NQB*Hq*B) but is NOT part of kernel_name(), so it has
+    # to be part of the cache key: otherwise two specs differing only in batch
+    # collide and the second silently reuses the first binary. Keying here rather
+    # than widening kernel_name() keeps the emitted IR (and its hash) untouched.
+    key = (spec.kernel_name(), spec.batch)
     launcher = _DENSE_LAUNCHER_CACHE.get(key)
     if launcher is None:
         art = compile_kernel(

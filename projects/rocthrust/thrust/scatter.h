@@ -22,13 +22,6 @@
 
 #include <thrust/detail/config.h>
 
-#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
-#  pragma GCC system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
-#  pragma clang system_header
-#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
-#  pragma system_header
-#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -303,7 +296,7 @@ void scatter_if(
  * Iterator</a> and \c InputIterator2's \c value_type must be convertible to \c RandomAccessIterator's \c
  * difference_type. \tparam InputIterator3 must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator3's \c
- * value_type must be convertible to \c Predicate's argument type. \tparam RandomAccessIterator must be a model of <a
+ * value_type must be convertible to \c Predicate's \c argument_type. \tparam RandomAccessIterator must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access iterator</a>. \tparam
  * Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
@@ -311,7 +304,7 @@ void scatter_if(
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- *  `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
  * `[stencil,stencil + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
@@ -325,7 +318,7 @@ void scatter_if(
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(int x)
  *    {
  *      return (x % 2) == 0;
@@ -383,7 +376,7 @@ THRUST_HOST_DEVICE void scatter_if(
  * Iterator</a> and \c InputIterator2's \c value_type must be convertible to \c RandomAccessIterator's \c
  * difference_type. \tparam InputIterator3 must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a> and \c InputIterator3's \c
- * value_type must be convertible to \c Predicate's argument type. \tparam RandomAccessIterator must be a model of <a
+ * value_type must be convertible to \c Predicate's \c argument_type. \tparam RandomAccessIterator must be a model of <a
  * href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access iterator</a>. \tparam
  * Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
@@ -404,7 +397,7 @@ THRUST_HOST_DEVICE void scatter_if(
  *
  *  struct is_even
  *  {
- *    __host__ __device__
+ *    THRUST_HOST_DEVICE
  *    bool operator()(int x)
  *    {
  *      return (x % 2) == 0;

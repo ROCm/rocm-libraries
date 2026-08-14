@@ -28,6 +28,7 @@ SOFTWARE.
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import os
 import re
 
 from rocm_docs import ROCmDocs
@@ -38,6 +39,10 @@ with open("../CMakeLists.txt", encoding="utf-8") as f:
         raise ValueError("VERSION not found!")
     version_number = match[1]
 left_nav_title = f"RPP {version_number} documentation"
+
+# Expose the version to the Doxyfile via $(RPP_VERSION) so the API reference
+# stays in sync with CMakeLists.txt instead of hardcoding PROJECT_NUMBER.
+os.environ["RPP_VERSION"] = version_number
 
 # for PDF output on Read the Docs
 project = "RPP documentation"

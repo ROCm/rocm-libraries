@@ -70,6 +70,33 @@ class TestFindStaleSources:
         stale = _find_stale_sources(so_path, [tmp_path], tmp_path / "build")
         assert str(src) in stale
 
+    def test_subsecond_edit_in_install_second_is_not_stale(self, tmp_path):
+        # cmake --install writes a whole-second mtime; a source edited in that
+        # same second keeps sub-second precision and must not read as stale.
+        fake_so = tmp_path / "_rocisa.so"
+        fake_so.write_bytes(b"")
+        whole = float(int(fake_so.stat().st_mtime))
+        os.utime(fake_so, (whole, whole))
+
+        src = tmp_path / "same_second.cpp"
+        src.write_text("// edited in the same second as the install")
+        os.utime(src, (whole + 0.75, whole + 0.75))
+
+        assert _find_stale_sources(fake_so, [tmp_path], tmp_path / "build") == []
+
+    def test_edit_after_install_second_is_still_stale(self, tmp_path):
+        # Rounding up must not swallow a genuine edit made a second later.
+        fake_so = tmp_path / "_rocisa.so"
+        fake_so.write_bytes(b"")
+        whole = float(int(fake_so.stat().st_mtime))
+        os.utime(fake_so, (whole, whole))
+
+        src = tmp_path / "later.cpp"
+        src.write_text("// edited well after the install")
+        os.utime(src, (whole + 2, whole + 2))
+
+        assert str(src) in _find_stale_sources(fake_so, [tmp_path], tmp_path / "build")
+
     def test_build_dir_files_are_excluded(self, tmp_path, so_path, so_mtime):
         build_dir = tmp_path / "build"
         build_dir.mkdir()

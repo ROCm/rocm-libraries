@@ -114,6 +114,7 @@ class STINKYTOFU_EXPORT PassContext {
     PassFeatureConfig passConfig;
     AsmCapsConfig asmCapsConfig;
     bool enableRemarks_ = false;
+    bool analysisFailed_ = false;
     uint32_t wavefrontSize = 0;  ///< Computed from gemmConfig.arch
 
     // Global BasicBlock filter applied to all StinkyInstPass instances.
@@ -156,6 +157,16 @@ class STINKYTOFU_EXPORT PassContext {
 
     bool getRemarksEnabled() const {
         return enableRemarks_;
+    }
+
+    /// Set by analysis/verification passes that detect a failure the driver should
+    /// surface as a non-zero exit code, instead of aborting the process themselves.
+    void setAnalysisFailed(bool failed = true) {
+        analysisFailed_ = failed;
+    }
+
+    bool getAnalysisFailed() const {
+        return analysisFailed_;
     }
 
     /// Set global BasicBlock filter for all StinkyInstPass instances.

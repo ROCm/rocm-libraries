@@ -33,13 +33,10 @@
 #define DEBUG_TYPE "InsertCoexecHazardPass"
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
-#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
-#include "stinkytofu/hardware/HwReg.hpp"
-#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
@@ -51,18 +48,11 @@ struct CoexecHazardConfig {
     // TRANS -> TRANS and TRANS -> XDL WMMA spacing.
     int transToNonCoreSide = 0;
     bool hwHandlesTransToCoreSide = false;
-    // Whether the arch has the SCHED_MODE DISABLE_XDL_ARB_STALL bit. When set at
-    // runtime co-execution is OFF and the reduced counts apply.
-    bool hasArbStallBit = false;
-    // Debug: treat the whole kernel as co-exec ON.
-    bool assumeCoexecOn = false;
 };
 
 constexpr CoexecHazardConfig kGfx1250Config = {
     /*transToNonCoreSide=*/1,
     /*hwHandlesTransToCoreSide=*/true,
-    /*hasArbStallBit=*/true,
-    /*assumeCoexecOn=*/false,
 };
 
 // Bounds the backward scan. Max count on gfx1250 is 9. 18 to match LLVM's MaxVALULookAhead.
@@ -79,7 +69,6 @@ struct ConsumerCtx {
     ProducerKind kind;
     bool consumerIsWmma;  // only meaningful for kind == WMMA
     const StinkyInstruction* consumer;
-    bool coexecOff;
 };
 
 inline int popcount16(uint16_t v) {
@@ -144,7 +133,7 @@ bool transOverlap(const StinkyInstruction& prod, const StinkyInstruction& cons) 
 class InsertCoexecHazardPass : public StinkyInstPass {
    public:
     static char ID;
-    explicit InsertCoexecHazardPass(StinkyAsmModule* module) : module_(module) {}
+    InsertCoexecHazardPass() = default;
 
     const char* getName() const override {
         return "InsertCoexecHazardPass";
@@ -155,47 +144,28 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        auto arch = passCtx.getGemmTileConfig().arch;
-        archId_ = getGfxArchID(arch[0], arch[1], arch[2]);
-        config_ = kGfx1250Config;
-
-        PASS_DEBUG(std::cerr << "[InsertCoexecHazard] run arch=gfx" << arch[0] << arch[1] << arch[2]
-                             << "\n");
-
-        // Whole-kernel: process the entry function, then every callee. The pass
-        // is invoked on the entry function; callees are reached via the module.
-        if (func.getIsCallable()) {
-            if (!func.empty()) processFunction(func);
-            return preserveCFGAnalyses();
-        }
-
+        setupArch(passCtx);
         if (!func.empty()) processFunction(func);
-
-        if (module_) {
-            for (Function* fn : module_->getFunctions())
-                if (fn && fn->getIsCallable() && !fn->empty()) processFunction(*fn);
-        }
-
         return preserveCFGAnalyses();
     }
 
    private:
-    // Detect TensileLite's `s_setreg hwreg(SCHED_MODE, offset=4, size=1), 1`.
-    bool isArbStallSetreg(const StinkyInstruction& inst) const {
-        if (!config_.hasArbStallBit) return false;
-        return HwReg::isSetregTo(inst, HwReg::schedModeId(archId_),
-                                 HwReg::schedModeDisableXdlArbStall(archId_));
+    void setupArch(PassContext& passCtx) {
+        auto arch = passCtx.getGemmTileConfig().arch;
+        archId_ = getGfxArchID(arch[0], arch[1], arch[2]);
+        config_ = kGfx1250Config;
+        PASS_DEBUG(std::cerr << "[InsertCoexecHazard] run arch=gfx" << arch[0] << arch[1] << arch[2]
+                             << "\n");
     }
 
     // V_NOPs a consumer needs behind a matched producer.
-    int required(ProducerKind kind, int slots, bool consumerIsWmma, bool off) const {
+    int required(ProducerKind kind, int slots, bool consumerIsWmma) const {
         if (kind == ProducerKind::TRANS) return config_.transToNonCoreSide;
-        // DGEMM/SGEMM -> WMMA: a single spacer, independent of co-exec mode.
+        // DGEMM/SGEMM -> WMMA: a single spacer.
         if (kind == ProducerKind::DGEMM) return 1;
-        // Tensor-LUT (perm_pk16): coexec slots, 0 when co-exec is off.
-        if (kind == ProducerKind::PERM) return off ? 0 : slots;
-        // WMMA producer.
-        if (off) return consumerIsWmma ? 1 : 0;
+        // Tensor-LUT (perm_pk16): coexec slots.
+        if (kind == ProducerKind::PERM) return slots;
+        // WMMA producer: +1 on WMMA->WMMA is the D-writeback/pre-read pipeline spacer.
         return consumerIsWmma ? slots + 1 : slots;
     }
 
@@ -264,9 +234,13 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                 const bool hasWindow =
                     ctx.kind == ProducerKind::WMMA || ctx.kind == ProducerKind::PERM;
                 const int slots = hasWindow ? popcount16(inst.getHwInstDesc()->coIssueWindow) : 0;
-                const int need = required(ctx.kind, slots, ctx.consumerIsWmma, ctx.coexecOff);
+                const int need = required(ctx.kind, slots, ctx.consumerIsWmma);
                 best = std::max(best, need - existing);
             }
+
+            // Only the nearest preceding XDL WMMA can hazard the consumer; an earlier one is
+            // separated by this WMMA, so stop here.
+            if (ctx.kind == ProducerKind::WMMA && isXDLWMMA(inst)) return best;
 
             if (isSlotFiller(inst)) ++existing;
             if (existing > kMaxSlotBudget) return best;
@@ -280,144 +254,10 @@ class InsertCoexecHazardPass : public StinkyInstPass {
         return best;
     }
 
-    // Per-BB entry mode: OFF only when the disable setreg ran on every path to it.
-    // Uncertainty => ON, the conservative default.
-    void computeCoexecOff(Function& func, std::unordered_map<const BasicBlock*, bool>& entryOff) {
-        std::unordered_map<const BasicBlock*, bool> disablesCoexec, exitOff;
-        for (BasicBlock& bb : func) {
-            bool found = false;
-            for (auto& node : bb) {
-                auto* inst = dyn_cast<StinkyInstruction>(&node);
-                if (inst && !isPseudoInst(inst) && isArbStallSetreg(*inst)) {
-                    found = true;
-                    break;
-                }
-            }
-            disablesCoexec[&bb] = found;
-            entryOff[&bb] = false;
-            exitOff[&bb] = true;  // start every block OFF; iteration flips to ON where forced
-        }
-
-        bool changed = true;
-        int iters = 0;
-        while (changed) {
-            changed = false;
-            ++iters;
-            for (BasicBlock& bb : func) {
-                const auto& preds = bb.getPredecessors();
-                bool en = !preds.empty();  // no preds => ON (conservative)
-                for (BasicBlock* p : preds) en = en && exitOff[p];
-                if (en != entryOff[&bb]) {
-                    entryOff[&bb] = en;
-                    changed = true;
-                }
-                const bool ex = en || disablesCoexec[&bb];
-                if (ex != exitOff[&bb]) {
-                    exitOff[&bb] = ex;
-                    changed = true;
-                }
-            }
-        }
-
-        PASS_DEBUG({
-            std::cerr << "[InsertCoexecHazard] === computeCoexecOff CFG dump (fixed-point in "
-                      << iters << " iters) ===\n";
-            for (BasicBlock& bb : func) {
-                std::cerr << "[InsertCoexecHazard]   bb \"" << bb.getLabel() << "\""
-                          << " setreg=" << (disablesCoexec[&bb] ? 1 : 0)
-                          << " entryOFF=" << (entryOff[&bb] ? 1 : 0)
-                          << " exitOFF=" << (exitOff[&bb] ? 1 : 0) << " preds=[";
-                bool first = true;
-                for (BasicBlock* p : bb.getPredecessors()) {
-                    std::cerr << (first ? "" : ", ") << "\"" << p->getLabel()
-                              << "\"(exitOFF=" << (exitOff[p] ? 1 : 0) << ")";
-                    first = false;
-                }
-                std::cerr << "]\n";
-            }
-            std::cerr << "[InsertCoexecHazard] === end CFG dump ===\n";
-        });
-    }
-
-    // the v_nop is the required safe-first-VALU
-    IRBase* entryPrologueVNop(Function& func) const {
-        const StinkyInstruction* first = nullptr;
-        for (BasicBlock& bb : func) {
-            for (auto& node : bb) {
-                auto* inst = dyn_cast<StinkyInstruction>(&node);
-                if (!inst || isPseudoInst(inst)) continue;
-                if (!first) {
-                    if (inst->getUnifiedOpcode() != GFX::global_prefetch_b8) return nullptr;
-                    first = inst;
-                    continue;
-                }
-                return inst->getUnifiedOpcode() == GFX::v_nop ? &node : nullptr;
-            }
-        }
-        return nullptr;
-    }
-
-    size_t stripVNops(Function& func) {
-        IRBase* keep = entryPrologueVNop(func);
-        size_t removed = 0;
-        for (BasicBlock& bb : func) {
-            for (auto it = bb.begin(); it != bb.end();) {
-                auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-                IRBase* node = it.getNodePtr();
-                ++it;  // advance before a possible erase
-                if (inst && inst->getUnifiedOpcode() == GFX::v_nop && node != keep) {
-                    bb.removeIR(node);
-                    ++removed;
-                }
-            }
-        }
-        return removed;
-    }
-
-    void ensureArbStallSetreg(Function& func) {
-        if (!config_.hasArbStallBit) return;
-        if (func.getIsCallable()) return;
-        for (BasicBlock& bb : func)
-            for (auto& node : bb) {
-                auto* inst = dyn_cast<StinkyInstruction>(&node);
-                if (inst && !isPseudoInst(inst) && isArbStallSetreg(*inst)) return;  // present
-            }
-
-        BasicBlock* entry = func.getEntryBlock();
-        if (!entry) return;
-        // Insert at the end of the entry block.
-        IRBase* anchor = nullptr;
-        for (auto& node : *entry) {
-            auto* inst = dyn_cast<StinkyInstruction>(&node);
-            if (inst && isBranch(*inst)) {
-                anchor = &node;
-                break;
-            }
-        }
-        AsmIRBuilder builder(*entry, archId_);
-        StinkyInstruction* setreg =
-            builder.create(getMCIDByUOp(GFX::s_setreg_IMM32_b32, archId_), anchor);
-        const HwReg::SubField arb = HwReg::schedModeDisableXdlArbStall(archId_);
-        setreg->addDestReg(
-            StinkyRegister::Hwreg(HwReg::schedModeId(archId_), arb.offset, arb.size));
-        setreg->addSrcReg(StinkyRegister(1));
-        PASS_DEBUG(std::cerr << "[InsertCoexecHazard]   inserted DISABLE_XDL_ARB_STALL setreg at \""
-                             << entry->getLabel() << "\"\n");
-    }
-
     void processFunction(Function& func) {
-        // Strip existing v_nops, then re-emit correct counts.
-        const size_t stripped = stripVNops(func);
-        if (!config_.assumeCoexecOn) ensureArbStallSetreg(func);
-        PASS_DEBUG(std::cerr << "[InsertCoexecHazard] stripped " << stripped
-                             << " pre-existing v_nop(s)\n");
-
-        // assumeCoexecOn leaves entryOff empty (all false), so every BB is costed ON.
-        std::unordered_map<const BasicBlock*, bool> entryOff;
-        if (!config_.assumeCoexecOn) computeCoexecOff(func, entryOff);
-
+        // v_nops are stripped upstream by StinkyRemoveNopPass; this pass counts the
+        // remaining (deliberate, scheduler-placed) fillers and tops up the shortfall.
         for (BasicBlock& bb : func) {
-            bool off = entryOff[&bb];
             for (auto it = bb.begin(); it != bb.end();) {
                 auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                 if (!inst || isPseudoInst(inst)) {
@@ -425,40 +265,33 @@ class InsertCoexecHazardPass : public StinkyInstPass {
                     continue;
                 }
 
-                if (!config_.assumeCoexecOn && isArbStallSetreg(*inst)) {
-                    off = true;
-                    ++it;
-                    continue;
-                }
-
                 int toInsert = 0;
                 if (isXDLWMMA(*inst)) {
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
-                                                            /*consumerIsWmma=*/true, off));
+                                                            /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::TRANS,
-                                                            /*consumerIsWmma=*/false, off));
+                                                            /*consumerIsWmma=*/false));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::DGEMM,
-                                                            /*consumerIsWmma=*/true, off));
+                                                            /*consumerIsWmma=*/true));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::PERM,
-                                                            /*consumerIsWmma=*/false, off));
+                                                            /*consumerIsWmma=*/false));
                 } else if (isCoexecutableVALU(*inst)) {
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::WMMA,
-                                                            /*consumerIsWmma=*/false, off));
+                                                            /*consumerIsWmma=*/false));
                     toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::PERM,
-                                                            /*consumerIsWmma=*/false, off));
+                                                            /*consumerIsWmma=*/false));
                     // TRANS -> core/side is HW-handled; only a TRANS consumer needs
                     // the TRANS -> TRANS spacing.
                     if (isTranscendental(*inst))
                         toInsert = std::max(toInsert, hazardFor(bb, *inst, ProducerKind::TRANS,
-                                                                /*consumerIsWmma=*/false, off));
+                                                                /*consumerIsWmma=*/false));
                 }
 
                 if (toInsert > 0) {
                     insertVNops(bb, it.getNodePtr(), toInsert);
                     PASS_DEBUG(std::cerr << "[InsertCoexecHazard]   inserted " << toInsert
                                          << " v_nop before " << inst->getHwInstDesc()->mnemonic
-                                         << " in bb \"" << bb.getLabel() << "\"" << " (coexec "
-                                         << (off ? "OFF" : "ON") << ")\n");
+                                         << " in bb \"" << bb.getLabel() << "\"\n");
                 }
                 ++it;
             }
@@ -466,8 +299,8 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     }
 
     int hazardFor(BasicBlock& bb, const StinkyInstruction& consumer, ProducerKind kind,
-                  bool consumerIsWmma, bool off) {
-        ConsumerCtx ctx{kind, consumerIsWmma, &consumer, off};
+                  bool consumerIsWmma) {
+        ConsumerCtx ctx{kind, consumerIsWmma, &consumer};
         // minExisting bounds re-entries: a block is re-scanned only on a strictly smaller filler
         // count.
         std::unordered_map<const BasicBlock*, int> minExisting;
@@ -480,19 +313,16 @@ class InsertCoexecHazardPass : public StinkyInstPass {
         for (int i = 0; i < n; ++i) builder.create(getMCIDByUOp(GFX::v_nop, archId_), insertBefore);
     }
 
-    StinkyAsmModule* module_ = nullptr;
     GfxArchID archId_ = GfxArchID{};
     CoexecHazardConfig config_;
 };
 
 char InsertCoexecHazardPass::ID = 0;
+
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createInsertCoexecHazardPass(StinkyAsmModule& module) {
-    return std::make_unique<InsertCoexecHazardPass>(&module);
-}
 std::unique_ptr<Pass> createInsertCoexecHazardPass() {
-    return std::make_unique<InsertCoexecHazardPass>(nullptr);
+    return std::make_unique<InsertCoexecHazardPass>();
 }
 }  // namespace stinkytofu

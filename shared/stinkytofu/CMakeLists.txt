@@ -362,9 +362,14 @@ endif()
 # clang-tidy
 # --------------------------------------------------------------------------- #
 option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
-include(ClangTidy)
-add_clang_tidy_custom_target()
+# ClangTidy.cmake lives in the superbuild's cmake/modules, outside this
+# subproject. Only reach for it when the feature is actually requested, so a
+# standalone or partial checkout of shared/stinkytofu can still configure.
+if(ENABLE_CLANG_TIDY)
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/modules")
+    include(ClangTidy)
+    add_clang_tidy_custom_target()
+endif()
 
 # Build-tree export so find_package() works without installing.
 # Write targets to stinkytofu-targets.cmake (not stinkytofuConfig.cmake) to
