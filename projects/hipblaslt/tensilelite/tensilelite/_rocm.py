@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 import os
 import re
 import shutil
@@ -15,7 +16,6 @@ from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
-from typing import TypeAlias
 
 from _tensilelite_client_binding import ClientBindingError, ClientCandidate, standard_client_path
 
@@ -25,9 +25,25 @@ class TensileLiteRuntimeError(ImportError):
 
 
 @dataclass(frozen=True)
-class PythonRocm:
+class ValidatedRocm(ABC):
+    """A ROCm installation selected and validated for this process."""
+
+    path: Path
     version: str
     toolchain_paths: tuple[Path, ...]
+    source: str
+
+    @abstractmethod
+    def default_client(self) -> ClientCandidate:
+        """Return the default client candidate for this installation."""
+
+    @abstractmethod
+    def selected_info(self) -> str:
+        """Return the installation details included in diagnostic messages."""
+
+
+@dataclass(frozen=True)
+class PythonRocm(ValidatedRocm):
     source: str = "active Python rocm_sdk_core"
 
     def default_client(self) -> ClientCandidate:
@@ -38,19 +54,16 @@ class PythonRocm:
             "Configure an explicit TensileLite client binding instead."
         )
 
+    def selected_info(self) -> str:
+        return f"  selected package: {self.path}\n  selected by: {self.source}"
 
-@dataclass(frozen=True)
-class SystemRocm:
-    root: Path
-    version: str
-    source: str
-    toolchain_paths: tuple[Path, ...]
 
+class SystemRocm(ValidatedRocm):
     def default_client(self) -> ClientCandidate:
-        return ClientCandidate(standard_client_path(self.root), self.source)
+        return ClientCandidate(standard_client_path(self.path), self.source)
 
-
-ValidatedRocm: TypeAlias = PythonRocm | SystemRocm
+    def selected_info(self) -> str:
+        return f"  selected root: {self.path}\n  selected by: {self.source}"
 
 
 @dataclass(frozen=True)
@@ -126,6 +139,22 @@ def _python_sdk_version() -> str | None:
         ) from exc
 
 
+def _python_sdk_location() -> Path:
+    try:
+        import rocm_sdk_core
+
+        location = rocm_sdk_core.__file__
+        if location is None:
+            raise AttributeError("__file__ is None")
+        return Path(location).resolve().parent
+    except Exception as exc:
+        raise TensileLiteRuntimeError(
+            "The active Python ROCm core package has no installed location.\n"
+            "  selected by: active Python rocm_sdk_core\n"
+            "Install the matching rocm core package."
+        ) from exc
+
+
 def _python_sdk_toolchain_paths() -> tuple[Path, ...]:
     user_scheme = sysconfig.get_preferred_scheme("user")
     script_dirs = (
@@ -185,18 +214,12 @@ def _validate_version(
 ) -> None:
     if validated.version != expected_for_comparison:
         shown_version = distribution_version or package_version(distribution)
-        selected = (
-            f"  selected root: {validated.root}\n"
-            if isinstance(validated, SystemRocm)
-            else ""
-        )
         raise TensileLiteRuntimeError(
             f"{distribution} and ROCm release mismatch.\n"
             f"  {distribution} version: {shown_version}\n"
             f"  expected ROCm: {expected_for_comparison}\n"
             f"  found ROCm: {validated.version}\n"
-            f"{selected}"
-            f"  selected by: {validated.source}\n"
+            f"{validated.selected_info()}\n"
             "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
         )
 
@@ -208,8 +231,9 @@ def _validate_python_sdk(
     python_sdk_version: str,
 ) -> PythonRocm:
     validated = PythonRocm(
-        canonical_rocm_version(python_sdk_version),
-        _python_sdk_toolchain_paths(),
+        version=canonical_rocm_version(python_sdk_version),
+        path=_python_sdk_location(),
+        toolchain_paths=_python_sdk_toolchain_paths(),
     )
     _validate_version(distribution, distribution_version, expected, validated)
     return validated
@@ -232,10 +256,10 @@ def _validate_system_rocm(
             f"  expected file: {version_file}"
         ) from exc
     validated = SystemRocm(
-        resolved.root,
-        actual,
-        resolved.source,
-        (resolved.root / "bin", resolved.root / "lib" / "llvm" / "bin"),
+        path=resolved.root,
+        version=actual,
+        source=resolved.source,
+        toolchain_paths=(resolved.root / "bin", resolved.root / "lib" / "llvm" / "bin"),
     )
     _validate_version(
         distribution,

@@ -24,6 +24,14 @@ def _system_rocm(root: Path, source: str = "test") -> _rocm.SystemRocmRoot:
     return _rocm.SystemRocmRoot(root, source)
 
 
+def _python_core(path: Path, version: str):
+    return type(
+        "Core",
+        (),
+        {"__file__": str(path / "__init__.py"), "__version__": version},
+    )
+
+
 def _set_tensilelite_version(monkeypatch, version: str) -> None:
     monkeypatch.setattr(tensilelite, "__version__", version)
 
@@ -55,7 +63,8 @@ def test_validate_distribution_uses_base_info_version_without_python_core(tmp_pa
     )
 
     assert isinstance(result, _rocm.SystemRocm)
-    assert result.root == root
+    assert isinstance(result, _rocm.ValidatedRocm)
+    assert result.path == root
     assert result.version == "10.1.0"
     assert result.source == "test"
     assert result.toolchain_paths == (root / "bin", root / "lib" / "llvm" / "bin")
@@ -76,6 +85,36 @@ def test_validate_distribution_reports_mismatch(tmp_path, monkeypatch):
         "  found ROCm: 7.3.0\n"
         f"  selected root: {root}\n"
         "  selected by: active Python rocm_sdk\n"
+        "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
+    )
+
+
+def test_validate_distribution_reports_python_sdk_mismatch(tmp_path, monkeypatch):
+    scripts = tmp_path / "venv" / "bin"
+    user_scripts = tmp_path / "user" / "bin"
+    core_path = tmp_path / "venv" / "site-packages" / "rocm_sdk_core"
+    monkeypatch.setitem(sys.modules, "rocm_sdk_core", _python_core(core_path, "7.3.0"))
+    monkeypatch.setattr(
+        _rocm.sysconfig,
+        "get_path",
+        lambda name, scheme=None: str(scripts if scheme is None else user_scripts),
+    )
+    monkeypatch.setattr(
+        _rocm,
+        "resolve_system_rocm",
+        lambda: (_ for _ in ()).throw(AssertionError("prefix discovery was used")),
+    )
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError) as exc_info:
+        _rocm.validate_distribution("tensilelite", "5.0.0+rocm7.2.4")
+
+    assert str(exc_info.value) == (
+        "tensilelite and ROCm release mismatch.\n"
+        "  tensilelite version: 5.0.0+rocm7.2.4\n"
+        "  expected ROCm: 7.2.4\n"
+        "  found ROCm: 7.3.0\n"
+        f"  selected package: {core_path.resolve()}\n"
+        "  selected by: active Python rocm_sdk_core\n"
         "Install the wheel from the matching ROCm wheel index or select the matching ROCM_PATH."
     )
 
@@ -133,13 +172,15 @@ def test_path_system_rocm_uses_hipconfig_rocmpath(tmp_path, monkeypatch):
 def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "bin"
     user_scripts = tmp_path / "user" / "bin"
+    core_path = tmp_path / "venv" / "site-packages" / "rocm_sdk_core"
     scripts.mkdir(parents=True)
     user_scripts.mkdir(parents=True)
 
-    class Core:
-        __version__ = "10.1.0a20260813"
-
-    monkeypatch.setitem(sys.modules, "rocm_sdk_core", Core)
+    monkeypatch.setitem(
+        sys.modules,
+        "rocm_sdk_core",
+        _python_core(core_path, "10.1.0a20260813"),
+    )
     monkeypatch.setattr(
         _rocm.sysconfig,
         "get_path",
@@ -156,6 +197,8 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     )
 
     assert isinstance(result, _rocm.PythonRocm)
+    assert isinstance(result, _rocm.ValidatedRocm)
+    assert result.path == core_path.resolve()
     assert result.version == "10.1.0a20260813"
     assert result.source == "active Python rocm_sdk_core"
     assert result.toolchain_paths == (scripts.resolve(), user_scripts.resolve())
@@ -207,7 +250,11 @@ def test_python_sdk_toolchain_prefers_primary_script_over_user_script(
     monkeypatch.setattr(
         _runtime,
         "_installation",
-        _rocm.PythonRocm("10.1.0a20260813", (scripts, user_scripts)),
+        _rocm.PythonRocm(
+            version="10.1.0a20260813",
+            path=scripts,
+            toolchain_paths=(scripts, user_scripts),
+        ),
     )
 
     assert validateToolchain("amdclang") == str(primary if primary_exists else user)
@@ -226,7 +273,10 @@ def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
         _runtime,
         "validate_distribution",
         lambda distribution, version: _rocm.SystemRocm(
-            root, "7.2.4", "test", (root / "bin", root / "lib" / "llvm" / "bin")
+            path=root,
+            version="7.2.4",
+            source="test",
+            toolchain_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
         ),
     )
     monkeypatch.setattr(
@@ -268,7 +318,9 @@ def test_python_sdk_client_request_requires_explicit_binding(tmp_path, monkeypat
         _runtime,
         "validate_distribution",
         lambda distribution, version: _rocm.PythonRocm(
-            "10.1.0a20260813", (scripts,)
+            version="10.1.0a20260813",
+            path=scripts,
+            toolchain_paths=(scripts,),
         ),
     )
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: None)
@@ -292,7 +344,11 @@ def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_
     monkeypatch.setattr(
         _runtime,
         "validate_distribution",
-        lambda distribution, version: _rocm.PythonRocm("10.1.0a20260813", (scripts,)),
+        lambda distribution, version: _rocm.PythonRocm(
+            version="10.1.0a20260813",
+            path=scripts,
+            toolchain_paths=(scripts,),
+        ),
     )
     monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: configured)
     monkeypatch.setattr(
@@ -321,7 +377,10 @@ def _initialize_runtime_with_root(root: Path, monkeypatch) -> None:
         _runtime,
         "validate_distribution",
         lambda distribution, version: _rocm.SystemRocm(
-            root, "7.2.4", "test", (root / "bin", root / "lib" / "llvm" / "bin")
+            path=root,
+            version="7.2.4",
+            source="test",
+            toolchain_paths=(root / "bin", root / "lib" / "llvm" / "bin"),
         ),
     )
     _runtime.initialize()
