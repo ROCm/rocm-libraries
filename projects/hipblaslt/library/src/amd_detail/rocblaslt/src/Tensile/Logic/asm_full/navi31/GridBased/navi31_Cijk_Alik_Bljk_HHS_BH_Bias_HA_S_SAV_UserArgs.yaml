@@ -1,7 +1,7 @@
 - MinimumRequiredVersion: 5.0.0
 - navi31
 - gfx1100
-- - Device 73f0
+- [Device 73f0]
 - Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false
