@@ -439,8 +439,10 @@ reference implementation lives in
 
 ### What a pack is
 
-A **pack** is one engine's contribution, and it is one `.cpp` file plus its kernel
-source and its descriptors:
+A **pack** is one engine's contribution: a set of descriptors, the kernel they name, and
+the native functions those descriptors quote by symbol. One `.cpp` file can hold the
+native side of several packs of the same engine (see below), so this is the shape of a
+pack rather than a file count:
 
 | File | Contains |
 |---|---|

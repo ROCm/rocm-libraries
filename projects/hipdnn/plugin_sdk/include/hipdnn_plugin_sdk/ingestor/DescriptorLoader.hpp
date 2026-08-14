@@ -33,12 +33,10 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
-#include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
-#include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
+#include <hipdnn_plugin_sdk/ingestor/MakeEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/NativeRegistry.hpp>
-#include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 /**
  * @file DescriptorLoader.hpp
@@ -653,7 +651,13 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
     engine.id = requireId(root, "id", where);
     engine.name = requireString(root, "name", where);
     requireScopedName(engine.name, where);
-    engine.heuristicId = requireId(root, "heuristic", where);
+    // Optional: a UED naming no UHD ranks by declared order, and makeKernelHeuristic()
+    // warns and substitutes DeclaredOrderKernelHeuristic. Absence is the only way out --
+    // a `heuristic` key present but naming nothing is still a parse error below.
+    if(root.find("heuristic") != root.end())
+    {
+        engine.heuristicId = requireId(root, "heuristic", where);
+    }
     engine.metadataSchemaId = requireId(root, "metadata", where);
     engine.knobs = optionalStringArray(root, "knobs", where);
     requireNoDuplicates(engine.knobs, "knob", where);
@@ -1339,14 +1343,21 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
             continue;
         }
 
-        const auto* heuristic = detail::findDescriptor(catalog.heuristics, engine.heuristicId);
-        if(heuristic == nullptr)
+        // Only resolved when the UED names one. Naming a UHD no file defines still drops
+        // the engine: the author asked for a model that did not ship, which is a broken
+        // install rather than a deliberate declared-order ranking.
+        const HeuristicDescriptor* heuristic = nullptr;
+        if(engine.heuristicId.has_value())
         {
-            HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
-                                    << engine.name << "' names heuristic "
-                                    << toString(engine.heuristicId)
-                                    << ", which no descriptor defines; dropping it");
-            continue;
+            heuristic = detail::findDescriptor(catalog.heuristics, *engine.heuristicId);
+            if(heuristic == nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
+                                        << engine.name << "' names heuristic "
+                                        << toString(*engine.heuristicId)
+                                        << ", which no descriptor defines; dropping it");
+                continue;
+            }
         }
         const auto* schema = detail::findDescriptor(catalog.schemas, engine.metadataSchemaId);
         if(schema == nullptr)
@@ -1384,7 +1395,10 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         DescriptorSet set;
         set.engine = engine;
         set.schema = *schema;
-        set.heuristic = *heuristic;
+        if(heuristic != nullptr)
+        {
+            set.heuristic = *heuristic;
+        }
 
         // Keyed by id: deduplicates descriptors two packs share and orders them in one
         // step.
@@ -1578,38 +1592,6 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
     return sets;
 }
 
-/// @brief Builds the state manager one DescriptorSet's engine selects over.
-///
-/// @p set's UED is ignored: a UED is 1:1 with a hipDNN engine and is owned by the engine,
-/// not by the state manager.
-template <typename THandle>
-inline std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(DescriptorSet set)
-{
-    return std::make_unique<KernelIngestorStateManager<THandle>>(
-        std::move(set.schema),
-        std::move(set.matchers),
-        std::move(set.dispatches),
-        std::move(set.packs),
-        makeKernelHeuristic(set.heuristic));
-}
-
-/// @brief Builds the engine one DescriptorSet describes.
-///
-/// @p deviceResolver is held by reference by the engine, so the provider must keep it
-/// alive for the engine's lifetime.
-template <typename THandle, typename TSettings, typename TContext>
-inline std::unique_ptr<IEngine<THandle, TSettings, TContext>>
-    makeDescriptorEngine(DescriptorSet set, const IDeviceResolver<THandle>& deviceResolver)
-{
-    // Moves the UED out of `set` in its own statement, fully sequenced before the move of
-    // the (now engine-less) remainder below -- not two moves racing inside one call's
-    // argument list. makeStateManager() never reads set.engine, so its moved-from state
-    // here is inert.
-    auto engine = std::move(set.engine);
-    return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
-        std::move(engine), makeStateManager<THandle>(std::move(set)), deviceResolver);
-}
-
 namespace detail
 {
 
@@ -1672,12 +1654,14 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
                 resolvable = false;
             }
         }
-        if(set.heuristic.kind == HeuristicKind::NATIVE
-           && !ScoreRegistry::isRegistered(set.heuristic.payload))
+        // Nothing to pre-flight when the engine ships no UHD: declared-order ranking
+        // resolves no symbol.
+        if(set.heuristic.has_value() && set.heuristic->kind == HeuristicKind::NATIVE
+           && !ScoreRegistry::isRegistered(set.heuristic->payload))
         {
             HIPDNN_PLUGIN_LOG_ERROR("descriptor loader: engine '"
                                     << set.engine.name << "' names unregistered score symbol '"
-                                    << set.heuristic.payload << "'; dropping it");
+                                    << set.heuristic->payload << "'; dropping it");
             resolvable = false;
         }
 
@@ -1719,7 +1703,8 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
             // Built only to prove the set validates, then thrown away: Container::copyEngineIds
             // is static and would otherwise advertise an id for a set that fails to
             // construct. Extracting validateAndIndexPacks() into a shared predicate would
-            // remove this discarded second walk.
+            // remove this discarded second walk, and with it the duplicate warning an
+            // engine shipping no heuristic gets: once here, once at real construction.
             auto probe = makeStateManager<THandle>(set);
             static_cast<void>(probe);
         }

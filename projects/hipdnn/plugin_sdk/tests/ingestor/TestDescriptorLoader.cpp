@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -17,8 +18,6 @@
 #include <string_view>
 #include <variant>
 #include <vector>
-
-#include <unistd.h>
 
 #include <gtest/gtest.h>
 
@@ -305,20 +304,20 @@ nlohmann::json& secondDocumentOfType(Documents& documents, std::string_view suff
     throw std::runtime_error("no second document of type " + std::string(suffix));
 }
 
-/// mkdtemp's XXXXXX template is unique by construction, not pid-keyed, so a SIGKILLed
-/// run's leftover directory plus pid reuse can't make a later run collide. Removed
-/// immediately so ScopedDirectory below (which throws on an existing path) can create it
-/// again -- a TOCTOU window only an adversarial local process could hit.
+/// Distinct per call, so ScopedDirectory below -- which creates the directory atomically
+/// and throws if the name is taken -- always has a free one. The per-process stamp keeps
+/// two suites running this binary at once out of each other's tree, and remove_all clears
+/// a leftover from a killed run. std::filesystem only: mkdtemp is POSIX, and MSVC ships
+/// no <unistd.h>.
 std::filesystem::path uniqueDirectory(const std::string& name)
 {
-    std::string path
-        = (std::filesystem::temp_directory_path() / ("descriptor_loader_" + name + "_XXXXXX"))
-              .string();
-    if(::mkdtemp(path.data()) == nullptr)
-    {
-        throw std::runtime_error("mkdtemp failed for " + path);
-    }
-    ::rmdir(path.c_str());
+    static const std::string s_session
+        = std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    static unsigned s_counter = 0;
+    const auto path
+        = std::filesystem::temp_directory_path()
+          / ("descriptor_loader_" + name + "_" + s_session + "_" + std::to_string(s_counter++));
+    std::filesystem::remove_all(path);
     return path;
 }
 
@@ -340,13 +339,37 @@ TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
     const auto& set = sets.front();
     EXPECT_EQ(set.engine.name, "test:complete");
     EXPECT_EQ(set.schema.fields.size(), 2u);
-    EXPECT_EQ(set.heuristic.payload, SCORE_SYMBOL);
+    ASSERT_TRUE(set.heuristic.has_value());
+    EXPECT_EQ(set.heuristic->payload, SCORE_SYMBOL);
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
     ASSERT_EQ(set.packs.size(), 1u);
     EXPECT_EQ(set.packs.front().kernels.size(), 3u);
     ASSERT_EQ(set.engine.behaviorNotes.size(), 1u);
     EXPECT_EQ(set.engine.behaviorNotes.front(), HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION);
+}
+
+/// A UED naming no UHD ranks by declared order instead of failing, so the SDK can adopt a
+/// model later without the engine being unloadable until it does. The UHD is removed with
+/// the reference: a descriptor no engine names is the orphan case, tested separately.
+TEST(TestDescriptorLoader, LoadsAnEngineThatShipsNoHeuristic)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("no_heuristic"));
+    auto documents = makeSetDocuments('1', "test:orderly");
+    documentOfType(documents, ".ued.json").erase("heuristic");
+    documents.erase(
+        std::remove_if(documents.begin(),
+                       documents.end(),
+                       [](const TestDocument& document) { return document.suffix == ".uhd.json"; }),
+        documents.end());
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_FALSE(sets.front().engine.heuristicId.has_value());
+    EXPECT_FALSE(sets.front().heuristic.has_value());
 }
 
 TEST(TestDescriptorLoader, CollapsesIdenticalDuplicatesAcrossArchDirectories)
@@ -490,10 +513,12 @@ INSTANTIATE_TEST_SUITE_P(
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["schema"] = "hipdnn.ued/v1";
                       }},
-        ViolationCase{"missing_required_key",
-                      [](Documents& documents) {
-                          documentOfType(documents, ".ued.json").erase("heuristic");
-                      }},
+        // `metadata`, not `heuristic`: a UED may now omit its UHD and rank by declared
+        // order, so erasing that one no longer violates anything. Every engine still
+        // names a KMD, because a pack's kernels are checked against its field list.
+        ViolationCase{
+            "missing_required_key",
+            [](Documents& documents) { documentOfType(documents, ".ued.json").erase("metadata"); }},
         ViolationCase{"unknown_behavior_note",
                       [](Documents& documents) {
                           documentOfType(documents, ".ued.json")["behavior_notes"]
@@ -744,7 +769,8 @@ TEST(TestDescriptorLoader, DropsAnEngineWhoseMetadataSchemaIsMissing)
 }
 
 /// The applicability-descriptor analogue of DropsAnEngineWhoseMetadataSchemaIsMissing
-/// above: a UED's other required cross-reference, unresolved, must drop the engine too.
+/// above. Naming a UHD no file defines is a broken install, and stays a drop; naming none
+/// at all is deliberate, and loads -- LoadsAnEngineThatShipsNoHeuristic covers that half.
 TEST(TestDescriptorLoader, DropsAnEngineWhoseHeuristicIsMissing)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("dangling_heuristic"));
@@ -1354,6 +1380,8 @@ TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
 TEST(TestDescriptorLoader, IgnoresAFileWhoseWholeNameIsASuffix)
 {
     const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("bare_suffix"));
     writeDocuments(dir.path(), makeSetDocuments('1', "test:intact"));
     std::ofstream(dir.path() / ".ued.json", std::ios::binary) << "{}";
@@ -1362,6 +1390,10 @@ TEST(TestDescriptorLoader, IgnoresAFileWhoseWholeNameIsASuffix)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:intact");
+    // The mechanism, not just the outcome: widening the stem guard types this file as a
+    // UED, which opens it and rejects `{}` with a per-file ERROR instead. The sibling
+    // engine survives either way, so only this WARN separates them.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "is not a descriptor filename"));
 }
 
 /// findFileType() is case-sensitive on purpose; an uppercased suffix must still warn
