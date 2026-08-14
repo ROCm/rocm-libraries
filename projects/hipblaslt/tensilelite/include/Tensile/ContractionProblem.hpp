@@ -203,6 +203,24 @@ namespace TensileLite
         int              m_smCountTarget = 0;
     };
 
+    // Selects which dynamic-quant fused epilogue a solution performs.
+    enum class DQuantType : int
+    {
+        None  = 0,
+        Tile  = 1,
+        MXFP8 = 2
+    };
+
+    inline std::ostream& operator<<(std::ostream& os, DQuantType v)
+    {
+        switch(v)
+        {
+        case DQuantType::Tile:  return os << "Tile";
+        case DQuantType::MXFP8: return os << "MXFP8";
+        default:                return os << "None";
+        }
+    }
+
     /**
      * \addtogroup Problem
      * @{
@@ -355,6 +373,14 @@ namespace TensileLite
             MXSA          = 15,
             MXSB          = 16,
             GATE_RESIDUAL = 17,
+            RMSGAMMA      = 18, // bf16 input: RMSNorm gamma (N_hidden elements).
+            PARTIALBUF    = 19, // f32 output: partial Σx² [M_tokens_padded x n_d] row-major, n_d = ceil(N_hidden/MT0).
+            RESIDUAL      = 20, // bf16 input: residual tensor [M_tokens x N_hidden] row-major (optional).
+            QUANTSCALE    = 21, // f32 output: per-tile amax/448 scale [ceil(M/Q0) x ceil(N/Q1)] row-major.
+            SCALEA_DS     = 22, // E8M0 byte input: per-row A dequantization scale [M rows].
+            SCALEB_DS     = 23, // E8M0 byte input: per-128col-block B dequantization scale [ceil(N/128)].
+            MXSCALE       = 24, // e8m0 (UE8M0, 1 byte) per-block MX scale; GFX950 pre-swizzled, rows padded to multiple of 32, cols to multiple of 8, total paddedRows*paddedCols bytes.
+            RESIDUAL_OUT  = 25, // bf16 output: pre-quantization gamma-scaled values [M x N], row-major (PartialRMSStoreBf16D only).
             TENSOR_COUNT
         };
 
@@ -767,6 +793,84 @@ namespace TensileLite
             m_outputAmaxD = outputAmaxD;
         }
 
+        void setUsePartialRMS(bool v)           { m_usePartialRMS = v; }
+        void setPartialRMSResidualAdd(bool v)   { m_partialRMSResidualAdd = v; }
+        void setPartialRMSQuant(bool v)         { m_partialRMSQuant = v; }
+        void setPartialRMSStoreBf16D(bool v)    { m_partialRMSStoreBf16D = v; }
+        void setPartialRMSMT0(int v)            { m_partialRMSMT0 = v; }
+        void setPartialRMSMT1(int v)            { m_partialRMSMT1 = v; }
+
+        bool usePartialRMS()           const { return m_usePartialRMS; }
+        bool partialRMSResidualAdd()   const { return m_partialRMSResidualAdd; }
+        bool partialRMSQuant()         const { return m_partialRMSQuant; }
+        bool partialRMSStoreBf16D()    const { return m_partialRMSStoreBf16D; }
+        int  partialRMSMT0()           const { return m_partialRMSMT0; }
+        int  partialRMSMT1()           const { return m_partialRMSMT1; }
+
+        void setDquantType(DQuantType v) { m_dquantType = v; }
+        DQuantType dquantType() const    { return m_dquantType; }
+        void setDquantSize0(int v) { m_dquantSize0 = v; }
+        int  dquantSize0() const  { return m_dquantSize0; }
+        void setDquantSize1(int v) { m_dquantSize1 = v; }
+        int  dquantSize1() const  { return m_dquantSize1; }
+
+        void setQuantScale(size_t mTiles, size_t nTiles)
+        {
+            if(m_dquantType == DQuantType::Tile)
+            {
+                m_tensors[TENSOR::QUANTSCALE]
+                    = {"quantScale", rocisa::DataType::Float, {mTiles, nTiles}, {nTiles, 1}};
+                m_tensors[TENSOR::QUANTSCALE].setAsOutput(true);
+            }
+        }
+
+        void setMxScale(size_t freeTiles, size_t kBlockTiles)
+        {
+            if(m_dquantType == DQuantType::MXFP8)
+            {
+                // rows = free dim (M_tokens), padded to ×32; cols = kblock dim (N_hidden/32), padded to ×8.
+                size_t paddedRows = ((freeTiles   + 31) / 32) * 32;
+                size_t paddedCols = ((kBlockTiles +  7) /  8) *  8;
+                m_tensors[TENSOR::MXSCALE]
+                    = {"mxScale", rocisa::DataType::E8, {paddedRows, paddedCols}, {paddedCols, 1}};
+                m_tensors[TENSOR::MXSCALE].setAsOutput(true);
+            }
+        }
+
+        void setUseDeepseekScaleA(bool v) { m_useDeepseekScaleA = v; }
+        bool useDeepseekScaleA() const     { return m_useDeepseekScaleA; }
+
+        void setUseDeepseekScaleB(bool v) { m_useDeepseekScaleB = v; }
+        bool useDeepseekScaleB() const     { return m_useDeepseekScaleB; }
+
+        void setDeepseekScaleAq0(int v) { m_deepseekScaleAq0 = v; }
+        int  deepseekScaleAq0() const   { return m_deepseekScaleAq0; }
+
+        void setDeepseekScaleAq1(int v) { m_deepseekScaleAq1 = v; }
+        int  deepseekScaleAq1() const   { return m_deepseekScaleAq1; }
+
+        void setDeepseekScaleBq0(int v) { m_deepseekScaleBq0 = v; }
+        int  deepseekScaleBq0() const   { return m_deepseekScaleBq0; }
+
+        void setDeepseekScaleBq1(int v) { m_deepseekScaleBq1 = v; }
+        int  deepseekScaleBq1() const   { return m_deepseekScaleBq1; }
+
+        // flatSize = nRowGroups * nKBlocks * 64 fp32 elements (DTL broadcast layout).
+        void setScaleADeepseek(size_t flatSize)
+        {
+            if(m_useDeepseekScaleA)
+                m_tensors[TENSOR::SCALEA_DS]
+                    = {"scaleADeepseek", rocisa::DataType::Float, {flatSize}, {1}};
+        }
+
+        // flatSize = nNBlocks * nKBlocks * 64 fp32 elements (DTL broadcast layout).
+        void setScaleBDeepseek(size_t flatSize)
+        {
+            if(m_useDeepseekScaleB)
+                m_tensors[TENSOR::SCALEB_DS]
+                    = {"scaleBDeepseek", rocisa::DataType::Float, {flatSize}, {1}};
+        }
+
         void setUseBias(int useBias)
         {
             m_useBias = useBias;
@@ -974,6 +1078,42 @@ namespace TensileLite
                 m_tensors[ContractionProblemGemm::TENSOR::AMAXD] = {"amaxD", type, {1}, {1, 1}};
                 m_tensors[ContractionProblemGemm::TENSOR::AMAXD].setAsOutput(isOutput);
             }
+        }
+
+        void setRMSGamma(rocisa::DataType type, size_t nHidden)
+        {
+            if(m_usePartialRMS)
+                m_tensors[ContractionProblemGemm::TENSOR::RMSGAMMA]
+                    = {"rmsGamma", type, {nHidden}, {1}};
+        }
+
+        void setPartialBuf(size_t mPadded, size_t nTilesN)
+        {
+            if(m_usePartialRMS)
+            {
+                m_tensors[ContractionProblemGemm::TENSOR::PARTIALBUF]
+                    = {"partialBuf", rocisa::DataType::Float, {mPadded, nTilesN}, {nTilesN, 1}};
+                m_tensors[ContractionProblemGemm::TENSOR::PARTIALBUF].setAsOutput(true);
+            }
+        }
+
+        void setResidual(rocisa::DataType type, size_t M, size_t nHidden)
+        {
+            if(m_usePartialRMS && m_partialRMSResidualAdd)
+                m_tensors[ContractionProblemGemm::TENSOR::RESIDUAL]
+                    = {"residual", type, {M, nHidden}, {1, M}};
+        }
+
+        // Set the bf16 pre-quantization output tensor (PartialRMSStoreBf16D).
+        // Matches the D layout: shape [M x N], row-major, bf16 elements.
+        void setResidualOut(rocisa::DataType type, std::vector<size_t> const& sizes,
+                            std::vector<size_t> const& strides)
+        {
+            m_tensors[ContractionProblemGemm::TENSOR::RESIDUAL_OUT]
+                = TensorDescriptor("residualOut", type,
+                                   sizes.begin(), sizes.end(),
+                                   strides.begin(), strides.end());
+            m_tensors[ContractionProblemGemm::TENSOR::RESIDUAL_OUT].setAsOutput(true);
         }
 
         void setSynchronizer(rocisa::DataType type, size_t length)
@@ -1484,6 +1624,21 @@ namespace TensileLite
         bool             m_useE                    = false;
         rocisa::DataType m_auxType                 = rocisa::DataType::None;
         bool             m_outputAmaxD             = false;
+        bool             m_usePartialRMS           = false;
+        bool             m_partialRMSResidualAdd   = false;
+        bool             m_partialRMSQuant         = false;
+        bool             m_partialRMSStoreBf16D    = false;
+        int              m_partialRMSMT0            = 0;
+        int              m_partialRMSMT1            = 0;
+        DQuantType       m_dquantType              = DQuantType::None;
+        int              m_dquantSize0             = 0;
+        int              m_dquantSize1             = 0;
+        bool             m_useDeepseekScaleA       = false;
+        bool             m_useDeepseekScaleB       = false;
+        int              m_deepseekScaleAq0        = 128;
+        int              m_deepseekScaleAq1        = 128;
+        int              m_deepseekScaleBq0        = 1;
+        int              m_deepseekScaleBq1        = 128;
         bool             m_swizzleTensorA          = false;
         bool             m_swizzleTensorB          = false;
         int              m_useBias                 = 0;
@@ -1622,6 +1777,15 @@ namespace TensileLite
         void*       d     = nullptr;
         void*       e     = nullptr;
         void*       amaxD = nullptr;
+
+        void*       partialBuf      = nullptr;
+        void const* rmsGamma        = nullptr;
+        void const* residual        = nullptr;
+        void*       residualOut     = nullptr;
+        void*       quantScale      = nullptr;
+        void*       mxScale         = nullptr;
+        void const* scaleADeepseek  = nullptr;
+        void const* scaleBDeepseek  = nullptr;
 
         void const* const* batchA    = nullptr;
         void const* const* batchB    = nullptr;

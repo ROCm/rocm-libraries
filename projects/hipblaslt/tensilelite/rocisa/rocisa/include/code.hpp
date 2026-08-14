@@ -1530,7 +1530,7 @@ namespace rocisa
             {
                 kStr += "  - 1\n";
             }
-            else if(codeObjectVersion == "5")
+            else if(codeObjectVersion == "5" || codeObjectVersion == "6")
             {
                 kStr += "  - 2\n";
             }

@@ -134,6 +134,12 @@ namespace TensileLite
             return a == b;
         }
         template <>
+        inline bool AlmostEqual(uint8_t a, uint8_t b, double threshold)
+        {
+            // E8 (e8m0) scale bytes require exact bit-for-bit equality.
+            return a == b;
+        }
+        template <>
         inline bool AlmostEqual(int a, int b, double threshold)
         {
             return a == b;

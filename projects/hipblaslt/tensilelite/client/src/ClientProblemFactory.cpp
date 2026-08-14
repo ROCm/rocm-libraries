@@ -187,6 +187,49 @@ namespace TensileLite
             if(args.count("output-amaxD"))
                 m_outputAmaxD = args["output-amaxD"].as<bool>();
 
+            if(args.count("dquant-type"))
+            {
+                std::string dq = args["dquant-type"].as<std::string>();
+                if(dq == "tile")
+                    m_dquantType = DQuantType::Tile;
+                else if(dq == "mxfp8")
+                    m_dquantType = DQuantType::MXFP8;
+                else
+                    m_dquantType = DQuantType::None;
+            }
+            if(args.count("dquant-size-0"))
+                m_dquantSize0Override = static_cast<int>(args["dquant-size-0"].as<size_t>());
+            if(args.count("dquant-size-1"))
+                m_dquantSize1Override = static_cast<int>(args["dquant-size-1"].as<size_t>());
+            if(args.count("use-partial-rms"))
+                m_usePartialRMS = args["use-partial-rms"].as<bool>();
+            if(args.count("partial-rms-residual-add"))
+                m_partialRMSResidualAdd = args["partial-rms-residual-add"].as<bool>();
+            if(args.count("partial-rms-quant"))
+                m_partialRMSQuant = args["partial-rms-quant"].as<bool>();
+            if(args.count("partial-rms-store-bf16-d"))
+                m_partialRMSStoreBf16D = args["partial-rms-store-bf16-d"].as<bool>();
+            if(args.count("partial-rms-mt0"))
+                m_partialRMSMT0Override = static_cast<int>(args["partial-rms-mt0"].as<size_t>());
+            if(args.count("partial-rms-mt1"))
+                m_partialRMSMT1Override = static_cast<int>(args["partial-rms-mt1"].as<size_t>());
+            if(args.count("partial-rms-gamma-type"))
+                m_partialRMSGammaType = args["partial-rms-gamma-type"].as<rocisa::DataType>();
+            if(args.count("partial-rms-residual-type"))
+                m_partialRMSResidualType = args["partial-rms-residual-type"].as<rocisa::DataType>();
+            if(args.count("use-deepseek-scale-a"))
+                m_useDeepseekScaleA = args["use-deepseek-scale-a"].as<bool>();
+            if(args.count("use-deepseek-scale-b"))
+                m_useDeepseekScaleB = args["use-deepseek-scale-b"].as<bool>();
+            if(args.count("deepseek-scale-aq0"))
+                m_deepseekScaleAq0 = static_cast<int>(args["deepseek-scale-aq0"].as<size_t>());
+            if(args.count("deepseek-scale-aq1"))
+                m_deepseekScaleAq1 = static_cast<int>(args["deepseek-scale-aq1"].as<size_t>());
+            if(args.count("deepseek-scale-bq0"))
+                m_deepseekScaleBq0 = static_cast<int>(args["deepseek-scale-bq0"].as<size_t>());
+            if(args.count("deepseek-scale-bq1"))
+                m_deepseekScaleBq1 = static_cast<int>(args["deepseek-scale-bq1"].as<size_t>());
+
             if(args.count("bias-type-args"))
                 m_biasTypeArgs = args["bias-type-args"].as<std::vector<rocisa::DataType>>();
             if(args.count("factor-dim-args"))
@@ -396,6 +439,15 @@ namespace TensileLite
                                 rv.back().setUseGateResidual(m_useGateResidual);
                                 rv.back().setUseE(m_useE);
                                 rv.back().setOutputAmaxD(m_outputAmaxD);
+                                rv.back().setDquantType(m_dquantType);
+                                rv.back().setUseDeepseekScaleA(m_useDeepseekScaleA);
+                                rv.back().setUseDeepseekScaleB(m_useDeepseekScaleB);
+                                rv.back().setDeepseekScaleAq0(m_deepseekScaleAq0);
+                                rv.back().setDeepseekScaleAq1(m_deepseekScaleAq1);
+                                rv.back().setDeepseekScaleBq0(m_deepseekScaleBq0);
+                                rv.back().setDeepseekScaleBq1(m_deepseekScaleBq1);
+                                rv.back().setUsePartialRMS(m_usePartialRMS);
+                                rv.back().setPartialRMSResidualAdd(m_partialRMSResidualAdd);
                                 rv.back().setKernelLanguage(m_kernelLanguage);
                                 rv.back().setPerformanceMetric(m_performanceMetric);
                                 rv.back().setDeterministicMode(m_deterministicMode);
@@ -457,6 +509,73 @@ namespace TensileLite
                                 {
                                     rv.back().setSynchronizer(
                                         m_constantTypes[ContractionProblemGemm::CONST::ALPHA], 409600);
+                                }
+                                if(m_usePartialRMS)
+                                {
+                                    // PartialRMSAxis=0: free0=N_hidden tiles with MT0,
+                                    // free1=M_tokens padded with MT1.
+                                    // d.sizes()[0]=N_hidden (free0), d.sizes()[1]=M_tokens (free1).
+                                    // partialBuf[token, t_free0]: shape [M_tokens_padded, n_d].
+                                    size_t nHidden  = rv.back().d().sizes()[0];  // free0
+                                    size_t mTokens  = rv.back().d().sizes()[1];  // free1
+
+                                    int mt0      = m_partialRMSMT0Override > 0 ? m_partialRMSMT0Override : 16;
+                                    int mt1      = m_partialRMSMT1Override > 0 ? m_partialRMSMT1Override : 16;
+                                    size_t mPadded  = ((mTokens  + static_cast<size_t>(mt1) - 1) / static_cast<size_t>(mt1)) * static_cast<size_t>(mt1);
+                                    size_t nTilesN  = (nHidden   + static_cast<size_t>(mt0) - 1) / static_cast<size_t>(mt0);
+
+                                    rv.back().setPartialRMSMT0(mt0);
+                                    rv.back().setPartialRMSMT1(mt1);
+                                    rv.back().setRMSGamma(m_partialRMSGammaType, nHidden);
+                                    rv.back().setPartialRMSQuant(m_partialRMSQuant);
+                                    // Double the row count so both halves fit: first half = Σx²,
+                                    // second half = amax(|D|)/448.
+                                    size_t pbRows = m_partialRMSQuant ? 2 * mPadded : mPadded;
+                                    rv.back().setPartialBuf(pbRows, nTilesN);
+                                    rv.back().setPartialRMSResidualAdd(m_partialRMSResidualAdd);
+                                    if(m_partialRMSResidualAdd)
+                                        rv.back().setResidual(m_partialRMSResidualType, mTokens, nHidden);
+                                    if(m_partialRMSStoreBf16D)
+                                    {
+                                        // ResidualOut: same shape as D (fp8 output), bf16 elements.
+                                        auto const& dSizes   = rv.back().d().sizes();
+                                        auto const& dStrides = rv.back().d().strides();
+                                        rv.back().setResidualOut(rocisa::DataType::BFloat16,
+                                                                 dSizes, dStrides);
+                                    }
+                                }
+                                if(m_dquantType != DQuantType::None)
+                                {
+                                    size_t M  = rv.back().d().sizes()[0];
+                                    size_t N  = rv.back().d().sizes()[1];
+                                    int    q0 = m_dquantSize0Override > 0 ? m_dquantSize0Override : static_cast<int>(M);
+                                    int    q1 = m_dquantSize1Override > 0 ? m_dquantSize1Override : static_cast<int>(N);
+                                    rv.back().setDquantSize0(q0);
+                                    rv.back().setDquantSize1(q1);
+                                    rv.back().setQuantScale((M + q0 - 1) / q0, (N + q1 - 1) / q1);
+                                    rv.back().setMxScale((N + q1 - 1) / q1, (M + q0 - 1) / q0);
+                                }
+                                if(m_useDeepseekScaleA)
+                                {
+                                    size_t M    = rv.back().d().sizes()[0];
+                                    size_t K    = rv.back().boundSize(0);
+                                    int    aq1  = m_deepseekScaleAq1 > 0 ? m_deepseekScaleAq1 : 128;
+                                    // Device buffer: [ceil(M/64), nKBlocks, 64] fp32.
+                                    // 64 = WavefrontSize; each slot broadcasts one value per lane.
+                                    size_t nRowGroups = (M + 63) / 64;
+                                    size_t nKBlocks   = (K + aq1 - 1) / aq1;
+                                    rv.back().setScaleADeepseek(nRowGroups * nKBlocks * 64);
+                                }
+                                if(m_useDeepseekScaleB)
+                                {
+                                    size_t K    = rv.back().boundSize(0);
+                                    size_t N    = rv.back().d().sizes()[1];
+                                    int    aq1  = m_deepseekScaleAq1 > 0 ? m_deepseekScaleAq1 : 128;
+                                    int    bq1  = m_deepseekScaleBq1 > 0 ? m_deepseekScaleBq1 : 128;
+                                    // Device buffer: [nNBlocks, nKBlocks, 64] fp32.
+                                    size_t nNBlocks = (N + bq1 - 1) / bq1;
+                                    size_t nKBlocks = (K + aq1 - 1) / aq1;
+                                    rv.back().setScaleBDeepseek(nNBlocks * nKBlocks * 64);
                                 }
                                 if(j < m_activationEnumArg.size())
                                 {

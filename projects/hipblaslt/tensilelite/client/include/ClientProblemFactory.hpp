@@ -83,6 +83,21 @@ namespace TensileLite
             bool        m_useGradient     = false;
             bool        m_useGateResidual = false;
             bool        m_outputAmaxD;
+            DQuantType  m_dquantType              = DQuantType::None;
+            int         m_dquantSize0Override     = 0;
+            int         m_dquantSize1Override     = 0;
+            bool        m_usePartialRMS          = false;
+            bool        m_partialRMSResidualAdd  = false;
+            bool        m_partialRMSQuant        = false;
+            bool        m_partialRMSStoreBf16D   = false;
+            int         m_partialRMSMT0Override  = 0;
+            int         m_partialRMSMT1Override  = 0;
+            bool        m_useDeepseekScaleA      = false;
+            bool        m_useDeepseekScaleB      = false;
+            int         m_deepseekScaleAq0       = 128;
+            int         m_deepseekScaleAq1       = 128;
+            int         m_deepseekScaleBq0       = 1;
+            int         m_deepseekScaleBq1       = 128;
 
             int                              m_sparse;
             KernelLanguage                   m_kernelLanguage;
@@ -106,6 +121,8 @@ namespace TensileLite
             rocisa::DataType                 m_computeInputTypeB;
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
+            rocisa::DataType                 m_partialRMSGammaType    = rocisa::DataType::BFloat16;
+            rocisa::DataType                 m_partialRMSResidualType = rocisa::DataType::BFloat16;
             std::vector<std::vector<size_t>> m_problemSizes;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;

@@ -1238,6 +1238,46 @@ namespace TensileLite
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
         }
+
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+        if(sizeMapping.partialRMS)
+        {
+            // RMSNormGamma is the first 64-bit pointer of the PartialRMS block and
+            // must land on an 8-byte kernarg boundary. When the preceding args do
+            // not end on an 8-byte boundary a bare append() leaves it 4-byte
+            // shifted, which corrupts every PartialRMS pointer loaded by the
+            // device s_load_dwordx8. The device inserts a matching 4-byte pad
+            // (PartialRMSPad); align here so the layouts agree.
+            args.template appendAligned<void const*>("RMSNormGamma", inputs.rmsGamma);
+            args.template append<void*>      ("PartialBuf",   inputs.partialBuf);
+            if(sizeMapping.partialRMSResidualAdd)
+                args.template append<void const*>("ResidualBuf", inputs.residual);
+            if(sizeMapping.partialRMSStoreBf16D)
+                args.template append<void*>("AddressResidualOut", inputs.residualOut);
+        }
+        if(sizeMapping.dquantType == DQuantType::Tile)
+            args.template append<void*>("QuantScale", inputs.quantScale);
+        if(sizeMapping.dquantType == DQuantType::MXFP8)
+            args.template append<void*>("MXScale", inputs.mxScale);
     }
 
     inline uint32_t getNumWorkGroups(const KernelInvocation& rv)
@@ -2033,6 +2073,13 @@ namespace TensileLite
             rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
             rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
+
+        // Deepseek scale pointers follow batchOffsets in the kernel signature, matching
+        // the order emitted by Signature.py (see SubtileDeepseekScaleEmit.py).
+        if(sizeMapping.deepseekScaleA)
+            rv.args.append<void const*>("ScaleABuf", inputs.scaleADeepseek);
+        if(sizeMapping.deepseekScaleB)
+            rv.args.append<void const*>("ScaleBBuf", inputs.scaleBDeepseek);
 
         if(problemType.stochasticRounding)
         {
@@ -3916,7 +3963,39 @@ namespace TensileLite
                                                        : calculateAutoGSU(problem, &hardware);
             size += requiredWorkspaceSizeGsu(problem, hardware, gsu);
         }
+
+        // Fused RMSNorm (full flow): the K1 producer writes a transient per-tile
+        // partial-sum-of-squares buffer that the reduce-and-apply Kernel 2 consumes. It is
+        // carved from the tail of the workspace (after any GSU/StreamK region), so account
+        // for it here; the launch path uses partialRMSPartialBufBytes() to locate the offset
+        // as (requiredWorkspaceSize - partialBufBytes).
+        if(sizeMapping.partialRMS)
+            size += partialRMSPartialBufBytes(problem);
+
         return size;
+    }
+
+    size_t ContractionSolution::partialRMSPartialBufBytes(Problem const& problem) const
+    {
+        if(!sizeMapping.partialRMS)
+            return 0;
+
+        const size_t mt0 = sizeMapping.macroTile.x;
+        const size_t mt1 = sizeMapping.macroTile.y;
+        if(mt0 == 0 || mt1 == 0)
+            return 0;
+
+        // Row-major PartialRMS convention: the problem is transposed so free0 = N_hidden
+        // and free1 = M (tokens). K1 writes partialBuf[token, tile] with one fp32 per
+        // (token, free0 macro-tile): rows = padded tokens (by MT1), cols = nD tiles along
+        // N_hidden (by MT0).
+        const size_t nHidden = problem.d().sizes()[0]; // free0 = N_hidden
+        const size_t tokens  = problem.d().sizes()[1]; // free1 = M tokens
+        const size_t batch   = problem.d().sizes()[2];
+
+        const size_t nD       = (nHidden + mt0 - 1) / mt0;      // partial tiles along N_hidden
+        const size_t mPadded  = ((tokens + mt1 - 1) / mt1) * mt1; // K1 writes padded token rows
+        return mPadded * nD * batch * sizeof(float);
     }
 
     size_t ContractionSolution::requiredWorkspaceSizeGsu(Problem const&  problem,

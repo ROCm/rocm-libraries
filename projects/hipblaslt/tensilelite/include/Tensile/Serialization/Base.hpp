@@ -34,6 +34,7 @@
 #include <vector>
 
 #include <Tensile/Activation.hpp>
+#include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/ScalarValueTypes.hpp>
@@ -410,6 +411,19 @@ namespace TensileLite
                     auto const& info = ScalarValueTypeInfo::Get(i);
                     iot::enumCase(io, value, info.name.c_str(), info.m_value);
                 }
+            }
+        };
+
+        template <typename IO>
+        struct EnumTraits<DQuantType, IO>
+        {
+            using iot = IOTraits<IO>;
+
+            static void enumeration(IO& io, DQuantType& value)
+            {
+                iot::enumCase(io, value, "None",  DQuantType::None);
+                iot::enumCase(io, value, "Tile",  DQuantType::Tile);
+                iot::enumCase(io, value, "MXFP8", DQuantType::MXFP8);
             }
         };
     } // namespace Serialization
