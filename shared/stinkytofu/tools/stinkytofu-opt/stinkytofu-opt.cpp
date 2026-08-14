@@ -175,9 +175,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
                 arg == "--verify-each" || arg == "--time-passes" ||
-                arg == "--preserve-symbolic-regs" ||
-                arg == "--preserve-comments" || arg.starts_with("--ds-read-order=") ||
-                arg.starts_with("--ds-read-queue-depth=") ||
+                arg == "--preserve-symbolic-regs" || arg == "--preserve-comments" ||
+                arg.starts_with("--ds-read-order=") || arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
                 arg.starts_with("--ds-read-throttle-latency=") ||
                 arg.starts_with("--ds-read-per-wmma=") ||
