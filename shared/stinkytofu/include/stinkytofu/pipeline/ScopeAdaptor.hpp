@@ -36,6 +36,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 namespace stinkytofu {
 // -----------------------------------------------------------------------
@@ -190,6 +191,7 @@ inline void configureModuleInstrumentations(ModulePassManager& mpm,
                                             const StinkyAsmModule* module = nullptr) {
     if (auto inst = makeDebugPrintInstrumentation(opts, label, debugStreams, module))
         mpm.addInstrumentation(std::move(inst));
+    if (auto timer = getActiveTimePasses()) mpm.addInstrumentation(std::move(timer));
     if (!opts.DebugPass.empty()) {
         std::istringstream stream(opts.DebugPass);
         std::string name;
@@ -203,10 +205,10 @@ inline void configureModuleInstrumentations(ModulePassManager& mpm,
 }
 
 /// Single entry point for the standard pipeline observers (LLVM
-/// StandardInstrumentations style): debug IR printing plus, when
-/// ModuleOptions.VerifyEach is set, per-pass StinkyTofu ASM IR verification.
-/// Drivers (backend, opt) should call this instead of wiring each observer
-/// individually.
+/// StandardInstrumentations style): debug IR printing, per-pass StinkyTofu ASM IR
+/// verification when ModuleOptions.VerifyEach is set, and per-pass timing while a
+/// TimePassesSession is open. Drivers (backend, opt) should call this instead of
+/// wiring each observer individually.
 inline void configureStandardInstrumentations(
     PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
     const std::shared_ptr<DebugOutputStreams>& debugStreams,
@@ -215,6 +217,7 @@ inline void configureStandardInstrumentations(
     if (opts.VerifyEach) {
         pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }
+    if (auto timer = getActiveTimePasses()) pm.addInstrumentation(std::move(timer));
 }
 
 // -----------------------------------------------------------------------
