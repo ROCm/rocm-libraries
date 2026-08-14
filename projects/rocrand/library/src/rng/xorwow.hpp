@@ -115,8 +115,10 @@ __host__ __device__ __forceinline__
         size_t index = thread_id;
 #ifdef __HIP_DEVICE_COMPILE__
         if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        {
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
-        __syncthreads();
+            __syncthreads();
+        }
 #endif
 #if defined(__gfx942__) || defined(__gfx908__)
         // On gfx942 and gfx908, the compiler generates faster code with unrolled loops.
