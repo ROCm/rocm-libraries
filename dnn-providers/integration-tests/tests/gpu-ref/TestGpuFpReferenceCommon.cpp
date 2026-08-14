@@ -283,6 +283,45 @@ TEST(TestFillTensorWithRandomValues, FloatStridedTensor)
     EXPECT_NEAR(variance, 192.0, 1.0e-01);
 }
 
+TEST(TestFillTensorWithRandomValues, HalfStridedTensor)
+{
+    SKIP_IF_NO_ROCRAND();
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<HalfType> tensor({1000, 10, 10, 1000}, {100, 1, 100, 10}); // Strided tensor
+    gpu_fp_reference_tensor::fillWithRandomValues<HalfType>(
+        tensor, static_cast<HalfType>(1.0f), static_cast<HalfType>(10.0f), 42);
+
+    const auto* data = static_cast<const HalfType*>(tensor.rawHostData());
+    const auto count = tensor.elementSpace();
+
+    // Range checks
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto value = static_cast<float>(data[i]);
+        EXPECT_FALSE(std::isnan(value));
+        EXPECT_FALSE(std::isinf(value));
+        EXPECT_GE(value, 1.0f);
+        EXPECT_LE(value, 10.0f);
+    }
+
+    // Mean and variance checks
+    double sum = 0.0;
+    double sumSq = 0.0;
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto val = static_cast<double>(data[i]);
+        sum += val;
+        sumSq += val * val;
+    }
+
+    const double mean = sum / static_cast<double>(count);
+    const double variance = (sumSq / static_cast<double>(count)) - (mean * mean);
+
+    EXPECT_NEAR(mean, 5.5, 1.0e-02);
+    EXPECT_NEAR(variance, 6.75, 1.0e-01);
+}
+
 TEST(TestFillTensorWithRandomValues, BFloat16StridedTensor)
 {
     SKIP_IF_NO_ROCRAND();

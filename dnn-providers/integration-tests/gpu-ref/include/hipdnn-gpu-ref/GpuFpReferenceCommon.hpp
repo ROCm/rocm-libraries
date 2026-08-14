@@ -9,10 +9,12 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 
 #if defined(USE_ROCRAND)
+#include <hip/hip_fp16.h>
 #include <rocrand/rocrand.h>
 #endif
 
 #include <cstdint>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -218,7 +220,7 @@ static void gpuFillWithRandomValues(hipdnn_data_sdk::utilities::TensorBase<T>& t
     else if constexpr(std::is_same_v<T, hipdnn_data_sdk::types::half>)
     {
         detail::throwOnRocRandError(
-            rocrand_generate_uniform_half(gen.generator, static_cast<half*>(dstPtr), count),
+            rocrand_generate_uniform_half(gen.generator, static_cast<__half*>(dstPtr), count),
             "rocrand_generate_uniform_half");
 
         if(minValue != static_cast<hipdnn_data_sdk::types::half>(0.0f)
