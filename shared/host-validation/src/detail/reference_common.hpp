@@ -396,26 +396,65 @@ RuntimeMathFunction<Accumulator> runtimeMathFunction(MathMode mode) {
 }
 
 template <typename Accumulator>
-Accumulator runtimeScalar(std::complex<double> value, const char* name) {
+Accumulator checkedRuntimeScalar(auto value, const char* name) {
+    using Source = decltype(value);
     if constexpr (IsComplex<Accumulator>::value) {
-        return Accumulator(static_cast<typename Accumulator::value_type>(value.real()),
-                           static_cast<typename Accumulator::value_type>(value.imag()));
+        using Real = typename Accumulator::value_type;
+        if constexpr (IsComplex<Source>::value)
+            return Accumulator(static_cast<Real>(value.real()), static_cast<Real>(value.imag()));
+        else
+            return Accumulator(static_cast<Real>(value), Real(0));
     } else {
-        if (value.imag() != 0.0)
-            throw std::invalid_argument(std::string("Real reference accumulator has complex ") +
-                                        name + ".");
-        if constexpr (std::is_integral_v<Accumulator>) {
-            const double real = value.real();
-            if (!std::isfinite(real) || std::trunc(real) != real ||
-                real < static_cast<double>(std::numeric_limits<Accumulator>::lowest()) ||
-                real > static_cast<double>(std::numeric_limits<Accumulator>::max()))
-                throw std::invalid_argument(
-                    std::string("Integer reference accumulator has invalid ") + name + ".");
-            return static_cast<Accumulator>(real);
+        if constexpr (IsComplex<Source>::value) {
+            if (value.imag() != 0)
+                throw std::invalid_argument(std::string("Real reference accumulator has complex ") +
+                                            name + ".");
+            return checkedRuntimeScalar<Accumulator>(value.real(), name);
         } else {
-            return static_cast<Accumulator>(value.real());
+            if constexpr (std::is_integral_v<Accumulator>) {
+                if constexpr (std::is_floating_point_v<Source>) {
+                    const long double converted = static_cast<long double>(value);
+                    if (!std::isfinite(converted) || std::trunc(converted) != converted ||
+                        converted <
+                            static_cast<long double>(std::numeric_limits<Accumulator>::lowest()) ||
+                        converted >
+                            static_cast<long double>(std::numeric_limits<Accumulator>::max()))
+                        throw std::invalid_argument(
+                            std::string("Integer reference accumulator has invalid ") + name + ".");
+                } else if constexpr (std::is_same_v<Source, bool>) {
+                    return static_cast<Accumulator>(value);
+                } else if constexpr (std::is_integral_v<Source>) {
+                    if (!std::in_range<Accumulator>(value))
+                        throw std::invalid_argument(
+                            std::string("Integer reference accumulator has invalid ") + name + ".");
+                }
+            }
+            return static_cast<Accumulator>(value);
         }
     }
+}
+
+template <typename Accumulator>
+Accumulator runtimeScalar(std::complex<double> value, const char* name) {
+    return checkedRuntimeScalar<Accumulator>(value, name);
+}
+
+template <typename Accumulator>
+Accumulator runtimeScalar(const Scalar& value, const char* name) {
+    switch (scalarTypeInfo(value.type()).category) {
+        case ScalarCategory::Boolean:
+            return checkedRuntimeScalar<Accumulator>(value.as<bool>(), name);
+        case ScalarCategory::SignedInteger:
+            return checkedRuntimeScalar<Accumulator>(value.as<int64_t>(), name);
+        case ScalarCategory::UnsignedInteger:
+            return checkedRuntimeScalar<Accumulator>(value.as<uint64_t>(), name);
+        case ScalarCategory::FloatingPoint:
+        case ScalarCategory::Scale:
+            return checkedRuntimeScalar<Accumulator>(value.as<double>(), name);
+        case ScalarCategory::Complex:
+            return checkedRuntimeScalar<Accumulator>(value.as<std::complex<double>>(), name);
+    }
+    throw std::invalid_argument("Invalid runtime scalar type.");
 }
 
 inline void requireRank(const Shape& shape, size_t rank, std::string_view operation,

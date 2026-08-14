@@ -45,22 +45,10 @@ namespace
     using namespace roc::host_validation;
 
     template <typename T>
-    struct IsStdComplex : std::false_type
+    Scalar runtimeScalar(const T& value)
     {
-    };
-
-    template <typename T>
-    struct IsStdComplex<std::complex<T>> : std::true_type
-    {
-    };
-
-    template <typename T>
-    std::complex<double> runtimeScalar(T value)
-    {
-        if constexpr(IsStdComplex<T>::value)
-            return {static_cast<double>(value.real()), static_cast<double>(value.imag())};
-        else
-            return {static_cast<double>(value), 0.0};
+        const ScalarType type = hipblaslt_adapter::scalarType<T>();
+        return Scalar::fromStorage(type, std::as_bytes(std::span<const T>(&value, 1)));
     }
 
     template <typename Tc>

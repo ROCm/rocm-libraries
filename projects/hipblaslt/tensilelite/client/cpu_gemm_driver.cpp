@@ -766,11 +766,9 @@ int runGemm(size_t             m,
                                     std::span<AccumulateT>(dPtr, numC)),
                                 nativeScalarType<AccumulateT>);
 
-            problem.epilogue.alpha
-                = {static_cast<double>(
-                       (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha),
-                   0.0};
-            problem.epilogue.beta       = {static_cast<double>(beta), 0.0};
+            problem.epilogue.alpha = static_cast<double>(
+                (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha);
+            problem.epilogue.beta       = static_cast<double>(beta);
             problem.epilogue.activation = toHostValidationActivation(activation);
             problem.mathMode            = isTF32 ? MathMode::XFloat32 : MathMode::Default;
 

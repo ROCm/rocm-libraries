@@ -41,17 +41,24 @@ struct GemmOperand {
 };
 
 struct GemmEpilogue {
-    std::complex<double> alpha = {1.0, 0.0};
-    std::complex<double> beta = {0.0, 0.0};
+    explicit GemmEpilogue(ScalarType coefficientType)
+        : alpha(Scalar::one(coefficientType)),
+          beta(Scalar::zero(coefficientType)),
+          outputScale(Scalar::one(coefficientType)),
+          activationParameter0(Scalar::zero(coefficientType)),
+          activationParameter1(Scalar::zero(coefficientType)) {}
+
+    Scalar alpha;
+    Scalar beta;
     std::optional<VectorBinding> bias;
     std::optional<VectorBinding> scaleAlpha;
     std::optional<TensorView> scaleA;
     std::optional<TensorView> scaleB;
-    std::complex<double> outputScale = {1.0, 0.0};
+    Scalar outputScale;
     OutputConversion outputConversion = OutputConversion::Default;
     Activation activation = Activation::None;
-    double activationParameter0 = 0.0;
-    double activationParameter1 = 0.0;
+    Scalar activationParameter0;
+    Scalar activationParameter1;
 };
 
 struct GemmProblem {
@@ -61,7 +68,8 @@ struct GemmProblem {
           b(std::move(bOperand)),
           c(std::move(cTensor)),
           outputType(output),
-          accumulatorType(accumulator) {}
+          accumulatorType(accumulator),
+          epilogue(accumulator) {}
 
     GemmOperand a;
     GemmOperand b;
