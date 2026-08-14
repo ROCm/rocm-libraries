@@ -26,6 +26,8 @@ int main()
 {
     try
     {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
         constexpr int64_t N = 2; // Batch size
         constexpr int64_t C = 4; // Input channels
         constexpr int64_t H = 8; // Height

@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <hipdnn_frontend/detail/TensorConstants.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -212,6 +213,33 @@ inline Error
                                                HIPDNN_TYPE_BOOLEAN,
                                                isVirtual,
                                                "tensor is_virtual"));
+
+    // Only send the byte-alignment attribute when the tensor carries a
+    // non-default alignment. Sending it unconditionally would break lowering against
+    // a pre-1.3.0 backend that doesn't recognize HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT.
+    if(tensor->get_alignment() != DEFAULT_TENSOR_ALIGNMENT)
+    {
+        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                                   HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT,
+                                                   HIPDNN_TYPE_INT64,
+                                                   tensor->get_alignment(),
+                                                   "tensor byte alignment"));
+    }
+
+    // Link the ragged-offset aux tensor by UID so the lowered graph carries the
+    // ragged-tensor relationship. The aux tensor is gathered alongside node I/O
+    // (see BaseNode::gather_hipdnn_tensors), so its UID is assigned before
+    // lowering begins.
+    if(tensor->has_ragged_offset())
+    {
+        const auto raggedOffset = tensor->get_ragged_offset();
+        HIPDNN_CHECK_ERROR(
+            setDescriptorAttrScalar(desc.get(),
+                                    HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC,
+                                    HIPDNN_TYPE_INT64,
+                                    raggedOffset->get_uid(),
+                                    "tensor ragged offset UID " + std::to_string(uid)));
+    }
 
     if(!std::holds_alternative<std::monostate>(tensor->get_value_variant()))
     {

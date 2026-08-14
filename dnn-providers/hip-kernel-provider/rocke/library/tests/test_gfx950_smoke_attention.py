@@ -15,6 +15,7 @@ Run on a gfx950 ROCm runner:
 
 from __future__ import annotations
 
+import importlib.resources
 import importlib.util
 import json
 import os
@@ -30,7 +31,7 @@ from rocke.runtime.hip_module import get_device_arch, get_device_name
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
 _PY_ROOT = platform_root() / "python"
 _DEFAULT_BASELINE = (
-    platform_root() / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
+    importlib.resources.files("rocke.golden") / "rocke_gfx950_smoke_perf.json"
 )
 
 

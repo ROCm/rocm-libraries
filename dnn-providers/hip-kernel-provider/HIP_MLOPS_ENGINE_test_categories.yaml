@@ -1,0 +1,88 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hip-kernel-provider Test Categories Configuration
+# Aligned with Test Filter Standardization (RFC0010).
+#
+# hip-kernel-provider has two GTest binaries (hip_kernel_provider_tests and
+# hip_kernel_provider_integration_tests) that share this YAML. CI can invoke the
+# generated CTest file without a label filter, so each enabled category becomes
+# a separate binary execution. Because the tiers are cumulative (see below),
+# invoking multiple tiers in one run re-executes the lower-tier tests; select a
+# single tier label to run exactly that tier's coverage.
+# See https://github.com/ROCm/rocm-libraries/issues/8852 for background on the
+# category execution model.
+# Tier behaviour (cumulative — each tier is a superset of the ones below it):
+#   - quick: run non-Full tests only.
+#   - standard: quick coverage (quick tests). No distinct Standard* prefix
+#     exists, so standard runs the same non-Full tests as quick.
+#   - comprehensive: standard + quick coverage. No distinct Comprehensive*
+#     prefix exists, so comprehensive runs the same non-Full tests as standard.
+#   - full: all tests (non-Full + Full* parameterised expansions), excluding
+#     only disabled tests.
+#
+# Neither the unit tests in tests/ nor the ASM SDPA / rocKE-client integration
+# tests in integration_tests/ currently use a Full*/Standard*/Comprehensive*
+# GTest prefix, so all four tiers below run the same coverage until a suite
+# adopts one of those prefixes (matching miopen-provider's convention).
+#
+# These categories apply to hip_kernel_provider_tests and
+# hip_kernel_provider_integration_tests. The external hipdnn_integration_tests
+# suite (run against HIP_MLOPS_ENGINE) uses
+# HIP_MLOPS_ENGINE_test_categories_integration.yaml because it has different
+# GTest naming conventions.
+test_categories:
+  quick:
+    description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation (cumulative: runs quick coverage) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete suite (cumulative: runs all tests, non-Full + Full*) - excludes only disabled tests"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+    labels:
+      - "full"
+      - "all"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours

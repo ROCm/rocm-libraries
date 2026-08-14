@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -122,7 +122,7 @@ struct _rocsparselt_mat_descr
         clear();
     };
 
-    _rocsparselt_mat_descr* clone()
+    _rocsparselt_mat_descr* clone() const
     {
         return new _rocsparselt_mat_descr(*this);
     };
@@ -198,6 +198,7 @@ struct _rocsparselt_matmul_descr
         , bias_stride(rhs.bias_stride)
         , bias_type(rhs.bias_type)
         , alpha_vector_scaling(rhs.alpha_vector_scaling)
+        , gate_residual_mat_pointer(rhs.gate_residual_mat_pointer)
         , m(rhs.m)
         , n(rhs.n)
         , k(rhs.k)
@@ -216,6 +217,7 @@ struct _rocsparselt_matmul_descr
         matrix_B     = rhs.matrix_B->clone();
         matrix_C     = rhs.matrix_C->clone();
         matrix_D     = rhs.matrix_D->clone();
+        gate_residual_desc = rhs.gate_residual_desc ? rhs.gate_residual_desc->clone() : nullptr;
         is_reference = false;
         is_init      = (uintptr_t)handle;
     };
@@ -230,6 +232,8 @@ struct _rocsparselt_matmul_descr
             delete matrix_C;
             delete matrix_D;
         }
+        if(gate_residual_desc != nullptr)
+            delete gate_residual_desc;
         is_init = 0;
     };
 
@@ -262,7 +266,9 @@ struct _rocsparselt_matmul_descr
     float*      bias_pointer                      = nullptr;
     int64_t     bias_stride                       = 0;
     hipDataType bias_type;
-    int         alpha_vector_scaling = 0;
+    int         alpha_vector_scaling              = 0;
+    void*                   gate_residual_mat_pointer = nullptr;
+    _rocsparselt_mat_descr* gate_residual_desc  = nullptr;
     int64_t     m                    = 0;
     int64_t     n                    = 0;
     int64_t     k                    = 0;

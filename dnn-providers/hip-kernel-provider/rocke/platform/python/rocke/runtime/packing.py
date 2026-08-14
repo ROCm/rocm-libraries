@@ -128,6 +128,14 @@ def _as_ptr(v: Any) -> int:
         return v
     if hasattr(v, "data_ptr"):
         return int(v.data_ptr())
+    # DeviceMem (RAII over hipMalloc, runtime.launcher) exposes its raw device
+    # pointer via a ptr() method. Accepting it here lets the torch-free numpy /
+    # manifest path pass a DeviceMem straight into a launcher's values dict, so
+    # the async path's retain_for_stream() keeps the RAII buffer alive until the
+    # stream drains -- closing the workspace-lifetime race by construction.
+    ptr = getattr(v, "ptr", None)
+    if callable(ptr):
+        return int(ptr())
     if v is None:
         return 0
     raise TypeError(f"cannot convert {type(v).__name__} to device pointer")

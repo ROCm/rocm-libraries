@@ -99,6 +99,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->b_tensor_uid(), BDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->c_tensor_uid(), CDataTypeEnum);
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

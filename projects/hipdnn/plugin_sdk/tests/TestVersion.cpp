@@ -40,9 +40,41 @@ TEST(TestVersion, BaselineVersionLessThanOverrideExecuteMinApiVersion)
     EXPECT_TRUE(baseline < overrideMin);
 }
 
-TEST(TestVersion, ZeroVersionLessThanBaseline)
+TEST(TestVersion, RaggedTensorMinApiVersionParses)
 {
-    const Version zero{std::string_view{"0.0.0"}};
-    const Version baseline{hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    EXPECT_TRUE(zero < baseline);
+    EXPECT_NO_THROW(Version{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION});
+    const Version v{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
+    EXPECT_EQ(v.major, 1);
+    EXPECT_EQ(v.minor, 3);
+    EXPECT_EQ(v.patch, 0);
+}
+
+TEST(TestVersion, OverrideExecuteMinApiVersionLessThanRaggedTensorMinApiVersion)
+{
+    const Version overrideMin{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
+    const Version raggedMin{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
+    EXPECT_TRUE(overrideMin < raggedMin);
+}
+
+TEST(TestVersion, TensorAlignmentMinApiVersionParses)
+{
+    EXPECT_NO_THROW(Version{hipdnn_plugin_sdk::K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION});
+    const Version v{hipdnn_plugin_sdk::K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION};
+    EXPECT_EQ(v.major, 1);
+    EXPECT_EQ(v.minor, 3);
+    EXPECT_EQ(v.patch, 0);
+}
+
+TEST(TestVersion, TensorAlignmentMinApiVersionEqualsRaggedTensorMinApiVersion)
+{
+    const Version alignmentMin{hipdnn_plugin_sdk::K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION};
+    const Version raggedMin{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
+    EXPECT_TRUE(alignmentMin == raggedMin);
+}
+
+TEST(TestVersion, OverrideExecuteMinApiVersionLessThanTensorAlignmentMinApiVersion)
+{
+    const Version overrideMin{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
+    const Version alignmentMin{hipdnn_plugin_sdk::K_TENSOR_ATTRIBUTE_ALIGNMENT_MIN_VERSION};
+    EXPECT_TRUE(overrideMin < alignmentMin);
 }

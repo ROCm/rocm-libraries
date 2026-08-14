@@ -1,27 +1,40 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Authoritative prefill-2D benchmark: LIVE Triton vs CK DSL variant sweep.
+"""Authoritative prefill-2D benchmark: LIVE Triton vs rocke variant sweep.
 
-Unlike ``benchmark_prefill2d_traces.py`` (which only times CK DSL and joins a
+Unlike ``benchmark_prefill2d_traces.py`` (which only times rocke and joins a
 pre-profiled Triton CSV), this harness:
 
   * runs AITER's Triton ``unified_attention`` LIVE, forced to the 2D kernel,
-    on the same stream + timer as CK DSL (apples-to-apples);
-  * sweeps a set of CK DSL 2D kernel variants per shape;
-  * checks correctness of every CK DSL variant against the Triton output;
+    on the same stream + timer as rocke (apples-to-apples);
+  * sweeps a set of rocke 2D kernel variants per shape;
+  * checks correctness of every rocke variant against the Triton output;
   * reports, per shape and per bucket (sw / no-sw, bf16 / fp8), the best
-    correct CK DSL variant and its speedup over Triton.
+    correct rocke variant and its speedup over Triton.
+  * optionally benchmarks FlyDSL flash attention (ROCm/FlyDSL dualwave_swp path)
+    as an additional comparison baseline.
 
 It is the canonical workbench for closing the prefill-2D gap.
+
+FlyDSL constraints on gfx950:
+  * bf16 or fp16 (no fp8 in paged/varlen paths)
+  * head_dim must be 64 or 128
+  * no sliding window, no alibi, no softcap, no sinks
+  * paged KV supported natively (block_table + seqlen_k, page_size=64)
+  * uses ROCm/FlyDSL dualwave_swp kernel (gfx950-optimised)
+  * requires ROCm/FlyDSL repo; set FLYDSL_PATH to its root (kernels/ is added
+    to sys.path at the end to avoid shadowing rocke's own kernels package)
 
 Run:
 
     export AITER_PATH=<path/to/aiter>
+    export FLYDSL_PATH=/path/to/ROCm/FlyDSL
     PYTHONPATH="python:${AITER_PATH}" \
-      python rocke/library/builders/gfx950/attention/benchmark_prefill2d_live.py \
+      python rocke/library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
+        --flydsl \
         --limit 20
 """
 
@@ -33,7 +46,7 @@ import math
 import sys
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from rocke.assets import shape_utils_dir
 
@@ -90,6 +103,173 @@ def _bench_stream_handle() -> int:
     return int(torch.cuda.current_stream().cuda_stream)
 
 
+# --------------------------------------------------------------------------
+# FlyDSL support check and runner (ROCm/FlyDSL dualwave_swp path for gfx950)
+# --------------------------------------------------------------------------
+_FLYDSL_FUNC = None
+_FLYDSL_KERNELS: dict = {}  # FlyDSL's kernels.* snapshot
+_ROCKE_KERNELS: dict = {}  # rocke's kernels.* snapshot
+
+
+def _import_flydsl():
+    global _FLYDSL_FUNC, _FLYDSL_KERNELS, _ROCKE_KERNELS
+    if _FLYDSL_FUNC is not None:
+        return
+    import os
+
+    flydsl_path = os.environ.get("FLYDSL_PATH")
+    if not flydsl_path:
+        raise RuntimeError(
+            "FLYDSL_PATH env var must be set to the ROCm/FlyDSL repo root"
+        )
+    sys.path.insert(0, flydsl_path)
+    # Stash rocke's kernels.* and load FlyDSL's instead.
+    _rocke = {
+        k: sys.modules.pop(k)
+        for k in list(sys.modules)
+        if k == "kernels" or k.startswith("kernels.")
+    }
+    try:
+        import kernels.attention.flash_attn_generic  # type: ignore  # noqa: F401
+        import kernels.attention.flash_attn_gfx950  # type: ignore  # noqa: F401
+        from kernels.attention.flash_attn_interface import flydsl_flash_attn_func  # type: ignore
+
+        _FLYDSL_FUNC = flydsl_flash_attn_func
+        _FLYDSL_KERNELS = {
+            k: v
+            for k, v in sys.modules.items()
+            if k == "kernels" or k.startswith("kernels.")
+        }
+    finally:
+        sys.path.remove(flydsl_path)
+        for k in [k for k in sys.modules if k == "kernels" or k.startswith("kernels.")]:
+            del sys.modules[k]
+        sys.modules.update(_rocke)
+        _ROCKE_KERNELS = {
+            k: v
+            for k, v in sys.modules.items()
+            if k == "kernels" or k.startswith("kernels.")
+        }
+
+
+def _flydsl_swap(flydsl: bool) -> None:
+    """Swap kernels.* in sys.modules between FlyDSL and rocke."""
+    for k in [k for k in sys.modules if k == "kernels" or k.startswith("kernels.")]:
+        del sys.modules[k]
+    sys.modules.update(_FLYDSL_KERNELS if flydsl else _ROCKE_KERNELS)
+
+
+_FLYDSL_PAGED_PAGE_SIZE = 64
+
+
+def _flydsl_supported(shape) -> tuple[bool, str]:
+    """Return (supported, reason) for whether FlyDSL can run this shape on gfx950."""
+    if shape.head_size not in (64, 128):
+        return False, f"head_size={shape.head_size} (need 64 or 128)"
+    if "float8" in shape.k_dtype:
+        return False, "fp8 KV not supported in paged/varlen path"
+    if shape.softcap > 0:
+        return False, f"softcap={shape.softcap} not supported"
+    if shape.has_alibi:
+        return False, "alibi not supported"
+    if shape.has_sinks:
+        return False, "sinks not supported"
+    if shape.window_size[0] >= 0:
+        return False, "sliding_window not supported"
+    return True, ""
+
+
+def _run_flydsl_live(shape, data, *, warmup, iters):
+    """Time FlyDSL flash attention (ROCm/FlyDSL dualwave_swp path, THD layout).
+
+    Uses paged KV natively when block_size == 64 (FlyDSL page_size requirement).
+    Falls back to dense KV reconstruction + varlen path for other block sizes.
+    """
+    import torch
+    from rocke.runtime import synchronize_and_release, time_launches
+
+    _import_flydsl()
+    hip_stream = _bench_stream_handle()
+
+    q = data["query"]  # [total_q, nheads_q, head_dim]
+    k_cache = data["key_cache"]  # [num_blocks, block_size, nheads_k, head_dim]
+    v_cache = data["value_cache"]
+    block_tables = data["block_tables"]  # [num_seqs, max_blocks_per_seq]
+    kv_lens = data["kv_lens"]  # [num_seqs] int32
+    cu_seqlens_q = data["cu_seqlens_q"]  # [num_seqs+1] int32
+
+    num_seqs = shape.num_seqs
+    cu_seqlens_kv = torch.zeros(num_seqs + 1, dtype=torch.int32, device=q.device)
+    cu_seqlens_kv[1:] = kv_lens.cumsum(0).to(torch.int32)
+    out = torch.empty_like(q)
+
+    if shape.block_size == _FLYDSL_PAGED_PAGE_SIZE:
+        # Paged path: FlyDSL handles paging natively.
+        def call_once():
+            _FLYDSL_FUNC(
+                q,
+                k_cache,
+                v_cache,
+                causal=True,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_kv=cu_seqlens_kv,
+                max_seqlen_q=int(data["max_query_len"]),
+                block_table=block_tables,
+                seqlen_k=kv_lens,
+                cross_seqlen=True,
+                out=out,
+            )
+
+    else:
+        # Varlen path: reconstruct dense KV from paged cache (one-time setup,
+        # outside the timed loop) and call FlyDSL with cu_seqlens_kv only.
+        block_size = shape.block_size
+        nheads_k = shape.num_kv_heads
+        head_dim = shape.head_size
+        kv_lens_cpu = kv_lens.cpu().tolist()
+        total_k = sum(kv_lens_cpu)
+        k_dense = torch.empty(
+            total_k, nheads_k, head_dim, dtype=q.dtype, device=q.device
+        )
+        v_dense = torch.empty(
+            total_k, nheads_k, head_dim, dtype=q.dtype, device=q.device
+        )
+        offset = 0
+        for seq_idx in range(num_seqs):
+            seq_kv_len = kv_lens_cpu[seq_idx]
+            blocks_needed = (seq_kv_len + block_size - 1) // block_size
+            tokens_copied = 0
+            for blk in range(blocks_needed):
+                phys = int(block_tables[seq_idx, blk].item())
+                n = min(block_size, seq_kv_len - tokens_copied)
+                k_dense[offset : offset + n] = k_cache[phys, :n]
+                v_dense[offset : offset + n] = v_cache[phys, :n]
+                offset += n
+                tokens_copied += n
+
+        def call_once():
+            _FLYDSL_FUNC(
+                q,
+                k_dense,
+                v_dense,
+                causal=True,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_kv=cu_seqlens_kv,
+                max_seqlen_q=int(data["max_query_len"]),
+                max_seqlen_kv=int(data["max_kv_len"]),
+                cross_seqlen=True,
+                out=out,
+            )
+
+    _flydsl_swap(flydsl=True)
+    try:
+        ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+        synchronize_and_release(hip_stream)
+    finally:
+        _flydsl_swap(flydsl=False)
+    return out, ms
+
+
 def _gm(vals: list[float]) -> float:
     vals = [v for v in vals if v > 0]
     return (
@@ -98,7 +278,7 @@ def _gm(vals: list[float]) -> float:
 
 
 # --------------------------------------------------------------------------
-# CK DSL variant specs
+# rocke variant specs
 # --------------------------------------------------------------------------
 def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) -> dict:
     """Return the UnifiedAttention2DTiledSpec transposed/opt flags for a variant.
@@ -168,6 +348,8 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             base["tile_mult"] = 1
         elif t == "t4":
             base["tile_mult"] = 4
+        elif t == "t8":
+            base["tile_mult"] = 8
         elif t == "mw16":
             base["block_m_per_warp"] = 16
         elif t == "nomlim":
@@ -201,9 +383,9 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 256):
+    def __init__(self, *, compile_backend: Optional[str] = None, num_cus: int = 256):
         self.compile_backend = compile_backend
-        self.num_sms = num_sms
+        self.num_cus = num_cus
         self._launchers: dict[tuple, Any] = {}
 
     def _problem(self, shape, sliding_window: int, is_fp8: bool):
@@ -225,7 +407,7 @@ class CkVariantBench:
             use_alibi=shape.has_alibi,
             use_qq_bias=False,
             use_fp8=is_fp8,
-            num_sms=self.num_sms,
+            num_cus=self.num_cus,
             compile_backend=self.compile_backend,
         )
 
@@ -236,7 +418,10 @@ class CkVariantBench:
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import (
+            _attn_signature,
+            _select_2d_compile_backend,
+        )
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -297,7 +482,13 @@ class CkVariantBench:
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
-            artifact = compile_kernel(kernel, capture_ir_text=False)
+            backend = self.compile_backend or _select_2d_compile_backend(problem)
+            if backend == "hipcc":
+                from rocke.helpers.compile import compile_kernel_via_hipcc
+
+                artifact = compile_kernel_via_hipcc(kernel)
+            else:
+                artifact = compile_kernel(kernel, capture_ir_text=False)
             self._launchers[key] = (
                 KernelLauncher(
                     hsaco=artifact.hsaco,
@@ -522,7 +713,7 @@ def main() -> int:
         "--variants",
         nargs="+",
         default=["prod", "combo", "fallback"],
-        help="CK DSL variants to sweep: prod combo fallback r4_t32 combo_sw",
+        help="rocke variants to sweep: prod combo fallback r4_t32 combo_sw",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -532,16 +723,31 @@ def main() -> int:
     # Production paged-KV caches have hundreds of thousands of blocks, so the
     # KV working set vastly exceeds L2 and attention is HBM-bandwidth-bound.
     # A small cap makes the cache artificially L2-resident, which understates
-    # CK DSL (its async-DMA KV loads are more bandwidth-efficient than
+    # rocke (its async-DMA KV loads are more bandwidth-efficient than
     # Triton's, the advantage that only shows once you are HBM-bound). Default
     # to a production-representative cap. Measured: bf16 cohort 0.90x at
     # cap=8192 vs 1.11x at cap=65536.
     ap.add_argument("--cap-blocks", type=int, default=65536)
-    ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument("--num-cus", type=int, default=256)
+    ap.add_argument(
+        "--compile-backend",
+        choices=("auto", "llvm", "hipcc"),
+        default="auto",
+        help="Compile backend for all CK DSL lanes (prod + build() variants). "
+        "'auto' (default) matches production dispatch "
+        "(_select_2d_compile_backend); 'llvm'/'hipcc' force a backend for A/B. "
+        "Forcing 'llvm' mismeasures cohorts whose production backend is hipcc "
+        "(e.g. D256 large prefill) by ~3x.",
+    )
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument("--shape-utils-path", type=Path, default=DEFAULT_SHAPE_UTILS)
     ap.add_argument(
         "--output-json", type=Path, default=Path("/tmp/prefill2d_live.json")
+    )
+    ap.add_argument(
+        "--flydsl",
+        action="store_true",
+        help="Also benchmark FlyDSL flash attention (set FLYDSL_PATH to ROCm/FlyDSL repo root)",
     )
     args = ap.parse_args()
 
@@ -566,23 +772,31 @@ def main() -> int:
     if args.limit is not None:
         shapes = shapes[: args.limit]
     print(f"device: {torch.cuda.get_device_name(0)}")
-    print(f"shapes: {len(shapes)}  variants: {args.variants}")
+    print(f"shapes: {len(shapes)}  variants: {args.variants}  flydsl={args.flydsl}")
 
-    bench = CkVariantBench(num_sms=args.num_sms)
+    _cb = None if args.compile_backend == "auto" else args.compile_backend
+    bench = CkVariantBench(num_cus=args.num_cus, compile_backend=_cb)
     results = []
+    n_fly_supported = 0
+    n_fly_correct = 0
     for i, shape in enumerate(shapes, 1):
         sw = shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
         is_fp8 = "float8" in shape.k_dtype
         tag = f"[{i}/{len(shapes)}] {shape.signature}"
         try:
             data = make_inputs(shape, seed=args.seed, cap_blocks=args.cap_blocks)
+        except Exception as exc:  # noqa: BLE001
+            print(f"{tag}  INPUT FAIL: {exc!r}")
+            traceback.print_exc()
+            continue
+
+        tri_out, tri_ms = None, None
+        try:
             tri_out, tri_ms = _run_triton_live(
                 shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
             )
         except Exception as exc:  # noqa: BLE001
-            print(f"{tag}  TRITON FAIL: {exc!r}")
-            traceback.print_exc()
-            continue
+            print(f"{tag}  TRITON SKIP: {exc!r}")
 
         # AOTriton flash baseline (best-effort; skipped for FP8 / ineligible shapes).
         aot_ms = None
@@ -595,6 +809,34 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             print(f"{tag}  AOTRITON FAIL: {exc!r}")
 
+        # ------------------------------------------------------------------
+        # FlyDSL measurement (optional, --flydsl flag)
+        # ------------------------------------------------------------------
+        fly_ms = None
+        fly_err = None
+        fly_ok = None
+        fly_skip_reason = None
+        fly_error = None
+
+        if args.flydsl:
+            fly_ok_for_shape, fly_skip_reason = _flydsl_supported(shape)
+            if not fly_ok_for_shape:
+                fly_status = f"SKIP({fly_skip_reason})"
+            else:
+                n_fly_supported += 1
+                try:
+                    fly_out, fly_ms = _run_flydsl_live(
+                        shape, data, warmup=args.warmup, iters=args.iterations
+                    )
+                    fly_err = _compare(fly_out, tri_out)
+                    fly_ok = fly_err <= args.tol
+                    if fly_ok:
+                        n_fly_correct += 1
+                    fly_status = f"{fly_ms * 1000:.1f}us({'ok' if fly_ok else 'WRONG'})"
+                except Exception as exc:  # noqa: BLE001
+                    fly_error = repr(exc)
+                    fly_status = f"ERR({exc!r})"
+
         rec = {
             "signature": shape.signature,
             "sliding_window": sw,
@@ -604,8 +846,15 @@ def main() -> int:
             "max_seqlen_k": shape.max_seqlen_k,
             "triton_ms": tri_ms,
             "aoTriton_ms": aot_ms,
+            "flydsl_ms": fly_ms,
+            "flydsl_ok": fly_ok,
+            "flydsl_max_abs": fly_err,
+            "flydsl_skip_reason": fly_skip_reason,
+            "flydsl_error": fly_error,
             "variants": {},
         }
+        if tri_ms is not None and fly_ms is not None:
+            rec["speedup_flydsl_vs_triton"] = tri_ms / fly_ms if fly_ms > 0 else 0.0
         best = None
         for v in args.variants:
             try:
@@ -631,9 +880,9 @@ def main() -> int:
                         warmup=args.warmup,
                         iters=args.iterations,
                     )
-                err = _compare(ck_out, tri_out)
-                ok = err <= args.tol
-                spd = tri_ms / ck_ms if ck_ms > 0 else 0.0
+                err = _compare(ck_out, tri_out) if tri_out is not None else None
+                ok = err <= args.tol if err is not None else True
+                spd = tri_ms / ck_ms if (tri_ms and ck_ms > 0) else 0.0
                 rec["variants"][v] = {
                     "ms": ck_ms,
                     "speedup": spd,
@@ -641,33 +890,59 @@ def main() -> int:
                     "ok": ok,
                     "kernel": kname,
                 }
-                if ok and (best is None or spd > best[1]):
-                    best = (v, spd)
+                if ok and (best is None or ck_ms < best[1]):
+                    best = (v, ck_ms)
             except Exception as exc:  # noqa: BLE001
                 rec["variants"][v] = {"error": repr(exc)}
         rec["best_variant"] = best[0] if best else None
-        rec["best_speedup_vs_triton"] = best[1] if best else 0.0
         best_ms = rec["variants"][best[0]]["ms"] if best else None
+        rec["best_ms"] = best_ms
+        rec["best_speedup_vs_triton"] = (
+            tri_ms / best_ms
+            if (tri_ms and best_ms is not None and best_ms > 0)
+            else None
+        )
         rec["best_speedup_vs_aoTriton"] = (
             aot_ms / best_ms
             if (aot_ms is not None and best_ms is not None and best_ms > 0)
             else None
         )
+        rec["best_speedup_vs_flydsl"] = (
+            fly_ms / best_ms
+            if (fly_ms is not None and best_ms is not None and best_ms > 0)
+            else None
+        )
+        flops = attention_flops(shape, data["query_lens"], data["kv_lens_list"])
+        rec["flops"] = flops
+        rec["best_tflops"] = (
+            flops / (best_ms * 1e-3) / 1e12
+            if (best_ms is not None and best_ms > 0)
+            else None
+        )
         results.append(rec)
+        tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
         vs = "  ".join(
-            f"{v}={rec['variants'][v].get('speedup', 0):.2f}x"
+            f"{v}={rec['variants'][v]['ms'] * 1000:.1f}us"
             f"{'' if rec['variants'][v].get('ok') else '!'}"
             for v in args.variants
-            if "speedup" in rec["variants"][v]
+            if "ms" in rec["variants"][v]
         )
-        aot_spd_str = (
-            f" aot_spd={rec['best_speedup_vs_aoTriton']:.2f}x"
-            if rec["best_speedup_vs_aoTriton"] is not None
-            else ""
-        )
+        best_str = f"{best_ms * 1000:.1f}us" if best_ms is not None else "N/A"
+        tf_str = f" {rec['best_tflops']:.1f}TF" if rec.get("best_tflops") else ""
+        fly_str = ""
+        if args.flydsl:
+            fly_spd_str = ""
+            if tri_ms is not None and fly_ms is not None and fly_ms > 0:
+                fly_spd_str = f"({tri_ms / fly_ms:.2f}x tri)"
+            fly_best_spd_str = (
+                f" fly_spd={rec['best_speedup_vs_flydsl']:.2f}x"
+                if rec.get("best_speedup_vs_flydsl") is not None
+                else ""
+            )
+            fly_str = f" | fly={fly_status}{fly_spd_str}{fly_best_spd_str}"
         print(
-            f"{tag} sw={sw} fp8={int(is_fp8)} tri={tri_ms * 1000:.1f}us {aot_str} | {vs} | best={rec['best_variant']}={rec['best_speedup_vs_triton']:.2f}x(tri){aot_spd_str}"
+            f"{tag} sw={sw} fp8={int(is_fp8)} {tri_str} {aot_str} | {vs} | best={rec['best_variant']}={best_str}{tf_str}{fly_str}"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -683,22 +958,38 @@ def main() -> int:
     buckets: dict[tuple, list] = {}
     for r in results:
         buckets.setdefault(bucket(r), []).append(r)
-    print("\n=== geomean best CK DSL speedup vs Triton and AOTriton ===")
+    print("\n=== geomean best rocke speedup vs Triton, AOTriton, FlyDSL ===")
     for b in sorted(buckets):
         rs = buckets[b]
         tri_spds = [
-            r["best_speedup_vs_triton"] for r in rs if r["best_speedup_vs_triton"] > 0
+            r["best_speedup_vs_triton"] for r in rs if r.get("best_speedup_vs_triton")
         ]
         aot_spds = [
             r["best_speedup_vs_aoTriton"]
             for r in rs
             if r.get("best_speedup_vs_aoTriton")
         ]
-        tri_part = f"vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+        fly_spds = [
+            r["best_speedup_vs_flydsl"] for r in rs if r.get("best_speedup_vs_flydsl")
+        ]
+        best_us = [r["best_ms"] * 1000 for r in rs if r.get("best_ms")]
+        tflops = [r["best_tflops"] for r in rs if r.get("best_tflops")]
+        lat_part = f"best_lat_gm={_gm(best_us):.1f}us (n={len(best_us)})"
+        tf_part = f"  tflops_gm={_gm(tflops):.1f}" if tflops else ""
+        tri_part = (
+            f"  vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+            if tri_spds
+            else ""
+        )
         aot_part = (
             f"  vs_aot={_gm(aot_spds):.3f}x (n={len(aot_spds)})" if aot_spds else ""
         )
-        print(f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {tri_part}{aot_part}")
+        fly_part = (
+            f"  vs_fly={_gm(fly_spds):.3f}x (n={len(fly_spds)})" if fly_spds else ""
+        )
+        print(
+            f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {lat_part}{tf_part}{tri_part}{aot_part}{fly_part}"
+        )
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:
         sp = [
@@ -717,6 +1008,45 @@ def main() -> int:
         print(
             f"  {v:10s}  geomean={_gm(sp):.3f}x  correct={ncorrect} incorrect={nfail}"
         )
+    if args.flydsl:
+        print("\n=== FlyDSL summary ===")
+        fly_results = [r for r in results if r["flydsl_ms"] is not None]
+        if fly_results:
+            print(f"  shapes total:       {len(results)}")
+            print(f"  FlyDSL supported:   {n_fly_supported}")
+            print(f"  FlyDSL ran:         {len(fly_results)}")
+            print(
+                f"  correctness:        {n_fly_correct}/{n_fly_supported} correct (tol={args.tol})"
+            )
+            print()
+            fly_buckets: dict[tuple, list] = {}
+            for r in fly_results:
+                fly_buckets.setdefault(bucket(r), []).append(r)
+            for b in sorted(fly_buckets):
+                rs = fly_buckets[b]
+                vs_tri = [
+                    r["speedup_flydsl_vs_triton"]
+                    for r in rs
+                    if r.get("speedup_flydsl_vs_triton")
+                ]
+                vs_ck = [
+                    r["best_speedup_vs_flydsl"]
+                    for r in rs
+                    if r.get("best_speedup_vs_flydsl")
+                ]
+                tri_part = (
+                    f"vs_tri={_gm(vs_tri):.3f}x  wins={sum(1 for x in vs_tri if x > 1)}/{len(vs_tri)}"
+                    if vs_tri
+                    else "vs_tri=N/A"
+                )
+                ck_part = (
+                    f"  rocke_vs_fly={_gm(vs_ck):.3f}x (n={len(vs_ck)})"
+                    if vs_ck
+                    else ""
+                )
+                print(f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  {tri_part}{ck_part}")
+        else:
+            print("  No FlyDSL results (all shapes skipped or errored).")
     return 0
 
 
@@ -749,7 +1079,7 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
         dtype=dtype_str,
         sliding_window=sw,
         kv_block_size=shape.block_size,
-        num_sms=bench.num_sms,
+        num_cus=bench.num_cus,
     )
 
     # Force path when caller requests a specific one (e.g. backend="3d").

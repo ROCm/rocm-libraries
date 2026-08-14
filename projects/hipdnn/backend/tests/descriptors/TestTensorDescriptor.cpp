@@ -1480,3 +1480,54 @@ TEST_F(TestTensorDescriptor, SetGetValueInt64)
     ASSERT_EQ(retrieved, 9876543210LL);
     ASSERT_EQ(elementCount, static_cast<int64_t>(sizeof(int64_t)));
 }
+
+TEST_F(TestTensorDescriptor, SetGetByteAlignment)
+{
+    auto desc = getDescriptor();
+    setRequiredAttributes();
+    desc->finalize();
+
+    // Default alignment is 16
+    int64_t alignment = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_BYTE_ALIGNMENT, HIPDNN_TYPE_INT64, 1, &elementCount, &alignment));
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_EQ(alignment, 16);
+}
+
+TEST_F(TestTensorDescriptor, SetGetRaggedOffsetDesc)
+{
+    auto desc = getDescriptor();
+
+    // Before setting: elementCount should be 0 (unset)
+    setRequiredAttributes();
+    desc->finalize();
+
+    int64_t uid = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, HIPDNN_TYPE_INT64, 1, &elementCount, &uid));
+    EXPECT_EQ(elementCount, 0);
+}
+
+TEST_F(TestTensorDescriptor, SetRaggedOffsetDescStored)
+{
+    auto desc = getDescriptor();
+
+    const int64_t raggedUid = 77;
+    ASSERT_NO_THROW(desc->setAttribute(
+        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, HIPDNN_TYPE_INT64, 1, &raggedUid));
+    EXPECT_TRUE(desc->getData().ragged_offset_tensor_uid.has_value());
+    EXPECT_EQ(desc->getData().ragged_offset_tensor_uid.value(), raggedUid);
+
+    setRequiredAttributes();
+    desc->finalize();
+
+    int64_t retrieved = 0;
+    int64_t elementCount = 0;
+    ASSERT_NO_THROW(desc->getAttribute(
+        HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC, HIPDNN_TYPE_INT64, 1, &elementCount, &retrieved));
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_EQ(retrieved, raggedUid);
+}

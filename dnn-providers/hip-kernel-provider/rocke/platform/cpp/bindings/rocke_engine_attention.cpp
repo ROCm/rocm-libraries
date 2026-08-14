@@ -27,6 +27,7 @@
 #include <vector>
 
 extern "C" {
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_fmha_appendkv.h"
 #include "rocke/instance_fmha_bwd.h"
@@ -1215,6 +1216,95 @@ void reg3(py::module_& m,
 
 } // namespace
 
+/* ===================== spec_from_problem ===================== */
+
+/* Convert a Python UnifiedAttentionProblem dict to the C struct. */
+static rocke_unified_attn_problem_t problem_dict_to_c(const py::dict& d, Store& st)
+{
+    rocke_unified_attn_problem_t p{};
+    p.total_q = a_int(d, "total_q", 0);
+    p.num_seqs = a_int(d, "num_seqs", 0);
+    p.num_query_heads = a_int(d, "num_query_heads", 0);
+    p.num_kv_heads = a_int(d, "num_kv_heads", 0);
+    p.head_size = a_int(d, "head_size", 0);
+    p.block_size = a_int(d, "block_size", 0);
+    p.max_seqlen_q = a_int(d, "max_seqlen_q", 0);
+    p.max_seqlen_k = a_int(d, "max_seqlen_k", 0);
+    p.sliding_window = a_int(d, "sliding_window", 0);
+    p.softcap = a_double(d, "softcap", 0.0);
+    p.use_sinks = a_bool(d, "use_sinks", false);
+    p.use_alibi = a_bool(d, "use_alibi", false);
+    p.use_qq_bias = a_bool(d, "use_qq_bias", false);
+    p.use_fp8 = a_bool(d, "use_fp8", false);
+    p.num_cus = a_int(d, "num_cus", 120);
+    p.num_kv_blocks = a_int(d, "num_kv_blocks", 0);
+    std::string v;
+    if(a_str(d, "dtype", v))
+        p.dtype = st.keep(v);
+    else
+        p.dtype = "bf16";
+    if(a_str(d, "q_dtype", v))
+        p.q_dtype = st.keep(v);
+    return p;
+}
+
+/* Convert a rocke_attention_tiled_2d_spec_t back to a Python dict so the
+ * parity harness can compare specs field-by-field. Returns only the fields
+ * the Python _tiled_spec_from_problem populates (same field names as the
+ * Python UnifiedAttention2DTiledSpec dataclass). */
+static py::dict spec_to_dict(const rocke_attention_tiled_2d_spec_t& s)
+{
+    py::dict d;
+    d["head_size"] = s.head_size;
+    d["block_size"] = s.block_size;
+    d["num_query_heads"] = s.num_query_heads;
+    d["num_kv_heads"] = s.num_kv_heads;
+    d["dtype"] = s.dtype ? std::string(s.dtype) : std::string("");
+    d["use_sinks"] = s.use_sinks;
+    d["sliding_window"] = s.sliding_window;
+    d["has_softcap"] = s.has_softcap;
+    d["use_alibi"] = s.use_alibi;
+    d["use_qq_bias"] = s.use_qq_bias;
+    d["num_seqs"] = s.num_seqs;
+    d["num_warps"] = s.num_warps;
+    d["waves_per_eu"] = s.has_waves_per_eu ? py::cast(s.waves_per_eu) : py::none();
+    d["kv_storage_dtype"]
+        = s.kv_storage_dtype ? py::cast(std::string(s.kv_storage_dtype)) : py::none();
+    d["tile_size"] = s.has_tile_size ? py::cast(s.tile_size) : py::none();
+    d["block_m_per_warp"] = s.block_m_per_warp;
+    d["use_mfma_32x32"] = s.use_mfma_32x32;
+    d["use_transposed_qk_32x32"] = s.use_transposed_qk_32x32;
+    d["use_transposed_half_local_pv"] = s.use_transposed_half_local_pv;
+    d["use_transposed_scalar_state"] = s.use_transposed_scalar_state;
+    d["use_transposed_mask_once"] = s.use_transposed_mask_once;
+    d["use_transposed_mask_limit"] = s.use_transposed_mask_limit;
+    d["use_mfma32_skip_legacy_qreg"] = s.use_mfma32_skip_legacy_qreg;
+    d["use_v_double_buffer"] = s.use_v_double_buffer;
+    d["use_early_v_schedule"] = s.use_early_v_schedule;
+    d["use_sched_barrier"] = s.use_sched_barrier;
+    d["use_fast_paged_kv_desc"] = s.use_fast_paged_kv_desc;
+    d["use_register_pv"] = s.use_register_pv;
+    d["use_i64_kv_addr"] = s.use_i64_kv_addr;
+    d["use_k_single_buffer"] = s.use_k_single_buffer;
+    d["use_fp8_mfma_qk"] = s.use_fp8_mfma_qk;
+    return d;
+}
+
+py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch)
+{
+    Store st;
+    rocke_unified_attn_problem_t p = problem_dict_to_c(d, st);
+    const char* a = arch.empty() ? "gfx950" : arch.c_str();
+    rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
+    /* Run the LDS-budget resolver (mirrors the Python _resolve_lds_budget call
+     * that attention_unified._tiled_spec_from_problem makes after building the spec). */
+    char reason[256] = {};
+    rocke_unified_attn_set_resolved_arch(a);
+    rocke_unified_attn_resolve_lds_budget(&spec, reason, sizeof(reason));
+    rocke_unified_attn_set_resolved_arch(NULL);
+    return spec_to_dict(spec);
+}
+
 void register_attention(py::module_& m)
 {
     reg3(m, "attention_unified", &au_lower, &au_serialize, &au_verify, "gfx950");
@@ -1236,4 +1326,15 @@ void register_attention(py::module_& m)
         m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify, "gfx942");
     reg3(
         m, "gfx950_attention_tiled_3d", &t3d950_lower, &t3d950_serialize, &t3d950_verify, "gfx950");
+
+    m.def(
+        "gfx950_attn_tiled_spec_from_problem",
+        [](const py::dict& d, const std::string& arch) {
+            return attn_tiled_spec_from_problem(d, arch);
+        },
+        py::arg("problem"),
+        py::arg("arch") = std::string("gfx950"),
+        "Run the gfx950 tiled-2D selector on a UnifiedAttentionProblem dict "
+        "and return the assembled spec as a dict (mirrors "
+        "attention_spec_builder._tiled_spec_from_problem).");
 }

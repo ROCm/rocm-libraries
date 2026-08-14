@@ -6,8 +6,8 @@ Builds the RDNA3.5 WMMA attention kernel, verifies it once against a numpy
 dense-attention reference, then times the launch with HIP events and reports
 latency and achieved attention throughput. Companion to
 ``wmma_fmha_fwd_verify`` (same kernel and ABI); this one measures the kernel
-that stages each K-tile's V rows through LDS instead of gathering V column-wise
-from global memory.
+with either direct V gathers or optional LDS V staging, allowing the two
+strategies to be compared on the target architecture.
 
 Must run on a gfx1151 device.
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import math
 import struct
 
@@ -60,6 +61,11 @@ def main() -> int:
     p.add_argument("--kv-heads", type=int, default=0, help="0 -> MHA (== heads)")
     p.add_argument("--batch", type=int, default=4)
     p.add_argument("--causal", action="store_true")
+    p.add_argument(
+        "--v-lds-stage",
+        action="store_true",
+        help="stage each K-tile's V rows through LDS instead of direct gathers",
+    )
     p.add_argument("--tol", type=float, default=2e-2)
     p.add_argument("--warmup", type=int, default=10)
     p.add_argument("--iters", type=int, default=100)
@@ -81,6 +87,7 @@ def main() -> int:
         num_query_heads=args.heads,
         num_kv_heads=kvh,
         mask_mode="causal" if args.causal else "none",
+        v_lds_stage=args.v_lds_stage,
         name=f"wmma_fmha_bench_{args.arch}",
     )
     art = compile_kernel(build_wmma_fmha_fwd(spec, arch=args.arch), arch=args.arch)
@@ -186,6 +193,20 @@ def main() -> int:
         f"[{args.arch}] WMMA FMHA B={B} Sq={Sq} Sk={Sk} D={D} Hq={Hq} Hk={Hk} "
         f"causal={args.causal}: max_abs={max_abs:.2e} grid={grid} | "
         f"{ms * 1e3:.1f} us/iter  {tflops:.2f} TFLOP/s  {gbps:.1f} GB/s (IO-floor)"
+    )
+    print(
+        "PerfJSON: "
+        + json.dumps(
+            {
+                "ms": ms,
+                "tflops": tflops,
+                "gbps": gbps,
+                "max_abs_diff": max_abs,
+                "bad_count": 0,
+                "total": int(Out.size),
+                "variant": "vlds" if args.v_lds_stage else "vgather",
+            }
+        )
     )
     return 0
 

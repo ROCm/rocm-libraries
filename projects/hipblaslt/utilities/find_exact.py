@@ -270,13 +270,52 @@ class yamlListInfo:
     def __post_init__(self):
         self.problemSizes = []
 
+
+def _is_dict_logic(data):
+    return isinstance(data, dict)
+
+
+def _get_library_type(data):
+    if _is_dict_logic(data):
+        return data.get("LibraryType")
+    if len(data) > 11 and data[11]:
+        return data[11]
+    return None
+
+
+def _get_solution_list(data):
+    if _is_dict_logic(data):
+        return data["Solutions"]
+    return data[5]
+
+
+def _set_solution_list(data, solutions):
+    if _is_dict_logic(data):
+        data["Solutions"] = solutions
+    else:
+        data[5] = solutions
+
+
+def _set_exact_logic(data, exact_logic):
+    if _is_dict_logic(data):
+        data["ExactLogic"] = exact_logic
+        data["RangeLogic"] = None
+    else:
+        data[7] = exact_logic
+        data[8] = None
+
+
+def _set_logic_type(data, logic_type):
+    if _is_dict_logic(data):
+        data["LibraryType"] = logic_type
+    else:
+        data[11] = logic_type
+
 def fetchDataFromLogic(yamlFilePath, folderPath, infoList, logicType="Equality"):
     data = readYaml(yamlFilePath)
     # Skip exact yaml files
-    libraryType = None
-    if len(data) > 11 and data[11]:
-        libraryType = data[11]
-    else:
+    libraryType = _get_library_type(data)
+    if not libraryType:
         str1 = "Library logic file {} is missing required field matching property." \
                 .format(yamlFilePath)
         assert 0 and str1
@@ -285,7 +324,7 @@ def fetchDataFromLogic(yamlFilePath, folderPath, infoList, logicType="Equality")
     # index 5: solution
     # index 7: exactLogic
     # index 8: rangeLogic
-    solutionList = data[5]
+    solutionList = _get_solution_list(data)
     newSolutionList = []
     local2NewLocalTable = {}
     for info in infoList:
@@ -309,7 +348,7 @@ def fetchDataFromLogic(yamlFilePath, folderPath, infoList, logicType="Equality")
                 if oldStr in newSolutionList[-1]["SolutionNameMin"]:
                     newSolutionList[-1]["SolutionNameMin"] = newSolutionList[-1]["SolutionNameMin"].replace(oldStr, newStr)
                 newSolutionList[-1]["GlobalSplitU"] = gsu
-    data[5] = newSolutionList
+    _set_solution_list(data, newSolutionList)
     exactLogicList = []
     for info in infoList:
         solution = solutionList[info.localSolutionIndex]
@@ -317,9 +356,8 @@ def fetchDataFromLogic(yamlFilePath, folderPath, infoList, logicType="Equality")
         key = (info.localSolutionIndex, gsu)
         if key in local2NewLocalTable:
             exactLogicList.append([info.problemSizes, [local2NewLocalTable[key], info.tflops]])
-    data[7] = exactLogicList
-    data[8] = None
-    data[11] = logicType
+    _set_exact_logic(data, exactLogicList)
+    _set_logic_type(data, logicType)
 
     yamlFileName = os.path.abspath(folderPath + "/" + os.path.basename(yamlFilePath))
     writeYAML(yamlFileName, data, explicit_start=False, explicit_end=False)

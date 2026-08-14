@@ -23,12 +23,11 @@
 # ---
 # name: test_problem_predicate_compound
   dict({
-    'count': 10,
+    'count': 9,
     'tags': list([
       'BufferLoadOffsetLimitCheck',
       'BufferLoadOffsetLimitCheck_Beta',
       'BufferStoreOffsetLimitCheck',
-      'ClusterDimCheck',
       'GlobalSplitUCheckMinK',
       'KernelLanguageCompatible',
       'LeadingFree0SizesGreaterOrEqual',
@@ -58,7 +57,7 @@
 # ---
 # name: test_problem_type_predicates
   dict({
-    'count': 26,
+    'count': 28,
     'tags': list([
       'Activation',
       'ActivationComputeType',
@@ -69,6 +68,7 @@
       'BiasSrcWhiteList',
       'DataTypeE',
       'F32XdlMathOp',
+      'GateResidualDataTypeWhiteList',
       'GroupedGemm',
       'HighPrecisionAccumulate',
       'MXBlockA',
@@ -82,6 +82,7 @@
       'TypesEqual',
       'UseBias',
       'UseE',
+      'UseGateResidual',
       'UseGradient',
       'UseScaleAB',
       'UseScaleAlphaVec',

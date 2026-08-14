@@ -27,6 +27,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -143,6 +145,32 @@ class ORIGAMI_EXPORT hardware_t {
   static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
 
   /**
+   * @brief gfx950-only architecture constants from optional PCI chip id.
+   *
+   * When @p pci_chip_id is @c std::nullopt, uses the primary (id75a0) microbenchmark row.
+   * When the chip id’s low 16 bits equal @c 0x75a8 (PCI device id as from e.g.
+   * @c hipDeviceAttributePciChipId), uses the alternate (id75a8) row. Other values use
+   * the id75a0 row. ISA and instruction map stay gfx950.
+   */
+  static constexpr architecture_constants get_gfx950_arch_constants(
+      std::optional<int> pci_chip_id = std::nullopt) noexcept {
+    if (gfx950_pci_chip_selects_id75a8(pci_chip_id)) {
+      return {8.5,
+              1.21875121875121875122 * 3.6,
+              2.55,
+              4,
+              std::make_tuple(-0.000098, 0.02011, 0),
+              1.5};
+    }
+    return {17,
+            1.21875121875121875122 * 7,
+            6,
+            4,
+            std::make_tuple(-0.000013, 0.007070, 0.027355),
+            1.5};
+  }
+
+  /**
    * @brief Get architecture-specific constants for a given architecture.
    *
    * Returns the pre-configured constants (memory performance ratios, bandwidth
@@ -150,21 +178,21 @@ class ORIGAMI_EXPORT hardware_t {
    * determined through microbenchmarking.
    *
    * @param arch Architecture enum value
+   * @param pci_chip_id For gfx950 only: optional PCI chip id; @c std::nullopt selects the
+   *                    default id75a0 row; low 16 bits @c 0x75a8 selects the id75a8 row.
+   *                    Ignored for all other architectures.
    * @return architecture_constants Constants for the specified architecture
    */
-  static constexpr architecture_constants get_arch_constants(architecture_t arch) {
+  static constexpr architecture_constants get_arch_constants(
+      architecture_t arch,
+      std::optional<int> pci_chip_id = std::nullopt) noexcept {
     switch (arch) {
       case architecture_t::gfx90a:
         return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
       case architecture_t::gfx942:
         return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
       case architecture_t::gfx950:
-        return {17,
-                1.21875121875121875122 * 7,
-                6,
-                4,
-                std::make_tuple(-0.000013, 0.007070, 0.027355),
-                1.5};
+        return get_gfx950_arch_constants(pci_chip_id);
       case architecture_t::gfx1200:
         return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5};
       case architecture_t::gfx1201:
@@ -185,7 +213,7 @@ class ORIGAMI_EXPORT hardware_t {
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
       case architecture_t::gfx1250: {
         // TODO: Update with real gfx1250 constants when available
-        auto c                       = get_arch_constants(architecture_t::gfx950);
+        auto c                       = get_gfx950_arch_constants(std::nullopt);
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
         c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
         return c;
@@ -504,6 +532,12 @@ class ORIGAMI_EXPORT hardware_t {
              // SGEMM: V_WMMA_F32_16X16X4_F32, 16x4 F32 x 4x16 F32 = 16x16 F32
              {matrix_instruction(16, 16, 4, data_type_t::Float), 16},
 
+             // CGEMM: same tile shape as SGEMM, 4x real latency
+             {matrix_instruction(16, 16, 4, data_type_t::ComplexFloat), 64},
+
+             // ZGEMM: same tile shape as DGEMM, 4x real latency
+             {matrix_instruction(16, 16, 4, data_type_t::ComplexDouble), 64},
+
              // F16
              // HHS: V_WMMA_F16_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F16
              // HSS: V_WMMA_F32_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F32
@@ -570,8 +604,6 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 8 * 3},
 
              // TODO:
-             // ComplexFloat
-             // ComplexDouble
              // BF6
              // DOT2
          }}};
@@ -591,6 +623,7 @@ class ORIGAMI_EXPORT hardware_t {
   std::tuple<double, double, double>
       mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
   size_t NUM_XCD;                  ///< Number of XCDs (XGMI Complex Die)
+  std::optional<int> pci_chip_id{};  ///< PCI chip ID for gfx950 memory model row (if set)
 
   /**
    * @brief Construct hardware_t with explicit parameters.
@@ -607,6 +640,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @param compute_clock_ghz Compute clock frequency in GHz
    * @param parallel_mi_cu Number of parallel matrix instructions per CU
    * @param mem_bw_per_wg_coefficients Memory bandwidth coefficients per workgroup
+   * @param pci_chip_id Optional PCI chip ID stored on this object (default none)
    */
   hardware_t(architecture_t arch,
              size_t N_CU,
@@ -619,7 +653,8 @@ class ORIGAMI_EXPORT hardware_t {
              size_t L2_capacity,
              double compute_clock_ghz,
              size_t parallel_mi_cu,
-             std::tuple<double, double, double> mem_bw_per_wg_coefficients);
+             std::tuple<double, double, double> mem_bw_per_wg_coefficients,
+             std::optional<int> pci_chip_id = std::nullopt);
 
   /**
    * @brief Construct hardware_t using architecture constants and a clock frequency.
@@ -637,6 +672,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_ghz Compute clock frequency in GHz
    * @param memory_clock_ghz Memory clock frequency in GHz
+   * @param pci_chip_id Optional PCI chip ID stored on this object (default none)
    */
   hardware_t(architecture_t arch,
              size_t N_CU,
@@ -646,17 +682,27 @@ class ORIGAMI_EXPORT hardware_t {
              size_t num_xcds,
              size_t L2_capacity,
              double compute_clock_ghz,
-             double memory_clock_ghz);
+             double memory_clock_ghz,
+             std::optional<int> pci_chip_id = std::nullopt);
 
   /**
    * @brief Construct hardware_t from HIP device properties.
    *
    * Automatically determines architecture and extracts hardware parameters
-   * from the provided HIP device properties structure.
+   * from the provided HIP device properties structure. Delegates to
+   * @ref get_hardware_for_properties with no XCD override.
+   *
+   * This constructor does **not** call HIP to discover PCI identifiers. If you need
+   * gfx950 memory-constant selection from PCI (e.g. low 16 bits @c 0x75a8 for the \c id75a8
+   * row), pass @p pci_chip_id explicitly (for example from @c hipDeviceGetAttribute with
+   * @c hipDeviceAttributePciChipId). When @p pci_chip_id is @c std::nullopt, gfx950 uses
+   * the default \c id75a0 row and the \c pci_chip_id field on this object is unset.
    *
    * @param properties HIP device properties structure
+   * @param pci_chip_id Optional PCI chip id forwarded to @ref get_arch_constants for gfx950;
+   *                    Origami does not query HIP when omitted.
    */
-  hardware_t(hipDeviceProp_t properties);
+  hardware_t(hipDeviceProp_t properties, std::optional<int> pci_chip_id = std::nullopt);
 
   /**
    * @brief Copy constructor.
@@ -672,10 +718,15 @@ class ORIGAMI_EXPORT hardware_t {
    * @param num_xcds_override If non-zero, use this XCD count instead of
    *                          the hardcoded default. Passed by
    *                          get_hardware_for_device() after a runtime query.
+   * @param pci_chip_id Optional PCI chip ID (e.g. from @c hipDeviceAttributePciChipId).
+   *                    For gfx950, @c 0x75a8 (low 16 bits) maps to @ref id75a8; @c std::nullopt
+   *                    and other values use @ref id75a0. Origami does not query HIP for this.
    * @return hardware_t Configured hardware instance
    */
-  static hardware_t get_hardware_for_properties(hipDeviceProp_t properties,
-                                                size_t num_xcds_override = 0);
+  static hardware_t get_hardware_for_properties(
+      hipDeviceProp_t properties,
+      size_t num_xcds_override           = 0,
+      std::optional<int> pci_chip_id = std::nullopt);
 
   /**
    * @brief Create hardware_t instance for a specific HIP device.
@@ -701,23 +752,19 @@ class ORIGAMI_EXPORT hardware_t {
    * preserved. The runtime XCC query
    * (`hipDeviceAttributeNumberOfXccs` on HIP 7+) is still performed
    * against `deviceId`.
-   *
-   * @warning `prop` must describe the same physical device as `deviceId`,
-   *          aside from intentional field-level overrides the caller has
-   *          applied (e.g. swapping `multiProcessorCount` for the
-   *          physical MP count). Passing a `prop` from one device together
-   *          with a `deviceId` for a different device produces an
-   *          internally-inconsistent `hardware_t` — the XCC count will
-   *          come from `deviceId` while CU count, clocks, LDS/L2 capacity,
-   *          and architecture all come from `prop`. This is not checked.
+   * Accepts a caller-supplied PCI chip ID (e.g. from
+   * `hipDeviceAttributePciChipId` upstream). When @p pci_chip_id is
+   * `std::nullopt`, PCI chip ID is queried at runtime on HIP 7+ for gfx950.
    *
    * @param deviceId HIP device ID used to query the XCC count
-   * @param prop     Caller-owned device properties to model from; must
-   *                 correspond to `deviceId`
+   * @param prop     Caller-owned device properties to model from
+   * @param pci_chip_id Optional PCI chip ID for gfx950 memory-constant selection
    * @return hardware_t Configured hardware instance for the device
    */
-  static hardware_t get_hardware_for_device(int deviceId,
-                                            hipDeviceProp_t const& prop);
+  static hardware_t get_hardware_for_device(
+      int deviceId,
+      hipDeviceProp_t const& prop,
+      std::optional<int> pci_chip_id = std::nullopt);
 
   /**
    * @brief Create hardware_t instance for a specific architecture with specified parameters.
@@ -728,18 +775,22 @@ class ORIGAMI_EXPORT hardware_t {
    * @param arch Architecture enum value
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
-   * @param rf_capacity LDS capacity in bytes
+   * @param rf_capacity rf capacity in bytes
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_khz Compute clock in KHz
+   * @param pci_chip_id Optional PCI chip ID for gfx950 memory-constant selection; see
+   *                    @ref get_hardware_for_properties.
    * @return hardware_t Configured hardware instance
    * @throws std::runtime_error if architecture is not supported
    */
-  static hardware_t get_hardware_for_arch(architecture_t arch,
-                                          size_t N_CU,
-                                          size_t lds_capacity,
-                                          size_t rf_capacity,
-                                          size_t L2_capacity,
-                                          int compute_clock_khz);
+  static hardware_t get_hardware_for_arch(
+      architecture_t arch,
+      size_t N_CU,
+      size_t lds_capacity,
+      size_t rf_capacity,
+      size_t L2_capacity,
+      int compute_clock_khz,
+      std::optional<int> pci_chip_id = std::nullopt);
 
   /**
    * @brief Get the default (hardcoded) XCD count for a known architecture.
@@ -755,6 +806,17 @@ class ORIGAMI_EXPORT hardware_t {
    * @throws std::runtime_error if the architecture has no hardcoded default
    */
   static size_t get_default_num_xcds(architecture_t arch);
+
+  /**
+   * @brief Get the default L2 cache-line size (in bytes) for an architecture.
+   *
+   * Returns the per-arch L2 cache-line size used for the StreamK per-queue
+   * counter stride (currently uniform 128 B across supported archs).
+   *
+   * @param arch Architecture enum value
+   * @return L2 cache-line size in bytes
+   */
+  static size_t get_default_cache_line_bytes(architecture_t arch);
 
   /**
    * @brief Check if the hardware described by properties is supported.
@@ -836,5 +898,35 @@ class ORIGAMI_EXPORT hardware_t {
    * @return std::string Substring before the first colon, or entire string if no colon found
    */
   static std::string get_before_first_colon(const std::string& input);
+
+  /**
+   * @brief True when PCI chip id selects gfx950 id75a8 microbenchmark row.
+   *
+   * Matches HIP @c hipDeviceAttributePciChipId style encodings: low 16 bits @c 0x75a8
+   * (device id as printed in hex, e.g. @c 0x75a8).
+   */
+  static constexpr bool gfx950_pci_chip_selects_id75a8(
+      std::optional<int> pci_chip_id) noexcept {
+    if (!pci_chip_id.has_value()) { return false; }
+    const unsigned v = static_cast<unsigned>(*pci_chip_id);
+    return (v & 0xFFFFu) == 0x75a8u;
+  }
 };
+
+/**
+ * @brief Resolve the number of compute units to model against.
+ *
+ * Central helper for honoring a caller-supplied CU budget (problem.num_cus).
+ * Returns @p requested_num_cus when it is a positive cap below the physical
+ * count, otherwise the full hardware count. Used across solution selection and
+ * mapping so that a budget of <= 0 preserves the "use all CUs" behaviour.
+ *
+ * @param requested_num_cus Requested CU budget (<= 0 = use all CUs). A signed
+ *                          type so that invalid/negative inputs are absorbed
+ *                          here rather than wrapping to a huge unsigned value.
+ * @param hardware_num_cus Physical number of compute units (hardware_t::N_CU).
+ * @return std::size_t Effective number of usable compute units.
+ */
+ORIGAMI_EXPORT std::size_t resolve_num_cus(std::int64_t requested_num_cus,
+                                           std::size_t hardware_num_cus);
 }  // namespace origami

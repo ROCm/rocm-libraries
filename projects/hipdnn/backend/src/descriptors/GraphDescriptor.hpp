@@ -5,6 +5,7 @@
 
 #include "BackendDescriptor.hpp"
 #include "IGraphOperation.hpp"
+#include <array>
 #include <flatbuffers/detached_buffer.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
@@ -36,6 +37,11 @@ private:
     // Cached serialized graph buffer. Populated by finalize() or buildSerializedGraph().
     // Cleared by invalidateCache() when operations are mutated.
     flatbuffers::DetachedBuffer _graphSerializedBuffer;
+
+    // Stable identity of a logical finalized graph across serialization round trips.
+    // Deserialized copies preserve it, so it is not a unique live-object token; use it only to
+    // key state derived from immutable graph content. Newly generated values use UUID v4.
+    std::optional<std::array<uint8_t, 16>> _graphId;
 
     // Source of truth for the graph's operations. Populated via setOperations() (C-API flow)
     // or eagerly from deserializeGraph() (FlatBuffer flow).
@@ -145,6 +151,8 @@ public:
     virtual hipdnnHandle_t getHandle() const;
     virtual bool isOverrideShapeEnabled() const;
 
+    virtual bool hasRaggedTensors() const;
+    virtual bool hasNonDefaultTensorAlignment() const;
     virtual bool isRuntimePassByValueEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();

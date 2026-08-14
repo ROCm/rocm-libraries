@@ -224,6 +224,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     origami::problem_t origami_problem = {
         .size        = {prob.m, prob.n, prob.k},
         .batch       = prob.batch_count,
+        // 0 = use all CUs;
+        .num_cus     = static_cast<size_t>(prob.sm_count_target),
         .a_transpose = (prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T
                                                                           : origami::transpose_t::N,
         .b_transpose = (prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T
@@ -335,7 +337,9 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         int cu_multiplier = 1;
         if(kernelType.swizzleA)
             cu_multiplier = 4;
-        if(numTiles * cu_multiplier < analytical_hardware.N_CU && itersPerTile >= 16
+        // Honor the caller's CU budget (sm_count_target); <= 0 = use all CUs.
+        size_t usableCUs = origami::resolve_num_cus(prob.sm_count_target, analytical_hardware.N_CU);
+        if(numTiles * cu_multiplier < usableCUs && itersPerTile >= 16
             && !isF6 && !isLargeF8)
         {
             useStreamK = true;

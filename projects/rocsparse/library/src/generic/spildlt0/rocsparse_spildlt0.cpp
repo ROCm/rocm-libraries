@@ -169,14 +169,11 @@ namespace rocsparse
                     "before the stage rocsparse_spildlt0_stage_compute");
             }
 
+            // The external diagonal output vector is optional: D is always stored on the
+            // diagonal of the L factor (whose unit diagonal is otherwise implicit). When the
+            // user provides a pointer via rocsparse_spildlt0_input_diag, D is additionally
+            // copied out into it.
             void* diag = spildlt0_descr->get_diag();
-            if(diag == nullptr)
-            {
-                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
-                    rocsparse_status_invalid_pointer,
-                    "diag pointer must be set via rocsparse_spildlt0_input_diag before compute "
-                    "stage");
-            }
 
             spildlt0_descr->m_batch_count = A->batch_count;
 

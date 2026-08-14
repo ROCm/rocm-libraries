@@ -414,6 +414,7 @@ rocke_cshuffle_epilogue_t rocke_cshuffle_epilogue_make(const rocke_mfma_atom_t* 
     epi.store_vec = 8; /* Python default */
     epi.smem_name_hint = "C_smem";
     epi.out_dtype = "f16";
+    epi.no_alias = false; /* Python default */
     return epi;
 }
 
@@ -505,7 +506,8 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
     /* ---- step 1: publish accs to LDS at the MFMA output layout. ---- */
     lds_shape[0] = grid->tile_m; /* storage_shape(tile_m) == (tile_m, tile_n) */
     lds_shape[1] = grid->tile_n;
-    if(rocke_make_lds_view(b, &c_view, _lds_dtype, lds_shape, 2, epi->smem_name_hint, NULL)
+    if(rocke_make_lds_view_ex(
+           b, &c_view, _lds_dtype, lds_shape, 2, epi->smem_name_hint, NULL, epi->no_alias ? 1 : 0)
        != ROCKE_OK)
         return;
     c_smem = c_view.base;
@@ -517,6 +519,21 @@ void rocke_cshuffle_epilogue_store(rocke_ir_builder_t* b,
      * values ARE emitted here. */
     (void)rocke_b_const_i32(b, 0);
     (void)rocke_b_const_i32(b, 0);
+
+    /* ---- step 0: reuse barrier. ----
+     * The common-LDS packer aliases this C staging tile onto the A/B staging
+     * bytes (non-interfering in program order). Double-buffered / prefetched
+     * (compv4 / async_dma) mainloops end with the tail-tile MFMA reading A/B
+     * from LDS *after* their last drain barrier and emit no trailing barrier, so
+     * without a barrier here a fast wave's first C ds_write would clobber A/B
+     * bytes a slow wave is still reading for its tail MFMA -- a cross-wave WAR on
+     * the aliased pool. Mirrors the Python CShuffleEpilogue.store.
+     *
+     * With no_alias the C tile has its own exclusive LDS bytes that never
+     * overlap A/B, so this WAR cannot occur and the barrier is elided. The
+     * step-2 C-write->C-read barrier below is a genuine RAW and always stays. */
+    if(!epi->no_alias)
+        rocke_b_sync(b);
 
     for(mi = 0; mi < mfmas_m; ++mi)
     {

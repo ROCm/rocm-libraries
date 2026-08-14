@@ -9,11 +9,14 @@
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
+#include "PlatformUtils.hpp"
 
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/Uuid.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <logging/GraphLogger.hpp>
+#include <logging/Logging.hpp>
 #include <nlohmann/json.hpp>
 #include <unordered_map>
 
@@ -33,10 +36,33 @@ void GraphDescriptor::finalize()
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::finalize: no operations set");
 
-    invalidateCache();
-    buildSerializedGraph();
+    const bool needsId = !_graphId.has_value();
+    if(needsId)
+    {
+        _graphId = platform_utilities::generateUuidV4();
+    }
+
+    try
+    {
+        invalidateCache();
+        buildSerializedGraph();
+    }
+    catch(...)
+    {
+        // Uncovered by tests: reaching here needs buildSerializedGraph() to fail on operations
+        // that already validated, which no input can force through the public API.
+        if(needsId)
+        {
+            _graphId.reset();
+        }
+        throw;
+    }
 
     HipdnnBackendDescriptorImpl<GraphDescriptor>::finalize();
+
+    HIPDNN_BACKEND_LOG_INFO("Finalized graph \"{}\" with id {}",
+                            _name,
+                            hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
 
     if(logging::GraphLogger::isEnabled())
     {
@@ -58,6 +84,11 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->preferred_engine_id = _preferredEngineId;
     graph->is_override_shape_enabled = _isOverrideShapeEnabled;
     graph->name = _name;
+    if(_graphId.has_value())
+    {
+        graph->id = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::Uuid>(
+            hipdnn_flatbuffers_sdk::utilities::toFlatbufferUuid(*_graphId));
+    }
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
 
@@ -98,8 +129,12 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     const bool anyRuntimePassByValue
         = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
             graph->tensors, [](const auto& tensor) { return tensor.get(); });
-    const auto& requiredVersion = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(
-        _isOverrideShapeEnabled, anyRuntimePassByValue);
+
+    const auto& requiredVersion
+        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(_isOverrideShapeEnabled,
+                                                                  anyRuntimePassByValue,
+                                                                  hasRaggedTensors(),
+                                                                  hasNonDefaultTensorAlignment());
     graph->min_required_engine_api_version
         = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::EngineApiVersion>(
             hipdnn_plugin_sdk::toEngineApiVersion(requiredVersion));
@@ -374,21 +409,30 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
     // Non-mutating attributes (e.g., HANDLE) set invalidate = false.
     if(invalidate)
     {
+        if(_graphId.has_value())
+        {
+            HIPDNN_BACKEND_LOG_DEBUG(
+                "Discarding id {} for graph \"{}\": its contents changed, so finalizing again "
+                "generates a new id",
+                hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId),
+                _name);
+        }
         invalidateCache();
+        _graphId.reset();
     }
 }
 
 void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t graphByteSize)
 {
+    THROW_IF_TRUE(isFinalized(),
+                  HIPDNN_STATUS_NOT_INITIALIZED,
+                  "GraphDescriptor::deserializeGraph() failed: Already finalized.");
     THROW_IF_NULL(serializedGraph,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "GraphDescriptor::deserializeGraph: serializedGraph is null");
     THROW_IF_TRUE(graphByteSize == 0,
                   HIPDNN_STATUS_BAD_PARAM,
                   "GraphDescriptor::deserializeGraph: graphByteSize is 0");
-
-    invalidateCache();
-
     // Parse FlatBuffer and eagerly unpack into _operations
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
@@ -396,28 +440,43 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     const auto requiredVersion
         = hipdnn_plugin_sdk::fromEngineApiVersion(graph->min_required_engine_api_version.get());
     THROW_IF_TRUE(
-        requiredVersion > hipdnn_data_sdk::utilities::
-                Version{hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION},
+        requiredVersion
+            > hipdnn_data_sdk::utilities::Version{hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION},
         HIPDNN_STATUS_NOT_SUPPORTED,
         "Serialized graph requires a newer engine plugin API version than this build supports.");
 
-    // Extract graph-level attributes
-    _computeDataType = graph->compute_data_type;
-    _intermediateDataType = graph->intermediate_data_type;
-    _ioDataType = graph->io_data_type;
-    _preferredEngineId = graph->preferred_engine_id;
-    _isOverrideShapeEnabled = graph->is_override_shape_enabled;
-    _isRuntimePassByValueEnabled = requiredVersion >= hipdnn_data_sdk::utilities::Version{
-                                       hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
-    _name = graph->name;
+    std::optional<std::array<uint8_t, 16>> graphId;
+    if(graph->id)
+    {
+        graphId = hipdnn_flatbuffers_sdk::utilities::toUuidBytes(*graph->id);
+    }
 
-    // Populate _operations from the deserialized graph nodes
     auto tensorMap = NodeFactory::buildTensorMap(graph->tensors);
     std::vector<std::shared_ptr<IBackendDescriptor>> unpacked;
     unpacked.reserve(graph->nodes.size());
     for(const auto& nodeT : graph->nodes)
     {
         unpacked.push_back(NodeFactory::createOperationFromNode(*nodeT, tensorMap));
+    }
+
+    // Commit only after every validation and conversion succeeds.
+    invalidateCache();
+    _computeDataType = graph->compute_data_type;
+    _intermediateDataType = graph->intermediate_data_type;
+    _ioDataType = graph->io_data_type;
+    _preferredEngineId = graph->preferred_engine_id;
+    _isOverrideShapeEnabled = graph->is_override_shape_enabled;
+    // Scanned directly: the stamped required-version collapses to a single floor
+    // and cannot distinguish pass-by-value from a higher feature floor like ragged.
+    _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graph->tensors, [](const auto& tensor) { return tensor.get(); });
+    _name = graph->name;
+    _graphId = graphId;
+    if(_graphId.has_value())
+    {
+        HIPDNN_BACKEND_LOG_DEBUG("Deserialized graph \"{}\" with inherited id {}",
+                                 _name,
+                                 hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));
     }
     _operations = std::move(unpacked);
 }
@@ -433,10 +492,10 @@ void GraphDescriptor::buildSerializedGraph()
     THROW_IF_NULL(graph,
                   HIPDNN_STATUS_INTERNAL_ERROR,
                   "GraphDescriptor::buildSerializedGraph: graph is null");
-    _isRuntimePassByValueEnabled
-        = hipdnn_plugin_sdk::fromEngineApiVersion(*graph->min_required_engine_api_version)
-          >= hipdnn_data_sdk::utilities::Version{
-              hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
+    // Scanned directly: the stamped required-version collapses to a single floor
+    // and cannot distinguish pass-by-value from a higher feature floor like ragged.
+    _isRuntimePassByValueEnabled = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graph->tensors, [](const auto& tensor) { return tensor.get(); });
 
     flatbuffers::FlatBufferBuilder builder;
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(builder, graph.get()));
@@ -528,6 +587,40 @@ bool GraphDescriptor::isOverrideShapeEnabled() const
     return _isOverrideShapeEnabled;
 }
 
+bool GraphDescriptor::hasRaggedTensors() const
+{
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().ragged_offset_tensor_uid.has_value())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool GraphDescriptor::hasNonDefaultTensorAlignment() const
+{
+    // Source of truth: tensor_attributes.fbs -> `alignment: long = 16`.
+    static constexpr int64_t K_DEFAULT_TENSOR_ALIGNMENT = 16;
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().alignment != K_DEFAULT_TENSOR_ALIGNMENT)
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool GraphDescriptor::isRuntimePassByValueEnabled() const
 {
     return _isRuntimePassByValueEnabled;
@@ -538,6 +631,9 @@ std::string GraphDescriptor::toString() const
     std::string str = "GraphDescriptor: {handle=";
     str += _handle != nullptr ? fmt::format("{:p}", static_cast<const void*>(_handle)) : "null";
     str += ", name=" + (_name.empty() ? std::string("(empty)") : _name);
+    str += ", id="
+           + (_graphId.has_value() ? hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId)
+                                   : std::string("(none)"));
     str += ", serializedGraphSize=" + std::to_string(_graphSerializedBuffer.size());
     str += '}';
     return str;

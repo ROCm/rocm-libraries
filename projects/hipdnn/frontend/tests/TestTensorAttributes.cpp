@@ -197,6 +197,74 @@ TEST(TestTensorAttributes, ValidateDataType)
     }
 }
 
+TEST(TestTensorAttributes, SetAndGetRaggedOffset)
+{
+    TensorAttributes tensor;
+    EXPECT_FALSE(tensor.has_ragged_offset());
+    EXPECT_EQ(tensor.get_ragged_offset(), nullptr);
+
+    auto aux = std::make_shared<TensorAttributes>();
+    aux->set_uid(99);
+    tensor.set_ragged_offset(aux);
+    EXPECT_TRUE(tensor.has_ragged_offset());
+    EXPECT_EQ(tensor.get_ragged_offset()->get_uid(), 99);
+
+    tensor.set_ragged_offset(nullptr);
+    EXPECT_FALSE(tensor.has_ragged_offset());
+    EXPECT_EQ(tensor.get_ragged_offset(), nullptr);
+}
+
+TEST(TestTensorAttributes, SetAndGetAlignment)
+{
+    TensorAttributes tensor;
+    EXPECT_EQ(tensor.get_alignment(), 16);
+
+    tensor.set_alignment(64);
+    EXPECT_EQ(tensor.get_alignment(), 64);
+
+    tensor.set_alignment(1);
+    EXPECT_EQ(tensor.get_alignment(), 1);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnAlignmentZero)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_alignment(0);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnAlignmentNegative)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_alignment(-1);
+    EXPECT_EQ(tensor.validate().code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsWithDefaultAlignment)
+{
+    TensorAttributes tensor;
+    tensor.set_dim({4, 1, 1, 1});
+    tensor.set_stride({1, 1, 1, 1});
+    tensor.set_data_type(DataType::FLOAT);
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, RaggedOffsetMethodChainingReturnsThis)
+{
+    TensorAttributes tensor;
+    auto aux = std::make_shared<TensorAttributes>();
+    const TensorAttributes& ref = tensor.set_ragged_offset(aux);
+    EXPECT_EQ(&ref, &tensor);
+
+    const TensorAttributes& ref2 = tensor.set_alignment(32);
+    EXPECT_EQ(&ref2, &tensor);
+}
 TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
 {
     // flag true + value present; set_value seeded dims/strides/data_type.

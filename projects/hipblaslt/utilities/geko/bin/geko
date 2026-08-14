@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+"""GEKO CLI launcher (repo-local). Installed environments use the ``geko`` entry point."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+_GEKO_PKG_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), ".."))
+
+if _GEKO_PKG_ROOT not in sys.path:
+    sys.path.insert(0, _GEKO_PKG_ROOT)
+
+try:
+    from geko.cli import main
+except ImportError as e:
+    print(
+        f"Could not import geko. Install with: pip install -e {_GEKO_PKG_ROOT}, or set PYTHONPATH.\n{e}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1) from e
+
+if __name__ == "__main__":
+    # _GEKO_PKG_ROOT (<hipblaslt>/utilities/geko) anchors hipBLASLt root auto-detection;
+    # --hipblaslt / $GEKO_HIPBLASLT_PATH still take priority when set.
+    raise SystemExit(main(anchor=_GEKO_PKG_ROOT))

@@ -89,7 +89,7 @@ endif()
 # Using standardized versioning from rocm-cmake
 set ( ROCFFT_VERSION_MAJOR "1" )
 set ( ROCFFT_VERSION_MINOR "0" )
-set ( ROCFFT_VERSION_PATCH "39" )
+set ( ROCFFT_VERSION_PATCH "40" )
 set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
@@ -218,6 +218,11 @@ set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
 if( ROCFFT_RUN_INTERNAL_TESTS AND NOT ROCFFT_BUILD_INTERNAL_TESTS )
   message( FATAL_ERROR
     "ROCFFT_RUN_INTERNAL_TESTS=ON requires ROCFFT_BUILD_INTERNAL_TESTS=ON." )
+endif()
+# Coverage needs the internal tests built too.
+if( BUILD_CODE_COVERAGE )
+  set( ROCFFT_BUILD_INTERNAL_TESTS ON CACHE BOOL
+    "Build internal (library-side) unit tests" FORCE )
 endif()
 if( ROCFFT_BUILD_INTERNAL_TESTS )
   enable_testing()

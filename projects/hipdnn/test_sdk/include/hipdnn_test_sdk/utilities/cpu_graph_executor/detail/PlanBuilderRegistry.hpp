@@ -1,5 +1,5 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier:  MIT
 
 #pragma once
 
@@ -20,6 +20,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdPlan.hpp>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>

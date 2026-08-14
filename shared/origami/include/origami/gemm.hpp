@@ -49,7 +49,14 @@ struct ORIGAMI_EXPORT context_t {
   size_t num_wgs                 = 0;
   size_t num_timesteps           = 0;
 
+  /// Tile-scheduling mode.
+  hybrid_mode_t tile_schedule = hybrid_mode_t::none;
+
   /// Hardware-derived values.
+  /// Number of compute units usable for this problem. Equals hardware.N_CU
+  /// unless problem.num_cus caps it lower (@see origami::problem_t::num_cus).
+  /// This is the effective CU count the whole model schedules against.
+  size_t n_cu                 = 0;
   size_t active_cus           = 0;
   double mem_bw_limited       = 0.0;
   double write_mem_bw_limited = 0.0;
@@ -150,7 +157,6 @@ ORIGAMI_EXPORT workgroup_mapping_t predict_workgroup_mapping(const problem_t& pr
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
  * @param grid_selection Different algorithms to select the grid size for kernel execution.
- * @param max_cus maximum number of CU's
  * @return tuple<reduction_t, size_t, size_t, size_t, size_t>
  *         (reduction_strategy, num_wgs, num_active_cus, num_timesteps, split_factor)
  */
@@ -158,8 +164,7 @@ ORIGAMI_EXPORT std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_l
     const problem_t& problem,
     const hardware_t& hardware,
     const config_t& config,
-    grid_selection_t grid_selection,
-    size_t max_cus);
+    grid_selection_t grid_selection);
 
 /**
  * @brief Check if MT fits in LDS
@@ -494,13 +499,11 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.
- * @param max_cus
  * @return double Latency in cycles.
  */
 ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
-                             const config_t& config,
-                             size_t max_cus);
+                             const config_t& config);
 
 }  // namespace gemm
 }  // namespace origami

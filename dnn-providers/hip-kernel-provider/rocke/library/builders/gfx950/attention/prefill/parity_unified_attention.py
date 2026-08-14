@@ -264,6 +264,38 @@ def default_scenarios() -> List[Scenario]:
             block_size=16,
             dtype=torch.float16,
         ),
+        # D256 gfx950 bf16 prefill fast path (Qwen3-Next-80B-A3B cohort,
+        # GQA 16/2). Exercises the _d256_gfx950_fast route (32x32 transposed
+        # + FA3-style softmax<->MFMA interleave) at the two measured points.
+        Scenario(
+            name="prefill_d256_gqa8_b16_sq4096",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+        ),
+        Scenario(
+            name="prefill_d256_gqa8_b16_sq8192",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+        ),
+        # bs=32 D256: takes the same fast route (T=64 forced -> 2 blocks/tile),
+        # a distinct multi-block ratio from the bs=16 (4/tile) validated points.
+        Scenario(
+            name="prefill_d256_gqa8_b32_sq4096",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=32,
+            dtype=torch.bfloat16,
+        ),
         Scenario(
             name="prefill_d128_b16",
             seq_lens=[(64, 64), (128, 256), (32, 256)],
@@ -891,12 +923,110 @@ def creative_scenarios() -> List[Scenario]:
         # --- head_size=256 with bf16 ---
         Scenario(
             name="creative_d256_bf16_decode",
-            seq_lens=[(1, 4096), (1, 8192)],
+            seq_lens=[(1, 1024), (1, 2048), (1, 4096), (1, 8192)],
             num_query_heads=16,
             num_kv_heads=2,
             head_size=256,
             block_size=16,
             dtype=torch.bfloat16,
+        ),
+        # --- PR #9233: D256 gfx950 bf16 prefill fast-path cohort (Sq bs64) ---
+        # These are the shapes the PR perf table reports (+9.1% @ Sq4096,
+        # +10.1% @ Sq8192 over the 32x32 base). bf16, head_size=256, causal
+        # prefill (query_len == kv_len), batch 64. num_blocks covers 64 seqs *
+        # (Sq / block_size) unique blocks so the paged block-table is dense.
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq4096_bs64",
+            seq_lens=[(4096, 4096)] * 64,
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=64 * (4096 // 16),
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_bs64",
+            seq_lens=[(8192, 8192)] * 64,
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=64 * (8192 // 16),
+        ),
+        # bs64 == block_size=64 interpretation, single long sequence (batch 1):
+        # a low-occupancy compute-bound prefill where the exposed softmax v_exp
+        # is the bottleneck the interleave targets.
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq4096_b1_blk64",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=4096 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_blk64",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_h8",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_gqa16x2",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_h1",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=1,
+            num_kv_heads=1,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq4096_b1_blk16",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=4096 // 16,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_blk16",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 16,
         ),
         Scenario(
             name="creative_d256_prefill",
@@ -1166,7 +1296,40 @@ def _run_triton(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         _force_triton_path("auto")
 
 
-def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
+def _with_kq_xor_swizzle(spec):
+    """Return a harness-only ProbeSpec with the measurement-only KQ XOR swizzle ON.
+
+    The XOR swizzle produces INTENTIONALLY WRONG numerics (a read-only
+    bank-conflict probe), so the flag lives ONLY on this harness-local subclass --
+    never on the production ``UnifiedAttention2DTiledSpec`` -- and the kernel emit
+    reads it via ``getattr(spec, "use_kq_xor_swizzle", False)``.
+    """
+    import dataclasses
+
+    from kernels import UnifiedAttention2DTiledSpec
+
+    @dataclasses.dataclass(frozen=True)
+    class _ProbeTiledSpec(UnifiedAttention2DTiledSpec):
+        use_kq_xor_swizzle: bool = False
+
+    fields = {
+        f.name: getattr(spec, f.name)
+        for f in dataclasses.fields(UnifiedAttention2DTiledSpec)
+    }
+    return _ProbeTiledSpec(**fields, use_kq_xor_swizzle=True)
+
+
+def _run_rocke(
+    s: Scenario,
+    data,
+    *,
+    path: str,
+    warmup: int,
+    attempts: int,
+    kq_swizzle: bool = False,
+    kq_pad: int = 0,
+    probe_occupancy: bool = False,
+):
     """Run CK DSL `run_unified_attention_torch` with the requested path forced.
 
     Both backends share the default bench stream (torch's current
@@ -1205,22 +1368,21 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         use_alibi=data["alibi_slopes"] is not None,
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
-        num_sms=120,
+        num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
     )
 
     hip_stream = _bench_stream_handle()
 
-    # NOTE: the ``"2d"`` lane force-builds the hand-tuned MFMA-32x32 /
-    # half-local-PV 2D kernel directly so we can measure the *best* 2D
-    # variant for a shape (this is the aspirational ceiling for the 2D
-    # path, including the d64/b32/h64kv8 trace family). The ``"auto"``
-    # lane must instead exercise the *production* dispatcher
+    # NOTE: the ``"2d"`` lane builds and launches the PRODUCTION 2D spec
+    # (``_tiled_spec_from_problem``) directly -- GPU-time only, no
+    # ``run_unified_attention_torch`` dispatcher overhead -- so it measures the
+    # exact kernel production selects for a shape. The ``"auto"`` lane instead
+    # exercises the *production* dispatcher
     # (``run_unified_attention_torch(backend="auto")`` -> ``select_path``),
-    # otherwise we'd be reporting forced-2D timings as if they were what
-    # production launches -- which mis-measures decode shapes by ~6x
-    # (production correctly routes them to the 3D split-KV path). Keep the
-    # two lanes strictly separate.
+    # otherwise we'd report forced-2D timings as if they were what production
+    # launches -- which mis-measures decode shapes by ~6x (production correctly
+    # routes them to the 3D split-KV path). Keep the two lanes strictly separate.
     if path == "2d":
         from rocke import compile_kernel
         from kernels import (
@@ -1232,8 +1394,86 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             _attn_signature,
             _attn_values,
             _select_2d_compile_backend,
+            _d256_gfx950_fast,
+            _tiled_spec_from_problem,
         )
         from rocke.runtime import KernelLauncher, LaunchConfig
+
+        # PR #9233 direct-launch lane: for the D256 gfx950 bf16 prefill cohort,
+        # build and launch the PRODUCTION fast spec directly (GPU-time only, no
+        # run_unified_attention_torch dispatcher overhead). --no-interleave
+        # (applied in main via a scoped patch of _tiled_spec_from_problem) makes
+        # this lane measure both the interleave fast path and the "32x32 base".
+        if _d256_gfx950_fast(problem):
+            spec = _tiled_spec_from_problem(problem)
+            if kq_swizzle:
+                spec = _with_kq_xor_swizzle(spec)
+                print(
+                    "    [2d-direct] KQ XOR swizzle ON (read-only probe; "
+                    "numerics intentionally wrong)"
+                )
+            if kq_pad > 0:
+                from dataclasses import replace as _replace
+
+                spec = _replace(spec, use_kq_lds_pad=True, kq_lds_pad_halves=kq_pad)
+                print(
+                    f"    [2d-direct] KQ slab-gran pad ON (pad={kq_pad} halves, "
+                    "correct: numerics preserved)"
+                )
+            kernel = build_unified_attention_2d_tiled(spec)
+            if _select_2d_compile_backend(problem) == "hipcc":
+                from rocke.helpers.compile import compile_kernel_via_hipcc
+
+                artifact = compile_kernel_via_hipcc(kernel)
+            else:
+                artifact = compile_kernel(kernel, capture_ir_text=False)
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=_attn_signature(
+                    dtype_str, include_bt_stride=True, include_qq_bias_stride=True
+                ),
+                cache_key=("d256_fast_direct", spec.kernel_name()),
+            )
+            if probe_occupancy:
+                from builders.common.occupancy_probe import print_occupancy
+
+                print_occupancy(artifact.hsaco, spec.num_warps, arch="gfx950")
+            vals = _attn_values(
+                problem=problem,
+                q=q,
+                k=data["key_cache"],
+                v=data["value_cache"],
+                out=output,
+                cu_seqlens_q=data["cu_q"],
+                seqused_k=data["kv_lens"],
+                softmax_scale=data["scale"],
+                block_table=data["block_tables"],
+                softcap=float(s.softcap),
+                sinks=data["sinks"],
+                bt_stride=int(data["block_tables"].stride(0)),
+                include_bt_stride=True,
+                alibi_slopes=data["alibi_slopes"],
+                qq_bias=qq_bias,
+                qq_bias_stride_0=qq_bias_stride_0,
+                include_qq_bias_stride=True,
+            )
+            block_q = spec.block_q
+            total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)
+            cfg = LaunchConfig(
+                grid=(int(s.num_kv_heads), int(total_num_q_blocks), 1),
+                block=(64 * spec.num_warps, 1, 1),
+                stream=hip_stream,
+            )
+            print(f"    [2d-direct] {spec.kernel_name()}")
+
+            def call_once():
+                launcher(vals, config=cfg)
+
+            ms = _time_lane_ms(
+                call_once, warmup=warmup, attempts=attempts, stream=hip_stream
+            )
+            return output, ms
 
         ok, reason = supports_tiled_2d(
             head_size=s.head_size,
@@ -1251,66 +1491,7 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
         if not ok:
             raise NotImplementedError(reason)
 
-        def use_hlpv_variant() -> bool:
-            if dtype_str != "bf16":
-                return False
-            if s.head_size != 64 or s.block_size != 32:
-                return False
-            if s.num_query_heads != 64 or s.num_kv_heads != 8:
-                return False
-            if (
-                s.softcap > 0
-                or problem.use_fp8
-                or problem.use_alibi
-                or problem.use_qq_bias
-            ):
-                return False
-            if data["max_query_len"] <= 256:
-                return False
-            # The half-local PV path regresses on the high-num-seq SW tail.
-            if (s.sliding_window or 0) > 0 and len(s.seq_lens) >= 450:
-                return False
-            return True
-
-        use_hlpv = use_hlpv_variant()
-        # Measured best local policy for the d64/b32/h64kv8 bf16+sinks family:
-        #   * no-SW: R4_s1mask_hlpv + mask-limit + fast paged-KV + skip legacy Q
-        #   * SW:    R4_s1mask_hlpv + fast paged-KV + skip legacy Q
-        #   * SW high-num-seq tail falls back to plain R4 in use_hlpv_variant().
-        use_transposed_mask_limit = use_hlpv and (s.sliding_window or 0) == 0
-        use_mfma32_skip_legacy_qreg = use_hlpv
-        use_fast_paged_kv_desc = use_hlpv
-        # AGPR0 is still experimental and did not improve this path broadly; keep
-        # it as an explicit environment opt-in for microbench work only.
-        use_agpr_alloc_zero = (
-            use_hlpv and os.environ.get("ROCKE_ATTENTION_AGPR_ALLOC_ZERO") == "1"
-        )
-        spec = UnifiedAttention2DTiledSpec(
-            head_size=s.head_size,
-            block_size=s.block_size,
-            num_query_heads=s.num_query_heads,
-            num_kv_heads=s.num_kv_heads,
-            dtype=dtype_str,
-            use_sinks=data["sinks"] is not None,
-            sliding_window=s.sliding_window or 0,
-            has_softcap=s.softcap > 0,
-            use_alibi=data["alibi_slopes"] is not None,
-            use_qq_bias=qq_bias is not None,
-            num_seqs=len(s.seq_lens),
-            num_warps=4,
-            waves_per_eu=2,
-            tile_size=2 * s.block_size,
-            block_m_per_warp=32,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_transposed_scalar_state=use_hlpv,
-            use_transposed_mask_once=use_hlpv,
-            use_transposed_half_local_pv=use_hlpv,
-            use_mfma32_skip_legacy_qreg=use_mfma32_skip_legacy_qreg,
-            use_transposed_mask_limit=use_transposed_mask_limit,
-            use_fast_paged_kv_desc=use_fast_paged_kv_desc,
-            use_agpr_alloc_zero=use_agpr_alloc_zero,
-        )
+        spec = _tiled_spec_from_problem(problem)
         kernel = build_unified_attention_2d_tiled(spec)
         if _select_2d_compile_backend(problem) == "hipcc":
             from rocke.helpers.compile import compile_kernel_via_hipcc
@@ -1324,14 +1505,7 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             signature=_attn_signature(
                 dtype_str, include_bt_stride=True, include_qq_bias_stride=True
             ),
-            cache_key=(
-                "r4_hlpv_parity",
-                spec.kernel_name(),
-                use_agpr_alloc_zero,
-                use_mfma32_skip_legacy_qreg,
-                use_transposed_mask_limit,
-                use_fast_paged_kv_desc,
-            ),
+            cache_key=("prod_2d_direct", spec.kernel_name()),
         )
         vals = _attn_values(
             problem=problem,
@@ -1390,6 +1564,39 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
 
     ms = _time_lane_ms(call_once, warmup=warmup, attempts=attempts, stream=hip_stream)
     return output, ms
+
+
+def _run_torch_flash(s: Scenario, data, *, warmup: int, attempts: int):
+    """Time torch flash SDPA on the same shape (the "vs torch-flash" reference).
+
+    Thin arch-local adapter over the shared
+    ``builders.common.torch_flash_reference.run_torch_flash`` (kept generic so
+    the gfx942/decode harnesses can reuse it). Returns (out[total_q, H, D], ms).
+    """
+    from builders.common.torch_flash_reference import run_torch_flash
+
+    out, ms, backend = run_torch_flash(
+        query=data["query"],
+        key_cache=data["key_cache"],
+        value_cache=data["value_cache"],
+        block_tables=data["block_tables"],
+        query_lens=data["query_lens"],
+        kv_lens_list=data["kv_lens_list"],
+        num_query_heads=s.num_query_heads,
+        num_kv_heads=s.num_kv_heads,
+        head_size=s.head_size,
+        block_size=s.block_size,
+        scale=data["scale"],
+        warmup=warmup,
+        attempts=attempts,
+        bench_stream=_bench_stream_handle(),
+        time_lane_ms=_time_lane_ms,
+    )
+    _LAST_TORCH_FLASH["backend"] = backend
+    return out, ms
+
+
+_LAST_TORCH_FLASH = {"backend": None}
 
 
 def run_unified(backend: str, s: Scenario, data, warmup: int = 3, attempts: int = 10):
@@ -1500,12 +1707,57 @@ def _row_print(label: str, out_ms, ref_out, t_out):
 
 
 def main() -> int:
+    # Guarantee any --no-interleave patch of the production
+    # _tiled_spec_from_problem is restored, even on exceptions (no global leak).
+    import kernels.common.attention_unified as _au
+
+    _orig_tiled_spec = _au._tiled_spec_from_problem
+    try:
+        return _main_impl()
+    finally:
+        _au._tiled_spec_from_problem = _orig_tiled_spec
+
+
+def _main_impl() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", default=None, action="append")
     parser.add_argument("--attempts", type=int, default=10)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--skip-ck", action="store_true")
+    parser.add_argument(
+        "--no-interleave",
+        action="store_true",
+        help="build the D256 fast spec with softmax<->MFMA interleave OFF (the "
+        "'32x32 base'); run with/without to recover the +N%% interleave delta "
+        "(was PARITY_NO_INTERLEAVE)",
+    )
+    parser.add_argument(
+        "--kq-swizzle",
+        action="store_true",
+        help="direct-launch 2D lane: KQ XOR swizzle ON (read-only probe; "
+        "numerics intentionally wrong; was PARITY_KQ_SWIZZLE)",
+    )
+    parser.add_argument(
+        "--kq-pad",
+        type=int,
+        default=0,
+        metavar="HALVES",
+        help="direct-launch 2D lane: KQ slab-granularity LDS pad width in "
+        "halves (0=off, correct; was PARITY_KQ_PAD / PARITY_KQ_PAD_W)",
+    )
+    parser.add_argument(
+        "--probe-occupancy",
+        action="store_true",
+        help="direct-launch 2D lane: print static VGPR/LDS/waves occupancy for "
+        "the built kernel (was PARITY_PROBE_OCC)",
+    )
+    parser.add_argument(
+        "--torch-flash",
+        action="store_true",
+        help="also time torch F.sdpa (flash) and report the CK-auto vs "
+        "torch-flash ratio (PR #9233 'vs torch-flash' column)",
+    )
     parser.add_argument(
         "--skip-triton",
         action="store_true",
@@ -1539,6 +1791,37 @@ def main() -> int:
         print("CUDA/HIP device unavailable; exiting", file=sys.stderr)
         return 1
     print("device:", torch.cuda.get_device_name(0))
+
+    # PR #9233 reproduction lever (--no-interleave): force the softmax<->MFMA
+    # interleave OFF on the production ("auto") dispatch AND the direct-launch
+    # lane so the D256 gfx950 fast path degrades to the "32x32 base" it is
+    # measured against. Run the harness twice (with and without) and take the
+    # latency ratio to recover the "+N% over 32x32 base" number. Only the
+    # interleave codegen flags are dropped; the gated geometry
+    # (num_warps/tile_size/block_m_per_warp) is unchanged. The patch is restored
+    # in main()'s finally (no global leak).
+    if args.no_interleave:
+        from dataclasses import replace as _replace
+        import kernels.common.attention_unified as _au
+
+        _orig_tiled_spec = _au._tiled_spec_from_problem
+
+        def _tiled_spec_no_interleave(problem):
+            spec = _orig_tiled_spec(problem)
+            if getattr(spec, "use_softmax_mfma_interleave", False):
+                spec = _replace(
+                    spec,
+                    use_softmax_mfma_interleave=False,
+                    softmax_interleave_mode=0,
+                    softmax_interleave_groups=1,
+                )
+            return spec
+
+        _au._tiled_spec_from_problem = _tiled_spec_no_interleave
+        print(
+            "[parity] --no-interleave: softmax<->MFMA interleave DISABLED "
+            "(auto + direct-launch -> 32x32 base)"
+        )
 
     if args.set == "default":
         scenarios = default_scenarios()
@@ -1650,6 +1933,38 @@ def main() -> int:
                             row["ck_auto_status"] = err_ck
                         _row_print("ck-auto", ck_auto, ref_out, None)
                         _isolate_benchmark_lane()
+
+                    if args.torch_flash:
+                        tf, err_tf = _safe_run(
+                            lambda: _run_torch_flash(
+                                s,
+                                data,
+                                warmup=args.warmup,
+                                attempts=args.attempts,
+                            )
+                        )
+                        if tf:
+                            tf_out, tf_ms = tf
+                            row["torch_flash_ms"] = tf_ms
+                            row["torch_flash_backend"] = _LAST_TORCH_FLASH["backend"]
+                            tf_diff = compare(ref_out, tf_out)
+                            row["torch_flash_vs_ref"] = tf_diff["max_abs"]
+                            print(
+                                f"  {'torch-flash':14s}: {tf_ms * 1000:9.2f} us  "
+                                f"max_abs={tf_diff['max_abs']:.5f}  "
+                                f"backend={_LAST_TORCH_FLASH['backend']}"
+                            )
+                            if row.get("ck_auto_ms"):
+                                ratio = tf_ms / row["ck_auto_ms"]
+                                row["ck_auto_vs_torch_flash"] = ratio
+                                print(
+                                    f"  {'ck-auto vs torch-flash':22s}: {ratio:.3f}x "
+                                    f"(ck {'faster' if ratio > 1 else 'slower'})"
+                                )
+                        elif err_tf:
+                            row["torch_flash_status"] = err_tf
+                            print(f"  torch-flash FAILED: {err_tf}")
+                        _isolate_benchmark_lane()
                     continue
 
                 # Force-path: Triton on `path`, CK DSL on `path`.
@@ -1680,6 +1995,9 @@ def main() -> int:
                             path=p,
                             warmup=args.warmup,
                             attempts=args.attempts,
+                            kq_swizzle=args.kq_swizzle,
+                            kq_pad=args.kq_pad,
+                            probe_occupancy=args.probe_occupancy,
                         )
                     )
                     _row_print(f"ck-{path}", ck_p, ref_out, None)

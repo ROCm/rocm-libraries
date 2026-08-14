@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
@@ -86,6 +87,16 @@ NB_MODULE(origami, m) {
       .export_values();
 
   m.def("int_to_reduction_t", &origami::int_to_reduction_t, "Convert int to reduction_t.");
+
+  nanobind::enum_<origami::hybrid_mode_t>(m, "hybrid_mode_t")
+      .value("static_", origami::hybrid_mode_t::static_)
+      .value("dynamic", origami::hybrid_mode_t::dynamic)
+      .value("none", origami::hybrid_mode_t::none)
+      .export_values();
+
+  m.def("hybrid_mode_to_string",
+        &origami::hybrid_mode_to_string,
+        "Convert hybrid_mode_t to string.");
 
   nanobind::enum_<origami::prediction_modes_t>(m, "prediction_modes_t")
       .value("estimation", origami::prediction_modes_t::estimation)
@@ -202,6 +213,7 @@ NB_MODULE(origami, m) {
       .def_rw("splitting_factor", &origami::gemm::context_t::splitting_factor)
       .def_rw("num_wgs", &origami::gemm::context_t::num_wgs)
       .def_rw("num_timesteps", &origami::gemm::context_t::num_timesteps)
+      .def_rw("tile_schedule", &origami::gemm::context_t::tile_schedule)
       .def_rw("active_cus", &origami::gemm::context_t::active_cus)
       .def_rw("mem_bw_limited", &origami::gemm::context_t::mem_bw_limited)
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
@@ -213,6 +225,7 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<>())
       .def_rw("size", &origami::problem_t::size)
       .def_rw("batch", &origami::problem_t::batch)
+      .def_rw("num_cus", &origami::problem_t::num_cus)
       .def_rw("q_heads", &origami::problem_t::q_heads)
       .def_rw("a_transpose", &origami::problem_t::a_transpose)
       .def_rw("b_transpose", &origami::problem_t::b_transpose)
@@ -232,17 +245,33 @@ NB_MODULE(origami, m) {
 
   nanobind::class_<hardware_t>(m, "hardware_t")
       .def(nanobind::init<hardware_t::architecture_t,
-                          size_t,                                 // N_CU
-                          size_t,                                 // lds_capacity
-                          size_t,                                 // rf_capacity
-                          size_t,                                 // NUM_XCD
-                          double,                                 // mem1_perf_ratio
-                          double,                                 // mem2_perf_ratio
-                          double,                                 // mem3_perf_ratio
-                          size_t,                                 // L2_capacity
-                          double,                                 // compute_clock_ghz
-                          size_t,                                 // parallel_mi_cu
-                          std::tuple<double, double, double>>())  // mem_bw_per_wg_coefficients
+                          size_t,                             // N_CU
+                          size_t,                             // lds_capacity
+                          size_t,                             // rf_capacity
+                          size_t,                             // NUM_XCD
+                          double,                             // mem1_perf_ratio
+                          double,                             // mem2_perf_ratio
+                          double,                             // mem3_perf_ratio
+                          size_t,                             // L2_capacity
+                          double,                             // compute_clock_ghz
+                          size_t,                             // parallel_mi_cu
+                          std::tuple<double, double, double>, // mem_bw_per_wg_coefficients
+                          std::optional<int>>(),              // pci_chip_id
+           nanobind::arg("arch"),
+           nanobind::arg("N_CU"),
+           nanobind::arg("lds_capacity"),
+           nanobind::arg("rf_capacity"),
+           nanobind::arg("NUM_XCD"),
+           nanobind::arg("mem1_perf_ratio"),
+           nanobind::arg("mem2_perf_ratio"),
+           nanobind::arg("mem3_perf_ratio"),
+           nanobind::arg("L2_capacity"),
+           nanobind::arg("compute_clock_ghz"),
+           nanobind::arg("parallel_mi_cu"),
+           nanobind::arg("mem_bw_per_wg_coefficients"),
+           nanobind::arg("pci_chip_id") = nanobind::none(),
+           "Construct hardware from architecture and measured ratios. "
+           "pci_chip_id is optional (default None); Origami does not query HIP for it.")
       .def("print", &hardware_t::print)
       .def("get_valid_matrix_instructions",
            &hardware_t::get_valid_matrix_instructions,
@@ -261,22 +290,28 @@ NB_MODULE(origami, m) {
       .def_rw("compute_clock_ghz", &hardware_t::compute_clock_ghz)
       .def_rw("parallel_mi_cu", &hardware_t::parallel_mi_cu)
       .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
-      .def_rw("NUM_XCD", &hardware_t::NUM_XCD);
+      .def_rw("NUM_XCD", &hardware_t::NUM_XCD)
+      .def_rw("pci_chip_id", &hardware_t::pci_chip_id);
 
   m.def("get_hardware_for_device",
         static_cast<hardware_t (*)(int)>(&hardware_t::get_hardware_for_device),
+        nanobind::arg("device_id"),
         "This gets a hardware object for a device.");
 
-  // Needs named arguments
-  m.def("get_hardware_for_arch",
-        &hardware_t::get_hardware_for_arch,
-        nanobind::arg("arch"),
-        nanobind::arg("N_CU"),
-        nanobind::arg("lds_capacity"),
-        nanobind::arg("rf_capacity"),
-        nanobind::arg("L2_capacity"),
-        nanobind::arg("compute_clock_khz"),
-        "Create hardware object for a specific architecture with specified parameters.");
+  // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
+  m.def(
+      "get_hardware_for_arch",
+      &hardware_t::get_hardware_for_arch,
+      nanobind::arg("arch"),
+      nanobind::arg("N_CU"),
+      nanobind::arg("lds_capacity"),
+      nanobind::arg("rf_capacity"),
+      nanobind::arg("L2_capacity"),
+      nanobind::arg("compute_clock_khz"),
+      nanobind::arg("pci_chip_id") = nanobind::none(),
+      "Create hardware object for a specific architecture with specified parameters."
+      "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
+      "(0x75a8 -> id75a8; absent or other values -> id75a0).");
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
   m.def("string_to_datatype",
         &origami::string_to_datatype,
@@ -375,20 +410,13 @@ NB_MODULE(origami, m) {
   m.def("compute_timestep_latency",
         &origami::gemm::compute_timestep_latency,
         "Compute latency per K-complete MT wave");
-  m.def("compute_total_latency", &origami::gemm::compute_total_latency, "Compute total latency");
   m.def("compute_total_latency",
-        static_cast<double (*)(const origami::problem_t&,
-                               const origami::hardware_t&,
-                               const origami::config_t&,
-                               size_t max_cus)>(&origami::gemm::compute_total_latency),
+        &origami::gemm::compute_total_latency,
         "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
 
   // Attention functions
   m.def("att_compute_total_latency",
-        static_cast<double (*)(const origami::problem_t&,
-                               const origami::hardware_t&,
-                               const origami::config_t&,
-                               size_t max_cus)>(&origami::attention::compute_total_latency),
+        &origami::attention::compute_total_latency,
         "Compute total latency for Flash Attention");
   m.def("att_compute_number_matrix_instructions",
         &origami::attention::compute_number_matrix_instructions,

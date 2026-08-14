@@ -44,6 +44,8 @@
 #include <cstddef>
 #include <numeric>
 #include <stdint.h>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -93,7 +95,27 @@ using RocprimDeviceSelectTestsParams
                                           common::custom_huge_type<1024, int>,
                                           int>>;
 
-TYPED_TEST_SUITE(RocprimDeviceSelectTests, RocprimDeviceSelectTestsParams);
+// Default TYPED_TEST_SUITE naming uses the plain index of the type in
+// RocprimDeviceSelectTestsParams, which shifts whenever a param is added or
+// removed. Give the huge-type case a fixed, type-derived name so filters
+// (e.g. test_categories.yaml) that target it stay valid across reordering.
+struct RocprimDeviceSelectTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int index)
+    {
+        if constexpr(std::is_same<typename Params::input_type,
+                                   common::custom_huge_type<1024, int>>::value)
+        {
+            return "CustomHugeType1024Int";
+        }
+        return std::to_string(index);
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceSelectTests,
+                 RocprimDeviceSelectTestsParams,
+                 RocprimDeviceSelectTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceSelectTests, Flagged)
 {

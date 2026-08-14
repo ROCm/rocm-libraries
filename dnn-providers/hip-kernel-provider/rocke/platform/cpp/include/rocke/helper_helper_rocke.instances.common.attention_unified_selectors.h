@@ -79,7 +79,7 @@ typedef struct rocke_unified_attn_problem
     bool use_alibi; /* default false */
     bool use_qq_bias; /* default false */
     bool use_fp8; /* default false */
-    int num_sms; /* default 120 */
+    int num_cus; /* default 120 */
     /* waves_per_eu / compile_backend are not read by the ported selectors. */
     int num_kv_blocks; /* default 0 ("unknown") */
 } rocke_unified_attn_problem_t;
@@ -181,10 +181,27 @@ bool rocke_unified_attn_enable_transposed_subflags(const rocke_unified_attn_prob
  * (T=block_size + nw=2 -> 2 WG/CU). DEFAULT-ON for the gfx950 single-batch
  * d128 no-FP8 combo; HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
 bool rocke_unified_attn_enable_d128_small_tile(const rocke_unified_attn_problem_t* p);
+/* Python: _enable_softmax_mfma_interleave(problem) -- d128 softmax<->MFMA
+ * interleave (iglp_opt(1)) + nw=4. DEFAULT-ON for the gfx950 single-batch d128
+ * no-FP8 combo; HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0 force-disables. */
+bool rocke_unified_attn_enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p);
 /* Python: _enable_v_double_buffer(problem) -- short single-batch combo prefill. */
 bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_t* p);
 /* Python: _enable_early_v_schedule(problem) -- long single-batch combo prefill. */
 bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attn_problem_t* p);
+
+/* Python: _tiled_spec_from_problem(problem) -> rocke_attention_tiled_2d_spec_t.
+ * Assembles the full tiled-2D spec for gfx950 by running every selector and gate
+ * predicate exactly as attention_spec_builder._tiled_spec_from_problem does.
+ * Returns the filled spec; on a non-gfx950 arch or an unresolvable LDS budget the
+ * caller should check rocke_unified_attn_resolve_lds_budget separately.
+ *
+ * The ``arch`` string is passed to rocke_unified_attn_set_resolved_arch before
+ * selection so all gate predicates see the right arch (the caller's set_resolved_arch
+ * state is restored on return). Pass "gfx950" for the primary production path. */
+rocke_attention_tiled_2d_spec_t
+    rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attn_problem_t* p,
+                                               const char* arch);
 
 /* ----------------------------------------------------------- magic div */
 

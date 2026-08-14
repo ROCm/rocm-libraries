@@ -32,9 +32,7 @@ namespace rocalution
 
     /** \ingroup solver_module
   * \class Inversion
-  * \brief Matrix Inversion
-  * \details
-  * Full matrix inversion based on QR decomposition.
+  * \brief Matrix inversion direct solver based on QR decomposition.
   *
   * \tparam OperatorType - can be LocalMatrix
   * \tparam VectorType - can be LocalVector

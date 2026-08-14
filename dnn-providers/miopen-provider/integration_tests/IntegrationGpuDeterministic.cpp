@@ -44,7 +44,7 @@ void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
             if(!tensorAttr->get_is_virtual()
                && bundle.tensors.find(tensorId) == bundle.tensors.end())
             {
-                bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                bundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
             }
         }
         for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
@@ -53,7 +53,7 @@ void populateBundleFromGraph(Graph& graph, GraphTensorBundle& bundle)
             if(!tensorAttr->get_is_virtual()
                && bundle.tensors.find(tensorId) == bundle.tensors.end())
             {
-                bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+                bundle.addTensor(*tensorAttr, createTensorFromAttribute(*tensorAttr));
             }
         }
     });

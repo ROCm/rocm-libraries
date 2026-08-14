@@ -33,9 +33,12 @@ add_executable(
     utilities/TestEngineNames.cpp
     utilities/TestFloats.cpp
     utilities/TestMigratableMemory.cpp
+    utilities/TestPackedFp4Tensor.cpp
     utilities/TestPlatformUtils.cpp
     utilities/TestScopedResource.cpp
+    utilities/TestRaggedTensor.cpp
     utilities/TestShallowHostOnlyMigratableMemory.cpp
+    utilities/TestShallowRaggedTensor.cpp
     utilities/TestShallowTensor.cpp
     utilities/TestShapeUtilities.cpp
     utilities/TestStringUtil.cpp

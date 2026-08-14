@@ -43,6 +43,10 @@ add_executable(
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimError.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimTensor.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimV9Tu.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimGraph.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:TestCudnnShimGraphNodes.cpp>
+    # SDPA node coverage additionally needs the SDPA build.
+    $<$<AND:$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>,$<BOOL:${HIPDNN_ENABLE_SDPA}>>:TestCudnnShimGraphSDPA.cpp>
     TestDescriptorHelpers.cpp
     TestDescriptorUnpackHelpers.cpp
     TestConvolutionWgradNode.cpp
@@ -65,6 +69,12 @@ add_executable(
     TestGraphLayernormBackward.cpp
     TestMatmulAttributes.cpp
     TestMatmulNode.cpp
+    TestMoeGroupedMatmulAttributes.cpp
+    TestMoeGroupedMatmulNode.cpp
+    TestGraphMoeGroupedMatmul.cpp
+    TestMoeGroupedMatmulBwdAttributes.cpp
+    TestMoeGroupedMatmulBwdNode.cpp
+    TestGraphMoeGroupedMatmulBwd.cpp
     TestNode.cpp
     TestOperationUnpacker.cpp
     TestSdpaAttributes.cpp
@@ -75,6 +85,9 @@ add_executable(
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp
     TestReductionNode.cpp
+    TestGraphResampleBwd.cpp
+    TestResampleBwdAttributes.cpp
+    TestResampleBwdNode.cpp
     TestResampleFwdAttributes.cpp
     TestResampleFwdNode.cpp
     TestRMSNormAttributes.cpp
@@ -131,3 +144,9 @@ endif()
 add_hipdnn_test(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}
 )
+# Under ASAN the dlopen interceptor ignores the executable RUNPATH, so
+# the bare-name backend .so is only found via LD_LIBRARY_PATH.
+if(BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    set_property(TEST hipdnn_frontend_dynamic_load_tests APPEND PROPERTY
+        ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:hipdnn_backend>")
+endif()

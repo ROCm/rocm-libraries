@@ -124,6 +124,7 @@ rocke_status_t rocke_wmma_fmha_fwd_kernel_name(const rocke_wmma_fmha_fwd_spec_t*
  *   if op is None or op.family != "wmma": reject
  *   if target.wave_size != op.wave_size: reject
  *   if spec.head_size % 16 != 0: reject
+ *   if num_kv_heads and num_query_heads % num_kv_heads != 0: reject
  *   bytes_lds = BLOCK_M*BLOCK_K*2 (+ BLOCK_M*head_size*2 if v_lds_stage)
  *   if not target.fits_lds(bytes_lds): reject
  *   return True, "ok"
@@ -192,6 +193,21 @@ bool rocke_wmma_fmha_fwd_is_valid_spec(const rocke_wmma_fmha_fwd_spec_t* spec,
     if(spec->head_size % 16 != 0)
     {
         snprintf(buf, sizeof(buf), "head_size must be a multiple of 16 (got %d)", spec->head_size);
+        wmma_set_reason(reason, reason_cap, buf);
+        return false;
+    }
+
+    /* GQA requires an integral number of query heads per KV head. Otherwise
+     * kv_head = head / (num_query_heads / num_kv_heads) can address beyond the
+     * available KV heads. num_kv_heads == 0 denotes MHA. */
+    if(spec->num_kv_heads != 0 && (spec->num_query_heads % spec->num_kv_heads) != 0)
+    {
+        snprintf(buf,
+                 sizeof(buf),
+                 "num_query_heads must be a multiple of num_kv_heads for GQA "
+                 "(got num_query_heads=%d, num_kv_heads=%d)",
+                 spec->num_query_heads,
+                 spec->num_kv_heads);
         wmma_set_reason(reason, reason_cap, buf);
         return false;
     }
