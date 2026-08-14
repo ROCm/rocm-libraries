@@ -6799,6 +6799,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
                                "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # TDMLoadWaveSyncPass (Gfx1250Backend): insert a barrier
+                               # between an urgent and a deferrable tensor_load group.
+                               # Off by default.
+                               "TDMLoadWaveSync": bool(kernel.get("TDMLoadWaveSync", False)),
                                # PrefetchGlobalRead (PGR) for Tensile scheduling. Defaults to 1.
                                "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
                                # PrefetchLocalRead (PLR) for Tensile scheduling. Defaults to 1.

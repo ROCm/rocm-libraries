@@ -1202,12 +1202,9 @@ def supports_tiled_2d(
         # to gfx950's; gfx942 is tile-limited rather than starved, so the only
         # effect is that the largest T/HD combos (which exceed 64 KB) are
         # rejected here with a clean reason instead of a comgr CODEGEN abort.
-        from rocke.core.arch import ArchTarget
+        from ..common.attention_arch import attention_lds_capacity_bytes
 
-        try:
-            _LDS_CAPACITY_BYTES = ArchTarget.from_gfx(arch).lds_capacity_bytes
-        except KeyError:
-            _LDS_CAPACITY_BYTES = 65536
+        _LDS_CAPACITY_BYTES = attention_lds_capacity_bytes(arch)
         _BPE = 2  # fp16/bf16
         _t_eff = tile_size if tile_size is not None else block_size
         _block_m = num_warps * block_m_per_warp
@@ -1782,12 +1779,9 @@ def build_unified_attention_2d_tiled(
     # (unpadded) figure, so disable the swizzle if the pad would push the total
     # estimate past the gfx942 LDS budget (otherwise a borderline config would
     # comgr-abort only when the env flag is set). Mirrors the gate's formula.
-    try:
-        from rocke.core.arch import ArchTarget as _ArchTarget
+    from ..common.attention_arch import attention_lds_capacity_bytes
 
-        _LDS_CAP = _ArchTarget.from_gfx(arch).lds_capacity_bytes
-    except Exception:  # noqa: BLE001
-        _LDS_CAP = 65536
+    _LDS_CAP = attention_lds_capacity_bytes(arch)
     _swz_extra_bytes = (T // max(V_ROWS_PER_CALL, 1)) * V_ROWS_PER_CALL * 8 * 2
     _out_stripe_b = 32 if HD <= 64 else HD
     _lds_natural = (
