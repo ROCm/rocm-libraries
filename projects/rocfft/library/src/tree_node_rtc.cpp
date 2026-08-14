@@ -28,10 +28,9 @@
 
 #include <cstdint>
 
-bool LeafNode::KernelNeeds64BitIndexing() const
+IndexType LeafNode::GetKernelIndexType() const
 {
-    for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
-    {
+    auto needs_64bit_indexing = [this](io_data_label io) {
         const auto& io_stride     = io == io_data_label::INPUT ? inStride : outStride;
         const auto& io_dist       = io == io_data_label::INPUT ? iDist : oDist;
         const auto& io_array_type = io == io_data_label::INPUT ? inArrayType : outArrayType;
@@ -39,18 +38,12 @@ bool LeafNode::KernelNeeds64BitIndexing() const
         const auto  io_length     = io == io_data_label::INPUT ? length : GetOutputLength();
 
         // Hermitian interleaved data may be re-interpreted as real data internally.
-        if((io_offset + compute_ptrdiff(io_length, io_stride, batch, io_dist))
-               * (io_array_type == rocfft_array_type_hermitian_interleaved ? 2 : 1)
-           > static_cast<size_t>(INT32_MAX) + 1)
-        {
-            return true;
-        }
-    }
+        return (io_offset + compute_ptrdiff(io_length, io_stride, batch, io_dist))
+                   * (io_array_type == rocfft_array_type_hermitian_interleaved ? 2 : 1)
+               > static_cast<size_t>(INT32_MAX) + 1;
+    };
 
-    return false;
-}
-
-IndexType LeafNode::GetKernelIndexType() const
-{
-    return KernelNeeds64BitIndexing() ? IndexType::_64BIT : IndexType::_32BIT;
+    return needs_64bit_indexing(io_data_label::INPUT) || needs_64bit_indexing(io_data_label::OUTPUT)
+               ? IndexType::_64BIT
+               : IndexType::_32BIT;
 }

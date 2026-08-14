@@ -1039,10 +1039,9 @@ public:
     bool         CreateDeviceResources() override;
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
-    bool         KernelNeeds64BitIndexing() const;
     // Index type for both this node's kernel and its devKernArg
     // buffer; the two must agree on the width of the stride arrays.
-    IndexType GetKernelIndexType() const;
+    IndexType    GetKernelIndexType() const;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
 };

@@ -61,26 +61,24 @@ bool KernelArgsBuffer::create(const std::vector<size_t>& length,
 
     // NB: iDist is right after the last inStride[dim-1], i.e. inStride[dim] = batch-in-stride
     //     oDist is right after the last outStride[dim-1], i.e. outStride[dim] = batch-out-stride
-    auto pack_strides
-        = [&](size_t array_idx, const std::vector<size_t>& stride, size_t dist) {
-              char* array = host.data() + lengths_bytes() + array_idx * strides_bytes();
+    auto pack_strides = [&](size_t array_idx, const std::vector<size_t>& stride, size_t dist) {
+        char* array = host.data() + lengths_bytes() + array_idx * strides_bytes();
 
-              auto store = [&](size_t i, size_t value) {
-                  if(itype == IndexType::_32BIT)
-                  {
-                      if(value > std::numeric_limits<unsigned int>::max())
-                          throw std::runtime_error(
-                              "stride overflows 32-bit kernel index_type");
-                      reinterpret_cast<unsigned int*>(array)[i] = static_cast<unsigned int>(value);
-                  }
-                  else
-                      reinterpret_cast<unsigned long long*>(array)[i] = value;
-              };
+        auto store = [&](size_t i, size_t value) {
+            if(itype == IndexType::_32BIT)
+            {
+                if(value > std::numeric_limits<unsigned int>::max())
+                    throw std::runtime_error("stride overflows 32-bit kernel index_type");
+                reinterpret_cast<unsigned int*>(array)[i] = static_cast<unsigned int>(value);
+            }
+            else
+                reinterpret_cast<unsigned long long*>(array)[i] = value;
+        };
 
-              for(size_t i = 0; i < stride.size(); ++i)
-                  store(i, stride[i]);
-              store(stride.size(), dist);
-          };
+        for(size_t i = 0; i < stride.size(); ++i)
+            store(i, stride[i]);
+        store(stride.size(), dist);
+    };
 
     pack_strides(0, inStride, iDist);
     pack_strides(1, outStride, oDist);
