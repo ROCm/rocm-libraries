@@ -1,8 +1,6 @@
 # hipDNN Testing Strategy
 
 - **Owner:** `@ROCm/hipdnn-core` (see [CODEOWNERS](../../../.github/CODEOWNERS))
-- **Technical lead:** Not recorded in repository metadata
-- **Last updated:** 2026-08-13
 
 > **In a hurry?** Read [The short version](#the-short-version), then use
 > [Choosing the Right Test Type](#choosing-the-right-test-type) before writing a test or
