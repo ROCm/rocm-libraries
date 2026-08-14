@@ -158,6 +158,8 @@ jobs:
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
+      # TEST: Extend max age to find older baselines with complete artifacts
+      stage_reuse_max_age_hours: "168"
       repository: ROCm/TheRock
       # TEST: using feature branch for in-progress artifact reuse
       ref: users/geomin12/better-dynamic-determination
