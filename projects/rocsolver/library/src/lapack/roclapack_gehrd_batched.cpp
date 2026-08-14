@@ -118,8 +118,12 @@ rocblas_status rocsolver_sgehrd_batched(rocblas_handle handle,
                                         const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_batched_impl<float>(handle, n, ilo, ihi, A, lda, ipiv,
                                                           strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_dgehrd_batched(rocblas_handle handle,
@@ -132,8 +136,12 @@ rocblas_status rocsolver_dgehrd_batched(rocblas_handle handle,
                                         const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_batched_impl<double>(handle, n, ilo, ihi, A, lda, ipiv,
                                                            strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_cgehrd_batched(rocblas_handle handle,
@@ -146,8 +154,12 @@ rocblas_status rocsolver_cgehrd_batched(rocblas_handle handle,
                                         const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_batched_impl<rocblas_float_complex>(
         handle, n, ilo, ihi, A, lda, ipiv, strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
@@ -160,8 +172,12 @@ rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
                                         const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_batched_impl<rocblas_double_complex>(
         handle, n, ilo, ihi, A, lda, ipiv, strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C

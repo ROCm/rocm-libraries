@@ -110,7 +110,11 @@ rocblas_status rocsolver_sgehd2(rocblas_handle handle,
                                 const rocblas_int lda,
                                 float* ipiv)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehd2_impl<float>(handle, n, ilo, ihi, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_dgehd2(rocblas_handle handle,
@@ -121,7 +125,11 @@ rocblas_status rocsolver_dgehd2(rocblas_handle handle,
                                 const rocblas_int lda,
                                 double* ipiv)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehd2_impl<double>(handle, n, ilo, ihi, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_cgehd2(rocblas_handle handle,
@@ -132,7 +140,11 @@ rocblas_status rocsolver_cgehd2(rocblas_handle handle,
                                 const rocblas_int lda,
                                 rocblas_float_complex* ipiv)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehd2_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_zgehd2(rocblas_handle handle,
@@ -143,7 +155,11 @@ rocblas_status rocsolver_zgehd2(rocblas_handle handle,
                                 const rocblas_int lda,
                                 rocblas_double_complex* ipiv)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehd2_impl<rocblas_double_complex>(handle, n, ilo, ihi, A, lda, ipiv);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C

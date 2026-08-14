@@ -66,6 +66,7 @@ option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like impleme
 # Feature flags
 option(ROCSOLVER_ENABLE_CHOLQR "Enable CholQR method" ON)
 option(ROCSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
+option(ROCSOLVER_ENABLE_HESSENBERG "Enable Hessenberg reduction routines (gehrd/gehd2/lahr2)" ON)
 
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

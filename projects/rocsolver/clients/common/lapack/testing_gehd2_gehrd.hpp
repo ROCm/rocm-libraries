@@ -95,6 +95,7 @@ void testing_gehd2_gehrd_bad_arg()
     rocblas_stride stP = 1;
     rocblas_int bc = 1;
 
+#ifdef ROCSOLVER_ENABLE_HESSENBERG
     if(BATCHED)
     {
         // memory allocations
@@ -119,6 +120,7 @@ void testing_gehd2_gehrd_bad_arg()
         gehd2_gehrd_checkBadArgs<STRIDED, GEHRD>(handle, n, ilo, ihi, dA.data(), lda, stA,
                                                  dIpiv.data(), stP, bc);
     }
+#endif
 }
 
 template <bool CPU, bool GPU, typename T, typename Td, typename Ud, typename Th, typename Uh>
@@ -323,6 +325,26 @@ void testing_gehd2_gehrd(Arguments& argus)
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
     size_t size_PRes = (argus.unit_check || argus.norm_check) ? size_P : 0;
+
+// check feature flag
+#ifndef ROCSOLVER_ENABLE_HESSENBERG
+    {
+        if(BATCHED)
+            EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                        (T* const*)nullptr, lda, stA, (T*)nullptr,
+                                                        stP, bc),
+                                  rocblas_status_not_implemented);
+        else
+            EXPECT_ROCBLAS_STATUS(rocsolver_gehd2_gehrd(STRIDED, GEHRD, handle, n, ilo, ihi,
+                                                        (T*)nullptr, lda, stA, (T*)nullptr, stP, bc),
+                                  rocblas_status_not_implemented);
+
+        if(argus.timing)
+            rocsolver_bench_inform(inform_not_implemented);
+
+        return;
+    }
+#endif
 
     // check invalid sizes
     bool invalid_size = (n < 0 || lda < n || bc < 0 || n && (ilo < 1 || ihi < ilo || ihi > n));

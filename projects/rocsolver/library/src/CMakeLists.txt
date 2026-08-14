@@ -532,6 +532,9 @@ endif()
 if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
   target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
 endif()
+if(ROCSOLVER_ENABLE_HESSENBERG)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_HESSENBERG)
+endif()
 
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16

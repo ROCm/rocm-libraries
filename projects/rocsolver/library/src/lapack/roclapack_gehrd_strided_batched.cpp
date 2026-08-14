@@ -117,8 +117,12 @@ rocblas_status rocsolver_sgehrd_strided_batched(rocblas_handle handle,
                                                 const rocblas_stride strideP,
                                                 const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_strided_batched_impl<float>(
         handle, n, ilo, ihi, A, lda, strideA, ipiv, strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_dgehrd_strided_batched(rocblas_handle handle,
@@ -132,8 +136,12 @@ rocblas_status rocsolver_dgehrd_strided_batched(rocblas_handle handle,
                                                 const rocblas_stride strideP,
                                                 const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_strided_batched_impl<double>(
         handle, n, ilo, ihi, A, lda, strideA, ipiv, strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_cgehrd_strided_batched(rocblas_handle handle,
@@ -147,8 +155,12 @@ rocblas_status rocsolver_cgehrd_strided_batched(rocblas_handle handle,
                                                 const rocblas_stride strideP,
                                                 const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_strided_batched_impl<rocblas_float_complex>(
         handle, n, ilo, ihi, A, lda, strideA, ipiv, strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle handle,
@@ -162,8 +174,12 @@ rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle handle,
                                                 const rocblas_stride strideP,
                                                 const rocblas_int batch_count)
 {
+#if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehrd_strided_batched_impl<rocblas_double_complex>(
         handle, n, ilo, ihi, A, lda, strideA, ipiv, strideP, batch_count);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C
