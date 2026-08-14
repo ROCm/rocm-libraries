@@ -64,7 +64,17 @@ add_executable(rocsparse-unit-test
   ${ROCSPARSE_UNIT_TEST_LIB_SOURCES}
 )
 
-target_compile_definitions(rocsparse-unit-test PRIVATE GOOGLE_TEST)
+# This target compiles a few library .cpp translation units directly
+# (ROCSPARSE_UNIT_TEST_LIB_SOURCES). Those files decorate public entry points
+# with ROCSPARSE_EXPORT, which the generated rocsparse-export.h expands to a
+# dllexport/dllimport (Windows) or default-visibility (Linux) attribute. Applying
+# an export/import attribute to a *definition* compiled into this executable is
+# ill-formed on Windows ("dllimport cannot be applied to non-inline function
+# definition"). Defining ROCSPARSE_STATIC_DEFINE makes rocsparse-export.h expand
+# ROCSPARSE_EXPORT (and *_NO_EXPORT) to nothing on every platform, which is
+# correct here: these TUs are compiled *into* the test binary, not consumed from
+# the shared library. Test-only; no library change.
+target_compile_definitions(rocsparse-unit-test PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE)
 target_compile_options(rocsparse-unit-test PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
@@ -115,6 +125,20 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_sort.cpp
+  unit_test_internal_collectives.cpp
+  unit_test_internal_infostructs.cpp
+  unit_test_internal_hostblocks.cpp
+)
+
+# Host building-block library translation units under test by
+# unit_test_internal_hostblocks.cpp. Compiled into the device (GPU) test binary
+# because their include chain (rocsparse_control.hpp -> rocsparse_common.hpp)
+# requires the HIP compile mode; the routines themselves are host-pure logic.
+# This is build wiring only -- NO library source changes. Subsequent leaves
+# append here (append-only) so the stacked branches do not conflict.
+set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3/rocsparse_csrmm_default_alg.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_determine_indextype.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
@@ -129,9 +153,16 @@ set(ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES
 add_executable(rocsparse-unit-test-device
   ${ROCSPARSE_UNIT_TEST_DEVICE_SOURCES}
   ${ROCSPARSE_UNIT_TEST_PRIMITIVE_SOURCES}
+  ${ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES}
 )
 
-target_compile_definitions(rocsparse-unit-test-device PRIVATE GOOGLE_TEST)
+# See the note on rocsparse-unit-test above: ROCSPARSE_STATIC_DEFINE makes the
+# compiled-in library TUs' ROCSPARSE_EXPORT expand to nothing, avoiding the
+# Windows "dllimport cannot be applied to non-inline function definition" error
+# (e.g. from library/src/auxiliary/rocsparse_auxiliary.cpp compiled in at the
+# infostructs leaf and beyond). Correct on Linux too (these are definitions
+# built into the executable, not symbols imported from the shared library).
+target_compile_definitions(rocsparse-unit-test-device PRIVATE GOOGLE_TEST ROCSPARSE_STATIC_DEFINE)
 target_compile_options(rocsparse-unit-test-device PRIVATE
   -Wno-deprecated
   -Wno-unused-command-line-argument
@@ -142,6 +173,7 @@ target_compile_options(rocsparse-unit-test-device PRIVATE
 target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
 )
 
 # hip::device provides the HIP device-compilation flags (-x hip, --offload-arch).
