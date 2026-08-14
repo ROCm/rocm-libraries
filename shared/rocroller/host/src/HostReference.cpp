@@ -205,7 +205,7 @@ namespace rocRoller::HostNumerics
         referenceGemm(request,
                       {
                           .backend                 = GemmBackend::Blas,
-                          .requireRequestedBackend = true,
+                          .requireRequestedBackend = false,
                       },
                       &backend);
         return output;

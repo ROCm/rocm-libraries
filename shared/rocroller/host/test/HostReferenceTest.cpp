@@ -68,6 +68,62 @@ namespace
                 "Unscaled rocroller-gemm host reference mismatch.");
     }
 
+    void testZeroExtentReference()
+    {
+        const std::array<float, 0> empty{};
+
+        {
+            const std::array<float, 6> b{1, 2, 3, 4, 5, 6};
+            GeneratedGEMMInputs        inputs{
+                nativeTensor(ScalarType::Float32, Layout(Shape{0, 2}, {1, 0}), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 3}, {1, 2}), b),
+                nativeTensor(ScalarType::Float32, Layout(Shape{0, 3}, {1, 0}), empty),
+                std::nullopt,
+                std::nullopt,
+            };
+
+            const Tensor reference = computeHostReference(
+                makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f));
+            require(reference.shape() == Shape{0, 3}
+                        && convertHostReference<float>(reference.view()).empty(),
+                    "M-zero rocroller-gemm host reference mismatch.");
+        }
+
+        {
+            const std::array<float, 6> a{1, 2, 3, 4, 5, 6};
+            GeneratedGEMMInputs        inputs{
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 3}, {1, 2}), a),
+                nativeTensor(ScalarType::Float32, Layout(Shape{3, 0}, {1, 3}), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 0}, {1, 2}), empty),
+                std::nullopt,
+                std::nullopt,
+            };
+
+            const Tensor reference = computeHostReference(
+                makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 1.0f, 0.0f));
+            require(reference.shape() == Shape{2, 0}
+                        && convertHostReference<float>(reference.view()).empty(),
+                    "N-zero rocroller-gemm host reference mismatch.");
+        }
+
+        {
+            const std::array<float, 4> c{1, 2, 3, 4};
+            GeneratedGEMMInputs        inputs{
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 0}, {1, 2}), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{0, 2}, {1, 0}), empty),
+                nativeTensor(ScalarType::Float32, Layout(Shape{2, 2}, {1, 2}), c),
+                std::nullopt,
+                std::nullopt,
+            };
+
+            const Tensor reference = computeHostReference(
+                makeHostReferenceProblem(inputs, std::nullopt, std::nullopt, 0, 7.0f, -2.0f));
+            require(convertHostReference<float>(reference.view())
+                        == std::vector<float>({-2, -4, -6, -8}),
+                    "K-zero rocroller-gemm host reference did not apply beta to C.");
+        }
+    }
+
     void testScaledReference()
     {
         const std::array<float, 4> a{1, 1, 1, 1};
@@ -209,6 +265,7 @@ namespace
 int main()
 {
     testUnscaledReference();
+    testZeroExtentReference();
     testScaledReference();
     testGeneratedLogicalKScales();
     testOutputConversion();
