@@ -251,9 +251,14 @@ resolved marker path rather than assume a fixed package name.
 2. The Python SDK package adapter treats `rocm_sdk_core.__version__` as the
    exact full identity. It resolves compiler, assembler, bundler, and
    device-enumerator commands through the active interpreter's
-   `rocm-sdk-core` console-script trampolines. It does not call
-   `get_core_root()`, inspect a package payload directory, or consult
-   `ROCM_PATH`.
+   `rocm-sdk-core` console-script trampolines, first in the normal scripts
+   directory and then in the platform's Python user-install scripts directory.
+   It does not call `get_core_root()`, inspect a package payload directory, or
+   consult `ROCM_PATH`. It also does not fall back to an ambient `PATH`
+   executable or borrow an individual tool from a conventional prefix when a
+   trampoline is absent: executable `PATH` lookup cannot repair the selected
+   wheel tool's native dependency closure, and mixing independently selected
+   ROCm tools has no compatibility guarantee.
 3. When client capability is requested in the Python SDK package adapter, the
    intermediary implementation returns an explicit unavailable-client error:
    `rocm-sdk-libraries` does not yet ship the client. The final state uses that

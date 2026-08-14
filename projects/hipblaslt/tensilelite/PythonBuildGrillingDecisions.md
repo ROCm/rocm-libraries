@@ -2294,6 +2294,19 @@ device-enumerator commands are resolved through the active Python
 environment's `rocm-sdk-core` console-script trampolines; TensileLite does not
 need `rocm_sdk_core.get_core_root()` or a physical SDK root for this model.
 
+The Python SDK adapter selects only explicit Python console-script locations:
+the active interpreter's scripts directory, followed by that platform's Python
+user-install scripts directory when the package is installed with `--user`.
+Those are ordered locations within the same Python installation model, not an
+ambient `PATH` fallback. TensileLite must not select an individual executable
+from a conventional ROCm prefix when a Python SDK script is absent. `PATH`
+selects an executable; it does not resolve that executable's native
+dependencies. The selected Python tool instead executes its package payload
+with that payload's own loader closure. Borrowing one missing tool from another
+ROCm installation would therefore create a mixed toolchain, not repair the
+Python SDK installation. A missing expected trampoline remains an error for
+TheRock to fix in its wheel publication.
+
 If a client-capable workflow requests `tensilelite-client`, the interim Python
 SDK package implementation fails clearly because `rocm-sdk-libraries` does not
 yet ship the client. The final state uses that package's console-script
@@ -2367,8 +2380,8 @@ runtime models:
 | Concern | Python SDK packages | Conventional prefix |
 | --- | --- | --- |
 | ROCm identity | `rocm_sdk_core.__version__` (exact full publication identity) | `<root>/.info/version` (base `A.B.C` only) |
-| Toolchain | active interpreter's `rocm-sdk-core` console-script trampolines | `<root>/bin` and `<root>/lib/llvm/bin` |
-| Client | Interim: clear unavailable-client error. Final: active interpreter's `rocm-sdk-libraries` `tensilelite-client` trampoline | `<root>/libexec/hipblaslt/tensilelite/tensilelite-client[.exe]` |
+| Toolchain | active interpreter scripts, then the platform's Python user scripts, for `rocm-sdk-core` console-script trampolines | `<root>/bin` and `<root>/lib/llvm/bin` |
+| Client | Interim: clear unavailable-client error. Final: the same ordered Python script locations for `rocm-sdk-libraries` `tensilelite-client` | `<root>/libexec/hipblaslt/tensilelite/tensilelite-client[.exe]` |
 | Root discovery | none; package trampolines own package payload resolution | explicit `ROCM_PATH`, `/opt/rocm`, or a ROCm tool discovered on PATH |
 
 For ROCm identity, compiler/toolchain, and client resolution, an active Python
@@ -2378,6 +2391,14 @@ Python SDK package payloads. The prefix adapter's base-only identity comparison
 deliberately cannot distinguish nightly, RC, or CI publications sharing the
 same `A.B.C` line. This does not redefine optional benchmark conveniences such
 as the separate `amd-smi` clock-pinning probe.
+
+This no-path-borrowing rule applies to individual tools as well as root
+discovery. If the Python SDK lacks a required console script in either of its
+explicit script locations, TensileLite fails instead of resolving that one name
+through `PATH` or a conventional prefix. The Python toolchain's native
+libraries are resolved by the selected executable's own loader configuration,
+not by executable `PATH`; mixing a wheel compiler with a prefix bundler is a
+different toolchain model and has no compatibility guarantee.
 
 ## Confirmed TheRock build/test facts
 
