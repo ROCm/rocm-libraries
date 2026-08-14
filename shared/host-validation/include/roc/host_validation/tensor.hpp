@@ -1036,11 +1036,15 @@ class Scalar {
     static constexpr size_t maximumStorageBytes = 16;
 
     template <typename Source>
+        requires(!std::is_same_v<std::remove_cvref_t<Source>, Scalar> &&
+                 requires { nativeScalarType<std::remove_cvref_t<Source>>; })
+    Scalar(Source value) : m_type(nativeScalarType<std::remove_cvref_t<Source>>) {
+        detail::encodeScalar(m_type, m_storage, 0, std::move(value));
+    }
+
+    template <typename Source>
     static Scalar from(Source value) {
-        using Value = std::remove_cvref_t<Source>;
-        Scalar result(nativeScalarType<Value>);
-        detail::encodeScalar(result.m_type, result.m_storage, 0, std::move(value));
-        return result;
+        return Scalar(std::move(value));
     }
 
     static Scalar fromStorage(ScalarType type, std::span<const std::byte> storage) {

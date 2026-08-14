@@ -108,7 +108,8 @@ void validateCommon(const GemmRequest& problem) {
         throw std::invalid_argument("BLAS backend supports only default operand math.");
     if (problem.epilogue.bias || problem.epilogue.scaleAlpha || problem.epilogue.scaleA ||
         problem.epilogue.scaleB || problem.epilogue.activation != Activation::None ||
-        problem.epilogue.outputScale != std::complex<double>(1.0, 0.0) ||
+        detail::runtimeScalar<std::complex<double>>(problem.epilogue.outputScale, "output scale") !=
+            std::complex<double>(1.0, 0.0) ||
         problem.epilogue.outputConversion != OutputConversion::Default)
         throw std::invalid_argument("BLAS backend does not support a fused epilogue.");
     if (!problem.outputSelection.selectsAll())
@@ -142,8 +143,8 @@ GemmRunInfo runReal(const GemmRequest& problem) {
     const int n = static_cast<int>(problem.b.values.shape()[1]);
     const int k = static_cast<int>(problem.a.values.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
-    const T alpha = static_cast<T>(problem.epilogue.alpha.real());
-    const T beta = static_cast<T>(problem.epilogue.beta.real());
+    const T alpha = detail::runtimeScalar<T>(problem.epilogue.alpha, "alpha");
+    const T beta = detail::runtimeScalar<T>(problem.epilogue.beta, "beta");
     const T* a = typedData<T>(problem.a.values, "A");
     const T* b = typedData<T>(problem.b.values, "B");
     T* d = typedMutableData<T>(problem.d, "D");
@@ -170,10 +171,8 @@ GemmRunInfo runComplex(const GemmRequest& problem) {
     const int n = static_cast<int>(problem.b.values.shape()[1]);
     const int k = static_cast<int>(problem.a.values.shape()[1]);
     const int ldc = static_cast<int>(problem.d.layout().strides()[1]);
-    const T alpha(static_cast<typename T::value_type>(problem.epilogue.alpha.real()),
-                  static_cast<typename T::value_type>(problem.epilogue.alpha.imag()));
-    const T beta(static_cast<typename T::value_type>(problem.epilogue.beta.real()),
-                 static_cast<typename T::value_type>(problem.epilogue.beta.imag()));
+    const T alpha = detail::runtimeScalar<T>(problem.epilogue.alpha, "alpha");
+    const T beta = detail::runtimeScalar<T>(problem.epilogue.beta, "beta");
     const T* a = typedData<T>(problem.a.values, "A");
     const T* b = typedData<T>(problem.b.values, "B");
     T* d = typedMutableData<T>(problem.d, "D");
