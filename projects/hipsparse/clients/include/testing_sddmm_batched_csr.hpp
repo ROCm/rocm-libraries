@@ -191,7 +191,6 @@ void testing_sddmm_batched_csr(Arguments argus)
     hipsparseSDDMMAlg_t  alg      = argus.sddmm_alg;
     std::string          filename = argus.filename;
 
-    // Currently only the C_i = A_i * B_i batch mode is supported.
     J batch_count_A = 3;
     J batch_count_B = 3;
     J batch_count_C = 3;

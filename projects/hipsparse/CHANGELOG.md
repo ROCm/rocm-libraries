@@ -8,7 +8,7 @@ Documentation for hipSPARSE is available at
 
 ### Added
 * Added the generic API routines `hipsparseSpGEAM_createDescr`, `hipsparseSpGEAM_destroyDescr`, `hipsparseSpGEAM_bufferSize`, `hipsparseSpGEAM_nnz`, and `hipsparseSpGEAM` for sparse matrix-matrix addition (`C = alpha * op(A) + beta * op(B)`), along with the `hipsparseSpGEAMDescr_t` type and the `hipsparseSpGEAMAlg_t` algorithm enum, to match the cuSPARSE 13.3 generic `SpGEAM` API.
-* Added batched support to `hipsparseSDDMM` for CSR, CSC, COO, COO AoS, and ELL formats.
+* Added batched support to `hipsparseSDDMM` for CSR format.
 
 ## hipSPARSE 4.7.0 for ROCm 10.0
 
