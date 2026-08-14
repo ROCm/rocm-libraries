@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -25,8 +25,33 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
+# Enable Fortran only if a compiler is actually available. A system without a
+# Fortran compiler can still build the clients by falling back to the C-only
+# OpenBLAS build below, so this must not be a hard requirement. There are no
+# Fortran sources in the clients, so this is only for optional Fortran samples.
+#
+# Note: CMAKE_Fortran_COMPILER may be pre-set to a bare name (e.g. "gfortran")
+# by the toolchain or environment even when no such compiler exists, so we must
+# confirm it resolves to a real executable rather than just being non-empty.
 if(UNIX)
-  enable_language(Fortran)
+  include(CheckLanguage)
+  check_language(Fortran)
+  set(_fortran_ok FALSE)
+  if(CMAKE_Fortran_COMPILER)
+    if(EXISTS "${CMAKE_Fortran_COMPILER}")
+      set(_fortran_ok TRUE)
+    else()
+      find_program(_fortran_prog NAMES "${CMAKE_Fortran_COMPILER}")
+      if(_fortran_prog)
+        set(_fortran_ok TRUE)
+      endif()
+    endif()
+  endif()
+  if(_fortran_ok)
+    enable_language(Fortran)
+  else()
+    message(STATUS "No Fortran compiler found -- skipping Fortran language support")
+  endif()
 endif()
 
 # Specify where to put the client binaries
@@ -40,18 +65,46 @@ if(NOT TARGET rocsolver)
   message(STATUS "Found rocSOLVER: ${location}")
 endif()
 
+# GTest is needed by the gtest and extras client subdirectories. Try to find it
+# on the system first; if unavailable, fetch and build it once here via
+# FetchContent so both subdirectories share a single target. The system is
+# never modified.
+if(BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_EXTRA_TESTS)
+  find_package(GTest QUIET)
+  if(NOT GTest_FOUND)
+    message(STATUS "GTest not found on system -- fetching with FetchContent")
+    include(FetchContent)
+    FetchContent_Declare(googletest
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG        v1.14.0
+    )
+    # Prevent googletest from overriding the parent project's compiler/linker
+    # options on Windows; harmless elsewhere.
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+  endif()
+endif()
+
 if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
+  # Try to find LAPACK on the system first. If unavailable, build a static,
+  # C-only OpenBLAS at build time (no Fortran required). The system is never
+  # modified.
   if(ROCSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
-    find_package(LAPACK 3.7 REQUIRED CONFIG)
+    find_package(LAPACK 3.7 CONFIG)
   else()
-    find_package(LAPACK 3.7 REQUIRED)
+    find_package(LAPACK 3.7)
   endif()
 
-  if(NOT LAPACK_LIBRARIES)
-    set(LAPACK_LIBRARIES
-      ${LAPACK_blas_LIBRARIES}
-      ${LAPACK_lapack_LIBRARIES}
-    )
+  if(LAPACK_FOUND)
+    if(NOT LAPACK_LIBRARIES)
+      set(LAPACK_LIBRARIES
+        ${LAPACK_blas_LIBRARIES}
+        ${LAPACK_lapack_LIBRARIES}
+      )
+    endif()
+  else()
+    message(STATUS "LAPACK not found on system -- building OpenBLAS with ExternalProject")
+    include(build-openblas) # sets LAPACK_LIBRARIES to the imported openblas_lapack target
   endif()
 
   add_library(clients-common INTERFACE)

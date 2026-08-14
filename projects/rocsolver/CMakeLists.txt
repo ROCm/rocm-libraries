@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -25,7 +25,7 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.14)
 
 # This has to be initialized before the project() command appears
 # Set the default build type to Release
@@ -68,7 +68,19 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-find_package(fmt REQUIRED)
+
+# Try to find libfmt on the system; if unavailable, fetch and build it at
+# configure time via FetchContent. The system is never modified.
+find_package(fmt QUIET)
+if(NOT fmt_FOUND)
+  message(STATUS "libfmt not found on system -- fetching with FetchContent")
+  include(FetchContent)
+  FetchContent_Declare(fmt
+    GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+    GIT_TAG        10.2.1
+  )
+  FetchContent_MakeAvailable(fmt)
+endif()
 
 # ########################################################################
 # Main

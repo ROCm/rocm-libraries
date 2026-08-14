@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -25,7 +25,8 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
-find_package(GTest REQUIRED)
+# GTest (GTest::gtest or GTest::GTest) is provided by the parent
+# clients/CMakeLists.txt, either found on the system or fetched via FetchContent.
 
 set(roclapack_test_source
   # linear systems solvers
