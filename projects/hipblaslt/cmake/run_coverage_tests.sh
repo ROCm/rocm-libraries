@@ -8,6 +8,20 @@ COVERAGE_DIR="$2"
 # Use GTEST_FILTER from environment, or default to "*" (all tests)
 FILTER="${GTEST_FILTER:-*}"
 
+# Math CI narrows coverage to the pre_checkin data-driven cases. Keep the
+# host-validation adapter tests in that coverage run without disturbing an
+# unrestricted filter or its existing negative exclusions.
+POSITIVE_FILTER="${FILTER%%-*}"
+if [[ -n "${POSITIVE_FILTER}" &&
+      "${POSITIVE_FILTER}" != "*" &&
+      "${POSITIVE_FILTER}" != *"*HostValidation*"* ]]; then
+    if [[ "${FILTER}" == *-* ]]; then
+        FILTER="${POSITIVE_FILTER}:*HostValidation*-${FILTER#*-}"
+    else
+        FILTER="${FILTER}:*HostValidation*"
+    fi
+fi
+
 echo "Running coverage with GTEST_FILTER: $FILTER"
 
 # Run the test with profiling
