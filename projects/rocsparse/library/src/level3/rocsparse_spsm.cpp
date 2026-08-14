@@ -1198,13 +1198,14 @@ try
     ROCSPARSE_CHECKARG_POINTER(4, matA);
     ROCSPARSE_CHECKARG(4, matA, matA->init == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, matA, matA->batch_count != 1, rocsparse_status_not_implemented);
-    // The diagonal fill mode is only supported by the CSR format. A unit
+    // The diagonal fill mode is supported by the CSR and CSC formats. A unit
     // diagonal is treated as a_ii = 1, reducing the solve to the identity
     // scaling x_i = alpha * b_i.
     ROCSPARSE_CHECKARG(4,
                        matA,
                        (matA->descr->fill_mode == rocsparse_fill_mode_diagonal
-                        && matA->format != rocsparse_format_csr),
+                        && matA->format != rocsparse_format_csr
+                        && matA->format != rocsparse_format_csc),
                        rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG_POINTER(5, matB);
     ROCSPARSE_CHECKARG(5, matB, matB->init == false, rocsparse_status_not_initialized);

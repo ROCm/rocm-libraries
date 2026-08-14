@@ -10,6 +10,7 @@ Documentation for rocSPARSE is available at
 * Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
 * Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split` and `rocsparse_spmm_alg_csr_merge_path`.
 * Added `rocsparse_sddmm` batched support to CSR, CSC, COO, COO AoS, and ELL formats.
+* Added the enum value `rocsparse_fill_mode_diagonal`, which makes `rocsparse_sptrsv` and `rocsparse_sptrsm` solve with the diagonal of the matrix for the CSR and CSC formats. This is intended for the diagonal step of an incomplete LDL^H solve.
 
 ### Optimized
 * Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
