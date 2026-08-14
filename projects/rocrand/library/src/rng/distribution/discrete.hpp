@@ -64,7 +64,8 @@ public:
     {}
 
     template<class T>
-    __forceinline__ __host__ __device__ unsigned int operator()(T x) const
+    __forceinline__ __host__ __device__
+    unsigned int operator()(T x) const
     {
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
         {
@@ -84,7 +85,8 @@ public:
     }
 
     template<class T>
-    __forceinline__ __device__ unsigned int generate_lds(T x) const
+    __forceinline__ __device__
+    unsigned int generate_lds(T x) const
     {
         if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
         {
@@ -103,33 +105,7 @@ public:
         output[0] = generate_lds(input[0]);
     }
 
-    __device__
-    static rocrand_discrete_distribution_st* get_storage()
-    {
-        __shared__ rocrand_discrete_distribution_st s_dist;
-
-        if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
-        {
-            __shared__ double s_cdf[LDS_DISTR_MAX];
-
-            // Stash the array pointers into s_dist once, harmless if repeated.
-            s_dist.cdf = s_cdf;
-        }
-        if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
-        {
-            __shared__ double s_probability[LDS_DISTR_MAX];
-            __shared__ unsigned int s_alias[LDS_DISTR_MAX];
-
-            // Stash the array pointers into s_dist once, harmless if repeated.
-            s_dist.probability = s_probability;
-            s_dist.alias       = s_alias;
-        }
-
-        return &s_dist;
-    }
-
-    __forceinline__
-    __host__ __device__
+    __forceinline__ __host__ __device__
     bool check_lds_size()
     {
         return m_distribution.size <= LDS_DISTR_MAX;
@@ -173,6 +149,35 @@ public:
     }
 
 private:
+    __device__
+    static rocrand_discrete_distribution_st* get_storage()
+    {
+        __shared__
+        rocrand_discrete_distribution_st s_dist;
+
+        if constexpr((Method & DISCRETE_METHOD_CDF) != 0)
+        {
+            __shared__
+            double s_cdf[LDS_DISTR_MAX];
+
+            // Stash the array pointers into s_dist once, harmless if repeated.
+            s_dist.cdf = s_cdf;
+        }
+        if constexpr((Method & DISCRETE_METHOD_ALIAS) != 0)
+        {
+            __shared__
+            double       s_probability[LDS_DISTR_MAX];
+            __shared__
+            unsigned int s_alias[LDS_DISTR_MAX];
+
+            // Stash the array pointers into s_dist once, harmless if repeated.
+            s_dist.probability = s_probability;
+            s_dist.alias       = s_alias;
+        }
+
+        return &s_dist;
+    }
+
     static constexpr unsigned int    LDS_DISTR_MAX = 128;
     rocrand_discrete_distribution_st m_distribution;
 };
@@ -327,15 +332,15 @@ public:
         small.reserve(size);
         large.reserve(size);
 
-        for (unsigned int i = 0; i < size; i++)
+        for(unsigned int i = 0; i < size; i++)
         {
-            if (p[i] >= average)
+            if(p[i] >= average)
                 large.push_back(i);
             else
                 small.push_back(i);
         }
 
-        while (!small.empty() && !large.empty())
+        while(!small.empty() && !large.empty())
         {
             const unsigned int less = small.back();
             small.pop_back();
@@ -343,21 +348,21 @@ public:
             large.pop_back();
 
             h_probability[less] = p[less] * size;
-            h_alias[less] = more;
+            h_alias[less]       = more;
 
             p[more] = (p[more] + p[less]) - average;
 
-            if (p[more] >= average)
+            if(p[more] >= average)
                 large.push_back(more);
             else
                 small.push_back(more);
         }
 
-        for (unsigned int i : small)
+        for(unsigned int i : small)
         {
             h_probability[i] = 1.0;
         }
-        for (unsigned int i : large)
+        for(unsigned int i : large)
         {
             h_probability[i] = 1.0;
         }
@@ -484,7 +489,7 @@ private:
                               h_cdf.data(),
                               sizeof(double) * distribution.size,
                               hipMemcpyHostToDevice);
-            if (error != hipSuccess)
+            if(error != hipSuccess)
             {
                 return ROCRAND_STATUS_INTERNAL_ERROR;
             }
