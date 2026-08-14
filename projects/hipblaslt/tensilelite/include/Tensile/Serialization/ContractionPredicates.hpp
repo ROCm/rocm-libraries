@@ -109,6 +109,19 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::FreeSizeMatching>(),
                      Base::template Pair<Predicates::Contraction::PredictionMatching>(),
                      Base::template Pair<Predicates::Contraction::GridBasedMatching>(),
+                     Base::template Pair<Predicates::Contraction::UsePartialRMSEqual>(),
+                     Base::template Pair<Predicates::Contraction::DQuantTypeEqual>(),
+                     Base::template Pair<Predicates::Contraction::DQuantSize0Equal>(),
+                     Base::template Pair<Predicates::Contraction::DQuantSize1Equal>(),
+                     Base::template Pair<Predicates::Contraction::UseDeepseekScaleAEqual>(),
+                     Base::template Pair<Predicates::Contraction::UseDeepseekScaleBEqual>(),
+                     Base::template Pair<Predicates::Contraction::DeepseekScaleAq0Equal>(),
+                     Base::template Pair<Predicates::Contraction::DeepseekScaleAq1Equal>(),
+                     Base::template Pair<Predicates::Contraction::DeepseekScaleBq0Equal>(),
+                     Base::template Pair<Predicates::Contraction::DeepseekScaleBq1Equal>(),
+                     Base::template Pair<Predicates::Contraction::UsePartialRMSResidualAddEqual>(),
+                     Base::template Pair<Predicates::Contraction::UsePartialRMSQuantEqual>(),
+                     Base::template Pair<Predicates::Contraction::UsePartialRMSStoreBf16DEqual>(),
                      Base::template Pair<Predicates::Contraction::UseGradientEqual>(),
                      Base::template Pair<Predicates::Contraction::ActivationCheck>(),
                      Base::template Pair<Predicates::Contraction::ActivationComputeTypeEqual>(),
@@ -445,6 +458,84 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::UseGradientEqual, IO>
             : public AutoMappingTraits<Predicates::Contraction::UseGradientEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UsePartialRMSEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DQuantTypeEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DQuantTypeEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DQuantSize0Equal, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DQuantSize0Equal, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DQuantSize1Equal, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DQuantSize1Equal, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UseDeepseekScaleAEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseDeepseekScaleAEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UseDeepseekScaleBEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseDeepseekScaleBEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DeepseekScaleAq0Equal, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DeepseekScaleAq0Equal, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DeepseekScaleAq1Equal, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DeepseekScaleAq1Equal, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DeepseekScaleBq0Equal, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DeepseekScaleBq0Equal, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::DeepseekScaleBq1Equal, IO>
+            : public AutoMappingTraits<Predicates::Contraction::DeepseekScaleBq1Equal, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UsePartialRMSResidualAddEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSResidualAddEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UsePartialRMSQuantEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSQuantEqual, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UsePartialRMSStoreBf16DEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UsePartialRMSStoreBf16DEqual, IO>
         {
         };
 
