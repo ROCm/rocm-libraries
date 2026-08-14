@@ -26,14 +26,17 @@ namespace ckc
 
 /* ---------------------------------------------------------------------- */
 /* datalayout / triple (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22 /   */
-/* _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED: two fields drift        */
-/* between LLVM flavors -- the buffer-fat-pointer address space (p8):       */
-/*   LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                          */
-/*   LLVM 22 (ROCm >= 7.2):   e-...-p8:128:128:128:48-...                   */
-/* Note: the ELF mangling spec (m:e) was present in early LLVM 22 builds    */
-/* but was removed; the current ROCm 7.2 toolchain does not emit it.        */
-/* (Python _DATALAYOUT_LLVM20 / _DATALAYOUT_LLVM22; pick via               */
-/* rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.)        */
+/* _DATALAYOUT_LLVM23 / _TRIPLE). The AMDGPU datalayout is FLAVOR-KEYED:    */
+/* two fields drift across LLVM flavors:                                    */
+/*   * buffer-resource address space (p8, the 128-bit buffer descriptor --   */
+/*     NOT the p7 fat pointer) gained an index-width field:                  */
+/*       LLVM 20 (ROCm 7.0/7.1):  e-...-p8:128:128-...                       */
+/*       LLVM 22 (ROCm 7.2):      e-...-p8:128:128:128:48-...                */
+/*   * ELF symbol-mangling spec (m:e): absent in LLVM 20 and LLVM 22,        */
+/*     present in LLVM 23 (ROCm 7.13+, AMD clang 23.0.0git):                 */
+/*       LLVM 20 / 22:  e-p:64:64-...                                        */
+/*       LLVM 23:       e-m:e-p:64:64-...                                    */
+/* Pick via rocke_ll_datalayout_for_flavor, mirroring _datalayout_for_flavor.*/
 /* ---------------------------------------------------------------------- */
 
 const char* const ROCKE_LL_DATALAYOUT_LLVM20
@@ -48,10 +51,15 @@ const char* const ROCKE_LL_DATALAYOUT_LLVM22
       "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
       "-n32:64-S32-A5-G1-ni:7:8:9";
 
-/* LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for wired CDNA targets
- * today. Split out a distinct string if a drift guard on an LLVM 23 host proves
- * otherwise (Python _DATALAYOUT_LLVM23). */
-const char* const ROCKE_LL_DATALAYOUT_LLVM23 = ROCKE_LL_DATALAYOUT_LLVM22;
+/* LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host and found to drift from
+ * LLVM 22 by one field -- it emits the ELF symbol-mangling spec m:e that LLVM 22
+ * omits. The p8-indexed layout is otherwise identical (Python
+ * _DATALAYOUT_LLVM23). */
+const char* const ROCKE_LL_DATALAYOUT_LLVM23
+    = "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+      "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+      "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+      "-n32:64-S32-A5-G1-ni:7:8:9";
 
 /* Back-compat alias: callers that have not yet been flavor-threaded see the
  * LLVM20 form (the historical hardcoded value). New code keys on the flavor
@@ -61,8 +69,8 @@ const char* const ROCKE_LL_DATALAYOUT = ROCKE_LL_DATALAYOUT_LLVM20;
 const char* const ROCKE_LL_TRIPLE = "amdgcn-amd-amdhsa";
 
 /* Python _datalayout_for_flavor: LLVM20 returns the legacy p8 layout, LLVM23
- * returns its own (currently == LLVM22) form, and anything else (incl. an
- * unexpected value) degrades to the modern LLVM22 form. */
+ * returns its own m:e form, and anything else (incl. an unexpected value)
+ * degrades to the modern LLVM22 form. */
 const char* rocke_ll_datalayout_for_flavor(rocke_llvm_flavor_t flavor)
 {
     if(flavor == ROCKE_LLVM_FLAVOR_LLVM20)

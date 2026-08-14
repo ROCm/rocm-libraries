@@ -440,7 +440,7 @@ Unit tests focus on the internal implementation of your plugin components:
 - **Requirements**:
 
   - Must be fast-running.
-  - Typically, unit tests should never access GPU hardware. If unit tests need to access the GPU hardware, use the ``SKIP_IF_NO_DEVICE()`` macro to automatically skip the test if no HIP devices are found.
+  - Typically, unit tests should never access GPU hardware. If unit tests need to access the GPU hardware, use the ``SKIP_IF_NO_DEVICES()`` macro to automatically skip the test if no HIP devices are found.
   - Use mocking/stubbing for dependencies where appropriate.
   - Should work on both Windows and Linux.
 
@@ -457,7 +457,7 @@ Integration tests validate end-to-end functionality of your plugin:
   - Validate against reference implementations.
   - Test different data types, layouts, dimensions, and edge-cases for each.
   - Enable tests for all supported ASICs.
-  - A GPU is typically required for meaningful validation. Use the ``SKIP_IF_NO_DEVICE()`` macro to automatically skip the test if no HIP devices are found.
+  - A GPU is typically required for meaningful validation. Use the ``SKIP_IF_NO_DEVICES()`` macro to automatically skip the test if no HIP devices are found.
   - Tests are divided into two categories designated by the prefix argument passed to ``INSTANTIATE_TEST_SUITE_P``.
 
     - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).

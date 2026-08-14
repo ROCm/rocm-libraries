@@ -575,7 +575,7 @@ Tests:
 - name: aux_plan_assign
   category: smoke
   function:
-    aux_plan_assign: *hpa_int8_precision
+    aux_plan_assign: *real_precisions
   M: 128
   N: 128
   K: 128

@@ -54,22 +54,23 @@ from .ir import (
 # Datalayout / triple. Copied verbatim from clang's output for the same
 # target on this box: clang -target amdgcn-amd-amdhsa -mcpu=gfx950
 # -emit-llvm -S. The string is LLVM-version-keyed, not gfx-keyed: every
-# wired arch shares one datalayout, but two fields drift between LLVM 20
-# (ROCm 7.0/7.1) and LLVM 21+ (ROCm 7.2 ships LLVM 22; ROCm 7.13+ ships
-# LLVM 23 -- same datalayout as LLVM 22 for gfx950/gfx942 today):
+# wired arch shares one datalayout, but two fields drift across LLVM 20
+# (ROCm 7.0/7.1), LLVM 22 (ROCm 7.2), and LLVM 23 (ROCm 7.13+):
 #
-#   * LLVM 20 and LLVM 22 both omit the ELF symbol-mangling spec ``m:e``
-#     from the AMDGPU datalayout on this toolchain:
+#   * the ELF symbol-mangling spec ``m:e``: absent in LLVM 20 and LLVM 22,
+#     present in LLVM 23 (AMD clang 23.0.0git, ROCm 7.13). (It also appeared
+#     in early LLVM 22 builds but was dropped; ROCm 7.2's LLVM 22 omits it.)
 #         LLVM 20:  e-p:64:64-...
 #         LLVM 22:  e-p:64:64-...
-#   * the buffer-fat-pointer address space (``p8``) gained an index-width
-#     field:
-#         LLVM 20:  ...-p8:128:128-...
-#         LLVM 22:  ...-p8:128:128:128:48-...
+#         LLVM 23:  e-m:e-p:64:64-...
+#   * the buffer-resource address space (``p8``, the 128-bit buffer
+#     descriptor -- NOT the buffer fat pointer, which is ``p7``) gained an
+#     index-width field in LLVM 22:
+#         LLVM 20:       ...-p8:128:128-...
+#         LLVM 22 / 23:  ...-p8:128:128:128:48-...
 #
-# Note: early LLVM 22 builds added an ELF mangling spec ``m:e`` prefix,
-# but the current ROCm 7.2 toolchain does not emit it. The constant below
-# reflects what the installed hipcc actually produces.
+# Each constant reflects what the installed hipcc actually produces for that
+# LLVM vintage; the drift guard re-derives them from the toolchain.
 #
 # (Confirmed against clang 20 and current clang 22 amdgcn output.) On the
 # textual-IR (comgr SOURCE) path the parser is lenient: it overrides the
@@ -93,10 +94,18 @@ _DATALAYOUT_LLVM22 = (
     "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
     "-n32:64-S32-A5-G1-ni:7:8:9"
 )
-# LLVM 23 (ROCm 7.13+): empirically identical to LLVM 22 for wired CDNA targets
-# today. Re-derive via ``test_datalayout_matches_hipcc_emitted_ir`` on an LLVM 23
-# host; split out a distinct constant here if drift is found.
-_DATALAYOUT_LLVM23 = _DATALAYOUT_LLVM22
+# LLVM 23 (ROCm 7.13+): re-derived on an LLVM 23 host (AMD clang 23.0.0git,
+# ROCm 7.13) and found to drift from LLVM 22 by one field -- LLVM 23 emits the
+# ELF symbol-mangling spec ``m:e`` that LLVM 20 and LLVM 22 omit. Otherwise the
+# p8-indexed layout is identical to LLVM 22 for every wired arch. Regenerate via
+# ``test_datalayout_matches_hipcc_emitted_ir`` if a future LLVM 23 build drifts
+# further.
+_DATALAYOUT_LLVM23 = (
+    "e-m:e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+    "-p7:160:256:256:32-p8:128:128:128:48-p9:192:256:256:32-i64:64-v16:16-v24:32"
+    "-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048"
+    "-n32:64-S32-A5-G1-ni:7:8:9"
+)
 _TRIPLE = "amdgcn-amd-amdhsa"
 
 
@@ -132,12 +141,15 @@ LLVM_FLAVORS: Tuple[str, ...] = (
 
 
 class LlvmDatalayoutKind(enum.Enum):
-    """Datalayout generation, i.e. what an IR module's ``p8`` field can reveal.
+    """Datalayout generation, i.e. what an IR module's ``p8`` field reveals.
 
-    The buffer-fat-pointer address space ``p8`` is the only datalayout field
-    that drifts between flavors, so it identifies a *generation* shared by one
-    or more flavors rather than a single flavor -- llvm22 and llvm23 are
-    indistinguishable from the datalayout alone.
+    Two datalayout fields drift between flavors -- the buffer-resource address
+    space ``p8`` shape and the ELF mangling spec ``m:e`` -- but only ``p8``
+    partitions the flavors into the *generation* that gates intrinsic-declare
+    compatibility (``make.buffer.rsrc.p8.p1``, fp8/bf8 MFMA operand widths). So
+    this kind groups flavors by p8 shape, NOT by full datalayout identity:
+    llvm22 and llvm23 share a generation yet differ in ``m:e`` (llvm23 has it),
+    so the datalayout alone still cannot narrow to a single flavor.
 
     Members are named after the datalayout shape, deliberately not after its
     recency: a "modern" label stops being true the moment a newer generation
@@ -237,13 +249,13 @@ def _is_modern_flavor(flavor: str) -> bool:
 def _datalayout_for_flavor(flavor: str) -> str:
     """Module ``target datalayout`` string for an LLVM flavor.
 
-    One field drifts between flavors: the buffer-fat-pointer address space
-    ``p8`` gained an index-width field in LLVM 22 (see :data:`_DATALAYOUT_LLVM20`
-    / :data:`_DATALAYOUT_LLVM22` / :data:`_DATALAYOUT_LLVM23`).  The ELF
-    symbol-mangling spec ``m:e`` is omitted by both LLVM 20 and LLVM 22 on the
-    AMDGPU datalayout.  LLVM23 currently aliases the LLVM 22 layout.  LLVM22 is
-    the default for unknown values so a typo'd override degrades to the modern
-    layout rather than the legacy one.
+    Two fields drift between flavors: the buffer-resource address space ``p8``
+    (the 128-bit buffer descriptor, not the ``p7`` fat pointer) gained an
+    index-width field in LLVM 22, and the ELF symbol-mangling spec ``m:e``
+    (absent in LLVM 20 and LLVM 22) is present in LLVM 23
+    (see :data:`_DATALAYOUT_LLVM20` / :data:`_DATALAYOUT_LLVM22` /
+    :data:`_DATALAYOUT_LLVM23`).  LLVM22 is the default for unknown values so a
+    typo'd override degrades to the modern layout rather than the legacy one.
     """
     if flavor == LLVM_FLAVOR_LLVM20:
         return _DATALAYOUT_LLVM20

@@ -1498,6 +1498,30 @@ class TestLlvmFlavorEnumeration(unittest.TestCase):
         self.assertIs(_datalayout_kind_from_ir(legacy), LlvmDatalayoutKind.P8_PLAIN)
         self.assertIsNone(_datalayout_kind_from_ir("define void @k() {}"))
 
+    def test_llvm23_datalayout_is_llvm22_plus_me_mangling(self):
+        """llvm23 is no longer an alias of llvm22: it is the llvm22 layout with
+        the ELF ``m:e`` symbol-mangling spec spliced in after the leading
+        endianness field.
+
+        The toolchain drift guard proves this only on a ROCm 7.13+ host with
+        hipcc; this pins the same contract on the bare CI gate, so an accidental
+        re-alias (or a stray edit to either constant) fails here with a precise
+        message instead of surfacing as an opaque byte-identity golden diff.
+        """
+        from rocke.core.lower_llvm import _DATALAYOUT_LLVM22, _DATALAYOUT_LLVM23
+
+        self.assertNotEqual(
+            _DATALAYOUT_LLVM23,
+            _DATALAYOUT_LLVM22,
+            "llvm23 is no longer an alias of llvm22 (it adds the m:e spec)",
+        )
+        self.assertEqual(
+            _DATALAYOUT_LLVM23,
+            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1),
+            "llvm23 datalayout must be the llvm22 layout plus the m:e "
+            "symbol-mangling spec",
+        )
+
     def test_flavor_for_rocm_clamps_at_both_ends(self):
         """Version mapping is clamped, never raising: newest above, oldest below."""
         from rocke.core.lower_llvm import (

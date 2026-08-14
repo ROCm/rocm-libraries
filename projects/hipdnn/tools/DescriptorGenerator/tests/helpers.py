@@ -15,6 +15,7 @@ ALL_CONFIG_NAMES = [
     "pointwise.yaml",
     "reduction.yaml",
     "sdpa.yaml",
+    "moe_grouped_matmul.yaml",
 ]
 
 from codegen.models import (

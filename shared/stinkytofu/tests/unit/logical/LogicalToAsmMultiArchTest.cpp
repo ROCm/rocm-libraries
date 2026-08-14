@@ -88,6 +88,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VFmaF64(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VFmaPKF16:
             return VFmaPKF16(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VFmaPKF32:
+            return VFmaPKF32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VFmaMixF32:
             return VFmaMixF32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VMadI32I24:
@@ -755,6 +757,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return GlobalInv();
         case logical::GlobalWb:
             return GlobalWb();
+        case logical::STtraceData:
+            return STtraceData();
         case logical::GlobalPrefetchB8:
             return GlobalPrefetchB8(vgpr(0), vgpr(1));
         case logical::GlobalLoadTR8B64:
@@ -847,6 +851,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VMulI32I24, "v_mul_i32_i24"},
     {logical::VMulU32U24, "v_mul_u32_u24"},
     {logical::VFmaF32, "v_fma_f32"},
+    {logical::VFmaPKF32, "v_pk_fma_f32"},
     {logical::VFmaMixF32, "v_fma_mix_f32"},
     // Vector Bitwise
     {logical::VAndB32, "v_and_b32"},
@@ -962,6 +967,8 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::SWaitXCnt, "s_wait_xcnt"},
     // End program
     {logical::SEndpgm, "s_endpgm"},
+    // Trace
+    {logical::STtraceData, "s_ttracedata"},
 };
 
 /** Returns expected asm mnemonic for (opcode, arch) if we have one; else nullopt. */

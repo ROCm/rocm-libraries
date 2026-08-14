@@ -393,6 +393,7 @@ DEF_BATCH(.format = SOP1,
 
 // Scalar ALU — SOPP
 DEF_T(SEndpgmInst, "s_endpgm", .format = SOPP, .flags = {HasSideEffect}, .logical = "SEndpgm")
+DEF_T(STtraceDataInst, "s_ttracedata", .format = SOPP, .flags = {HasSideEffect}, .logical = "STtraceData")
 DEF_T(SNopInst, "s_nop", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SNop")
 DEF_T(SSetprioInst, "s_setprio", .format = SOPP_WAIT16, .flags = {HasSideEffect}, .logical = "SSetPrior")
 DEF_T(SDelayAluInst, "s_delay_alu", .format = SOPP, .flags = {HasSideEffect}, .logical = "SDelayAlu",
@@ -443,6 +444,15 @@ DEF_T(GlobalLoadTrB64Inst, "global_load_tr_b64", .format = VGLOBAL, .logical = "
 DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .logical = "GlobalLoadTR16B128",
     .cost = {12, 116},
     .operand_fields = { {D0, vdst, vgpr, 128}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
+
+// global_store_async_from_lds_*: gfx1250 async store copying data from LDS to
+// global memory, completion via s_wait_asynccnt. Operand layout and flag are
+// shared via the VGLOBAL_ASYNC_FROM_LDS format.
+DEF_BATCH(.format = VGLOBAL_ASYNC_FROM_LDS,
+    GlobalStoreAsyncFromLdsB8Inst, "global_store_async_from_lds_b8",
+    GlobalStoreAsyncFromLdsB32Inst, "global_store_async_from_lds_b32",
+    GlobalStoreAsyncFromLdsB64Inst, "global_store_async_from_lds_b64",
+    GlobalStoreAsyncFromLdsB128Inst, "global_store_async_from_lds_b128")
 
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
@@ -806,6 +816,15 @@ DEF_T(VSwapB32Inst, "v_swap_b32", .format = VOP1, .logical = "VSwapB32",
     },
 )
 
+// Vector ALU — VOP1 only (swaps the b32 across lane pairs 16 apart; both
+// operands are read-modify-write, like v_swap_b32).
+DEF_T(VPermlane16SwapB32Inst, "v_permlane16_swap_b32", .format = VOP1, .logical = "VPermlane16SwapB32",
+    .operand_fields = {
+        {D0, vdst, vgpr, 32, RW},
+        {D1, src0, src_vgpr, 32, RW},
+    },
+)
+
 // Vector ALU — VOP1 only (indirect dst via M0)
 // v_movrelsd_2_b32: like v_mov_b32 but the dst VGPR index is offset by M0 at
 // runtime (indirect VGPR write).
@@ -877,6 +896,13 @@ DEF_BATCH(.format = VOP3P,
             {S0, src0, src, 32},
             {S1, src1, src, 32},
             {S2, src2, src, 32},
+        },
+    VPkFmaF32Inst, "v_pk_fma_f32", .logical = "VFmaPKF32", .flags = {Commutative},
+        .operand_fields = {
+            {D0, vdst, vgpr, 64},
+            {S0, src0, src, 64},
+            {S1, src1, src, 64},
+            {S2, src2, src, 64},
         },
     VPkMulF16Inst, "v_pk_mul_f16", .logical = "VMulPKF16", .flags = {Commutative},
     VPkMulF32Inst, "v_pk_mul_f32", .logical = {"VMulPKF32S", "VMulPKF32", "_VMulPKF32"}, .flags = {Commutative},

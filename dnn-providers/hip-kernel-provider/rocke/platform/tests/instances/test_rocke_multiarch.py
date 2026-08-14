@@ -744,10 +744,17 @@ class TestDatalayoutDriftGuard(unittest.TestCase):
         )
         rocke_dl = _datalayout_for_flavor(detected_flavor)
         if detected_flavor == LLVM_FLAVOR_LLVM23:
+            # Drift proven on LLVM 23 (ROCm 7.13+): its datalayout is the llvm22
+            # one with the ELF symbol-mangling spec `m:e` inserted after the
+            # leading endianness field, and identical otherwise. Pin that exact
+            # relationship (derived from the llvm22 constant, not a second copy)
+            # so a stray edit to either constant is caught here, not only by the
+            # toolchain diff below.
             self.assertEqual(
                 rocke_dl,
-                _datalayout_for_flavor("llvm22"),
-                "llvm23 datalayout must track llvm22 until drift is proven",
+                _datalayout_for_flavor("llvm22").replace("e-", "e-m:e-", 1),
+                "llvm23 datalayout must be the llvm22 layout plus the m:e "
+                "symbol-mangling spec",
             )
 
         # Test across all wired arches to confirm datalayout really is gfx-invariant

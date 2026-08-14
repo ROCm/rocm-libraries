@@ -36,6 +36,12 @@ struct _rocsparse_dnvec_descr
     int64_t            batch_stride{};
     int64_t            batch_count{1};
     int64_t            inc{1};
+    // Memory space of \p values / \p const_values. Dense vectors created through the regular
+    // creators always live in device memory; the scalar creator
+    // (\ref rocsparse_dnvec_descr_create_scalar) may hold a host pointer so that routines such as
+    // rocsparse_spmat_scale can consume a host-side scalar without relying on the handle pointer
+    // mode.
+    rocsparse_pointer_mode pointer_mode{rocsparse_pointer_mode_device};
     _rocsparse_dnvec_descr() = default;
     _rocsparse_dnvec_descr(int64_t            batch_count_,
                            int64_t            nitems_,
