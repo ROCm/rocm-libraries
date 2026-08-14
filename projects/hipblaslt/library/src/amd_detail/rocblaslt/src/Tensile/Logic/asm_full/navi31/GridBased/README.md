@@ -1,12 +1,14 @@
-# Experimental: gfx1100 HHS-TN Origami catalog (v6)
+# gfx1100 HHS-TN Origami catalog (v6)
 
 `navi31_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs.yaml` — a 58-entry, Origami-selected
 kernel catalog for `Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV` (fp16 in, fp32 accumulate, TN,
 batch 1) on gfx1100 / Navi31 / RX 7900 XTX.
 
-**This directory is not built by default.** `TensileCreateLibrary` skips any path component
-named `experimental` unless `--experimental` is passed, so adding this file does not change
-the behaviour of a normal build.
+**This catalog IS built by default on this branch.** It previously lived under
+`navi31/Experimental/`, which `TensileCreateLibrary` skips unless `--experimental` is passed
+(`tensilelite/Tensile/TensileCreateLibrary/Run.py:1107`). It now sits in `GridBased/` and the
+298-solution `navi31_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml` has been deleted,
+because the two cannot coexist — see "Why the old catalog had to go" below.
 
 ## What it is
 
@@ -121,3 +123,95 @@ skill: `references/wiki/05_workflow/catalog_campaign_runbook.md`. If you are por
 another SKU, the highest-value advice is to **run the oracle pass before building any
 catalog** — it distinguishes a coverage problem from a selection problem, and those need
 opposite responses. Here it would have saved two failed catalogs.
+
+---
+
+# Why the old catalog had to go
+
+`navi31_Cijk_Alik_Bljk_HHS_BH_Bias_HAS_SAV_UserArgs.yaml` (298 solutions, `[11] = GridBased`,
+`[7]` = 9,680 reference points) declares a **byte-identical ProblemType** to this catalog.
+Two logic files with the same ProblemType do not coexist:
+
+- Under lazy loading both emit the *same* placeholder device-library file,
+  `TensileLibrary_HH_HH_HA_Bias_SAV_UA_Type_HH_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_gfx1100.dat.zlib`.
+- Without lazy loading, `PredicateLibrary.merge`
+  (`tensilelite/Tensile/SolutionLibrary.py:360-377`) appends them as two rows sorted by
+  `_MATCHING_ORDER` (`Tensile/Properties.py:68-75`), where `PredictionMatching`=2 sorts ahead
+  of `GridBasedMatching`=3, and `ExactLogicLibrary::findBestSolution`
+  (`tensilelite/include/Tensile/ExactLogicLibrary.hpp:102-156`) returns on the first row that
+  yields a non-null solution. Whichever row is first shadows the other completely.
+
+`TensileCreateLibrary` neither errors nor warns on the duplicate. Reverting the commit that
+deletes the old file restores the shipped GridBased selector.
+
+# Verification on this branch (2026-08-14)
+
+Clean standalone build of `projects/hipblaslt` from this branch: Release, `GPU_TARGETS=gfx1100`,
+`HIPBLASLT_ENABLE_LAZY_LOAD=ON`, client on, **no logic filter** — the source tree alone decides
+what is built. Then 1,500 frozen evaluation shapes x 3 reps, runtime selection only, one bench
+process at a time. **4,500 rows, `status=ok` on 100%, zero failures.**
+
+## The right catalog is selected — proven
+
+| check | result |
+|---|---|
+| v6 logic YAML | 58 solution entries (56 unique names; two duplicate pairs, kept as-measured) |
+| built HHS-TN device library | **111** kernel objects (58 solutions x GSU variants) |
+| same-tree library built from the deleted G0 catalog | **476** kernel objects, 408 of them G0-only |
+| selected kernels in the v6 library | **4,500 / 4,500 = 100%** |
+| selections from a G0-only kernel | **0** |
+
+Kernel names in the library are compared, not `SolutionNameMin` from the YAML: the runtime
+name has auto-valued parameters resolved (`ICIWn1` -> `ICIW0`) and Tensile emits GSU variants,
+so a YAML-name comparison reports false failures.
+
+## Reproduction against the previously measured arm
+
+The same configuration (stock Origami + v6) was measured on 2026-08-13 on `eae132fefcf`.
+Joining the two ledgers on `shape_id`:
+
+- **Kernel agreement: 1,500 / 1,500 = 100%.** Origami picks the identical kernel on every
+  single shape. The wiring reproduces exactly.
+- Throughput, paired geomean: **95.84%** [95.43, 96.27]. This missed the pre-registered
+  [98%, 102%] band, so it was decomposed rather than accepted:
+
+| contrast | ALL | <0.1ms | 0.1-1ms | 1-5ms | >=5ms |
+|---|---|---|---|---|---|
+| old build re-run today / old build 2026-08-13 (**session drift**) | 98.44% | 98.00% | 98.55% | 99.88% | 99.97% |
+| new build / old build, same session (**build difference**) | 97.12% | 99.52% | 95.36% | 94.49% | 101.91% |
+| new / recorded (confounded) | 95.84% | 98.03% | 93.44% | 92.88% | 101.61% |
+
+Neither term is the catalog: kernel choice is identical in all of them.
+
+## The build difference is library size, not the catalog
+
+Three libraries, one binary, one session, interleaved, ratios paired within (shape, rep),
+147 shapes >=1 ms x 5 reps. `v6full` is this branch's product library (all navi31 problem
+types); `v6only` and `g0` are single-problem-type libraries built from the same tree.
+
+| contrast | tiered iterations | amortised (floor 60) |
+|---|---|---|
+| `v6full / v6only` | **88.62%** [87.59, 89.59] | **100.50%** [100.44, 100.56] |
+| `v6full / g0` | 102.50% [101.99, 103.02] | **100.43%** [99.96, 100.95] — no difference |
+| `v6only / g0` | 115.67% [114.28, 117.10] | 99.94% [99.44, 100.42] — no difference |
+
+The 11.4-point `v6full` penalty is **entirely** one-time library initialisation that the
+tiered protocol charges to whichever library is larger; it vanishes at an iteration floor of
+60. This is the same artifact documented above, now observed from the other side — previously
+it flattered v6 because G0 was the big library; here it punishes the full product build
+because the single-problem-type comparison libraries are the small ones.
+
+**Under the deployment-relevant protocol, v6 ties G0 on shapes >=1 ms** (100.43%, CI spans
+1.0), which reproduces the corrected campaign figure for the 1-5 ms band (99.93%). It does
+not contradict the campaign's full-set amortised figure of 94.86%, which is dominated by the
+sub-1 ms shapes not measured here.
+
+## What this branch does and does not claim
+
+It claims: the catalog is wired in, a default build uses it, and Origami selects from it and
+only it. That is proven above.
+
+It does not claim a performance win. At >=1 ms v6 and G0 are indistinguishable once
+iterations are amortised, and the campaign measured v6 **behind** G0 on the full evaluation
+set under the same protocol. The reasons to prefer it are catalog size (58 vs 298 solutions,
+620K -> 284K of code object, ~70 ms less cold start) rather than steady-state throughput.
