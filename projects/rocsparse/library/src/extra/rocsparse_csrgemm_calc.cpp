@@ -193,7 +193,7 @@ namespace rocsparse
                                               const I* __restrict__ csr_row_ptr_C,
                                               J* __restrict__ csr_col_ind_C,
                                               T* __restrict__ csr_val_C,
-                                              I* __restrict__ workspace_B,
+                                              I*                   workspace_B,
                                               rocsparse_index_base idx_base_A,
                                               rocsparse_index_base idx_base_B,
                                               rocsparse_index_base idx_base_C,

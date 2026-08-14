@@ -22,6 +22,7 @@ The following table lists all operations currently supported in hipDNN:
 | Convolution Forward | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
 | Convolution Forward + (Bias) + Activation<sup>4</sup> | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Fused graph<sup>2,3</sup>, Deterministic<sup>5</sup> |
 | Convolution Wgrad   | FP16, BFP16, FP32 | NCHW, NHWC, NCDHW, NDHWC | Cross-correlation only<sup>2</sup>, Deterministic<sup>5</sup> |
+| Pointwise Activation (standalone) | FP16, FP32 | NCHW, NHWC | Single-node graph<sup>7</sup> |
 
 ¹ See Batchnorm Operations note below
 ² See Convolution Operations note below
@@ -29,6 +30,7 @@ The following table lists all operations currently supported in hipDNN:
 ⁴ See Detailed Requirements below
 ⁵ See Deterministic Engine Support section
 ⁶ 3D tensors are internally padded to 4D for MIOpen compatibility
+⁷ See Standalone Activation note below
 
 ## Detailed Requirements
 
@@ -70,7 +72,10 @@ The following table lists all operations currently supported in hipDNN:
 >   - **Convolution Forward + (Bias) + Activation:** Combines convolution forward, optional bias addition, and forward activation
 
 > [!NOTE]
-> **Activation Functions:** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).
+> **Activation Functions (fused):** Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips). Leaky ReLU, Sigmoid and Tanh are **not** supported when fused onto a producer op; use a standalone activation node for those.
+
+> [!NOTE]
+> **Standalone Activation:** A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.
