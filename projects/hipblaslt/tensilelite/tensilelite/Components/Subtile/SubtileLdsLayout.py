@@ -21,6 +21,7 @@ from typing import Dict, Tuple
 
 from ...Common import roundUpToNearestMultiple
 from .Kernel import TileInfo, selectABGeometry, selectDGeometry, selectMXScaleGeometry
+from .SubtileScaleEmit import deepseekScaleBNBlocksPerWave, usesScaleA, usesScaleB
 from .SubtileTLUSwizzle import swizzlePadPerStrip
 
 # A GR load round covers one MMA tile in M and two in K; when four or more waves
@@ -34,12 +35,6 @@ _GR_WAVES_TO_WIDEN = 4
 _LDS_OVERFLOW_RESOURCE_CODE = 8
 
 _AB_OPERANDS = ('A', 'B')
-_MX_SCALE_OPERANDS = ('MXSA', 'MXSB')
-
-
-def mxBlockOf(kernel: dict, tc: str) -> int:
-  """MXBlock size for operand 'A'/'B' (0 when that operand carries no scales)."""
-  return kernel["ProblemType"].get("MXBlock%s" % tc, 0)
 
 
 def selectGRSubtileShape(kernel: dict, tc: str) -> Tuple[int, int]:
@@ -92,9 +87,10 @@ def initSubtileInfos(writer, kernel: dict):
   """Build TileInfos for every operand this kernel uses."""
   for tc in ('A', 'B', 'D'):
     initSubtileInfo(writer, kernel, tc)
-  for tc in _AB_OPERANDS:
-    if mxBlockOf(kernel, tc) > 0:
-      initSubtileInfo(writer, kernel, 'MXS%s' % tc)
+  if usesScaleA(kernel):
+    initSubtileInfo(writer, kernel, 'MXSA')
+  if usesScaleB(kernel):
+    initSubtileInfo(writer, kernel, 'MXSB')
 
 
 def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
@@ -118,14 +114,17 @@ def subtileRegionSize(tileInfo, macroTile: int, ldsRowBankSize: int) -> int:
   return roundUpToNearestMultiple(payload, max(writeGroupBytes, int(ldsRowBankSize)))
 
 
-def _mxScaleRegionSize(tileInfo, kernel: dict) -> int:
+def _mxScaleRegionSize(tileInfo, kernel: dict, tc: str) -> int:
   """Bytes reserved for one MX scale operand.
 
   Swizzled scale takes more LDS than the scales strictly need, so that the DTL
-  loads feeding it can stay wide.
+  loads feeding it can stay wide. DeepseekScale on the B side packs an extra
+  nBlocksB K-blocks per wave into the same region.
   """
   numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
-  return tileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
+  nBlocksB = (deepseekScaleBNBlocksPerWave(kernel)
+              if tc == 'MXSB' and kernel.get("UseDeepseekScaleB", False) else 1)
+  return tileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves * nBlocksB
 
 
 @dataclass
@@ -153,11 +152,12 @@ def computeLdsLayout(writer, kernel: dict) -> SubtileLdsLayout:
 
   sizes = [(tc, subtileRegionSize(tileInfoOf(writer, tc), macroTiles[tc], ldsRowBankSize))
            for tc in _AB_OPERANDS]
-  # Scale regions are sized as a pair, so scales on one side only get no region
-  # here -- initSubtileInfos builds a TileInfo per scaled operand regardless.
-  if all(mxBlockOf(kernel, tc) > 0 for tc in _AB_OPERANDS):
-    sizes += [(tc, _mxScaleRegionSize(tileInfoOf(writer, tc), kernel))
-              for tc in _MX_SCALE_OPERANDS]
+  # Each scaled side (MX block-scale or DeepseekScale) gets its own contiguous
+  # region, independent of whether the other side is scaled.
+  if usesScaleA(kernel):
+    sizes.append(('MXSA', _mxScaleRegionSize(tileInfoOf(writer, 'MXSA'), kernel, 'MXSA')))
+  if usesScaleB(kernel):
+    sizes.append(('MXSB', _mxScaleRegionSize(tileInfoOf(writer, 'MXSB'), kernel, 'MXSB')))
 
   # Each region starts at the next free byte, in order.
   layout = SubtileLdsLayout()

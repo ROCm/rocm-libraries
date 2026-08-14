@@ -1,0 +1,96 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# PartialRMS + ResidualAdd (K1), bf16 in / bf16 out: StreamK split-K bug reproducer.
+#
+# WHY these exact parameters trigger the bug:
+#   - M=N=1024, MT0=MT1=128  → numTiles = 8×8 = 64 < 256 CUs on gfx950.
+#     With fewer tiles than CUs, StreamK assigns multiple K-slices per workgroup
+#     (split-K mode), dispatching a finishing/fixup workgroup for each tile.
+#   - K=4096, DepthU=64      → itersPerTile = K/DepthU = 64 > 1, so the
+#     finishing workgroup is always dispatched and takes the split-K store path.
+#   - SubtilePartialRMSEmit.py omits the partialBuf (per-row Σx²) write in the
+#     split-K finishing path; the buffer stays zero. The downstream row_div
+#     kernel then computes rstd = 1/sqrt(0/N_hidden + eps) ≈ 316 and scales
+#     every output element by ~316×, producing completely wrong results.
+#   - StreamKForceDPOnly=0 is the only buggy variant; StreamKForceDPOnly=1
+#     forces whole-tile dispatch (skTiles=0) so the split-K path is never taken
+#     and the bug is masked. Only [0] is forked here so a failure is visible.
+#   - NumElementsToValidate=-1 with ExitOnFails=1 validates every element and
+#     halts on the first wrong row, ensuring the zero partialBuf is caught.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  ExitOnFails: 1
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+
+  ########################################
+  # bf16 in, bf16 out — PartialRMS + ResidualAdd, StreamK split-K bug reproducer.
+  # M=N=1024, K=4096: numTiles=64 < 256 CUs forces K-split; itersPerTile=64>1
+  # ensures the finishing store path runs, where the partialBuf write is missing.
+  ########################################
+  -
+    - # ProblemType — bf16 in, bf16 out, f32 compute, residual add
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128  WG 1x1
+            - [16, 16, 32, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128  WG 2x1
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [1024, 1024, 1, 4096]
+
+LibraryLogic:
+  ScheduleName: "partialrms_residualadd_bf16_streamk_split_bug_repro"
+  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Prediction"

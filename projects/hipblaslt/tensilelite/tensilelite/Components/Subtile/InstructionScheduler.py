@@ -8,9 +8,27 @@ with pluggable scheduling rules.
 """
 
 from typing import List, Tuple, Optional
+import copy
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, SBarrier, MFMAInstruction, MXMFMAInstruction, \
     LocalReadInstruction, GlobalReadInstruction, CommonInstruction
+
+
+class MFMAGroupModule(Module):
+    """Module grouping one MFMA instruction with its inline fold code.
+
+    The instruction scheduler treats this as a single MFMA (isMFMA check).
+    Serialization emits the contained MFMA and fold instructions in order,
+    so the fold always executes immediately after the MFMA it belongs to.
+    deepcopy preserves the MFMAGroupModule subtype so the scheduler keeps
+    recognizing it across the NLL deepcopy pass.
+    """
+    def __deepcopy__(self, memo):
+        new_obj = MFMAGroupModule(self.name)
+        memo[id(self)] = new_obj
+        for item in self.flatitems():
+            new_obj.add(copy.deepcopy(item, memo))
+        return new_obj
 
 
 class _SlotPlacer:
@@ -478,7 +496,7 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
     if not emittedModules:
         return Module()
 
-    isMFMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
+    isMFMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction, MFMAGroupModule))
     n = len(emittedModules)
 
     mfmaIdx, pathOrders, preMfmaOrders = extractPathsFromBeforeDeps(emittedModules)
