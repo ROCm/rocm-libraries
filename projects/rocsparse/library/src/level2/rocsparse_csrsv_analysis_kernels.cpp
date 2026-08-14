@@ -179,7 +179,7 @@ rocsparse_status rocsparse::launch_csrsv_analysis_kernel(rocsparse_handle    han
 {
     // Determine archid and ASIC revision
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
-    const bool SLEEP = ((gcn_arch_name == rocpsarse_arch_names::gfx908) && (handle->asic_rev < 2));
+    const bool SLEEP = ((gcn_arch_name == rocsparse_arch_names::gfx908) && (handle->asic_rev < 2));
     csrsv_analysis_kernel_t launch = find_csrsv_analysis_kernel(1024,
                                                                 handle->wavefront_size,
                                                                 SLEEP,
