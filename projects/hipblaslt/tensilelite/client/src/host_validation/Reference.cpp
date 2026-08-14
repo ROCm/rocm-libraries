@@ -217,7 +217,9 @@ namespace TensileLite
         {
             using roc::host_validation::GemmRunInfo;
 
-            const bool partialSelection = elementsToValidate < problem.d().totalLogicalElements();
+            const bool partialSelection
+                = elementsToValidate != 0
+                  && elementsToValidate < problem.d().totalLogicalElements();
             const bool preserveStepwiseAccumulator
                 = partialSelection
                   && (problem.computeType() == rocisa::DataType::Half
