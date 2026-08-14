@@ -1027,6 +1027,40 @@ TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
     EXPECT_EQ(sets.front().engine.name, "test:intact");
 }
 
+/// `arch` is optional and empty means arch-independent, but it has to survive the parse:
+/// KernelIngestorStateManager drops a pack whose arch excludes the calling device, so a
+/// field the loader silently discarded would leave that gate permanently open, and one
+/// the allow-list omitted would reject the whole pack as an unknown key.
+TEST(TestDescriptorLoader, CarriesAPacksDeclaredArchitectures)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_arch"));
+    auto documents = makeSetDocuments('1', "test:arch");
+    documentOfType(documents, ".kdp.json")["arch"] = nlohmann::json::array({"gfx90a", "gfx942"});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().arch, (std::vector<std::string>{"gfx90a", "gfx942"}));
+}
+
+/// The default: a pack naming no architecture applies everywhere, so absence must parse
+/// as empty rather than as a constraint nothing satisfies.
+TEST(TestDescriptorLoader, APackWithNoDeclaredArchIsArchIndependent)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("pack_no_arch"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:no_arch"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_TRUE(sets.front().packs.front().arch.empty());
+}
+
 /// Folders are organizational only: the walk is recursive and a file's directory means
 /// nothing to the loader, so a set split across a subdirectory resolves as one engine.
 TEST(TestDescriptorLoader, LoadsDescriptorsFromNestedFolders)

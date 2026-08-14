@@ -734,6 +734,7 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
                     {"version",
                      "id",
                      "name",
+                     "arch",
                      "matcher_ids",
                      "engine_id",
                      "dispatch_id",
@@ -745,6 +746,12 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
     pack.name = requireString(root, "name", where);
     pack.engineId = requireId(root, "engine_id", where);
     pack.dispatchId = requireId(root, "dispatch_id", where);
+
+    // Optional, and empty means arch-independent, as Descriptors.hpp specifies.
+    // KernelIngestorStateManager drops a pack whose arch excludes the calling device at
+    // catalog build; without this the field is modelled and enforced but unreachable from
+    // a file, and a pack declaring one would be rejected outright as an unknown key.
+    pack.arch = optionalStringArray(root, "arch", where);
 
     const auto& matcherIds = requireKey(root, "matcher_ids", where);
     if(!matcherIds.is_array())
