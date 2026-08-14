@@ -12,7 +12,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
     - CHOLQR_64 (with batched and strided\_batched versions)
 * Hessenberg reduction auxiliary routine
     * LAHR2
-* Hessenberg decomposition
+* Hessenberg reduction routines
     * GEHD2
     * GEHRD
 
