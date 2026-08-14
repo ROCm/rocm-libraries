@@ -268,6 +268,24 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h.in"
                "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hiptensor/internal/hiptensor-version.h")
 
+# Configure Windows version resource file so hiptensor.dll exposes file metadata
+# (File description, version, product name, copyright) in Explorer properties.
+if(WIN32)
+    find_package(Git REQUIRED)
+
+    # Get the git hash of the hipTensor branch
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" log -1 --format=%H .
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        OUTPUT_VARIABLE hiptensor_VERSION_COMMIT_ID
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    string(TIMESTAMP HIPTENSOR_COPYRIGHT_YEAR "%Y")
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
+
 # Define package dependencies for export
 set(PACKAGE_DEPENDS
     PACKAGE hip

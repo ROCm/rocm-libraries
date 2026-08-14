@@ -16,6 +16,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 * Enabled `-frtti` on Windows to fix RTTI-related build failures.
+* Added a Windows version resource so `hiptensor.dll` exposes file metadata (file description, version, product name, and copyright) in File Explorer properties.
 
 ## hipTensor 2.3.0 for ROCm 7.14
 
