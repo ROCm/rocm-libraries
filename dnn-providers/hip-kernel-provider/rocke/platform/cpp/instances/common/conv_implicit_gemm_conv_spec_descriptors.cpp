@@ -819,11 +819,13 @@ bool rocke_implicit_gemm_conv_is_valid_spec(const rocke_implicit_gemm_conv_spec_
                                 s->pipeline ? s->pipeline : "",
                                 arch);
         }
-        if(!(s->epilogue && strcmp(s->epilogue, "default") == 0))
+        if(!(s->epilogue
+             && (strcmp(s->epilogue, "default") == 0 || strcmp(s->epilogue, "cshuffle") == 0)))
         {
-            ROCKE_CONVVS_REJECT("WMMA conv supports only the 'default' epilogue (got '%s') on %s",
-                                s->epilogue ? s->epilogue : "",
-                                arch);
+            ROCKE_CONVVS_REJECT(
+                "WMMA conv supports only 'default' or 'cshuffle' epilogue (got '%s') on %s",
+                s->epilogue ? s->epilogue : "",
+                arch);
         }
         if(s->async_dma)
         {

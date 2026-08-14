@@ -198,7 +198,6 @@ Tests:
   M: [128]
   N: [128]
   K: [256]
-  percentage: [0.4]
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
   transA: [rocsparse_operation_none]
@@ -301,6 +300,45 @@ Tests:
   baseC: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
+
+# Coverage: dense output rows to exercise nnz-per-row group kernels 2-5
+# (csrgemm_calc / csrgemm_nnz_calc / csrgemm_symbolic_calc binned kernels).
+# Keep K,N <= 1000 so the random B/D matrices stay dense (0.02 fill),
+# producing hundreds of non-zeros per output row.
+- name: csrgemm_mult_dense
+  category: pre_checkin
+  function: csrgemm
+  precision: *single_double_precisions
+  M: [512]
+  N: [500, 800, 1000]
+  K: [700, 1000]
+  alpha_alphai: *alpha_range_checkin
+  beta: [-99.0]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
+
+- name: csrgemm_mult_scale_dense
+  category: pre_checkin
+  function: csrgemm
+  precision: *single_double_precisions
+  M: [512]
+  N: [640, 1000]
+  K: [640, 1000]
+  alpha_alphai: *alpha_range_checkin
+  beta_betai: *beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_zero]
+  baseD: [rocsparse_index_base_one]
+  matrix_init_kind: [rocsparse_matrix_init_kind_tunedavg]
+  matrix: [rocsparse_matrix_random]
 
 # C = beta * D
 - name: csrgemm_scale

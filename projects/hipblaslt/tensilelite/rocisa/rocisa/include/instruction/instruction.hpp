@@ -212,7 +212,7 @@ namespace rocisa
                     const std::vector<InstructionInput>& srcs,
                     const std::shared_ptr<Container>&    dst) const
         {
-            if(!getAsmCaps()["HasVgprMSB"])
+            if(!capOrDefault(getAsmCaps(), "HasVgprMSB"))
                 return;
 
             int  msbSrc[3] = {0, 0, 0};

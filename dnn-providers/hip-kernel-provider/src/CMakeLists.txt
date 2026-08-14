@@ -120,16 +120,17 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
             ENVIRONMENT ${TEST_ENVIRONMENT}
         )
-        set(_hkp_integration_test_environment ${TEST_ENVIRONMENT})
-        if(HIPKERNELPROVIDER_ASM_KERNEL_ENV)
-            list(APPEND _hkp_integration_test_environment "${HIPKERNELPROVIDER_ASM_KERNEL_ENV}")
-        endif()
+        # hip_kernel_provider_integration_tests_TEST_ENVIRONMENT is TEST_ENVIRONMENT
+        # merged with any per-target ENVIRONMENT passed to add_integration_test_target()
+        # (e.g. HIPDNN_AITER_ASM_DIR for the SDPA engine), published by
+        # dnn-providers/cmake/Tests.cmake since the raw test name below is never
+        # itself registered as a CTest test in this YAML-categorized mode.
         apply_test_category_labels(
             hip_kernel_provider_integration_tests
             "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-            ENVIRONMENT ${_hkp_integration_test_environment}
+            ENVIRONMENT ${hip_kernel_provider_integration_tests_TEST_ENVIRONMENT}
         )
     endif()
 

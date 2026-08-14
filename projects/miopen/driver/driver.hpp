@@ -479,11 +479,8 @@ public:
     Driver()
     {
         data_type = miopenFloat;
-        hipStream_t s;
-        (void)hipStreamCreate(&s);
-        miopenCreateWithStream(&handle, s);
-
-        miopenGetStream(handle, &q);
+        (void)hipStreamCreate(&q);
+        miopenCreateWithStream(&handle, q);
     }
 
     miopenHandle_t GetHandle() { return handle; }
@@ -502,7 +499,11 @@ public:
     int ExecuteKernel();
     void FinalizeKernel();
     float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
-    virtual ~Driver() { miopenDestroy(handle); }
+    virtual ~Driver()
+    {
+        miopenDestroy(handle);
+        (void)hipStreamDestroy(q);
+    }
 
     // TODO: add timing APIs
     virtual int AddCmdLineArgs()                         = 0;
