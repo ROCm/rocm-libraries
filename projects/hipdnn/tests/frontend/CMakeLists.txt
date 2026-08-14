@@ -55,6 +55,9 @@ add_executable(
     IntegrationMatmulDescriptorLifting.cpp
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationMoeGroupedMatmul.cpp
+    IntegrationMoeGroupedMatmulBwd.cpp
+    IntegrationMoeGroupedMatmulBwdDescriptorLifting.cpp
+    IntegrationMoeGroupedMatmulBwdDescriptorLowering.cpp
     IntegrationMoeGroupedMatmulDescriptorLifting.cpp
     IntegrationMoeGroupedMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
