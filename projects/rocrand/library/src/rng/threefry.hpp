@@ -135,8 +135,10 @@ struct generate_threefry
 
 #ifdef __HIP_DEVICE_COMPILE__
         if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        {
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
-        __syncthreads();
+            __syncthreads();
+        }
 #endif
         // If data is not aligned by sizeof(vec_type)
         if(thread_id == 0 && head_size > 0)

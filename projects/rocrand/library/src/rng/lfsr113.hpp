@@ -114,8 +114,10 @@ struct generate_lfsr113
         size_t    index    = id;
 #ifdef __HIP_DEVICE_COMPILE__
         if constexpr(is_discrete_distribution_v<Distribution> && UseLDS)
+        {
             distribution.stage_to_lds(threadIdx.x, blockDim.x);
-        __syncthreads();
+            __syncthreads();
+        }
 #endif
         while(index < vec_n)
         {
