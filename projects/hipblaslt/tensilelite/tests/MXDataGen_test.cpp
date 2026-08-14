@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -76,15 +77,13 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    dataBuffer.data(),
-                    scaleBuffer.data(),
+                    dataBuffer,
+                    scaleBuffer,
                     rows,
                     cols,
                     rows, // stride = rows (column-major)
-                    isTranspose,
                     mxBlock,
                     1,
-                    true,
                     MXScaleLayout::None,
                     "Bounded",
                     -1.0f,
@@ -120,13 +119,13 @@ INSTANTIATE_TEST_SUITE_P(FP4ZeroFrequency,
  * rows=K (must be mxBlock-aligned), cols=M/N (need not be).
  */
 class MXGeneratorDeterminismTest
-    : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int, bool, bool>>
+    : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int>>
 {
 };
 
 TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
 {
-    auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
+    auto [rows, cols, mxBlock] = GetParam();
 
     const size_t numPacked = (rows * cols + 1) / 2;
     const size_t numScales = (rows / mxBlock) * cols;
@@ -139,15 +138,13 @@ TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    data1.data(),
-                    scale1.data(),
+                    data1,
+                    scale1,
                     rows,
                     cols,
                     rows,
-                    isTranspose,
                     mxBlock,
                     1,
-                    isMatrixA,
                     MXScaleLayout::None,
                     "Bounded",
                     -1.f,
@@ -155,15 +152,13 @@ TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    data2.data(),
-                    scale2.data(),
+                    data2,
+                    scale2,
                     rows,
                     cols,
                     rows,
-                    isTranspose,
                     mxBlock,
                     1,
-                    isMatrixA,
                     MXScaleLayout::None,
                     "Bounded",
                     -1.f,
@@ -184,11 +179,9 @@ INSTANTIATE_TEST_SUITE_P(
     GeneratorDeterminism,
     MXGeneratorDeterminismTest,
     ::testing::Values(
-        // rows=K, cols=M or N  (tensorA.sizes()={K,M}, tensorB.sizes()={K,N})
-        std::make_tuple(1024u, 128u, 32, true, true), // transposed A
-        std::make_tuple(1024u, 128u, 32, false, false), // non-transposed B
-        std::make_tuple(1024u, 204u, 32, true, true), // M=204, non-32-aligned (was failing)
-        std::make_tuple(1024u, 213u, 32, true, true) // M=213, non-32-aligned (was failing)
+        std::make_tuple(1024u, 128u, 32),
+        std::make_tuple(1024u, 204u, 32), // non-32-aligned regression
+        std::make_tuple(1024u, 213u, 32) // non-32-aligned regression
         ));
 
 class MXDataGenSeedTest : public ::testing::Test
@@ -212,15 +205,13 @@ protected:
         output.scales.resize((rows / mxBlock) * cols);
         output.reference = generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                            HIP_R_8F_UE8M0,
-                                           output.data.data(),
-                                           output.scales.data(),
+                                           output.data,
+                                           output.scales,
                                            rows,
                                            cols,
                                            rows,
-                                           /*isTranspose=*/true,
                                            mxBlock,
                                            1,
-                                           /*isMatrixA=*/true,
                                            MXScaleLayout::None,
                                            "rand_int",
                                            -1.0f,
@@ -259,16 +250,15 @@ TEST_F(MXDataGenSeedTest, DifferentSeedsChangeRandomOutput)
 // hard-coded inside `generateMXInput` -- callers just pick the layout.
 // ============================================================================
 
-// Params: {rows, cols, mxBlock, isTranspose, isMatrixA}
-class MXPreSwizzleTest
-    : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int, bool, bool>>
+// Params: {rows, cols, mxBlock}
+class MXPreSwizzleTest : public ::testing::TestWithParam<std::tuple<uint64_t, uint64_t, int>>
 {
 };
 
 /** @brief Verify the gfx950 swizzle produces a non-trivial permutation of scale data. */
 TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
 {
-    auto [rows, cols, mxBlock, isTranspose, isMatrixA] = GetParam();
+    auto [rows, cols, mxBlock] = GetParam();
 
     const uint64_t numElements = rows * cols;
     const uint64_t numPacked   = (numElements + 1) / 2;
@@ -282,15 +272,13 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
     // Generate without preSwizzle
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    dataNoShuf.data(),
-                    scaleNoShuf.data(),
+                    dataNoShuf,
+                    scaleNoShuf,
                     rows,
                     cols,
                     rows,
-                    isTranspose,
                     mxBlock,
                     1,
-                    isMatrixA,
                     MXScaleLayout::None,
                     "Bounded",
                     -1.0f,
@@ -299,15 +287,13 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
     // Generate with preSwizzle
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    dataShuf.data(),
-                    scaleShuf.data(),
+                    dataShuf,
+                    scaleShuf,
                     rows,
                     cols,
                     rows,
-                    isTranspose,
                     mxBlock,
                     1,
-                    isMatrixA,
                     MXScaleLayout::GFX950,
                     "Bounded",
                     -1.0f,
@@ -315,8 +301,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
 
     // The scale buffers must be different
     EXPECT_NE(scaleNoShuf, scaleShuf)
-        << "Scale data was not shuffled for " << rows << "x" << cols
-        << " (transpose=" << isTranspose << ", isMatrixA=" << isMatrixA << ")";
+        << "Scale data was not shuffled for " << rows << "x" << cols;
 
     // The shuffled scale must be a permutation: same multiset of bytes
     std::vector<uint8_t> sortedNoShuf = scaleNoShuf;
@@ -336,15 +321,13 @@ INSTANTIATE_TEST_SUITE_P(
     FP4PreSwizzle,
     MXPreSwizzleTest,
     ::testing::Values(
-        // rows, cols, mxBlock, isTranspose, isMatrixA
         // Test size constraints for preSwizzle {32,8,4} + preTile {8,32}:
         //   rows % 256 == 0  (scaleRows = rows/mxBlock must be divisible by tileK=8)
         //   cols % 32  == 0  (scaleCols must be divisible by swizzleTileMN=32)
-        std::make_tuple(256u, 256u, 32, true, true), // scale A transposed
-        std::make_tuple(256u, 256u, 32, false, false), // scale B non-transposed
-        std::make_tuple(512u, 256u, 32, true, true), // larger scale A
-        std::make_tuple(256u, 512u, 32, false, false), // larger scale B
-        std::make_tuple(4096u, 16384u, 32, true, true) // benchmark-scale problem
+        std::make_tuple(256u, 256u, 32),
+        std::make_tuple(512u, 256u, 32),
+        std::make_tuple(256u, 512u, 32),
+        std::make_tuple(4096u, 16384u, 32) // benchmark-scale problem
         ));
 
 // ============================================================================
@@ -384,15 +367,13 @@ public:
 
         return generateMXInput(dataType,
                                HIP_R_8F_UE8M0,
-                               dataBuffer.data(),
-                               scaleBuffer.data(),
+                               dataBuffer,
+                               scaleBuffer,
                                rows,
                                cols,
                                rows, // stride = rows (column-major)
-                               /*isTranspose=*/true,
                                mxBlock,
                                1,
-                               /*isMatrixA=*/true,
                                MXScaleLayout::None,
                                initMethod,
                                -1.0f,
@@ -479,15 +460,13 @@ TEST(MXDataGenDecoupledScale, BoundedDataWithUnityScales)
 
     auto ref = generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                HIP_R_8F_UE8M0,
-                               dataBuffer.data(),
-                               scaleBuffer.data(),
+                               dataBuffer,
+                               scaleBuffer,
                                rows,
                                cols,
                                rows,
-                               /*isTranspose=*/true,
                                mxBlock,
                                1,
-                               /*isMatrixA=*/true,
                                MXScaleLayout::None,
                                "Bounded",
                                -1.0f,
@@ -531,15 +510,13 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    dataA.data(),
-                    scaleA.data(),
+                    dataA,
+                    scaleA,
                     rows,
                     cols,
                     rows,
-                    true,
                     mxBlock,
                     1,
-                    true,
                     MXScaleLayout::None,
                     "Bounded",
                     -1.f,
@@ -547,15 +524,13 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
                     HIP_R_8F_UE8M0,
-                    dataB.data(),
-                    scaleB.data(),
+                    dataB,
+                    scaleB,
                     rows,
                     cols,
                     rows,
-                    true,
                     mxBlock,
                     1,
-                    true,
                     MXScaleLayout::None,
                     "Bounded",
                     -1.f,
@@ -564,6 +539,44 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
 
     EXPECT_EQ(dataA, dataB);
     EXPECT_EQ(scaleA, scaleB);
+}
+
+TEST(MXDataGenCapacity, RejectsUndersizedOutputsBeforeWriting)
+{
+    constexpr uint64_t rows    = 32;
+    constexpr uint64_t cols    = 2;
+    constexpr int      mxBlock = 32;
+
+    std::vector<uint8_t> data((rows * cols) / 2, 0xa5);
+    std::vector<uint8_t> scales((rows / mxBlock) * cols, 0x5a);
+    auto const           expectedData   = data;
+    auto const           expectedScales = scales;
+
+    EXPECT_THROW(generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                                 HIP_R_8F_UE8M0,
+                                 std::span<uint8_t>(data).first(data.size() - 1),
+                                 scales,
+                                 rows,
+                                 cols,
+                                 rows,
+                                 mxBlock,
+                                 1),
+                 std::invalid_argument);
+    EXPECT_EQ(data, expectedData);
+    EXPECT_EQ(scales, expectedScales);
+
+    EXPECT_THROW(generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                                 HIP_R_8F_UE8M0,
+                                 data,
+                                 std::span<uint8_t>(scales).first(scales.size() - 1),
+                                 rows,
+                                 cols,
+                                 rows,
+                                 mxBlock,
+                                 1),
+                 std::invalid_argument);
+    EXPECT_EQ(data, expectedData);
+    EXPECT_EQ(scales, expectedScales);
 }
 
 TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
@@ -582,7 +595,7 @@ TEST(MXScaleRestride, ExpandsKFastRowsInPlace)
     for(size_t i = 0; i < 8; ++i)
         scale[i] = static_cast<uint8_t>(i + 1);
 
-    restrideMXScaleBufferKFast(scale.data(),
+    restrideMXScaleBufferKFast(scale,
                                /*compactFreeDim=*/2,
                                /*compactKBlocks=*/4,
                                /*paddedKBlocks=*/8,
@@ -601,12 +614,21 @@ TEST(MXScaleRestride, ExpandsKFastRowsInPlace)
 TEST(MXScaleRestride, RejectsInvalidExtents)
 {
     std::vector<uint8_t> scale(16, 0);
-    EXPECT_THROW(restrideMXScaleBufferKFast(nullptr, 2, 4, 8, 1), std::invalid_argument);
-    EXPECT_THROW(restrideMXScaleBufferKFast(scale.data(), 2, 4, 8, 0), std::invalid_argument);
-    EXPECT_THROW(restrideMXScaleBufferKFast(scale.data(), 2, 8, 4, 1), std::invalid_argument);
-    EXPECT_THROW(
-        restrideMXScaleBufferKFast(scale.data(), std::numeric_limits<size_t>::max(), 1, 2, 1),
-        std::overflow_error);
+    EXPECT_THROW(restrideMXScaleBufferKFast(std::span<uint8_t>{}, 2, 4, 8, 1),
+                 std::invalid_argument);
+    EXPECT_THROW(restrideMXScaleBufferKFast(scale, 2, 4, 8, 0), std::invalid_argument);
+    EXPECT_THROW(restrideMXScaleBufferKFast(scale, 2, 8, 4, 1), std::invalid_argument);
+    EXPECT_THROW(restrideMXScaleBufferKFast(scale, std::numeric_limits<size_t>::max(), 1, 2, 1),
+                 std::overflow_error);
+}
+
+TEST(MXScaleRestride, RejectsUndersizedDestinationBeforeWriting)
+{
+    std::vector<uint8_t> scale(15, 0xa5);
+    auto const           expected = scale;
+
+    EXPECT_THROW(restrideMXScaleBufferKFast(scale, 2, 4, 8, 1), std::invalid_argument);
+    EXPECT_EQ(scale, expected);
 }
 
 TEST(MXGfx1250ScaleBuffer, PartialBlockedAxesStayWithinPaddedCapacity)
@@ -646,15 +668,13 @@ TEST(MXGfx1250ScaleBuffer, PartialBlockedAxesStayWithinPaddedCapacity)
 
         auto reference = generateMXInput((hipDataType)HIP_R_4F_E2M1,
                                          HIP_R_8F_UE8M0,
-                                         data.data(),
-                                         scales.data(),
+                                         data,
+                                         std::span<uint8_t>(scales).first(scaleBytes),
                                          test.rows,
                                          test.columns,
                                          test.rows,
-                                         /*isTranspose=*/false,
                                          test.blockRows,
                                          test.blockColumns,
-                                         /*isMatrixA=*/true,
                                          MXScaleLayout::GFX1250,
                                          "Bounded",
                                          -1.0f,

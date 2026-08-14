@@ -186,15 +186,13 @@ namespace
 
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
-                                   void*                  data,
-                                   void*                  scale,
+                                   std::span<uint8_t>     data,
+                                   std::span<uint8_t>     scale,
                                    uint64_t               row,
                                    uint64_t               col,
                                    uint64_t               stride,
-                                   bool                   isTranspose,
                                    int const              scaleBlockRowSize,
                                    int const              scaleBlockColSize,
-                                   bool                   isMatrixA,
                                    MXScaleLayout          scaleLayout,
                                    std::string_view const initMethod,
                                    float                  min_val,
@@ -202,7 +200,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const scaleInitMethod,
                                    uint32_t               seed)
 {
-    if(data == nullptr || scale == nullptr)
+    if(data.data() == nullptr || scale.data() == nullptr)
         throw std::invalid_argument("generateMXInput requires non-null data and scale outputs.");
     if constexpr(sizeof(size_t) < sizeof(uint64_t))
     {
@@ -240,7 +238,6 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     problem.seed = seed;
 
     roc::host_validation::MxGenerationResult result = roc::host_validation::generateMx(problem);
-    std::memcpy(data, result.data.storage().data(), result.data.storage().size());
 
     std::vector<uint8_t> scaleBytes(result.scales.storage().size());
     std::memcpy(scaleBytes.data(), result.scales.storage().data(), scaleBytes.size());
@@ -250,25 +247,30 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     const size_t slowScaleExtent = problem.blockAxis == 0 ? problem.shape[1] : blockedScaleExtent;
     scaleBytes                   = swizzleScaleBytes(
         std::move(scaleBytes), scaleLayout, slowScaleExtent, fastScaleExtent, problem.blockSize);
-    std::memcpy(scale, scaleBytes.data(), scaleBytes.size());
+
+    if(data.size() < result.data.storage().size())
+        throw std::invalid_argument("generateMXInput data output is too small.");
+    if(scale.size() < scaleBytes.size())
+        throw std::invalid_argument("generateMXInput scale output is too small.");
+
+    std::memcpy(data.data(), result.data.storage().data(), result.data.storage().size());
+    std::memcpy(scale.data(), scaleBytes.data(), scaleBytes.size());
 
     std::vector<float> reference(problem.shape.elementCount());
     std::memcpy(
         reference.data(), result.reference.storage().data(), reference.size() * sizeof(float));
-    (void)isTranspose;
-    (void)isMatrixA;
     return reference;
 }
 
-void restrideMXScaleBufferKFast(uint8_t* buffer,
-                                size_t   compactFreeDim,
-                                size_t   compactKBlocks,
-                                size_t   paddedKBlocks,
-                                size_t   elemBytes)
+void restrideMXScaleBufferKFast(std::span<uint8_t> buffer,
+                                size_t             compactFreeDim,
+                                size_t             compactKBlocks,
+                                size_t             paddedKBlocks,
+                                size_t             elemBytes)
 {
     if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
         return;
-    if(buffer == nullptr)
+    if(buffer.data() == nullptr)
         throw std::invalid_argument("restrideMXScaleBufferKFast: buffer must not be null");
     if(elemBytes == 0)
         throw std::invalid_argument("restrideMXScaleBufferKFast: element size must be non-zero");
@@ -282,13 +284,15 @@ void restrideMXScaleBufferKFast(uint8_t* buffer,
     size_t const paddedRow  = paddedKBlocks * elemBytes;
     if(compactFreeDim > std::numeric_limits<size_t>::max() / paddedRow)
         throw std::overflow_error("restrideMXScaleBufferKFast: buffer size overflow");
+    if(buffer.size() < compactFreeDim * paddedRow)
+        throw std::invalid_argument("restrideMXScaleBufferKFast: destination buffer is too small");
     size_t const padTail = paddedRow - compactRow;
     for(size_t f = compactFreeDim; f-- > 1;)
     {
-        std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
-        std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+        std::memmove(buffer.data() + f * paddedRow, buffer.data() + f * compactRow, compactRow);
+        std::memset(buffer.data() + f * paddedRow + compactRow, 0x00, padTail);
     }
-    std::memset(buffer + compactRow, 0x00, padTail);
+    std::memset(buffer.data() + compactRow, 0x00, padTail);
 }
 
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
