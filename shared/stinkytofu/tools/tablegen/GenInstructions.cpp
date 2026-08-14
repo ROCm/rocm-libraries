@@ -1903,6 +1903,11 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         std::cerr << "Error: Cannot write " << outputPath << "\n";
         return false;
     }
+    // Lowercase identity name stored on ArchInfo (e.g. "gfx1250v0"). Must match the tensile
+    // baseArchName the caller passes to getGfxArchID(name); the .def identifier is capitalized.
+    std::string lowerName = arch.name;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     out << "/* ************************************************************************\n"
         << " * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.\n"
         << " *\n"
@@ -1932,10 +1937,10 @@ static bool emitArchHeader(const ArchDef& arch, const std::string& outputPath) {
         << "struct " << arch.name << "ArchInfo : public ArchHelper::ArchInfo\n"
         << "{\n"
         << "    " << arch.name << "ArchInfo()\n"
-        << "        : ArchInfo(" << arch.major << ", " << arch.minor << ", " << arch.stepping
-        << ", " << arch.wavefront << " /* waveFrontSize */" << ", " << arch.totalVgprPerSimd
-        << " /* totalVgprPerSimd */" << ", " << arch.vgprAllocGranule
-        << " /* vgprAllocGranule */)\n"
+        << "        : ArchInfo(\"" << lowerName << "\" /* name */" << ", " << arch.major << ", "
+        << arch.minor << ", " << arch.stepping << ", " << arch.wavefront << " /* waveFrontSize */"
+        << ", " << arch.totalVgprPerSimd << " /* totalVgprPerSimd */" << ", "
+        << arch.vgprAllocGranule << " /* vgprAllocGranule */)\n"
         << "    {\n"
         << "    }\n\n"
         << "    IsaOpcode getIsaOpcode(UnifiedOpcode unifiedOpcode) const override\n"
@@ -2214,12 +2219,40 @@ bool genInstructions(const std::string& arch, const std::string& inputDir,
     return success;
 }
 
-// Generate for all archs from .def and emit ISA .inc (so full tablegen does not need gfxisa for
-// ISA). Single run: *.def -> costs, init, operands, *Isa.inc, gfxIsa.inc, GfxXXX.hpp, *_block.inc,
-// GfxArchDefines.cpp -> one build.
+// Generate the requested arch(s) from .def and emit ISA .inc (so full tablegen does not need
+// gfxisa for ISA). Single run: *.def -> costs, init, operands, *Isa.inc, gfxIsa.inc, GfxXXX.hpp,
+// *_block.inc, GfxArchDefines.cpp -> one build.
+//
+// requestedArch may name more than one architecture, comma- or semicolon-separated: the gfx12.5
+// v0/v1 steppings share an ISA triple but are distinct GfxArchID identities and coexist in one
+// library. The arch is already held in a vector because the gfxIsa/GfxArchDefines/GfxLogicalMaps/
+// ArchHelper_includes emitters produce list-shaped output that Config/Archs.def expands over, so
+// every named arch is generated in one pass and the shared tables cover all of them.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-bool genAllInstructions(const std::string& inputDir, const std::string& outputDir) {
-    const std::vector<std::string> archs = {"Gfx1250"};
+bool genAllInstructions(const std::string& inputDir, const std::string& outputDir,
+                        const std::string& requestedArch) {
+    if (requestedArch.empty()) {
+        std::cerr << "Error: genAllInstructions called with an empty architecture\n";
+        return false;
+    }
+    // Split the (possibly single) name list; duplicates are already removed upstream by CMake.
+    std::vector<std::string> archs;
+    {
+        std::string token;
+        for (char c : requestedArch) {
+            if (c == ',' || c == ';') {
+                if (!token.empty()) archs.push_back(token);
+                token.clear();
+            } else {
+                token.push_back(c);
+            }
+        }
+        if (!token.empty()) archs.push_back(token);
+    }
+    if (archs.empty()) {
+        std::cerr << "Error: genAllInstructions called with an empty architecture\n";
+        return false;
+    }
 
     std::map<std::string, std::vector<InstructionDef>> archInstructions;
     std::map<std::string, ArchDef> archDefs;
@@ -2295,7 +2328,9 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
         emitGfxLogicalMapsCpp(archInstructions, archs, (genDir / "GfxLogicalMaps.cpp").string());
     success &= emitArchHelperIncludes(archs, (archHdrDir / "ArchHelper_includes.inc").string());
 
-    if (success) std::cout << "Successfully generated instruction metadata and ISA for all archs\n";
+    if (success)
+        std::cout << "Successfully generated instruction metadata and ISA for " << requestedArch
+                  << "\n";
     return success;
 }
 

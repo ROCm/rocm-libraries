@@ -1869,25 +1869,24 @@ rocblas_status rocblasCall_syrk_herk(rocblas_handle handle,
                                      rocblas_stride offsetC,
                                      rocblas_int ldc,
                                      rocblas_stride strideC,
-                                     rocblas_int batch_count)
+                                     rocblas_int batch_count,
+                                     T** work = nullptr)
 {
     // TODO: How to get alpha and beta for trace logging
     ROCBLAS_ENTER("syrk", "uplo:", uplo, "trans:", transA, "n:", n, "k:", k, "shiftA:", offsetA,
                   "lda:", lda, "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
 
-    using S = decltype(std::real(T{}));
-
     if constexpr(BATCHED)
     {
         THROW_IF_ROCBLAS_ERROR(rocblas_internal_syrk_batched_template(
-            handle, uplo, transA, n, k, cast2constType<S>(alpha), cast2constType<T>(A), offsetA,
-            lda, strideA, cast2constType<S>(beta), C, offsetC, ldc, strideC, batch_count));
+            handle, uplo, transA, n, k, cast2constType(alpha), cast2constType(A), offsetA, lda,
+            strideA, cast2constType(beta), C, offsetC, ldc, strideC, batch_count));
     }
     else
     {
         THROW_IF_ROCBLAS_ERROR(rocblas_internal_syrk_template(
-            handle, uplo, transA, n, k, cast2constType<S>(alpha), cast2constType<T>(A), offsetA,
-            lda, strideA, cast2constType<S>(beta), C, offsetC, ldc, strideC, batch_count));
+            handle, uplo, transA, n, k, cast2constType(alpha), cast2constType(A), offsetA, lda,
+            strideA, cast2constType(beta), C, offsetC, ldc, strideC, batch_count));
     }
     return rocblas_status_success;
 }
@@ -1909,25 +1908,122 @@ rocblas_status rocblasCall_syrk_herk(rocblas_handle handle,
                                      rocblas_stride offsetC,
                                      rocblas_int ldc,
                                      rocblas_stride strideC,
-                                     rocblas_int batch_count)
+                                     rocblas_int batch_count,
+                                     T** work = nullptr)
 {
     // TODO: How to get alpha and beta for trace logging
     ROCBLAS_ENTER("herk", "uplo:", uplo, "trans:", transA, "n:", n, "k:", k, "shiftA:", offsetA,
                   "lda:", lda, "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
 
-    using S = decltype(std::real(T{}));
-
     if constexpr(BATCHED)
     {
         THROW_IF_ROCBLAS_ERROR(rocblas_internal_herk_batched_template(
-            handle, uplo, transA, n, k, cast2constType<S>(alpha), cast2constType<T>(A), offsetA,
-            lda, strideA, cast2constType<S>(beta), C, offsetC, ldc, strideC, batch_count));
+            handle, uplo, transA, n, k, cast2constType(alpha), cast2constType(A), offsetA, lda,
+            strideA, cast2constType(beta), C, offsetC, ldc, strideC, batch_count));
     }
     else
     {
         THROW_IF_ROCBLAS_ERROR(rocblas_internal_herk_template(
-            handle, uplo, transA, n, k, cast2constType<S>(alpha), cast2constType<T>(A), offsetA,
-            lda, strideA, cast2constType<S>(beta), C, offsetC, ldc, strideC, batch_count));
+            handle, uplo, transA, n, k, cast2constType(alpha), cast2constType(A), offsetA, lda,
+            strideA, cast2constType(beta), C, offsetC, ldc, strideC, batch_count));
+    }
+    return rocblas_status_success;
+}
+
+// overload syrk herk
+// A_ptr is pointer batched
+// C is strided batched
+template <bool BATCHED, typename T, typename U>
+rocblas_status rocblasCall_syrk_herk(rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_operation transA,
+                                     rocblas_int n,
+                                     rocblas_int k,
+                                     U alpha,
+                                     const T* const* A,
+                                     rocblas_stride offsetA,
+                                     rocblas_int lda,
+                                     rocblas_stride strideA,
+                                     U beta,
+                                     T* C,
+                                     rocblas_stride offsetC,
+                                     rocblas_int ldc,
+                                     rocblas_stride strideC,
+                                     rocblas_int batch_count,
+                                     T** work)
+{
+    constexpr auto name = rocblas_is_complex<T> ? "herk" : "syrk";
+    // TODO: How to get alpha and beta for trace logging
+    ROCBLAS_ENTER(name, "uplo:", uplo, "trans:", transA, "n:", n, "k:", k, "shiftA:", offsetA,
+                  "lda:", lda, "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    rocblas_int blocks = (batch_count - 1) / 256 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, work, C, strideC,
+                            batch_count);
+
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_syrk_batched_template(
+            handle, uplo, transA, n, k, cast2constType(alpha), A, offsetA, lda, strideA,
+            cast2constType(beta), work, offsetC, ldc, strideC, batch_count));
+    }
+    else
+    {
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_herk_batched_template(
+            handle, uplo, transA, n, k, cast2constType(alpha), A, offsetA, lda, strideA,
+            cast2constType(beta), work, offsetC, ldc, strideC, batch_count));
+    }
+    return rocblas_status_success;
+}
+
+// overload syrk herk
+// A is strided batched
+// C_ptr is pointer batched
+template <bool BATCHED, typename T, typename U>
+rocblas_status rocblasCall_syrk_herk(rocblas_handle handle,
+                                     rocblas_fill uplo,
+                                     rocblas_operation transA,
+                                     rocblas_int n,
+                                     rocblas_int k,
+                                     U alpha,
+                                     const T* A,
+                                     rocblas_stride offsetA,
+                                     rocblas_int lda,
+                                     rocblas_stride strideA,
+                                     U beta,
+                                     T* const* C,
+                                     rocblas_stride offsetC,
+                                     rocblas_int ldc,
+                                     rocblas_stride strideC,
+                                     rocblas_int batch_count,
+                                     T** work)
+{
+    constexpr auto name = rocblas_is_complex<T> ? "herk" : "syrk";
+    // TODO: How to get alpha and beta for trace logging
+    ROCBLAS_ENTER(name, "uplo:", uplo, "trans:", transA, "n:", n, "k:", k, "shiftA:", offsetA,
+                  "lda:", lda, "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    rocblas_int blocks = (batch_count - 1) / 256 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, work, A, strideA,
+                            batch_count);
+
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_syrk_batched_template(
+            handle, uplo, transA, n, k, cast2constType(alpha), cast2constType(work), offsetA, lda,
+            strideA, cast2constType(beta), C, offsetC, ldc, strideC, batch_count));
+    }
+    else
+    {
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_herk_batched_template(
+            handle, uplo, transA, n, k, cast2constType(alpha), cast2constType(work), offsetA, lda,
+            strideA, cast2constType(beta), C, offsetC, ldc, strideC, batch_count));
     }
     return rocblas_status_success;
 }
@@ -2606,7 +2702,7 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
                                 rocblas_stride offset_A,
                                 I lda,
                                 rocblas_stride stride_A,
-                                T* const B[],
+                                T* const* B,
                                 rocblas_stride offset_B,
                                 I ldb,
                                 rocblas_stride stride_B,
@@ -2623,8 +2719,6 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
                   "n:", n, "shiftA:", offset_A, "lda:", lda, "shiftB:", offset_B, "ldb:", ldb,
                   "bc:", batch_count);
 
-    using U = const T* const*;
-
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
@@ -2632,20 +2726,76 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, A, stride_A,
                             batch_count);
 
-    U supplied_invA = nullptr;
+    const T* const* supplied_invA = nullptr;
     if constexpr(std::is_same<I, int64_t>::value)
     {
         THROW_IF_ROCBLAS_ERROR(rocblas_internal_trsm_batched_template_64(
-            handle, side, uplo, transA, diag, m, n, alpha, cast2constType((U)workArr), offset_A,
-            lda, stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
+            handle, side, uplo, transA, diag, m, n, alpha, cast2constType(workArr), offset_A, lda,
+            stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
             invA, invA_arr, supplied_invA, 0));
     }
     else
     {
         THROW_IF_ROCBLAS_ERROR(rocblas_internal_trsm_batched_template(
-            handle, side, uplo, transA, diag, m, n, alpha, cast2constType((U)workArr), offset_A,
-            lda, stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
+            handle, side, uplo, transA, diag, m, n, alpha, cast2constType(workArr), offset_A, lda,
+            stride_A, B, offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr,
             invA, invA_arr, supplied_invA, 0));
+    }
+    return rocblas_status_success;
+}
+
+// trsm overload
+template <typename T, typename I>
+rocblas_status rocblasCall_trsm(rocblas_handle handle,
+                                rocblas_side side,
+                                rocblas_fill uplo,
+                                rocblas_operation transA,
+                                rocblas_diagonal diag,
+                                I m,
+                                I n,
+                                const T* alpha,
+                                const T* const* A,
+                                rocblas_stride offset_A,
+                                I lda,
+                                rocblas_stride stride_A,
+                                T* B,
+                                rocblas_stride offset_B,
+                                I ldb,
+                                rocblas_stride stride_B,
+                                I batch_count,
+                                bool optimal_mem,
+                                void* x_temp,
+                                void* x_temp_arr,
+                                void* invA,
+                                void* invA_arr,
+                                T** workArr)
+{
+    // TODO: How to get alpha for trace logging
+    ROCBLAS_ENTER("trsm", "side:", side, "uplo:", uplo, "trans:", transA, "diag:", diag, "m:", m,
+                  "n:", n, "shiftA:", offset_A, "lda:", lda, "shiftB:", offset_B, "ldb:", ldb,
+                  "bc:", batch_count);
+
+    hipStream_t stream;
+    rocblas_get_stream(handle, &stream);
+
+    I blocks = (batch_count - 1) / 256 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(get_array, dim3(blocks), dim3(256), 0, stream, workArr, B, stride_B,
+                            batch_count);
+
+    const T* const* supplied_invA = nullptr;
+    if constexpr(std::is_same<I, int64_t>::value)
+    {
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_trsm_batched_template_64(
+            handle, side, uplo, transA, diag, m, n, alpha, A, offset_A, lda, stride_A, workArr,
+            offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr, invA, invA_arr,
+            supplied_invA, 0));
+    }
+    else
+    {
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_trsm_batched_template(
+            handle, side, uplo, transA, diag, m, n, alpha, A, offset_A, lda, stride_A, workArr,
+            offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr, invA, invA_arr,
+            supplied_invA, 0));
     }
     return rocblas_status_success;
 }

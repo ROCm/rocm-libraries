@@ -16,7 +16,7 @@
 # potrfBatch    -> Cholesky factorization batch version
 # geqrf         -> Orthogonal factorization
 # (note: several can be selected)
-Slist="syevd syevdx syevj syevjBatch gesvd gesvdj gesvdjBatch potrf potrfBatch geqrf"
+Slist="syevd syevdx syevj syevjBatch gesvd gesvdj gesvdjBatch potrf potrfBatch geqrf cholqr"
 
 # precisions to use
 # valid options are: (default is d)
