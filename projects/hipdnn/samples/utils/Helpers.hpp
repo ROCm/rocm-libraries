@@ -107,8 +107,17 @@ enum class SampleType
 {
     GENERIC,
     BN_TRAINING,
-    SDPA
+    SDPA,
+    BN_WITH_PASS_BY_VALUE, // batchnorm samples that support pass-by-value tensors (epsilon)
 };
+
+// Single source of truth for which sample types accept --runtime-pass-by-value, so the
+// help text and the CLI parser can't drift out of sync as more sample types gain support.
+inline bool supportsRuntimePassByValue(SampleType sampleType)
+{
+    return sampleType == SampleType::BN_TRAINING || sampleType == SampleType::BN_WITH_PASS_BY_VALUE
+           || sampleType == SampleType::SDPA;
+}
 
 // HELP MESSAGE
 
@@ -148,6 +157,12 @@ inline void printSampleHelp(const std::string& sampleName,
                   << "  --full-training             Use running statistics\n";
     }
 
+    if(supportsRuntimePassByValue(sampleType))
+    {
+        std::cout << "  --runtime-pass-by-value     Supply pass-by-value tensors as runtime host\n"
+                  << "                              values instead of compile-time constants\n";
+    }
+
     std::cout << "  --help, -h                  Show this help message\n\n";
 }
 
@@ -157,6 +172,7 @@ struct Config
 {
     bool cpuValidation = false;
     bool useRunningStats = false;
+    bool useRuntimePassByValue = false;
 
     int engineId = -1;
     std::string dtype;
@@ -275,6 +291,8 @@ inline void printConfig(const Config& config)
     printList("--stride", config.stride);
     printList("--padding", config.padding);
     printList("--dilation", config.dilation);
+    std::cout << "  --runtime-pass-by-value: " << (config.useRuntimePassByValue ? "true" : "false")
+              << '\n';
 
     std::cout << '\n';
 }
@@ -301,6 +319,10 @@ inline Config
         else if(arg == "--full-training" && sampleType == SampleType::BN_TRAINING)
         {
             config.useRunningStats = true;
+        }
+        else if(arg == "--runtime-pass-by-value" && supportsRuntimePassByValue(sampleType))
+        {
+            config.useRuntimePassByValue = true;
         }
         else if(arg == "--engine-id")
         {

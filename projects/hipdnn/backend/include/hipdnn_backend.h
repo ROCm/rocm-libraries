@@ -55,6 +55,7 @@
 #include "HipdnnBackendPluginUnloadingMode.h"
 #include "HipdnnConvolutionMode.h"
 #include "HipdnnDataType.h"
+#include "HipdnnMoeGroupedMatmulMode.h"
 #include "HipdnnPaddingMode.h"
 #include "HipdnnReduceTensorOp.h"
 #include "HipdnnResampleMode.h"

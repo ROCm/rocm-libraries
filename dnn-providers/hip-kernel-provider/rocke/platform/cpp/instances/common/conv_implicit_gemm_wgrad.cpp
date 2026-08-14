@@ -695,11 +695,77 @@ static rocke_value_t* wgrad_dy_descriptor(rocke_ir_builder_t* b,
     rocke_value_t* m_val = rocke_b_add(b, ctx->block_m_off_v, row);
     /* k_wg_red = k_off + col (= output position, k_val) -- computed SECOND */
     rocke_value_t* k_val = rocke_b_add(b, ctx->k_off_capture, col);
+
+    /* Pointwise fast path: flat offset = k_wg_red * kpg + k_out
+     * Use pre-emitted constants to match Python's SSA ordering. */
+    if(ctx->is_pointwise)
+    {
+        rocke_value_t* c_K = ctx->ir_c_C_pw; /* kpg (pre-emitted as 1st const) */
+        rocke_value_t* c_wgM = ctx->ir_c_M_pw; /* wg_M (3rd) */
+        rocke_value_t* c_wgK = ctx->ir_c_wgN_pw; /* wg_K (5th, stored in ir_c_wgN_pw) */
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, k_val, c_K), m_val);
+        rocke_value_t* kred_ok = rocke_b_cmp_lt(b, k_val, c_wgK);
+        rocke_value_t* kout_ok = rocke_b_cmp_lt(b, m_val, c_wgM);
+        if(out_valid)
+            *out_valid = rocke_b_land(b, kred_ok, kout_ok);
+        return off;
+    }
+
     const char* names[2] = {"m", "k"};
     rocke_value_t* vals[2] = {m_val, k_val};
     rocke_value_t* off = NULL;
     rocke_value_t* valid = NULL;
     rocke_transforms_descriptor_offset(b, ctx->A_desc, names, vals, 2, &off, &valid);
+    if(out_valid)
+        *out_valid = valid;
+    return off;
+}
+
+// Wgrad x_descriptor: B-operand address closure for the X (input) tensor.
+// Python wgrad x_descriptor (build_implicit_gemm_conv_wgrad.py):
+//   k_val = b_.add(block_n_off_v, row)    # N_wg: filter+channel position
+//   m_val = b_.add(k_off_capture[0], col) # K_wg: output spatial position
+//   if p.is_pointwise:
+//     off = b_.add(b_.mul(m_val, _c_C_ir), k_val)  # k_wg * C + n_wg
+//     return off, land(cmp_lt(m_val, wg_K), cmp_lt(k_val, wg_N))
+//   return X_desc.offset(b_, m=m_val, k=k_val)
+//
+// When is_pointwise, the flat formula is: offset = k_wg * C + n_wg.
+// Note the operand order is reversed vs the forward b_descriptor (which computes
+// k_out * C + c). wg_N (filter+channel count) is stored in ctx->c_N_pw.
+static rocke_value_t* wgrad_x_descriptor(rocke_ir_builder_t* b,
+                                         rocke_value_t* row,
+                                         rocke_value_t* col,
+                                         rocke_value_t** out_valid,
+                                         void* ctx_user)
+{
+    rocke_conv_build_ctx_t* ctx = (rocke_conv_build_ctx_t*)ctx_user;
+    /* k_val = block_n_off + row (N_wg: filter+channel position) */
+    rocke_value_t* k_val = rocke_b_add(b, ctx->block_n_off_v, row);
+    /* m_val = k_off + col (K_wg: output spatial position) */
+    rocke_value_t* m_val = rocke_b_add(b, ctx->k_off_capture, col);
+
+    if(ctx->is_pointwise)
+    {
+        /* Flat: offset = k_wg * cpg + n_wg. Use pre-emitted constants. */
+        rocke_value_t* c_C = ctx->ir_c_K_pw; /* cpg (pre-emitted as 2nd const) */
+        rocke_value_t* c_wgK = ctx->ir_c_wgN_pw; /* wg_K (5th, stored in ir_c_wgN_pw) */
+        rocke_value_t* c_wgN = ctx->ir_always_valid; /* wg_N (4th, stored in ir_always_valid) */
+        rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_val, c_C), k_val);
+        rocke_value_t* kwg_ok = rocke_b_cmp_lt(b, m_val, c_wgK);
+        rocke_value_t* nwg_ok = rocke_b_cmp_lt(b, k_val, c_wgN);
+        if(out_valid)
+            *out_valid = rocke_b_land(b, kwg_ok, nwg_ok);
+        return off;
+    }
+
+    /* Full descriptor path: X_desc.offset(k_gemm=m_val, k_out=k_val)
+     * X descriptor top-level coords: "k_gemm" (K_wg reduction) and "k_out" (N_wg). */
+    const char* names[2] = {"k_gemm", "k_out"};
+    rocke_value_t* vals[2] = {m_val, k_val};
+    rocke_value_t* off = NULL;
+    rocke_value_t* valid = NULL;
+    rocke_transforms_descriptor_offset(b, ctx->B_desc, names, vals, 2, &off, &valid);
     if(out_valid)
         *out_valid = valid;
     return off;
@@ -925,6 +991,21 @@ static rocke_value_t* wgrad_dw_addr(rocke_ir_builder_t* b,
     return off;
 }
 
+/* Pointwise dW addr: flat offset = k_out * wg_N + n_wg, always valid.
+ * Python: def dw_addr(b_, m_val, n_val): return b_.add(b_.mul(m_val, _c_N), n_val), 1 */
+static rocke_value_t* wgrad_dw_addr_pointwise(rocke_ir_builder_t* b,
+                                              rocke_value_t* m_global,
+                                              rocke_value_t* n_global,
+                                              rocke_value_t** out_valid,
+                                              void* user)
+{
+    rocke_value_t* c_N = (rocke_value_t*)user;
+    rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_global, c_N), n_global);
+    if(out_valid)
+        *out_valid = rocke_b_const_i32(b, 1);
+    return off;
+}
+
 static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
                                        const rocke_conv_build_ctx_t* ctx,
                                        const rocke_implicit_gemm_conv_wgrad_spec_t* spec,
@@ -938,27 +1019,47 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     if(!ctx->is_wmma)
     {
         /* MFMA path: use DirectEpilogue.store with wgrad addr fn */
-        WgradDwAddrCtx addr_ctx;
-        addr_ctx.dW_desc = dW_desc;
-
         rocke_direct_epilogue_t epi;
         epi.atom = ctx->atom;
         epi.grid = ctx->grid;
         epi.out_dtype = dtype_d;
 
-        rocke_value_t* bound_m = rocke_b_const_i32(b, wg_M);
-        rocke_value_t* bound_n = rocke_b_const_i32(b, wg_N);
-
-        rocke_direct_epilogue_store(b,
-                                    &epi,
-                                    ctx->final_accs,
-                                    ctx->num_final_accs,
-                                    wgrad_dw_addr,
-                                    &addr_ctx,
-                                    dw_rsrc,
-                                    bound_m,
-                                    bound_n,
-                                    /*vec_in_acc=*/false);
+        if(ctx->is_pointwise)
+        {
+            /* Pointwise: Python _emit_wgrad_direct_epilogue emits _c_N FIRST:
+             *   _c_N = b.const_i32(wg_N)                      <- first
+             *   bounds = (b.const_i32(wg_M), b.const_i32(wg_N)) <- second/third */
+            rocke_value_t* c_N = rocke_b_const_i32(b, wg_N);
+            rocke_value_t* bound_m = rocke_b_const_i32(b, wg_M);
+            rocke_value_t* bound_n = rocke_b_const_i32(b, wg_N);
+            rocke_direct_epilogue_store(b,
+                                        &epi,
+                                        ctx->final_accs,
+                                        ctx->num_final_accs,
+                                        wgrad_dw_addr_pointwise,
+                                        (void*)c_N,
+                                        dw_rsrc,
+                                        bound_m,
+                                        bound_n,
+                                        false);
+        }
+        else
+        {
+            WgradDwAddrCtx addr_ctx;
+            addr_ctx.dW_desc = dW_desc;
+            rocke_value_t* bound_m = rocke_b_const_i32(b, wg_M);
+            rocke_value_t* bound_n = rocke_b_const_i32(b, wg_N);
+            rocke_direct_epilogue_store(b,
+                                        &epi,
+                                        ctx->final_accs,
+                                        ctx->num_final_accs,
+                                        wgrad_dw_addr,
+                                        &addr_ctx,
+                                        dw_rsrc,
+                                        bound_m,
+                                        bound_n,
+                                        false);
+        }
         return;
     }
 
@@ -980,6 +1081,9 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
     bool _fp32_out = (strcmp(dtype_d, "fp32") == 0);
     bool _bf16_out = (strcmp(dtype_d, "bf16") == 0);
     int elem_bytes = _fp32_out ? 4 : 2;
+
+    bool _is_pw = ctx->is_pointwise;
+    rocke_value_t* c_wgN_wmma = _is_pw ? rocke_b_const_i32(b, wg_N) : NULL;
 
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
     rocke_value_t* c0 = ctx->c0;
@@ -1012,8 +1116,14 @@ static void wgrad_emit_direct_epilogue(rocke_ir_builder_t* b,
                 rocke_value_t* ok = rocke_b_land(b, m_ok, n_ok);
                 rocke_value_t* v_f32 = rocke_b_vec_extract(b, acc, i);
 
-                /* dW_desc.offset(k_out=m_val, n_wg=n_val) */
+                /* dW_desc.offset(k_out=m_val, n_wg=n_val)
+                 * Pointwise: flat offset = m_val * wg_N + n_val */
                 rocke_value_t* d_off_elems = NULL;
+                if(_is_pw)
+                {
+                    d_off_elems = rocke_b_add(b, rocke_b_mul(b, m_val, c_wgN_wmma), n_val);
+                }
+                else
                 {
                     const char* names[2] = {"k_out", "n_wg"};
                     rocke_value_t* vals[2] = {m_val, n_val};
@@ -1101,6 +1211,40 @@ static bool wgrad_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         *stub_p = rocke_conv_problem_default(wg_M_val, 1, 1, wg_K, wg_N_val, 1, 1);
     }
     ctx->p = stub_p;
+
+    /* Pointwise fast path: mirrors Python `if p.is_pointwise:` where p is the
+     * real conv problem (not the stub).  The stub always has Y=X=1 so we must
+     * set is_pointwise from the real problem here and store wgrad-specific
+     * constants used by wgrad_dy_descriptor, wgrad_x_descriptor, and epilogues. */
+    {
+        bool pw = rocke_conv_problem_is_pointwise(&spec->problem);
+        ctx->is_pointwise = pw;
+        if(pw)
+        {
+            /* Python:
+             *   _c_K_ir   = b.const_i32(p.kpg)  -> kpg   (output channels per group)
+             *   _c_C_ir   = b.const_i32(p.cpg)  -> cpg   (input channels per group)
+             *   _c_wgM_ir = b.const_i32(wg_M)   -> wg_M  (= kpg for groups==1)
+             *   _c_wgN_ir = b.const_i32(wg_N)   -> wg_N  (= Y*X*C)
+             *   _c_wgK_ir = b.const_i32(wg_K)   -> wg_K  (= N*Ho*Wo reduction) */
+            ctx->c_K_pw = rocke_conv_problem_kpg(&spec->problem); /* kpg */
+            ctx->c_C_pw = rocke_conv_problem_cpg(&spec->problem); /* cpg */
+            ctx->c_M_pw = spec->problem.K; /* wg_M (groups==1) */
+            ctx->c_wgK_pw = wg_K; /* wg_K (reduction) */
+            ctx->c_wgN_pw = rocke_wgrad_conv_spec_wg_N(spec); /* wg_N */
+            /* Use wgrad_x_descriptor for B (X) tile: different pointwise formula. */
+            ctx->b_descriptor_fn = wgrad_x_descriptor;
+        }
+        else
+        {
+            ctx->c_K_pw = 0;
+            ctx->c_C_pw = 0;
+            ctx->c_M_pw = 0;
+            ctx->c_wgK_pw = 0;
+            ctx->c_wgN_pw = 0;
+            ctx->b_descriptor_fn = wgrad_x_descriptor; /* always use wgrad X descriptor */
+        }
+    }
 
     /* waves_per_eu */
     if(spec->has_waves_per_eu && b->kernel != NULL)
@@ -1470,6 +1614,29 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
     ctx.B_bytes = X_bytes;
     ctx.D_bytes = dW_bytes;
 
+    /* Pointwise prologue IR constants (mirrors Python build_implicit_gemm_conv_wgrad,
+     * before dy_buf_rsrc = make_buffer_resource):
+     *   if p.is_pointwise:
+     *     _c_K_ir   = b.const_i32(p.kpg)  <- first
+     *     _c_C_ir   = b.const_i32(p.cpg)  <- second
+     *     _c_wgM_ir = b.const_i32(wg_M)   <- third
+     *     _c_wgN_ir = b.const_i32(wg_N)   <- fourth
+     *     _c_wgK_ir = b.const_i32(wg_K)   <- fifth
+     * Emitted before buffer_rsrc so the SSA sequence matches Python. */
+    if(ctx.is_pointwise)
+    {
+        ctx.ir_c_C_pw = rocke_b_const_i32(b, ctx.c_K_pw); /* kpg = _c_K_ir */
+        ctx.ir_c_K_pw = rocke_b_const_i32(b, ctx.c_C_pw); /* cpg = _c_C_ir */
+        ctx.ir_c_M_pw = rocke_b_const_i32(b, ctx.c_M_pw); /* wg_M = _c_wgM_ir */
+        ctx.ir_always_valid = rocke_b_const_i32(b, ctx.c_wgN_pw); /* wg_N = _c_wgN_ir */
+        ctx.ir_c_wgN_pw = rocke_b_const_i32(b, ctx.c_wgK_pw); /* wg_K = _c_wgK_ir */
+    }
+    else
+    {
+        ctx.ir_c_C_pw = ctx.ir_c_K_pw = ctx.ir_c_M_pw = ctx.ir_always_valid = NULL;
+        ctx.ir_c_wgN_pw = NULL;
+    }
+
     /* Buffer resources */
     rocke_conv_buffer_resource_t a_rsrc, b_rsrc, d_rsrc;
     {
@@ -1497,14 +1664,23 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
      *   make_buffer_resource(dY/X/dW) then schedule.emit_prologue(b). */
     rocke_schedule_policy_emit_prologue(&ctx.schedule, b);
 
-    /* --- wgrad-specific descriptors --- */
-    rocke_tensor_descriptor_t* dY_desc = wgrad_make_dy_descriptor(b, p);
-    rocke_tensor_descriptor_t* X_desc = wgrad_make_x_descriptor(b, p);
-    rocke_tensor_descriptor_t* dW_desc = wgrad_make_dw_descriptor(b, p);
-    if(dY_desc == NULL || X_desc == NULL || dW_desc == NULL)
+    /* --- wgrad-specific descriptors ---
+     * Pointwise fast path (Y=X=1, stride=1, pad=0): descriptors are NULL; the
+     * wgrad_dy_descriptor / wgrad_x_descriptor closures use flat arithmetic.
+     * Non-pointwise: build the full coordinate-transform descriptor DAGs. */
+    rocke_tensor_descriptor_t* dY_desc = NULL;
+    rocke_tensor_descriptor_t* X_desc = NULL;
+    rocke_tensor_descriptor_t* dW_desc = NULL;
+    if(!ctx.is_pointwise)
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: descriptor build failed");
-        return NULL;
+        dY_desc = wgrad_make_dy_descriptor(b, p);
+        X_desc = wgrad_make_x_descriptor(b, p);
+        dW_desc = wgrad_make_dw_descriptor(b, p);
+        if(dY_desc == NULL || X_desc == NULL || dW_desc == NULL)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "wgrad: descriptor build failed");
+            return NULL;
+        }
     }
     /* The forward phase functions query A_desc with ("m","k") and B_desc with
      * ("k_out","k_gemm") -- our descriptors are built with exactly those names. */
@@ -1586,15 +1762,31 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv_wgrad(
             rocke_cshuffle_epilogue_t cepi
                 = rocke_cshuffle_epilogue_from_grid(ctx.atom, &ctx.grid, vec_c);
             cepi.out_dtype = dtype_d;
-            rocke_cshuffle_epilogue_store(b,
-                                          &cepi,
-                                          post_accs,
-                                          ctx.num_final_accs,
-                                          wgrad_dw_addr,
-                                          &dw_addr_ctx,
-                                          ctx.d_rsrc,
-                                          rocke_b_const_i32(b, wg_M),
-                                          rocke_b_const_i32(b, wg_N));
+            if(ctx.is_pointwise)
+            {
+                rocke_value_t* c_wgN = rocke_b_const_i32(b, wg_N);
+                rocke_cshuffle_epilogue_store(b,
+                                              &cepi,
+                                              post_accs,
+                                              ctx.num_final_accs,
+                                              wgrad_dw_addr_pointwise,
+                                              (void*)c_wgN,
+                                              ctx.d_rsrc,
+                                              rocke_b_const_i32(b, wg_M),
+                                              rocke_b_const_i32(b, wg_N));
+            }
+            else
+            {
+                rocke_cshuffle_epilogue_store(b,
+                                              &cepi,
+                                              post_accs,
+                                              ctx.num_final_accs,
+                                              wgrad_dw_addr,
+                                              &dw_addr_ctx,
+                                              ctx.d_rsrc,
+                                              rocke_b_const_i32(b, wg_M),
+                                              rocke_b_const_i32(b, wg_N));
+            }
         }
         else
         {

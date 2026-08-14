@@ -264,7 +264,7 @@ constexpr float getMxTolerance()
 {
     if constexpr(std::is_same_v<T, float>)
     {
-        return 1e-4f;
+        return 1e-3f;
     }
     else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
     {

@@ -160,6 +160,57 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
                                       rocke_value_t* rsrc,
                                       rocke_value_t* ptr);
 
+/* Split load: staging slot for one (row, col, v) triple produced by
+ * rocke_coalesced_tile_loader_load_global and consumed by
+ * rocke_coalesced_tile_loader_store_lds.
+ * Mirrors the Python list of (row, col, v) tuples returned by load_global(). */
+typedef struct rocke_ctl_staged_vec
+{
+    rocke_value_t* row;
+    rocke_value_t* col;
+    rocke_value_t* v; /* loaded VGPR value (buffer_load_vN result) */
+} rocke_ctl_staged_vec_t;
+
+/* Maximum vecs_per_thread supported by the split-load helpers.
+ * Sized for the largest tile (256x128 / 8 / 256 threads = 16). */
+#define ROCKE_CTL_MAX_VECS_PER_THREAD 32
+
+/* Staging buffer: holds up to ROCKE_CTL_MAX_VECS_PER_THREAD staged vectors for
+ * one loader's load_global() call. */
+typedef struct rocke_ctl_staged
+{
+    rocke_ctl_staged_vec_t vecs[ROCKE_CTL_MAX_VECS_PER_THREAD];
+    int count;
+} rocke_ctl_staged_t;
+
+/* CoalescedTileLoader.load_global() -- emit only the buffer_load_vN ops.
+ *
+ * Issues the global memory reads into VGPR SSA values and stores them in
+ * `staged` (which the caller must allocate). The matching smem_store_vN
+ * ops are deferred to rocke_coalesced_tile_loader_store_lds(). This split is
+ * required by CK pipeline_basic where the global read for tile k+1 must be issued
+ * before the sync+mfma for tile k but the LDS write must come after.
+ *
+ * Mirrors Python CoalescedTileLoader.load_global() -> list[(row, col, v)]. */
+void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
+                                             const rocke_coalesced_tile_loader_t* self,
+                                             rocke_value_t* tid,
+                                             rocke_loads_descriptor_fn descriptor,
+                                             void* descriptor_user,
+                                             rocke_value_t* rsrc,
+                                             rocke_value_t* ptr,
+                                             rocke_ctl_staged_t* staged);
+
+/* CoalescedTileLoader.store_lds() -- emit the smem_store_vN ops.
+ *
+ * Consumes a `staged` buffer filled by rocke_coalesced_tile_loader_load_global()
+ * and emits the corresponding smem_store_vN instructions into `smem_dst`.
+ * Mirrors Python CoalescedTileLoader.store_lds(b, smem_dst, staged). */
+void rocke_coalesced_tile_loader_store_lds(rocke_ir_builder_t* b,
+                                           const rocke_coalesced_tile_loader_t* self,
+                                           rocke_value_t* smem_dst,
+                                           const rocke_ctl_staged_t* staged);
+
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */

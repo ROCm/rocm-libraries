@@ -220,8 +220,15 @@ namespace rocsparse
             local_bsr_col_ind = (const rocsparse_int*)trm_info->get_transposed_col_ind();
             local_bsr_val     = (const T*)bsrt_val;
 
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_lower:
+                fill_mode = rocsparse_fill_mode_upper;
+                break;
+            case rocsparse_fill_mode_upper:
+                fill_mode = rocsparse_fill_mode_lower;
+                break;
+            }
         }
 
         // Determine gcn_arch and ASIC revision
@@ -232,13 +239,18 @@ namespace rocsparse
         // gfx908 A0/1
         if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
         {
-            if(fill_mode == rocsparse_fill_mode_upper)
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_upper:
             {
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_upper_large_kernel, 16, true);
+                break;
             }
-            else
+            case rocsparse_fill_mode_lower:
             {
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_lower_large_kernel, 16, true);
+                break;
+            }
             }
         }
         else
@@ -257,13 +269,18 @@ namespace rocsparse
 #define DEFINE_CASE(i)                                               \
     case i:                                                          \
     {                                                                \
-        if(fill_mode == rocsparse_fill_mode_upper)                   \
+        switch(fill_mode)                                            \
+        {                                                            \
+        case rocsparse_fill_mode_upper:                              \
         {                                                            \
             LAUNCH_LARGE_KERNEL(bsrsm_upper_large_kernel, i, false); \
+            break;                                                   \
         }                                                            \
-        else                                                         \
+        case rocsparse_fill_mode_lower:                              \
         {                                                            \
             LAUNCH_LARGE_KERNEL(bsrsm_lower_large_kernel, i, false); \
+            break;                                                   \
+        }                                                            \
         }                                                            \
         break;                                                       \
     }

@@ -46,8 +46,7 @@ struct BlockScaleDequantizeTensorBundle
 };
 
 template <typename XType, typename ScaleType>
-static std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>,
-                  std::unordered_map<int64_t, void*>>
+std::tuple<std::shared_ptr<hipdnn_frontend::graph::Graph>, std::unordered_map<int64_t, void*>>
     buildBlockScaleDequantizeGraph(BlockScaleDequantizeTensorBundle<XType, ScaleType>& tensorBundle,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType,
                                    hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,

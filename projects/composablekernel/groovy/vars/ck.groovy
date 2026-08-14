@@ -547,13 +547,16 @@ def runOnHealthyNode(String label, Closure body) {
         def attemptNode = null
         try {
             node(exclude(label, excluded)) {
-                attemptNode = env.NODE_NAME
-                echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                // Derive GPU requirement from the node label: only "nogpu" stages
-                // skip the driver/device checks. A new non-GPU label would need
-                // adding here (otherwise preflight would wrongly demand a GPU).
-                preflight(!label.contains('nogpu'))
-                runInPlace(body, transientRetries)
+                ws("${env.WORKSPACE}-${env.BUILD_NUMBER}") {
+                    sh 'echo "The updated workspace is: $WORKSPACE"'
+                    attemptNode = env.NODE_NAME
+                    echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
+                    // Derive GPU requirement from the node label: only "nogpu" stages
+                    // skip the driver/device checks. A new non-GPU label would need
+                    // adding here (otherwise preflight would wrongly demand a GPU).
+                    preflight(!label.contains('nogpu'))
+                    runInPlace(body, transientRetries)
+                }
             }
             return
         }
@@ -1234,7 +1237,7 @@ def run_downstream_tests(Map conf=[:]){
         try
         {
             echo "Pulling image: ${conf.image}"
-            retimage = docker.image("${conf.image}")
+            def retimage = docker.image("${conf.image}")
             withDockerRegistry([ credentialsId: "ck_docker_cred", url: "" ]) {
                 retimage.pull()
             }

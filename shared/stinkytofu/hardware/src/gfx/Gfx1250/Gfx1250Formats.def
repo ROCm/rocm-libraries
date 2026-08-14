@@ -730,12 +730,26 @@ DEF_FORMAT(VGLOBAL,
 // hazards bucket it as VMEM (EV_VGPR_VMEM_READ) -- not FLAT. NOTE: like all returning
 // atomics, it is NOT tracked by the waitcnt dataflow (returning atomics are untracked) --
 // the consumer's wait is emitted manually by the caller.
+// ImplicitReadEXEC: the hardware reads EXEC.
 DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
     .parent = VGLOBAL,
-    .flags = {GLOBALAtomic},
+    .flags = {GLOBALAtomic, ImplicitReadEXEC},
     .fields = {
         {D0, vdst, vgpr, 32},
         {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_ASYNC_FROM_LDS - gfx1250 async store LDS -> global:
+//   global_store_async_from_lds_* vaddr(64), dsaddr(32), saddr(64); no dest.
+// Shared by all size variants (b8/b32/b64/b128) via the DEF_BATCH.
+DEF_FORMAT(VGLOBAL_ASYNC_FROM_LDS,
+    .parent = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .fields = {
+        {S0, vaddr, vgpr, 64},
         {S1, vsrc, vgpr, 32},
         {S2, saddr, sreg, 64},
     },
