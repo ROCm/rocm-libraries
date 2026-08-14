@@ -12,7 +12,7 @@ Usage:
   python selective_test_filter.py <depmap_json> <ref1> <ref2> [--all | --test-prefix] [--output <output_json>]
 
 Arguments:
-  <depmap_json>   Path to miopen_dapper_mapping.json
+  <depmap_json>   Path to enhanced_dependency_mapping.json
   <ref1>          Source git ref (branch or commit)
   <ref2>          Target git ref (branch or commit)
 
@@ -24,44 +24,19 @@ Options:
 """
 
 import sys
-
-if sys.version_info < (3, 10):
-    sys.exit("Python 3.10 or later is required.")
-
+import subprocess
 import json
 import os
-from pathlib import Path
-import subprocess
-import xml.etree.ElementTree as ET
 
 
 def get_changed_files(ref1, ref2, path_to_folder):
     """Return a set of files changed between two git refs."""
-    base_commit = subprocess.run(
-        ["git", "show", "-s", '--format="%h  %ad  %s"', "--date=iso", f"{ref1}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    feat_commit = subprocess.run(
-        ["git", "show", "-s", '--format="%h  %ad  %s"', "--date=iso", f"{ref2}"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    print(f"DAPPER branches: MERGE-BASE: {base_commit.stdout.strip()}")
-    print(f"                    FEATURE: {feat_commit.stdout.strip()}")
-
     args = ["git", "diff", "--name-only", ref1, ref2]
     if path_to_folder:
         args += ["--", path_to_folder]
     try:
         result = subprocess.run(args, capture_output=True, text=True, check=True)
-        files = set(
-            str(Path(*Path(line).parts[2:])).strip()
-            for line in result.stdout.splitlines()
-            if line.strip()
-        )
+        files = set(line.strip() for line in result.stdout.splitlines() if line.strip())
         return files
     except subprocess.CalledProcessError as e:
         print(f"Error running git diff: {e}")
@@ -71,22 +46,11 @@ def get_changed_files(ref1, ref2, path_to_folder):
 def load_depmap(depmap_json):
     """Load the dependency mapping JSON."""
     with open(depmap_json, "r") as f:
-        depmap = json.load(f)
-    # TODO: remove old format
-    if "file_to_executables" in depmap:
-        return depmap["file_to_executables"]
-    return depmap
-
-
-def load_fixturemap(fixturemap_json):
-    """Load the dependency mapping JSON."""
-    with open(fixturemap_json, "r") as f:
-        fixturemap = json.load(f)
-    for test, fixtures in fixturemap.items():
-        for i, fixture in enumerate(fixtures):
-            if not fixture.endswith("*"):
-                fixtures[i] = fixture + "*"
-    return fixturemap
+        data = json.load(f)
+    # Support both old and new formats
+    if "file_to_executables" in data:
+        return data["file_to_executables"]
+    return data
 
 
 def select_tests(file_to_executables, changed_files, filter_mode):
@@ -97,111 +61,9 @@ def select_tests(file_to_executables, changed_files, filter_mode):
             for exe in file_to_executables[f]:
                 if filter_mode == "all":
                     affected.add(exe)
-                elif filter_mode == "test_prefix" and (
-                    exe.startswith("bin/test_") or exe == "bin/miopen_gtest"
-                ):
+                elif filter_mode == "test_prefix" and exe.startswith("test_"):
                     affected.add(exe)
     return sorted(affected)
-
-
-def create_gtest_filter(tests_to_run, fixturemap_json):
-    gtest_filter = ""
-    if fixturemap_json:
-        fixturemap = load_fixturemap(fixturemap_json)
-        for file in tests_to_run:
-            if file not in fixturemap:
-                if file != "bin/miopen_gtest":
-                    print(
-                        f"Warning: binary {file} was marked for run, but no gtests were found"
-                    )
-            else:
-                for test in fixturemap[file]:
-                    gtest_filter += test + ":"
-        gtest_filter = gtest_filter[:-1]
-    else:
-        gtest_filter = "*"
-    return gtest_filter
-
-
-def _xml_timestamp(ts):
-    return ts.split(".")[0] + "Z"
-
-
-def _xml_time(t):
-    return t + "s"
-
-
-def _xml_testcase(case):
-    a = case.attrib
-    tc = {
-        "name": a["name"],
-        "file": a["file"],
-        "line": int(a["line"]),
-        "status": a["status"].upper(),
-        "result": a["result"].upper(),
-        "timestamp": _xml_timestamp(a["timestamp"]),
-        "time": _xml_time(a["time"]),
-        "classname": a["classname"],
-    }
-    if "value_param" in a:
-        tc["value_param"] = a["value_param"]
-    failure_elems = [c for c in case if c.tag == "failure"]
-    if failure_elems:
-        tc["failures"] = [
-            {"failure": f.attrib["message"], "type": f.attrib.get("type", "")}
-            for f in failure_elems
-        ]
-    # reorder to match gtest json field order
-    ordered = {}
-    for key in (
-        "name",
-        "value_param",
-        "file",
-        "line",
-        "status",
-        "result",
-        "timestamp",
-        "time",
-        "classname",
-        "failures",
-    ):
-        if key in tc:
-            ordered[key] = tc[key]
-    return ordered
-
-
-def _xml_testsuite(suite):
-    a = suite.attrib
-    return {
-        "name": a["name"],
-        "tests": int(a["tests"]),
-        "failures": int(a["failures"]),
-        "disabled": int(a["disabled"]),
-        "errors": int(a["errors"]),
-        "timestamp": _xml_timestamp(a["timestamp"]),
-        "time": _xml_time(a["time"]),
-        "testsuite": [_xml_testcase(c) for c in suite if c.tag == "testcase"],
-    }
-
-
-def _xml_to_gtest_json(xml_path):
-    root = ET.parse(xml_path).getroot()
-    a = root.attrib
-    return {
-        "tests": int(a["tests"]),
-        "failures": int(a["failures"]),
-        "disabled": int(a["disabled"]),
-        "errors": int(a["errors"]),
-        "timestamp": _xml_timestamp(a["timestamp"]),
-        "time": _xml_time(a["time"]),
-        "name": a["name"],
-        "testsuites": [_xml_testsuite(s) for s in root if s.tag == "testsuite"],
-    }
-
-
-def load_shards(shardsfile):
-    """Read shard filenames from shardsfile; store xml paths as-is (conversion happens later)."""
-    return [line for line in open(shardsfile).read().splitlines() if line.strip()]
 
 
 def main():
@@ -250,12 +112,9 @@ def main():
     depmap_json = sys.argv[1]
     ref1 = sys.argv[2]
     ref2 = sys.argv[3]
-    filter_mode = "test_prefix"
+    filter_mode = "all"
     output_json = "tests-to-run.json"
     path_to_folder = ""
-    fixturemap_json = ""
-    shardsfile = ""
-    gtest_shards = []
 
     if "--test-prefix" in sys.argv:
         filter_mode = "test_prefix"
@@ -269,14 +128,6 @@ def main():
         idx = sys.argv.index("--folder")
         if idx + 1 < len(sys.argv):
             path_to_folder = sys.argv[idx + 1]
-    if "--fixturemap" in sys.argv:
-        idx = sys.argv.index("--fixturemap")
-        if idx + 1 < len(sys.argv):
-            fixturemap_json = sys.argv[idx + 1]
-    if "--shardsfile" in sys.argv:
-        idx = sys.argv.index("--shardsfile")
-        if idx + 1 < len(sys.argv):
-            shardsfile = sys.argv[idx + 1]
 
     if not os.path.exists(depmap_json):
         print(f"Dependency map JSON not found: {depmap_json}")
@@ -286,27 +137,16 @@ def main():
     if not changed_files:
         print("No changed files detected.")
         tests = []
-        gtest_filter = ""
     else:
         file_to_executables = load_depmap(depmap_json)
         tests = select_tests(file_to_executables, changed_files, filter_mode)
-        gtest_filter = create_gtest_filter(tests, fixturemap_json)
-        if shardsfile:
-            gtest_shards = load_shards(shardsfile)
 
     with open(output_json, "w") as f:
         json.dump(
-            {
-                "tests_to_run": tests,
-                "dapper_filter": gtest_filter,
-                "changed_files": sorted(changed_files),
-                "gtest_shards": gtest_shards,
-            },
-            f,
-            indent=2,
+            {"tests_to_run": tests, "changed_files": sorted(changed_files)}, f, indent=2
         )
 
-    print(f"Exported {len(tests)} test fixtures to run to {output_json}")
+    print(f"Exported {len(tests)} tests to run to {output_json}")
 
 
 if __name__ == "__main__":
