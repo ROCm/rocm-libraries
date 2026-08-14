@@ -1,0 +1,29 @@
+{
+  "version": "0.1",
+  "id": "kdp-copy",
+  "name": "Copy pack",
+  "arch": ["gfx942"],
+  "matchers": ["umd-copy"],
+  "engine": "ued-copy",
+  "dispatch": "udd-copy",
+  "kernelDescriptors": [
+    {
+      "version": "0.1",
+      "id": "ukd-copy-f32-b64",
+      "name": "Copy f32 block64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "Copy.cpp",
+        "entry": "Copy",
+        "build": {
+          "defines": {
+            "HIP_PLUGIN_COPY_TYPE": "float",
+            "HIP_PLUGIN_COPY_BLOCK_SIZE": 64
+          }
+        }
+      },
+      "metadata": { "dtype": "FLOAT", "block_size": 64 },
+      "priority": 0
+    }
+  ]
+}

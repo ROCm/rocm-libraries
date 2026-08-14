@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "uhd-solo",
+  "name": "Solo static-order heuristic",
+  "adapter": "static_order",
+  "order": ["priority", "id"]
+}

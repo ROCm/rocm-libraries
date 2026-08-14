@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "ued-pointwise",
+  "name": "Pointwise engine",
+  "heuristic": "uhd-shared",
+  "metadata": "kmd-pointwise"
+}

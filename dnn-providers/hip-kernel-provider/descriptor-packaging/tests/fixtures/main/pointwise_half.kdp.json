@@ -1,0 +1,29 @@
+{
+  "version": "0.1",
+  "id": "kdp-pointwise-half",
+  "name": "Pointwise half pack",
+  "arch": ["gfx942"],
+  "matchers": ["umd-pointwise"],
+  "engine": "ued-pointwise",
+  "dispatch": "udd-pointwise",
+  "kernelDescriptors": [
+    {
+      "version": "0.1",
+      "id": "ukd-pointwise-add-f16-b64",
+      "name": "PointwiseAdd f16 block64",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "PointwiseAdd.cpp",
+        "entry": "PointwiseAdd",
+        "build": {
+          "defines": {
+            "HIP_PLUGIN_POINTWISE_ADD_TYPE": "_Float16",
+            "HIP_PLUGIN_POINTWISE_ADD_BLOCK_SIZE": 64
+          }
+        }
+      },
+      "metadata": { "dtype": "HALF", "block_size": 64 },
+      "priority": 0
+    }
+  ]
+}

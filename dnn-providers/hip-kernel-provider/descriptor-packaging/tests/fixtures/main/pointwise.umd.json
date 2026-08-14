@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-pointwise",
+  "name": "Pointwise matcher",
+  "nodes": ["pointwise"],
+  "criteria": { "op": "pointwise" }
+}

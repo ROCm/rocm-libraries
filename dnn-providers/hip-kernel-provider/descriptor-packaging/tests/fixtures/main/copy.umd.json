@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-copy",
+  "name": "Copy matcher",
+  "nodes": ["copy"],
+  "criteria": { "op": "copy" }
+}

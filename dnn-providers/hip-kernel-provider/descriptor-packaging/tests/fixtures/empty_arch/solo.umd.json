@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "id": "umd-solo",
+  "name": "Solo matcher",
+  "nodes": ["pointwise"],
+  "criteria": { "op": "pointwise" }
+}
