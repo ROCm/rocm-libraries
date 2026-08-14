@@ -465,8 +465,8 @@ namespace rocsparse
             // row and nnz extents in range so stale/uninitialized merge coordinates
             // degrade to incorrect results rather than an out-of-bounds device fault.
             // No-ops for valid coordinates.
-            J       start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
-            const J end_row   = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
+            J start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+            const J end_row = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
             const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
             const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
@@ -681,8 +681,8 @@ namespace rocsparse
             // row and nnz extents in range so stale/uninitialized merge coordinates
             // degrade to incorrect results rather than an out-of-bounds device fault.
             // No-ops for valid coordinates.
-            J       start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
-            const J end_row   = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
+            J start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+            const J end_row = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
             const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
             const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
@@ -907,8 +907,8 @@ namespace rocsparse
             // row and nnz extents in range so stale/uninitialized merge coordinates
             // degrade to incorrect results rather than an out-of-bounds device fault.
             // No-ops for valid coordinates.
-            J       start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
-            const J end_row   = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
+            J start_row = static_cast<J>(rocsparse::min(start_coord.x, static_cast<uint32_t>(M)));
+            const J end_row = static_cast<J>(rocsparse::min(end_coord.x, static_cast<uint32_t>(M)));
 
             const I ptr_start_row = csr_row_ptr[start_row] - idx_base;
             const I ptr_end_row   = csr_row_ptr[end_row] - idx_base;
