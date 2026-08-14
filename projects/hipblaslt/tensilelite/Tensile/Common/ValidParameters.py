@@ -1214,6 +1214,15 @@ validParameters = { # we need to make sure this matches develop
     #      would not be produced (NumWaves == 1, UseSubtileImpl, no MX scales,
     #      sparse metadata) rather than degrading silently under a name that
     #      claims it.
+    #   2  {A,MXSA,MXSB} + {B}. Two descriptor sets on a THREE-WAY dispatch of
+    #      the shared set, and the grouping the hand-written OAI deliverable uses.
+    #      The dispatch is uneven: at NumWaves=4 two waves carry A, ONE carries
+    #      MXSA, ONE carries MXSB, and -- because B is alone in its set and has no
+    #      partner to divide against -- ALL FOUR carry B, so B's component id
+    #      becomes the full wave index over four components even though B's arm
+    #      reads as untouched. Costs the same 24 SGPRs as the default pairing.
+    #      Restricted to NumWaves == 4: 4 does not divide by 3, so the 1/1/2 split
+    #      is a remainder policy for three members rather than an even partition.
     #   6  {A} + {B} + {MXSA,MXSB}. Three descriptor sets: A and B each own one,
     #      the MX scales stay parity-aliased on a third. Not in the design table,
     #      which runs 0..5, so 6 sits above the table rather than in it. Costs 12
@@ -1230,16 +1239,11 @@ validParameters = { # we need to make sure this matches develop
     # problem once tuning libraries carry values. The unimplemented rows keep the
     # table's numbers provisionally:
     #     1  `AB`      {A,B}, MX scales unfused
-    #     2  `A_MX`    {A,MXSA,MXSB} + {B}
     #     3  `B_MX`    {B,MXSA,MXSB} + {A}
     #     5  `paired`  {MXSA,A} + {MXSB,B}
-    # Rows 2 and 3 are realisable but not expressible by today's generator: a
-    # three-member group needs a three-way wave dispatch, and
-    # TensorDataMover.calculateStartAddrWaveSeparated knows only the parity split
-    # (numComp = numWaves // 2, asserting numWaves > 1). Any value added here
-    # must document the dispatch it implies, or it will not survive a different
-    # NumWaves.
-    "TDMFuse": [0, 4, 6],
+    # Row 3 is the mirror of 2 and realisable the same way, but is unimplemented:
+    # it needs B's share of the shared set split across two waves against A alone.
+    "TDMFuse": [0, 2, 4, 6],
     # TDMWaveSpread -- how many wave-components each tensor's TDM transfer is split
     # into. A different axis from TDMFuse, which names only the grouping: two
     # configurations can share a grouping and split across different counts.

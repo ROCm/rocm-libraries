@@ -3161,8 +3161,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # de-aliased A/B pair, whose two fills are each parity-guarded.
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
           and not kernel.get("UseSubtileImpl") \
-          and not (self.states.staggerUCode and self.isTdmWaveSeparated(kernel)) \
-          and not tdmDealiasAB(kernel):
+          and not self.isTdmWaveIdxLive(kernel):
         module.add(self.undefineSgpr("WaveIdx"))
 
       ###########################################################################
@@ -7251,6 +7250,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
        disableStaggerForMxPap or \
        kernel["UseSubtileImpl"] or \
        clusterEnabled(kernel["ClusterDim"]):
+      self.states.staggerUCode = False
+    # StaggerU=0 must not keep the wrap machinery alive on the strength of the
+    # runtime SupportCustomStaggerU flag.
+    if kernel["StaggerU"] == 0:
       self.states.staggerUCode = False
     
     self.states.tailloopInNllmaxUnit = 1

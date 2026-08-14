@@ -43,7 +43,8 @@ from Tensile.Common.DecouplePgr import pgrLevelsForTensors, ldsBlocksForPgrLevel
                                        decoupledOneBlockBoth, tdmBothTensors, \
                                        tdmDealiasAB, tdmWaveComponents, decouplePgrBlocks, \
                                        equalPairDegeneratesToScalar, \
-                                       divergentPairUnsupportedReason
+                                       divergentPairUnsupportedReason, \
+                                       tdmFuseAMx
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config
@@ -2921,6 +2922,63 @@ class Solution(collections.abc.Mapping):
                "TDMFuse=%d describes how TDM transfers share descriptors, so it needs the TDM on "
                "both tensors (TDMInst=3); got TDMInst=%d" % (tdmFuse, state["TDMInst"]))
         return
+      if tdmFuse == 2:
+        # {A,MXSA,MXSB} + {B}. Reject rather than assert: an AssertionError in a
+        # solution predicate takes down the whole TensileCreateLibrary run.
+        if state["NumWaves"] != 4:
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 dispatches its shared descriptor three ways -- two waves on A, one on "
+                 "MXSA, one on MXSB -- and all remaining waves on B, which names four waves "
+                 "explicitly; 4 does not divide by 3, so the 1/1/2 split is a remainder policy "
+                 "rather than an even partition and does not generalise, got NumWaves=%d"
+                 % state["NumWaves"])
+          return
+        if state.get("UseSubtileImpl"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 is not available with UseSubtileImpl=1, which gives each tensor its "
+                 "own descriptor and so has no shared set to dispatch")
+          return
+        if not (state["ProblemType"]["MXBlockA"] and state["ProblemType"]["MXBlockB"]):
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 names MXSA and MXSB as the two single-wave members of its shared "
+                 "group, so it requires MX scales on both tensors; without them the group is "
+                 "just {A} and this is TDMFuse=6 with the scales moved")
+          return
+        if state.get("TDMSplit"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 is not available with TDMSplit, whose multi-wave increment recomputes "
+                 "one parity-selected split stride for one shared descriptor; this grouping "
+                 "retires the parity pairing that select depends on")
+          return
+        if state["enableTDMMetadata"]:
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 does not describe the sparse metadata tensor, which the TDM moves on "
+                 "a descriptor (tdmMetadataGroup0) that no value of this parameter names")
+          return
+        if state["StaggerU"]:
+          # The stagger wrap is selected per descriptor and the shared set holds three
+          # tensors' pointers, so the select would have to be three-way too. A wrap
+          # applied with the wrong tensor's WrapU walks the pointer off its tile rather
+          # than failing loudly.
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 requires StaggerU=0; the shared descriptor carries A, MXSA or MXSB "
+                 "depending on the wave, so a two-way WrapU select would apply the wrong "
+                 "tensor's wrap, got StaggerU=%d" % state["StaggerU"])
+          return
+        if state.get("TDMWaveSpread"):
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 fixes its own per-tensor component counts (2/1/1 on the shared set, "
+                 "NumWaves on B), so TDMWaveSpread=%d would name a second, contradictory count "
+                 "for the same tensors" % state["TDMWaveSpread"])
+          return
+        # These guards must stay exactly tdmFuseAMx's preconditions; if they drift,
+        # decline rather than accept a name the writer will not honour.
+        if not tdmFuseAMx(state):
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 passed its solution-level guards but tdmFuseAMx declined the "
+                 "solution, so the writer would emit a different grouping than the name claims")
+          return
+
       if tdmFuse == 4:
         # defineTdmSgprs reaches {MXSA,MXSB} + {A,B} under exactly NumWaves > 1
         # and not UseSubtileImpl. Outside that, each tensor already owns its

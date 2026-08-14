@@ -208,33 +208,111 @@ def tdmDealiasAB(ks):
     return ks.get("NumWaves", 1) > 1 and not ks.get("UseSubtileImpl")
 
 
-def tdmWaveComponents(ks, tc):
-    """How many wave-components carry tensor `tc`, and the shift from WaveIdx
-    to its component id.
+def tdmFuseAMx(ks):
+    """True when {A,MXSA,MXSB} share one TDM descriptor set and B owns its own.
 
-    Grouping -- which tensors share one descriptor register set -- and component
-    count -- how many waves split one tensor's transfer -- are independent axes.
-    TDMFuse names only the grouping, so the count travels separately on
-    TDMWaveSpread.
+    TDMFuse=2, the grouping the hand-written OAI kernel uses. Two sets of 4+8 is
+    the same 24 SGPRs the default {A,B}+{MXSA,MXSB} pairing already spends.
 
-    Returns (numComp, compShift). compShift is the right shift applied to
-    WaveIdx; 0 means the component id IS the wave index, and None means this
-    tensor sits on a single wave, so its component id is a constant zero and no
-    register arithmetic is emitted for it at all.
+    Selected only by TDMFuse=2, never derived, so 0 stays inert.
+
+    NumWaves == 4 exactly. The dispatch is 1/1/2 -- one wave for MXSA, one for
+    MXSB, two for A -- and A's share is numWaves - 2, which is a power of two
+    only at 4. 4 does not divide by 3, so the 1/1/2 split is the remainder
+    policy for three group members rather than an even partition, and there is
+    no arithmetic that generalises it to another wave count.
+
+    TDMSplit is excluded for the same reason it is excluded from tdmDealiasAB:
+    its multi-wave increment recomputes one parity-selected split stride for one
+    shared descriptor, and this row has no parity pairing left to select on.
+    """
+    if ks.get("TDMFuse") != 2:
+        return False
+    if not tdmBothTensors(ks):
+        return False
+    if ks.get("TDMSplit"):
+        return False
+    if not (ks["ProblemType"].get("MXBlockA") and ks["ProblemType"].get("MXBlockB")):
+        return False
+    return ks.get("NumWaves", 1) == 4 and not ks.get("UseSubtileImpl")
+
+
+def tdmWavePartition(ks, tc):
+    """(numComp, waves) for tensor `tc` on the wave-separated TDM path.
+
+    THE single source of truth for how a tensor is divided across waves. numComp
+    is how many waves divide it between them; waves is the tuple of wave indices
+    that actually move it, so the offset arithmetic and the dispatch guard are
+    derived from one statement rather than agreeing by coincidence. A tensor's
+    component id is its position within `waves`.
+
+    The default is the two-way parity split every pre-existing row uses: numComp
+    = numWaves // 2 with component id waveIdx >> 1, so waves {0,2,..} take the
+    A/MXSA arm and {1,3,..} the B/MXSB arm.
     """
     numWaves = ks.get("NumWaves", 1)
-    isMXS = "MXS" in tc
-
-    # TDMWaveSpread=1: the hand-written reference's 2/2/4 overlay. A and B each
-    # spread over every wave; the MX scales keep the parity pair untouched, so
-    # MXSA still rides waves 0 and 2 and MXSB waves 1 and 3.
+    if tdmFuseAMx(ks):
+        # A on the low two waves, one scale tensor each on the top two. B is alone in
+        # its set, so it has no partner to divide against and every wave carries it.
+        if tc.endswith("A") and not tc.startswith("MX"):
+            return 2, (0, 1)
+        if tc == "MXSA":
+            return 1, (2,)
+        if tc == "MXSB":
+            return 1, (3,)
+        if tc.endswith("B"):
+            return numWaves, tuple(range(numWaves))
     if ks.get("TDMWaveSpread", 0) == 1:
-        return (numWaves // 2, 1) if isMXS else (numWaves, 0)
+        # A and B each spread over every wave; the MX scales keep the parity pair.
+        if "MXS" in tc:
+            return numWaves // 2, tuple(
+                w for w in range(numWaves) if (w % 2 == 0) == tc.endswith("A"))
+        return numWaves, tuple(range(numWaves))
+    numComp = numWaves // 2
+    isAArm = tc.endswith("A")
+    return numComp, tuple(w for w in range(numWaves) if (w % 2 == 0) == isAArm)
 
-    # Every other configuration keeps the parity split exactly as it was: two
-    # components, component id WaveIdx >> 1. Passed explicitly rather than left
-    # to a default so that adding a row cannot move an existing one.
-    return numWaves // 2, 1
+
+def tdmWaveCompIdMode(ks, tc):
+    """How a tensor's TDM component id is derived from the wave index.
+
+    Both the global-address arithmetic (Components/TensorDataMover) and the LDS
+    arithmetic (KernelWriterAssembly.initTDMDescriptorWaveSeparatedImpl) have to
+    pick the same component id for the same tensor, or a wave reads one tile from
+    memory and writes a different tile's LDS slot -- which validates or not by
+    luck rather than failing to build. They read this.
+
+      "zero"    -- one wave carries the whole tensor, so its component id is 0
+      "waveIdx" -- component id IS the wave index; participants are waves
+                   0..numComp-1, which is how an uneven split addresses itself
+      "parity"  -- component id is waveIdx >> 1, two waves per component; the
+                   two-way split every pre-existing row uses
+    """
+    numComp, waves = tdmWavePartition(ks, tc)
+    if numComp == 1:
+        return "zero"
+    if waves == tuple(range(numComp)):
+        return "waveIdx"
+    return "parity"
+
+
+def tdmWaveComponents(ks, tc):
+    """(numComp, compShift) for tensor `tc` -- the shift form of the partition.
+
+    A thin adapter over tdmWavePartition/tdmWaveCompIdMode so that the
+    global-address side, the LDS side, both tail resets and the solution-level
+    divisibility guard all derive their component count and component id from
+    ONE function. compShift is the right shift applied to WaveIdx: 0 means the
+    component id IS the wave index, and None means one wave carries the tensor,
+    so the id is a constant zero and no register arithmetic is emitted.
+
+    Keeping the shift form is what makes TDMFuse=2 correct on the global-address
+    side for free: that side already asks this question per tensor, so a new
+    grouping answers it without a new call site to keep in step.
+    """
+    numComp, _waves = tdmWavePartition(ks, tc)
+    mode = tdmWaveCompIdMode(ks, tc)
+    return numComp, {"zero": None, "waveIdx": 0, "parity": 1}[mode]
 
 
 def decoupledOneBlockBoth(ks):
