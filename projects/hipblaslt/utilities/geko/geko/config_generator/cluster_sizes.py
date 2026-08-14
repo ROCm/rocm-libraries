@@ -11,7 +11,7 @@ Supports three modes:
 import logging
 from typing import Any, Dict, List, Sequence, Tuple
 
-from geko.config_generator.mi_designer import MIDesign
+from geko.config_generator.mi_designer import MFMA, MIDesign
 from geko.config_generator.shared_utils import ConfigEntry
 
 logger = logging.getLogger("GEKO")
@@ -111,8 +111,8 @@ def _cluster_sizes_mi(
                 mi[-2] = mi_group["WorkGroup"].values[-1]
             if "GlobalSplitU" in mi_group:
                 mi[-1] = mi_group["GlobalSplitU"].values[-1]
-            MT0, MT1, *_ = MIDesign.calculate_mfma_parameters(mi)
-            cluster_id = (MT0, MT1, mi[-2], mi[-1])
+            mfma_params = MIDesign.calculate_mfma_parameters(MFMA.from_list(mi[:9]))
+            cluster_id = (mfma_params.MT0, mfma_params.MT1, mi[-2], mi[-1])
         else:
             cluster_id = (0, 0, 0, 0)
 

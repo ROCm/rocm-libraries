@@ -1368,7 +1368,7 @@ def _run_rocke(
         use_alibi=data["alibi_slopes"] is not None,
         use_qq_bias=qq_bias is not None,
         use_fp8=False,
-        num_sms=120,
+        num_cus=120,
         compile_backend=os.environ.get("ROCKE_ATTENTION_COMPILE_BACKEND") or None,
     )
 
