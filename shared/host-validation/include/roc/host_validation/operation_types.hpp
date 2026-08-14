@@ -125,8 +125,21 @@ class OutputSelection {
     }
 
     size_t selectedCount(size_t logicalElements) const {
-        if (m_kind == OutputSelectionKind::All) return logicalElements;
-        return indices(logicalElements).size();
+        switch (m_kind) {
+            case OutputSelectionKind::All:
+                return logicalElements;
+            case OutputSelectionKind::Strided:
+                if (m_first >= logicalElements) return 0;
+                return 1 + (logicalElements - 1 - m_first) / m_stride;
+            case OutputSelectionKind::Explicit:
+                for (size_t index : m_indices) {
+                    if (index >= logicalElements)
+                        throw std::out_of_range(
+                            "Explicit output selection index exceeds output shape.");
+                }
+                return m_indices.size();
+        }
+        throw std::invalid_argument("Invalid output selection kind.");
     }
 
    private:
