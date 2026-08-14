@@ -2470,6 +2470,60 @@ namespace rocisa
         int storecnt;
     };
 
+    // Wait for outstanding async global stores (e.g. global_store_async_from_lds*)
+    // to complete. These are tracked by the dedicated ASYNC counter, NOT
+    // dscnt/storecnt -- emit `s_wait_asynccnt 0` before reusing the LDS staging
+    // region or before s_endpgm.
+    struct _SWaitAsynccnt : public Instruction
+    {
+        _SWaitAsynccnt(int asynccnt = -1, const std::string& comment = "")
+            : Instruction(InstType::INST_SWAIT, comment)
+            , asynccnt(asynccnt)
+        {
+        }
+
+        _SWaitAsynccnt(const _SWaitAsynccnt& other)
+            : Instruction(other)
+            , asynccnt(other.asynccnt)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<_SWaitAsynccnt>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {asynccnt};
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr;
+            setMsb(kStr, {}, nullptr);
+            return formatWithComment("s_wait_asynccnt " + std::to_string(asynccnt));
+        }
+
+        int getAsynccnt() const
+        {
+            return asynccnt;
+        }
+
+    private:
+        int asynccnt;
+    };
+
     struct _SWaitLoadcnt : public Instruction
     {
         _SWaitLoadcnt(int loadcnt = -1, const std::string& comment = "")
