@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -314,6 +315,93 @@ def _install_blis(c, build_dir: Path):
         symlink.symlink_to("libblis-mt.a")
 
 
+# gfx1250's two revisions share one ISA and compiler target, so the build probes
+# hipDeviceProp_t::asicRevision to tell them apart. The result goes to CMake in
+# its own cache variable, never GPU_TARGETS -- extops/matrix-transform would feed
+# gfx1250v0 to --offload-arch, and it is not in the supported-target list.
+_GFX1250_REVISIONS = ("v0", "v1")
+
+
+def _targets_include_gfx1250(architecture: str) -> bool:
+    """Whether --architecture can put gfx1250 in the build. 'all' and empty
+    (CMake's 'all') count; matched on the bare name so gfx1250v0 does not."""
+    targets = [t.strip() for t in (architecture or "").split(";")]
+    if not any(targets):
+        return True
+    return any(
+        t == "all" or t.split(":")[0].split("[")[0] == "gfx1250" for t in targets
+    )
+
+
+def _validate_gfx1250_revision(gfx1250_revision):
+    """Rejected here rather than in CMake, where an unrecognized value matches
+    no branch and quietly builds the shipping revision instead."""
+    if gfx1250_revision and gfx1250_revision not in _GFX1250_REVISIONS:
+        print("--gfx1250-revision must be 'v0' or 'v1'")
+        sys.exit(2)
+
+
+def _detect_gfx1250_revision(build_dir=None):
+    """Probe the local GPU and return the arch it reports ('gfx1250v0' for a v0
+    part), or None if the probe could not be loaded. The probe is tensilelite's
+    tasks.py, which shares this module's name, so it is loaded by path under a
+    distinct name and unloaded again -- else a later `import tasks` finds it."""
+    print("Probing the gfx1250 ASIC revision (may build a HIP probe first)...")
+    savedPath = list(sys.path)
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "_tensilelite_tasks", ROOT_PATH / "tensilelite" / "tasks.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module.detect_gpu_revision_target(build_dir=build_dir)
+    except Exception as e:  # noqa: BLE001 - a failed probe must not stop a build
+        print(f"warning: could not probe the gfx1250 ASIC revision: {e}", file=sys.stderr)
+        return None
+    finally:
+        sys.modules.pop("_tensilelite_tasks", None)
+        sys.path[:] = savedPath
+
+
+def _gfx1250_revision_option(architecture: str, gfx1250_revision, build_dir=None):
+    """The CMake option pinning the gfx1250 ASIC revision, or None when the
+    build cannot produce gfx1250. Emitted for v1 too: the value is cached and
+    builds are incremental, so an unset one would let a directory once set to v0
+    keep building v0. An explicit revision wins over the probe, so CI gets the
+    same content on any machine."""
+    _validate_gfx1250_revision(gfx1250_revision)
+    targetsGfx1250 = _targets_include_gfx1250(architecture)
+    if gfx1250_revision:
+        # Emitted even with no gfx1250 target (the value is cached); say so, or
+        # the line reads as though it changed something in the build.
+        how = "pinned by --gfx1250-revision"
+        if not targetsGfx1250:
+            how += ", though these targets contain no gfx1250"
+    elif not targetsGfx1250:
+        return None
+    else:
+        probed = _detect_gfx1250_revision(build_dir)
+        gfx1250_revision = "v0" if probed == "gfx1250v0" else "v1"
+        # Three ways reach v1 and only one confirmed a part: a failed probe and a
+        # probe of another arch (routine when CI cross-compiles -a all) both land
+        # on v1 too, so each says how sure it is -- a wrong v1 on v0 silicon is
+        # the miscompile this flag prevents.
+        if probed == "gfx1250v0":
+            how = "probed this machine, which reported a v0 part"
+        elif probed == "gfx1250":
+            how = "probed this machine, which reported gfx1250 silicon that is not a v0 part"
+        elif probed:
+            how = (
+                f"defaulted; this machine reported {probed}, not gfx1250, so the"
+                " probe confirms nothing about the part this build is for"
+            )
+        else:
+            how = "could not probe this machine; pass --gfx1250-revision v0 if it is a v0 part"
+    print(f"gfx1250 ASIC revision: {gfx1250_revision} ({how})")
+    return f"-DHIPBLASLT_GFX1250_REVISION={gfx1250_revision}"
+
+
 # ---------------------------------------------------------------------------
 # invoke tasks
 # ---------------------------------------------------------------------------
@@ -325,6 +413,7 @@ def _install_blis(c, build_dir: Path):
         "clients": "Build library clients.",
         "jobs": "Number of parallel build jobs (default: all cores).",
         "architecture": "GPU target(s), e.g. 'all' or 'gfx90a:xnack+;gfx90a:xnack-'.",
+        "gfx1250_revision": "Pin the gfx1250 ASIC revision, 'v0' or 'v1', instead of probing the local GPU.",
         "cpu_ref_lib": "CPU reference library for testing: 'blis' or 'lapack'.",
         "use_system_packages": "Use system-installed msgpack/blas/lapack (requires --install-deps).",
         "debug": "Build with CMAKE_BUILD_TYPE=Debug.",
@@ -390,6 +479,10 @@ def build(
     build_dir=None,
     rocm_path=None,
     clean=False,
+    # Appended rather than grouped with --architecture: invoke derives short
+    # flags in signature order, so inserting a parameter mid-signature takes
+    # -g from --gprof and cascades onto --logic-filter's -f.
+    gfx1250_revision=None,
 ):
     _supported_distros()
 
@@ -445,6 +538,8 @@ def build(
         print("--gprof requires --static.")
         sys.exit(2)
 
+    _validate_gfx1250_revision(gfx1250_revision)
+
     # PATH setup — use os.pathsep (';' on Windows, ':' on Linux)
     # lib/llvm/bin is Windows-only: the ROCm Windows SDK stores tools there
     sep = os.pathsep
@@ -479,6 +574,11 @@ def build(
         "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "-DMSGPACK_USE_BOOST=OFF",
     ]
+
+    if not no_tensile:
+        revision_opt = _gfx1250_revision_option(architecture, gfx1250_revision, bld)
+        if revision_opt:
+            cmake_opts.append(revision_opt)
 
     if legacy_hipblas_direct:
         cmake_opts.append("-DHIPBLASLT_ENABLE_HIPBLAS_DIRECT=ON")

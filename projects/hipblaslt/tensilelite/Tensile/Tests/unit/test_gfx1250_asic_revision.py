@@ -1127,18 +1127,15 @@ def test_qualified_gpu_targets_stay_accepted(
     assert captured["archNames"] == [target]
 
 
-def _run_createlibrary(monkeypatch, tmp_path, arch, logicArchName=None):
+def _logicFileName(architectureName, scheduleName, tag=""):
+    return f"{scheduleName}_{architectureName}{tag}.yaml"
+
+
+def _run_createlibrary(monkeypatch, tmp_path, arch, logicFiles=()):
     """Drives ``TensileCreateLibrary.run()`` for one requested architecture with
-    every expensive step stubbed, and returns what the production wiring produced.
-
-    Several separate behaviors are observed here -- the capability overrides, the
-    compiler-target normalization, and which logic files survive the filter --
-    and they get one test each, so that none is left without coverage if another
-    breaks first.
-
-    ``logicArchName`` writes one logic file declaring that architecture into the
-    otherwise empty logic directory. The real glob and filter always run; without
-    a file they simply have nothing to select.
+    every expensive step stubbed. ``logicFiles`` writes minimal logic files
+    (arch name, schedule name) into the logic dir; the real glob and filter run,
+    so the selection observed is the production wiring's.
     """
     from unittest.mock import MagicMock
 
@@ -1146,13 +1143,14 @@ def _run_createlibrary(monkeypatch, tmp_path, arch, logicArchName=None):
 
     logic_dir = tmp_path / "logic"
     logic_dir.mkdir()
-    if logicArchName is not None:
-        # The filter reads only the third sequence item (CustomYamlLoader's
-        # load_logic_gfx_arch), so a full logic file is not needed to exercise it.
-        (logic_dir / f"{logicArchName}_test.yaml").write_text(
+    for architectureName, scheduleName, *tag in logicFiles:
+        # The filter reads only the second and third sequence items
+        # (CustomYamlLoader's load_logic_schedule_name and load_logic_gfx_arch),
+        # so a full logic file is not needed to exercise it.
+        (logic_dir / _logicFileName(architectureName, scheduleName, *tag)).write_text(
             "- {MinimumRequiredVersion: 4.33.0}\n"
-            f"- {SCHEDULE_NAME}\n"
-            f"- {logicArchName}\n"
+            f"- {scheduleName}\n"
+            f"- {architectureName}\n"
         )
     captured = {}
     writeSignature = inspect.signature(RunModule.writeSolutionsAndKernelsTCL)
@@ -1269,23 +1267,96 @@ def test_createlibrary_entry_point_leaves_v1_capabilities_untouched(
     assert captured["cmdlineArchs"] == [GFX1250]
 
 
-def test_v0_build_consumes_the_architectures_logic_files(
+# One logic tree holds both revisions' tuning, so every selection test below
+# runs against a directory holding both: what has to be pinned is the partition,
+# not that a lone file survives. Each entry is (ArchitectureName, ScheduleName);
+# the revision's tuning declares the architecture's name because the two share
+# one ISA and one compiler target, leaving ScheduleName as the only difference.
+_ARCH_LOGIC = (GFX1250, GFX1250)
+# A second architecture file, so the report's selected and dropped counts can be
+# made to differ. Equal counts let the two be swapped in the message unnoticed.
+_ARCH_LOGIC_2 = (GFX1250, GFX1250, "_b")
+_REVISION_LOGIC = (GFX1250, GFX1250V0)
+_OTHER_ARCH_LOGIC = ("gfx942", "aquavanjaram")
+
+
+def test_v0_build_selects_only_the_asic_revisions_logic(
     monkeypatch, tmp_path, restore_global_parameters
 ):
-    """v0 has no tuned logic of its own and is not planned to get any: it reuses
-    gfx1250's and re-derives under v0 capabilities. The only thing that lets it is
-    ``archMatch``'s ``a.startswith(arch)`` clause, written for xnack variants, so
-    the whole feature rests on the ASIC revision name extending its architecture's.
+    """Reaching the revision's own logic at all rests entirely on ``archMatch``'s
+    ``a.startswith(arch)`` clause, written for xnack variants, and so on the
+    revision name extending its architecture's: a name that is not a
+    prefix-extension (``gfx1250-v0``) selects nothing.
 
-    Pinned here because it fails silently: a name that is not a prefix-extension
-    (``gfx1250-v0``) filters every logic file out and the build then reports
-    success having written an empty library.
+    Excluding the architecture's own logic is the other half. Those solutions
+    were selected under capabilities v0 does not have, and ``ArchitectureName``
+    cannot tell the two apart.
+
+    Both halves fail silently -- the build reports success having written a
+    library that is empty, or full of the wrong revision's solutions.
     """
     captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicArchName=GFX1250
+        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
     )
 
-    assert captured["logicFiles"] == [f"{GFX1250}_test.yaml"]
+    assert captured["logicFiles"] == [_logicFileName(*_REVISION_LOGIC)]
+
+
+def test_v1_build_selects_only_the_architectures_logic(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The mirror, and the isolation the shipping revision needs: v0's logic
+    sits in the same tree and declares the same architecture, so a plain
+    gfx1250 build globs it up unless ``ScheduleName`` excludes it. It would
+    otherwise ship v0-derived solutions in every gfx1250 library built after v0
+    lands, while the build itself stays byte-identical to before the split.
+    """
+    captured = _run_createlibrary(
+        monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
+    )
+
+    assert captured["logicFiles"] == [_logicFileName(*_ARCH_LOGIC)]
+
+
+def test_all_build_excludes_the_asic_revisions_logic(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """``all`` is the default distribution build and reaches the filter as the
+    architectures it expands to -- a list that cannot name an ASIC revision,
+    since a revision shares its architecture's ISA. The revision's logic must
+    therefore be excluded from it for the same reason as a plain gfx1250 build,
+    and every other architecture's must survive.
+    """
+    captured = _run_createlibrary(
+        monkeypatch,
+        tmp_path,
+        "all",
+        logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC, _OTHER_ARCH_LOGIC],
+    )
+
+    assert sorted(captured["logicFiles"]) == sorted(
+        [_logicFileName(*_ARCH_LOGIC), _logicFileName(*_OTHER_ARCH_LOGIC)]
+    )
+
+
+def test_asic_revision_filter_spares_other_architectures(
+    monkeypatch, tmp_path, restore_global_parameters
+):
+    """The filter is scoped to architectures that have ASIC revisions. A
+    multi-architecture build that includes the revision must still consume
+    every other architecture's logic, whose ``ScheduleName`` names neither
+    revision and would be dropped if the scoping were lost.
+    """
+    captured = _run_createlibrary(
+        monkeypatch,
+        tmp_path,
+        f"gfx942_{GFX1250V0}",
+        logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC, _OTHER_ARCH_LOGIC],
+    )
+
+    assert sorted(captured["logicFiles"]) == sorted(
+        [_logicFileName(*_REVISION_LOGIC), _logicFileName(*_OTHER_ARCH_LOGIC)]
+    )
 
 
 def test_v0_build_ignores_an_unrelated_architectures_logic_files(
@@ -1294,10 +1365,120 @@ def test_v0_build_ignores_an_unrelated_architectures_logic_files(
     """The control for the prefix rule above: it must stay a prefix match on the
     requested name, not degrade into accepting whatever logic is on disk."""
     captured = _run_createlibrary(
-        monkeypatch, tmp_path, GFX1250V0, logicArchName="gfx942"
+        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_OTHER_ARCH_LOGIC]
     )
 
     assert captured["logicFiles"] == []
+
+
+# =========================================================================== #
+# What the build says it did. The filter replaces an arch's tuning, so an
+# incomplete v0 build writes a library missing problem types that only fail at
+# runtime -- the build log is the only place to catch it. These tests pin the
+# report line and the warning.
+# =========================================================================== #
+def test_a_revision_build_reports_the_revision_and_what_it_dropped(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """The plain file total looks the same whether v0 tuning was found or the
+    arch's whole tree was discarded, so the per-arch counts must show it. Counts
+    differ here so swapping them in the message is visible."""
+    _run_createlibrary(
+        monkeypatch,
+        tmp_path,
+        GFX1250V0,
+        logicFiles=[_ARCH_LOGIC, _ARCH_LOGIC_2, _REVISION_LOGIC],
+    )
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0 (1 selected, 2 dropped" in out
+
+
+def test_a_revision_build_warns_that_the_dropped_tuning_has_no_replacement(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """A dropped file is a problem type the v0 library will not serve, so the
+    warning names the replacement semantics, the counts, and the remedy."""
+    _run_createlibrary(
+        monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
+    )
+
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert f"replaces {GFX1250}'s rather than adding to it" in out
+    assert "1 selected, 1 dropped" in out
+    assert "fail at runtime" in out
+    assert "without a revision for the shipping one" in out
+
+
+def test_the_shipping_revision_reports_itself_without_warning(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """A v1 build drops the revision's logic the other way -- the correct, full
+    outcome. Warning here would train readers to ignore the one that matters."""
+    _run_createlibrary(
+        monkeypatch, tmp_path, GFX1250, logicFiles=[_ARCH_LOGIC, _REVISION_LOGIC]
+    )
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: shipping" in out
+    assert "WARNING" not in out
+
+
+def test_a_build_without_a_revisioned_architecture_stays_silent(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """Most builds have nothing to do with revisions and should print no line.
+    The revision's logic is dropped even here, so drop-counting alone would
+    wrongly report on every build."""
+    _run_createlibrary(
+        monkeypatch, tmp_path, "gfx942", logicFiles=[_REVISION_LOGIC, _OTHER_ARCH_LOGIC]
+    )
+
+    assert "ASIC revision" not in capsys.readouterr().out
+
+
+def test_a_revision_build_that_finds_no_logic_at_all_says_so(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """A v0 directory never added, or a ``--logic-filter`` on the arch's own
+    path, leaves the revision with nothing while the build still succeeds."""
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, logicFiles=[_ARCH_LOGIC])
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0" in out
+    assert "0 selected" in out
+    assert "WARNING" in out
+    assert f"replaces {GFX1250}'s rather than adding to it" in out
+    assert "fail at runtime" in out
+
+
+def test_a_revision_build_warns_even_when_it_dropped_nothing_either(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """Zero selected and zero dropped is the emptiest library and the case a
+    drop-counting warning misses: a LogicPath or ``--logic-filter`` that reached
+    neither revision's tree leaves nothing to count."""
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, logicFiles=[_OTHER_ARCH_LOGIC])
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0 (0 selected, 0 dropped" in out
+    assert "WARNING" in out
+    assert f"replaces {GFX1250}'s rather than adding to it" in out
+    assert "fail at runtime" in out
+
+
+def test_a_complete_revision_tree_is_reported_without_a_warning(
+    monkeypatch, tmp_path, restore_global_parameters, capsys
+):
+    """The goal state: every type the build sees has v0 tuning, nothing dropped.
+    A warning here would be permanent and so ignored -- the failure this block
+    guards against."""
+    _run_createlibrary(monkeypatch, tmp_path, GFX1250V0, logicFiles=[_REVISION_LOGIC])
+
+    out = capsys.readouterr().out
+    assert f"{GFX1250} ASIC revision: v0 (1 selected, 0 dropped" in out
+    assert "WARNING" not in out
 
 
 # =========================================================================== #

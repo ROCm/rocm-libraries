@@ -38,7 +38,7 @@ invoke build -ca gfx942 -d     # add --install-deps on first run
 invoke --help build            # full flag list
 ```
 
-Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build).
+Useful flags (selected): `-d` install deps, `-n` install package after build, `-c` clients, `-d/-r/-k` Debug/RelWithDebInfo/RelWithDebInfo (default Release), `--clean`, `-a/--architecture` GPU target(s), `--skip-rocroller`, `-y/--legacy-hipblas-direct` (older-ROCm direct-hipBLAS API path), `-t/--no-tensile` for client-only, `-z/--no-lazy-load`, `-f/--logic-filter` to scope TensileLite logic dirs (massively faster device-lib build), `--gfx1250-revision v0|v1` to pin the gfx1250 ASIC revision instead of probing the local GPU.
 
 `install.sh` is a deprecated compatibility wrapper that just shells out to `invoke build`; new instructions and tooling should call `invoke build` directly.
 
@@ -123,3 +123,41 @@ Use the `users/<github-username>/<branch-name>` branch convention and base PRs o
 - Building only the host library (`-DHIPBLASLT_ENABLE_DEVICE=OFF` or preset `hipblaslt`, or `invoke build -t`) is fast and fine for compile checks, but the resulting library cannot run matmul without a separately built/installed device library.
 - After editing YAML under `clients/tests/data/`, you must rebuild the `hipblaslt-test` (or `hipblaslt-test-data`) target to regenerate `hipblaslt_gtest.data`.
 - A full device-lib build is slow. Use `invoke build -f 'gfx942/Equality/*'` (or similar `--logic-filter`) to scope it to a single arch/family while iterating.
+
+## gfx1250 ASIC revisions (v0 / v1)
+
+gfx1250 ships as two steppings that share one ISA and one compiler target, so no
+target-enumeration tool can tell them apart — the revision is read from
+`hipDeviceProp_t::asicRevision`. v0 lacks fp4 32×16 WMMA and TDM multicast.
+
+- `invoke build` probes the local GPU whenever the targets can include gfx1250
+  (which `all`, the default, does) and pins the answer in the
+  `HIPBLASLT_GFX1250_REVISION` cache variable. Pass `--gfx1250-revision v0|v1`
+  to pin it explicitly; CI and packaging should always pin, since the same
+  command otherwise produces different gfx1250 content on different machines.
+- `gfx1250v0` is a TensileLite architecture name only. It must never appear in
+  `GPU_TARGETS`, which also feeds extops, matrix-transform, rocRoller and the
+  supported-target validation, none of which know it. Only the device-library
+  `ARCHES` argument (and so `TensileCreateLibrary --architecture=`) sees it.
+- v0 tuning lives in `library/.../Logic/asm_full/gfx1250v0/`. A logic YAML is a
+  positional sequence; a v0 file differs from its base counterpart in one line,
+  the ScheduleName at index 1 (index 2, ArchitectureName, stays `gfx1250`):
+
+```yaml
+- {MinimumRequiredVersion: 5.0.0}
+- gfx1250v0   # ScheduleName -- the only thing marking this file as v0
+- gfx1250     # ArchitectureName -- unchanged; the ISA is the same
+```
+
+  The filter is **replacement, not overlay**: a v0 build takes the v0-tagged
+  files and nothing else, and a v1 or `all` build takes everything except them.
+- **v0 coverage is a bootstrap, not a port.** Only 2 of the 209 gfx1250 logic
+  files carry the v0 tag today, so a v0 build serves those two problem types and
+  nothing else. An uncovered shape gets no heuristic (success, zero algorithms)
+  and then `HIPBLAS_STATUS_INTERNAL_ERROR` from `hipblasLtMatmul`. Nothing at
+  runtime says "untuned", so the build log is the only warning: a
+  `# gfx1250 ASIC revision:` line with selected/dropped counts, plus a
+  `Tensile::WARNING:` when v0 logic is missing or absent. Treat a v0 build as
+  usable only for the shapes it covers.
+- A `--logic-filter` anchored on `gfx1250/` excludes the sibling `gfx1250v0/`
+  directory; use `gfx1250*/...` when iterating on a v0 build.

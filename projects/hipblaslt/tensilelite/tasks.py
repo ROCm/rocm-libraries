@@ -184,7 +184,11 @@ def detect_gpu_revision_target(build_dir=None, device_id=0):
               "'gfx1250'; defaulting to gfx1250 (v1).", file=sys.stderr)
         return "gfx1250"
 
-    return _revision_to_gpu_target("gfx1250", revision)
+    target = _revision_to_gpu_target("gfx1250", revision)
+    # Only revision 0 is v0; anything else (incl. unseen values) is shipping, so
+    # the raw number is the only thing telling a confirmed v1 from an unknown.
+    print(f"gfx1250 asicRevision {revision} -> {target}")
+    return target
 
 
 @task
