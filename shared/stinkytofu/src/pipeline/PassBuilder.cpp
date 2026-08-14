@@ -133,10 +133,14 @@ bool PassBuilder::loadPlugin(const std::string& path) {
         FreeLibrary(handle);
         return false;
     }
+    // A plugin is untrusted here: it can export the hook and still hand back
+    // nullptr. versionsMatch() rejects that, but the diagnostic must describe it
+    // rather than stream it.
     const char* pluginVersion = versionFn();
     if (!versionsMatch(pluginVersion, getRuntimeVersion())) {
         std::cerr << "PassBuilder: plugin '" << path << "' was built against stinkytofu "
-                  << pluginVersion << " but " << getRuntimeVersion()
+                  << (pluginVersion ? pluginVersion : "(no version reported)") << " but "
+                  << getRuntimeVersion()
                   << " is loaded — StinkyTofu does not support cross-version plugin loading\n";
         FreeLibrary(handle);
         return false;
@@ -173,10 +177,14 @@ bool PassBuilder::loadPlugin(const std::string& path) {
         dlclose(handle);
         return false;
     }
+    // A plugin is untrusted here: it can export the hook and still hand back
+    // nullptr. versionsMatch() rejects that, but the diagnostic must describe it
+    // rather than stream it.
     const char* pluginVersion = versionFn();
     if (!versionsMatch(pluginVersion, getRuntimeVersion())) {
         std::cerr << "PassBuilder: plugin '" << path << "' was built against stinkytofu "
-                  << pluginVersion << " but " << getRuntimeVersion()
+                  << (pluginVersion ? pluginVersion : "(no version reported)") << " but "
+                  << getRuntimeVersion()
                   << " is loaded — StinkyTofu does not support cross-version plugin loading\n";
         dlclose(handle);
         return false;

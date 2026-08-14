@@ -28,6 +28,8 @@ STINKYTOFU_EXPORT const char* getRuntimeVersion();
 // Exact string comparison, no semver-range logic — the whole "cross-version
 // support" contract lives in this one function. Pulled out of loadPlugin()/
 // rocisa's import-time check so both can be unit-tested with two literal
-// strings, without needing to actually build stinkytofu twice.
+// strings, without needing to actually build stinkytofu twice. Null-tolerant:
+// an argument that reports no version at all is a version that cannot be
+// established, and so matches nothing.
 STINKYTOFU_EXPORT bool versionsMatch(const char* expected, const char* actual);
 }  // namespace stinkytofu

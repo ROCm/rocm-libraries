@@ -35,6 +35,19 @@ TEST(VersionTest, DirtySuffixMakesItsOwnVersion) {
     EXPECT_FALSE(versionsMatch("1.2.3-abc1234", "1.2.3-abc1234-dirty"));
 }
 
+TEST(VersionTest, MissingVersionDoesNotMatch) {
+    // loadPlugin() passes whatever a plugin's stinkytofuPluginVersion() returns,
+    // so nullptr arrives here from any plugin that is broken or hostile. It must
+    // be rejected, not dereferenced — this test segfaults rather than fails if
+    // the null check is ever dropped.
+    EXPECT_FALSE(versionsMatch(nullptr, "1.2.3-abc1234"));
+    EXPECT_FALSE(versionsMatch("1.2.3-abc1234", nullptr));
+    EXPECT_FALSE(versionsMatch(nullptr, nullptr));
+    // An empty string is a version that matches nothing, by the same rule that
+    // makes every other non-identical string a mismatch.
+    EXPECT_FALSE(versionsMatch("", "1.2.3-abc1234"));
+}
+
 TEST(VersionTest, RuntimeVersionIsSelfConsistent) {
     // getRuntimeVersion() must match this TU's own compile-time
     // STINKYTOFU_FULL_VERSION within a single build — the real-world checks in
