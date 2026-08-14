@@ -9,17 +9,30 @@ handles a given `AttentionRequest`.
 **Decides:** kernel path (`"2d"` or `"3d"`), candidate name, algorithm tag,
 and spec identity `(path, head_size, block_size)`.
 
-**Does NOT decide:** CTA geometry (`num_warps`, `tile_size`), `num_segments`,
-`waves_per_eu`, or any other performance knob. Those live in
+**Does NOT decide, on the unified path:** CTA geometry (`num_warps`, `tile_size`),
+`num_segments`, `waves_per_eu`, or any other performance knob. Those live in
 `builders/common/attention_spec_builder.py` and
 `kernels/common/attention_unified.py`. The parity identity with C++ is
 `(path, head_size, block_size)` only — C++ reads `num_segments` as a parameter
 passed from Python, it does not recompute it.
 
+**Standalone candidates are a bounded exception.** A candidate that owns its own
+kernel module builds that kernel's own spec here, tuning included:
+`gfx950.py::_dense_spec` resolves `block_n`, the persistent decision and the CTA
+count, and `gfx942.py::_dense_spec` resolves those plus `waves_per_eu`. Those specs
+are consumed only by their own builder and never enter the C++ parity identity. One
+rule governs the exception: **any value the kernel bakes into its `kernel_name` must
+be resolved from the kernel's own policy function**, not pinned here — `gfx942.py`
+calls `kernels.gfx942.attention_dense._tuned_waves_per_eu` for exactly that reason.
+A number pinned in the factory drifts away from the policy, the name tag and the
+compiled binary then disagree, and the name-keyed launcher cache serves the wrong
+HSACO.
+
 ## Candidate registry — priority table
 
 | priority | candidate | declared arches | module | scope |
 |---|---|---|---|---|
+| 3 | `attention_gfx942_dense` | gfx942 | `gfx942.py` | bf16/fp16 D64/D128 dense prefill, default **and** persistent grids (opt-in only) |
 | 3 | `attention_gfx950_dense` | gfx950 | `gfx950.py` | bf16/fp16 dense persistent prefill (opt-in only) |
 | 5 | `attention_gfx942_dense_pipe` | gfx942 | `gfx942.py` | fp16 2D prefill flash |
 | 5 | `attention_gfx950_d256` | gfx950 | `gfx950.py` | bf16 D256 2D prefill |
@@ -31,11 +44,18 @@ passed from Python, it does not recompute it.
 Lower priority number = higher precedence. Generic candidates (10) remain the
 fallback for everything a specialized candidate does not claim.
 
-Two candidates are **opt-in only** and never win under `algorithm="auto"`:
-`attention_gfx950_dense` and `attention_gfx1250_wmma`. Registering a kernel
-makes it reachable; making it an arch's default is a separate decision that
-wants benchmark evidence, so neither one silently displaces the unified path
-its arch routes to today.
+Three candidates are **opt-in only** and never win under `algorithm="auto"`:
+`attention_gfx942_dense`, `attention_gfx950_dense` and `attention_gfx1250_wmma`.
+Registering a kernel makes it reachable; making it an arch's default is a
+separate decision that wants benchmark evidence, so none of them silently
+displaces the unified path its arch routes to today.
+
+**Tier 3 is reserved for opt-in candidates.** Because they outrank every other
+tier, that opt-in check is the only thing keeping them off the default path — a
+tier-3 candidate whose `support()` forgets it would silently claim all traffic
+for its arch. `Capability` cannot express the check (it constrains the request's
+*selector*, not its shape), so it stays in the predicate and every tier-3
+candidate has to carry it.
 
 ## Layout
 
