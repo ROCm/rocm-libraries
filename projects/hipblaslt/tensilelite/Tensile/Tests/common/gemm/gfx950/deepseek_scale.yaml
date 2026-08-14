@@ -1,0 +1,295 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# DeepseekScale fused mainloop epilogue: per-K-block E8M0 scale applied via the
+# MFMA operand during the mainloop. Covers scaleA-only, scaleB-only, scaleAB
+# DP-only (StreamKForceDPOnly=1), and scaleAB K-split (StreamKForceDPOnly=0).
+# fp8 input, f32 output, f32 compute. K must be a multiple of 128 (DeepseekBlockK).
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  PrintSolutionRejectionReason: True
+  # CPU reference does not implement E8M0 per-K-block scale lookup; run-only validation.
+  NumElementsToValidate: 0
+  MinimumRequiredVersion: 5.0.0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # DeepseekScaleA only — scaleB is unit (0x7f in E8M0), StreamKForceDPOnly=1
+  ########################################
+  -
+    - # ProblemType — fp8 in, f32 out, f32 compute; scaleA per K-block
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: S
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseDeepseekScaleA: True
+      UseDeepseekScaleB: False
+      DeepseekScaleAq0: 128
+      DeepseekScaleAq1: 128
+      DeepseekScaleBq0: 1
+      DeepseekScaleBq1: 128
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 8, 1, 1]   # MT0=64  MT1=128 wg0=1 wg1=1
+          - [16, 16, 128, 1, 1, 4, 8, 2, 1]   # MT0=128 MT1=128 wg0=2 wg1=1
+        - UseDeepseekScaleA: [True]
+        - UseDeepseekScaleB: [False]
+        - DeepseekScaleAq0: [128]
+        - DeepseekScaleAq1: [128]
+        - DeepseekScaleBq0: [1]
+        - DeepseekScaleBq1: [128]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [128]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 256, 1, 256]
+
+  ########################################
+  # DeepseekScaleB only — scaleA is unit (0x7f in E8M0), StreamKForceDPOnly=1
+  ########################################
+  -
+    - # ProblemType — fp8 in, f32 out, f32 compute; scaleB per K-block
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: S
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseDeepseekScaleA: False
+      UseDeepseekScaleB: True
+      DeepseekScaleAq0: 128
+      DeepseekScaleAq1: 128
+      DeepseekScaleBq0: 1
+      DeepseekScaleBq1: 128
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 8, 1, 1]   # MT0=64  MT1=128 wg0=1 wg1=1
+          - [16, 16, 128, 1, 1, 4, 8, 2, 1]   # MT0=128 MT1=128 wg0=2 wg1=1
+        - UseDeepseekScaleA: [False]
+        - UseDeepseekScaleB: [True]
+        - DeepseekScaleAq0: [128]
+        - DeepseekScaleAq1: [128]
+        - DeepseekScaleBq0: [1]
+        - DeepseekScaleBq1: [128]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [128]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 256, 1, 256]
+
+  ########################################
+  # DeepseekScaleAB — both scales active, StreamKForceDPOnly=1 (DP path only)
+  ########################################
+  -
+    - # ProblemType — fp8 in, f32 out, f32 compute; scaleA and scaleB per K-block
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: S
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseDeepseekScaleA: True
+      UseDeepseekScaleB: True
+      DeepseekScaleAq0: 128
+      DeepseekScaleAq1: 128
+      DeepseekScaleBq0: 1
+      DeepseekScaleBq1: 128
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 8, 1, 1]   # MT0=64  MT1=128 wg0=1 wg1=1
+          - [16, 16, 128, 1, 1, 4, 8, 2, 1]   # MT0=128 MT1=128 wg0=2 wg1=1
+        - UseDeepseekScaleA: [True]
+        - UseDeepseekScaleB: [True]
+        - DeepseekScaleAq0: [128]
+        - DeepseekScaleAq1: [128]
+        - DeepseekScaleBq0: [1]
+        - DeepseekScaleBq1: [128]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [128]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [128, 256, 1, 256]
+
+  ########################################
+  # DeepseekScaleAB — K-split path (StreamKForceDPOnly=0), PGR=0 required
+  ########################################
+  -
+    - # ProblemType — fp8 in, f32 out, f32 compute; both scales, K split across WGs
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: S
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UseDeepseekScaleA: True
+      UseDeepseekScaleB: True
+      DeepseekScaleAq0: 128
+      DeepseekScaleAq1: 128
+      DeepseekScaleBq0: 1
+      DeepseekScaleBq1: 128
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 4, 8, 1, 1]   # MT0=64 MT1=128 wg0=1 wg1=1
+        - UseDeepseekScaleA: [True]
+        - UseDeepseekScaleB: [True]
+        - DeepseekScaleAq0: [128]
+        - DeepseekScaleAq1: [128]
+        - DeepseekScaleBq0: [1]
+        - DeepseekScaleBq1: [128]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [128]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 256, 1, 256]

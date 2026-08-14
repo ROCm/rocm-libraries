@@ -1,0 +1,183 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# PartialRMS + ResidualAdd + MXFP8 DynQuant 32x1 + bf16 ResidualOut (K1):
+# comprehensive tile/prefetch coverage. PartialRMSStoreBf16D=True splits the
+# store into two passes: RMS pass writes bf16 to ResidualOut, quant pass
+# writes fp8 to D. Constraints: MT1==128, MT0%64==0, WG0<=2,
+# DQuantSize0(=32) <= MT0/WG0. NumElementsToValidate enables in-pipeline
+# correctness checking across a range of problem sizes.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  ExitOnFails: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+
+  ########################################
+  # bf16 in, fp8 out — PartialRMS + ResidualAdd + MXFP8 DynQuant + bf16 ResidualOut
+  # DepthU=64, PGR=[1,2], MT1=128, WG0<=2 — WG 1x1 and WG 2x1 tiles
+  ########################################
+  -
+    - # ProblemType — bf16 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
+      OperationType: GEMM
+      DataType: b
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: True
+      PartialRMSQuant: False
+      DQuantType: MXFP8
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 1x1 (WG0=1, MT1=128)
+            - [16, 16, 32, 1, 1,  4,  8, 1, 1]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  8,  8, 1, 1]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1, 12,  8, 1, 1]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1, 16,  8, 1, 1]  # MT0=256  MT1=128
+            # WG 2x1 (WG0=2, MT1=128)
+            - [16, 16, 32, 1, 1,  2,  8, 2, 1]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  4,  8, 2, 1]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1,  6,  8, 2, 1]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1,  8,  8, 2, 1]  # MT0=256  MT1=128
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [True]
+        - DQuantType: [MXFP8]
+        - DQuantSize0: [32]
+        - DQuantSize1: [1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [128,  128, 1,  128]
+            - Exact: [128,  256, 1,   64]
+            - Exact: [256, 2048, 1,  128]
+            - Exact: [512, 4096, 1,  128]
+            - Exact: [128, 4096, 1, 4096]
+            - Exact: [512, 4096, 1, 4096]
+            - Exact: [2048, 8192, 1, 4096]
+
+  ########################################
+  # WG 2x2 and WG 1x4 tiles: broader wave-group coverage, same constraints
+  ########################################
+  -
+    - # ProblemType — bf16 in, OCP fp8 e4m3 out, f32 compute, residual add, bf16 ResidualOut
+      OperationType: GEMM
+      DataType: b
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: False
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      UseScaleD: False
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: True
+      PartialRMSQuant: False
+      DQuantType: MXFP8
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            # WG 2x2 (WG0=2, MT1=128)
+            - [16, 16, 32, 1, 1,  2,  4, 2, 2]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  4,  4, 2, 2]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1,  6,  4, 2, 2]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1,  8,  4, 2, 2]  # MT0=256  MT1=128
+            # WG 1x4 (WG0=1, MT1=128)
+            - [16, 16, 32, 1, 1,  4,  2, 1, 4]  # MT0=64   MT1=128
+            - [16, 16, 32, 1, 1,  8,  2, 1, 4]  # MT0=128  MT1=128
+            - [16, 16, 32, 1, 1, 12,  2, 1, 4]  # MT0=192  MT1=128
+            - [16, 16, 32, 1, 1, 16,  2, 1, 4]  # MT0=256  MT1=128
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [True]
+        - PartialRMSQuant: [False]
+        - PartialRMSStoreBf16D: [True]
+        - DQuantType: [MXFP8]
+        - DQuantSize0: [32]
+        - DQuantSize1: [1]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [False]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [128,  128, 1,  128]
+            - Exact: [256,  256, 1,  256]
+            - Exact: [512, 4096, 1,  128]
+            - Exact: [2048, 4096, 1, 4096]
+            - Exact: [512,  8192, 1, 8192]
+
+
+
+LibraryLogic:
+  ScheduleName: "partialrms_residualout_bf16_comprehensive_k1"
+  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Prediction"

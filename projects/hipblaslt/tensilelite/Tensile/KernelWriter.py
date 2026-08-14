@@ -24,7 +24,7 @@
 
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
-from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, SrdUpperValue
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
@@ -265,6 +265,8 @@ class StateValues:
   preventVgprOverflowDuringNewTile: int  = -1
   interleaveStoreVmcnt: bool             = False
   srdShiftLeft:dict                      = field(init=False)
+  # SRD+3 flags word (buffer descriptor bits 127:96); arch-specific, set in _initKernel.
+  srdElementBits: int                    = 0
   checkGRO: bool                         = False
   combineLocalAddresses: bool            = False # Debug
   unifiedVgprRegs: bool                  = False
@@ -5067,8 +5069,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     btileInfo = self.states.b.tileInfo
     # TODO: Need corresponding ctileInfo for GSU/StreamK
     dtileInfo = self.states.d.tileInfo
-    mxsatileInfo = self.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
-    mxsbtileInfo = self.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
+    mxsatileInfo = self.states.mxsa.tileInfo if usesScaleA(kernel) else None
+    mxsbtileInfo = self.states.mxsb.tileInfo if usesScaleB(kernel) else None
 
     module.addComment0("Number of subtiles for A: %u"%(len(atileInfo.localSubtiles)))
     module.addComment0("Number of subtiles for B: %u"%(len(btileInfo.localSubtiles)))
@@ -5091,9 +5093,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
       module.add(globalReadDTLInitCommonSgpr(self, kernel))
 
-    if mxsatileInfo != None and mxsbtileInfo != None:
-      if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
-        module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
+    # DeepseekScale supports single-sided scale; non-DS MX scale always pairs both sides.
+    hasScaleDTL = (mxsatileInfo is not None or mxsbtileInfo is not None) if isDeepseekScale(kernel) \
+                  else (mxsatileInfo is not None and mxsbtileInfo is not None)
+    if hasScaleDTL and not (kernel["enableTDMA"] and kernel["enableTDMB"]):
+      module.add(globalReadScaleSwizzledDTLInitCommonSgpr(self, kernel))
 
     # TODOBS: globalWriteWorkGroupInit can be emitted here or later on, check..
     if self.states.doShadowInit:
@@ -5114,12 +5118,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.addComment1("global read addresses: addresses a")
     if not hasTDM:
       module.add(self.graAddresses(kernel, tensorParametersA))
-      if kernel["ProblemType"]["MXBlockA"]:
+      if isDeepseekScale(kernel):
+        module.addComment1("global read addresses: DeepseekScale SRD init (A and/or B)")
+        module.add(initDeepseekScaleSrd(self, kernel))
+      elif usesScaleA(kernel):
         module.addComment1("global read addresses: addresses mxsa")
         module.add(self.graAddresses(kernel, tensorParametersA["MX"]))
       module.addComment1("global read addresses: addresses b")
       module.add(self.graAddresses(kernel, tensorParametersB))
-      if kernel["ProblemType"]["MXBlockB"]:
+      if usesScaleB(kernel) and not isDeepseekScale(kernel):
         module.addComment1("global read addresses: addresses mxsb")
         module.add(self.graAddresses(kernel, tensorParametersB["MX"]))
 
@@ -5246,8 +5253,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       ####################################
       # NOT LocalSplitU
       ####################################
-
-
 
       # global write indices
       module.addComment1("not-LocalSplitU: global write indices")
@@ -6965,6 +6970,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.asmCaps  = ti.getAsmCaps()
     self.states.archCaps = ti.getArchCaps()
     self.states.regCaps  = ti.getRegCaps()
+    self.states.srdElementBits = SrdUpperValue(version).getValue()
 
     # rocisa keys caps by ISA, so both gfx1250 ASIC revisions share one entry;
     # the build's arch name is the only signal here (empty for v1). Rebuild the
@@ -7028,9 +7034,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       initSubTileInfo('B')
       initSubTileInfo('D')
 
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0:
+      if usesScaleA(kernel):
         initSubTileInfo('MXSA')
-      if kernel["ProblemType"].get("MXBlockB", 0) > 0:
+      if usesScaleB(kernel):
         initSubTileInfo('MXSB')
 
       self.ldsStartOffsetA = 0
@@ -7050,15 +7056,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.ldsStartOffsetB = sizeA
       sizeMXSA = 0
       sizeMXSB = 0
-      if kernel["ProblemType"].get("MXBlockA", 0) > 0 and kernel["ProblemType"].get("MXBlockB", 0) > 0:
+      # For swizzled scale we use extra LDS space to allow wider DTL loads.
+      # Each active scale operand gets its own contiguous LDS region.
+      numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
+      if usesScaleA(kernel):
         mxsaTileInfo = self.states.mxsa.tileInfo
-        mxsbTileInfo = self.states.mxsb.tileInfo
-
-        # For Swizzled scale we use extra LDS space for now to allow wider DTL loads
-        numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         sizeMXSA = mxsaTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
-        sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves
         self.ldsStartOffsetMXSA = sizeA + sizeB
+      if usesScaleB(kernel):
+        from .Components.Subtile.SubtileScaleEmit import deepseekScaleBNBlocksPerWave
+        mxsbTileInfo = self.states.mxsb.tileInfo
+        nBlocksB = deepseekScaleBNBlocksPerWave(kernel) if kernel.get("UseDeepseekScaleB", False) else 1
+        sizeMXSB = mxsbTileInfo.loadWidthGR * kernel["WavefrontSize"] * numWaves * nBlocksB
         self.ldsStartOffsetMXSB = sizeA + sizeB + sizeMXSA
 
       self.ldsTotalSize = sizeA + sizeB + sizeMXSA + sizeMXSB
@@ -7466,7 +7475,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tensorParametersB["PackedIndices"] = kernel["PackedC%uIndicesX"%tensorParametersB["tile01Idx"]]
 
     tensorParametersMXSA = None
-    if kernel["ProblemType"]["MXBlockA"]:
+    # DeepseekScale uses states.mxsa.tileInfo (SubtileImpl path); it does not
+    # go through the standard GR/LW tensor-parameter infrastructure.
+    if usesScaleA(kernel) and not isDeepseekScale(kernel):
       itP["MXSA"] = readWriteVectors("MXSA", vwmxsa, kernel)
       tensorParametersMXSA = {}
       self.getTensorParameters(tensorParametersMXSA, kernel, itP, "MXSA")
@@ -7474,7 +7485,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       tensorParametersA["MX"] = tensorParametersMXSA
 
     tensorParametersMXSB = None
-    if kernel["ProblemType"]["MXBlockB"]:
+    if usesScaleB(kernel) and not isDeepseekScale(kernel):
       itP["MXSB"] = readWriteVectors("MXSB", vwmxsb, kernel)
       tensorParametersMXSB = {}
       self.getTensorParameters(tensorParametersMXSB, kernel, itP, "MXSB")
@@ -9586,6 +9597,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("skTiles", 1)
       self.states.numSgprStreamK += 6
 
+    # SkPartialIdx normally aliases sgprBeta, but Beta is absent when UseBeta=False.
+    # Allocate a real SGPR on the parallel-reduction path so the non-DP split-output
+    # SrdD calc can resolve it.
+    if (self.states.streamK.emitsParallelReductionSgprAliases or kernel["StreamK"] == 4) \
+        and not kernel["ProblemType"]["UseBeta"]:
+      self.defineSgpr("SkPartialIdx", 1)
+      self.states.numSgprStreamK += 1
+
     if not kernel["UseSubtileImpl"]:
       if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("LocalWriteAddrA", 1)
@@ -9606,9 +9625,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.defineSgpr("SwapA", 1)
       if kernel["LocalWriteUseSgprB"]:
         self.defineSgpr("SwapB", 1)
-      if kernel["ProblemType"]["MXBlockA"] and kernel["LocalWriteUseSgprMXSA"]:
+      if usesScaleA(kernel) and kernel["LocalWriteUseSgprMXSA"]:
           self.defineSgpr("SwapMXSA", 1)
-      if kernel["ProblemType"]["MXBlockB"] and kernel["LocalWriteUseSgprMXSB"]:
+      if usesScaleB(kernel) and kernel["LocalWriteUseSgprMXSB"]:
           self.defineSgpr("SwapMXSB", 1)
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         self.defineSgpr("SwapMetadata", 1)
@@ -9727,15 +9746,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not (kernel["enableTDMA"] and kernel["enableTDMB"]):
         requiredUnalignedSgprVar.append("LocalWriteBaseAddrA")
         requiredUnalignedSgprVar.append("LocalWriteBaseAddrB")
-        if kernel["ProblemType"]["MXBlockA"]:
+        if usesScaleA(kernel):
           requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSA")
-        if kernel["ProblemType"]["MXBlockB"]:
+        if usesScaleB(kernel):
           requiredUnalignedSgprVar.append("LocalWriteBaseAddrMXSB")
         requiredUnalignedSgprVar.append("SwapA")
         requiredUnalignedSgprVar.append("SwapB")
-        if kernel["ProblemType"]["MXBlockA"]:
+        if usesScaleA(kernel):
           requiredUnalignedSgprVar.append("SwapMXSA")
-        if kernel["ProblemType"]["MXBlockB"]:
+        if usesScaleB(kernel):
           requiredUnalignedSgprVar.append("SwapMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
@@ -10199,6 +10218,92 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.numStoreSgprNames.append("ActivationType")
         self.states.numStoreSgprNameSizes.append(1)
       storeSgprLoad += self.states.numActivationTypeArgSize + self.states.numactivationArgTotalSize
+    if kernel["PartialRMS"]:
+      # RMSNormGamma: 64-bit ptr (2 SGPRs), PartialBuf: 64-bit ptr (2 SGPRs).
+      # NTilesN is a kernarg u32 but is NOT put in the named SGPR block; instead the
+      # epilogue computes it from SizesFree[1] and the compile-time MT1 constant.
+      # Guarantee even alignment for the 64-bit pointers. The store SGPR block is
+      # loaded starting at absolute kernarg dword offset numSgprToLoad, so the
+      # alignment of RMSNormGamma is decided by the ABSOLUTE running offset
+      # (numSgprToLoad + entries already in this block), not the internal block
+      # parity. Insert a 1-SGPR pad when that absolute offset is odd.
+      if (self.states.numSgprToLoad + sum(self.states.numStoreSgprNameSizes)) % 2:
+        self.states.numStoreSgprNames.append("PartialRMSPad")
+        self.states.numStoreSgprNameSizes.append(1)
+        storeSgprLoad += 1
+      self.states.numStoreSgprNames.append("RMSNormGamma")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      self.states.numStoreSgprNames.append("PartialBuf")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      storeSgprLoad += self.states.rpga * 2
+      if kernel["PartialRMSResidualAdd"]:
+        # ResidualBuf: 64-bit ptr (2 SGPRs) for the bf16 row-major residual tensor.
+        self.states.numStoreSgprNames.append("ResidualBuf")
+        self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+        storeSgprLoad += self.states.rpga
+      if kernel["PartialRMSStoreBf16D"]:
+        # AddressResidualOut: 64-bit ptr (2 SGPRs) for the bf16 pre-quant output.
+        # Ensure 64-bit alignment before the pointer pair using the ABSOLUTE
+        # running kernarg offset (see PartialRMSPad above), not internal parity.
+        if (self.states.numSgprToLoad + sum(self.states.numStoreSgprNameSizes)) % 2:
+          self.states.numStoreSgprNames.append("PartialRMSBf16Pad")
+          self.states.numStoreSgprNameSizes.append(1)
+          storeSgprLoad += 1
+        self.states.numStoreSgprNames.append("AddressResidualOut")
+        self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+        storeSgprLoad += self.states.rpga
+    if kernel["DQuantType"] == "Tile":
+      # QuantScale: 64-bit pointer (2 SGPRs) for per-tile amax/448 output buffer.
+      if sum(self.states.numStoreSgprNameSizes) % 2:
+        self.states.numStoreSgprNames.append("TileQuantPad")
+        self.states.numStoreSgprNameSizes.append(1)
+        storeSgprLoad += 1
+      self.states.numStoreSgprNames.append("QuantScale")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      storeSgprLoad += self.states.rpga
+    if kernel["DQuantType"] == "MXFP8":
+      # MXScale: 64-bit pointer (2 SGPRs) for the e8m0 side buffer.
+      # Align on the ABSOLUTE running kernarg offset (see PartialRMSPad above),
+      # not internal block parity, so the pointer lands on an 8-byte boundary.
+      if (self.states.numSgprToLoad + sum(self.states.numStoreSgprNameSizes)) % 2:
+        self.states.numStoreSgprNames.append("MXFP8QuantPad")
+        self.states.numStoreSgprNameSizes.append(1)
+        storeSgprLoad += 1
+      self.states.numStoreSgprNames.append("MXScale")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      storeSgprLoad += self.states.rpga
+    if kernel.get("UseDeepseekScaleA", False):
+      # ScaleABuf: 64-bit pointer (2 SGPRs) for per-row fp32 A-dequantization scales.
+      if sum(self.states.numStoreSgprNameSizes) % 2:
+        self.states.numStoreSgprNames.append("DeepseekScaleAPad")
+        self.states.numStoreSgprNameSizes.append(1)
+        storeSgprLoad += 1
+      self.states.numStoreSgprNames.append("ScaleABuf")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      storeSgprLoad += self.states.rpga
+    if kernel.get("UseDeepseekScaleB", False):
+      # ScaleBBuf: 64-bit pointer (2 SGPRs) for per-128col-block fp32 B-dequantization scales.
+      if sum(self.states.numStoreSgprNameSizes) % 2:
+        self.states.numStoreSgprNames.append("DeepseekScaleBPad")
+        self.states.numStoreSgprNameSizes.append(1)
+        storeSgprLoad += 1
+      self.states.numStoreSgprNames.append("ScaleBBuf")
+      self.states.numStoreSgprNameSizes.append(self.states.rpga)  # 2 SGPRs (64-bit ptr)
+      storeSgprLoad += self.states.rpga
+    self.states.numStoreSgprToLoad = storeSgprLoad
+
+
+    if self.states.useGateResidual:
+      self.states.numSgprAddressGate = self.states.rpga # 64-bit
+      self.states.numStoreSgprNames.append("AddressGate")
+      self.states.numStoreSgprNameSizes.append(self.states.numSgprAddressGate)
+      self.states.GateType   = 1
+      self.states.GateStride = self.states.gate.numSgprStrides
+      self.states.numStoreSgprNames.append("GateType")
+      self.states.numStoreSgprNameSizes.append(self.states.GateType)
+      self.states.numStoreSgprNames.append("GateStride")
+      self.states.numStoreSgprNameSizes.append(self.states.GateStride)
+      storeSgprLoad += self.states.numSgprAddressGate + self.states.GateType + self.states.GateStride
   
     self.states.numStoreSgprToLoad = storeSgprLoad      
     if self.db["InitLds"] : print ("\n***WARNING: InitLds enabled, may impact performance\n")

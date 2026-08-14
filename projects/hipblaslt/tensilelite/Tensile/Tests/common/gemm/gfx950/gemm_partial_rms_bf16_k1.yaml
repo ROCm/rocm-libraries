@@ -1,0 +1,665 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# PartialRMS fused epilogue (K1): bf16 input, no residual, no quant.
+# Groups are split by MT1 (Tensile PartialRMS pipeline constraint).
+# All tiles: MT0%64==0, MT1%64==0.
+# Deep-DepthU group (DepthU in {128,192}) covers MT1=128; larger tiles exceed LDS at these DepthU values.
+
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: -1
+  ExitOnFails: 0
+  PrintSolutionRejectionReason: True
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 2
+  DataInitTypeBias: 1
+  BoundsCheck: 0
+  CpuThreads: 1
+  RotatingBufferSize: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=64
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  4,  4, 1, 1]  # MT 64x64,   WG 1x1
+            - [16, 16, 32, 1, 1,  3,  2, 2, 2]  # MT 96x64,   WG 2x2
+            - [16, 16, 32, 1, 1,  6,  2, 2, 2]  # MT 192x64,  WG 2x2
+            - [16, 16, 32, 1, 1,  6,  4, 4, 1]  # MT 384x64,  WG 4x1
+            - [16, 16, 32, 1, 1,  9,  4, 4, 1]  # MT 576x64,  WG 4x1
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [320,  320, 1,  128]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [576,   64, 1,  128]
+            - Exact: [ 64,  512, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=128
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  4,  8, 1, 1]  # MT 64x128,  WG 1x1
+            - [16, 16, 32, 1, 1,  3,  4, 2, 2]  # MT 96x128,  WG 2x2
+            - [16, 16, 32, 1, 1,  4,  4, 2, 2]  # MT 128x128, WG 2x2
+            - [16, 16, 32, 1, 1,  9,  2, 1, 4]  # MT 144x128, WG 1x4
+            - [16, 16, 32, 1, 1,  6,  4, 2, 2]  # MT 192x128, WG 2x2
+            - [16, 16, 32, 1, 1, 14,  4, 2, 2]  # MT 448x128, WG 2x2
+            - [16, 16, 32, 1, 1, 15,  4, 2, 2]  # MT 480x128, WG 2x2
+            - [16, 16, 32, 1, 1, 16,  4, 2, 2]  # MT 512x128, WG 2x2
+            - [16, 16, 32, 1, 1,  8,  8, 4, 1]  # MT 512x128, WG 4x1
+            - [16, 16, 32, 1, 1, 32,  2, 1, 4]  # MT 512x128, WG 1x4
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [128,  128, 1,  128]
+            - Exact: [320,  320, 1,  128]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [512,  128, 1,  128]
+            - Exact: [128,  512, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=192
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  2,  6, 2, 2]  # MT 64x192,  WG 2x2
+            - [16, 16, 32, 1, 1,  8,  6, 2, 2]  # MT 256x192, WG 2x2
+            - [16, 16, 32, 1, 1, 12,  6, 2, 2]  # MT 384x192, WG 2x2
+            - [16, 16, 32, 1, 1, 14,  6, 2, 2]  # MT 448x192, WG 2x2
+            - [16, 16, 32, 1, 1,  7, 12, 4, 1]  # MT 448x192, WG 4x1
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [320,  320, 1,  128]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [448,  192, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=256
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  6,  4, 1, 4]  # MT 96x256,  WG 1x4
+            - [16, 16, 32, 1, 1,  8,  8, 2, 2]  # MT 256x256, WG 2x2
+            - [16, 16, 32, 1, 1, 21,  4, 1, 4]  # MT 336x256, WG 1x4
+            - [16, 16, 32, 1, 1, 23,  4, 1, 4]  # MT 368x256, WG 1x4
+            - [16, 16, 32, 1, 1, 12,  8, 2, 2]  # MT 384x256, WG 2x2
+            - [16, 16, 32, 1, 1, 24,  4, 1, 4]  # MT 384x256, WG 1x4
+            - [16, 16, 32, 1, 1,  6, 16, 4, 1]  # MT 384x256, WG 4x1
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256,  256, 1,  256]
+            - Exact: [320,  320, 1,  128]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [384,  256, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=320
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1, 17,  5, 1, 4]  # MT 272x320, WG 1x4
+            - [16, 16, 32, 1, 1, 19,  5, 1, 4]  # MT 304x320, WG 1x4
+            - [16, 16, 32, 1, 1, 10, 10, 2, 2]  # MT 320x320, WG 2x2
+            - [16, 16, 32, 1, 1, 20,  5, 1, 4]  # MT 320x320, WG 1x4
+            - [16, 16, 32, 1, 1,  5, 20, 4, 1]  # MT 320x320, WG 4x1
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [320,  320, 1,  320]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=384
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  2,  6, 1, 4]  # MT 32x384,  WG 1x4
+            - [16, 16, 32, 1, 1,  2, 24, 4, 1]  # MT 128x384, WG 4x1
+            - [16, 16, 32, 1, 1, 13,  6, 1, 4]  # MT 208x384, WG 1x4
+            - [16, 16, 32, 1, 1,  8, 12, 2, 2]  # MT 256x384, WG 2x2
+            - [16, 16, 32, 1, 1, 16,  6, 1, 4]  # MT 256x384, WG 1x4
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [256,  384, 1,  384]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [128,  512, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=448
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  6, 14, 2, 2]  # MT 192x448, WG 2x2
+            - [16, 16, 32, 1, 1, 12,  7, 1, 4]  # MT 192x448, WG 1x4
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [448,  192, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=512
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  4, 16, 2, 2]  # MT 128x512, WG 2x2
+            - [16, 16, 32, 1, 1,  8,  8, 1, 4]  # MT 128x512, WG 1x4
+            - [16, 16, 32, 1, 1,  1, 32, 4, 1]  # MT 64x512,  WG 4x1
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [128,  512, 1,  512]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [256,  2048, 1,  128]
+            - Exact: [128,  512, 1,  128]
+
+  ########################################
+  # Main — DepthU=64, PGR=[0,1,2], MT1=576
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  4,  9, 1, 4]  # MT 64x576,  WG 1x4
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [64]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [64,   576, 1,  576]
+            - Exact: [512,  512, 1,  512]
+            - Exact: [1024, 1024, 1, 1024]
+            - Exact: [ 64,  512, 1,  128]
+
+  ########################################
+  # Deep — DepthU=[128,192], PGR=[0,1,2], MT1=128
+  # K must be a multiple of LCM(128,192)=384
+  ########################################
+  -
+    - # ProblemType — bf16 TN GEMM, PartialRMS (no residual add)
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      StridedBatched: True
+      GroupedGemm: False
+      UseBias: 0
+      UseScaleAB: ""
+      UseScaleCD: False
+      UseScaleAlphaVec: 0
+      Sparse: 0
+      UsePartialRMS: True
+      PartialRMSResidualAdd: False
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+            - [16, 16, 32, 1, 1,  4,  4, 2, 2]  # MT 128x128, WG 2x2
+            - [16, 16, 32, 1, 1,  6,  4, 2, 2]  # MT 192x128, WG 2x2
+        - PartialRMS: [True]
+        - PartialRMSResidualAdd: [False]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - StreamKAtomic: [0]
+        - GlobalSplitU: [1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchAcrossPersistent: [0]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - DepthU: [128, 192]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - PreloadKernArgs: [True]
+        - 1LDSBuffer: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+            - Exact: [512,  512, 1, 384]
+            - Exact: [1024, 1024, 1, 768]
+            - Exact: [320,  320, 1, 384]
+
+
+
+LibraryLogic:
+  ScheduleName: "partialrms_bf16_k1"
+  DeviceNames: ["Device 75a0", "Device 75b0", "Device 75a2", "Device 75b2", "Device 75a3", "Device 75b3", "Device 75a8", "Device 75b8"]
+  ArchitectureName: "gfx950"
+  LibraryType: "Prediction"

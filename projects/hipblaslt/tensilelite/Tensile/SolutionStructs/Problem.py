@@ -425,6 +425,17 @@ _defaultProblemType = {
     # in:f32, intermediate:xf32, out:f32. f32 = xf32(f32) * xf32(f32)
     "UseBeta": True,  # =True use beta parameter (asm will check for B=0 and optimize the write for that), =False don't use beta parameter
     "UseE": False,  # =True use output E to output gemm results before activation
+    "UsePartialRMS":         False,
+    "PartialRMSResidualAdd": False,
+    "PartialRMSQuant":       False,
+    "PartialRMSStoreBf16D":  False,
+    "DQuantType":            "None",
+    "UseDeepseekScaleA":     False,
+    "UseDeepseekScaleB":     False,
+    "DeepseekScaleAq0":      128,  # M-dimension quantization block size for scaleA
+    "DeepseekScaleAq1":      128,  # K-dimension quantization block size for scaleA
+    "DeepseekScaleBq0":      1,    # K-dimension quantization block size for scaleB (in DepthU units)
+    "DeepseekScaleBq1":      128,  # N-dimension quantization block size for scaleB
     "Gradient": False,  # =True set globalWriteElements to gradient mode
     "UseBias": 0,  # =1 support bias vector on M direction, =2 support bias vector on N direction, =3 support bias vector on both M,N direction
     "UseGateResidual": False,  # =True apply gate residual: D = gate * spmm_result + gate
@@ -527,6 +538,7 @@ _validGEMMTypes = [
     ("B", "B", "B", "S"),
     ("B", "B", "S", "S"),
     ("B", "B", "H", "S"),
+    ("B", "B", "F8", "S"),   # bf16 in, OCP fp8 e4m3 out, f32 compute
     ("I8", "I8", "I", "I"),
     ("4xi8", "4xi8", "I", "I"),
     ("I8", "I8", "I8", "I"),
@@ -630,6 +642,7 @@ _HPATypes = [
     ("B", "B", "B", "S"),
     ("B", "B", "S", "S"),
     ("B", "B", "H", "S"),
+    ("B", "B", "F8", "S"),   # bf16 in, OCP fp8 e4m3 out, f32 compute (TileQuant)
     ("I8", "I8", "I", "I"),
     ("4xi8", "4xi8", "I", "I"),
     ("I8", "I8", "I", "S"),
@@ -1344,6 +1357,12 @@ class ProblemType(Mapping):
         name.append(f"Aux{self['DataTypeE'].toChar()}")
     if self["OutputAmaxD"]:
       name.append("AmaxD")
+    if self["UsePartialRMS"]:
+      name.append("PRMS")
+      if self["PartialRMSResidualAdd"]:
+        name.append("RA")
+      if self["PartialRMSQuant"]:
+        name.append("Q")
     if self["Sparse"]:
       if self["Sparse"] == 2:
         name.append("SPBML%d"%(self["MetadataLayout"]))

@@ -158,6 +158,7 @@ def makeValidWorkGroups():
                     validWorkGroups.append(workGroup)
     return validWorkGroups
 
+
 def makeValidWMMA():
     return [[16, 16, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 16, 128, 1]]
 
@@ -531,6 +532,21 @@ validParameters = { # we need to make sure this matches develop
     # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
+    "PartialRMS": [False, True],
+    "PartialRMSQuant": [False, True],
+    "PartialRMSResidualAdd": [False, True],
+    "PartialRMSStoreBf16D": [False, True],
+    "PartialRMSGammaType": ["b", "s"],
+    "PartialRMSResidualType": ["b", "s"],
+    "DQuantType": ["None", "Tile", "MXFP8"],
+    "DQuantSize0": -1,  # Scalar; -1/0 = whole MacroTile0. Real validation in _resolveDQuantSize.
+    "DQuantSize1": -1,  # Scalar; -1/0 = whole MacroTile1. Real validation in _resolveDQuantSize.
+    "UseDeepseekScaleA": [False, True],
+    "UseDeepseekScaleB": [False, True],
+    "DeepseekScaleAq0": list(range(1, 1025)),
+    "DeepseekScaleAq1": list(range(1, 1025)),
+    "DeepseekScaleBq0": list(range(1, 1025)),
+    "DeepseekScaleBq1": list(range(1, 1025)),
     "UseSubtileImpl": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
