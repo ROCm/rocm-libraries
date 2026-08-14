@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -20,10 +21,11 @@
 namespace hipdnn_plugin_sdk::ingestor
 {
 
-/// Implementations of these three must be thread-safe.
-using GraphMatcherFn = bool (*)(const MatchContext&, BoundTokens& bound);
-using KernelMatcherFn = bool (*)(const MatchContext&, const KernelDefinition&);
-using ScoreFn = double (*)(const KernelDefinition&, const MatchContext&);
+/// Implementations of these four must be thread-safe.
+using GraphMatchFn = std::optional<BoundTokens> (*)(const MatchContext&);
+using GraphCriterionFn = bool (*)(const MatchContext&, const BoundTokens&);
+using KernelMatcherFn = bool (*)(const MatchContext&, const BoundTokens&, const KernelDefinition&);
+using ScoreFn = double (*)(const KernelDefinition&, const MatchContext&, const BoundTokens&);
 
 /// The provider's registry of native implementations, keyed by symbol name. One
 /// instance per registered type per loaded image: requires `CXX_VISIBILITY_PRESET
@@ -117,7 +119,8 @@ private:
     std::unordered_map<std::string, T> _symbols;
 };
 
-using GraphMatcherRegistry = NativeRegistry<GraphMatcherFn>;
+using GraphMatchRegistry = NativeRegistry<GraphMatchFn>;
+using GraphCriterionRegistry = NativeRegistry<GraphCriterionFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;
 using ScoreRegistry = NativeRegistry<ScoreFn>;
 

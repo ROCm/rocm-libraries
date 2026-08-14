@@ -185,20 +185,21 @@ const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& conte
  *        device) and the memoized verdict is reused, with only the operation check left
  *        to each pack.
  */
-bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
+std::optional<BoundTokens> pointwiseGraphMatches(const MatchContext& context)
 {
+
     // Exactly one node: this engine's kernels each serve one complete graph.
     const auto* attributesPtr = pointwiseNode(context);
     if(attributesPtr == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
     const auto& attributes = *attributesPtr;
 
     // Binary: a second operand is required, a third would be a different operation.
     if(!attributes.in_1_tensor_uid().has_value() || attributes.in_2_tensor_uid().has_value())
     {
-        return false;
+        return std::nullopt;
     }
 
     const auto* inputA = findTensor(context, attributes.in_0_tensor_uid());
@@ -206,41 +207,43 @@ bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
     const auto* output = findTensor(context, attributes.out_0_tensor_uid());
     if(inputA == nullptr || inputB == nullptr || output == nullptr)
     {
-        return false;
+        return std::nullopt;
     }
 
     if(!isSingleElement(*inputA) || !isSingleElement(*inputB) || !isSingleElement(*output))
     {
-        return false;
+        return std::nullopt;
     }
 
     if(inputA->virtual_() || inputB->virtual_() || output->virtual_())
     {
-        return false;
+        return std::nullopt;
     }
 
     if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputA)
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(inputB)
        || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(output))
     {
-        return false;
+        return std::nullopt;
     }
 
     if(inputA->data_type() != inputB->data_type() || inputA->data_type() != output->data_type())
     {
-        return false;
+        return std::nullopt;
     }
 
+    BoundTokens bound;
     bound[std::string(INPUT_A_TOKEN)] = attributes.in_0_tensor_uid();
     bound[std::string(INPUT_B_TOKEN)] = attributes.in_1_tensor_uid().value();
     bound[std::string(OUTPUT_TOKEN)] = attributes.out_0_tensor_uid();
-    return true;
+    return bound;
 }
 
 /**
  * @brief Graph-scoped operation check: the one fact that separates this engine's packs.
- *        Binds nothing -- the applicability matcher above already bound every token
- *        dispatch reads.
+ *
+ * Listing this second matcher is the whole cost of a pack, and two packs claiming the
+ * same operation would be the authoring mistake, not two packs sharing the graph check.
  */
 bool pointwiseOperationMatches(const MatchContext& context, data_objects::PointwiseMode operation)
 {
@@ -248,17 +251,17 @@ bool pointwiseOperationMatches(const MatchContext& context, data_objects::Pointw
     return attributes != nullptr && attributes->operation() == operation;
 }
 
-bool pointwiseAddMatches(const MatchContext& context, BoundTokens& /*bound*/)
+bool pointwiseAddMatches(const MatchContext& context, const BoundTokens& /*bound*/)
 {
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::ADD);
 }
 
-bool pointwiseMulMatches(const MatchContext& context, BoundTokens& /*bound*/)
+bool pointwiseMulMatches(const MatchContext& context, const BoundTokens& /*bound*/)
 {
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::MUL);
 }
 
-bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
+bool pointwiseSubMatches(const MatchContext& context, const BoundTokens& /*bound*/)
 {
     return pointwiseOperationMatches(context, data_objects::PointwiseMode::SUB);
 }
@@ -268,7 +271,9 @@ bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
  *        Evaluated once per candidate kernel; without it an f32 graph could reach an
  *        f16 binary and return wrong numbers rather than failing.
  */
-bool pointwiseKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
+bool pointwiseKernelMatches(const MatchContext& context,
+                            const BoundTokens& /*bound*/,
+                            const KernelDefinition& kernel)
 {
     const auto dataType = graphDataType(context);
     if(!dataType.has_value())
@@ -279,7 +284,9 @@ bool pointwiseKernelMatches(const MatchContext& context, const KernelDefinition&
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double pointwiseScore(const KernelDefinition& kernel, const MatchContext& /*context*/)
+double pointwiseScore(const KernelDefinition& kernel,
+                      const MatchContext& /*context*/,
+                      const BoundTokens& /*bound*/)
 {
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }
@@ -404,7 +411,7 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        // Reads the operand uids the matcher bound rather than re-deriving them.
+        // Reads the operand uids the graph match bound rather than re-deriving them.
         const auto binding = pointwiseBinding(bound);
 
         const auto blockSize

@@ -22,11 +22,14 @@ namespace hipdnn_plugin_sdk::ingestor
 
 /// Takes @p set by value so a caller building both an engine and its state manager
 /// builds the set once.
+/// @param graphMatchSymbol The engine's `graph_match` native symbol; empty means the
+///        engine declares none and binds no tokens.
 /// @param describedBy Names the engine if it ships no heuristic and one is warned
 ///        about. Defaulted from @p set, but a caller that already moved
 ///        `set.engine` out must pass it, or the warning names nothing.
 template <typename THandle>
 std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(DescriptorSet set,
+                                                                      std::string graphMatchSymbol,
                                                                       std::string describedBy = {})
 {
     if(describedBy.empty())
@@ -38,7 +41,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(Descriptor
                                                                  std::move(set.matchers),
                                                                  std::move(set.dispatches),
                                                                  std::move(set.packs),
-                                                                 std::move(heuristic));
+                                                                 std::move(heuristic),
+                                                                 std::move(graphMatchSymbol));
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a
@@ -47,13 +51,17 @@ template <typename THandle, typename TSettings, typename TContext>
 std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     makeEngine(DescriptorSet set, const IDeviceResolver<THandle>& deviceResolver)
 {
-    // Described before the move: makeStateManager would otherwise read a moved-from
-    // name and warn about an engine it cannot name.
+    // Both reads of the UED happen in their own statements, fully sequenced before the
+    // moves below: the arguments of one call are unsequenced with respect to each other,
+    // so reading either inside the call could observe an already-moved-from engine --
+    // silently resolving no graph match, and warning about an engine it cannot name.
     auto describedBy = describeDescriptor("engine", set.engine.name, set.engine.id);
     auto engine = std::move(set.engine);
+    auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
         std::move(engine),
-        makeStateManager<THandle>(std::move(set), std::move(describedBy)),
+        makeStateManager<THandle>(
+            std::move(set), std::move(graphMatchSymbol), std::move(describedBy)),
         deviceResolver);
 }
 

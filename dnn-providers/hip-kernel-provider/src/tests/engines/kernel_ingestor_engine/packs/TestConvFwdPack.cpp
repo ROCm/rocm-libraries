@@ -41,8 +41,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 bool matches(const MatchContext& context)
 {
-    BoundTokens bound;
-    return matchesGraph(CONV_FWD, context, bound);
+    return matchesGraph(CONV_FWD, context).has_value();
 }
 
 // ---------------------------------------------------------------------------
@@ -67,12 +66,15 @@ TEST(TestConvFwdBinding, BindsAllThreeOperandUids)
 {
     const GraphFixture fixture(buildConvFwdGraph());
 
-    BoundTokens bound;
-    ASSERT_TRUE(matchesGraph(CONV_FWD, fixture.context(), bound));
+    const auto bound = matchesGraph(CONV_FWD, fixture.context());
+    ASSERT_TRUE(bound.has_value());
 
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.inputAToken), CONV_X_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.inputBToken), CONV_W_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, CONV_FWD.outputToken), CONV_Y_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, CONV_FWD.inputAToken),
+              CONV_X_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, CONV_FWD.inputBToken),
+              CONV_W_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, CONV_FWD.outputToken),
+              CONV_Y_UID);
 }
 
 // ---------------------------------------------------------------------------
@@ -234,12 +236,11 @@ TEST(TestConvFwdGraphMatcher, DoesNotOverlapWithThePointwiseEngine)
     const GraphFixture convFixture(buildConvFwdGraph());
     const GraphFixture pointwiseFixture(buildPointwiseGraph());
 
-    BoundTokens bound;
-    EXPECT_TRUE(matchesGraph(CONV_FWD, convFixture.context(), bound));
-    EXPECT_FALSE(matchesGraph(CONV_FWD, pointwiseFixture.context(), bound));
+    EXPECT_TRUE(matchesGraph(CONV_FWD, convFixture.context()).has_value());
+    EXPECT_FALSE(matchesGraph(CONV_FWD, pointwiseFixture.context()).has_value());
 
-    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, pointwiseFixture.context(), bound));
-    EXPECT_FALSE(matchesGraph(POINTWISE_ADD, convFixture.context(), bound));
+    EXPECT_TRUE(matchesGraph(POINTWISE_ADD, pointwiseFixture.context()).has_value());
+    EXPECT_FALSE(matchesGraph(POINTWISE_ADD, convFixture.context()).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -346,15 +347,15 @@ TEST(TestConvFwdPack, HasOneGraphMatcherAndOneKernelMatcher)
 // is never touched here, so short of the slow GPU integration test, nothing catches a
 // broken registration or a broken prepare() unhappy path.
 
-/// Bindings a real plan build would hand the handler, from running the graph matcher.
+/// Bindings a real plan build would hand the handler, from running the graph match.
 BoundTokens convBindingsFor(const MatchContext& context)
 {
-    BoundTokens bound;
-    if(!matchesGraph(CONV_FWD, context, bound))
+    auto bound = matchesGraph(CONV_FWD, context);
+    if(!bound.has_value())
     {
         throw std::logic_error("test graph does not match the conv pack");
     }
-    return bound;
+    return std::move(*bound);
 }
 
 /// If IngestorPacks drops the ConvFwd row, or registerConvFwdSymbols stops registering

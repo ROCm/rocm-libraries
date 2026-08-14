@@ -163,12 +163,12 @@ TEST(TestPointwisePacks, SubtractsInTheRightDirection)
     const GraphFixture fixture(
         buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB));
 
-    hipdnn_plugin_sdk::ingestor::BoundTokens bound;
-    ASSERT_TRUE(matchesGraph(POINTWISE_SUB, fixture.context(), bound));
+    const auto bound = matchesGraph(POINTWISE_SUB, fixture.context());
+    ASSERT_TRUE(bound.has_value());
 
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputAToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_SUB.inputAToken),
               INPUT_A_UID);
-    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, POINTWISE_SUB.inputBToken),
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_SUB.inputBToken),
               INPUT_B_UID);
 }
 

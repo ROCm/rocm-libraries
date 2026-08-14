@@ -33,7 +33,10 @@ class IKernelHeuristic
 public:
     virtual ~IKernelHeuristic() = default;
 
-    virtual double score(const KernelDefinition& kernel, const MatchContext& context) const = 0;
+    virtual double score(const KernelDefinition& kernel,
+                         const MatchContext& context,
+                         const BoundTokens& bound) const
+        = 0;
 
     /// Orders @p catalog best-first, breaking ties on `priority`, then descriptor id
     /// bytes (stable across runs).
@@ -51,7 +54,7 @@ public:
         scored.reserve(catalog.entries.size());
         for(const auto& entry : catalog.entries)
         {
-            const double raw = score(entry, context);
+            const double raw = score(entry, context, catalog.bound);
             scored.emplace_back(std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
                                 &entry);
         }
@@ -91,9 +94,11 @@ public:
     {
     }
 
-    double score(const KernelDefinition& kernel, const MatchContext& context) const override
+    double score(const KernelDefinition& kernel,
+                 const MatchContext& context,
+                 const BoundTokens& bound) const override
     {
-        return _scoreFn(kernel, context);
+        return _scoreFn(kernel, context, bound);
     }
 
 private:
@@ -109,7 +114,9 @@ private:
 class UnrankedKernelHeuristic : public IKernelHeuristic
 {
 public:
-    double score(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/) const override
+    double score(const KernelDefinition& /*kernel*/,
+                 const MatchContext& /*context*/,
+                 const BoundTokens& /*bound*/) const override
     {
         return 0.0;
     }

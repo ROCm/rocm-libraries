@@ -489,15 +489,18 @@ constexpr DeviceId DEVICE_FOR_HANDLE_B = 7;
 constexpr const char* DEVICE_GATED_MATCH_SYMBOL
     = "hipdnn.kernel_ingestor.test.generic_plan_builder.device_gated";
 
-bool acceptsOnlyDeviceA(const MatchContext& context, BoundTokens& /*bound*/)
+std::optional<BoundTokens> acceptsOnlyDeviceA(const MatchContext& context)
 {
-    return context.deviceId == DEVICE_FOR_HANDLE_A;
+    if(context.deviceId != DEVICE_FOR_HANDLE_A)
+    {
+        return std::nullopt;
+    }
+    return BoundTokens{};
 }
 
 TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionIntoTheMatchContext)
 {
-    const auto deviceGatedMatcher
-        = scopedGraphMatcher(DEVICE_GATED_MATCH_SYMBOL, &acceptsOnlyDeviceA);
+    GraphMatchRegistry::registerSymbol(DEVICE_GATED_MATCH_SYMBOL, &acceptsOnlyDeviceA);
     const ScopedBlockSizeScore scorer;
 
     MetadataSchema schema;
@@ -509,18 +512,17 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
     pack.name = "test pack";
-    pack.matcherIds = {GRAPH_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
     pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
 
     const KernelIngestorStateManager<StubHandle> manager(
         std::move(schema),
-        std::vector<MatchDescriptor>{
-            {GRAPH_MATCHER_ID, "device gated", MatchScope::GRAPH, DEVICE_GATED_MATCH_SYMBOL}},
+        std::vector<MatchDescriptor>{},
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        DEVICE_GATED_MATCH_SYMBOL);
 
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const MockDeviceResolver resolver;
@@ -538,6 +540,8 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
 
     EXPECT_TRUE(builder.isApplicable(handleA, graph));
     EXPECT_FALSE(builder.isApplicable(handleB, graph));
+
+    GraphMatchRegistry::unregisterSymbol(DEVICE_GATED_MATCH_SYMBOL);
 }
 
 /// A graph schema floor an engine declaring the baseline cannot serve.
@@ -557,7 +561,7 @@ TEST(TestIngestorGenericPlanBuilder, EngineDecliningTheGraphsSchemaNeverMatches)
     const TestGraph graph(makeGraphId(0xA0), NEWER_THAN_BASELINE);
 
     EXPECT_FALSE(builder.isApplicable(0, graph));
-    EXPECT_EQ(counters().graphCalls, 0);
+    EXPECT_EQ(counters().graphMatchCalls, 0);
     EXPECT_EQ(counters().kernelCalls, 0);
 }
 
@@ -572,7 +576,7 @@ TEST(TestIngestorGenericPlanBuilder, EngineDeclaringTheGraphsSchemaMatchesNormal
     const TestGraph graph(makeGraphId(0xA1), NEWER_THAN_BASELINE);
 
     EXPECT_TRUE(builder.isApplicable(0, graph));
-    EXPECT_EQ(counters().graphCalls, 1);
+    EXPECT_EQ(counters().graphMatchCalls, 1);
 }
 
 TEST(TestIngestorGenericPlanBuilder, EngineNewerThanTheGraphNeedsMatchesNormally)

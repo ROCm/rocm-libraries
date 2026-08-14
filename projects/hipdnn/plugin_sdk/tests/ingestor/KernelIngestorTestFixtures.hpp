@@ -162,17 +162,21 @@ inline DeviceProperties testDeviceProperties()
     return properties;
 }
 
-inline bool acceptAnyGraph(const MatchContext& /*context*/, BoundTokens& /*bound*/)
+inline std::optional<BoundTokens> acceptAnyGraph(const MatchContext& /*context*/)
 {
-    return true;
+    return BoundTokens{};
 }
 
-inline bool acceptFloatKernels(const MatchContext& /*context*/, const KernelDefinition& kernel)
+inline bool acceptFloatKernels(const MatchContext& /*context*/,
+                               const BoundTokens& /*bound*/,
+                               const KernelDefinition& kernel)
 {
     return kernel.getStringMetadata(DTYPE) == "FLOAT";
 }
 
-inline double scoreByBlockSize(const KernelDefinition& kernel, const MatchContext& /*context*/)
+inline double scoreByBlockSize(const KernelDefinition& kernel,
+                               const MatchContext& /*context*/,
+                               const BoundTokens& /*bound*/)
 {
     return static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
 }
@@ -182,14 +186,14 @@ class ScopedTestSymbols
 public:
     ScopedTestSymbols()
     {
-        GraphMatcherRegistry::registerSymbol(GRAPH_MATCH_SYMBOL, &acceptAnyGraph);
+        GraphMatchRegistry::registerSymbol(GRAPH_MATCH_SYMBOL, &acceptAnyGraph);
         KernelMatcherRegistry::registerSymbol(KERNEL_MATCH_SYMBOL, &acceptFloatKernels);
         ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
     }
 
     ~ScopedTestSymbols()
     {
-        GraphMatcherRegistry::unregisterSymbol(GRAPH_MATCH_SYMBOL);
+        GraphMatchRegistry::unregisterSymbol(GRAPH_MATCH_SYMBOL);
         KernelMatcherRegistry::unregisterSymbol(KERNEL_MATCH_SYMBOL);
         ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
     }
@@ -297,7 +301,6 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
                      {DTYPE, MetadataType::STRING, std::nullopt}};
 
     std::vector<MatchDescriptor> matchers{
-        {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL},
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, KERNEL_MATCH_SYMBOL}};
     ensureNoopDispatchRegistered<int>("hipdnn.kernel_ingestor.test.dispatch");
     std::vector<DispatchDescriptor> dispatches{
@@ -306,7 +309,7 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
     pack.name = "test pack";
-    pack.matcherIds = {GRAPH_MATCHER_ID, KERNEL_MATCHER_ID};
+    pack.matcherIds = {KERNEL_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
     pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
@@ -319,16 +322,19 @@ inline std::unique_ptr<KernelIngestorStateManager<int>>
         std::move(dispatches),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GRAPH_MATCH_SYMBOL,
         cacheCapacity);
 }
 
 struct MatcherCounters
 {
+    int graphMatchCalls = 0;
     int graphCalls = 0;
     int kernelCalls = 0;
 
     void reset()
     {
+        graphMatchCalls = 0;
         graphCalls = 0;
         kernelCalls = 0;
     }
@@ -342,28 +348,47 @@ inline MatcherCounters& counters()
 
 constexpr int64_t BOUND_TOKEN_VALUE = 4242;
 
-inline bool acceptGraph(const MatchContext& /*context*/, BoundTokens& bound)
+inline std::optional<BoundTokens> acceptGraph(const MatchContext& /*context*/)
+{
+    ++counters().graphMatchCalls;
+    BoundTokens bound;
+    bound["test.bound_token"] = BOUND_TOKEN_VALUE;
+    return bound;
+}
+
+inline std::optional<BoundTokens> rejectGraph(const MatchContext& /*context*/)
+{
+    ++counters().graphMatchCalls;
+    return std::nullopt;
+}
+
+/// Graph-scoped criteria. These read the tokens the engine's graph match produced and
+/// count separately from it, so a test can tell which stage ran.
+inline bool acceptCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
     ++counters().graphCalls;
-    bound["test.bound_token"] = BOUND_TOKEN_VALUE;
     return true;
 }
 
-inline bool rejectGraph(const MatchContext& /*context*/, BoundTokens& /*bound*/)
+inline bool rejectCriterion(const MatchContext& /*context*/, const BoundTokens& /*bound*/)
 {
     ++counters().graphCalls;
     return false;
 }
 
-inline bool countingFloatKernels(const MatchContext& context, const KernelDefinition& kernel)
+inline bool countingFloatKernels(const MatchContext& context,
+                                 const BoundTokens& bound,
+                                 const KernelDefinition& kernel)
 {
     ++counters().kernelCalls;
-    return acceptFloatKernels(context, kernel);
+    return acceptFloatKernels(context, bound, kernel);
 }
 
 constexpr const char* CONSTANT_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.constant_score";
 
-inline double scoreConstant(const KernelDefinition& /*kernel*/, const MatchContext& /*context*/)
+inline double scoreConstant(const KernelDefinition& /*kernel*/,
+                            const MatchContext& /*context*/,
+                            const BoundTokens& /*bound*/)
 {
     return 1.0;
 }
@@ -392,7 +417,8 @@ constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score"
 /// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
 /// one pack poisoning the order for the rest, not merely losing its own place.
 inline double scoreNanForLargestBlock(const KernelDefinition& kernel,
-                                      const MatchContext& /*context*/)
+                                      const MatchContext& /*context*/,
+                                      const BoundTokens& /*bound*/)
 {
     return kernel.getIntMetadata(BLOCK_SIZE) == 4096
                ? std::numeric_limits<double>::quiet_NaN()
@@ -435,15 +461,15 @@ public:
     ScopedBlockSizeScore& operator=(const ScopedBlockSizeScore&) = delete;
 };
 
-/// Registers one graph matcher for the returned object's lifetime. Unregisters even when
-/// the test body throws, which a trailing unregisterSymbol() call does not. @p symbol must
-/// outlive the guard; every call site passes a string literal.
+/// Registers one graph criterion for the returned object's lifetime. Unregisters even
+/// when the test body throws, which a trailing unregisterSymbol() call does not. @p
+/// symbol must outlive the guard; every call site passes a string literal.
 inline hipdnn_data_sdk::utilities::ScopedResource<const char*>
-    scopedGraphMatcher(const char* symbol, GraphMatcherFn matcher)
+    scopedGraphMatcher(const char* symbol, GraphCriterionFn matcher)
 {
-    GraphMatcherRegistry::registerSymbol(symbol, matcher);
+    GraphCriterionRegistry::registerSymbol(symbol, matcher);
     return {symbol,
-            [](const char* registered) { GraphMatcherRegistry::unregisterSymbol(registered); }};
+            [](const char* registered) { GraphCriterionRegistry::unregisterSymbol(registered); }};
 }
 
 inline MetadataSchema makeSchema()
@@ -481,9 +507,11 @@ inline KernelDescriptorPack makePack(const std::vector<DescriptorId>& matcherIds
     return pack;
 }
 
+/// The graph-scoped criterion here resolves through GraphCriterionRegistry, so a test
+/// using it registers one with scopedGraphMatcher("test.graph_criterion", ...).
 inline std::vector<MatchDescriptor> makeTestMatchers()
 {
-    return {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
+    return {{GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph_criterion"},
             {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
 }
 
@@ -508,19 +536,20 @@ inline KernelDefinition makeDefinition(const DescriptorId& id,
             arch};
 }
 
-/// RAII: registers matchers under caller-supplied names; construct before any state
-/// manager naming them, since symbols resolve eagerly.
+/// RAII: registers the engine's graph match and one kernel matcher under
+/// caller-supplied names; construct before any state manager naming them, since symbols
+/// resolve eagerly. Graph criteria are registered separately with scopedGraphMatcher().
 class ScopedSymbols
 {
 public:
     ScopedSymbols(std::string graphSymbol,
-                  GraphMatcherFn graphFn,
+                  GraphMatchFn graphFn,
                   std::string kernelSymbol,
                   KernelMatcherFn kernelFn)
         : _graphSymbol(std::move(graphSymbol))
         , _kernelSymbol(std::move(kernelSymbol))
     {
-        GraphMatcherRegistry::registerSymbol(_graphSymbol, graphFn);
+        GraphMatchRegistry::registerSymbol(_graphSymbol, graphFn);
         KernelMatcherRegistry::registerSymbol(_kernelSymbol, kernelFn);
         ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
         counters().reset();
@@ -528,7 +557,7 @@ public:
 
     ~ScopedSymbols()
     {
-        GraphMatcherRegistry::unregisterSymbol(_graphSymbol);
+        GraphMatchRegistry::unregisterSymbol(_graphSymbol);
         KernelMatcherRegistry::unregisterSymbol(_kernelSymbol);
         ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
     }
@@ -544,12 +573,14 @@ private:
 using TestHandle = int;
 using StateManager = KernelIngestorStateManager<TestHandle>;
 
+/// The default engine: a graph match plus one kernel-scoped criterion, and no
+/// graph-scoped criterion. Tests that exercise graph criteria register their own with
+/// scopedGraphMatcher() and list GRAPH_MATCHER_ID in their pack.
 inline std::unique_ptr<StateManager>
     makeStateManager(const std::string& scoreSymbol = SCORE_SYMBOL,
                      size_t cacheCapacity = StateManager::DEFAULT_CATALOG_CACHE_CAPACITY)
 {
     std::vector<MatchDescriptor> matchers{
-        {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
     ensureNoopDispatchRegistered<TestHandle>();
     std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
@@ -558,8 +589,9 @@ inline std::unique_ptr<StateManager>
         makeSchema(),
         std::move(matchers),
         std::move(dispatches),
-        std::vector<KernelDescriptorPack>{makePack({GRAPH_MATCHER_ID, KERNEL_MATCHER_ID})},
+        std::vector<KernelDescriptorPack>{makePack({KERNEL_MATCHER_ID})},
         std::make_shared<NativeKernelHeuristic>(scoreSymbol),
+        "test.graph",
         cacheCapacity);
 }
 
@@ -702,18 +734,17 @@ inline std::unique_ptr<KernelIngestorStateManager<StubHandle>> makeStubStateMana
     KernelDescriptorPack pack;
     pack.id = PACK_ID;
     pack.name = "test pack";
-    pack.matcherIds = {GRAPH_MATCHER_ID};
     pack.engineId = ENGINE_ID;
     pack.dispatchId = DISPATCH_ID;
     pack.kernels = {makeTestKernel(testId(0x64), "kernel_64_float", 64, "FLOAT")};
 
     return std::make_unique<KernelIngestorStateManager<StubHandle>>(
         std::move(schema),
-        std::vector<MatchDescriptor>{
-            {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, GRAPH_MATCH_SYMBOL}},
+        std::vector<MatchDescriptor>{},
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
-        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL));
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GRAPH_MATCH_SYMBOL);
 }
 
 inline EngineDescriptor
