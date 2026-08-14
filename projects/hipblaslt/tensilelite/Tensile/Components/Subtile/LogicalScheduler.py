@@ -29,7 +29,6 @@ from bisect import bisect_left
 import copy
 import io
 import math
-import os
 
 from rocisa.code import Module
 from .ScheduleTypes import (
@@ -3706,12 +3705,9 @@ class LogicalScheduler:
         # / v_lshlrev / v_permlane). Opt such small tiles into the SAME strategy as
         # large tiles: keep the terminal MFMAs IN the loop (every input tile dead
         # before the store) and lend the now-dead input-tile VGPRs to the store pool
-        # so its temps reuse the freed holes instead of shuffling. This is selected
-        # by the internal plsinStoreMode decision (Lend vs Weave), carried on
-        # writer.states from Components/Subtile/Plsin.py.
-        paramLend = getattr(writer.states, "plsinStoreMode", "Weave") == "Lend"
-        smallTileLend = (not largeTile) and paramLend
-        if largeTile or smallTileLend:
+        # so its temps reuse the freed holes instead of shuffling. Only large tiles
+        # take this Lend path today; small tiles keep the weave.
+        if largeTile:
             weaveGroups = None
             # Carry (base, size) per input tile so buildSubtileFusedStore can skip
             # any tile that overlaps the spilled-accumulator arch-VGPR region. For
@@ -3862,11 +3858,11 @@ class LogicalScheduler:
         return groups
 
     def _weaveFillersIntoMfmaGaps(self, flat, numFillers, emitFiller, woven,
-                                  perGap=None, stride=None, tailStart=None):
-        """Shared MFMA-gap weaver for the PLSIN hoist passes (B3): the single place
-        that decides WHERE hoisted fillers land relative to the loop's MFMAs. Both the
-        NGLL coord-hoist and the NLL store-init hoist route through here so a placement
-        policy change (e.g. C1 terminal-gap targeting) is made once.
+                                  perGap=None, stride=None):
+        """Shared MFMA-gap weaver for the PLSIN hoist passes: the single place that
+        decides WHERE hoisted fillers land relative to the loop's MFMAs. Both the NGLL
+        coord-hoist and the NLL store-init hoist route through here so a placement
+        policy change is made once.
 
         Walk `flat`, copying each item into `woven`; after each MFMA, drop fillers per
         the policy. `emitFiller(idx, woven) -> nextIdx` emits ONE filler unit (a single
@@ -3875,30 +3871,19 @@ class LogicalScheduler:
         policy is given:
           perGap=k    : packed   -- up to k fillers immediately after each MFMA
           stride=s    : spread   -- one filler after every s-th MFMA
-          tailStart=t : terminal -- one filler after each MFMA past the t-th (C1): the
-                        exposed back-to-back tail MFMAs stall (~48c on ATT) while the
-                        earlier gaps already overlap the loop's ds_reads, so directing
-                        the fillers at the tail hides the real stalls instead of
-                        redundantly re-hiding already-covered early gaps.
         Leftover fillers (fewer targeted gaps than fillers) are appended in order.
         Returns the next filler index consumed."""
         idx = 0
         credit = 0
-        mfmaSeen = 0
         for inst in flat:
             woven.add(inst)
             isMfma = isinstance(inst, (MFMAInstruction, MXMFMAInstruction))
-            if isMfma:
-                mfmaSeen += 1
             if idx >= numFillers or not isMfma:
                 continue
             if perGap is not None:
                 for _ in range(perGap):
                     if idx >= numFillers:
                         break
-                    idx = emitFiller(idx, woven)
-            elif tailStart is not None:
-                if mfmaSeen > tailStart:
                     idx = emitFiller(idx, woven)
             else:
                 credit += 1
@@ -4003,46 +3988,6 @@ class LogicalScheduler:
         # exceeds the +-simm16 short-branch range, so force 32-bit long branches.
         module.add(writer.emitFusedStoreGuard(kernel, plainLabel, longBranch=True))
         return module
-
-    def _inject_fused_drain(self, writer, kernel, emitted_3d):
-        """Insert the FUSED-NLL drain module (write-index/cvt materialization) right
-        after the NLL's global-read drain (wait_gr), in the FUSED copy only.
-
-        Mirrors emitMainAndExitLoops.inject_pap_after_nll_drain: find the wait_gr
-        EmittedModule, then place a new EmittedModule after it (and after any sync
-        that chains off it) by re-pointing that drain's before-consumers at the new
-        module. The module is built eagerly (like the PAP module) so it lands as
-        already-emitted instructions with source=None. Step 4c uses
-        buildSubtileFusedDrainProbe to measure VGPR headroom at the drain; Step 4d
-        swaps in the real materialization. Caller passes a deepcopy, so this mutates
-        in place. Returns emitted_3d unchanged if no drain is found."""
-        drain_module = writer.buildSubtileFusedDrainProbe(kernel)
-
-        def insert_after_drain(em_list):
-            wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
-            if wait_gr is None:
-                return False
-            tail_id = wait_gr.moduleId
-            sync = next((em for em in em_list
-                         if em.opType == 'sync' and em.before == tail_id), None)
-            if sync is not None:
-                tail_id = sync.moduleId
-
-            new_id = max(em.moduleId for em in em_list) + 1
-            consumers = [em for em in em_list if em.before == tail_id]
-            em_list.append(EmittedModule(moduleId=new_id,
-                                         instructions=[drain_module],
-                                         before=tail_id,
-                                         source=None))
-            for consumer in consumers:
-                consumer.before = new_id
-            return True
-
-        for partition_emitted in emitted_3d:
-            for em_list in partition_emitted:
-                if insert_after_drain(em_list):
-                    return emitted_3d
-        return emitted_3d
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).

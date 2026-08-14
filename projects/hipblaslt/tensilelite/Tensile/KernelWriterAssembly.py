@@ -14095,35 +14095,6 @@ class KernelWriterAssembly(KernelWriter):
     remainder = flat[i:]
     return units, remainder
 
-  def buildSubtileFusedDrainProbe(self, kernel):
-    """Step 4c measurement probe: reserve the paired-store's arch-VGPR footprint at
-    the FUSED NLL drain to measure whether it spills past the VGPR ceiling.
-
-    The fused 256x256 kernel already sits near the unified VGPR ceiling (arch +
-    AGPR accumulators). The NLL's terminal-subIterK MFMAs keep the LR tile VGPRs
-    live, and DirectToLds means there are no large G2L destination VGPRs to
-    reclaim — so the injected paired store adds arch-VGPR pressure on top of the
-    live tiles. This probe checks out a representative store footprint (cvt vPack +
-    coord/coutRowPtr + addr scratch), forces it onto the high-water via a dummy
-    write, then checks it back in. It emits no functional work and self-cleans, so
-    the FUSED copy stays dead code and the post-loop path is untouched — only the
-    reported .vgpr_count/.vgpr_spill_count change, quantifying the headroom before
-    the real materialization + GR-offset reclaim lands."""
-    module = Module("SubtileFusedDrainProbe")
-    module.addComment0("PostLoopStoreInNll 4c PROBE: measure paired-store VGPR footprint at NLL drain")
-    # cvtVgprStruct.vgprBf16Temp (vPack): 4 VGPRs, 4-aligned for buffer_store_dwordx4.
-    vPack = self.vgprPool.checkOutAligned(4, 4, tag="fusedDrainProbe_vPack")
-    # coord0/coord1/coutRowPtrD (write indices) + address scratch held to the store.
-    vIdx  = self.vgprPool.checkOut(3, tag="fusedDrainProbe_writeIdx")
-    vAddr = self.vgprPool.checkOutAligned(2, 2, tag="fusedDrainProbe_addr")
-    module.add(VMovB32(dst=vgpr(vPack), src=0, comment="probe: touch vPack (high-water)"))
-    module.add(VMovB32(dst=vgpr(vIdx),  src=0, comment="probe: touch write-index"))
-    module.add(VMovB32(dst=vgpr(vAddr), src=0, comment="probe: touch addr scratch"))
-    self.vgprPool.checkIn(vAddr)
-    self.vgprPool.checkIn(vIdx)
-    self.vgprPool.checkIn(vPack)
-    return module
-
   def loadFusedEpilogueStoreSgprs(self, kernel):
     """Fused-NLL epilogue kernarg loader (dispatcher).
 
@@ -14744,7 +14715,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # --- write indices (coord0/1, coutRowPtrD) + restricted beta0/NonEdge store ---
     # Stage 2 init-hoist: if the owner's PostLoopInitInNGLL arm already computed the
-    # write indices (TENSILE_NGLL_HOIST_COORDS), reuse those VGPRs instead of
+    # write indices, reuse those VGPRs instead of
     # recomputing here — the coord VALU then overlapped the NLL terminal MFMAs
     # (latency hidden). Restore self.vgprs.* from the stash so the store body and
     # cleanupGlobalWrite (below) operate on / check in the hoisted registers exactly
@@ -14763,17 +14734,15 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.coutRowPtrE    = _hoistedIdx["coutRowPtrE"]
       self.vgprs.coutRowPtrBias = _hoistedIdx["coutRowPtrBias"]
       self.states.subtileHoistedWriteIndices = None
-      # PLSIN numIter<PGR (TENSILE_PLSIN_MIN_ITER lowered the fused-store gate below
-      # PGR): the PGR>=2 preloop takes SkipToNLL for numIter<PGR (e.g. K==DepthU), so
-      # the NGLL init-hoist never ran and the hoisted coord VGPRs hold garbage -> the
-      # branch-free full-tile store would fault. RECOMPUTE the write indices here, at
-      # runtime, INTO those same hoisted VGPRs (subtileRecomputeCoords reuses the live
-      # registers -> zero extra register pressure). Guarded on numIter<PGR so the
-      # common numIter>=PGR path keeps the latency-hidden hoisted coords and pays only
-      # a scalar compare + (not-taken) branch. Emitted only when the gate is actually
-      # relaxed, so default (minIter==PGR) builds stay byte-identical.
+      # PLSIN numIter<PGR: the PGR>=2 preloop takes SkipToNLL for numIter<PGR (e.g.
+      # K==DepthU), so the NGLL init-hoist never ran and the hoisted coord VGPRs hold
+      # garbage -> the branch-free full-tile store would fault. RECOMPUTE the write
+      # indices here, at runtime, INTO those same hoisted VGPRs (subtileRecomputeCoords
+      # reuses the live registers -> zero extra register pressure). Guarded on
+      # numIter<PGR so the common numIter>=PGR path keeps the latency-hidden hoisted
+      # coords and pays only a scalar compare + (not-taken) branch.
       pgr = kernel["PrefetchGlobalRead"]
-      if pgr >= 2 and self._plsinMinIter(kernel) < pgr:
+      if pgr >= 2:
         depthU = kernel["DepthU"]
         skipRecompute = Label(label=self.labels.getNameInc("PLSIN_coordsValid"), comment="")
         module.addComment1("PLSIN numIter<PGR: refill hoisted store coords when NGLL was skipped")
@@ -14884,18 +14853,6 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.removeFromCheckOut(_base)
 
     return module
-
-  def subtileStoreInitInlineOp(self):
-    """InlineModuleOp wrapping buildSubtileStoreInitModule for NLL injection (Step 4).
-
-    The subtile scheduler emits an InlineModuleOp by calling build(emitter); the
-    emitter exposes .writer/.kernel, so the store-init is built from the same
-    buildSubtileStoreInitModule used by the fallback post-loop path. Unused until
-    Step 4 anchors it into the FUSED NLL's subIterK 0..S-2 MFMA gaps."""
-    from .Components.Subtile.LogicalScheduler import InlineModuleOp
-    return InlineModuleOp(
-      build=lambda em: em.writer.buildSubtileStoreInitModule(em.kernel),
-      label="postloop_store_init")
 
   ##############################################################################
   # LocalSplitU: Global Write Indices
@@ -15978,15 +15935,6 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # PostLoopStoreInNll: effective-alpha==1 fast-path support
   ##############################################################################
-  def _plsinMinIter(self, kernel):
-    """Minimum numIter (= SizesSum/DepthU) that still takes the FUSED store. This is
-    1: the numIter==1 / K==DepthU case is handled by the runtime coord recompute
-    emitted in buildSubtileFusedStore (which refills the hoisted write-index coord
-    VGPRs when numIter < PGR, since the NGLL init-hoist arm only runs for numIter>=PGR).
-    Validated bit-exact vs develop on K==DepthU shapes, so the fused store covers small-K
-    tiles too."""
-    return 1
-
   def _plsinAlphaSkipEligible(self, kernel):
     """The fused store may skip its epilogue alpha multiply only when this returns
     True: PostLoopStoreInNll is active and the compute type is fp32 (the scalar-scale
@@ -16097,13 +16045,12 @@ class KernelWriterAssembly(KernelWriter):
     depthUPow2    = (depthU & (depthU - 1)) == 0
     unrollIdx     = self.states.unrollIdx
     pgr           = kernel["PrefetchGlobalRead"]
-    minIter       = self._plsinMinIter(kernel)
     isScalarScale = (kernel["ProblemType"]["UseScaleAB"] == "Scalar")
     supportUA     = kernel["ProblemType"]["SupportUserArgs"]
     useStreamK    = (kernel["StreamK"] > 0 and not kernel["StreamKAtomic"]
                      and not kernel["StreamKForceDPOnly"])
 
-    # Every sub-guard below except the full-tile pair, Alpha and numIter is a "this word
+    # Every sub-guard below except the full-tile pair and Alpha is a "this word
     # must be zero" test (tail, Beta, the scale pointers, StreamKLocalStart,
     # StreamKLocalEnd^ItersPerTile), so OR them all into ONE accumulator and spend a
     # single compare at the end:
@@ -16246,16 +16193,6 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SCmpEQU32(src0=sgpr("Alpha"), src1=1.0, comment="Alpha == 1.0 ?"))
       module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="Alpha != 1 -> not fused"))
 
-      # Degenerate short-K guard: require numIter >= minIter so the NLL pipeline has a
-      # real iteration to drain.
-      if depthUPow2 and pgr >= 2 and minIter > 1:
-        module.addComment1("PLSIN guard-hoist: fold numIter>=%u into %s (pre-loop shadow)" % (minIter, flag))
-        module.add(SLShiftRightB32(dst=sgpr(off), src=sgpr("SizesSum+%u" % unrollIdx),
-                                   shiftHex=hex(log2(depthU)),
-                                   comment="numIter = SizesSum / DepthU"))
-        module.add(SCmpGeU32(src0=sgpr(off), src1=minIter, comment="numIter >= minIter (real NLL drain)?"))
-        module.add(SCSelectB32(dst=sgpr(flag), src0=sgpr(flag), src1=0, comment="too few K-iters -> not fused"))
-
       # ---- full MacroTile in M and N ---------------------------------------------
       # Tile wg spans [wg*MT, (wg+1)*MT), so it is full iff (wg+1)*MT <= SizeX, i.e. iff
       # wg < SizeX / MT (floor). One shift plus one compare per dimension replaces the
@@ -16360,32 +16297,10 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                   comment="has tail -> not fused"))
-      # Degenerate short-K guard: require numIter (= SizesSum/DepthU) >= minIter so the
-      # NLL pipeline has a real iteration to drain; otherwise the hoisted write-index
-      # coords are never validly computed and the branch-free full-tile D store faults
-      # (illegal memory access at K == DepthU, e.g. the K=256 / MT256x256x256 repro).
-      # minIter is 1 (the numIter==1 case is handled by the runtime coord recompute in
-      # buildSubtileFusedStore). The fp32 path folds this into PostLoopFusedStore above;
-      # this inline copy covers the rest.
-      pgr = kernel["PrefetchGlobalRead"]
-      minIter = self._plsinMinIter(kernel)
-      if pgr >= 2 and minIter > 1:
-        module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= %u) else -> %s" % (minIter, targetLabel.getLabelName()))
-        with self.allocTmpSgpr(1, tag="fusedStoreGuard_numIter") as tmpSgprInfo:
-          module.add(SLShiftRightB32(dst=sgpr(tmpSgprInfo.idx),
-                                     src=sgpr("SizesSum+%u" % self.states.unrollIdx),
-                                     shiftHex=hex(log2(depthU)),
-                                     comment="numIter = SizesSum / DepthU (no tail here)"))
-          module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=minIter,
-                               comment="fused guard: numIter >= minIter (real NLL drain)?"))
-          if longBranch:
-            module.add(self.longBranchScc0(targetLabel, posNeg=1,
-                                           comment="too few K-iters -> not fused (long)"))
-          else:
-            module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
-                                    comment="too few K-iters -> not fused"))
-    # (effective alpha == 1 is folded into PostLoopFusedStore along with no-tail /
-    # numIter>=PGR on the eligible fp32 path above -- no separate alpha branch here.)
+    # (effective alpha == 1 is folded into PostLoopFusedStore along with the no-tail
+    # check on the eligible fp32 path above -- no separate alpha branch here. The
+    # numIter==1 / K==DepthU case is handled by the runtime coord recompute in
+    # buildSubtileFusedStore, so no short-K guard is needed here.)
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:

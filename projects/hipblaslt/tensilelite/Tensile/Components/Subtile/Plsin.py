@@ -23,27 +23,20 @@
 ################################################################################
 
 def computeSubtilePlsin(kernel):
-    """Derive the PostLoopStoreInNll (PLSIN) eligibility and store mode for a
-    subtile kernel.
+    """Derive the PostLoopStoreInNll (PLSIN) eligibility for a subtile kernel.
 
     PLSIN is an internal, subtile-owned decision: it is NOT a public solution
     parameter and is NOT part of the kernel name. It is a deterministic function
     of the already-derived solution/problem parameters, computed once at
-    kernel-writer init time and carried on ``writer.states`` (postLoopStoreInNll
-    and plsinStoreMode).
+    kernel-writer init time and carried on ``writer.states.postLoopStoreInNll``.
 
     The gate only ever AUTO-DISABLES; it never enables an ineligible config
     (sub-threshold tiles stay disabled, eligible tiles stay on).
 
     Returns:
-        (postLoopStoreInNll: bool, plsinStoreMode: str)
+        postLoopStoreInNll: bool
     """
     isa = tuple(kernel["ISA"])
-    plsin = True
-    # PLSINStoreMode was a solution-selection choice (Weave/Lend); the shipped
-    # default is always "Weave" (no config ever set "Lend" -- Lend is selected at
-    # schedule time via largeTile). Canonicalize to "Weave" here.
-    storeMode = "Weave"
 
     isFloat4 = kernel["ProblemType"]["DataTypeA"].isFloat4() or \
                kernel["ProblemType"]["DataTypeB"].isFloat4()
@@ -83,7 +76,6 @@ def computeSubtilePlsin(kernel):
     weaveLA = 2
     numStorePairs = (miwt[0] * miwt[1] // 2) if (bool(miwt) and len(miwt) == 2) else 0
     overlapPossible = numStorePairs > weaveLA
-    streamKFixupSafe = True
     # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
     # gfx9 ceiling; auto-disable just those.
     mxBlockScaled = bool(kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"])
@@ -105,19 +97,8 @@ def computeSubtilePlsin(kernel):
                     or (not storeFitsVgpr)
                     or (not mxBlockScaleSgprFits))
     # Pure profitability (weave-overlap threshold): correct and register-safe, just
-    # below the pair-count where the weave overlaps anything.
-    profitFail = ((not overlapPossible)
-                  or (not streamKFixupSafe))
-    if structuralFail or registerFail or profitFail:
-        plsin = False
+    # below the pair-count where the weave overlaps anything. The structural NLL
+    # requirement (PGR >= 1) is already enforced by structuralFail above.
+    profitFail = not overlapPossible
 
-    # PLSIN fuses the D store into the No-Load Loop, so it needs a structural NLL
-    # (PGR >= 1). Defensive re-check.
-    if plsin and kernel["PrefetchGlobalRead"] < 1:
-        plsin = False
-
-    # PLSINStoreMode only matters when PLSIN is on; canonicalize when disabled.
-    if not plsin:
-        storeMode = "Weave"
-
-    return plsin, storeMode
+    return not (structuralFail or registerFail or profitFail)

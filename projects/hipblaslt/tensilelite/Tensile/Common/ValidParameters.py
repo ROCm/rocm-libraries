@@ -1152,7 +1152,7 @@ validParameters = { # we need to make sure this matches develop
     # parameter. It is an internal, subtile-owned decision derived at kernel-writer
     # init from the already-present solution/problem parameters
     # (Components/Subtile/Plsin.py::computeSubtilePlsin) and carried on
-    # writer.states (postLoopStoreInNll / plsinStoreMode). Keeping it out of
+    # writer.states.postLoopStoreInNll. Keeping it out of
     # ValidParameters keeps it out of the kernel name and the tuning search space.
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.

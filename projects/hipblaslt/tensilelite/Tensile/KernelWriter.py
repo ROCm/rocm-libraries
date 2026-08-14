@@ -402,10 +402,7 @@ class StateValues:
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
   postLoopStoreInNll: bool               = False
-  plsinStoreMode: str                    = "Weave"
-  postLoopStoreInjected: bool            = False
-  postLoopSrdDHoisted: bool              = False
-  # PostLoopStoreInNll (PLSIN) store/init-weave state (B2). Declared here so the
+  # PostLoopStoreInNll (PLSIN) store/init-weave state. Declared here so the
   # fused-store weave communicates through typed StateValues fields instead of
   # dynamically-attached, stringly-typed getattr-with-default attributes. All
   # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
@@ -5244,14 +5241,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # carrying a bit across endSummation (see post-loop code below). Both flags being
     # persistent added +2 to the store-path SGPR peak (MT256x256 fp4 hit 104 > 102).
 
-      # Step 4b (SGPR-defer): SrdD's value is NO LONGER hoisted before the main loop.
-      # Hoisting required SrdD to be main-loop-resident (4 SGPRs across the loop),
-      # overflowing MT256x256 fp4. Instead SrdD is computed lazily on each path that
-      # needs it: the PLAIN / SkipToEnd post-loop store computes it after endSummation's
-      # reclaim (globalWriteWorkGroupInit channels=None, baseline behavior), and the
-      # FUSED NLL store defines a transient SrdD from the drain-era pool
-      # (buildSubtileFusedStore). postLoopSrdDHoisted stays False so the post-loop init
-      # emits the full C+D SRD compute.
+      # SGPR-defer: SrdD's value is NOT hoisted before the main loop. Hoisting would
+      # require SrdD to be main-loop-resident (4 SGPRs across the loop), overflowing
+      # MT256x256 fp4. Instead SrdD is computed lazily on each path that needs it: the
+      # PLAIN / SkipToEnd post-loop store computes it after endSummation's reclaim
+      # (globalWriteWorkGroupInit channels=None, baseline behavior), and the FUSED NLL
+      # store defines a transient SrdD from the drain-era pool (buildSubtileFusedStore).
 
     # PostLoopStoreInNll: precompute the "effective alpha == 1" predicate into the
     # persistent PostLoopFusedStore SGPR BEFORE the main loop, while Alpha / ArgType /
@@ -5371,18 +5366,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       # Post-loop store-init (SrdC/SrdD address math). Emitted AFTER the dedup guard so
       # a fused owner skips it (see tail-reduction note above). For non-PostLoopStoreInNll
-      # builds no guard was emitted, so this runs inline exactly as before.
-      # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
-      # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
-      # valid and re-emitting its SRD-init would duplicate the D labels. When the
-      # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
-      # to the full C+D init (channels=None), byte-identical to the legacy path.
+      # builds no guard was emitted, so this runs inline exactly as before. SrdD is never
+      # hoisted before the main loop (SGPR-defer), so this always computes the full C+D
+      # init (channels=None), byte-identical to the legacy path.
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdD")
         self.removeSgprVarFromPool("SrdC")
-        module.add(self.buildSubtileStoreInitModule(
-          kernel,
-          channels=["C"] if self.states.postLoopSrdDHoisted else None))
+        module.add(self.buildSubtileStoreInitModule(kernel, channels=None))
 
       # global write indices
       module.addComment1("not-LocalSplitU: global write indices")
@@ -5540,13 +5530,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not self.isStreamKConstantsToVgprEnabled(kernel):
       return []
     if kernel["ISA"] == IsaVersion(9,5,0) and self.states.postLoopStoreInNll:
-      # Kernarg order, which is what makes the default a contiguous run:
-      allNames = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile",
-                  "SKItersPerWG", "skGrid", "skTiles", "StreamKIdx"]
-      sel = "MagicNumberItersPerTile,MagicShiftItersPerTile,SKItersPerWG,skGrid"
-      want = [n for n in allNames if n in sel.split(",")]
-      if kernel["StreamK"] != 3:
-        want = [n for n in want if n not in ("skGrid", "skTiles")]
+      # Park only the contiguous run that clears the SGPR peak, in kernarg order
+      # (SK3 gets the four incl. skGrid; SK4/5 park the leading three).
+      want = ["MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
+      if kernel["StreamK"] == 3:
+        want.append("skGrid")
       return want
     names = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
     if kernel["StreamK"] == 3:
@@ -7261,13 +7249,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # part of the kernel name). computeSubtilePlsin runs before every consumer in
     # this init pass (StreamK-constants-to-VGPR at 9354+/9909, defineSgpr at 9648)
     # and before the schedule-time consumers in LogicalScheduler / KernelWriterAssembly.
-    self.states.postLoopStoreInNll, self.states.plsinStoreMode = computeSubtilePlsin(kernel)
-    self.states.postLoopStoreInjected = False
-    # Step 4b-2: set True once SrdD's value is computed before the main loop, so
-    # the post-loop store-init emits only the C channel (D already done) instead
-    # of the full C+D init. Reset per kernel; only the pre-main-loop D-hoist below
-    # flips it on.
-    self.states.postLoopSrdDHoisted = False
+    self.states.postLoopStoreInNll = computeSubtilePlsin(kernel)
     hasMx = kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]
     usesTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
     usesDTL = kernel["DirectToLdsA"] or kernel["DirectToLdsB"]
@@ -9659,15 +9641,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # the sgprs overlap with wg ids
     # TODO: For subtileimpl, consider shadowInit param as well
-    # PostLoopStoreInNll (fp4 subtile weave) reserves SrdD here too — even though
-    # subtile kernels never set doShadowInit — so SrdD gets a stable index in the
-    # common allocator *before* the deferred loop places SrdWS. This is what
-    # prevents the SrdD/SrdWS register-pool collision on StreamK (the old bespoke
-    # mid-loop SrdD define grabbed the parked SrdWS registers). The value of SrdD
-    # is still computed early (before the main loop) in the kernel body. SrdC is
-    # NOT reserved early for the PLSIN path: it is only needed by the post-loop
-    # beta/C path and is defined in endSummation, so it stays free as a main-loop
-    # temp (parking it through the whole loop would let a temp grab its registers).
     # PostLoopStoreInNll (fp4 subtile weave) SGPR-defer: SrdD is intentionally NOT
     # reserved early here. Reserving it early made it main-loop-resident (survives
     # via nonPostLoopSgpr), costing 4 SGPRs across the whole loop and overflowing
