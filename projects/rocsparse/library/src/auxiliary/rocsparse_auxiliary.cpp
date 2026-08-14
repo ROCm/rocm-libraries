@@ -134,6 +134,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_fill_mode value_)
     {
         CASE(rocsparse_fill_mode_lower);
         CASE(rocsparse_fill_mode_upper);
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        CASE(rocsparse_fill_mode_diagonal);
+#endif
 #undef CASE
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -388,6 +391,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_fill_mode value_)
     {
     case rocsparse_fill_mode_lower:
     case rocsparse_fill_mode_upper:
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    case rocsparse_fill_mode_diagonal:
+#endif
     {
         return false;
     }

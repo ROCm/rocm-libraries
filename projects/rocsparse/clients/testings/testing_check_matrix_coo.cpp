@@ -199,6 +199,10 @@ void testing_check_matrix_coo(const Arguments& arg)
             {
                 switch(uplo)
                 {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+                case rocsparse_fill_mode_diagonal:
+                    break;
+#endif
                 case rocsparse_fill_mode_lower:
                     // Find index of last column in row
                     while((index + 1) < nnz && row == (hcoo_row_ind[index + 1] - base))

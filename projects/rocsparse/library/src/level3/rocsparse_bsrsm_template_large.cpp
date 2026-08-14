@@ -228,6 +228,10 @@ namespace rocsparse
             case rocsparse_fill_mode_upper:
                 fill_mode = rocsparse_fill_mode_lower;
                 break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                return rocsparse_status_not_implemented;
+#endif
             }
         }
 
@@ -251,6 +255,12 @@ namespace rocsparse
                 LAUNCH_LARGE_KERNEL(rocsparse::bsrsm_lower_large_kernel, 16, true);
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
         }
         else
@@ -266,6 +276,14 @@ namespace rocsparse
 
             switch(nbsr)
             {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+#define BSRSM_LARGE_DIAGONAL_CASE      \
+    case rocsparse_fill_mode_diagonal: \
+        return rocsparse_status_not_implemented;
+#else
+#define BSRSM_LARGE_DIAGONAL_CASE
+#endif
+
 #define DEFINE_CASE(i)                                               \
     case i:                                                          \
     {                                                                \
@@ -281,6 +299,7 @@ namespace rocsparse
             LAUNCH_LARGE_KERNEL(bsrsm_lower_large_kernel, i, false); \
             break;                                                   \
         }                                                            \
+            BSRSM_LARGE_DIAGONAL_CASE                                \
         }                                                            \
         break;                                                       \
     }

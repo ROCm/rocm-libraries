@@ -115,6 +115,10 @@ static csrsv_analysis_kernel_t find_mode(rocsparse_fill_mode mode, rocsparse_ope
     case rocsparse_fill_mode_upper:
         return transpose ? launch_csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>
                          : launch_csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP, I, J>;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    case rocsparse_fill_mode_diagonal:
+        break;
+#endif
     }
     return nullptr;
 }

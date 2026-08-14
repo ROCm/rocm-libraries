@@ -55,6 +55,7 @@ endif()
 set(ROCSPARSE_WITH_HANDLE_CREATE ${ROCSPARSE_ENABLE_HANDLE_CREATE})
 set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
 set(ROCSPARSE_WITH_U16_REMOVED ${BUILD_WITH_U16_REMOVED})
+set(ROCSPARSE_WITH_FILL_MODE_DIAGONAL ${BUILD_WITH_FILL_MODE_DIAGONAL})
 set(ROCSPARSE_WITH_ILU0_BOOST_SIGN ${ROCSPARSE_ENABLE_ILU0_BOOST_SIGN})
 set(ROCSPARSE_WITH_SPMAT_SCALE ${ROCSPARSE_ENABLE_SPMAT_SCALE})
 set(ROCSPARSE_WITH_SDDMM_BATCHED ${ROCSPARSE_ENABLE_SDDMM_BATCHED})
@@ -124,6 +125,10 @@ target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall
 if(BUILD_WITH_U16_REMOVED)
     target_compile_definitions(rocsparse PRIVATE ROCSPARSE_KEEP_INTERNAL_U16)
     message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
+endif()
+
+if(NOT BUILD_WITH_FILL_MODE_DIAGONAL)
+    message(STATUS "Building rocSPARSE with rocsparse_fill_mode_diagonal disabled.")
 endif()
 
 # Target include directories

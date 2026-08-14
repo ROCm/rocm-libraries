@@ -109,6 +109,13 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_format format = mat->format;
+
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        ROCSPARSE_CHECKARG(3,
+                           mat,
+                           (mat->descr->fill_mode == rocsparse_fill_mode_diagonal),
+                           rocsparse_status_not_implemented);
+#endif
         switch(format)
         {
         case rocsparse_format_csc:

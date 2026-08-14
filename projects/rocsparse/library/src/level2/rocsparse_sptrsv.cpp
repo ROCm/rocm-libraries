@@ -380,6 +380,14 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_format    format    = A->format;
         const rocsparse_operation operation = sptrsv_descr->get_operation();
+
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        ROCSPARSE_CHECKARG(2,
+                           A,
+                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
+                           rocsparse_status_not_implemented);
+#endif
+
         switch(sptrsv_stage)
         {
         case rocsparse_sptrsv_stage_analysis:
@@ -533,6 +541,13 @@ namespace rocsparse
         const rocsparse_operation    operation      = sptrsv_descr->get_operation();
         const rocsparse_sptrsv_stage previous_stage = sptrsv_descr->get_stage();
         const rocsparse_sptrsv_alg   alg            = sptrsv_descr->get_alg();
+
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        ROCSPARSE_CHECKARG(2,
+                           A,
+                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
+                           rocsparse_status_not_implemented);
+#endif
 
         ROCSPARSE_CHECKARG(1,
                            sptrsv_descr,

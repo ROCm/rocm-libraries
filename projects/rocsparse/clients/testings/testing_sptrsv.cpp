@@ -270,6 +270,10 @@ void cpu_csrsv(rocsparse_operation  trans,
     {
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
@@ -330,6 +334,10 @@ void cpu_csrsv(rocsparse_operation  trans,
 
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,

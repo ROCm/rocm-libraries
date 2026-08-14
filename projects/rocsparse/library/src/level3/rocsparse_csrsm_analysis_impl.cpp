@@ -217,6 +217,12 @@ namespace rocsparse
                            descr,
                            (descr->type != rocsparse_matrix_type_general),
                            rocsparse_status_not_implemented);
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        ROCSPARSE_CHECKARG(7,
+                           descr,
+                           (descr->fill_mode == rocsparse_fill_mode_diagonal),
+                           rocsparse_status_not_implemented);
+#endif
         ROCSPARSE_CHECKARG(7,
                            descr,
                            (descr->storage_mode != rocsparse_storage_mode_sorted),

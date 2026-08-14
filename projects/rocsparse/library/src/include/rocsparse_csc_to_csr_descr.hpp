@@ -54,6 +54,11 @@ namespace rocsparse
         case rocsparse_fill_mode_upper:
             csr_descr.fill_mode = rocsparse_fill_mode_lower;
             break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            // The transpose of a diagonal matrix is the matrix itself.
+            break;
+#endif
         }
     }
 

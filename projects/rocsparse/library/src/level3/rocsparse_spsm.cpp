@@ -1198,6 +1198,12 @@ try
     ROCSPARSE_CHECKARG_POINTER(4, matA);
     ROCSPARSE_CHECKARG(4, matA, matA->init == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(4, matA, matA->batch_count != 1, rocsparse_status_not_implemented);
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    ROCSPARSE_CHECKARG(4,
+                       matA,
+                       matA->descr->fill_mode == rocsparse_fill_mode_diagonal,
+                       rocsparse_status_not_implemented);
+#endif
     ROCSPARSE_CHECKARG_POINTER(5, matB);
     ROCSPARSE_CHECKARG(5, matB, matB->init == false, rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(5, matB, matB->batch_count != 1, rocsparse_status_not_implemented);

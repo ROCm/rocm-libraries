@@ -41,6 +41,10 @@ rocsparse_status rocsparse_host_csritsv_ptr_end(rocsparse_fill_mode fill_mode_,
     zero_pivot[0] = -1;
     switch(fill_mode_)
     {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    case rocsparse_fill_mode_diagonal:
+        break;
+#endif
     case rocsparse_fill_mode_lower:
     {
         switch(diag_type_)
@@ -273,6 +277,10 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
         case rocsparse_fill_mode_upper:
             ptr_end = csr_row_ptr;
             break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         }
 
         switch(diag_type)
@@ -281,6 +289,10 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
         {
             switch(fill_mode)
             {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                break;
+#endif
             case rocsparse_fill_mode_lower:
                 for(J i = 0; i < m; ++i)
                 {
@@ -323,6 +335,10 @@ rocsparse_status rocsparse_host_csritsv_solve(rocsparse_handle          handle,
     const I* d = nullptr;
     switch(fill_mode)
     {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    case rocsparse_fill_mode_diagonal:
+        break;
+#endif
     case rocsparse_fill_mode_lower:
     {
         b = csr_row_ptr;

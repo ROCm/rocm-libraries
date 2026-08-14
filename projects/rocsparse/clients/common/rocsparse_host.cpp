@@ -1271,6 +1271,10 @@ void host_bsrsv(rocsparse_operation  trans,
     {
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
@@ -1333,6 +1337,10 @@ void host_bsrsv(rocsparse_operation  trans,
 
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
@@ -2196,6 +2204,10 @@ void host_csrsv(rocsparse_operation  trans,
     {
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
@@ -2256,6 +2268,10 @@ void host_csrsv(rocsparse_operation  trans,
 
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
@@ -3907,6 +3923,10 @@ void host_csrsm(J                    M,
         {
             switch(fill_mode)
             {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                break;
+#endif
             case rocsparse_fill_mode_lower:
                 host_lssolve(M,
                              nrhs,
@@ -3971,6 +3991,10 @@ void host_csrsm(J                    M,
 
             switch(fill_mode)
             {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                break;
+#endif
             case rocsparse_fill_mode_lower:
                 host_ussolve(M,
                              nrhs,
@@ -4186,6 +4210,10 @@ void host_bsrsm(rocsparse_int       mb,
     {
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             transX,
@@ -4248,6 +4276,10 @@ void host_bsrsm(rocsparse_int       mb,
 
         switch(fill_mode)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             transX,

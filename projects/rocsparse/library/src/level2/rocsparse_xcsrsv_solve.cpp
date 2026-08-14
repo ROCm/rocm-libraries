@@ -58,6 +58,12 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_SIZE(3, nnz);
         ROCSPARSE_CHECKARG_POINTER(4, alpha_device_host);
         ROCSPARSE_CHECKARG_POINTER(5, descr);
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        ROCSPARSE_CHECKARG(5,
+                           descr,
+                           (descr->fill_mode == rocsparse_fill_mode_diagonal),
+                           rocsparse_status_not_implemented);
+#endif
         ROCSPARSE_CHECKARG_ARRAY(6, nnz, csr_val);
         ROCSPARSE_CHECKARG_ARRAY(7, m, csr_row_ptr);
         ROCSPARSE_CHECKARG_ARRAY(8, nnz, csr_col_ind);

@@ -386,11 +386,21 @@ typedef enum rocsparse_diag_type_
  *  \ref rocsparse_fill_mode can be set using rocsparse_set_mat_fill_mode(). The current
  *  \ref rocsparse_fill_mode of a matrix can be obtained by
  *  rocsparse_get_mat_fill_mode().
+ *
+ *  The additional \ref rocsparse_fill_mode_diagonal mode instructs \ref rocsparse_sptrsv
+ *  and \ref rocsparse_sptrsm to solve with the diagonal of the matrix only, i.e.
+ *  \f$x_i = \alpha \, b_i / a_{ii}\f$. This is intended for the diagonal step of an
+ *  incomplete \f$LDL^T\f$ solve, where the same factor matrix can be reused for the
+ *  \f$L\f$, \f$D\f$ and \f$L^T\f$ stages.
  */
 typedef enum rocsparse_fill_mode_
 {
     rocsparse_fill_mode_lower = 0, /**< Lower triangular part is stored. */
     rocsparse_fill_mode_upper = 1 /**< Upper triangular part is stored. */
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    ,
+    rocsparse_fill_mode_diagonal = 2 /**< Diagonal part is stored. */
+#endif
 } rocsparse_fill_mode;
 
 /*! \ingroup types_module

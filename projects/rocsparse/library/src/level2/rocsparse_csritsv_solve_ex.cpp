@@ -364,6 +364,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 ptr_diag_shift = 0;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
         }
         else
@@ -384,6 +390,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 ptr_diag       = ptr_begin;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
         }
         break;
@@ -415,6 +427,12 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 ptr_end   = csr_row_ptr + 1;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
         }
         else

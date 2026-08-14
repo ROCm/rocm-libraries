@@ -208,6 +208,10 @@ namespace rocsparse
                         return;
                     }
                     break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+                case rocsparse_fill_mode_diagonal:
+                    break;
+#endif
                 }
             }
 

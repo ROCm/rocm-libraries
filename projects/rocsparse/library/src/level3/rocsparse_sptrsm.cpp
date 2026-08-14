@@ -1634,6 +1634,13 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, sptrsm_stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       A->descr->fill_mode == rocsparse_fill_mode_diagonal,
+                       rocsparse_status_not_implemented);
+#endif
+
     switch(sptrsm_stage)
     {
     case rocsparse_sptrsm_stage_analysis:
@@ -1709,6 +1716,13 @@ try
     ROCSPARSE_CHECKARG(2, A, (A->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(3, X, (X->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(4, Y, (Y->batch_count != 1), rocsparse_status_not_implemented);
+
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    ROCSPARSE_CHECKARG(2,
+                       A,
+                       A->descr->fill_mode == rocsparse_fill_mode_diagonal,
+                       rocsparse_status_not_implemented);
+#endif
 
     const rocsparse_datatype compute_type = sptrsm_descr->get_compute_datatype();
 

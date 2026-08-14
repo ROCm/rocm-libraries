@@ -93,6 +93,7 @@ Datatypes:
       attr:
         rocsparse_fill_mode_lower: 0
         rocsparse_fill_mode_upper: 1
+        rocsparse_fill_mode_diagonal: 2
   - rocsparse_storage_mode:
       bases: [ c_int ]
       attr:

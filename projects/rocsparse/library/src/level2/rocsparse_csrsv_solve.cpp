@@ -191,6 +191,11 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         case rocsparse_fill_mode_upper:
             fill_mode = rocsparse_fill_mode_lower;
             break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            // The transpose of a diagonal matrix is the matrix itself.
+            break;
+#endif
         }
     }
     else if(force_conj)

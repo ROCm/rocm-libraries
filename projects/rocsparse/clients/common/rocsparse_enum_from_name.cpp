@@ -74,7 +74,14 @@ DEF(rocsparse_matrix_type,
 
 DEF(rocsparse_diag_type, rocsparse_diag_type_non_unit, rocsparse_diag_type_unit);
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+DEF(rocsparse_fill_mode,
+    rocsparse_fill_mode_lower,
+    rocsparse_fill_mode_upper,
+    rocsparse_fill_mode_diagonal);
+#else
 DEF(rocsparse_fill_mode, rocsparse_fill_mode_lower, rocsparse_fill_mode_upper);
+#endif
 
 DEF(rocsparse_storage_mode, rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted);
 
@@ -271,6 +278,9 @@ bool rocsparse_fill_mode_from_name(rocsparse_fill_mode value, const char* name)
         {
             CASE(rocsparse_fill_mode_lower);
             CASE(rocsparse_fill_mode_upper);
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            CASE(rocsparse_fill_mode_diagonal);
+#endif
         }
     }
     return false;

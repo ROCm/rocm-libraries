@@ -96,6 +96,13 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        if(descr->fill_mode == rocsparse_fill_mode_diagonal)
+        {
+            return rocsparse_status_not_implemented;
+        }
+#endif
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -204,6 +211,10 @@ namespace rocsparse
             case rocsparse_fill_mode_upper:
                 fill_mode = rocsparse_fill_mode_lower;
                 break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                return rocsparse_status_not_implemented;
+#endif
             }
         }
         else if(force_conj)

@@ -806,6 +806,10 @@ struct rocsparse_matrix_utils
         nnz = 0;
         switch(uplo)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             for(J i = 0; i < M; i++)
             {
@@ -847,6 +851,10 @@ struct rocsparse_matrix_utils
 
         switch(uplo)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
             for(J i = 0; i < M; i++)
             {
@@ -919,6 +927,10 @@ struct rocsparse_matrix_utils
         int64_t new_nnz = 0;
         switch(uplo)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
         {
             int64_t index = 0;
@@ -962,6 +974,10 @@ struct rocsparse_matrix_utils
         nnz = 0;
         switch(uplo)
         {
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        case rocsparse_fill_mode_diagonal:
+            break;
+#endif
         case rocsparse_fill_mode_lower:
         {
             int64_t index = 0;

@@ -215,6 +215,12 @@ namespace rocsparse
                 extract_before_diagonal = false;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
             break;
         }
@@ -233,6 +239,12 @@ namespace rocsparse
                 extract_before_diagonal = true;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
             break;
         }
@@ -504,6 +516,12 @@ namespace rocsparse
                 extract_before_diagonal = false;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
             break;
         }
@@ -522,6 +540,12 @@ namespace rocsparse
                 extract_before_diagonal = true;
                 break;
             }
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+            {
+                return rocsparse_status_not_implemented;
+            }
+#endif
             }
             break;
         }

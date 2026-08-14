@@ -209,6 +209,10 @@ namespace rocsparse
             case rocsparse_fill_mode_upper:
                 use_unit_kernel = (diag_type == rocsparse_diag_type_non_unit);
                 break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                return rocsparse_status_not_implemented;
+#endif
             }
 
             dim3 blocks((m - 1) / BLOCKSIZE + 1);
@@ -328,6 +332,10 @@ namespace rocsparse
                         (J*)temp_buffer,
                         zero_pivot);
                     break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+                case rocsparse_fill_mode_diagonal:
+                    return rocsparse_status_not_implemented;
+#endif
                 }
             }
             J count_missing_diagonal;
@@ -399,6 +407,10 @@ namespace rocsparse
                                 descr->base,
                                 (J*)temp_buffer);
                             break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+                        case rocsparse_fill_mode_diagonal:
+                            return rocsparse_status_not_implemented;
+#endif
                         }
 
                         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&count_diagonal,

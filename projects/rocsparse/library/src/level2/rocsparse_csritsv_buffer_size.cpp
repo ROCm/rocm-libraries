@@ -109,6 +109,13 @@ namespace rocsparse
                             && descr->type != rocsparse_matrix_type_triangular),
                            rocsparse_status_not_implemented);
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+        ROCSPARSE_CHECKARG(4,
+                           descr,
+                           (descr->fill_mode == rocsparse_fill_mode_diagonal),
+                           rocsparse_status_not_implemented);
+#endif
+
         // Check matrix sorting mode
 
         ROCSPARSE_CHECKARG(4,

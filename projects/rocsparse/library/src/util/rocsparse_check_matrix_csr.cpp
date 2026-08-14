@@ -253,6 +253,10 @@ rocsparse_status rocsparse::check_matrix_csr_checkarg(rocsparse_handle       han
     ROCSPARSE_CHECKARG_ENUM(7, idx_base);
     ROCSPARSE_CHECKARG_ENUM(8, matrix_type);
     ROCSPARSE_CHECKARG_ENUM(9, uplo);
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    ROCSPARSE_CHECKARG(
+        9, uplo, (uplo == rocsparse_fill_mode_diagonal), rocsparse_status_not_implemented);
+#endif
     ROCSPARSE_CHECKARG_ENUM(10, storage);
     ROCSPARSE_CHECKARG_POINTER(11, data_status);
     ROCSPARSE_CHECKARG_POINTER(12, temp_buffer);

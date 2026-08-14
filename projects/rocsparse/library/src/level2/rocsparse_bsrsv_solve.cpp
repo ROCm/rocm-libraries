@@ -63,6 +63,14 @@ namespace rocsparse
         LAUNCH_BSRSV_GTHR_DIM(bsize, 64, 8);  \
     }
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+#define LAUNCH_BSRSV_DIAGONAL_CASE     \
+    case rocsparse_fill_mode_diagonal: \
+        return rocsparse_status_not_implemented;
+#else
+#define LAUNCH_BSRSV_DIAGONAL_CASE
+#endif
+
 #define LAUNCH_BSRSV_SHARED(fill, ptr, bsize, wfsize, dim, arch, asic) \
     switch(fill)                                                       \
     {                                                                  \
@@ -90,6 +98,7 @@ namespace rocsparse
         }                                                              \
         break;                                                         \
     }                                                                  \
+        LAUNCH_BSRSV_DIAGONAL_CASE                                     \
     }
 
 #define LAUNCH_BSRSV_LOWER_SHARED(bsize, wfsize, dim, arch)           \
@@ -165,6 +174,7 @@ namespace rocsparse
         }                                                          \
         break;                                                     \
     }                                                              \
+        LAUNCH_BSRSV_DIAGONAL_CASE                                 \
     }
 
 #define LAUNCH_BSRSV_LOWER_GENERAL(bsize, wfsize, arch)               \
@@ -433,6 +443,10 @@ namespace rocsparse
             case rocsparse_fill_mode_upper:
                 fill_mode = rocsparse_fill_mode_lower;
                 break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+            case rocsparse_fill_mode_diagonal:
+                return rocsparse_status_not_implemented;
+#endif
             }
         }
 
