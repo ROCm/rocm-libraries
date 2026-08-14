@@ -389,18 +389,13 @@ namespace rocsparse
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
                            rocsparse_status_not_implemented);
 #endif
-        // The diagonal fill mode is supported by the CSR and CSC formats, and it
-        // requires a non-unit diagonal (a unit diagonal would reduce the solve to
-        // an identity scaling and is therefore rejected).
+        // The diagonal fill mode is supported by the CSR and CSC formats. A unit
+        // diagonal is treated as a_ii = 1, reducing the solve to the identity
+        // scaling x_i = alpha * b_i.
         ROCSPARSE_CHECKARG(2,
                            A,
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal
                             && format != rocsparse_format_csr && format != rocsparse_format_csc),
-                           rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(2,
-                           A,
-                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal
-                            && A->descr->diag_type == rocsparse_diag_type_unit),
                            rocsparse_status_not_implemented);
 
         switch(sptrsv_stage)
@@ -565,18 +560,13 @@ namespace rocsparse
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
                            rocsparse_status_not_implemented);
 #endif
-        // The diagonal fill mode is supported by the CSR and CSC formats, and it
-        // requires a non-unit diagonal (a unit diagonal would reduce the solve to
-        // an identity scaling and is therefore rejected).
+        // The diagonal fill mode is supported by the CSR and CSC formats. A unit
+        // diagonal is treated as a_ii = 1, reducing the solve to the identity
+        // scaling x_i = alpha * b_i.
         ROCSPARSE_CHECKARG(2,
                            A,
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal
                             && format != rocsparse_format_csr && format != rocsparse_format_csc),
-                           rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(2,
-                           A,
-                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal
-                            && A->descr->diag_type == rocsparse_diag_type_unit),
                            rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(1,

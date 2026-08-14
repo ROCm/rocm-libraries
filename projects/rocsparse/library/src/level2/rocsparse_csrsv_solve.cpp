@@ -92,10 +92,9 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     // are conjugated on the fly.
     if(descr->fill_mode == rocsparse_fill_mode_diagonal)
     {
-        // A diagonal solve divides by the diagonal entry; a unit diagonal would
-        // reduce it to an identity scaling and is therefore not supported.
-        ROCSPARSE_CHECKARG(
-            8, descr, (diag_type == rocsparse_diag_type_unit), rocsparse_status_not_implemented);
+        // A diagonal solve divides by the diagonal entry. A unit diagonal is
+        // treated as a_ii = 1, so the solve reduces to the identity scaling
+        // x_i = alpha * b_i, which the kernel below produces directly.
 
         // Zero pivot reporting
         RETURN_IF_ROCSPARSE_ERROR(

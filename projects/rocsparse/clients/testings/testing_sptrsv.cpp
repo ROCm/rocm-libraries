@@ -266,6 +266,57 @@ void cpu_csrsv(rocsparse_operation  trans,
     *struct_pivot  = M + 1;
     *numeric_pivot = M + 1;
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
+    if(fill_mode == rocsparse_fill_mode_diagonal)
+    {
+        // Diagonal-only solve: y_i = alpha * x_i / a_ii. A diagonal matrix is its
+        // own transpose; only the conjugate transpose conjugates the diagonal. A
+        // unit diagonal is treated as a_ii = 1, so the solve reduces to the
+        // identity scaling y_i = alpha * x_i. (The switch cases below keep a
+        // diagonal stub only to satisfy -Wswitch; this branch does the work.)
+        const bool conj = (trans == rocsparse_operation_conjugate_transpose);
+        for(J row = 0; row < M; ++row)
+        {
+            const I row_begin = csr_row_ptr[row] - base;
+            const I row_end   = csr_row_ptr[row + 1] - base;
+
+            I diag     = -1;
+            T diag_val = static_cast<T>(0);
+            for(I j = row_begin; j < row_end; ++j)
+            {
+                if(csr_col_ind[j] - base == row)
+                {
+                    diag     = j;
+                    diag_val = csr_val[j];
+                    break;
+                }
+            }
+
+            T val = alpha * x[x_inc * row];
+            if(diag_type == rocsparse_diag_type_non_unit)
+            {
+                if(diag == -1)
+                {
+                    *struct_pivot = std::min(*struct_pivot, int64_t(row + base));
+                }
+                else if(diag_val == static_cast<T>(0))
+                {
+                    *numeric_pivot = std::min(*numeric_pivot, int64_t(row + base));
+                    diag_val       = static_cast<T>(1);
+                }
+
+                val = val / (conj ? rocsparse_conj(diag_val) : diag_val);
+            }
+            y[row] = val;
+        }
+
+        *numeric_pivot = std::min(*numeric_pivot, *struct_pivot);
+        *struct_pivot  = (*struct_pivot == M + 1) ? -1 : *struct_pivot;
+        *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
+        return;
+    }
+#endif
+
     if(trans == rocsparse_operation_none)
     {
         switch(fill_mode)
@@ -683,6 +734,18 @@ void testing_sptrsv(const Arguments& arg)
     // CSC triangular solve support can be disabled at build time
     // (BUILD_WITH_CSC_TRSV=OFF); skip the CSC cases in that configuration.
     if(arg.formatA == rocsparse_format_csc)
+    {
+        return;
+    }
+#endif
+
+#ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
+    // The diagonal fill mode can be disabled at build time
+    // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF). rocsparse_gentest.py still maps
+    // rocsparse_fill_mode_diagonal to 2 regardless of the build flag, so skip
+    // those cases in that configuration instead of letting them fail with
+    // rocsparse_status_invalid_value.
+    if(arg.uplo == static_cast<rocsparse_fill_mode>(2))
     {
         return;
     }

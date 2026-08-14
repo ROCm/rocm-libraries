@@ -391,7 +391,9 @@ typedef enum rocsparse_diag_type_
  *  and \ref rocsparse_sptrsm to solve with the diagonal of the matrix only, i.e.
  *  \f$x_i = \alpha \, b_i / a_{ii}\f$. This is intended for the diagonal step of an
  *  incomplete \f$LDL^T\f$ solve, where the same factor matrix can be reused for the
- *  \f$L\f$, \f$D\f$ and \f$L^T\f$ stages.
+ *  \f$L\f$, \f$D\f$ and \f$L^T\f$ stages. A unit \ref rocsparse_diag_type is treated
+ *  as \f$a_{ii} = 1\f$, reducing the solve to the identity scaling
+ *  \f$x_i = \alpha \, b_i\f$.
  */
 typedef enum rocsparse_fill_mode_
 {
