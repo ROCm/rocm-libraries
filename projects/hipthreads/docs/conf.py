@@ -55,6 +55,10 @@ doxygen_project = {
     "path": "doxygen/xml",
 }
 
+article_pages = [
+    {"file": "reference/hipThreads-set-test-timeout", "os": ["linux"]},
+]
+
 cpp_id_attributes = [
     "__device__",
     "__host__",
