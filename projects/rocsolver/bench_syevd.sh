@@ -1,7 +1,7 @@
 #!/bin/bash
 
 bench=$1
-func=${2:-syevd --uplo L}
+func=${2:-syevd --evect V --uplo L}
 prec=${3:-s}
 dev=${4:-0}
 

@@ -210,22 +210,26 @@ a divide-and-conquer algorithm. It calls SYTRD internally for the tridiagonaliza
 the LATRD path selection env vars (`LATRD_MULTI_KERNEL`, `LATRD_SW_GRID_SYNC`, etc.) apply
 here too. Use `-f syevd` with only `-n` (no `-k`; the SYTRD block size is fixed internally).
 
+**Important:** always pass `--evect V` to benchmark the full SYEVD path including eigenvector
+computation. Without it, only eigenvalues are computed, which skips a significant portion of
+the divide-and-conquer work and does not reflect production use.
+
 ```bash
 cd build/release
 
 # Default matrix type (random, diagonally dominant)
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
-    ./clients/staging/rocsolver-bench -f syevd --uplo L -n 2048 --perf 1 --iters 21 -r s
+    ./clients/staging/rocsolver-bench -f syevd --evect V --uplo L -n 2048 --perf 1 --iters 21 -r s
 
 # Toeplitz matrix (symmetric tridiagonal: diagonal=2, off-diagonal=1)
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
     SYEVD_TEST_TOEPLITZ=1 \
-    ./clients/staging/rocsolver-bench -f syevd --uplo L -n 2048 --perf 1 --iters 21 -r s
+    ./clients/staging/rocsolver-bench -f syevd --evect V --uplo L -n 2048 --perf 1 --iters 21 -r s
 
 # Wilkinson matrix (symmetric tridiagonal, near-repeated eigenvalues)
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
     SYEVD_TEST_WILKINSON=1 \
-    ./clients/staging/rocsolver-bench -f syevd --uplo L -n 2048 --perf 1 --iters 21 -r s
+    ./clients/staging/rocsolver-bench -f syevd --evect V --uplo L -n 2048 --perf 1 --iters 21 -r s
 ```
 
 ### Matrix types
@@ -235,11 +239,11 @@ if none is set the default initializer is used.
 
 | Environment variable | Matrix | Notes |
 |---|---|---|
-| *(none)* | **Default** — random, diagonally dominant | Diagonal shifted by +400; off-diagonal scaled by −4. General-purpose baseline. |
-| `SYEVD_TEST_TOEPLITZ=1` | **Toeplitz** — symmetric tridiagonal, diagonal=2, off-diagonal=1 | Known eigenvalues: 2 + 2cos(kπ/(n+1)). Well-conditioned, good for convergence rate checks. |
-| `SYEVD_TEST_WILKINSON=1` | **Wilkinson** — symmetric tridiagonal with near-repeated eigenvalues | Classic stress test for eigenvalue solvers; exposes convergence difficulty. |
-| `SYEVD_TEST_CLEMENT=1` | **Clement** — symmetric tridiagonal, diagonal=0, off-diagonal=sqrt(i(n−i)) | Known eigenvalues symmetric about 0; tests behaviour with zero diagonal. |
-| `SYEVD_TEST_EIG7=1` | **Eig7** — n−1 eigenvalues clustered near 0 (multiples of ε), one eigenvalue = 1 | Stress test for deflation in the divide-and-conquer step. |
+| *(none)* | **Default** -- random, diagonally dominant | Diagonal shifted by +400; off-diagonal scaled by -4. General-purpose baseline. |
+| `SYEVD_TEST_TOEPLITZ=1` | **Toeplitz** -- symmetric tridiagonal, diagonal=2, off-diagonal=1 | Known eigenvalues: 2 + 2cos(k?/(n+1)). Well-conditioned, good for convergence rate checks. |
+| `SYEVD_TEST_WILKINSON=1` | **Wilkinson** -- symmetric tridiagonal with near-repeated eigenvalues | Classic stress test for eigenvalue solvers; exposes convergence difficulty. |
+| `SYEVD_TEST_CLEMENT=1` | **Clement** -- symmetric tridiagonal, diagonal=0, off-diagonal=sqrt(i(n-i)) | Known eigenvalues symmetric about 0; tests behaviour with zero diagonal. |
+| `SYEVD_TEST_EIG7=1` | **Eig7** -- n-1 eigenvalues clustered near 0 (multiples of ?), one eigenvalue = 1 | Stress test for deflation in the divide-and-conquer step. |
 
 All four `SYEVD_TEST_*` variables have aliases without the `SYEVD_` prefix
 (`TEST_TOEPLITZ`, `TEST_WILKINSON`, etc.) that apply to all eigensolver benchmarks.
@@ -249,14 +253,14 @@ All four `SYEVD_TEST_*` variables have aliases without the `SYEVD_` prefix
 ```bash
 cd build/release
 
-# Default matrix, single precision
+# Default matrix, single precision (with eigenvectors)
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
     ./bench_syevd.sh ./clients/staging/rocsolver-bench
 
-# Toeplitz matrix, double precision
+# Toeplitz matrix, double precision (with eigenvectors)
 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
     SYEVD_TEST_TOEPLITZ=1 \
-    ./bench_syevd.sh ./clients/staging/rocsolver-bench syevd --uplo L d
+    ./bench_syevd.sh ./clients/staging/rocsolver-bench "syevd --evect V --uplo L" d
 
 # With numerical verification
 VERIFY=1 LD_LIBRARY_PATH=$(pwd)/library/src:$LD_LIBRARY_PATH \
@@ -267,9 +271,9 @@ The script signature is:
 ```
 bench_syevd.sh <bench-binary> [func] [prec] [device]
 ```
-Defaults: `func="syevd --uplo L"`, `prec=s`, `device=0`.
+Defaults: `func="syevd --evect V --uplo L"`, `prec=s`, `device=0`.
 
-The sweep covers n=320–2048 in steps of 64, n=2176–4096 in steps of 128, and n=4352–8192
+The sweep covers n=320-2048 in steps of 64, n=2176-4096 in steps of 128, and n=4352-8192
 in steps of 256. Iteration counts taper from 31 (small) to 11 (large) to keep total
 benchmark time reasonable.
 
