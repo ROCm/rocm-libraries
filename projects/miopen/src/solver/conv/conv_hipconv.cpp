@@ -290,6 +290,8 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
     if(kernel == nullptr)
         MIOPEN_THROW("ConvHipConv: performance config does not resolve to a kernel.");
 
+    MIOPEN_LOG_I(hipconv::name(kernel) << ": " << hipconv::describe_config(kernel));
+
     if(problem.IsDirectionBackwardWrW())
     {
         const auto workspace_size = GetWorkspaceSize(ctx, problem);
