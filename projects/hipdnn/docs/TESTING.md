@@ -143,12 +143,27 @@ or GPU hardware that an isolated unit test cannot represent.
 | Backend API | `tests/backend/` | Public C API behavior, descriptor lifecycle, execution and plugin-management contracts | Fake plugins; GPU only for GPU paths |
 | Frontend-backend | `tests/frontend/` | Graph creation, descriptor conversion, routing, and execution flow | Fake plugins; no numerical solution validation |
 | Provider integration | `dnn-providers/<name>/integration_tests/` | Provider-specific errors, determinism, support, and tuning behavior | Yes |
-| Cross-provider | `dnn-providers/integration-tests/` | Graph execution through a provider compared with a CPU reference | Yes |
+| Cross-provider | `dnn-providers/integration-tests/` | Same graph executed through every registered provider plugin and compared with a reference | Yes |
+
+The shared cross-provider suite builds one `hipdnn_integration_tests` binary that each provider
+registers against its own plugin. This lets one provider-agnostic graph test run against the MIOpen,
+hipBLASLt, and hip-kernel engines; unsupported operations are skipped through the shared engine-support
+check, while provider-owned TOML files hold engine-specific tolerance overrides and skips. See
+[Provider Integration](../../../dnn-providers/integration-tests/README.md#provider-integration) for
+the canonical wiring and execution details.
+
+The suite has [two graph-test authoring mechanisms](../../../dnn-providers/integration-tests/README.md#two-ways-to-test-a-graph):
+data-driven bundles and sweeps are the default for "run this graph and compare it with a reference,"
+while C++ integration tests remain for error paths, API contracts, serialization, determinism, and
+other behavior that graph data cannot express. Bundle tests in turn support
+[single-graph and template-sweep formats](../../../dnn-providers/integration-tests/README.md#bundle-formats-single-graph-vs-template-sweep):
+a concrete graph JSON defines one case, while `graph.template.json` holds invariant topology and
+`${case.*}` placeholders expanded from a `sweep.json` case matrix. Keep format, authoring, migration,
+and golden-data details in the linked cross-provider documentation rather than duplicating them here.
 
 The shared cross-provider suite is the default home for data-driven graph correctness tests. A
 provider-specific integration directory is reserved for behavior not expressed as "run this graph
-and compare it," such as unsupported paths, determinism, or benchmarking controls. See the
-[cross-provider README](../../../dnn-providers/integration-tests/README.md).
+and compare it," such as unsupported paths, determinism, or benchmarking controls.
 
 Current limitations matter:
 
@@ -652,14 +667,25 @@ Integration tests validate end-to-end functionality across components.
   - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
 
 ###### External Integration
-- A shared, cross-provider harness (`hipdnn_integration_tests`) that runs graphs through a hipDNN provider plugin and compares the results against a reference executor, rather than living inside any one provider
-- Under a superbuild the provider plugin is discovered automatically; standalone, pass `--test-article /path/to/libmiopen_plugin.so`
-- Tiered by the `INSTANTIATE_TEST_SUITE_P` prefix (`Smoke`/`Standard`/`Comprehensive`/`Full`); tiers cascade so each higher tier includes the lower ones, and any suite without a tier prefix runs in smoke
-- See the [external integration tests README](../../../dnn-providers/integration-tests/README.md) for adding operations and shapes
-- Provider-owned TOML files can override tolerances or skip cases for known numerical/support limitations. These are governed as explicit workarounds, not passing proof; see [TESTING.md § Known Risks and Gaps](#known-risks-and-gaps).
+- A shared, cross-provider harness (`hipdnn_integration_tests`) that each provider runs against its
+  own plugin, so one provider-agnostic graph test covers every registered engine
+- Under a superbuild the provider plugin is discovered automatically; standalone, pass
+  `--test-article /path/to/libmiopen_plugin.so`
+- Tiered by the `INSTANTIATE_TEST_SUITE_P` prefix
+  (`Smoke`/`Standard`/`Comprehensive`/`Full`); tiers cascade so each higher tier includes the lower
+  ones, and any suite without a tier prefix runs in smoke
+- The [cross-provider README](../../../dnn-providers/integration-tests/README.md#two-ways-to-test-a-graph)
+  is the canonical guide to the two authoring mechanisms and the
+  [single-graph and template-sweep bundle formats](../../../dnn-providers/integration-tests/README.md#bundle-formats-single-graph-vs-template-sweep)
+- Provider-owned TOML files can override tolerances or skip cases for known numerical/support
+  limitations. These are governed as explicit workarounds, not passing proof; see
+  [TESTING.md § Known Risks and Gaps](#known-risks-and-gaps).
 
 #### Graph Validation
-We use reference implementations via the CPU Graph Executor to validate correctness of graph execution in integration tests. See the [CPU Graph Executor Design Document](rfcs/0001_CpuGraphExecutorDesign.md) for more details.
+The cross-provider harness can compare outputs with precomputed golden tensors or a live GPU/CPU
+reference executor. See the canonical [verification modes](../../../dnn-providers/integration-tests/README.md#verification-modes)
+for selection and fallback behavior, and the [CPU Graph Executor Design Document](rfcs/0001_CpuGraphExecutorDesign.md)
+for CPU reference implementation details.
 
 ---
 
