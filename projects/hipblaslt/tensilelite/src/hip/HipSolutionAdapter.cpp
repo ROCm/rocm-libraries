@@ -108,6 +108,14 @@ namespace TensileLite
             if(error == hipSuccess)
                 return error;
 
+            if(error == hipErrorFileNotFound)
+            {
+                // Callers probe several name/xnack variants and expect misses;
+                // the aggregate failure is reported by the caller, so a missing
+                // variant is not an error worth printing here.
+                return error;
+            }
+
             if(error != hipErrorLaunchFailure && error != hipErrorNoBinaryForGpu)
             {
                 logCodeObjectLoadError(path, error);

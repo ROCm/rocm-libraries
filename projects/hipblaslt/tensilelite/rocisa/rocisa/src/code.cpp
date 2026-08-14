@@ -376,6 +376,7 @@ void init_code(nb::module_ m)
              nb::arg("kind"),
              nb::arg("type"),
              nb::arg("addrSpaceQual") = std::nullopt)
+        .def("alignKernArg", &rocisa::SignatureCodeMeta::alignKernArg, nb::arg("alignment"))
         .def("__str__", &rocisa::SignatureCodeMeta::toString)
         .def("__deepcopy__",
              [](const rocisa::SignatureCodeMeta& self, nb::dict&) {
@@ -417,6 +418,7 @@ void init_code(nb::module_ m)
              nb::arg("kind"),
              nb::arg("type"),
              nb::arg("addrSpaceQual") = std::nullopt)
+        .def("alignKernArg", &rocisa::SignatureBase::alignKernArg, nb::arg("alignment"))
         .def("addDescriptionTopic", &rocisa::SignatureBase::addDescriptionTopic)
         .def("addDescriptionBlock", &rocisa::SignatureBase::addDescriptionBlock)
         .def("addDescription", &rocisa::SignatureBase::addDescription)
