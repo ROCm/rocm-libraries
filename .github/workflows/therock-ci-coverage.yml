@@ -122,7 +122,12 @@ jobs:
           python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-artifacts and therock-dist
-        run: cmake --build TheRock/build-coverage --target therock-artifacts therock-dist -- -k 0
+        run: |
+          echo "===== COVERAGE ENV CHECK (pre-build) ====="
+          echo "HIPRAND_ENABLE_COVERAGE=${HIPRAND_ENABLE_COVERAGE:-NOT SET}"
+          env | grep -i coverage || echo "No COVERAGE vars in environment"
+          echo "===== END COVERAGE ENV CHECK ====="
+          cmake --build TheRock/build-coverage --target therock-artifacts therock-dist -- -k 0
 
       - name: Verify coverage instrumentation
         if: ${{ !cancelled() }}
