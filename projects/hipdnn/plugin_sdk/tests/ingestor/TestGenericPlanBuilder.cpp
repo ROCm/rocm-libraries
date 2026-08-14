@@ -476,8 +476,9 @@ bool acceptsOnlyDeviceA(const MatchContext& context, BoundTokens& /*bound*/)
 
 TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionIntoTheMatchContext)
 {
-    GraphMatcherRegistry::registerSymbol(DEVICE_GATED_MATCH_SYMBOL, &acceptsOnlyDeviceA);
-    ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
+    const auto deviceGatedMatcher
+        = scopedGraphMatcher(DEVICE_GATED_MATCH_SYMBOL, &acceptsOnlyDeviceA);
+    const ScopedBlockSizeScore scorer;
 
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
@@ -517,9 +518,6 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
 
     EXPECT_TRUE(builder.isApplicable(handleA, graph));
     EXPECT_FALSE(builder.isApplicable(handleB, graph));
-
-    GraphMatcherRegistry::unregisterSymbol(DEVICE_GATED_MATCH_SYMBOL);
-    ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
 }
 
 /// A graph schema floor an engine declaring the baseline cannot serve.

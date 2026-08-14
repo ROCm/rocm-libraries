@@ -15,6 +15,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <hip/hip_runtime_api.h>
+#include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -226,11 +227,16 @@ public:
 };
 
 /// Ensures @p symbol resolves so a fixture-built manager constructs; global, idempotent.
+/// Never overwrites: a test that installed its own handler under this symbol, via
+/// ScopedDispatchRegistration, keeps it.
 template <typename THandle>
 inline void ensureNoopDispatchRegistered(const std::string& symbol = "test.dispatch")
 {
     static const NoopDispatchHandler<THandle> s_handler;
-    static_cast<void>(DispatchRegistry<THandle>::replaceSymbol(symbol, &s_handler));
+    if(DispatchRegistry<THandle>::tryResolve(symbol) == nullptr)
+    {
+        DispatchRegistry<THandle>::registerSymbol(symbol, &s_handler);
+    }
 }
 
 class TestDeviceResolver : public IDeviceResolver<int>
@@ -397,6 +403,17 @@ public:
     ScopedBlockSizeScore& operator=(const ScopedBlockSizeScore&) = delete;
 };
 
+/// Registers one graph matcher for the returned object's lifetime. Unregisters even when
+/// the test body throws, which a trailing unregisterSymbol() call does not. @p symbol must
+/// outlive the guard; every call site passes a string literal.
+inline hipdnn_data_sdk::utilities::ScopedResource<const char*>
+    scopedGraphMatcher(const char* symbol, GraphMatcherFn matcher)
+{
+    GraphMatcherRegistry::registerSymbol(symbol, matcher);
+    return {symbol,
+            [](const char* registered) { GraphMatcherRegistry::unregisterSymbol(registered); }};
+}
+
 inline MetadataSchema makeSchema()
 {
     return {SCHEMA_ID,
@@ -499,6 +516,7 @@ inline std::unique_ptr<StateManager>
     std::vector<MatchDescriptor> matchers{
         {GRAPH_MATCHER_ID, "graph scoped", MatchScope::GRAPH, "test.graph"},
         {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, "test.kernel"}};
+    ensureNoopDispatchRegistered<TestHandle>();
     std::vector<DispatchDescriptor> dispatches{{DISPATCH_ID, "test dispatch", "test.dispatch"}};
 
     return std::make_unique<StateManager>(
@@ -622,13 +640,10 @@ public:
 
 inline std::vector<DispatchDescriptor> makeStubDispatches()
 {
-    static const NoopDispatchHandler<StubHandle> s_handler;
-    static const bool s_registered = [] {
-        DispatchRegistry<StubHandle>::replaceSymbol("hipdnn.kernel_ingestor.test.dispatch",
-                                                    &s_handler);
-        return true;
-    }();
-    static_cast<void>(s_registered);
+    // Checked per call, not once: a ScopedDispatchRegistration that ran before the first
+    // call here restores a null previous entry by unregistering, so a one-shot static
+    // would leave every later caller with an unresolvable symbol.
+    ensureNoopDispatchRegistered<StubHandle>("hipdnn.kernel_ingestor.test.dispatch");
     return {{DISPATCH_ID, "test dispatch", "hipdnn.kernel_ingestor.test.dispatch"}};
 }
 

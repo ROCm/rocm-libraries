@@ -81,8 +81,8 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
 {
     // Distinct symbol avoids colliding with ScopedTestSymbols' matcher elsewhere.
     constexpr const char* REJECT_SYMBOL = "hipdnn.kernel_ingestor.test.generic_engine.reject";
-    GraphMatcherRegistry::registerSymbol(REJECT_SYMBOL, &rejectGraph);
-    ScoreRegistry::registerSymbol(SCORE_SYMBOL, &scoreByBlockSize);
+    const auto rejectMatcher = scopedGraphMatcher(REJECT_SYMBOL, &rejectGraph);
+    const ScopedBlockSizeScore scorer;
 
     MetadataSchema schema;
     schema.id = SCHEMA_ID;
@@ -113,9 +113,6 @@ TEST(TestIngestorGenericEngine, IsApplicableFalseWhenNoMatcherAccepts)
     const TestGraph graph(makeGraphId(0x61));
 
     EXPECT_FALSE(engine.isApplicable(handle, graph));
-
-    GraphMatcherRegistry::unregisterSymbol(REJECT_SYMBOL);
-    ScoreRegistry::unregisterSymbol(SCORE_SYMBOL);
 }
 
 TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
