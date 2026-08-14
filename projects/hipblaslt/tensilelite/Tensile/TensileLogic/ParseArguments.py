@@ -64,6 +64,14 @@ def parseArguments():
         default=ToolchainDefaults.CXX_COMPILER,
         help=f"default: {ToolchainDefaults.CXX_COMPILER}",
     )
+    argParser.add_argument(
+        "--architecture",
+        dest="Architecture",
+        action="store",
+        default="all",
+        help="semicolon-separated list of gfx architectures to validate "
+        "(e.g. 'gfx1151;gfx942'); 'all' validates every logic file",
+    )
 
     group = argParser.add_mutually_exclusive_group()
     group.add_argument(

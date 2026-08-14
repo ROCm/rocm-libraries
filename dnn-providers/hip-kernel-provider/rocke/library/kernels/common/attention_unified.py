@@ -93,12 +93,12 @@ class UnifiedAttentionProblem:
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_fp8: bool = False
-    num_sms: int = 120
+    num_cus: int = 120
     # Direct device-subscription target override (concurrent workgroups / CTAs).
-    # 0 => auto: derive as ``num_sms * 4``. When > 0, this takes precedence over
-    # ``num_sms`` for 2D<->3D routing (``select_path``) and 3D segmentation
+    # 0 => auto: derive as ``num_cus * 4``. When > 0, this takes precedence over
+    # ``num_cus`` for 2D<->3D routing (``select_path``) and 3D segmentation
     # (``select_3d``), so tuners/benchmarks can pin the target without knowing
-    # the device CU count. Honoured on the Python dispatch path; like ``num_sms``,
+    # the device CU count. Honoured on the Python dispatch path; like ``num_cus``,
     # the C++ C-ABI engine (attention_unified_entry.cpp) does not yet read it, so
     # a companion change is needed for it to take effect in production.
     target_ctas: int = 0
@@ -150,8 +150,8 @@ class UnifiedAttentionProblem:
         "fills" the device. Single source of truth for 2D<->3D routing
         (``select_path``) and the 3D segment count (``select_3d``). Uses the
         explicit ``target_ctas`` override when set (> 0); otherwise derives it
-        as ``num_sms * 4`` (4 CTAs/CU)."""
-        return self.target_ctas if self.target_ctas > 0 else self.num_sms * 4
+        as ``num_cus * 4`` (4 CTAs/CU)."""
+        return self.target_ctas if self.target_ctas > 0 else self.num_cus * 4
 
     def select_path(self) -> str:
         target = self._effective_target_ctas
@@ -890,6 +890,10 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
+    # gfx942 full-causal sink prefill: T=2*block_size (paired with mw16, LDS still
+    # fits) feeds the KV loop better than the narrow single-block oracle.
+    if _enable_gfx942_sink_prefill_tuned(problem):
+        return 2 * problem.block_size
     # gfx942 D64. The flash/L4 regime (use_mfma_32x32x8 + sliced-K ring) requires
     # T in {64,128} and a multiple of 32, so force T=64 there (mirrors the D128
     # flash rule below); otherwise paged block_size in {16,32} would yield T=16/32
@@ -1061,6 +1065,10 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     # key, so a drift would silently launch the wrong CTA count, not rebuild).
     if _enable_gfx942_l4(problem):
         return _select_gfx942_flash_num_warps(problem)
+    # gfx942 full-causal sink prefill: nw2 (with mw16/T32/register_pv) beats the
+    # nw4 D64 oracle up to 1.46x.
+    if _enable_gfx942_sink_prefill_tuned(problem):
+        return 2
     # gfx942 D64 oracle.
     #   * prefill: num_warps=4 (BLOCK_M=128) + mw=32, four waves fit the MI300X
     #     64 KB LDS budget and match the direct gfx942 harness.
@@ -1417,6 +1425,12 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     # decode the VALU pressure is already low so wpe=2 stays better.
     if problem.use_fp8 and problem.max_seqlen_q > 256 and problem.num_seqs >= 2:
         return 3
+    # gfx950 full-causal sink prefill: wpe=3 is a consistent 1.07-1.15x at
+    # Sq>=1024 over the shipped wpe=2 (same nw4/mw16/T64 geometry). This cohort
+    # was not isolable in the general wpe sweeps above (sinks were unbuildable
+    # until recently); the win is sink-specific and reproduced across runs.
+    if _enable_gfx950_sink_prefill_wpe3(problem):
+        return 3
     # (The transposed-32x32 combo is handled at the top of this function:
     # wpe=4 reaches 4 WG/CU on both the nw4/T64 and nw2/T32 geometries and
     # is a consistent win over wpe=2/3 on the d64 prefill-2D cohort.)
@@ -1749,6 +1763,56 @@ def _enable_gfx942_small_q_narrow(problem: UnifiedAttentionProblem) -> bool:
     )
 
 
+def _enable_gfx942_sink_prefill_tuned(problem: UnifiedAttentionProblem) -> bool:
+    """gfx942 full-causal bf16 attention-sink prefill -> nw2/mw16/T32 + register_pv.
+
+    GPU-verified up to 1.46x over the shipped nw4/mw32 config, bit-exact
+    (max_abs=0), holding under batch. Full-causal only: register_pv is full-mask
+    (v1 rejects sliding_window), and SWA gains are a wash at long context. Decode
+    (q==1) routes to the 3D path, so it is excluded here.
+    """
+    return (
+        _resolve_attention_arch() == "gfx942"
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and problem.max_seqlen_q > 1
+        and problem.use_sinks
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+    )
+
+
+def _enable_gfx950_sink_prefill_wpe3(problem: UnifiedAttentionProblem) -> bool:
+    """gfx950 full-causal bf16 attention-sink prefill -> waves_per_eu=3.
+
+    Same-run A/B on gfx950 vs the shipped nw4/mw16/T64 config (waves_per_eu is
+    the only difference): 1.07x @ S1024, 1.11x @ S2048, 1.15x @ S4096, reproduced
+    across two runs. waves_per_eu is a pure AMDGPU occupancy hint (kernel
+    attribute only, no compute change), so output is bit-identical. Full-causal
+    only: SWA showed inconsistent run-to-run results at long context. Decode
+    (q==1) routes to the 3D path, so it is excluded here.
+    """
+    return (
+        _resolve_attention_arch() == "gfx950"
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and problem.max_seqlen_q > 1
+        and problem.use_sinks
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+    )
+
+
 def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
     """Gate the gfx942 fp16 transposed-x8 attention family.
 
@@ -2014,10 +2078,13 @@ def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
 
 
 def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool:
-    # The sliced-K ring (32-wide K slices -> k_groups = HD/32) is correctness-
-    # verified only for D64 (k_groups=2): measured T=64+ring+cfvst+mask-limit (nw4)
-    # is 13-17% faster than the prior D64 best (beats Torch at S2048, ~parity
-    # elsewhere).
+    # The sliced-K ring stages K in k_slice_hd-wide slices, so
+    # k_groups = HD/k_slice_hd and the width is routed per head size (see
+    # _select_gfx942_flash_k_slice_hd). D64 is correctness-verified: measured
+    # T=64+ring+cfvst+mask-limit (nw4) is 13-17% faster than the prior D64 best
+    # (beats Torch at S2048, ~parity elsewhere). That measurement was taken at the
+    # 32-wide slice (k_groups=2); D64 now routes to 16 (k_groups=4), which was
+    # re-verified bitwise-identical on device.
     #
     # D128 (k_groups=4) ring history: the default depth-3 kg%3 slot map reuses
     # slot 0 for slice 3, and the reusing DMA was unfenced -> numerically wrong at
@@ -2085,17 +2152,20 @@ def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
     degree but doubles the per-tile barrier and partial-wait count, so the best
     width is a knee rather than the smallest legal value.
 
-    Returns the shipped 32 for every problem: this makes the width expressible
-    without changing any kernel. Selecting a narrower width is a separate change,
-    and one that has to mirror the width into the C++ engine first -- the C++ twin
-    of this builder hardcodes ``K_SLICE_HD`` (and ``K_SLICE_SLOTS``), so a Python
-    selector that returned anything else would make the two engines disagree for
-    ring specs. The parity corpus enumerates no ring config, so the byte-identity
-    gate would not catch it.
+    D64 takes 16 (k_groups=4) and D128 keeps the shipped 32 (k_groups=4). The two
+    head sizes land on opposite sides of the trade because the barrier count the
+    narrower width buys follows k_groups, not the width: at D64 width 16 reaches
+    the same k_groups D128 already runs at, so it halves the conflict degree at a
+    group count the schedule is known to carry, while the same step at D128 would
+    double it again. Slot reuse and the drain-on-reuse fence are width-independent
+    by *derivation* (see the ``k_slice_hd`` field docstring) but not by
+    *reachability*, and that distinction is the one schedule change this routing
+    makes: at width 32 D64 has ``k_groups=2 < ring_depth=3``, so the slot map never
+    wraps and the fence is never emitted at all, while at width 16 ``k_groups=4``,
+    slice 3 reuses slot 0 and it fires. ``test_attn_k_slice_hd.py`` pins that.
 
-    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. It is a
-    diagnostic knob and carries that same engine-divergence caveat, which is why
-    the default path does not use it. Only meaningful when the ring is active."""
+    ``HIPDNN_GFX942_K_SLICE_HD`` overrides the width for measurement. Only
+    meaningful when the ring is active."""
     env = __import__("os").environ.get("HIPDNN_GFX942_K_SLICE_HD", "").strip()
     # isdecimal rather than isdigit: isdigit accepts characters such as
     # superscripts that int() then rejects, turning a typo into a ValueError on
@@ -2112,6 +2182,8 @@ def _select_gfx942_flash_k_slice_hd(problem: UnifiedAttentionProblem) -> int:
         # ``_GFX942_K_SLICE_HD_CHOICES``, so it cannot fail here.
         if problem.head_size % width == 0 and problem.head_size // width >= 2:
             return width
+    if problem.head_size == 64:
+        return 16
     return 32
 
 
@@ -2161,7 +2233,7 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
     """
     if problem.dtype != "bf16":
         return False
-    if problem.use_sinks:
+    if problem.use_sinks and not _enable_gfx942_sink_prefill_tuned(problem):
         return False
     if problem.sliding_window > 0:
         return False
@@ -2559,6 +2631,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
         problem
     ):
         return 16
+    if _enable_gfx942_sink_prefill_tuned(problem):
+        return 16
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
         return 32
     # gfx942 D128 fp16 L4 (shipped): one M=32 atom per warp (BLOCK_M=32).
@@ -2595,25 +2669,25 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
 
 # Reference CU count for the split-KV segment clamp below. This is NOT the device
 # count (routing resolves that live, per AICK-1722); it is the tuned pre-bump
-# baseline -- the segment count the formula produced at the historical num_sms=120
-# -- used only as the safe ceiling so raising num_sms cannot over-split 3D shapes.
-_PRE_BUMP_SMS = 120
+# baseline -- the segment count the formula produced at the historical num_cus=120
+# -- used only as the safe ceiling so raising num_cus cannot over-split 3D shapes.
+_PRE_BUMP_CUS = 120
 
 
 def _num_segments(problem: UnifiedAttentionProblem) -> int:
     """Mirror AITER ``select_3d_config`` num_segments derivation exactly."""
     attn_cfg, _ = problem.select_3d()
     segments = attn_cfg.NUM_SEGMENTS_PER_SEQ
-    # Routing uses the device CU count (num_sms*4) so under-filled grids flip
+    # Routing uses the device CU count (num_cus*4) so under-filled grids flip
     # 2D->3D; but the split-KV segment count must stay bounded, else the reduce
     # round-trip over-splits 3D shapes. The PRE-BUMP baseline (segments the same
-    # formula produced at the reference num_sms=120 -> target=480) is the
+    # formula produced at the reference num_cus=120 -> target=480) is the
     # universally-safe ceiling: clamping to it can never do worse than shipped.
     if _resolve_attention_arch() == "gfx942" and problem.sliding_window == 0:
         num_2d = problem.total_num_q_blocks_upper_bound * problem.num_kv_heads
         min_seg = 16 if problem.block_size <= 16 else 8
         pre_bump = max(
-            min(_next_power_of_2((_PRE_BUMP_SMS * 4 + num_2d - 1) // num_2d), 128),
+            min(_next_power_of_2((_PRE_BUMP_CUS * 4 + num_2d - 1) // num_2d), 128),
             min_seg,
         )
         if problem.max_seqlen_q == 1:
@@ -2638,7 +2712,7 @@ def _num_segments(problem: UnifiedAttentionProblem) -> int:
             # q>1 PREFILL / SPEC-DECODE / MTP: the same bump inflates segments here
             # (spec-decode q=2-8, small batch route 3D with num_2d small). This path
             # is unmeasured -> clamp to the pre-bump baseline so the routing bump can
-            # never over-split prefill (identical to the shipped num_sms=120 split).
+            # never over-split prefill (identical to the shipped num_cus=120 split).
             return min(segments, pre_bump)
     return segments
 
