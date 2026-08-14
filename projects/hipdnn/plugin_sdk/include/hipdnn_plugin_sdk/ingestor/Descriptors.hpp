@@ -227,7 +227,13 @@ struct KernelDescriptorPack
     /// decline like a matcher returning false, not a malformed load, so it must not be
     /// reported as one.
     std::vector<std::string> arch;
+    /// Every kernel this pack binds, whether authored inline or referenced by id.
     std::vector<KernelDescriptor> kernels;
+    /// Kernels named by id rather than spelled inline; each is a standalone `.ukd.json`.
+    /// resolveDescriptorSets() looks them up and appends them to `kernels`, which is the
+    /// resolved truth every consumer reads -- this stays as the authored record. Packs
+    /// built in memory leave it empty and fill `kernels` directly.
+    std::vector<DescriptorId> kernelIds;
 };
 
 /// One engine and every descriptor it references by id; self-contained.

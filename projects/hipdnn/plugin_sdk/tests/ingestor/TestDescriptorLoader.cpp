@@ -145,6 +145,7 @@ constexpr char ROLE_GRAPH_MATCHER = '4';
 constexpr char ROLE_KERNEL_MATCHER = '5';
 constexpr char ROLE_DISPATCH = '6';
 constexpr char ROLE_PACK = '7';
+constexpr char ROLE_STANDALONE_KERNEL = 'd';
 
 /// A document plus the type the loader will read it as. The type is no longer inside the
 /// body: it comes from the filename writeDocument() builds from `suffix`.
@@ -259,6 +260,28 @@ nlohmann::json& documentOfType(Documents& documents, std::string_view suffix)
         }
     }
     throw std::runtime_error("no document of type " + std::string(suffix));
+}
+
+/// Moves the pack's last inline kernel into its own `.ukd.json`, leaving a bare-id
+/// reference behind: the same corpus, authored the other way.
+void referenceLastKernel(Documents& documents)
+{
+    auto& kernels = documentOfType(documents, ".kdp.json").at("kernelDescriptors");
+    // Scans from the end rather than trusting kernels.back(): a second call (building an
+    // all-references pack) must find the next remaining inline entry, not a string left
+    // behind by the first call.
+    for(auto i = kernels.size(); i-- > 0;)
+    {
+        if(kernels[i].is_object())
+        {
+            nlohmann::json kernel = kernels[i];
+            kernel["version"] = "1.0";
+            kernels[i] = kernel.at("id").get<std::string>();
+            documents.push_back(TestDocument{".ukd.json", std::move(kernel)});
+            return;
+        }
+    }
+    throw std::runtime_error("no inline kernel left to reference");
 }
 
 /// The body of the *second* document in @p documents of type @p suffix. makeSetDocuments
@@ -1029,7 +1052,8 @@ TEST(TestDescriptorLoader, ValidationIsIdempotentAcrossReloads)
 TEST(TestDescriptorLoader, ReadsTheTypeFromTheSuffixNotTheStem)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("stem_ignored"));
-    const auto documents = makeSetDocuments('1', "test:stems");
+    auto documents = makeSetDocuments('1', "test:stems");
+    referenceLastKernel(documents); // proves .ukd.json is read by suffix too
 
     // Deliberately not the id, and deliberately not descriptive: a stem carrying no
     // information at all must still load.
@@ -1046,6 +1070,8 @@ TEST(TestDescriptorLoader, ReadsTheTypeFromTheSuffixNotTheStem)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:stems");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
 }
 
 /// The name is hashed into a global id space, so an unscoped one is the name two vendors
@@ -1449,6 +1475,258 @@ TEST(TestDescriptorLoader, LoadsDescriptorsFromNestedFolders)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:nested");
+}
+
+// ---------------------------------------------------------------------------
+// UKD: standalone kernel files and by-id references from a KDP
+// ---------------------------------------------------------------------------
+
+TEST(TestDescriptorLoader, LoadsAPackMixingInlineAndReferencedKernels)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_mixed"));
+    auto documents = makeSetDocuments('1', "test:mixed");
+    referenceLastKernel(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    const auto& kernels = sets.front().packs.front().kernels;
+    ASSERT_EQ(kernels.size(), 3u);
+    const auto referencedId = testUuid('1', 'a');
+    const auto it = std::find_if(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+        return toString(kernel.id) == referencedId;
+    });
+    ASSERT_NE(it, kernels.end());
+    EXPECT_EQ(std::get<std::string>(it->metadata.at("dtype")), "HALF");
+}
+
+/// Guards resolveDescriptorSets' ordering: kernelIds must resolve into `kernels` before
+/// the "declares no kernels" check runs, or an all-references pack reads as empty.
+TEST(TestDescriptorLoader, LoadsAPackWhoseKernelsAreAllReferences)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_all_refs"));
+    auto documents = makeSetDocuments('1', "test:all_refs");
+    referenceLastKernel(documents);
+    referenceLastKernel(documents);
+    referenceLastKernel(documents);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+}
+
+TEST(TestDescriptorLoader, DropsAPackReferencingAKernelNoFileDefines)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_dangling"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".kdp.json")["kernelDescriptors"].push_back(testUuid('f', 'f'));
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('f', 'f') + ", which no descriptor defines; dropping the pack"));
+}
+
+TEST(TestDescriptorLoader, DropsAPackNamingTheSameKernelTwice)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_duplicate_ref"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    auto& kernelRefs = documentOfType(broken, ".kdp.json").at("kernelDescriptors");
+    const nlohmann::json duplicateRef = kernelRefs.back();
+    kernelRefs.push_back(duplicateRef);
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('2', 'a') + " more than once; dropping the pack"));
+}
+
+/// The inline+reference spelling of the same duplicate, rather than ref+ref above.
+TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelIsAlsoInline)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_ref_and_inline"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    auto inlineAgain = documentOfType(broken, ".ukd.json");
+    inlineAgain.erase("version"); // else this is RejectsAnInlineKernelCarryingAVersion instead
+    documentOfType(broken, ".kdp.json")["kernelDescriptors"].push_back(inlineAgain);
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('2', 'a') + " more than once; dropping the pack"));
+}
+
+TEST(TestDescriptorLoader, WarnsAboutAStandaloneKernelNoPackReferences)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_orphan"));
+    auto documents = makeSetDocuments('1', "test:orphan_kernel");
+    documents.push_back(TestDocument{".ukd.json",
+                                     {{"version", "1.0"},
+                                      {"id", testUuid('1', ROLE_STANDALONE_KERNEL)},
+                                      {"name", "unreferenced kernel"},
+                                      {"kernel_source",
+                                       {{"kind", "embedded_source"},
+                                        {"source_file", "Kernel.cpp"},
+                                        {"entry_point", "Entry"}}}}});
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:orphan_kernel");
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().kernels.size(), 3u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, testUuid('1', ROLE_STANDALONE_KERNEL)));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "no pack references it"));
+}
+
+TEST(TestDescriptorLoader, SharesAStandaloneKernelBetweenTwoEngines)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_shared"));
+    auto first = makeSetDocuments('1', "test:first");
+    referenceLastKernel(first);
+    const auto sharedId = testUuid('1', 'a');
+
+    // A second, unrelated engine names the same standalone kernel: the two-packs-of-one-
+    // -engine collision is pre-existing behavior for identical metadata tuples, not this.
+    auto second = makeSetDocuments('2', "test:second");
+    documentOfType(second, ".kdp.json")["kernelDescriptors"].push_back(sharedId);
+
+    writeDocuments(dir.path(), first);
+    writeDocuments(dir.path(), second);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 2u);
+    for(const auto& set : sets)
+    {
+        ASSERT_EQ(set.packs.size(), 1u);
+        const auto& kernels = set.packs.front().kernels;
+        EXPECT_TRUE(std::any_of(kernels.begin(), kernels.end(), [&](const auto& kernel) {
+            return toString(kernel.id) == sharedId;
+        }));
+    }
+}
+
+/// Two files claiming the same kernel id are both ignored (DropsAnIdTwoFilesDisagreeAbout's
+/// pattern, one catalog map over), so the pack naming that id sees a dangling reference.
+TEST(TestDescriptorLoader, DropsAPackWhoseReferencedKernelConflicts)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_conflict"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    writeDocuments(dir.path(), broken);
+    auto& conflicting = documentOfType(broken, ".ukd.json");
+    conflicting["name"] = "a different kernel with the same id";
+    std::ofstream(dir.path() / "second-claim.ukd.json", std::ios::binary) << conflicting.dump(2);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(
+        HIPDNN_SEV_ERROR,
+        "descriptor loader: pack 'pack' id=" + testUuid('2', ROLE_PACK) + " names kernel "
+            + testUuid('2', 'a') + ", which no descriptor defines; dropping the pack"));
+}
+
+TEST(TestDescriptorLoader, RejectsAStandaloneKernelWithNoVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_missing_version"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".ukd.json").erase("version");
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(
+        recorder.hasLogContaining(HIPDNN_SEV_ERROR, "missing required key 'version' in .ukd.json"));
+}
+
+/// Pins the asymmetry the contract draws: `version` is a file-level key, so the field
+/// required standalone is rejected on the inline spelling of the very same kernel.
+TEST(TestDescriptorLoader, RejectsAnInlineKernelCarryingAVersion)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("inline_with_version"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    documentOfType(broken, ".kdp.json").at("kernelDescriptors").front()["version"] = "1.0";
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                          "unknown key 'version' in a 'kernelDescriptors' entry"));
+}
+
+/// Follows AnUnsupportedVersionDropsBeforeItCanCollideByName's shape: an unreadable file
+/// is skipped, not treated as absent-and-defaulted -- the seventh type is gated the same.
+TEST(TestDescriptorLoader, SkipsAStandaloneKernelOnAnUnsupportedMajor)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("ukd_bad_major"));
+    writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+
+    auto broken = makeSetDocuments('2', "test:broken");
+    referenceLastKernel(broken);
+    documentOfType(broken, ".ukd.json")["version"] = "2.0";
+    writeDocuments(dir.path(), broken);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:valid");
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

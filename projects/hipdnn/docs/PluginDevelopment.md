@@ -499,10 +499,26 @@ product that a shape like `{-1,-1,1,1}` satisfies.
 2. Write the descriptor files under `src/engines/kernel_ingestor_engine/descriptors/<engine>/`. They are **data, not
    code** — installed JSON the loader reads at engine construction, so adding a variant
    ships no C++. A file's type comes from its filename suffix, one of `.kmd.json`,
-   `.uhd.json`, `.ued.json`, `.umd.json`, `.udd.json` or `.kdp.json`; the stem is
-   free-form documentation and is never parsed. Every file carries a `"version"`.
-   Subdirectories are organizational only — the loader walks the tree and a `.json`
-   matching no suffix is warned about and skipped.
+   `.uhd.json`, `.ued.json`, `.umd.json`, `.udd.json`, `.kdp.json` or `.ukd.json`; the
+   stem is free-form documentation and is never parsed. Every file carries a
+   `"version"`. Subdirectories are organizational only — the loader walks the tree and
+   a `.json` matching no suffix is warned about and skipped.
+
+   A KDP's `kernelDescriptors` array holds either form, and a pack may mix them. An
+   inline object is a kernel that ships with its pack; it must not carry `version`.
+   A bare UUID string is a reference to a standalone `.ukd.json` file elsewhere in the
+   tree, resolved when the descriptor set is built. Use a standalone UKD for a kernel
+   built or generated separately from its pack, or shared by packs of different
+   engines — a UKD referenced by two packs of the *same* engine is a duplicate-kernel
+   error, since both would resolve to identical metadata. A UKD file requires
+   `version`; an inline entry rejects it.
+
+   ```json
+   "kernelDescriptors": [
+     { "id": "...", "name": "conv_fwd.f32_block64", "kernel_source": { "...": "..." } },
+     "2eb00697-80a3-4ffe-b4cd-2e5c71d9d834"
+   ]
+   ```
 
    Each `MetadataField` in the KMD declares its `name`, its expected `type`, and either
    a `default_value` or nothing (making it mandatory). A kernel supplying a field of

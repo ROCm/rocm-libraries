@@ -55,17 +55,26 @@
  * | `<name>.umd.json` | MatchDescriptor      |
  * | `<name>.udd.json` | DispatchDescriptor   |
  * | `<name>.kdp.json` | KernelDescriptorPack |
+ * | `<name>.ukd.json` | KernelDescriptor     |
  *
  * Directories under the root are organizational only -- the walk is recursive and a
  * file's folder means nothing here. A `.json`/`.jsonc` matching no suffix is a WARN and
  * skip, not an error. Every file carries a required `version`, gated per type (FILE_TYPES
  * below) by RFC 0017 §4: accept iff the major matches and the minor is no newer.
  *
- * The UED follows RFC 0020 (source of truth); the other five follow RFC 0017 §4 until
+ * A KDP names its kernels either inline or by id: an entry of `kernelDescriptors` is an
+ * object (the kernel itself) or a bare UUID string naming a `.ukd.json`. The two are
+ * equivalent once loaded -- references resolve during set building and append to the same
+ * `kernels` vector, so nothing downstream can tell them apart. A file exists so a kernel
+ * can ship separately from the pack binding it, or be shared by packs of different
+ * engines; two packs of one engine sharing a kernel is not legal, since the duplicate
+ * completed metadata tuples collide on the catalog key.
+ *
+ * The UED follows RFC 0020 (source of truth); the other six follow RFC 0017 §4 until
  * their own follow-ups land. Two deliberate divergences from RFC 0020 §4.2, pending an
  * amendment: no `schema` member -- the filename already carries that fact, and a file
- * whose name and body disagree has no correct reading; and `version` required on all six
- * types, not just the UED -- a type with no version can't be gated by §11.1 at all.
+ * whose name and body disagree has no correct reading; and `version` required on every
+ * type, not just the UED -- a type with no version can't be gated by §11.1 at all.
  * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
  * parseEngineDescriptor().
  *
@@ -111,6 +120,7 @@ struct DescriptorCatalog
     DescriptorMap<MatchDescriptor> matchers;
     DescriptorMap<DispatchDescriptor> dispatches;
     DescriptorMap<KernelDescriptorPack> packs;
+    DescriptorMap<KernelDescriptor> kernels;
 };
 
 namespace detail
@@ -125,6 +135,7 @@ inline constexpr std::string_view SUFFIX_UED = ".ued.json";
 inline constexpr std::string_view SUFFIX_UMD = ".umd.json";
 inline constexpr std::string_view SUFFIX_UDD = ".udd.json";
 inline constexpr std::string_view SUFFIX_KDP = ".kdp.json";
+inline constexpr std::string_view SUFFIX_UKD = ".ukd.json";
 
 /// One row per descriptor file type: the suffix that selects it, the `major.minor` this
 /// build accepts per RFC 0017 §4 (per type, not a build-wide pair, so one type reaching
@@ -736,16 +747,15 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     return source;
 }
 
-inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
+/// The fields a kernel carries in either form: inline in a KDP's `kernelDescriptors`, or
+/// alone in a `.ukd.json`. The caller owns the allow-list, because the two forms differ by
+/// exactly one key -- a file carries `version`, an inline entry has no file to version.
+inline KernelDescriptor parseKernelDescriptorBody(const nlohmann::json& root,
+                                                  const std::string& entryLabel)
 {
-    requireObject(root, "a 'kernelDescriptors' entry");
-    requireOnlyKeys(root,
-                    {"id", "name", "kernel_source", "metadata", "priority"},
-                    "a 'kernelDescriptors' entry");
-
     KernelDescriptor kernel;
-    kernel.id = requireId(root, "id", "a 'kernelDescriptors' entry");
-    kernel.name = requireString(root, "name", "a 'kernelDescriptors' entry");
+    kernel.id = requireId(root, "id", entryLabel);
+    kernel.name = requireString(root, "name", entryLabel);
     const std::string where = "kernel '" + kernel.name + "'";
     kernel.source
         = parseKernelSource(requireKey(root, "kernel_source", where), where + " kernel_source");
@@ -775,6 +785,46 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
     return kernel;
 }
 
+/// A kernel spelled inside its pack.
+inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root)
+{
+    const std::string where = "a 'kernelDescriptors' entry";
+    requireObject(root, where);
+    requireOnlyKeys(root, {"id", "name", "kernel_source", "metadata", "priority"}, where);
+    return parseKernelDescriptorBody(root, where);
+}
+
+/// UKD: a kernel shipped in its own file, named from a pack by bare id. Identical to an
+/// inline one once loaded; the file exists so a kernel can ship separately from the pack
+/// that binds it, or be shared by packs of different engines.
+inline KernelDescriptor parseStandaloneKernelDescriptor(const nlohmann::json& root)
+{
+    const std::string where{SUFFIX_UKD};
+    requireOnlyKeys(
+        root, {"version", "id", "name", "kernel_source", "metadata", "priority"}, where);
+    return parseKernelDescriptorBody(root, where);
+}
+
+/// A UUID string from an array-valued key, with the key named in any failure. Shared by
+/// `matchers` and the bare-id form of `kernelDescriptors`.
+inline DescriptorId
+    requireUuidEntry(const nlohmann::json& value, const char* key, const std::string& where)
+{
+    if(!value.is_string())
+    {
+        fail("key '" + std::string(key) + "' in " + where + " must be an array of UUID strings");
+    }
+    try
+    {
+        return hipdnn_flatbuffers_sdk::utilities::parseUuid(value.get<std::string>());
+    }
+    catch(const std::invalid_argument& error)
+    {
+        fail("key '" + std::string(key) + "' in " + where
+             + " holds a value that is not a UUID: " + error.what());
+    }
+}
+
 inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_KDP};
@@ -797,20 +847,7 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
     }
     for(const auto& matcherId : matcherIds)
     {
-        if(!matcherId.is_string())
-        {
-            fail("key 'matchers' in " + where + " must be an array of UUID strings");
-        }
-        try
-        {
-            pack.matcherIds.push_back(
-                hipdnn_flatbuffers_sdk::utilities::parseUuid(matcherId.get<std::string>()));
-        }
-        catch(const std::invalid_argument& error)
-        {
-            fail("key 'matchers' in " + where
-                 + " holds a value that is not a UUID: " + error.what());
-        }
+        pack.matcherIds.push_back(requireUuidEntry(matcherId, "matchers", where));
     }
 
     const auto& kernels = requireKey(root, "kernelDescriptors", where);
@@ -818,9 +855,19 @@ inline KernelDescriptorPack parseKernelDescriptorPack(const nlohmann::json& root
     {
         fail("key 'kernelDescriptors' in " + where + " must be an array");
     }
-    for(const auto& kernelJson : kernels)
+    for(const auto& entry : kernels)
     {
-        pack.kernels.push_back(parseKernelDescriptor(kernelJson));
+        // A string references a standalone `.ukd.json` by id, resolved once the whole tree
+        // is read; an object is the kernel itself. Anything else fails as a malformed
+        // entry, since only these two spellings name a kernel.
+        if(entry.is_string())
+        {
+            pack.kernelIds.push_back(requireUuidEntry(entry, "kernelDescriptors", where));
+        }
+        else
+        {
+            pack.kernels.push_back(parseKernelDescriptor(entry));
+        }
     }
     return pack;
 }
@@ -1020,8 +1067,14 @@ inline constexpr std::array FILE_TYPES{
              [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
                  insertCatalogEntry(c.packs, parseKernelDescriptorPack(d), d, p);
              }},
+    FileType{SUFFIX_UKD,
+             1,
+             0,
+             [](DescriptorCatalog& c, const nlohmann::json& d, const std::filesystem::path& p) {
+                 insertCatalogEntry(c.kernels, parseStandaloneKernelDescriptor(d), d, p);
+             }},
 };
-static_assert(FILE_TYPES.size() == 6, "one row per descriptor file type");
+static_assert(FILE_TYPES.size() == 7, "one row per descriptor file type");
 
 /// The row @p filename's suffix selects, or nullptr if it names no descriptor type.
 ///
@@ -1140,7 +1193,7 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
                             "descriptor loader: "
                             << walk->path()
                             << " is not a descriptor filename (expected "
-                               "<name>.{kmd,uhd,ued,umd,udd,kdp}.json); skipping");
+                               "<name>.{kmd,uhd,ued,umd,udd,kdp,ukd}.json); skipping");
                     }
                 }
             }
@@ -1372,6 +1425,45 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                          + ", which no descriptor defines";
             }
 
+            // Referenced kernels join the inline ones before either check below, so a
+            // `.ukd.json` is validated against the KMD exactly like a kernel spelled in
+            // place, and a pack whose kernels are all references is not "empty". Appended
+            // rather than interleaved: rank() orders by (score, priority, id), so position
+            // never decides selection.
+            if(reason.empty())
+            {
+                for(const auto& kernelId : pack.kernelIds)
+                {
+                    const auto* kernel = detail::findDescriptor(catalog.kernels, kernelId);
+                    if(kernel == nullptr)
+                    {
+                        reason = "names kernel " + toString(kernelId)
+                                 + ", which no descriptor defines";
+                        break;
+                    }
+                    pack.kernels.push_back(*kernel);
+                }
+            }
+
+            // One id twice -- referenced twice, or referenced and also inline -- reaches
+            // the state manager as two identical kernels, which collide on the completed
+            // metadata key and throw, costing the whole engine. Dropping the pack keeps
+            // the failure at pack granularity, where every other malformed pack lands.
+            if(reason.empty())
+            {
+                std::vector<DescriptorId> seen;
+                seen.reserve(pack.kernels.size());
+                for(const auto& kernel : pack.kernels)
+                {
+                    if(std::find(seen.begin(), seen.end(), kernel.id) != seen.end())
+                    {
+                        reason = "names kernel " + toString(kernel.id) + " more than once";
+                        break;
+                    }
+                    seen.push_back(kernel.id);
+                }
+            }
+
             if(reason.empty())
             {
                 for(auto& kernel : pack.kernels)
@@ -1447,6 +1539,40 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
                                 << "' id=" << toString(entry->descriptor.id) << " names engine "
                                 << toString(entry->descriptor.engineId)
                                 << ", which no descriptor defines; dropping it");
+    }
+
+    // Same argument one level down: a standalone kernel is reachable only through a pack's
+    // reference list, so one nobody names does nothing and says nothing. WARN, not ERROR --
+    // an unreferenced kernel costs no engine, and a typo'd reference already dropped its
+    // pack loudly above; this is the other half of that story.
+    std::vector<const CatalogEntry<KernelDescriptor>*> unreferenced;
+    for(const auto& kernelEntry : catalog.kernels)
+    {
+        if(kernelEntry.second.conflicted)
+        {
+            continue;
+        }
+        const DescriptorId& kernelId = kernelEntry.first;
+        const bool named = std::any_of(
+            catalog.packs.begin(), catalog.packs.end(), [&kernelId](const auto& packEntry) {
+                const auto& ids = packEntry.second.descriptor.kernelIds;
+                return !packEntry.second.conflicted
+                       && std::find(ids.begin(), ids.end(), kernelId) != ids.end();
+            });
+        if(!named)
+        {
+            unreferenced.push_back(&kernelEntry.second);
+        }
+    }
+    std::sort(unreferenced.begin(), unreferenced.end(), [](const auto* lhs, const auto* rhs) {
+        return lhs->descriptor.id < rhs->descriptor.id;
+    });
+    for(const auto* entry : unreferenced)
+    {
+        HIPDNN_PLUGIN_LOG_WARN("descriptor loader: kernel '"
+                               << entry->descriptor.name << "' id="
+                               << toString(entry->descriptor.id) << " loaded from " << entry->path
+                               << ", but no pack references it; it will never be dispatched");
     }
 
     return sets;
