@@ -132,13 +132,19 @@ def test_path_system_rocm_uses_hipconfig_rocmpath(tmp_path, monkeypatch):
 
 def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "bin"
+    user_scripts = tmp_path / "user" / "bin"
     scripts.mkdir(parents=True)
+    user_scripts.mkdir(parents=True)
 
     class Core:
         __version__ = "10.1.0a20260813"
 
     monkeypatch.setitem(sys.modules, "rocm_sdk_core", Core)
-    monkeypatch.setattr(_rocm.sysconfig, "get_path", lambda name: str(scripts))
+    monkeypatch.setattr(
+        _rocm.sysconfig,
+        "get_path",
+        lambda name, scheme=None: str(scripts if scheme is None else user_scripts),
+    )
     monkeypatch.setattr(
         _rocm,
         "resolve_system_rocm",
@@ -152,7 +158,59 @@ def test_validate_distribution_uses_active_python_core_version(tmp_path, monkeyp
     assert isinstance(result, _rocm.PythonRocm)
     assert result.version == "10.1.0a20260813"
     assert result.source == "active Python rocm_sdk_core"
-    assert result.toolchain_paths == (scripts.resolve(),)
+    assert result.toolchain_paths == (scripts.resolve(), user_scripts.resolve())
+
+
+@pytest.mark.parametrize(
+    "user_scheme",
+    ["posix_user", "nt_user"],
+)
+def test_python_sdk_toolchain_paths_include_platform_user_scripts(
+    tmp_path, monkeypatch, user_scheme
+):
+    scripts = tmp_path / "venv" / "bin"
+    user_scripts = tmp_path / "user" / "bin"
+    calls = []
+
+    def get_path(name, scheme=None):
+        calls.append((name, scheme))
+        return str(scripts if scheme is None else user_scripts)
+
+    monkeypatch.setattr(
+        _rocm.sysconfig,
+        "get_preferred_scheme",
+        lambda purpose: user_scheme,
+    )
+    monkeypatch.setattr(_rocm.sysconfig, "get_path", get_path)
+
+    assert _rocm._python_sdk_toolchain_paths() == (scripts.resolve(), user_scripts.resolve())
+    assert calls == [("scripts", None), ("scripts", user_scheme)]
+
+
+@pytest.mark.parametrize("primary_exists", [False, True])
+def test_python_sdk_toolchain_prefers_primary_script_over_user_script(
+    tmp_path, monkeypatch, primary_exists
+):
+    from tensilelite.Toolchain.Validators import validateToolchain
+
+    scripts = tmp_path / "venv" / "bin"
+    user_scripts = tmp_path / "user" / "bin"
+    primary = scripts / "amdclang"
+    user = user_scripts / "amdclang"
+    for candidate in (primary, user):
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text("#!/bin/sh\n", encoding="utf-8")
+        candidate.chmod(0o755)
+    if not primary_exists:
+        primary.unlink()
+
+    monkeypatch.setattr(
+        _runtime,
+        "_installation",
+        _rocm.PythonRocm("10.1.0a20260813", (scripts, user_scripts)),
+    )
+
+    assert validateToolchain("amdclang") == str(primary if primary_exists else user)
 
 
 def test_runtime_initialization_does_not_import_rocisa(tmp_path, monkeypatch):
@@ -200,7 +258,7 @@ def test_cli_help_does_not_request_client(monkeypatch):
     assert cli.main(["--help"]) == 0
 
 
-def test_python_sdk_client_request_uses_sdk_client_trampoline(tmp_path, monkeypatch):
+def test_python_sdk_client_request_requires_explicit_binding(tmp_path, monkeypatch):
     scripts = tmp_path / "venv" / "bin"
     scripts.mkdir(parents=True)
     monkeypatch.setattr(_runtime, "_client", None)
@@ -213,19 +271,15 @@ def test_python_sdk_client_request_uses_sdk_client_trampoline(tmp_path, monkeypa
             "10.1.0a20260813", (scripts,)
         ),
     )
-    monkeypatch.setattr(_runtime, "selected_client", lambda default_client: default_client())
-    validated = []
-    monkeypatch.setattr(
-        _runtime,
-        "validate_client",
-        lambda path, version: validated.append((path, version)),
-    )
+    monkeypatch.setattr(client_binding, "read_binding", lambda installation=None: None)
 
     _runtime.initialize()
 
-    executable = scripts / ("tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client")
-    assert _runtime.client_executable() == executable
-    assert validated == [(executable, "5.0.0+rocm10.1.0a20260813")]
+    with pytest.raises(
+        _rocm.TensileLiteRuntimeError,
+        match="rocm-sdk-libraries does not publish the tensilelite-client console script",
+    ):
+        _runtime.client_executable()
 
 
 def test_python_sdk_client_request_uses_explicit_binding_before_sdk_default(tmp_path, monkeypatch):

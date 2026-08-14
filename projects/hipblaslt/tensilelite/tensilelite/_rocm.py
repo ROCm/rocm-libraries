@@ -17,7 +17,7 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import TypeAlias
 
-from _tensilelite_client_binding import ClientCandidate, standard_client_path
+from _tensilelite_client_binding import ClientBindingError, ClientCandidate, standard_client_path
 
 
 class TensileLiteRuntimeError(ImportError):
@@ -31,10 +31,11 @@ class PythonRocm:
     source: str = "active Python rocm_sdk_core"
 
     def default_client(self) -> ClientCandidate:
-        executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-        return ClientCandidate(
-            self.toolchain_paths[0] / executable,
-            "active Python rocm_sdk_libraries",
+        # Enable the Python SDK default when rocm-sdk-libraries publishes the
+        # tensilelite-client console-script trampoline.
+        raise ClientBindingError(
+            "rocm-sdk-libraries does not publish the tensilelite-client console script. "
+            "Configure an explicit TensileLite client binding instead."
         )
 
 
@@ -126,13 +127,20 @@ def _python_sdk_version() -> str | None:
 
 
 def _python_sdk_toolchain_paths() -> tuple[Path, ...]:
-    scripts = sysconfig.get_path("scripts")
-    if not scripts:
+    user_scheme = sysconfig.get_preferred_scheme("user")
+    script_dirs = (
+        sysconfig.get_path("scripts"),
+        sysconfig.get_path("scripts", scheme=user_scheme),
+    )
+    paths = tuple(
+        dict.fromkeys(Path(scripts).resolve() for scripts in script_dirs if scripts)
+    )
+    if not paths:
         raise TensileLiteRuntimeError(
             "The active Python ROCm SDK has no scripts directory for its tool trampolines.\n"
             "  selected by: active Python rocm_sdk_core"
         )
-    return (Path(scripts).resolve(),)
+    return paths
 
 
 def _path_system_rocm() -> SystemRocmRoot | None:
