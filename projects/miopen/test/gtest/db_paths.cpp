@@ -14,6 +14,14 @@
 #include <string>
 #include <sstream>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <miopen/miopen.h>
+#include <windows.h>
+#endif
+
 using ::testing::_;
 using ::testing::Return;
 
@@ -21,6 +29,7 @@ namespace fs = miopen::fs;
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_USER_DB_PATH)
 MIOPEN_LIB_ENV_VAR(MIOPEN_CUSTOM_CACHE_DIR)
+MIOPEN_LIB_ENV_VAR(MIOPEN_SYSTEM_DB_PATH)
 
 // Helper function to build expected version string
 std::string GetExpectedVersionString()
@@ -339,3 +348,68 @@ TEST_F(CPU_DbPaths_NONE, CacheDisabled_ReturnsCorrectly)
     // Just verify it returns a valid boolean without crashing
     EXPECT_TRUE(is_disabled == true || is_disabled == false);
 }
+
+// ============================================================================
+// Tests for GetSystemDbPath()
+// ============================================================================
+
+TEST_F(CPU_DbPaths_NONE, SystemDbPath_EnvVarSet)
+{
+    const std::string custom_path = (fs::temp_directory_path() / "custom/system/db").string();
+    ScopedEnvironment<std::string> scoped_env(MIOPEN_SYSTEM_DB_PATH, custom_path);
+
+    EXPECT_EQ(miopen::GetSystemDbPath(), fs::path{custom_path})
+        << "MIOPEN_SYSTEM_DB_PATH must take precedence over the built-in default";
+}
+
+TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_IsAbsolute)
+{
+    ScopedEnvironment<std::string> unset_system_db(MIOPEN_SYSTEM_DB_PATH, "");
+
+    const auto system_db_path = miopen::GetSystemDbPath();
+
+    // An empty or relative default is resolved against the current working directory, so the
+    // system databases would only be found when the process happens to be started from the
+    // directory holding them.
+    EXPECT_TRUE(system_db_path.is_absolute())
+        << "System DB path '" << system_db_path.string()
+        << "' must be absolute so database lookup does not depend on the working directory";
+}
+
+#ifdef _WIN32
+TEST_F(CPU_DbPaths_NONE, SystemDbPath_NoEnvVar_FollowsMIOpenModule)
+{
+#if MIOPEN_BUILD_DEV
+    GTEST_SKIP() << "Development builds read databases from the build tree, not the install layout";
+#else
+    ScopedEnvironment<std::string> unset_system_db(MIOPEN_SYSTEM_DB_PATH, "");
+
+    // DATABASE_INSTALL_DIR is "bin" on Windows, so the databases are installed next to
+    // MIOpen.dll. Resolve that directory independently and compare.
+    HMODULE hmod = nullptr;
+    ASSERT_NE(GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                     GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                 reinterpret_cast<LPCWSTR>(miopenCreate),
+                                 &hmod),
+              0)
+        << "Unable to locate the module exporting miopenCreate";
+
+    std::wstring module_path(MAX_PATH, L'\0');
+    DWORD len = 0;
+    while(true)
+    {
+        len = GetModuleFileNameW(hmod, module_path.data(), static_cast<DWORD>(module_path.size()));
+        ASSERT_NE(len, 0u) << "GetModuleFileNameW failed";
+        if(len < module_path.size())
+            break;
+        module_path.resize(module_path.size() * 2);
+    }
+    module_path.resize(len);
+    const auto expected = miopen::weakly_canonical(fs::path{module_path}).parent_path();
+
+    EXPECT_EQ(miopen::GetSystemDbPath(), expected)
+        << "System DB path should follow MIOpen.dll so an installed MIOpen finds its databases "
+           "no matter which directory the application runs from";
+#endif
+}
+#endif
