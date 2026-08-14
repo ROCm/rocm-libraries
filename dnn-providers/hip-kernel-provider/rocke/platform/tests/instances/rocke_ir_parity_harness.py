@@ -397,7 +397,7 @@ def _d256_problem():
         max_seqlen_q=4096,
         max_seqlen_k=4096,
         dtype="bf16",
-        num_sms=120,
+        num_cus=120,
     )
 
 
@@ -1561,6 +1561,20 @@ def cases():
                 "ragged": True,
                 "persistent": True,
                 "num_persistent": 256,
+            },
+        ),
+        # paged-KV load path (block_tables indirection). Gates the PAGED DSL through
+        # BOTH the golden (Python lowering byte-stability) and the cpp/python
+        # byte-identity gate. fp16 D128 sliding-window single-seq (the validated
+        # cohort); num_kv_blocks = seqlen_kv / block_size (32 = 512 / 16).
+        (
+            "paged_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
             },
         ),
     ):

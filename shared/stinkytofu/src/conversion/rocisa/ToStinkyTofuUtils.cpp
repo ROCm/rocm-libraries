@@ -34,6 +34,7 @@
 #include <functional>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <typeinfo>
@@ -50,6 +51,7 @@
 #include "instruction/mem.hpp"
 #include "instruction/mfma.hpp"
 #include "stinkytofu/Config/Config.h"
+#include "stinkytofu/Version.h"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
@@ -60,6 +62,10 @@
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
+
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+#include "HelloWorldPass.hpp"  // declares stinkytofu::registerHelloWorldPassPlugin()
+#endif
 
 namespace nb = nanobind;
 
@@ -282,6 +288,8 @@ stinkytofu::DPPModifiers convertDPPModifiers(const rocisa::DPPModifiers& rocMod)
     } else if (rocMod.quad_perm.size() == 4) {
         ctrl = stinkytofu::dppQuadPerm(rocMod.quad_perm[0], rocMod.quad_perm[1],
                                        rocMod.quad_perm[2], rocMod.quad_perm[3]);
+    } else if (rocMod.row_xmask != kUnset) {
+        ctrl = stinkytofu::dppRowXmask(rocMod.row_xmask);
     }
 
     // bound_ctrl is {0, 1}. Anything else (unset -1, or stray) -> default 0.
@@ -1384,6 +1392,22 @@ std::array<int, 3> convertArch(nb::object arch_obj) {
 ///
 /// \param m The nanobind module to add bindings to
 void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
+    // rocisa was compiled against whichever stinkytofu/Version.h it saw at build
+    // time (STINKYTOFU_FULL_VERSION, a compile-time macro expansion in this TU).
+    // stinkytofu::getRuntimeVersion() instead reports the truth about whatever
+    // stinkytofu is actually loaded/linked right now — a separately-installed
+    // shared lib, a vendored copy, or (in a static build) the same binary this
+    // function itself lives in. A mismatch means a different stinkytofu build
+    // than the one rocisa was compiled against is present at runtime; rocisa
+    // does not support running against a different stinkytofu build, so fail
+    // loudly at import time rather than risk silent ABI/behavior drift.
+    if (!stinkytofu::versionsMatch(STINKYTOFU_FULL_VERSION, stinkytofu::getRuntimeVersion())) {
+        throw std::runtime_error(
+            std::string("rocisa was built against stinkytofu ") + STINKYTOFU_FULL_VERSION +
+            " but " + stinkytofu::getRuntimeVersion() +
+            " is loaded at runtime — rebuild rocisa against a matching stinkytofu.");
+    }
+
     // Pipeline extension point enum
     nb::enum_<PipelineExtensionPoint>(m, "PipelineExtensionPoint")
         .value("BeforeRegionPasses", PipelineExtensionPoint::BeforeRegionPasses)
@@ -1398,6 +1422,13 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     m.def("stinkytofuExamplePluginPath", &PassBuilder::examplePluginPath,
           "Absolute path to StinkyTofu's bundled example plugin, or \"\" if it was not built. "
           "For tests/demos; consumers with their own plugins pass their path to loadPlugin().");
+
+#ifdef ROCISA_HAVE_HELLOWORLD_STATIC_PLUGIN
+    m.def("registerExamplePlugin", &stinkytofu::registerHelloWorldPassPlugin,
+          "Register StinkyTofu's built-in example HelloWorldPass, compiled directly into "
+          "rocisa (LLVM-style static-plugin pattern). Only available when rocisa was built "
+          "with ROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON.");
+#endif
 
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
