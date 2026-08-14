@@ -323,6 +323,25 @@ class TestCliIntegration(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn('ENVIRONMENT "OMP_NUM_THREADS=24"', result.stdout)
 
+    def test_cli_environment_modification_emitted(self):
+        result, _ = self._run_parser(
+            PATTERNS_ONLY_YAML,
+            "--environment-modification",
+            "PATH=path_list_prepend:/opt/rocm/bin",
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn(
+            'ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:/opt/rocm/bin"',
+            result.stdout,
+        )
+
+    def test_cli_fixtures_required_emitted(self):
+        result, _ = self._run_parser(
+            PATTERNS_ONLY_YAML, "--fixtures-required", "my_setup_fixture"
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn('FIXTURES_REQUIRED "my_setup_fixture"', result.stdout)
+
     def test_cli_install_command_arg_and_executable(self):
         result, install_contents = self._run_parser(
             PATTERNS_ONLY_YAML,

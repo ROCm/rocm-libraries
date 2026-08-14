@@ -60,7 +60,7 @@ public:
 
     void SetUp() override {}
 
-    using IntegrationBundleVerificationHarness::synthesis;
+    using IntegrationBundleVerificationHarness::inputFillRecipes;
     using IntegrationBundleVerificationHarness::TestBody;
 
 protected:
@@ -212,7 +212,7 @@ protected:
 };
 
 // uids: x=1, y=2, scale=3, bias=4, epsilon=5, prev_mean=8, prev_variance=9, momentum=10
-std::shared_ptr<IntegrationTestBundle> makeRuntimePbvSynthesisBundle()
+std::shared_ptr<IntegrationTestBundle> makeRuntimePbvFillBundle()
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
         {3, 1},
@@ -309,8 +309,8 @@ TEST(TestBundleVerificationHarness, DeviceVariantPackUsesHostPointerForRuntimePa
 } // namespace
 
 // Full harness seam: start with graph metadata only, then prove allocation,
-// fixed/random synthesis, and host-pointer delivery all happen before execute.
-TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreSynthesizedEndToEnd)
+// fixed/random fill, and host-pointer delivery all happen before execute.
+TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreFilledEndToEnd)
 {
     const auto runHarness = [&](float& epsilon, float& momentum) {
         ::testing::TestPartResultArray results;
@@ -324,9 +324,9 @@ TEST_F(TestGoldenHarnessFixture, GraphOnlyRuntimePbvValuesAreSynthesizedEndToEnd
         };
         TestableHarness harness(execute);
 
-        auto bundle = makeRuntimePbvSynthesisBundle();
-        harness.setBundle(std::move(bundle), "runtime-pbv-synthesis");
-        harness.synthesis().setGlobalSeed(42);
+        auto bundle = makeRuntimePbvFillBundle();
+        harness.setBundle(std::move(bundle), "runtime-pbv-fill");
+        harness.inputFillRecipes().setGlobalSeed(42);
 
         const ::testing::ScopedFakeTestPartResultReporter reporter(
             ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, &results);

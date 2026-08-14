@@ -63,7 +63,7 @@
  *         <tt>THRUST_VERSION / 100 % 1000</tt> is the minor version.
  *         <tt>THRUST_VERSION / 100000</tt> is the major version.
  */
-#define THRUST_VERSION 300003 // macro expansion with ## requires this to be a single value
+#define THRUST_VERSION 200805 // macro expansion with ## requires this to be a single value
 
 /*! \def THRUST_MAJOR_VERSION
  *  \brief The preprocessor macro \p THRUST_MAJOR_VERSION encodes the
@@ -92,10 +92,6 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 static_assert(THRUST_MAJOR_VERSION == CCCL_MAJOR_VERSION, "");
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP // for libhipcxx
-static_assert(THRUST_MINOR_VERSION <= CCCL_MINOR_VERSION, "");
-#  else // CUDA
 static_assert(THRUST_MINOR_VERSION == CCCL_MINOR_VERSION, "");
-static_assert(THRUST_SUBMINOR_VERSION <= CCCL_PATCH_VERSION, "");
-#  endif
+static_assert(THRUST_SUBMINOR_VERSION == CCCL_PATCH_VERSION, "");
 #endif

@@ -3451,6 +3451,10 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     int64_t                batch_stride_c = 0;
     int64_t                batch_stride_d = 0;
     int64_t                batch_stride_e = 0;
+    int64_t                batch_offset_a = 0;
+    int64_t                batch_offset_b = 0;
+    int64_t                batch_offset_c = 0;
+    int64_t                batch_offset_d = 0;
     bool                   strided_batch  = true;
     bool                   grouped_gemm   = true;
     void*                  bias           = nullptr;
@@ -3478,15 +3482,19 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                                            a_type,
                                                            lda,
                                                            batch_stride_a,
+                                                           batch_offset_a,
                                                            b_type,
                                                            ldb,
                                                            batch_stride_b,
+                                                           batch_offset_b,
                                                            c_type,
                                                            ldc,
                                                            batch_stride_c,
+                                                           batch_offset_c,
                                                            d_type,
                                                            ldd,
                                                            batch_stride_d,
+                                                           batch_offset_d,
                                                            lde,
                                                            batch_stride_e,
                                                            bias,
@@ -3512,22 +3520,26 @@ inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         nullptr,
                                         lda, // arg.lda
                                         batch_stride_a,
+                                        batch_offset_a,
                                         b_type,
                                         B, // B
                                         nullptr,
                                         ldb, // arg.ldb
                                         batch_stride_b,
+                                        batch_offset_b,
                                         beta,
                                         c_type,
                                         C, // C
                                         nullptr,
                                         ldc, // arg.ldc
                                         batch_stride_c,
+                                        batch_offset_c,
                                         d_type,
                                         D, // D
                                         nullptr,
                                         ldd, // arg.ldc
                                         batch_stride_d,
+                                        batch_offset_d,
                                         E, // E
                                         nullptr,
                                         lde, //arg.lde

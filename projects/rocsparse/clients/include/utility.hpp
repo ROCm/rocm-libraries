@@ -247,6 +247,14 @@ public:
 
         CHECK_HIP_ERROR(hipStreamCreate(&this->graph_stream));
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(*this, &this->old_stream));
+
+        // Flush any pending pre-capture work on the current stream before capturing
+        // on the fresh graph stream. A preprocess/analysis phase (e.g. SpMM/SpMV)
+        // runs on this stream and produces data the captured compute reads; since
+        // the graph is launched on a different stream, without this sync that setup
+        // work would race the graph and can be read stale/uninitialized.
+        CHECK_HIP_ERROR(hipStreamSynchronize(this->old_stream));
+
         CHECK_ROCSPARSE_ERROR(rocsparse_set_stream(*this, this->graph_stream));
 
         // BEGIN GRAPH CAPTURE

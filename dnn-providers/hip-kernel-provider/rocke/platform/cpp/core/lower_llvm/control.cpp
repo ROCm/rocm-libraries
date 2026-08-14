@@ -113,6 +113,45 @@ static int ll_backend_waitcnt(rocke_lower_t* L, int vmcnt, int expcnt, int lgkmc
     return rocke_ll_encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt);
 }
 
+/* Python ISABackend.emit_lds_barrier_drain: an s_barrier only synchronises
+ * waves, it does not drain outstanding LDS (and, when draining VMEM, the
+ * VMEM->LDS chain) traffic, so a post-barrier reader can otherwise observe
+ * stale LDS. gfx9/10/11 spend one monolithic s_waitcnt on it. */
+void rocke_ll_emit_lds_barrier_drain_legacy(rocke_lower_t* L, bool drain_vmem)
+{
+    int mask = ll_backend_waitcnt(L, drain_vmem ? 0 : -1, -1, 0);
+    rocke_ll_need(L, "s.waitcnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
+}
+
+/* Python Gfx1250Backend.emit_lds_barrier_drain: gfx1250 has split wait
+ * counters and the raw s_barrier does NOT get an auto-inserted pre-barrier
+ * s_wait_dscnt, so the LDS write->read would race and read stale LDS (NaN).
+ * Emit the drain explicitly: dscnt for LDS, plus loadcnt for the VMEM->LDS
+ * chain. clang fuses the pair into `s_wait_loadcnt_dscnt 0`. */
+void rocke_ll_emit_lds_barrier_drain_split(rocke_lower_t* L, bool drain_vmem)
+{
+    if(drain_vmem)
+    {
+        rocke_ll_need(L, "s.wait.loadcnt");
+        rocke_ll_emit(L, "  call void @llvm.amdgcn.s.wait.loadcnt(i16 0)");
+    }
+    rocke_ll_need(L, "s.wait.dscnt");
+    rocke_ll_emit(L, "  call void @llvm.amdgcn.s.wait.dscnt(i16 0)");
+}
+
+/* Python self._backend.emit_lds_barrier_drain(self, drain_vmem=...), with the
+ * legacy encoder as the fallback when no backend is bound. */
+static void ll_backend_lds_barrier_drain(rocke_lower_t* L, bool drain_vmem)
+{
+    if(L && L->backend && L->backend->emit_lds_barrier_drain)
+    {
+        L->backend->emit_lds_barrier_drain(L, drain_vmem);
+        return;
+    }
+    rocke_ll_emit_lds_barrier_drain_legacy(L, drain_vmem);
+}
+
 /* ======================================================================== */
 /* yield-stack helpers (Python _yield_stack: list of list[str])             */
 /* ======================================================================== */
@@ -890,10 +929,11 @@ static void _op_tile_sync(rocke_lower_t* L, const rocke_op_t* op)
     {
         return; /* skip the trailing sync in a non-final unrolled iteration */
     }
-    int mask = ll_backend_waitcnt(L, 0, -1, 0);
-    rocke_ll_need(L, "s.waitcnt");
+    /* Drain outstanding LDS (and the VMEM->LDS chain) before the barrier. The
+     * backend picks the wait: gfx9/10/11 the monolithic s_waitcnt, gfx1250 the
+     * split s_wait_loadcnt/dscnt pair. */
+    ll_backend_lds_barrier_drain(L, /*drain_vmem=*/true);
     rocke_ll_need(L, "s.barrier");
-    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
     rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
 }
 
@@ -951,10 +991,9 @@ static void _op_tile_sync_lds_only(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
-    int mask = ll_backend_waitcnt(L, -1, -1, 0);
-    rocke_ll_need(L, "s.waitcnt");
+    /* LDS-only drain (keep VMEM in flight for the async-DMA ping-pong). */
+    ll_backend_lds_barrier_drain(L, /*drain_vmem=*/false);
     rocke_ll_need(L, "s.barrier");
-    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
     rocke_ll_emit(L, " call void @llvm.amdgcn.s.barrier()");
 }
 
@@ -965,6 +1004,12 @@ static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
     {
         return;
     }
+    /* gfx1250: the split wait counters are inserted by the backend and the
+     * legacy s_waitcnt intrinsic is not selectable, so emit nothing. */
+    if(L->backend && !L->backend->emits_legacy_s_waitcnt)
+    {
+        return;
+    }
     rocke_ll_need(L, "s.waitcnt");
     int64_t vm = -1, lk = -1, ec = -1;
     rocke_attr_get_int(&op->attrs, "vmcnt", &vm);
@@ -972,6 +1017,96 @@ static void _op_tile_s_waitcnt(rocke_lower_t* L, const rocke_op_t* op)
     rocke_attr_get_int(&op->attrs, "expcnt", &ec);
     int mask = ll_backend_waitcnt(L, (int)vm, (int)ec, (int)lk);
     rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.waitcnt(i32 %d)", mask);
+}
+
+/* Python: getattr(self._backend, "has_async_lds_counter", False). */
+static bool ll_has_async_lds_counter(const rocke_lower_t* L)
+{
+    return L && L->backend && L->backend->has_async_lds_counter;
+}
+
+/* Reject an immediate that does not fit the i16 the intrinsic declares (Python
+ * _Lowerer._check_u16). The builders check too, but serialized IR reaches the
+ * lowerer without passing through them, and LLVM would truncate silently. */
+static void ll_check_u16(rocke_lower_t* L, const char* op, const char* field, int64_t value)
+{
+    if(value < 0 || value > 0xFFFF)
+    {
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s %s must fit an unsigned i16 (0..65535), got %lld",
+                      op,
+                      field,
+                      (long long)value);
+    }
+}
+
+static void _op_tile_s_wait_asynccnt(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n = 0;
+    if(!rocke_ll_live(L))
+        return;
+    if(!ll_has_async_lds_counter(L))
+        return;
+    if(!rocke_attr_get_int(&op->attrs, "n", &n))
+        n = 0;
+    ll_check_u16(L, "s_wait_asynccnt", "n", n);
+    rocke_ll_need(L, "s.wait.asynccnt");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.asynccnt(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
+{
+    (void)op;
+    if(!rocke_ll_live(L))
+        return;
+    rocke_ll_need(L, "asyncmark");
+    rocke_ll_emit(L, "  call void @llvm.amdgcn.asyncmark()");
+}
+
+static void _op_tile_wait_asyncmark(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t n = 0;
+    if(!rocke_ll_live(L))
+        return;
+    if(!rocke_attr_get_int(&op->attrs, "n", &n))
+        n = 0;
+    ll_check_u16(L, "wait_asyncmark", "n", n);
+    rocke_ll_need(L, "wait.asyncmark");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.wait.asyncmark(i16 %lld)", (long long)n);
+}
+
+static void _op_tile_s_wait_event(rocke_lower_t* L, const rocke_op_t* op)
+{
+    int64_t imm = 0;
+    if(!rocke_ll_live(L))
+        return;
+    if(!rocke_attr_get_int(&op->attrs, "imm", &imm))
+        imm = 0;
+    ll_check_u16(L, "s_wait_event", "imm", imm);
+    rocke_ll_need(L, "s.wait.event");
+    rocke_ll_emitf(L, "  call void @llvm.amdgcn.s.wait.event(i16 %lld)", (long long)imm);
+}
+
+static void _op_tile_s_prefetch_inst(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const char* ptr_ty = NULL;
+    int space;
+    if(!rocke_ll_live(L))
+        return;
+    space = rocke_ll_anyptr_space(L,
+                                  "s_prefetch_inst",
+                                  op->operands[0],
+                                  ROCKE_LL_S_PREFETCH_INST_PTR_TYPES,
+                                  ROCKE_LL_S_PREFETCH_INST_PTR_TYPES_COUNT,
+                                  &ptr_ty);
+    rocke_ll_need(L, rocke_arena_printf(&L->arena, "s.prefetch.inst.p%d", space));
+    rocke_ll_emitf(L,
+                   "  call void @llvm.amdgcn.s.prefetch.inst.p%d(%s %s, i32 %s)",
+                   space,
+                   ptr_ty,
+                   rocke_ll_operand(L, op->operands[0]),
+                   rocke_ll_operand(L, op->operands[1]));
 }
 
 /* Python _op_tile_iglp_opt. */
@@ -1684,6 +1819,11 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SYNC_LDS_ONLY, _op_tile_sync_lds_only);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_BARRIER_BARE, _op_tile_s_barrier_bare);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_WAITCNT, _op_tile_s_waitcnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_ASYNCCNT, _op_tile_s_wait_asynccnt);
+    rocke_ll_set_handler(ROCKE_OP_TILE_ASYNCMARK, _op_tile_asyncmark);
+    rocke_ll_set_handler(ROCKE_OP_TILE_WAIT_ASYNCMARK, _op_tile_wait_asyncmark);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_WAIT_EVENT, _op_tile_s_wait_event);
+    rocke_ll_set_handler(ROCKE_OP_TILE_S_PREFETCH_INST, _op_tile_s_prefetch_inst);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);

@@ -316,7 +316,8 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
     /// P0)/4096)+1` (conservative one-shot: no iteration, never under-covers), clamped to `budget -
     /// armFloor`.
     static int computeCoverN(int64_t boundary) {
-        if (boundary < 0 || boundary <= kCpWindowBytes) return 0;
+        // kCpWindowBytes >= 0, so `boundary <= kCpWindowBytes` already covers negatives.
+        if (boundary <= kCpWindowBytes) return 0;
         const int64_t gap = boundary + kCpCoverInsertUpperBoundBytes - kCpWindowBytes;
         int raw = static_cast<int>(gap / kSwPrefetchSpacingBytes) + 1;  // floor+1 (gap > 0)
         const int maxCover = kPostCpHintBudget - kCpBoundaryArmFloor;   // = 4
@@ -372,6 +373,7 @@ class SwInstructionPrefetchAbsDynamicPass : public StinkyInstPass {
         // marginally larger than the reference table. Coverage uses fixed N, not blockSize,
         // so this only affects the dumped value, never behavior.
         std::vector<int64_t> boundaries;
+        boundaries.reserve(targets.size() + 1);
         for (const CaseTarget& t : targets) boundaries.push_back(t.offset);
         boundaries.push_back(phase1.totalLayoutBytes);
         std::sort(boundaries.begin(), boundaries.end());

@@ -9,7 +9,7 @@ productionization contract of that path:
   * the live builder ``build_gfx942_4warp_gqa`` is importable, and
   * the retired std-QK builder ``build_stdqk_attention_paged`` stays removed
     (0 call sites -- it was replaced at the seam by the 4-warp builder), and
-  * ``supports_tiled_2d`` exposes the renamed ``use_d256_gfx942_fast`` flag
+  * ``supports_tiled_2d`` exposes the renamed ``use_d256_fast`` flag
     (never the old ``use_stdqk_paged`` name) that bypasses the generic
     staged-tile LDS-budget model for the fast path.
 
@@ -119,7 +119,7 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
 
     def test_supports_flag_renamed(self):
         params = inspect.signature(t2d.supports_tiled_2d).parameters
-        self.assertIn("use_d256_gfx942_fast", params)
+        self.assertIn("use_d256_fast", params)
         self.assertNotIn("use_stdqk_paged", params)
 
     def test_supports_bypasses_lds_model_when_flagged(self):
@@ -137,7 +137,7 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
             tile_size=32,
             num_warps=4,
             arch="gfx942",
-            use_d256_gfx942_fast=True,
+            use_d256_fast=True,
         )
         self.assertTrue(ok, msg=why)
 

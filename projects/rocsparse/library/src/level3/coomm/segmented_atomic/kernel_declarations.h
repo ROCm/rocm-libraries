@@ -40,6 +40,7 @@ namespace rocsparse
                                       I                   m,
                                       I                   n,
                                       I                   nstart,
+                                      int64_t             batch_count,
                                       int64_t             batch_stride_A,
                                       ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                       const I* __restrict__ coo_row_ind,

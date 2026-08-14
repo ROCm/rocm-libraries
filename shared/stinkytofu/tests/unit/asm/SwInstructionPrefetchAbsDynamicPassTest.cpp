@@ -393,7 +393,7 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_StaticRegime_DetectorO
 /// CP-extend boundary: when > 0 a `label_TailLoopBeginL` is anchored at that byte offset (the
 /// primary boundary), so coverN is deterministic; <= 0 omits it (boundary falls back to the
 /// shallowest GW_* > P(0)).
-void buildThreeArmKernelTail(BasicBlock* bb, GfxArchID arch, int64_t tailAlignTo) {
+static void buildThreeArmKernelTail(BasicBlock* bb, GfxArchID arch, int64_t tailAlignTo) {
     // Site: label_MultiGemmEnd followed by a real insn so the anchor (node after
     // the label) exists — the ladder is inserted before it, i.e. right after MGE.
     appendLabel(bb, arch, "label_MultiGemmEnd");
@@ -425,7 +425,7 @@ void buildThreeArmKernelTail(BasicBlock* bb, GfxArchID arch, int64_t tailAlignTo
 
 /// Default emittable kernel: tail boundary at byte 40000 → coverN = 2 (armN stays 6). This
 /// reproduces the earlier fixed-N=2 cover width, so the cover-on counts below are 2 + 3*6.
-void buildThreeArmEmittableKernel(BasicBlock* bb, GfxArchID arch) {
+static void buildThreeArmEmittableKernel(BasicBlock* bb, GfxArchID arch) {
     buildThreeArmKernelTail(bb, arch, /*tailAlignTo=*/40000);
 }
 
@@ -546,7 +546,7 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_ThreeArmLadder_Wit
 /// Build a > 65536-byte kernel with the label_MultiGemmEnd site + a real insn <= P(0), but NO
 /// GSU1 anchors and NO sgprGSU/sgprBeta — so the 3-arm ladder is unsupported. Used to prove the
 /// CP cover is DECOUPLED (still emits) from the ladder's GSU/beta guard.
-void buildCoverOnlyKernel(BasicBlock* bb, GfxArchID arch) {
+static void buildCoverOnlyKernel(BasicBlock* bb, GfxArchID arch) {
     appendLabel(bb, arch, "label_MultiGemmEnd");
     createVAddInBlock(bb, arch, 0, 1, 2);  // site anchor + a real insn at offset ~0 (<= P0)
     // Boundary (primary): tail at 40000 → coverN = 2. No GSU/beta and no GW anchors, so the
@@ -613,7 +613,7 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CpCoverOff_NoLadde
 /// 3-arm emittable kernel with an extra real instruction anchored at byte 32000 (<= P(0)=32640),
 /// so the CP-boundary label has a meaningful boundary instruction to anchor at (unlike the
 /// tiny fixtures whose only <=P0 insn is at offset ~0).
-void buildThreeArmKernelWithBoundaryInsn(BasicBlock* bb, GfxArchID arch) {
+static void buildThreeArmKernelWithBoundaryInsn(BasicBlock* bb, GfxArchID arch) {
     appendLabel(bb, arch, "label_MultiGemmEnd");
     createVAddInBlock(bb, arch, 0, 1, 2);
     appendSetDirective(bb, "sgprGSU", "54");
@@ -788,7 +788,8 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_CoverBoundary_GwFa
 
 /// 3-arm emittable kernel whose fast-path boundary is label_OptNLL_End (fallback #1) — NO
 /// label_TailLoopBegin* present, OptNLL_End anchored at \p optNllAlignTo.
-void buildThreeArmKernelOptNllBoundary(BasicBlock* bb, GfxArchID arch, int64_t optNllAlignTo) {
+static void buildThreeArmKernelOptNllBoundary(BasicBlock* bb, GfxArchID arch,
+                                              int64_t optNllAlignTo) {
     appendLabel(bb, arch, "label_MultiGemmEnd");
     createVAddInBlock(bb, arch, 0, 1, 2);
     appendSetDirective(bb, "sgprGSU", "54");

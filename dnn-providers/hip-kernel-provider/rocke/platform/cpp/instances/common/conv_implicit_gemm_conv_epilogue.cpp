@@ -121,6 +121,21 @@ static rocke_value_t* rocke_conv_d_addr(rocke_ir_builder_t* b,
     return off;
 }
 
+/* Pointwise D-address closure: flat offset = m * kpg + n, always valid.
+ * Python: def d_addr(b_, m_val, n_val): return b_.add(b_.mul(m_val, _c_K_ir), n_val), 1 */
+static rocke_value_t* rocke_conv_d_addr_pointwise(rocke_ir_builder_t* b,
+                                                  rocke_value_t* m_global,
+                                                  rocke_value_t* n_global,
+                                                  rocke_value_t** out_valid,
+                                                  void* user)
+{
+    rocke_value_t* c_K = (rocke_value_t*)user;
+    rocke_value_t* off = rocke_b_add(b, rocke_b_mul(b, m_global, c_K), n_global);
+    if(out_valid != NULL)
+        *out_valid = rocke_b_const_i32(b, 1);
+    return off;
+}
+
 /* ===================================================================== *
  * rocke_conv_emit_direct_epilogue   (Python lines 1386-1414)
  *
@@ -133,21 +148,43 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      rocke_value_t* const* accs,
                                      int num_accs,
                                      const rocke_warp_grid_t* grid,
-                                     rocke_value_t* d_rsrc)
+                                     rocke_value_t* d_rsrc,
+                                     rocke_value_t* ir_c_K_pw)
 {
     const rocke_conv_problem_t* p = &spec->problem;
-    /* D_desc = make_d_descriptor(p) */
-    rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
     rocke_direct_epilogue_t epi;
 
-    /* DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.dtype_d).store(
-     *     b, accs=accs, addr_fn=d_addr, d_rsrc=d_rsrc,
-     *     bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm))) */
     epi.atom = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     epi.grid = *grid;
     epi.out_dtype = spec->dtype_d;
 
+    if(rocke_conv_problem_is_pointwise(p))
     {
+        /* Pointwise fast path: flat offset = m * kpg + n, always valid.
+         * Python _emit_direct_epilogue emits _c_K_ir FIRST, then bound_m/bound_n:
+         *   _c_K_ir  = b.const_i32(p.kpg)       <- first
+         *   bound_m  = b.const_i32(p.M)          <- second (inside bounds= arg)
+         *   bound_n  = b.const_i32(p.N_gemm)     <- third
+         * Match this order exactly. */
+        rocke_value_t* c_K = rocke_b_const_i32(b, rocke_conv_problem_kpg(p));
+        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
+        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        (void)ir_c_K_pw;
+        rocke_direct_epilogue_store(b,
+                                    &epi,
+                                    accs,
+                                    num_accs,
+                                    rocke_conv_d_addr_pointwise,
+                                    (void*)c_K,
+                                    d_rsrc,
+                                    bound_m,
+                                    bound_n,
+                                    false);
+    }
+    else
+    {
+        /* D_desc = make_d_descriptor(p) */
+        rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
         /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
         rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
         rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
@@ -184,7 +221,8 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                                           rocke_value_t* block_m_off,
                                           rocke_value_t* block_n_off,
                                           rocke_value_t* d_rsrc,
-                                          rocke_value_t* c0)
+                                          rocke_value_t* c0,
+                                          rocke_value_t* ir_c_K_pw)
 {
     const rocke_conv_problem_t* p = &spec->problem;
     int mfmas_m = rocke_implicit_gemm_conv_spec_mfmas_per_warp_m(spec);
@@ -206,8 +244,15 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
     /* c_M = b.const_i32(p.M); c_N = b.const_i32(p.N_gemm) */
     rocke_value_t* c_M = rocke_b_const_i32(b, rocke_conv_problem_m(p));
     rocke_value_t* c_N = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
-    /* D_desc = make_d_descriptor(p) */
-    rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
+    /* Pointwise: skip descriptor, use kpg constant for flat D offset. */
+    bool _is_pointwise = rocke_conv_problem_is_pointwise(p);
+    /* Python _emit_direct_epilogue_wmma emits its own _c_K_wmma = b.const_i32(kpg).
+     * Emit a new const here to match the Python SSA sequence. */
+    rocke_value_t* c_K_wmma
+        = _is_pointwise ? rocke_b_const_i32(b, rocke_conv_problem_kpg(p)) : NULL;
+    (void)ir_c_K_pw; /* prologue value not used in wmma path */
+    /* D_desc = make_d_descriptor(p) (NULL when pointwise) */
+    rocke_tensor_descriptor_t* D_desc = _is_pointwise ? NULL : rocke_conv_make_d_descriptor(b, p);
     /* c_map = op.c_layout() */
     const rocke_arch_layout_map_t* c_map = rocke_mmaop_c_layout(op, b);
 
@@ -273,7 +318,13 @@ void rocke_conv_emit_direct_epilogue_wmma(rocke_ir_builder_t* b,
                 /* v_f32 = b.vec_extract(acc, i) */
                 v_f32 = rocke_b_vec_extract(b, acc, i);
 
-                /* d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val) */
+                /* d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
+                 * Pointwise fast path: flat offset = m * kpg + n */
+                if(_is_pointwise)
+                {
+                    d_off_elems = rocke_b_add(b, rocke_b_mul(b, m_val, c_K_wmma), n_val);
+                }
+                else
                 {
                     const char* names[2];
                     rocke_value_t* values[2];
@@ -318,11 +369,10 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        rocke_value_t* const* accs,
                                        int num_accs,
                                        const rocke_warp_grid_t* grid,
-                                       rocke_value_t* d_rsrc)
+                                       rocke_value_t* d_rsrc,
+                                       rocke_value_t* ir_c_K_pw)
 {
     const rocke_conv_problem_t* p = &spec->problem;
-    /* D_desc = make_d_descriptor(p) */
-    rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
     const rocke_mfma_atom_t* atom
         = rocke_mfma_atom("f16", spec->warp_tile_m, spec->warp_tile_n, spec->warp_tile_k);
     /* CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid, **kwargs)
@@ -330,11 +380,34 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
     int max_store_vec = spec->has_vector_size_c ? spec->vector_size_c : 8;
     rocke_cshuffle_epilogue_t epi = rocke_cshuffle_epilogue_from_grid(atom, grid, max_store_vec);
     epi.out_dtype = spec->dtype_d;
-    epi.no_alias = spec->cshuffle_no_alias;
+    /* Python _emit_cshuffle_epilogue no longer passes no_alias to from_grid
+     * (removed from _cshuffle_kwargs in the pointwise commit), so the epilogue
+     * always uses no_alias=False (the dataclass default). Match that here. */
+    epi.no_alias = false;
 
-    /* .store(b, accs=accs, addr_fn=d_addr, d_rsrc=d_rsrc,
-     *        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm))) */
+    if(rocke_conv_problem_is_pointwise(p))
     {
+        /* Python _emit_cshuffle_epilogue emits _c_K_ir FIRST, then bounds:
+         *   _c_K_ir = b.const_i32(kpg)            <- first
+         *   bounds = (b.const_i32(M), b.const_i32(N_gemm))   <- second/third */
+        rocke_value_t* c_K = rocke_b_const_i32(b, rocke_conv_problem_kpg(p));
+        rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
+        rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
+        (void)ir_c_K_pw;
+        rocke_cshuffle_epilogue_store(b,
+                                      &epi,
+                                      accs,
+                                      num_accs,
+                                      rocke_conv_d_addr_pointwise,
+                                      (void*)c_K,
+                                      d_rsrc,
+                                      bound_m,
+                                      bound_n);
+    }
+    else
+    {
+        /* D_desc = make_d_descriptor(p) */
+        rocke_tensor_descriptor_t* D_desc = rocke_conv_make_d_descriptor(b, p);
         /* hoist bounds in Python's left-to-right order: M first, then N_gemm */
         rocke_value_t* bound_m = rocke_b_const_i32(b, rocke_conv_problem_m(p));
         rocke_value_t* bound_n = rocke_b_const_i32(b, rocke_conv_problem_n_gemm(p));
@@ -381,7 +454,8 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
     /* elif spec.epilogue == "cshuffle": */
     else if(spec->epilogue != NULL && strcmp(spec->epilogue, "cshuffle") == 0)
     {
-        rocke_conv_emit_cshuffle_epilogue(b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc);
+        rocke_conv_emit_cshuffle_epilogue(
+            b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc, ctx->ir_c_K_pw);
     }
     /* elif op.family == "wmma": */
     else if(ctx->op != NULL && ctx->op->family != NULL && strcmp(ctx->op->family, "wmma") == 0)
@@ -397,11 +471,13 @@ void rocke_conv_emit_epilogue(rocke_conv_build_ctx_t* ctx)
                                              ctx->block_m_off_v,
                                              ctx->block_n_off_v,
                                              ctx->d_rsrc,
-                                             ctx->c0);
+                                             ctx->c0,
+                                             ctx->ir_c_K_pw);
     }
     /* else: */
     else
     {
-        rocke_conv_emit_direct_epilogue(b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc);
+        rocke_conv_emit_direct_epilogue(
+            b, spec, final_accs, num_accs, &ctx->grid, ctx->d_rsrc, ctx->ir_c_K_pw);
     }
 }

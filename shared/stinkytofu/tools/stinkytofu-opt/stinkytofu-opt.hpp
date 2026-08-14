@@ -27,7 +27,9 @@
 #include <vector>
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/DumpMemTokenIRStructurePass.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
@@ -35,7 +37,9 @@
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/Gfx1250HazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
+#include "stinkytofu/transforms/asm/InsertCoexecHazardPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertInitialUnclausedVmemPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -48,6 +52,7 @@
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveDscntPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
@@ -58,6 +63,7 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 using namespace stinkytofu;
 
@@ -83,6 +89,11 @@ inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
+    // HazardGapAnalysisPass accepts optional arg: verbose
+    {"HazardGapAnalysisPass",
+     [](const std::vector<std::string>& args) {
+         return createHazardGapAnalysisPass(hasPassArg(args, "verbose"));
+     }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
@@ -96,11 +107,18 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},
     {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
+    {"RemoveDscntPass", [](const auto&) { return createRemoveDscntPass(); }},
     {"StinkyWaitCntInsertionPass",
      [](const std::vector<std::string>& args) {
          WaitCntInsertionOptions options;
          options.enableLoopCarriedTokenDeps = hasPassArg(args, "enableLoopCarriedTokenDeps");
          return createStinkyWaitCntInsertionPass(options);
+     }},
+    // Gfx1250HazardPass accepts:
+    //   profile — print the xcnt drain summary (per rule and drain site) to stderr
+    {"Gfx1250HazardPass",
+     [](const std::vector<std::string>& args) {
+         return createGfx1250HazardPass(hasPassArg(args, "profile"));
      }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
@@ -114,6 +132,10 @@ const std::vector<PassInfo> availablePasses = {
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
     {"DumpStinkyModulePass",
      [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
+    {"DumpMemTokenIRStructurePass",
+     [](const auto&) {
+         return createDumpMemTokenIRStructurePass({.path = "dump_memtoken_ir_structure.txt"});
+     }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
@@ -136,25 +158,14 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertInitialUnclausedVmemPass",
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
-    // InsertClusterBarrierPass accepts:
-    //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>,PrefetchLocalRead=<n>
-    {"InsertClusterBarrierPass",
-     [](const std::vector<std::string>& args) {
-         auto getArgInt = [&args](const char* k, int d) {
-             std::string prefix = std::string(k) + "=";
-             for (const auto& a : args)
-                 if (a.starts_with(prefix)) return std::atoi(a.substr(prefix.size()).c_str());
-             return d;
-         };
-         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                               getArgInt("PrefetchGlobalRead", 1),
-                                               getArgInt("PrefetchLocalRead", 1));
-     }},
+    {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
+    {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {
          return createInsertWaitAluPass(hasPassArg(args, "enableESM2TrackValuVsrc"));
      }},
+    {"InsertCoexecHazardPass", [](const auto&) { return createInsertCoexecHazardPass(); }},
     {"RegionClonePass",
      [](const auto&) {
          return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});

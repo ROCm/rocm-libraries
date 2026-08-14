@@ -424,6 +424,79 @@ class StreamK(Component):
         numQueues, _, _, cacheLineLog2 = self._wsQueueConstants(writer, kernel)
         return numQueues << cacheLineLog2
 
+    @staticmethod
+    def usesRawQueueRank(writer, kernel):
+        """True when the per-XCD queue index is taken from the raw pre-remap
+        launch rank snapshotted into the reused, in-window-dead persistent
+        ``StreamKTileIdx`` carrier (zero extra SGPR -- see the prologue snapshot
+        in KernelWriterAssembly and KernelWriter.skUsesRawQueueRank).
+
+        The auto-reset wrap bound (tiles_q + W_q [+ W_p]) assumes each queue's
+        home-workgroup count equals ``distribute(skGrid, q)`` -- i.e. that the
+        set of workgroup ids mapped to queue q is ``{i in [0,skGrid) : i %%
+        numQueues == q}``.  That holds only if the value feeding ``% numQueues``
+        densely covers ``[0, skGrid)``.  ``StreamKIdx`` is the *remapped* id
+        (wgmXCC CU-count remap and/or the StreamKXCCMapping chiplet remap), and
+        neither remap is a ``% numQueues``-count-preserving permutation when the
+        grid does not block evenly, so ``StreamKIdx %% numQueues`` skews the
+        per-queue count away from W_q and the counter no longer wraps back to 0
+        each launch.  Using the raw launch rank (a dense bijection onto
+        ``[0, skGrid)`` == physical XCD rank) restores the invariant.
+
+        Two disjoint remap regimes need the raw rank:
+          * WorkGroupMappingXCC == -1 (dynamic auto-WGM) -- host picks
+            WGMXCC = NUM_XCD > 1 and the wgmXCC remap skews the count.
+          * StreamKXCCMapping != 0 with WorkGroupMappingXCC > 1 (SKXCC) -- the
+            SKXCC chiplet remap (plus fixed WGMXCC > 1) skews the count.  SKXCC
+            with WGMXCC == 1 is already count-preserving and stays on the cheap
+            ``StreamKIdx %% numQueues`` else-branch; WGMXCC == -1 is mutually
+            exclusive with SKXCC so the disjuncts never overlap.
+
+        Fixed non-SKXCC WGMXCC == 1 needs no fix (StreamKIdx is already the raw
+        rank).  On WorkGroupIdFromTTM targets (gfx12) StreamKIdx is re-read from
+        the raw hardware id (ttmp9); single-queue arches (NumXCD <= 1) are
+        trivially balanced.  Kept in sync with KernelWriter.skUsesRawQueueRank."""
+        return (writer.states.archCaps["NumXCD"] > 1
+                and not writer.states.archCaps["WorkGroupIdFromTTM"]
+                and (kernel["WorkGroupMappingXCC"] == -1
+                     or (kernel["StreamKXCCMapping"] != 0
+                         and kernel["WorkGroupMappingXCC"] > 1)))
+
+    def _emitQueueIndex(self, writer, kernel, sQueueIdx, wsLog2Queues) -> Module:
+        """Compute the per-XCD work-queue index into ``sQueueIdx``.
+
+        Zero-overhead accounting fix: the queue must come from the raw
+        round-robin launch rank so its ``% numQueues`` count equals the
+        ``distribute(skGrid, q)`` the auto-reset bound assumes (see
+        ``usesRawQueueRank``).  On gfx9 that raw rank is snapshotted once, before
+        wgmXCC / the SKXCC XCCMapping remap rewrites WorkGroup0, into the reused,
+        in-window-dead persistent ``StreamKTileIdx`` carrier (KernelWriterAssembly
+        prologue -- zero extra SGPR); here it is read back and reduced
+        ``% numQueues``.  Otherwise (WGMXCC no-op, or gfx12) ``StreamKIdx``
+        already holds the raw id, so fall back to ``StreamKIdx %% numQueues``.
+        """
+        module = Module("StreamK queue index")
+        if self.usesRawQueueRank(writer, kernel):
+            # The queue index is the RAW pre-wgmXCC launch WG rank modulo
+            # numQueues. This raw rank densely covers [0, skGrid), so the number
+            # of home workgroups mapped to queue q equals distribute(skGrid, q) =
+            # W_q -- exactly the count the auto-reset wrap bound (tiles_q + W_q)
+            # assumes -- and the atomic counter self-resets to 0 every launch.
+            # (StreamKIdx is the wgmXCC CU-count-remapped id, whose % numQueues is
+            # NOT count-preserving and skews the per-queue count.) Uniform for SK4
+            # and SK5 -- the snapshot lives in the reused, in-window-dead
+            # persistent StreamKTileIdx carrier (zero extra SGPR; see
+            # KernelWriterAssembly prologue and usesRawQueueRank).
+            _, numQueuesMask, _, _ = self._wsQueueConstants(writer, kernel)
+            module.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKTileIdx"), src1=hex(numQueuesMask),
+                               comment="queue = rawWG %% numQueues (dense round-robin => home-WG count == distribute(skGrid,q))"))
+        else:
+            module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"), shiftHex=wsLog2Queues))
+            module.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx), shiftHex=wsLog2Queues))
+            module.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKIdx"), src1=sgpr(sQueueIdx),
+                               comment="Default queue index"))
+        return module
+
     def _wsStructuralCount(self, mod, mask, log2Queues, sDst, sTotal, sQueue, sTmp, comment):
         """Emit sDst = (sTotal >> log2Queues) + [sQueue < (sTotal & mask)].
 
@@ -1471,7 +1544,7 @@ class StreamK(Component):
                 # are likely to be low-performing so likely not worth optimizing.
                 if shrinkDb:
                     print("WARNING: half requires at least two elements per batch")
-                self.overflowedResources = 3
+                writer.states.overflowedResources = 3
         #elif kernel["ProblemType"]["DataType"].is8bitFloat():
         #    if numElementsPerBatch > 1:
         #        numElementsPerBatch = int(numElementsPerBatch/4)*4
@@ -2030,7 +2103,7 @@ class StreamK(Component):
                     # are likely to be low-performing so likely not worth optimizing.
                     if shrinkDb:
                         print("WARNING: half requires at least two elements per batch")
-                    self.overflowedResources = 3
+                    writer.states.overflowedResources = 3
             #elif kernel["ProblemType"]["DataType"].is8bitFloat():
             #    if numElementsPerBatch > 1:
             #        numElementsPerBatch = int(numElementsPerBatch/4)*4
@@ -3145,9 +3218,7 @@ class StreamKDynamic(StreamK):
 
         # Default queue index
         sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
-        module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"), shiftHex=wsLog2Queues))
-        module.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx), shiftHex=wsLog2Queues))
-        module.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKIdx"), src1=sgpr(sQueueIdx), comment="Default queue index"))
+        module.add(self._emitQueueIndex(writer, kernel, sQueueIdx, wsLog2Queues))
 
         # Queue address
         sAddress = writer.sgprPool.checkOutAligned(2, 2, "Address")
@@ -3374,6 +3445,7 @@ class StreamKDynamic(StreamK):
 
     def storeBranches(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
         module = Module("StreamK Dynamic storeBranches")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
 
         # No branches for atomic mode
         if kernel["StreamKAtomic"]:
@@ -3412,12 +3484,11 @@ class StreamKDynamic(StreamK):
             # Check flag
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sPartialIdx), shiftHex=log2(4), comment="flag offset based on partial index"))
             module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), comment="get flag"))
-
-            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+            module.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
             if kernel["DebugStreamK"] & 2 == 0:
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                 module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
+                module.add(memOrder.acquireFence(writer))
 
             # TODO Barrier here to sync all threads in workgroup, but maybe better to have separate flag for each wavefront (to be tested)
             module.add(SBarrier(comment="wait for all workgroups before resetting flag"))
@@ -3800,12 +3871,7 @@ class StreamKHybrid(StreamK):
 
             # Default queue index
             sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
-            mod.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"),
-                                       shiftHex=wsLog2Queues))
-            mod.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx),
-                                      shiftHex=wsLog2Queues))
-            mod.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKIdx"),
-                               src1=sgpr(sQueueIdx), comment="Default queue index"))
+            mod.add(self._emitQueueIndex(writer, kernel, sQueueIdx, wsLog2Queues))
 
             # Queue address
             sAddress = writer.sgprPool.checkOutAligned(2, 2, "Address")
@@ -4200,6 +4266,7 @@ class StreamKHybrid(StreamK):
     # ------------------------------------------------------------------
     def storeBranches(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
         module = Module("StreamK Hybrid storeBranches")
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
 
         if kernel["StreamKAtomic"]:
             return module
@@ -4234,16 +4301,12 @@ class StreamKHybrid(StreamK):
                                        comment="flag offset based on partial index"))
                 mod.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel),
                                 comment="Offset flags to come after the work queues"))
-                mod.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
-                                 soffset=sgpr(tmpSgpr),
-                                 smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV),
-                                 comment="get flag"))
-
-                mod.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
+                mod.add(memOrder.readFlag(writer, dst=tmpSgpr+2, soffset=sgpr(tmpSgpr)))
                 if kernel["DebugStreamK"] & 2 == 0:
                     mod.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                     mod.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(),
                                          comment="if flag not set, wait and check again"))
+                    mod.add(memOrder.acquireFence(writer))
 
                 mod.add(SBarrier(comment="wait for all workgroups before resetting flag"))
                 skipFlagReset = Label(writer.labels.getNameInc("SK_SkipFlagReset"), "")

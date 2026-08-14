@@ -852,7 +852,7 @@ def _run_rocke(s: Shape, data, launcher, spec, *, warmup: int, attempts: int):
         use_alibi=False,
         use_qq_bias=False,
         use_fp8=False,
-        num_sms=120,
+        num_cus=120,
     )
     hip_stream = int(torch.cuda.current_stream().cuda_stream)
     vals = _attn_values(
