@@ -11,7 +11,7 @@
 // UNSUPPORTED: GCC-ALWAYS_INLINE-FIXME
 // The test hard-codes the POSIX locale name "fr_FR.UTF-8" (via LOCALE_fr_FR_UTF_8),
 // which MSVC's CRT doesn't recognize - it names locales "French_France.1252" /
-// "fr-FR" - so std::locale("fr_FR.UTF-8") throws on Windows. The thread::id
+// "fr-FR" - so std::locale("fr_FR.UTF-8") throws on Windows. The wthread::id
 // streaming this test targets works on Windows; only the locale sub-check can't run.
 // UNSUPPORTED: windows
 
@@ -22,11 +22,11 @@
 
 // <thread>
 
-// class thread::id
+// class wthread::id
 
 // template<class charT, class traits>
 // basic_ostream<charT, traits>&
-// operator<<(basic_ostream<charT, traits>& out, thread::id id);
+// operator<<(basic_ostream<charT, traits>& out, wthread::id id);
 
 // TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
 // libhipcxx adds support for strings and ::std::format
@@ -43,16 +43,16 @@
 
 template <class CharT>
 static void basic() {
-  hip::thread::id id0 = hip::this_thread::get_id();
+  hip::wthread::id id0 = hip::this_thread::get_id();
   ::std::basic_ostringstream<CharT> os;
   os << id0;
 
 #if TEST_STD_VER > 20
-  // C++23 added a formatter specialization for thread::id.
+  // C++23 added a formatter specialization for wthread::id.
   // This changed the requirement of ostream to have a
   // [thread.thread.id]/2
   //   The text representation for the character type charT of an object of
-  //   type thread::id is an unspecified sequence of charT ...
+  //   type wthread::id is an unspecified sequence of charT ...
   // This definition is used for both streaming and formatting.
   //
   // Test whether the output is identical.

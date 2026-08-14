@@ -152,24 +152,46 @@ static rocke_value_t** rocke_build_mem_operands(rocke_ir_builder_t* b,
 /*  LDS (shared memory) -- alloc                                          */
 /* ===================================================================== */
 
+rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
+                                     const rocke_type_t* elem,
+                                     const int* shape,
+                                     int rank,
+                                     const char* name_hint,
+                                     int exclusive)
+{
+    const rocke_type_t* t;
+    rocke_attr_map_t attrs;
+    const rocke_attr_map_t* attrs_p = NULL;
+    if(!rocke_i_live(b))
+    {
+        return NULL;
+    }
+    t = rocke_smem_type(b, elem, shape, rank, exclusive);
+    if(!t)
+    {
+        return NULL;
+    }
+    /* Carry the exclusive bit as an op attr so it round-trips through the
+     * ck.dsl.ir/v1 serializer (the type name deliberately omits it). Only
+     * emitted when set, so the default stays byte-identical. Ignored by the
+     * native .ll lowering (which reads the SmemType's smem_exclusive). */
+    if(exclusive)
+    {
+        attrs = rocke_i_attrs(b);
+        rocke_attr_set_bool(b, &attrs, "exclusive", true);
+        attrs_p = &attrs;
+    }
+    return rocke_i_op1(
+        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, attrs_p, name_hint ? name_hint : "smem");
+}
+
 rocke_value_t* rocke_b_smem_alloc(rocke_ir_builder_t* b,
                                   const rocke_type_t* elem,
                                   const int* shape,
                                   int rank,
                                   const char* name_hint)
 {
-    const rocke_type_t* t;
-    if(!rocke_i_live(b))
-    {
-        return NULL;
-    }
-    t = rocke_smem_type(b, elem, shape, rank);
-    if(!t)
-    {
-        return NULL;
-    }
-    return rocke_i_op1(
-        b, ROCKE_OP_TILE_SMEM_ALLOC, NULL, 0, t, NULL, name_hint ? name_hint : "smem");
+    return rocke_b_smem_alloc_ex(b, elem, shape, rank, name_hint, 0);
 }
 
 /* ===================================================================== */

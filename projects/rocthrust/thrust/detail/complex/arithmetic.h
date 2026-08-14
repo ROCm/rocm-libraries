@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,72 +32,82 @@ THRUST_NAMESPACE_BEGIN
 /* --- Binary Arithmetic Operators --- */
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator+(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() + y.real(), x.imag() + y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator+(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() + y, x.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator+(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator+(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x + y.real(), y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator-(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() - y.real(), x.imag() - y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator-(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() - y, x.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator-(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator-(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x - y.real(), -y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator*(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() * y.real() - x.imag() * y.imag(), x.real() * y.imag() + x.imag() * y.real());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator*(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() * y, x.imag() * y);
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator*(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator*(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x * y.real(), x * y.imag());
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator/(const complex<T0>& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
 
   // Find `abs` by ADL.
   using std::abs;
@@ -120,16 +130,18 @@ THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const co
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const complex<T0>& x, const T1& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator/(const complex<T0>& x, const T1& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() / y, x.imag() / y);
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> operator/(const T0& x, const complex<T1>& y)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+operator/(const T0& x, const complex<T1>& y)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x) / y;
 }
 
@@ -191,7 +203,11 @@ template <typename T>
 THRUST_HOST_DEVICE T arg(const complex<T>& z)
 {
   // Find `atan2` by ADL.
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::atan2;
+#else
   using std::atan2;
+#endif
   return atan2(z.imag(), z.real());
 }
 
@@ -213,7 +229,11 @@ THRUST_HOST_DEVICE inline float norm(const complex<float>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::sqrt;
+#else
   using std::sqrt;
+#endif
 
   if (abs(z.real()) < sqrt(FLT_MIN) && abs(z.imag()) < sqrt(FLT_MIN))
   {
@@ -230,7 +250,11 @@ THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
 {
   // Find `abs` and `sqrt` by ADL.
   using std::abs;
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::sqrt;
+#else
   using std::sqrt;
+#endif
 
   if (abs(z.real()) < sqrt(DBL_MIN) && abs(z.imag()) < sqrt(DBL_MIN))
   {
@@ -243,13 +267,19 @@ THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
 }
 
 template <typename T0, typename T1>
-THRUST_HOST_DEVICE complex<::internal::common_type_t<T0, T1>> polar(const T0& m, const T1& theta)
+THRUST_HOST_DEVICE complex<typename ::internal::promoted_numerical_type<T0, T1>::type>
+polar(const T0& m, const T1& theta)
 {
-  using T = ::internal::common_type_t<T0, T1>;
+  using T = typename ::internal::promoted_numerical_type<T0, T1>::type;
 
   // Find `cos` and `sin` by ADL.
+#ifdef __HIP_DEVICE_COMPILE__
+  using ::cos;
+  using ::sin;
+#else
   using std::cos;
   using std::sin;
+#endif
 
   return complex<T>(m * cos(theta), m * sin(theta));
 }

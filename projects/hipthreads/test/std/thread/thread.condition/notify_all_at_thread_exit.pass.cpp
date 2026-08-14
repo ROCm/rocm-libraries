@@ -46,7 +46,7 @@ int main(int, char**)
 {
 #ifdef __HIP_DEVICE_COMPILE__
     hip::unique_lock<hip::spin_mutex> lk(mut);
-    hip::thread t = support::make_test_thread(func);
+    hip::wthread t = support::make_test_thread(func);
     Clock::time_point t0 = Clock::now();
     cv.wait(lk);
     Clock::time_point t1 = Clock::now();

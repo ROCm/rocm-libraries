@@ -64,48 +64,76 @@ except (ModuleNotFoundError, AttributeError):
 class Library:
     """Represents a single Library loaded from a data structure.
 
-    The Library holds a list-based data representation with specific expected
-    fields. It provides access to architecture, problem description, solutions,
-    sizes, and type, with validation on setters to maintain data integrity.
+    The Library supports both legacy list-format and dict-format logic payloads.
+    It provides access to architecture, problem description, solutions, sizes,
+    and type, with validation on setters to maintain data integrity.
     """
 
-    def __init__(self, data: List, name: str):
+    def __init__(self, data: List | dict, name: str):
         """Initialize a Library instance with validated data.
 
         Args:
-            data (List): The library data list. Must have at least 9 elements,
-                with specific indices containing required fields:
+            data (List | dict): Library logic payload in one of two formats.
+                Legacy list format must have at least 9 elements with required
+                positions:
                     - data[2]: architecture
                     - data[4]: problem
                     - data[5]: solutions (non-empty list)
                     - data[6]: indexing order
-                    - data[7]: sizes (non-empty list)
+                    - data[7]: sizes
                     - data[10]: performance metric
                     - data[11]: type
+                Dict format must contain required keys:
+                    - ArchitectureName
+                    - ProblemType
+                    - DefaultSolution
+                    - Solutions (non-empty list)
+                    - ExactLogic (sizes)
+                    - LibraryType
             name (str): The filename of the library. Must be a non-empty string.
 
         Raises:
-            ValueError: If 'data' is not a list, missing required fields,
-                        or contains empty solutions/sizes.
+            ValueError: If 'data' is neither list nor dict, is missing required
+                        fields for its format, or contains empty solutions.
             ValueError: If 'name' is not a non-empty string.
         """
-        if not isinstance(data, List):
-            raise ValueError(f"Only list type libraries are supported")
-
-        if len(data) < 9:
-            raise ValueError(f"Library logic is missing required fields (len = {len(data)} < 9)")
-
-        if data[5] is None or len(data[5]) == 0:
-            raise ValueError(f"Library logic does not have any Solutions")
-
-        if data[7] is not None and len(data[7]) == 0:
-            raise ValueError(f"Library logic does not have any Sizes")
-
+        if isinstance(data, list):
+            self.format = "list"
+            if len(data) < 9:
+                raise ValueError(f"Library data must have at least 9 elements, got {len(data)}")
+            if data[5] is None or len(data[5]) == 0:
+                raise ValueError(f"Library logic does not have any Solutions")
+        elif isinstance(data, dict):
+            self.format = "dict"
+            required_keys = ["ArchitectureName", "ProblemType", "DefaultSolution", "Solutions", "LibraryType"]
+            for key in required_keys:
+                if key not in data:
+                    raise ValueError(f"Library data must contain key '{key}'")
+            if data["Solutions"] is None or len(data["Solutions"]) == 0:
+                raise ValueError(f"Library logic does not have any Solutions")
+        else:
+            raise ValueError(f"Library logic must be of type 'list' or 'dict', got {type(data)}")
+        
         if not isinstance(name, str) or len(name) == 0:
             raise ValueError(f"'name' must be of type 'str' and non-empty")
-
+        
         self.data = data
         self.name = name
+
+    def _get(self, idx: int, dict_key: str):
+        if self.format == "dict":
+            return self.data.get(dict_key)
+        if len(self.data) <= idx:
+            return None
+        return self.data[idx]
+
+    def _set(self, idx: int, dict_key: str, value) -> None:
+        if self.format == "dict":
+            self.data[dict_key] = value
+        else:
+            if len(self.data) <= idx:
+                self.data.extend([None] * (idx - len(self.data) + 1))
+            self.data[idx] = value
 
     @property
     def arch(self) -> str:
@@ -114,8 +142,10 @@ class Library:
         Returns:
             str: Target GPU architecture (e.g., "gfx950", "gfx942").
         """
+        if self.format == "dict":
+            return self.data.get("ArchitectureName")
         if isinstance(self.data[2], dict):
-            return self.data[2].get("Architecture", None)
+            return self.data[2].get("Architecture")
         return self.data[2]
 
     @property
@@ -125,7 +155,7 @@ class Library:
         Returns:
             dict: Problem specification including GEMM parameters and configuration.
         """
-        return self.data[4]
+        return self._get(4, "ProblemType")
 
     @property
     def solutions(self) -> List[dict]:
@@ -134,7 +164,7 @@ class Library:
         Returns:
             List[dict]: List of solution dictionaries with kernel configurations.
         """
-        return self.data[5]
+        return self._get(5, "Solutions")
 
     @solutions.setter
     def solutions(self, val: List) -> None:
@@ -146,9 +176,9 @@ class Library:
         Raises:
             TypeError: If 'val' is not a list.
         """
-        if not isinstance(val, List):
+        if not isinstance(val, list):
             raise TypeError("Must be a list")
-        self.data[5] = val
+        self._set(5, "Solutions", val)
 
     @property
     def order(self) -> List[int]:
@@ -157,7 +187,7 @@ class Library:
         Returns:
             List: List of integers containing the indexing order.
         """
-        return self.data[6]
+        return self._get(6, "IndexOrder")
 
     @order.setter
     def order(self, val: List[int]) -> None:
@@ -169,9 +199,9 @@ class Library:
         Raises:
             TypeError: If 'val' is not a list.
         """
-        if not isinstance(val, List):
+        if not isinstance(val, list):
             raise TypeError("Must be a list")
-        self.data[6] = val
+        self._set(6, "IndexOrder", val)
 
     @property
     def sizes(self) -> List:
@@ -180,7 +210,7 @@ class Library:
         Returns:
             List: List of tuples containing size specifications and performance data.
         """
-        return self.data[7]
+        return self._get(7, "ExactLogic")
 
     @sizes.setter
     def sizes(self, val: List) -> None:
@@ -192,9 +222,9 @@ class Library:
         Raises:
             TypeError: If 'val' is not a list.
         """
-        if not isinstance(val, List):
+        if not isinstance(val, list):
             raise TypeError("Must be a list")
-        self.data[7] = val
+        self._set(7, "ExactLogic", val)
 
     @property
     def metric(self) -> str:
@@ -203,7 +233,7 @@ class Library:
         Returns:
             str: Library performance  specification.
         """
-        return self.data[10]
+        return self._get(10, "PerfMetric")
 
     @metric.setter
     def metric(self, val: str) -> None:
@@ -217,7 +247,7 @@ class Library:
         """
         if not isinstance(val, str):
             raise TypeError("Must be a string")
-        self.data[10] = val
+        self._set(10, "PerfMetric", val)
 
     @property
     def type(self) -> str:
@@ -226,7 +256,7 @@ class Library:
         Returns:
             str: Library type specification.
         """
-        return self.data[11]
+        return self._get(11, "LibraryType")
 
     @type.setter
     def type(self, val: str) -> None:
@@ -240,7 +270,30 @@ class Library:
         """
         if not isinstance(val, str):
             raise TypeError("Must be a string")
-        self.data[11] = val
+        self._set(11, "LibraryType", val)
+    
+    @property
+    def default_solution(self) -> str:
+        """Get the library default solution.
+
+        Returns:
+            dict: Library default solution.
+        """
+        return self._get(12, "DefaultSolution")
+
+    @default_solution.setter
+    def default_solution(self, val: dict) -> None:
+        """Set the default solution of the library.
+
+        Args:
+            val (dict): New default solution.
+
+        Raises:
+            TypeError: If 'val' is not a dict.
+        """
+        if not isinstance(val, dict):
+            raise TypeError("Must be a dict")
+        self._set(12, "DefaultSolution", val)
 
     def add_epilogues(self) -> None:
         """Add epilogue support (bias, activation, scaling) to a library.
@@ -492,8 +545,9 @@ class Library:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         name = name or self.name
+        
         with open(output_dir / name, "w") as f:
-            yaml.dump(self.data, f, default_flow_style=None, Dumper=DEFAULT_YAML_DUMPER)
+            yaml.dump(self.data, f, default_flow_style=None, Dumper=DEFAULT_YAML_DUMPER, sort_keys=False)
 
 
 class LibraryCollection:
@@ -521,7 +575,7 @@ class LibraryCollection:
         if not libs:
             libs = []
 
-        if not isinstance(libs, List):
+        if not isinstance(libs, list):
             raise TypeError(f"Must be of type 'list'")
 
         if len(libs) > 0 and not all(isinstance(lib, Library) for lib in libs):

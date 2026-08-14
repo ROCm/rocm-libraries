@@ -142,7 +142,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->inputFillRecipes().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

@@ -645,6 +645,8 @@ void deserializeVisit(StinkyInstruction* inst, const std::string& attrKey,
 
 void ModifierSerializer::deserialize(StinkyInstruction* inst, const ParsedModifierDict& modifiers) {
     for (const auto& [attrKey, fields] : modifiers) deserializeVisit(inst, attrKey, fields);
+    // Matrix data format is now known; apply any format-keyed hardware overrides.
+    inst->resolveMatrixFmtOverrides();
 }
 
 }  // namespace stinkytofu

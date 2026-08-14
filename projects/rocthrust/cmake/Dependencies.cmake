@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2026 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -293,7 +293,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG        v1.17.0
+        GIT_TAG        release-1.11.0
       )
     endif()
     set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
@@ -310,7 +310,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
     FetchContent_Declare(
       TBB
       GIT_REPOSITORY      https://github.com/oneapi-src/oneTBB.git
-      GIT_TAG             v2023.0.0
+      GIT_TAG             1c4c93fc5398c4a1acb3492c02db4699f3048dea # v2021.13.0
       INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/tbb
       CMAKE_ARGS          -DCMAKE_CXX_COMPILER=g++ -DTBB_TEST=OFF -DTBB_BUILD=ON -DTBB_INSTALL=ON -DTBBMALLOC_PROXY_BUILD=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
       LOG_CONFIGURE       TRUE

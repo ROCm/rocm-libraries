@@ -133,7 +133,10 @@ public:
   }
 };
 
-#ifndef THRUST_DOXYGEN_INVOKED
+/*! \cond
+ *  skip void specialized implementation
+ */
+
 template <>
 class memory_resource<void*>
 #ifdef THRUST_STD_MR_NS
@@ -182,7 +185,9 @@ public:
   }
 #endif
 };
-#endif
+
+/*! \endcond
+ */
 
 /*! Compares the memory resources for equality, first by identity, then by \p is_equal.
  */

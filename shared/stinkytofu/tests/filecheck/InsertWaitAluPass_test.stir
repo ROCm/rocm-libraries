@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
 #
 # InsertWaitAluPass: whole-kernel mode-2 s_wait_alu insertion + SCHED_MODE enable.
 # - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=2) inserted at function entry

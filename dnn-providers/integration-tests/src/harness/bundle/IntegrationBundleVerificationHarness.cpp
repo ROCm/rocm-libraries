@@ -8,10 +8,10 @@
 #include <set>
 #include <sstream>
 
+#include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
-#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
@@ -27,7 +27,7 @@
 #include "harness/TomlGuards.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
-#include "harness/input-init/SynthesizeInputs.hpp"
+#include "harness/input-init/FillInputs.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -301,10 +301,10 @@ bool IntegrationBundleVerificationHarness::ensureInputsAvailable()
     {
         return true;
     }
-    return synthesizeInputs();
+    return fillBundleInputs();
 }
 
-bool IntegrationBundleVerificationHarness::synthesizeInputs()
+bool IntegrationBundleVerificationHarness::fillBundleInputs()
 {
     const auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
@@ -323,19 +323,19 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
         leafInputUids.push_back(uid);
     }
 
-    auto synthResult = hipdnn_integration_tests::synthesizeInputs(
-        wrapper.getGraph(), inputs, leafInputUids, _synthesisConfig);
-    if(!synthResult.filled)
+    auto fillResult = hipdnn_integration_tests::fillInputs(
+        wrapper.getGraph(), inputs, leafInputUids, _inputFillRecipes);
+    if(!fillResult.filled)
     {
-        skipUnverifiable(synthResult.reason);
+        skipUnverifiable(fillResult.reason);
         return false;
     }
 
-    auto missing = _synthesisConfig.unfilled(leafInputUids);
+    auto missing = _inputFillRecipes.unfilled(leafInputUids);
     if(!missing.empty())
     {
         std::ostringstream os;
-        os << "cannot synthesize:";
+        os << "cannot fill:";
         for(const int64_t uid : missing)
         {
             os << " uid=" << uid;
@@ -659,14 +659,13 @@ std::string IntegrationBundleVerificationHarness::dataTypeName(
 
 void IntegrationBundleVerificationHarness::applyMetadataGuards() const
 {
-    if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
-           _bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
+    if(auto reason
+       = checkVramRequirement(_bundle->metadata, TestConfig::get().getCurrentDeviceVramMb()))
     {
         GTEST_SKIP() << *reason;
     }
 
-    if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
-           _bundle->metadata, TestConfig::get().getCurrentArch()))
+    if(auto reason = checkArchCompatibility(_bundle->metadata, TestConfig::get().getCurrentArch()))
     {
         GTEST_SKIP() << *reason;
     }

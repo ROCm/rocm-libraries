@@ -81,7 +81,7 @@ QUICK_TESTS = [
     "*threefry_prng_state_tests.*",
     "*xorwow_engine_type_test.*",
     "*xorwow_generator/*",
-    "-*basic_tests/rocrand_basic_tests.rocrand_create_destroy_generator_test/10*",
+    "-*basic_tests/rocrand_basic_tests.rocrand_create_destroy_generator_test/Sobol32*",
 ]
 
 cmd = [

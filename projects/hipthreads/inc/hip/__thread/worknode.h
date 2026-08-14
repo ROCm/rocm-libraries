@@ -3,12 +3,12 @@
 
 /**
  * @file
- * @brief Internal work node structures for GPU thread scheduling.
+ * @brief Internal work node structures for GPU wthread scheduling.
  * @ingroup thread
  *
  *
  * Defines the low-level work node (WorkNode_Header, WorkNode<Callable_t>)
- * that backs hip::thread.
+ * that backs hip::wthread.
  */
 
 #include <memory>
@@ -27,10 +27,10 @@ struct WorkNode_Header;
 /// Type-erased function pointer for invoking a work node's callable.
 typedef void (*WrappedFnPointer)(WorkNode_Header *, bool);
 
-// Info about the thread itself that the user might query. (As opposed to info the scheduler uses behind the scenes)
+// Info about the wthread itself that the user might query. (As opposed to info the scheduler uses behind the scenes)
 /**
  * @struct ThreadData
- * @brief User-visible metadata about a logical thread.
+ * @brief User-visible metadata about a logical wthread.
  *
  *
  * Stores width (active lane count) and a base thread id. The actual
@@ -39,7 +39,7 @@ typedef void (*WrappedFnPointer)(WorkNode_Header *, bool);
 struct ThreadData {
     // How many threads per block/vthread are active.
     uint32_t width = 0;
-    // TODO: should this be a hip::thread::max_width() array? For now we just store a common "base" id. See
+    // TODO: should this be a hip::wthread::max_width() array? For now we just store a common "base" id. See
     // this_thread::get_id for details on how the base id is converted to a full thread id.
     __thread_id::underlying_type vthread_id = {};
 
@@ -84,7 +84,7 @@ struct WorkNode_Header {
      * @brief Stores sizeof(WorkNode<T>) for memcpy.
      *
      * Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T
-     * (e.g. in thread::detach()).
+     * (e.g. in wthread::detach()).
      *
      * Not initialized when a WorkNode is constructed from device code because
      * we don't need it.
@@ -92,16 +92,16 @@ struct WorkNode_Header {
     const size_t worknodeSize = 0;
 
     /**
-     * @brief Double pointer for locking and thread::detach().
+     * @brief Double pointer for locking and wthread::detach().
      *
-     * Enables thread::detach() to copy a worknode into memory the gpu can free on its own.
+     * Enables wthread::detach() to copy a worknode into memory the gpu can free on its own.
      *
      * It can be either &mainWorkQueue[i], &cpuWorkQueue[i], &currentWorkNode[blockIdx.x], &(prev->next) or nullptr.
      *
      * Locking semantics:
      *  - *link_to_self == this: Unlocked.
      *  - *link_to_self == nullptr (or another node during move): Locked.
-     *  - link_to_self == nullptr: In thread::detach() and thread::join() - execution is complete.
+     *  - link_to_self == nullptr: In wthread::detach() and wthread::join() - execution is complete.
      *                             In the scheduler - WorkNode has been detached.
      */
     // When holding a pointer to a WorkNode, it must always be in a "locked" state to ensure the pointer doesn't get
@@ -288,7 +288,7 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     }
 
     // TODO: figure out how to make all the threads with idx > width 'catch up' on missed __syncthreads() calls.
-    // Shouldn't be a concern as long as blockDim.x == hip::thread::max_width() == warpSize
+    // Shouldn't be a concern as long as blockDim.x == hip::wthread::max_width() == warpSize
 }
 
 template <class Callable_t>

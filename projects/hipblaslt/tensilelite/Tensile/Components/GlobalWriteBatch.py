@@ -35,7 +35,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VAddI32, VAddPKF16, VAddPKF32, VAddU32, VBfeI32, VCmpEQU32, VCmpGEI32, VCmpGtU32, \
   VCmpNeU32, VCmpNeU64, VCndMaskB32, VCvtBF8toF32, VCvtF16toF32, VCvtF32toF16, VCvtF32toI32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
-  VFmaF32, VFmaF64, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
+  VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
   VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
 from rocisa.functions import vectorStaticMultiply
@@ -1849,19 +1849,32 @@ class GlobalWriteBatchWriter:
 
         def _emit_gate_fma():
           """Identity (branchless null): ValuC = (gate+s)*ValuC + gate.
-          GateNullOne (s) = 1.0 if gate null else 0.0 -> null:(0+1)*acc+0=acc; real:gate*acc+gate."""
+          GateNullOne (s) = 1.0 if gate null else 0.0 -> null:(0+1)*acc+0=acc; real:gate*acc+gate.
+          gwvw>1 packs 2 elements/op (v_pk_add_f32 + v_pk_fma_f32). s is broadcast from its sgpr
+          via op_sel_hi."""
           fmaMod = Module("GateFMA")
+          assert self.tmpVgprSize >= 2, "gate packed FMA needs a 2-vgpr store-tmps scratch"
+          tmpPk = self.tmpVgpr
           for vi in range(0, self.gwvw):
             sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            fmaMod.add(VAddF32(dst=vgpr(self.tmpVgpr), src0=vgpr(dataGate + vi),
-              src1=sgpr("GateNullOne"), comment="gate + s (vi=%d)"%vi))
-            fmaMod.add(VFmaF32(
-              dst=vgpr("ValuC+%d"%vgprIdx),
-              src0=vgpr(self.tmpVgpr),
-              src1=vgpr("ValuC+%d"%vgprIdx),
-              src2=vgpr(dataGate + vi),
-              comment="GateResidual identity: acc = (gate+s)*acc + gate (vi=%d)"%vi))
+            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+              # scalar (gwvw==1 or odd tail): sgpr GateNullOne broadcasts naturally.
+              fmaMod.add(VAddF32(dst=vgpr(self.tmpVgpr), src0=vgpr(dataGate + vi),
+                src1=sgpr("GateNullOne"), comment="gate + s (vi=%d)"%vi))
+              fmaMod.add(VFmaF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(self.tmpVgpr),
+                src1=vgpr("ValuC+%d"%vgprIdx), src2=vgpr(dataGate + vi),
+                comment="GateResidual identity: acc = (gate+s)*acc + gate (vi=%d)"%vi))
+            elif vi % 2 == 1:
+              assert (self.gwvw % 2 == 0)
+            else:
+              # packed pair: op_sel_hi=[1,0,1] broadcasts GateNullOne (src1) low element to both lanes.
+              fmaMod.add(VAddPKF32(dst=vgpr(tmpPk, 2), src0=vgpr(dataGate + vi, 2),
+                src1=sgpr("GateNullOne", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]),
+                comment="gate + s (vi=%d,%d)"%(vi, vi+1)))
+              fmaMod.add(VFmaPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(tmpPk, 2),
+                src1=vgpr("ValuC+%d"%vgprIdx, 2), src2=vgpr(dataGate + vi, 2),
+                comment="GateResidual identity packed: acc = (gate+s)*acc + gate (vi=%d,%d)"%(vi, vi+1)))
           return fmaMod
 
         if len(gateList) == 1:
@@ -2231,8 +2244,10 @@ class GlobalWriteBatchWriter:
                                                   labelPrefix="subtile_skip_store")
           # Apply exec mask for partial M/N blocks (regular fp32 store path)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+            # wave32: 2 LGs x 8 rows/LG -> shift=1; wave64: 4 LGs x 4 rows/LG -> shift=2
+            rowScaleShift = 1 if self.wavelen == 32 else 2
             self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
-                                     mGuardOffset=1, rowScaleShift=2)
+                                     mGuardOffset=1, rowScaleShift=rowScaleShift)
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,

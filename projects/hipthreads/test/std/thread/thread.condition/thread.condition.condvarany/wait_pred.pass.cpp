@@ -50,13 +50,13 @@ __device__ void test() {
     hip::condition_variable_any &cv = *cv_ptr;
     Mutex &mutex = *mutex_ptr;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
       cv.wait(lock, [&] { return !likely_spurious; });
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -93,14 +93,14 @@ __device__ void test() {
     hip::condition_variable_any &cv = *cv_ptr;
     Mutex &mutex = *mutex_ptr;
     
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       Lock lock(mutex);
       ready = true;
       cv.wait(lock, [] { return true; });
       awoken = true;
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
