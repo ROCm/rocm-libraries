@@ -6622,8 +6622,8 @@
     WaveSplitK: false
     WavefrontSize: 64
     WorkGroup: [16, 8, 1]
-    WorkGroupMapping: 1
-    WorkGroupMappingXCC: 8
+    WorkGroupMapping: 0
+    WorkGroupMappingXCC: -1
     WorkGroupMappingXCCGroup: -1
     WorkGroupReduction: false
     WorkspaceCheck: [4, 0, 0]
