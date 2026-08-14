@@ -99,14 +99,16 @@ else()
         message("-- ${Red}${PROJECT_NAME} is not supported to build and run with RPP HIP backend installation${ColourReset}")
     endif()
 
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp::rpp)
-    # In-tree builds: prefer source API headers over installed ones so new
-    # declarations are visible before the next install step.
+    # In-tree builds: link against the just-built library and use source headers
+    # so new symbols/declarations are available before the next install step.
     if(TARGET rpp)
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp)
         get_target_property(_rpp_src_dir rpp SOURCE_DIR)
         if(_rpp_src_dir)
             include_directories(BEFORE ${_rpp_src_dir}/api)
         endif()
+    else()
+        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp::rpp)
     endif()
     include_directories(${rpp_INCLUDE_DIR})
 
