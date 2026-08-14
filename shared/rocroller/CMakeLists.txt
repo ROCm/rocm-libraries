@@ -18,6 +18,7 @@ include(CMakeDependentOption)
 include(rocroller_target_configure_sanitizers)
 
 include(fetch_rocm_cmake)
+include(rocroller_materialize_monorepo_paths)
 
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
@@ -289,6 +290,18 @@ if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
         find_package(ROCHostValidation CONFIG QUIET)
     endif()
     if(NOT TARGET roc::host-validation
+       AND NOT EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
+        rocroller_materialize_monorepo_paths(
+            _rocroller_materialized_root
+            shared/host-validation
+        )
+        if(_rocroller_materialized_root)
+            set(_rocroller_host_validation_source
+                "${_rocroller_materialized_root}/shared/host-validation"
+            )
+        endif()
+    endif()
+    if(NOT TARGET roc::host-validation
        AND EXISTS "${_rocroller_host_validation_source}/CMakeLists.txt")
         block(SCOPE_FOR VARIABLES)
             set(HOST_VALIDATION_BUILD_TESTING OFF)
@@ -304,7 +317,9 @@ if(_rocroller_needs_host_numerics AND NOT TARGET roc::host-validation)
     if(NOT TARGET roc::host-validation)
         message(FATAL_ERROR
             "rocRoller host numerics require the ROCHostValidation component. "
-            "Include shared/host-validation in the checkout or install its package."
+            "Include shared/host-validation in a monorepo sparse checkout, "
+            "configure from a Git checkout that can materialize that path, or "
+            "install the ROCHostValidation package and add it to CMAKE_PREFIX_PATH."
         )
     endif()
 endif()
