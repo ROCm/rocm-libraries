@@ -368,6 +368,18 @@ void cpu_labrd(rocblas_int m,
                T* Y,
                rocblas_int ldy);
 
+template <typename T>
+void cpu_lahr2(rocblas_int n,
+               rocblas_int k,
+               rocblas_int nb,
+               T* A,
+               rocblas_int lda,
+               T* tau,
+               T* T_,
+               rocblas_int ldt,
+               T* Y,
+               rocblas_int ldy);
+
 template <typename T, typename W>
 void cpu_bdsqr(rocblas_fill uplo,
                rocblas_int n,
