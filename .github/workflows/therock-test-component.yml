@@ -17,11 +17,16 @@ on:
         type: string
       component:
         type: string
+      coverage_enabled:
+        description: "When true, collect llvm profraw from the test run and generate a coverage report."
+        type: boolean
+        default: false
     secrets:
       MIOPEN_CI_WEBHOOK_URL:
         required: false
       HIPDNN_CI_WEBHOOK_URL:
         required: false
+
 
 permissions:
   contents: read
@@ -64,7 +69,8 @@ jobs:
       - name: "Fetch 'build_tools' from repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
+          ref: ${{ inputs.therock_ref }}
           sparse-checkout: build_tools
           path: "prejob"
 
@@ -82,7 +88,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
           ref: ${{ inputs.therock_ref }}
 
       - name: Configure git for long paths on Windows
@@ -101,6 +107,7 @@ jobs:
         with:
           ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          AMDGPU_TARGETS: ${{ inputs.coverage_enabled && inputs.amdgpu_families || '' }}
           OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: ${{ fromJSON(inputs.component).fetch_artifact_args }}
@@ -124,6 +131,83 @@ jobs:
             echo "KUBE_CPU_REQUEST not set, thread limits not configured"
           fi
 
+      - name: Prepare coverage profile directory
+        if: ${{ inputs.coverage_enabled }}
+        run: |
+          # Raw profiles are collected under ${PROFILE_DIR}/profraw. The coverage build
+          # overrides PROFILE_DIR to ${GITHUB_WORKSPACE}/coverage-report (a container path
+          # valid on this test node), so profraw lands in coverage-report/profraw.
+          # This GITHUB_ENV value is the fallback for binaries whose ctest ENVIRONMENT
+          # does not already bake LLVM_PROFILE_FILE; hipRAND overrides it per-test to the
+          # same dir. Non-instrumented binaries ignore it.
+          mkdir -p "${GITHUB_WORKSPACE}/coverage-report/profraw"
+          echo "LLVM_PROFILE_FILE=${GITHUB_WORKSPACE}/coverage-report/profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw" >> "${GITHUB_ENV}"
+
+      - name: Pre-test coverage debug diagnostics
+        if: ${{ inputs.coverage_enabled }}
+        continue-on-error: true
+        run: |
+          set +e
+          echo "===== COVERAGE DEBUG: Pre-test diagnostics ====="
+          echo "--- Environment ---"
+          echo "LLVM_PROFILE_FILE=${LLVM_PROFILE_FILE:-NOT SET}"
+          echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-NOT SET}"
+          echo "PATH=${PATH}"
+          echo "PWD=$(pwd)"
+
+          echo "--- GPU Info ---"
+          command -v rocminfo && rocminfo | grep -A 5 "Name:" || echo "rocminfo not available"
+          command -v hipconfig && hipconfig --platform || echo "hipconfig not available"
+
+          echo "--- hipRAND library verification ---"
+          HIPRAND_SO=$(find ./build -name "libhiprand.so*" -type f ! -name "*.debug" 2>/dev/null | head -1)
+          if [ -n "$HIPRAND_SO" ]; then
+            echo "Found libhiprand.so at: $HIPRAND_SO"
+            echo "Real path: $(readlink -f "$HIPRAND_SO" 2>/dev/null || echo "N/A")"
+            ls -lh "$HIPRAND_SO" 2>/dev/null || echo "ls failed"
+            command -v file && file "$HIPRAND_SO" || echo "file command not available"
+            echo "Coverage instrumentation check (__llvm_profile symbols):"
+            if command -v nm >/dev/null; then
+              COUNT=$(nm "$HIPRAND_SO" 2>/dev/null | grep -c "__llvm_profile" || echo 0)
+              echo "  Count: $COUNT"
+              if [ "$COUNT" -gt 0 ]; then
+                nm "$HIPRAND_SO" 2>/dev/null | grep "__llvm_profile" | head -20
+              else
+                echo "  NO __llvm_profile symbols found!"
+              fi
+            else
+              echo "  nm command not available"
+            fi
+            echo "Linked libraries:"
+            ldd "$HIPRAND_SO" 2>/dev/null | head -20 || echo "ldd failed"
+          else
+            echo "ERROR: libhiprand.so not found!"
+            find ./build -name "*.so" -type f 2>/dev/null | head -20
+          fi
+
+          echo "--- Test binary verification ---"
+          TEST_BIN=$(find ./build -name "test_hiprand_api" -type f 2>/dev/null | head -1)
+          if [ -n "$TEST_BIN" ]; then
+            echo "Found test binary at: $TEST_BIN"
+            ls -lh "$TEST_BIN" 2>/dev/null || echo "ls failed"
+            echo "Linked libraries (hiprand/hip):"
+            ldd "$TEST_BIN" 2>/dev/null | grep -E "hiprand|hip|amdhip" || echo "No hiprand/hip libs found in ldd"
+            echo "RPATH/RUNPATH:"
+            readelf -d "$TEST_BIN" 2>/dev/null | grep -E "RPATH|RUNPATH" || echo "No RPATH/RUNPATH"
+          else
+            echo "ERROR: test_hiprand_api not found!"
+          fi
+
+          echo "--- Profile directory check ---"
+          if [ -n "${LLVM_PROFILE_FILE:-}" ]; then
+            PROF_DIR=$(dirname "$LLVM_PROFILE_FILE")
+            echo "Profile directory: $PROF_DIR"
+            ls -ld "$PROF_DIR" 2>/dev/null || echo "Profile dir does not exist yet"
+            echo "Disk space:"
+            df -h "$PROF_DIR" 2>/dev/null || df -h . 2>/dev/null || echo "df failed"
+          fi
+          echo "===== END Pre-test diagnostics ====="
+
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
         env:
@@ -137,6 +221,7 @@ jobs:
           # bin/, which is DATABASE_INSTALL_DIR on Windows and where the databases actually land.
           # Left empty elsewhere; Linux resolves correctly on its own.
           MIOPEN_SYSTEM_DB_PATH: ${{ runner.os == 'Windows' && format('{0}/build/bin', github.workspace) || '' }}
+          LLVM_PROFILE_FILE: ${{ inputs.coverage_enabled && format('{0}/coverage-profraw/{1}-shard{2}-%p-%m.profraw', github.workspace, fromJSON(inputs.component).job_name, matrix.shard) || '' }}
         run: |
           # Create logs directory
           mkdir -p ./test_logs
@@ -144,6 +229,15 @@ jobs:
           # Run test and capture output (still display to console)
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
+
+      - name: Merge profraw and generate coverage report
+        if: ${{ inputs.coverage_enabled }}
+        run: |
+          cd ${{ github.workspace }}/coverage-report
+          ${{ github.workspace }}/build/lib/llvm/bin/llvm-profdata merge -sparse -o coverage.profdata profraw/*.profraw
+          ${{ github.workspace }}/build/lib/llvm/bin/llvm-cov export \
+            -object ${{ github.workspace }}/build/lib/lib${{ fromJSON(inputs.component).job_name }}.so \
+            -instr-profile=coverage.profdata --format=lcov > coverage.info
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}

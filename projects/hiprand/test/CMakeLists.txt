@@ -43,7 +43,7 @@ else()
     endif()
 endif()
 
-set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report")
+set(PROFILE_DIR "${CMAKE_BINARY_DIR}/coverage-report" CACHE PATH "Directory for coverage profraw/report output; CI overrides via -DPROFILE_DIR so the path is valid on the test node")
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
 [=[
@@ -67,7 +67,7 @@ function(add_relative_test test_name test_target)
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
-    if(BUILD_CODE_COVERAGE)
+    if(HIPRAND_ENABLE_COVERAGE)
         set_tests_properties(${test_name} PROPERTIES
             ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hiprand-coverage_%m.profraw"
         )
@@ -78,7 +78,7 @@ endfunction()
 # Get hipRAND tests source files
 file(GLOB hipRAND_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/test_hiprand*.cpp)
 
-if(BUILD_CODE_COVERAGE)
+if(HIPRAND_ENABLE_COVERAGE)
   add_custom_target(
     coverage_analysis
     DEPENDS hiprand
@@ -93,7 +93,7 @@ if(BUILD_CODE_COVERAGE)
     LLVM_PROFDATA
     llvm-profdata
     REQUIRED
-    HINTS ${ROCM_PATH}/llvm/bin
+    HINTS ${LLVM_TOOLS_SEARCH_PREFIX}/bin ${ROCM_PATH}/llvm/bin
     PATHS /opt/rocm/llvm/bin
   )
 
@@ -101,7 +101,7 @@ if(BUILD_CODE_COVERAGE)
     LLVM_COV
     llvm-cov
     REQUIRED
-    HINTS ${ROCM_PATH}/llvm/bin
+    HINTS ${LLVM_TOOLS_SEARCH_PREFIX}/bin ${ROCM_PATH}/llvm/bin
     PATHS /opt/rocm/llvm/bin
   )
 
@@ -109,9 +109,9 @@ if(BUILD_CODE_COVERAGE)
     coverage
     DEPENDS coverage_analysis
     COMMAND ${LLVM_PROFDATA} merge -sparse ${PROFILE_DIR}/profraw/hiprand-coverage_*.profraw -o ${PROFILE_DIR}/hiprand.profdata
-    COMMAND ${LLVM_COV} report -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata
-    COMMAND ${LLVM_COV} show -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=html -output-dir=${PROFILE_DIR}
-    COMMAND ${LLVM_COV} export -object ${CMAKE_BINARY_DIR}/library/libhiprand-d.so -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=lcov > ${PROFILE_DIR}/coverage.info
+    COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hiprand> -instr-profile=${PROFILE_DIR}/hiprand.profdata
+    COMMAND ${LLVM_COV} show -object $<TARGET_FILE:hiprand> -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=html -output-dir=${PROFILE_DIR}
+    COMMAND ${LLVM_COV} export -object $<TARGET_FILE:hiprand> -instr-profile=${PROFILE_DIR}/hiprand.profdata -format=lcov > ${PROFILE_DIR}/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 endif()
@@ -154,14 +154,19 @@ foreach(test_src ${hipRAND_TEST_SRCS})
             hiprand
             roc::rocrand
             hip::device
+            ${CMAKE_DL_LIBS}
         )
     endif()
     set_target_properties(${test_name}
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
     )
+    if(HIPRAND_ENABLE_COVERAGE)
+        # Match the offload driver used by libhiprand to avoid kernel image incompatibility
+        target_link_options(${test_name} PRIVATE --offload-new-driver)
+    endif()
     add_relative_test(${test_name} ${test_name})
-    if(BUILD_CODE_COVERAGE)
+    if(HIPRAND_ENABLE_COVERAGE)
         set_tests_properties(${test_name} PROPERTIES
             ENVIRONMENT "LLVM_PROFILE_FILE=${PROFILE_DIR}/profraw/hiprand-coverage_%m.profraw"
         )
@@ -184,7 +189,7 @@ foreach(test_src ${hipRAND_TEST_SRCS})
       endforeach( file_i )
     endif()
 
-    if (BUILD_CODE_COVERAGE)
+    if (HIPRAND_ENABLE_COVERAGE)
       add_dependencies(coverage_analysis ${test_name})
     endif()
 endforeach()

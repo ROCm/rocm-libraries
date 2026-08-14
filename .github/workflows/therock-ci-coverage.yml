@@ -1,0 +1,283 @@
+name: TheRock CI Linux Coverage
+
+on:
+  workflow_call:
+    inputs:
+      cmake_options:
+        type: string
+      project_name:
+        type: string
+      cmake_target:
+        type: string
+      build_dir:
+        type: string
+      coverage_config:
+        description: "Per-project coverage metadata file (test_categories_coverage.yaml)."
+        type: string
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+      projects_to_test:
+        type: string
+      test_type:
+        type: string
+      therock_ref:
+        type: string
+        default: enable-codecov
+      test_therock_ref:
+        type: string
+        default: enable-codecov
+
+permissions:
+  contents: read
+
+jobs:
+  therock-coverage-build:
+    name: Build Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    runs-on: aws-linux-scale-rocm-prod
+    permissions:
+      id-token: write
+    container:
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+      options: -v /runner/config:/home/awsconfig/
+    env:
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+    steps:
+      - name: "Checking out repository for rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "reboss/TheRock"
+          path: TheRock
+          ref: ${{ inputs.therock_ref }}
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-dev" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
+
+      - name: Enable coverage instrumentation for sub-project
+        run: |
+          # TheRock does not reliably forward -D<PROJECT>_ENABLE_COVERAGE to the
+          # sub-project (ROCm/TheRock#6572). Environment variables DO propagate through
+          # TheRock's sub-project sandbox (only ROCM_PATH/ROCM_DIR/HIP_PATH/HIP_DIR are
+          # unset), so export it for the configure + build steps; the component CMake
+          # honors $ENV{<PROJECT>_ENABLE_COVERAGE} as a fallback trigger.
+          echo "${{ inputs.project_name }}_ENABLE_COVERAGE=ON" >> "$GITHUB_ENV"
+
+      - name: Configure coverage build
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: >-
+            -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
+            -D${{ inputs.project_name }}_ENABLE_COVERAGE=ON
+            -DLLVM_TOOLS_SEARCH_PREFIX=${{ github.workspace }}/TheRock/build-coverage/dist/rocm/lib/llvm
+            -DCOMPILER_RT_BUILD_PROFILE_ROCM=ON
+            -DLLVM_PARALLEL_LINK_JOBS=4
+            -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF
+            ${{ inputs.cmake_options }}
+          BUILD_DIR: build-coverage
+        run: |
+          # Override PROFILE_DIR with the container workspace path so the coverage
+          # profraw path baked into the tests is valid on the test node too
+          # (build and test containers share ${GITHUB_WORKSPACE}=/__w/...).
+          export extra_cmake_options="${extra_cmake_options} -DPROFILE_DIR=${GITHUB_WORKSPACE}/coverage-report"
+          python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build therock-artifacts and therock-dist
+        run: |
+          echo "===== COVERAGE ENV CHECK (pre-build) ====="
+          echo "HIPRAND_ENABLE_COVERAGE=${HIPRAND_ENABLE_COVERAGE:-NOT SET}"
+          env | grep -i coverage || echo "No COVERAGE vars in environment"
+          echo "===== END COVERAGE ENV CHECK ====="
+          cmake --build TheRock/build-coverage --target therock-artifacts therock-dist -- -k 0
+
+      - name: Verify coverage instrumentation
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e  # diagnostic only; never fail the build
+          proj="$(echo '${{ inputs.project_name }}' | tr '[:upper:]' '[:lower:]')"
+          BC=TheRock/build-coverage
+          nm="$(find "$BC" -type f -name llvm-nm -path '*/llvm/bin/*' 2>/dev/null | head -1)"
+          echo "===== COVERAGE BUILD VERIFICATION (${proj}) ====="
+
+          echo "-- [1] lib${proj}.so* symbol counts (symlinks resolved) --"
+          find "$BC" -name "lib${proj}.so*" 2>/dev/null | sort -u | while read -r so; do
+            real="$(readlink -f "$so" 2>/dev/null || echo "$so")"
+            count="$("${nm}" "$real" 2>/dev/null | grep -c __llvm_profile || echo 0)"
+            printf '    %6s __llvm_profile  %s\n' "$count" "$so"
+            if [ "$count" -eq 0 ]; then
+              echo "       WARNING: No coverage symbols in $so"
+              file "$real"
+              ls -lh "$real"
+            fi
+          done
+
+          echo "-- [2] compile_commands*.json entries with -fprofile-instr-generate --"
+          find "$BC" -name "compile_commands*.json" 2>/dev/null | while read -r cc; do
+            n="$(grep -c "fprofile-instr-generate" "$cc" 2>/dev/null)"
+            printf '    %6s  %s\n' "${n:-0}" "$cc"
+          done
+
+          echo "-- [3] ${proj} configure log: coverage/ENABLE/fprofile/offload-new-driver --"
+          find "$BC" -iname "*${proj}*configure*.log" 2>/dev/null | while read -r lg; do
+            echo "    log: $lg"
+            grep -iE "coverage|ENABLE_COVERAGE|fprofile|offload-new-driver" "$lg" 2>/dev/null | head -15 | sed 's/^/       /'
+          done
+
+          echo "-- [4] Artifact verification for dist/rocm/lib --"
+          DIST_LIB="$BC/dist/rocm/lib/lib${proj}.so"
+          if [ -f "$DIST_LIB" ]; then
+            echo "    Found dist lib: $DIST_LIB"
+            ls -lh "$DIST_LIB"
+            real_dist="$(readlink -f "$DIST_LIB")"
+            echo "    Real path: $real_dist"
+            count_dist="$("${nm}" "$real_dist" 2>/dev/null | grep -c __llvm_profile || echo 0)"
+            echo "    __llvm_profile symbols: $count_dist"
+            if [ "$count_dist" -eq 0 ]; then
+              echo "    ERROR: dist library has NO coverage instrumentation!"
+            fi
+          else
+            echo "    ERROR: $DIST_LIB not found!"
+          fi
+
+          echo "-- [5] CMake cache verification --"
+          if [ -f "$BC/CMakeCache.txt" ]; then
+            echo "    HIPRAND_ENABLE_COVERAGE:"
+            grep "HIPRAND_ENABLE_COVERAGE" "$BC/CMakeCache.txt" || echo "    NOT SET"
+            echo "    COMPILER_RT_BUILD_PROFILE_ROCM:"
+            grep "COMPILER_RT_BUILD_PROFILE_ROCM" "$BC/CMakeCache.txt" || echo "    NOT SET"
+            echo "    PROFILE_DIR:"
+            grep "PROFILE_DIR" "$BC/CMakeCache.txt" || echo "    NOT SET"
+          fi
+
+          echo "-- [6] Compiler RT profile runtime check --"
+          find "$BC/dist/rocm" -name "*profile*" -o -name "*PGO*" | head -20
+
+          echo "===== END BUILD VERIFICATION ====="
+
+      - name: Debug single fprofile entry
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          echo "===== SINGLE FPROFILE ENTRY DEBUG ====="
+          CC_FILE="TheRock/build-coverage/math-libs/hipRAND/build/compile_commands.json"
+          if [ -f "$CC_FILE" ]; then
+            total=$(grep -c '"file":' "$CC_FILE")
+            with_profile=$(grep -c 'fprofile-instr-generate' "$CC_FILE")
+            without_profile=$((total - with_profile))
+
+            echo "Total source files: $total"
+            echo "Files WITH -fprofile-instr-generate: $with_profile"
+            echo "Files WITHOUT -fprofile-instr-generate: $without_profile"
+            echo ""
+
+            if [ "$with_profile" -gt 0 ]; then
+              echo "Files that HAVE coverage flags:"
+              grep -B2 'fprofile-instr-generate' "$CC_FILE" | grep '"file":' | sed 's/.*"file": "\(.*\)".*/  + \1/'
+            fi
+          fi
+          echo "===== END SINGLE FPROFILE DEBUG ====="
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          set +e  # best-effort diagnostics; never fail the build on reporting
+          echo "Full SDK du:"
+          echo "------------"
+          du -h -d 1 TheRock/build-coverage/dist/rocm
+          echo "Artifact Archives:"
+          echo "------------------"
+          ls -lh TheRock/build-coverage/artifacts/ 2>/dev/null
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build-coverage/artifacts
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s -v
+
+      - name: Configure AWS Credentials for non-forked repos
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Rename coverage artifacts to avoid conflicts
+        run: |
+          cd TheRock/build-coverage/artifacts
+          for item in rand_*; do
+            if [ -e "$item" ]; then
+              new_name="${item/rand_/rand-coverage_}"
+              mv "$item" "$new_name"
+              echo "Renamed: $item -> $new_name"
+            fi
+          done
+
+      - name: Push artifacts
+        run: |
+          python TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build-coverage \
+            --stage all
+
+      - name: Post Build Upload
+        if: always()
+        run: |
+          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --build-dir TheRock/build-coverage \
+            --upload
+
+  therock-coverage-test:
+    name: Test Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
+    needs: [therock-coverage-build]
+    uses: ./.github/workflows/therock-test-packages.yml
+    secrets: inherit
+    with:
+      therock_ref: ${{ inputs.test_therock_ref }}
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: "linux"
+      test_type: ${{ inputs.test_type }}
+      coverage_enabled: true

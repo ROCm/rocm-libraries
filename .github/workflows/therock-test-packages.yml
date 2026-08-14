@@ -16,6 +16,10 @@ on:
         type: string
       test_type:
         type: string
+      coverage_enabled:
+        description: "When true, collect llvm profraw from the test runs and generate a coverage report."
+        type: boolean
+        default: false
     secrets:
       MIOPEN_CI_WEBHOOK_URL:
         required: false
@@ -38,7 +42,8 @@ jobs:
         with:
           sparse-checkout: build_tools
           path: "prejob"
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
+          ref: ${{ inputs.therock_ref }}
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
@@ -50,7 +55,7 @@ jobs:
       - name: "Checking out repository"
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "ROCm/TheRock"
+          repository: "reboss/TheRock"
           ref: ${{ inputs.therock_ref }}
 
       - name: Checkout CI config
@@ -90,11 +95,14 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       # Per-component runner selection:
-      #   1. Multi-GPU components use the multi-GPU runner
-      #   2. CPU-only components use standard GitHub runners
-      #   3. Per-component runner (set by fetch_test_configurations.py)
+      #   1. Coverage workflows use the explicit test_runs_on input (e.g., codecov-poc)
+      #   2. Multi-GPU components use the multi-GPU runner
+      #   3. CPU-only components use standard GitHub runners
+      #   4. Per-component runner (set by fetch_test_configurations.py)
       test_runs_on: >-
         ${{
+          (inputs.coverage_enabled && inputs.test_runs_on != '' &&
+            inputs.test_runs_on) ||
           (matrix.components.multi_gpu_runner != '' &&
             matrix.components.multi_gpu_runner) ||
           (matrix.components.linux_cpu_runner == true &&
@@ -103,6 +111,5 @@ jobs:
         }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
-    secrets:
-      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
-      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+      coverage_enabled: ${{ inputs.coverage_enabled }}
+    secrets: inherit

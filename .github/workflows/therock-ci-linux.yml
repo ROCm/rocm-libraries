@@ -119,8 +119,16 @@ jobs:
           package_version: ${{ inputs.rocm_package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
-        run: |
-          python3 TheRock/build_tools/github_actions/build_configure.py
+        run: python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Configure Projects
+        if: ${{ inputs.test_type == 'coverage' }}
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: "-D${{ inputs.project_name }}_ENABLE_COVERAGE=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
+        run: python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-artifacts and therock-dist
         run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
@@ -184,7 +192,7 @@ jobs:
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
     # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
+    if: ${{  inputs.test_type != 'coverage' && inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
@@ -209,3 +217,4 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       build_runs_on: ${{ inputs.build_runs_on }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
+    secrets: inherit

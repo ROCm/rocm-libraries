@@ -58,7 +58,14 @@ project(hipRAND CXX)
 # Build options
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
-option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+option(HIPRAND_ENABLE_COVERAGE "Build with code coverage enabled" OFF)
+# Fallback trigger: TheRock's superbuild does not reliably forward the
+# -DHIPRAND_ENABLE_COVERAGE cache variable to this sub-project (ROCm/TheRock#6572),
+# but environment variables DO propagate into the sub-project configure. Honor an
+# env var of the same name so coverage CI can force instrumentation on regardless.
+if(NOT HIPRAND_ENABLE_COVERAGE AND DEFINED ENV{HIPRAND_ENABLE_COVERAGE})
+  set(HIPRAND_ENABLE_COVERAGE ON)
+endif()
 option(BUILD_FORTRAN_WRAPPER "Build Fortran wrapper" OFF)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
@@ -244,9 +251,29 @@ else()
     set(package_name hiprand)
 endif()
 
-if(BUILD_CODE_COVERAGE)
-  target_compile_options(hiprand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
-  target_link_options(hiprand PUBLIC -fprofile-instr-generate)
+if(HIPRAND_ENABLE_COVERAGE)
+  message(STATUS "hipRAND: code coverage instrumentation ENABLED (libhiprand)")
+  # ccache (direct mode) does not include -fprofile-instr-generate in its hash, so a
+  # coverage compile can hit a cached NON-coverage object and come back
+  # un-instrumented (observed: 0 __llvm_profile symbols despite the flag). Add a
+  # coverage-only define so ccache keys the coverage build separately and produces a
+  # freshly instrumented object. This busts only hipRAND's cache entry; LLVM/HIP/etc.
+  # still hit ccache, so the build is not fully recompiled.
+  target_compile_definitions(hiprand PRIVATE HIPRAND_COVERAGE_INSTRUMENTED=1)
+
+  # ROCm 7.14: Device PGO/coverage requires the new offload driver and LLVM commit
+  # 7c0a3a52cf96 which fixes device profile collection and sections emission.
+  target_compile_options(hiprand PRIVATE
+    -g
+    -O0
+    -fprofile-instr-generate
+    -fcoverage-mapping
+    --offload-new-driver
+  )
+  target_link_options(hiprand PUBLIC
+    -fprofile-instr-generate
+    --offload-new-driver
+  )
 endif()
 
 rocm_create_package(
