@@ -2,10 +2,12 @@
 
 #include "tolerance.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 struct LaunchParams;
 
@@ -13,6 +15,38 @@ typedef struct ihipStream_t* hipStream_t;
 
 namespace hipconv
 {
+
+class ConvKernel;
+
+// A non-owning view over a contiguous array of ConvKernel pointers.
+// Each kernel TU exposes its kernels[] this way so per-arch backends
+// can iterate kernels uniformly without templating on each TU's count.
+using ConvKernelSpan = std::span<ConvKernel* const>;
+
+// One kernel and what it scored on a layer.
+struct ScoredKernel
+{
+    ConvKernel* kernel;
+    float wti;
+};
+
+// Order the scored kernels best first, and drop all but `max_ranked` of them.
+//
+// Stable, so insertion order wins a tie: a family that hand-orders its table best-first keeps
+// that order wherever the index cannot separate two configs. Ranking and truncation are the
+// same operation at every level, an algorithm over its spans and the registry over its
+// algorithms, so every level takes the caller's limit.
+//
+// min-heap or partial_sort would not be a stable alternative and would not be significantly
+// faster for a small number of kernels.
+inline void keep_top_ranked(std::vector<ScoredKernel>& scored, std::size_t max_ranked)
+{
+    std::stable_sort(scored.begin(),
+                     scored.end(),
+                     [](const ScoredKernel& a, const ScoredKernel& b) { return a.wti > b.wti; });
+    if(scored.size() > max_ranked)
+        scored.resize(max_ranked);
+}
 
 class ConvKernel
 {
@@ -111,10 +145,5 @@ public:
 private:
     LaunchFn launch_fn_;
 };
-
-// A non-owning view over a contiguous array of ConvKernel pointers.
-// Each kernel TU exposes its kernels[] this way so per-arch backends
-// can iterate kernels uniformly without templating on each TU's count.
-using ConvKernelSpan = std::span<ConvKernel* const>;
 
 } // namespace hipconv

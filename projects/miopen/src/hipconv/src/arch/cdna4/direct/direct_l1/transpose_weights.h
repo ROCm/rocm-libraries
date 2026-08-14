@@ -172,7 +172,10 @@ __global__ void transpose_weights_kernel(const ToType<DT>* __restrict__ src,
                                          int Kq,
                                          int Kwg_total)
 {
-    transpose_weights_subtensor_impl<Kh, Kw, Kwg, DT>(src, dst, K, C, C_padded, Kq, Kwg_total);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_raw_ptr_buffer_load_lds))
+    {
+        transpose_weights_subtensor_impl<Kh, Kw, Kwg, DT>(src, dst, K, C, C_padded, Kq, Kwg_total);
+    }
 }
 
 // Dgrad weights pre-format: fprop format with operand axes swapped, filter flipped.
@@ -358,8 +361,11 @@ __global__ void transpose_weights_dgrad_kernel(const ToType<DT>* __restrict__ sr
                                                int Kq,
                                                int Kwg_total)
 {
-    transpose_weights_dgrad_subtensor_impl<Kh, Kw, Kwg, DT>(
-        src, dst, K_dout, C_din, C_padded_dout, Kq, Kwg_total);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
+    {
+        transpose_weights_dgrad_subtensor_impl<Kh, Kw, Kwg, DT>(
+            src, dst, K_dout, C_din, C_padded_dout, Kq, Kwg_total);
+    }
 }
 
 inline constexpr int make_divisible(int n, int divisor)

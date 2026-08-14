@@ -78,18 +78,17 @@ constexpr int ntile_of(int g)
 }
 
 template <Config cfg, hipconv::DataType DT, bool NEEDS_ATOMIC, bool PARTITIONED = false>
-__global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad_nhwc_cdna5(
-    const ::ToType<DT>* __restrict__ input,
-    const ::ToType<DT>* __restrict__ delta,
-    float* __restrict__ wgrad,
-    int N,
-    int groups,
-    int hi,
-    int wi,
-    int ho,
-    int wo,
-    int py,
-    int px)
+__device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>* __restrict__ input,
+                                                             const ::ToType<DT>* __restrict__ delta,
+                                                             float* __restrict__ wgrad,
+                                                             int N,
+                                                             int groups,
+                                                             int hi,
+                                                             int wi,
+                                                             int ho,
+                                                             int wo,
+                                                             int py,
+                                                             int px)
 {
     (void)N; // batch is indexed via blockIdx.z; kept for interface consistency.
 
@@ -357,6 +356,29 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad
             });
         });
     });
+}
+
+template <Config cfg, hipconv::DataType DT, bool NEEDS_ATOMIC, bool PARTITIONED = false>
+__global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad_nhwc_cdna5(
+    const ::ToType<DT>* __restrict__ input,
+    const ::ToType<DT>* __restrict__ delta,
+    float* __restrict__ wgrad,
+    int N,
+    int groups,
+    int hi,
+    int wi,
+    int ho,
+    int wo,
+    int py,
+    int px)
+{
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_wmma_f32_16x16x32_f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_wmma_f32_16x16x32_bf16))
+    {
+        conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl<cfg, DT, NEEDS_ATOMIC, PARTITIONED>(
+            input, delta, wgrad, N, groups, hi, wi, ho, wo, py, px);
+    }
 }
 
 template <Config cfg>

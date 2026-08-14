@@ -63,6 +63,8 @@ auto to_string(Algorithm algo) -> char const*
     {
     case Algorithm::Grouped:
         return "grouped";
+    case Algorithm::Depthwise:
+        return "depthwise";
     case Algorithm::Direct:
         return "direct";
     case Algorithm::Pointwise:
@@ -84,6 +86,24 @@ std::optional<DataType> parse_data_type(std::string_view name)
     for(auto dtype : input_data_types)
         if(name == to_string(dtype))
             return dtype;
+    return std::nullopt;
+}
+
+std::optional<int> parse_direction_mask(std::string_view name)
+{
+    if(name == "fprop")
+        return static_cast<int>(Direction::Fprop);
+    if(name == "dgrad")
+        return static_cast<int>(Direction::Dgrad);
+    if(name == "wgrad")
+        return static_cast<int>(Direction::Wgrad);
+    if(name == "all")
+    {
+        int mask = 0;
+        for(auto dir : all_directions)
+            mask |= static_cast<int>(dir);
+        return mask;
+    }
     return std::nullopt;
 }
 

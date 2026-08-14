@@ -424,25 +424,31 @@ __global__ void conv2d_grouped_16c_wgrad_fp16_nhwc_cdna4(const ToType<DT>* __res
                                                          int py,
                                                          int px)
 {
-    conv2d_grouped_16c_wgrad_fp16_cdna4_nhwc_impl<cfg, DT>(input,
-                                                           delta,
-                                                           wgrad,
-                                                           N,
-                                                           groups,
-                                                           c_per_group,
-                                                           k_per_group,
-                                                           hi,
-                                                           wi,
-                                                           ho,
-                                                           wo,
-                                                           fy,
-                                                           fx,
-                                                           sy,
-                                                           sx,
-                                                           dy,
-                                                           dx,
-                                                           py,
-                                                           px);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_raw_ptr_buffer_load_lds) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
+    {
+        conv2d_grouped_16c_wgrad_fp16_cdna4_nhwc_impl<cfg, DT>(input,
+                                                               delta,
+                                                               wgrad,
+                                                               N,
+                                                               groups,
+                                                               c_per_group,
+                                                               k_per_group,
+                                                               hi,
+                                                               wi,
+                                                               ho,
+                                                               wo,
+                                                               fy,
+                                                               fx,
+                                                               sy,
+                                                               sx,
+                                                               dy,
+                                                               dx,
+                                                               py,
+                                                               px);
+    }
 }
 
 template <Config cfg>

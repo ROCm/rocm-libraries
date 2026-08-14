@@ -1,39 +1,41 @@
-function(hipconv_get_logical gpu out)
-    string(REGEX REPLACE ":.*" "" logical "${gpu}")
-    if(NOT logical)
-        message(FATAL_ERROR "hipconv: ${gpu} empty after stripping feature flags")
-    endif()
-    set(${out} "${logical}" PARENT_SCOPE)
-endfunction()
-
-function(hipconv_make_logical_to_gpu hip_architectures out)
-    set(stripped "")
-    foreach(arch IN LISTS hip_architectures)
-        hipconv_get_logical("${arch}" arch_base)
-        list(APPEND stripped "${arch_base}")
-    endforeach()
-    set("${out}_KEYS" "${stripped}" PARENT_SCOPE)
-    set("${out}_VALUES" "${hip_architectures}" PARENT_SCOPE)
-    set(${out} "${out}_KEYS;${out}_VALUES" PARENT_SCOPE)
-endfunction()
-
-function(hipconv_get_matching_gpu logical_to_gpu logicals out)
-    list(GET logical_to_gpu 0 keys)
-    list(GET logical_to_gpu 1 values)
-    set(gpus "")
-    foreach(key value IN ZIP_LISTS ${keys} ${values})
-        foreach(logical IN LISTS logicals)
-            if(logical STREQUAL key)
-                list(APPEND gpus "${value}")
-                break()
+function(hipconv_have_at_least_one_gpu targets out)
+    foreach(gpu IN LISTS CMAKE_HIP_ARCHITECTURES)
+        string(REGEX REPLACE ":.*" "" logical "${gpu}")
+        foreach(target IN LISTS targets)
+            if(logical STREQUAL target)
+                set(${out} true PARENT_SCOPE)
+                return()
             endif()
         endforeach()
     endforeach()
-    set(${out} "${gpus}" PARENT_SCOPE)
+    set(${out} false PARENT_SCOPE)
 endfunction()
 
-function(hipconv_add_arch_lib name gpus)
+# Build one architecture's kernel library.
+#
+# TARGETS is the GPUs this architecture serves, independent of what the build
+# targets. (NPI development is exempt: We only build for what we target.)
+#
+# Options go ahead of TARGETS, which has to be last. publish_to_miopen.sh's
+# embargo guard reads an embargoed arch's GPU names straight out of its call
+# site, taking everything from TARGETS to the closing paren, and refuses to
+# publish on a token that is not a gfx name.
+function(hipconv_add_arch_lib name)
+    cmake_parse_arguments(ARG "NPI" "" "TARGETS" ${ARGN})
+    if(NOT ARG_TARGETS)
+        message(FATAL_ERROR "hipconv_add_arch_lib(${name}): TARGETS is required")
+    endif()
+
+    if(ARG_NPI)
+        hipconv_have_at_least_one_gpu("${ARG_TARGETS}" have_gpu)
+        if(NOT have_gpu)
+            return()
+        endif()
+    endif()
+
     set(HIPCONV_ARCH_NAME "${name}")
+    string(TOUPPER "${name}" HIPCONV_ARCH_NAME_UPPER)
+
     configure_file(
         ${HIPCONV_ROOT}/src/algorithm_registry.hpp.in
         algorithm_registry.hpp
@@ -42,12 +44,20 @@ function(hipconv_add_arch_lib name gpus)
     set(sources
         "direct_backend.cpp"
         "grouped_backend.cpp"
+        "depthwise_backend.cpp"
     )
+    # One .cpp per kernel header, globbed here.
+    #
+    # Autoshard kernels (direct, direct_l1, depthwise_1d/2d_toeplitz) instead generate
+    # their per-config shard TUs into the build tree, so only their host helper .cpp
+    # is globbed.
     file(GLOB variant_sources CONFIGURE_DEPENDS
         "grouped/*.cpp"
+        "depthwise/*.cpp"
         "direct/*.cpp"
         "direct/direct_l1/*.cpp"
         "direct/direct/*.cpp"
+        "direct/direct_wgrad/*.cpp"
     )
     list(APPEND sources "${variant_sources}")
     add_library(hipconv_arch_${name} OBJECT ${sources})
@@ -57,18 +67,30 @@ function(hipconv_add_arch_lib name gpus)
         "${HIPCONV_ROOT}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(hipconv_arch_${name} PRIVATE hip::device)
+    # No HIP_ARCHITECTURES (except for NPI): each arch compiles for whatever the build targets.
     # Position-independent so the objects can link into libMIOpen.so
     set_target_properties(hipconv_arch_${name} PROPERTIES
-        HIP_ARCHITECTURES "${gpus}"
         POSITION_INDEPENDENT_CODE ON
         HIPCONV_ARCH_NAME ${name}
+        HIPCONV_ARCH_TARGETS "${ARG_TARGETS}"
     )
+    if(ARG_NPI)
+        set_target_properties(hipconv_arch_${name} PROPERTIES
+            HIP_ARCHITECTURES "${ARG_TARGETS}"
+        )
+    endif()
+    # The shipped kernels' disassembly is what hot_loop_check.py reads, so the collection
+    # has to run after this library rather than only after the tests. It already did by
+    # accident, since every test links this; saying so keeps a library-only build honest.
+    if(TARGET collect-asm)
+        add_dependencies(collect-asm hipconv_arch_${name})
+    endif()
 endfunction()
 
 function(hipconv_autoshard)
     cmake_parse_arguments(ARG
         ""
-        "ARCH;NAMESPACE;KERNEL_CLASS;CONFIG_TABLE;KERNEL;NUM_SHARDS"
+        "ARCH;NAMESPACE;KERNEL_CLASS;CONFIG_TABLE;KERNEL;NUM_SHARDS;EXTRA_HIP_FLAGS"
         ""
         ${ARGN})
     set(target hipconv_arch_${ARG_ARCH})
@@ -111,21 +133,28 @@ function(hipconv_autoshard)
 
     target_sources(${target} PRIVATE ${generated_files})
     set_source_files_properties(${generated_files} PROPERTIES LANGUAGE HIP)
+    if(ARG_EXTRA_HIP_FLAGS)
+        set_source_files_properties(${generated_files} PROPERTIES
+            COMPILE_OPTIONS "${ARG_EXTRA_HIP_FLAGS}")
+    endif()
+
 endfunction()
 
+# Emit the arch registry from the declared TARGETS, never from what the build
+# compiles for. Whether a row's GPU has device code here is a runtime question;
+# see the probe in registry.cpp.
 function(hipconv_make_arch_registry targets out_file_name)
     set(HIPCONV_REG_DECLS "")
     set(HIPCONV_REG_ROWS "")
     foreach(target IN LISTS targets)
         get_target_property(name ${target} HIPCONV_ARCH_NAME)
-        get_target_property(gpus ${target} HIP_ARCHITECTURES)
+        get_target_property(gpus ${target} HIPCONV_ARCH_TARGETS)
         string(APPEND HIPCONV_REG_DECLS
             "#include \"arch/${name}/algorithm_registry.hpp\"\n"
         )
         foreach(gpu IN LISTS gpus)
-            hipconv_get_logical("${gpu}" logical)
             string(APPEND HIPCONV_REG_ROWS
-                "{ \"${logical}\", algos_${name}, },\n"
+                "{ \"${gpu}\", algos_${name}, },\n"
             )
         endforeach()
     endforeach()
