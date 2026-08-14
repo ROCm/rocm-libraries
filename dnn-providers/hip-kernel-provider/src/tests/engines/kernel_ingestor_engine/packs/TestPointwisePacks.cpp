@@ -154,10 +154,10 @@ TEST(TestPointwisePacks, MatchersCoverBothScopes)
               1);
 }
 
-/// The GPU suite (ExecutesASubtractGraphThroughItsOwnPack) proves the kernel itself
-/// computes a - b; add and mul are commutative so an operand swap there is invisible,
-/// but sub is asymmetric, so this pins the fast, device-free half: binding never
-/// swaps input_a/input_b before dispatch gets them.
+/// The GPU suite (ExecutesASubtractGraphThroughItsOwnPack) proves the kernel computes
+/// a - b, but add/mul are commutative so an operand swap there is invisible. Sub is
+/// asymmetric, so this pins the fast, device-free half: binding never swaps
+/// input_a/input_b before dispatch gets them.
 TEST(TestPointwisePacks, SubtractsInTheRightDirection)
 {
     const GraphFixture fixture(

@@ -77,9 +77,9 @@ inline constexpr PackSymbols POINTWISE_SUB{"hipkernel:Pointwise",
                                            "pointwise.input_b.uid",
                                            "pointwise.output.uid"};
 
-/// The second engine, split from Pointwise by graph node type rather than operation.
-/// One pack, so `operationMatcher` is empty -- its graph matcher both admits the node
-/// type and validates the shape in one pass, unlike the three Pointwise packs above.
+/// The second engine, split from Pointwise by graph node type. One pack, so
+/// `operationMatcher` is empty -- the graph matcher both admits the node type and
+/// validates shape in one pass.
 inline constexpr PackSymbols CONV_FWD{"hipkernel:ConvFwd",
                                       "hipkernel.conv_fwd.graph_match",
                                       "",
@@ -90,9 +90,9 @@ inline constexpr PackSymbols CONV_FWD{"hipkernel:ConvFwd",
                                       "conv_fwd.w.uid",
                                       "conv_fwd.y.uid"};
 
-/// The descriptor set this provider ships for @p engineName, read from the same files
-/// the provider reads. Asserting on a loaded set rather than a hand-written twin is
-/// what makes these tests fail if the descriptors stop being installed.
+/// The descriptor set this provider ships for @p engineName. Asserting against the
+/// loaded set rather than a hand-written twin is what makes these tests fail if the
+/// descriptors stop being installed.
 inline const hipdnn_plugin_sdk::ingestor::DescriptorSet& loadedSet(std::string_view engineName)
 {
     const auto& sets = discoverDescriptorSets();
@@ -156,11 +156,9 @@ inline bool matchesGraph(const PackSymbols& pack,
     return graphMatcher(pack)(context, bound);
 }
 
-/// Runs the graph-scoped matcher that admits only @p pack's operation.
-///
-/// Separate from matchesGraph() because the split is the contract: the shared matcher
-/// says "this engine could serve this graph", this one says "this pack is the one".
-/// A pack passes only if both do.
+/// Runs the graph-scoped matcher that admits only @p pack's operation -- separate from
+/// matchesGraph() because the split is the contract: the shared matcher says "this
+/// engine could serve this graph", this one says "this pack is the one".
 inline bool matchesOperation(const PackSymbols& pack,
                              const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                              hipdnn_plugin_sdk::ingestor::BoundTokens& bound)
@@ -170,7 +168,6 @@ inline bool matchesOperation(const PackSymbols& pack,
         std::string(pack.operationMatcher))(context, bound);
 }
 
-/// Runs a pack's kernel-scoped matcher against one candidate.
 inline bool matchesKernel(const PackSymbols& pack,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                           const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
@@ -392,13 +389,11 @@ constexpr int64_t CONV_Y_UID = 3;
 
 /**
  * @brief Builds a single-node conv-forward graph, parameterized on everything this
- *        pack's matcher gates: mode, stride, dilation, padding, and dtype.
- *
- * Defaults to the one shape the engine's naive kernel can serve: unit stride and
- * dilation, no padding, cross-correlation, packed NCHW/KCRS/NKPQ, uniform dtype.
- * @p wDims and @p yDims default from @p xDims assuming a 1-in/1-out-channel, 2x2
- * kernel with no padding (P = H - R + 1, Q = W - S + 1), so a caller overriding only
- * @p xDims for a refusal case does not also have to keep w/y consistent by hand.
+ *        pack's matcher gates: mode, stride, dilation, padding, and dtype. Defaults to
+ *        the one shape the naive kernel can serve (unit stride/dilation, no padding,
+ *        cross-correlation, packed NCHW/KCRS/NKPQ, uniform dtype); @p wDims and @p yDims
+ *        default from @p xDims (P = H - R + 1, Q = W - S + 1) so a caller overriding
+ *        only @p xDims for a refusal case need not keep w/y consistent by hand.
  *
  * @param wDataType Overrides w's dtype away from @p dataType, for the cross-operand
  *        dtype-mismatch refusal.

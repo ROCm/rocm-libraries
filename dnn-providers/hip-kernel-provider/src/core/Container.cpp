@@ -84,16 +84,14 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
         // disk: adding an engine is an install, not an edit here.
         for(const auto& set : kernel_ingestor_engine::discoverDescriptorSets())
         {
-            // engineNameToId, not a provider-side registration: the loader already
-            // interned this name and registered it, and a second registry behind one
-            // process-wide string_view map is how a dangling view gets created.
+            // engineNameToId, not a provider-side registration: the loader already interned
+            // and registered this name, and a second registry over the same process-wide
+            // string_view map risks a dangling view.
             const auto engineId = engineNameToId(set.engine.name);
             definitions.push_back(
                 {engineId,
-                 // set is a reference into discoverDescriptorSets()'s memoized s_sets
-                 // vector (static, process-lifetime) -- captured by reference, not
-                 // value, is what that memoization exists to make safe. Do not change
-                 // this back to [set]: it re-copies a DescriptorSet per engine.
+                 // set aliases discoverDescriptorSets()'s memoized, process-lifetime vector.
+                 // Capture by reference: [set] would re-copy a DescriptorSet per engine.
                  [&set](const device::IDevicePropertyProvider& /*devicePropertyProvider*/)
                      -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>> {
                      try
@@ -105,10 +103,9 @@ const std::vector<Container::EngineDefinition>& Container::getEngineDefinitions(
                      }
                      catch(const std::exception& error)
                      {
-                         // The loader validates every set it returns, but its probe and
-                         // this construction are two different objects, so that is a
-                         // convention rather than a guarantee. Returning null costs this
-                         // engine; throwing would cost HIP_MLOPS and ASM_SDPA too.
+                         // The loader validates each set, but its probe and this construction
+                         // are different objects, so that's convention, not a guarantee.
+                         // Return null: throwing here would cost HIP_MLOPS and ASM_SDPA too.
                          HIPDNN_PLUGIN_LOG_ERROR("ingestor: engine '"
                                                  << set.engine.name
                                                  << "' failed to construct and is excluded: "
@@ -153,10 +150,9 @@ Container::Container()
     HIPDNN_PLUGIN_LOG_INFO("Creating Container");
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    // Every ingestor pack's native matchers, scorers, and dispatch handlers must be
-    // registered before any descriptor-backed engine below can resolve the symbols its
-    // UMDs, UHDs, and UDDs name. Safe to call on every Container construction: it
-    // registers exactly once per process (see SharedContainerManager).
+    // Must run before any descriptor-backed engine below can resolve its UMD/UHD/UDD
+    // symbols. Safe on every Container construction: registers exactly once per process
+    // (see SharedContainerManager).
     kernel_ingestor_engine::registerNativeIngestorSymbols();
 #endif
 
@@ -165,9 +161,9 @@ Container::Container()
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
-        // Null only from a descriptor-backed engine that failed to construct, which has
-        // already logged why. Its id stays advertised and simply never claims a graph --
-        // indistinguishable, to a caller, from an engine that declines everything.
+        // Null only when a descriptor-backed engine failed to construct (already logged).
+        // Its id stays advertised but never claims a graph -- indistinguishable from an
+        // engine that declines everything.
         if(auto engine = engineDefinition.createEngine(*_devicePropertyProvider))
         {
             _engineManager->addEngine(std::move(engine));

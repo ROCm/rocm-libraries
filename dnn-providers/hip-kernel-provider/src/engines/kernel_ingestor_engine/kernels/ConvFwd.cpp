@@ -1,20 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Reference kernel behind the conv-forward descriptor pack: naive direct convolution,
-// one thread per output element.
-//
-// HIP_PLUGIN_CONV_TYPE is the element type from the kernel descriptor's dtype metadata.
-// HIP_PLUGIN_CONV_BLOCK_SIZE is the descriptor's block size; unused by the kernel body,
-// which reads its launch geometry from blockDim/blockIdx instead, but must reach the
-// compiler for ranking and knob reporting, matching PointwiseAdd.cpp's two macros.
-//
-// Narrow on purpose: the matcher admits only stride 1, dilation 1, no padding, so
-// p = h - r + 1 and q = width - s + 1 are computed here rather than passed in. x is
-// packed NCHW, w is packed KCRS, y is packed NKPQ -- the matcher rejects anything else,
-// so the kernel may assume all of it. The accumulator is always float regardless of
-// HIP_PLUGIN_CONV_TYPE: a _Float16 accumulator loses too much precision for a reference
-// a CPU float reference is compared against.
+// Reference kernel behind the conv-forward pack: naive direct convolution, one thread per
+// output element. The matcher admits only stride 1, dilation 1, no padding, so
+// p = h - r + 1 and q = width - s + 1 are computed here rather than passed in, for
+// NCHW/KCRS/NKPQ layouts; the accumulator stays float regardless of HIP_PLUGIN_CONV_TYPE
+// since a _Float16 accumulator loses too much precision against the CPU float reference.
+// HIP_PLUGIN_CONV_BLOCK_SIZE is unused by the body but must reach the compiler for knob
+// reporting.
 
 #include <cstdint>
 
@@ -29,9 +22,8 @@ extern "C" __global__ void ConvFwd(const HIP_PLUGIN_CONV_TYPE* x,
                                    int r,
                                    int s)
 {
-    // int64_t: n*k*p*q can exceed 2^31 for shapes the matcher admits (element count is
-    // unbounded); 32-bit arithmetic here wrapped, defeating the `index >= total` guard
-    // and turning it into an out-of-bounds read/write.
+    // int64_t: n*k*p*q can exceed 2^31 for shapes the matcher admits; 32-bit overflow here
+    // would silently defeat the `index >= total` guard, causing an out-of-bounds access.
     const int64_t p = h - r + 1;
     const int64_t q = width - s + 1;
     const int64_t total = static_cast<int64_t>(n) * k * p * q;

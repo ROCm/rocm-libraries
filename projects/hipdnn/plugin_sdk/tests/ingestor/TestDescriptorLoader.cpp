@@ -282,11 +282,10 @@ nlohmann::json& secondDocumentOfType(Documents& documents, std::string_view suff
     throw std::runtime_error("no second document of type " + std::string(suffix));
 }
 
-/// mkdtemp's XXXXXX template is unique by construction (kernel-guaranteed, not pid-keyed),
-/// so a SIGKILLed run's leftover directory and pid reuse -- both real in short-lived CI
-/// containers -- can no longer make a later run collide. mkdtemp() creates the directory;
-/// removed immediately so ScopedDirectory below (which throws on an existing path) can
-/// create it again -- a small TOCTOU window only an adversarial local process could hit.
+/// mkdtemp's XXXXXX template is unique by construction, not pid-keyed, so a SIGKILLed
+/// run's leftover directory plus pid reuse can't make a later run collide. Removed
+/// immediately so ScopedDirectory below (which throws on an existing path) can create it
+/// again -- a TOCTOU window only an adversarial local process could hit.
 std::filesystem::path uniqueDirectory(const std::string& name)
 {
     std::string path
@@ -557,10 +556,9 @@ INSTANTIATE_TEST_SUITE_P(
                           documentOfType(documents, ".kdp.json")["arch"]
                               = nlohmann::json::array({"x86_64"});
                       }},
-        // Only 'embedded_source' has an implementation the dispatch handler can call; a
-        // kernel naming any other kind would otherwise pass validation and load, only to
-        // throw inside getKernelSrc("") at plan-build time -- after applicability has
-        // already promised the graph, which is what this rejection at load time prevents.
+        // Only 'embedded_source' has an implementation the dispatch handler can call; any
+        // other kind would pass validation and only throw inside getKernelSrc("") at
+        // plan-build time, after applicability already promised the graph.
         ViolationCase{"kernel_source_kind_not_dispatchable",
                       [](Documents& documents) {
                           documentOfType(documents, ".kdp.json")
@@ -646,10 +644,9 @@ TEST(TestDescriptorLoader, DropsAPackWhoseEngineIdNamesNoLoadedEngine)
             return toString(pack.id) == testUuid('2', ROLE_PACK);
         }));
     }
-    // The block that logs this is diagnostics-only: an orphan pack is absent from every
-    // set whether or not the block exists, so the assertions above hold either way. This
-    // is what actually pins it -- without the block, this is the one silent drop in the
-    // loader with nothing to say why the pack vanished.
+    // The logging block is diagnostics-only: an orphan pack is absent from every set
+    // whether or not it exists, so the assertions above hold either way. This is what
+    // actually pins it -- without the block, the pack vanishes with nothing to say why.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, testUuid('2', ROLE_PACK)));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "no descriptor defines"));
 }
@@ -898,15 +895,12 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredSymbol)
     EXPECT_EQ(sets.front().engine.name, "test:symbol_check_sibling");
 }
 
-/// The kernel-scope arm of the match-symbol pre-flight: the test above only ever
-/// corrupts the first `.umd.json` documentOfType returns, which makeSetDocuments always
-/// emits as the graph-scope matcher, so the KernelMatcherRegistry::isRegistered() branch
-/// was never taken. Pointing the kernel-scope matcher at the *graph* symbol -- registered,
-/// but only for graph scope -- would still get the engine dropped even with the ternary
-/// collapsed onto GraphMatcherRegistry for both scopes, since KernelIngestorStateManager's
-/// own constructor resolves matchers by scope again and throws; the pre-flight's specific
-/// diagnostic is the only observable that distinguishes the two, so that is what this
-/// asserts.
+/// The kernel-scope arm of the match-symbol pre-flight: the test above only corrupts the
+/// first `.umd.json`, always the graph-scope matcher, so KernelMatcherRegistry's branch
+/// was never taken. Pointing the kernel-scope matcher at a symbol registered only for
+/// graph scope still gets the engine dropped even with the ternary collapsed onto one
+/// registry for both scopes -- the state manager's constructor would also reject it --
+/// so the pre-flight's specific diagnostic is the only thing that distinguishes the two.
 TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelScopeMatcher)
 {
     const ScopedSymbols symbols;
@@ -927,12 +921,10 @@ TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAGraphSymbolAsItsKernelS
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "names unregistered match symbol"));
 }
 
-/// The dispatch-symbol pre-flight: independent of the match-symbol arm above, and until
-/// now untested. Deleting its loop leaves the whole SDK suite green on drop/survive
-/// assertions alone, because KernelIngestorStateManager's constructor resolves every
-/// dispatch symbol too and throws on the same miss; that generic "does not validate: ..."
-/// catch produces a different message, which is what pins this loop rather than the
-/// probe's fallback.
+/// The dispatch-symbol pre-flight, independent of the match-symbol arm above and until
+/// now untested. The state manager's constructor also rejects an unregistered dispatch
+/// symbol, but with a different, generic message -- that difference is what pins this
+/// loop rather than the probe's fallback catching it instead.
 TEST(TestDescriptorLoader, ValidationDropsAnEngineNamingAnUnregisteredDispatchSymbol)
 {
     const ScopedSymbols symbols;
@@ -1312,10 +1304,9 @@ TEST(TestDescriptorLoader, RejectsATrailingComma)
 }
 
 /// A `.json` naming no descriptor type is skipped before it is opened, so an unrelated
-/// JSON file living under the descriptor root costs nothing. Distinct from
-/// IgnoresANonJsonFile, which never had a `.json` extension to begin with. The sibling
-/// still loading holds even if the file were opened and rejected as malformed, so the
-/// WARN naming it is what actually distinguishes "skipped before opening" from that.
+/// JSON file under the descriptor root costs nothing. Distinct from IgnoresANonJsonFile,
+/// which never had a `.json` extension to begin with; the WARN is what distinguishes
+/// "skipped before opening" from "opened and rejected as malformed".
 TEST(TestDescriptorLoader, SkipsAJsonFileThatNamesNoDescriptorType)
 {
     const ScopedSymbols symbols;

@@ -24,13 +24,11 @@
 
 /**
  * @file TestConvFwdPack.cpp
- * @brief The conv-forward pack's matcher shapes: what it accepts, what it refuses, and
- *        that the engine split by graph node type actually holds.
- *
- * Modelled on TestPointwiseAddMatchers.cpp. This engine has one pack and no operation
- * matcher, so there is no operation-matcher section to mirror; in its place is the
- * claim the second engine exists to make -- a conv graph and a pointwise graph each
- * reach only their own engine's matcher.
+ * @brief The conv-forward pack's matcher shapes -- what it accepts and refuses -- plus
+ *        the claim the engine split by graph node type exists to make: a conv graph and
+ *        a pointwise graph each reach only their own matcher. Modelled on
+ *        TestPointwiseAddMatchers.cpp; this pack has no operation-matcher section since
+ *        it is the engine's only pack.
  */
 namespace
 {
@@ -285,10 +283,10 @@ TEST(TestConvFwdScore, PrefersTheLargerBlockSize)
 // Shipped descriptor set
 // ---------------------------------------------------------------------------
 //
-// Every test above resolves symbols compiled into this binary and hand-builds
-// KernelDefinitions via makeKernel() -- none of it loads conv_fwd/*.json. Without this
-// section, a broken shipped descriptor (wrong entry_point, a missing kernel, a knob
-// naming no KMD field) passes every unit test and only shows up in the slow GPU suite.
+// Every test above hand-builds KernelDefinitions via makeKernel() -- none of it loads
+// conv_fwd/*.json. Without this section, a broken shipped descriptor (wrong entry_point,
+// a missing kernel, a knob naming no KMD field) passes every unit test and only shows up
+// in the slow GPU suite.
 
 TEST(TestConvFwdPack, ShipsThreeKernelsCoveringTwoBlockSizesAndTwoDataTypes)
 {
@@ -343,10 +341,10 @@ TEST(TestConvFwdPack, HasOneGraphMatcherAndOneKernelMatcher)
 // Dispatch: this pack's IKernelDispatchHandler, unreached above
 // ---------------------------------------------------------------------------
 //
-// Every test above resolves the graph/kernel matchers and the scorer directly.
-// dispatchHandler(CONV_FWD) (ConvNative.cpp prepare()/workspaceBytes()/launch()) is
-// never touched anywhere in this suite, so short of the LABELS-slow GPU integration
-// test, nothing catches a broken registration or a broken prepare() unhappy path.
+// Every test above resolves the graph/kernel matchers and the scorer directly;
+// dispatchHandler(CONV_FWD) -- prepare()/workspaceBytes()/launch() in ConvNative.cpp --
+// is never touched here, so short of the slow GPU integration test, nothing catches a
+// broken registration or a broken prepare() unhappy path.
 
 /// Bindings a real plan build would hand the handler, from running the graph matcher.
 BoundTokens convBindingsFor(const MatchContext& context)
@@ -360,9 +358,8 @@ BoundTokens convBindingsFor(const MatchContext& context)
 }
 
 /// If IngestorPacks drops the ConvFwd row, or registerConvFwdSymbols stops registering
-/// DISPATCH_SYMBOL, this resolves to nullptr and every plan build for this engine
-/// null-derefs at dispatch time; nothing else in the fast suite ever asks the registry
-/// for this symbol.
+/// DISPATCH_SYMBOL, this resolves to nullptr and every plan build null-derefs at
+/// dispatch time -- nothing else in the fast suite asks the registry for this symbol.
 TEST(TestConvFwdDispatch, DispatchSymbolResolves)
 {
     registerNativeIngestorSymbols();
@@ -371,11 +368,9 @@ TEST(TestConvFwdDispatch, DispatchSymbolResolves)
               nullptr);
 }
 
-/// This reference kernel needs no scratch: every output element is accumulated in a
-/// register and written once. The one caller of workspaceBytes() (execution-plan build,
-/// exercised only by the slow GPU suite) allocates whatever it reports without ever
-/// checking the number against anything, so a regression to a non-zero value is
-/// invisible there too -- this is the only place that pins it to 0.
+/// This reference kernel needs no scratch -- every output element is accumulated once
+/// and written directly. Its only caller (execution-plan build) never checks the value
+/// it returns, so this is the only place pinning workspaceBytes() to 0.
 TEST(TestConvFwdDispatch, WorkspaceBytesIsAlwaysZero)
 {
     const GraphFixture fixture(buildConvFwdGraph());
@@ -387,10 +382,9 @@ TEST(TestConvFwdDispatch, WorkspaceBytesIsAlwaysZero)
               0U);
 }
 
-/// convFwdBinding() (ConvNative.cpp) must throw before touching HIP: an empty
-/// BoundTokens is what a catalog entry built by a matcher other than this pack's own
-/// would hand prepare(). Without this guard a plan build reads uninitialized binding
-/// values (0) and either launches against the wrong tensors or crashes deep in HIP
+/// convFwdBinding() must throw before touching HIP: empty BoundTokens is what a
+/// mismatched matcher's catalog entry would hand prepare(). Without this guard, a plan
+/// build reads uninitialized bindings and launches wrong tensors or crashes in HIP
 /// instead of failing cleanly at plan-build time.
 TEST(TestConvFwdDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
 {
@@ -402,12 +396,10 @@ TEST(TestConvFwdDispatch, RefusesToPrepareWithoutTheMatcherSBindings)
         hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-/// elementTypeFor() (ConvNative.cpp) throws on a dtype its two `if` branches don't
-/// name; reached only from inside prepare(), after binding and tensor lookup already
-/// succeeded. Note this is a *different* guard from the kernel matcher's
-/// RefusesAKernelBakedForAnotherDtype above: that one returns false and never reaches
-/// dispatch, so it would keep passing even if this throw were deleted and replaced
-/// with, say, always compiling as float.
+/// elementTypeFor() throws on a dtype its `if` branches don't name, reached only inside
+/// prepare() after binding/lookup succeed. Distinct from the kernel matcher's
+/// RefusesAKernelBakedForAnotherDtype above, which returns false before dispatch and
+/// would keep passing even if this throw were deleted.
 TEST(TestConvFwdDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 {
     const GraphFixture fixture(buildConvFwdGraph());
@@ -423,11 +415,10 @@ TEST(TestConvFwdDispatch, PrepareRejectsAKernelDeclaringAnUnsupportedDtype)
 // Shipped descriptor set: source kind/file, behavior notes, operation metadata
 // ---------------------------------------------------------------------------
 
-/// Pins kernel_source.kind and source_file for the conv pack, the conv analogue of
-/// TestPointwisePacks.cpp's EveryKernelNamesItsPacksEmbeddedSource. Without this, a
-/// descriptor edit that swapped in a source kind with no adapter, or renamed/misspelled
-/// the source file, would pass this entire fast suite -- prepare() only discovers a bad
-/// source_file when the (slow, GPU-only) integration test tries to compile it.
+/// Pins kernel_source.kind and source_file, the conv analogue of TestPointwisePacks.cpp's
+/// EveryKernelNamesItsPacksEmbeddedSource. Without it, a bad source kind or a misspelled
+/// source_file passes this whole fast suite -- prepare() only discovers it when the slow
+/// GPU integration test tries to compile it.
 TEST(TestConvFwdPack, PinsTheEmbeddedConvSource)
 {
     const auto& set = loadedSet("hipkernel:ConvFwd");
@@ -443,11 +434,10 @@ TEST(TestConvFwdPack, PinsTheEmbeddedConvSource)
     }
 }
 
-/// behavior_notes: ["runtime_compilation"] is parsed by the loader and published onto
-/// the EngineDetails flatbuffer, but nothing anywhere asserts it survives. Losing it --
-/// a dropped descriptor line, or a loader regression that stops copying it into
-/// EngineDescriptor -- tells a caller-facing framework this engine never JIT-compiles,
-/// which is false for both engines this provider ships.
+/// behavior_notes: ["runtime_compilation"] is parsed by the loader onto the
+/// EngineDetails flatbuffer, but nothing else asserts it survives. Losing it (a dropped
+/// descriptor line, or a loader regression) would tell a caller-facing framework this
+/// engine never JIT-compiles, which is false for both engines here.
 TEST(TestConvFwdPack, BothShippedEnginesDeclareRuntimeCompilation)
 {
     for(const std::string_view engineName : {"hipkernel:Pointwise", "hipkernel:ConvFwd"})
@@ -462,11 +452,9 @@ TEST(TestConvFwdPack, BothShippedEnginesDeclareRuntimeCompilation)
 }
 
 /// Nothing in production reads a kernel's "operation" metadata -- matching runs on
-/// block_size/dtype alone, and the graph-scoped operation matchers key off the graph,
-/// not the kernel. All three Pointwise packs could ship "operation": "ADD" and every
-/// other test, including the matcher tests above, would keep passing. This is the one
-/// place that ties each pack's kernels back to the operation its own source file (and
-/// therefore its own operation matcher) actually implements.
+/// block_size/dtype alone. All three Pointwise packs could ship "operation": "ADD" and
+/// every other test would keep passing; this is the one place tying each pack's kernels
+/// back to the operation its own source file actually implements.
 TEST(TestConvFwdPack, PointwisePacksClaimTheOperationTheyActuallyImplement)
 {
     const auto& set = loadedSet("hipkernel:Pointwise");

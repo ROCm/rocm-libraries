@@ -34,22 +34,12 @@
  * @brief The pointwise engine's native half: matching, scoring, dispatch, and the one
  *        function that registers them.
  *
- * The permanent side of the seam: everything a descriptor cannot express as data. The
- * descriptors themselves are installed JSON, read by discoverDescriptorSets().
- *
- * This engine serves two packs, add and mul, and the split between them is the point.
- * Everything that makes a graph servable at all -- one node, pointwise, binary, one
- * element, real buffers, uniform dtype -- is one matcher both packs list, so it is
- * evaluated once per graph and memoized across them. What differs is one enum compare,
- * which each pack lists as a second graph-scoped matcher of its own. A pack passes only
- * if every matcher it lists passes, so add and mul are disjoint without either one
- * repeating the other's work (RFC 0017 section 6).
- *
- * The symbol names below are restated rather than shared through a header, because a
- * descriptor file cannot export a constant to C++. The two sides agree by string
- * value, so a typo is not a compile error. That is safe only because the loader
- * pre-flights every symbol a descriptor names and drops the descriptor that names one
- * this build does not ship.
+ * Three packs (add, mul, sub) share one applicability matcher -- node shape, binary,
+ * one element, uniform dtype -- evaluated once per graph; each pack adds only an
+ * operation check, so RFC 0017 §6 keeps them disjoint without duplicating that work.
+ * Symbol names are restated here rather than shared via a header, since a descriptor
+ * can't reference a C++ constant; the loader pre-flights every symbol a descriptor
+ * names, so a mismatched string is caught without becoming a compile error.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -169,10 +159,9 @@ std::string dataTypeName(data_objects::DataType dataType)
     return data_objects::EnumNameDataType(dataType);
 }
 
-/// The node this engine's matchers read, or nullptr if the graph is not a single
-/// pointwise node. Shared so the operation check does not depend on running after the
-/// applicability matcher: matcher order within a pack is the order the descriptor lists
-/// them, which is not a thing a matcher should have to know.
+/// The node this engine's matchers read, or nullptr if the graph isn't a single
+/// pointwise node. Shared so the operation check doesn't depend on matcher order,
+/// which the descriptor controls.
 const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& context)
 {
     if(context.graph.nodeCount() != 1)
@@ -190,14 +179,11 @@ const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& conte
 }
 
 /**
- * @brief Graph-scoped applicability, shared by every pack in this engine: is this a
- *        single-node binary pointwise op over 1-element tensors this engine can launch?
- *
- * Deliberately says nothing about *which* operation. Both packs list this matcher, so
- * it is evaluated once per (graph, device) and the second pack reuses the memoized
- * verdict; the operation is the only thing each pack then checks for itself.
- *
- * A failure disqualifies every kernel in every pack that lists it.
+ * @brief Graph-scoped applicability shared by every pack: is this a single-node binary
+ *        pointwise op over 1-element tensors this engine can launch? Says nothing about
+ *        which operation -- every pack lists this matcher, so it runs once per (graph,
+ *        device) and the memoized verdict is reused, with only the operation check left
+ *        to each pack.
  */
 bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
@@ -258,11 +244,8 @@ bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
 
 /**
  * @brief Graph-scoped operation check: the one fact that separates this engine's packs.
- *
- * Binds nothing -- the shared applicability matcher has already bound every token the
- * dispatch handler reads. Listing this second matcher is the whole cost of a pack, and
- * two packs claiming the same operation would be the authoring mistake, not two packs
- * sharing the graph check.
+ *        Binds nothing -- the applicability matcher above already bound every token
+ *        dispatch reads.
  */
 bool pointwiseOperationMatches(const MatchContext& context, data_objects::PointwiseMode operation)
 {
@@ -287,9 +270,8 @@ bool pointwiseSubMatches(const MatchContext& context, BoundTokens& /*bound*/)
 
 /**
  * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
- *
- * Evaluated once per candidate kernel. Without it, an f32 graph could reach an f16
- * binary and return wrong numbers rather than failing.
+ *        Evaluated once per candidate kernel; without it an f32 graph could reach an
+ *        f16 binary and return wrong numbers rather than failing.
  */
 bool pointwiseKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
 {
@@ -397,23 +379,18 @@ const data_objects::TensorAttributes& firstInput(const MatchContext& context,
 }
 
 /**
- * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise kernel.
- *
- * Shared by every pack of this engine: which operation runs is the selected kernel's
- * entry point, not anything this handler decides.
- *
- * Splits per RFC 0017 §8.5: everything derived from the graph and chosen kernel
- * resolves once at plan build; execute only resolves device pointers by uid and
- * launches. A plan may execute concurrently from several threads, so nothing here
- * mutates after preparation.
+ * @brief The native dispatch behind this pack's UDD: sizes and launches a pointwise
+ *        kernel. Shared across packs -- the operation is just the selected kernel's
+ *        entry point. Splits per RFC 0017 §8.5: everything graph/kernel-derived
+ *        resolves once at prepare(); execute() only resolves buffers and launches, so
+ *        nothing mutates once prepared and concurrent execution is safe.
  */
 class PointwiseDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
 public:
     /// @param kernelCompiler Must outlive this handler; both are process-lifetime.
-    ///
-    /// Device properties are not held; they arrive per call on the MatchContext, so a
-    /// kernel is compiled for the device the call is actually for.
+    /// Device properties aren't held here -- they arrive per call via MatchContext,
+    /// so each call compiles for the device it's actually for.
     explicit PointwiseDispatchHandler(const compilation::IKernelCompiler& kernelCompiler)
         : _kernelCompiler(kernelCompiler)
     {
@@ -476,11 +453,9 @@ private:
     const compilation::IKernelCompiler& _kernelCompiler;
 };
 
-/// This pack's dispatch handler.
-///
-/// Process-lifetime: the registry holds a non-owning pointer to it while a provider's
-/// Container is created and destroyed per handle, so it must outlive every Container.
-/// The compiler it holds is a static for the same reason.
+/// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
+/// pointer to it, but a provider's Container is created and destroyed per handle, so
+/// it (and the compiler it holds) must outlive every Container.
 const PointwiseDispatchHandler& pointwiseDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;

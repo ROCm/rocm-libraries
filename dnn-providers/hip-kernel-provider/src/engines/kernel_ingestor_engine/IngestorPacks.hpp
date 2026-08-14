@@ -14,15 +14,11 @@
 #include "core/Handle.hpp"
 
 /// @file IngestorPacks.hpp
-/// The provider's pack inventory: the one file adding an engine edits.
-///
-/// A pack contributes native symbols and nothing else -- its descriptors are installed
-/// JSON, read by discoverDescriptorSets(). What stays in C++ is the half no file can
-/// supply: the compiled behaviour a descriptor names by symbol.
-///
-/// Registration is a table entry, not a self-registering static: a linker drops an
-/// archive member nothing references (as in the unit-test static-archive build), even
-/// though the same TU survives in the plugin .so. This table is that reference.
+/// The provider's pack inventory: the one file adding an engine edits. A pack contributes
+/// native symbols only; its descriptors are installed JSON read by discoverDescriptorSets().
+/// Registration is a table entry rather than a self-registering static, because a linker
+/// drops an unreferenced archive member (as in the unit-test static-archive build) even
+/// though the same TU survives in the plugin .so -- this table is that reference.
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
 
@@ -37,9 +33,9 @@ struct IngestorPack
 /// Every pack this provider ships. **Adding an engine edits this table.**
 const std::vector<IngestorPack>& ingestorPacks();
 
-/// One function per pack, one per file. A pack's matchers, scorer and dispatch handler
-/// are internal to its native file, reachable only through the registry its descriptors
-/// name, so there is no per-pack header.
+/// One function per pack, one per file: each pack's matchers, scorer, and dispatch handler
+/// are internal to its native file, reachable only through the registry, so there's no
+/// per-pack header.
 
 /// @see packs/PointwiseNative.cpp
 void registerPointwiseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);

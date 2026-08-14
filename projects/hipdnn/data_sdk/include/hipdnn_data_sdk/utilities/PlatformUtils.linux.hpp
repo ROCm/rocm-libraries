@@ -94,18 +94,11 @@ inline void* getSymbol(SharedLibraryHandle handle, const char* symbolName)
     return dlsym(handle, symbolName);
 }
 
-/// The directory of the module @p address belongs to, as an absolute, symlink-resolved
-/// path.
-///
-/// Works under every dlopen flag and needs nothing exported: the address already names
-/// the module. Prefer this over the symbol-name form when asking "where am I loaded
-/// from" about the calling module itself -- pass the address of one of its own functions.
-///
-/// dladdr reports the name the module was *loaded with*, which is not necessarily usable
-/// as a base for other paths: dlopen("./sub/lib.so") reports it verbatim, so anything
-/// resolved against it would follow the process's current directory rather than the
-/// module, and a .so reached through a symlink reports the link rather than the file its
-/// siblings sit beside. Canonicalized here so callers get a stable base either way.
+/// The directory of the module @p address belongs to, canonicalized because dladdr()
+/// reports the path the module was loaded with verbatim -- relative to the process's
+/// current directory, or a symlink rather than the file its siblings sit beside. Works
+/// under any dlopen flag and needs nothing exported, so prefer it over the symbol-name
+/// form when asking "where am I loaded from" about the calling module itself.
 inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
 {
     Dl_info info{};

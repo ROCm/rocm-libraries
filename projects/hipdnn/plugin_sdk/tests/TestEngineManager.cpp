@@ -16,7 +16,6 @@ using namespace hipdnn_test_sdk::utilities;
 using ::testing::NiceMock;
 using ::testing::Return;
 
-// Define test handle, settings, and execution context structs for testing
 struct TestHandle
 {
 };
@@ -32,7 +31,6 @@ struct TestContext
 namespace
 {
 
-// Test engine that inherits from IEngine with configurable behavior
 class TestEngine : public IEngine<TestHandle, TestSettings, TestContext>
 {
 public:
@@ -84,7 +82,6 @@ private:
     size_t _workspaceSize;
 };
 
-// Define type alias for readability
 using TestEngineManager = EngineManager<TestHandle, TestSettings, TestContext>;
 
 std::unique_ptr<TestEngine>
@@ -123,15 +120,11 @@ TEST(TestEngineManager, AddMultipleEngines)
     EXPECT_EQ(engineIds.size(), 3u);
 }
 
-/// Two engines hashing onto one id is an authoring collision (RFC 0003). The manager keeps
-/// whoever claimed the id and reports the loser rather than dropping it into the void,
-/// which is what a bare map insert did: the count stayed at one while the caller that
-/// advertised the second id went on reporting it.
-///
-/// Keep-first here is not the descriptor rule. RFC 0020 §10.2.1 drops *every* UED in a
-/// name collision, and the descriptor loader applies that before construction; this is the
-/// backstop for pairs that rule cannot see, where refusing both would take a working
-/// engine down to punish a duplicate.
+/// Two engines hashing onto one id is an authoring collision (RFC 0003); the manager keeps
+/// the incumbent and logs the loser rather than dropping it silently. This is not the
+/// descriptor rule -- RFC 0020 §10.2.1 drops every UED in a name collision before
+/// construction -- but the backstop for collisions that rule can't see, e.g. two
+/// hand-written engines.
 TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
 {
     auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
@@ -143,9 +136,7 @@ TEST(TestEngineManager, AddEngineKeepsTheIncumbentOnDuplicateId)
     ASSERT_EQ(engineIds.size(), 1u);
     EXPECT_EQ(engineIds[0], 1);
 
-    // The diagnostic is the entire point of the change over the bare `emplace` it
-    // replaced -- everything above already held true against that, so nothing failed
-    // before this assertion existed.
+    // The point of this assertion: the old bare `emplace` would also pass everything above.
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "already registered"));
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "duplicate is discarded"));
 

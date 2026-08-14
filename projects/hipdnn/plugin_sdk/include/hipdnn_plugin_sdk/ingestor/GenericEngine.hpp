@@ -27,10 +27,9 @@ namespace hipdnn_plugin_sdk::ingestor
 {
 
 /// The first knob @p engine exposes that @p fields does not declare, or nullptr. RFC 0017
-/// §4 makes a knob naming no field a load error: the field supplies its type, default and
-/// legal values, so a knob matching none can never be honoured. Shared with the descriptor
-/// loader, which rejects such an engine while reading it rather than letting this
-/// constructor throw after the id has been advertised.
+/// §4 treats an undeclared knob as a load error, since the field supplies its type,
+/// default, and legal values. Shared with the descriptor loader so a bad engine is
+/// rejected while reading it, before its id is ever advertised.
 inline const std::string* findUndeclaredKnob(const EngineDescriptor& engine,
                                              const std::vector<MetadataField>& fields)
 {

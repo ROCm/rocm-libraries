@@ -24,17 +24,11 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 
 std::filesystem::path descriptorSearchDirectory()
 {
-    // Three sources, in falling order of how much they know about this specific install.
-    //
-    // 1. The environment, which is the only one an operator or a test can set. Tests and
-    //    run-from-build-dir use it, the same way the ASM engine takes HIPDNN_AITER_ASM_DIR.
-    //
-    //    Taken only if it names a real directory. A stale value is not hypothetical: the
-    //    install-tree CTestTestfile.cmake is generated from the same ENVIRONMENT list as
-    //    the build-tree one, so it carries this build's absolute staging path, and on a
-    //    test machine that path does not exist. Honouring it unconditionally would win
-    //    over both branches below and load nothing at all -- the failure this whole
-    //    function is ordered to avoid.
+    // Three sources, in falling order of specificity. Env var first: it's the only one an
+    // operator or test can set (tests and run-from-build-dir use it, like the ASM engine's
+    // HIPDNN_AITER_ASM_DIR), but only if it names a real directory -- a stale value is
+    // common (install-tree CTestTestfile.cmake bakes in the build's staging path, which
+    // won't exist on a test machine), and trusting it blindly would load nothing at all.
     if(const auto override = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_DIR");
        !override.empty())
     {
@@ -49,20 +43,11 @@ std::filesystem::path descriptorSearchDirectory()
                                   "the descriptor tree from the loaded module instead");
     }
 
-    // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR below
-    //    bakes in the prefix this build was *configured* with, which a DESTDIR-staged,
-    //    relocated or repackaged install (ROCm packaging, conda, wheels) invalidates --
-    //    and the cost of getting it wrong is the whole descriptor-backed engine inventory,
-    //    reported only as "0 descriptor-backed engine(s) loaded from <a path that is not
-    //    there>". Measuring from the loaded module instead is correct wherever it lands,
-    //    because the descriptors install at a fixed offset from the plugin.
-    //
-    //    Keyed on the address of this very function rather than on a symbol name. A name
-    //    lookup goes through the dynamic linker's scope rules and can in principle answer
-    //    for a different module -- every provider exports the same plugin entry points,
-    //    and the backend opens each one RTLD_LOCAL. An address cannot be ambiguous: it
-    //    already belongs to exactly one module, under any dlopen flag and on both
-    //    platforms, and nothing has to be exported for it to work.
+    // 2. Where this plugin was actually loaded from. HIPDNN_DESCRIPTOR_INSTALL_DIR bakes in
+    //    the configure-time prefix, which a relocated or repackaged install invalidates;
+    //    measuring from the loaded module is correct wherever it lands. Keyed on this
+    //    function's own address rather than a symbol name, since a name lookup can resolve
+    //    to a different module when every provider exports the same plugin entry points.
     try
     {
         const auto candidate = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
@@ -77,7 +62,7 @@ std::filesystem::path descriptorSearchDirectory()
     catch(const std::runtime_error& error)
     {
         // No module to measure from -- this TU linked straight into an executable, as in
-        // the static test binaries. Not fatal: step 3 still answers. Logged because on a
+        // the static test binaries. Not fatal, step 3 still answers; logged because on a
         // real install it would mean the relocatable path had silently stopped working.
         HIPDNN_PLUGIN_LOG_INFO("ingestor: no module-relative descriptor directory ("
                                << error.what() << "); using the configure-time path");
@@ -90,10 +75,9 @@ std::filesystem::path descriptorSearchDirectory()
 namespace
 {
 
-/// Registers every pack's native symbols, one SymbolScope per pack. A pack that throws is
-/// rolled back and skipped, because one pack's duplicate symbol must not unregister every
-/// other pack's. Runs under call_once, where a throw is catchable; at static-init it would
-/// terminate the process during dlopen().
+/// One SymbolScope per pack; a throwing pack rolls back and is skipped so its duplicate
+/// symbol can't unregister the others. Runs under call_once, not static init, so the throw
+/// is catchable instead of terminating the process during dlopen().
 void registerNativeIngestorSymbolsOnce()
 {
     for(const auto& pack : ingestorPacks())
@@ -130,13 +114,12 @@ void registerNativeIngestorSymbols()
 
 const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets()
 {
-    // Memoized because two callers read it at different times: Container's static
-    // engine-id enumeration and Container's constructor. "Read once at startup" has to
-    // mean once, not once per caller, so the two can never disagree about what shipped.
+    // Memoized: Container's static engine-id enumeration and its constructor both call
+    // this and must agree on what shipped.
     static const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet> s_sets = [] {
-        // Before the scan, not after: validation asks the registry whether each
-        // descriptor's symbol exists, so an unregistered pack drops its descriptors here
-        // rather than throwing later at first use.
+        // Register before scanning: validation checks each descriptor's symbol against the
+        // registry, so an unregistered pack drops its descriptors here instead of throwing
+        // at first use.
         registerNativeIngestorSymbols();
         return hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
             descriptorSearchDirectory());

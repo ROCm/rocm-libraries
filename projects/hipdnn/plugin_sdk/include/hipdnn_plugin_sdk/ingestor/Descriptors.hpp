@@ -155,9 +155,8 @@ struct EngineDescriptor
     /// Graph schema version this engine understands; a graph below this floor is
     /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    /// RFC 0020 §4.2 numerical notes, held as authored. Unlike `behaviorNotes` these map
-    /// to no hipDNN enum -- there is no numerical-note vocabulary yet -- so the loader
-    /// carries the strings and nothing consumes them.
+    /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
+    /// yet, so nothing consumes the strings.
     std::vector<std::string> numericalNotes;
 };
 
@@ -222,16 +221,11 @@ struct KernelDescriptorPack
     std::vector<DescriptorId> matcherIds;
     DescriptorId engineId;
     DescriptorId dispatchId;
-    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent.
-    /// Matches the base target id exactly, so `gfx942` never accepts `gfx950`.
-    ///
-    /// Enforced only at catalog build (KernelIngestorStateManager::buildCatalog), against
-    /// the device that call targets. There is no load-time gate, so a pack every local
-    /// device excludes is still built and simply declines per call.
-    ///
-    /// An arch-excluded pack is a correct, expected decline, the same category as a matcher
-    /// returning false -- reporting it as malformed makes a healthy cross-arch install read
-    /// as a pile of failures.
+    /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent, matched
+    /// exactly against the device's base target id. Enforced at catalog build, not load
+    /// time, so an excluded pack still builds and simply declines per call -- an expected
+    /// decline like a matcher returning false, not a malformed load, so it must not be
+    /// reported as one.
     std::vector<std::string> arch;
     std::vector<KernelDescriptor> kernels;
 };

@@ -25,11 +25,8 @@ using namespace hip_kernel_provider;
 using namespace hip_kernel_provider::core;
 
 /// Engines the provider exposes: one per compiled-in native engine, plus one per
-/// discovered descriptor set.
-///
-/// The ingestor's contribution is read from the inventory rather than hardcoded. A
-/// literal count goes wrong the moment a second pack ships, and it is the only thing
-/// standing between a dead-stripped pack table and a green run.
+/// discovered descriptor set, read from the inventory rather than hardcoded so a
+/// newly shipped pack is never silently uncounted.
 static uint32_t expectedEngines()
 {
     uint32_t expected = 0;
@@ -91,10 +88,9 @@ TEST(TestContainer, ExposesAnEngineForEveryDiscoveredDescriptorSet)
 {
     using namespace hip_kernel_provider::kernel_ingestor_engine;
 
-    // Named rather than merely non-empty: neither a count nor an emptiness check tells
-    // a missing engine (a set that failed to stage or install) from a renamed one, and
-    // the failure this guards -- the pack table dropped from a static-archive link --
-    // looks identical to "nothing shipped" either way.
+    // Named rather than just counted: neither a count nor an emptiness check can tell
+    // a missing engine (e.g. a pack table dropped from a static-archive link) from a
+    // renamed one.
     const auto& sets = discoverDescriptorSets();
 
     std::vector<std::string> names;

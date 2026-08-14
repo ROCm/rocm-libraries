@@ -268,10 +268,9 @@ TEST(TestKernelIngestorEngine, DeclinesAGraphNoPackOfItsClaims)
     auto& engineManager = container.getEngineManager();
     Handle handle;
 
-    // A division is a servable shape, so the shared matcher admits it; all three packs
-    // then decline it on operation. Exercised through the full engine because "no pack
-    // passed" and "the matcher refused" are different failures with the same symptom.
-    // Not SUB: that is one of the three packs now, so it would prove the opposite.
+    // DIV passes the shared shape matcher, but every pack's operation matcher declines
+    // it -- distinguishing "no pack claims this op" from "the matcher rejected the
+    // shape" outright. Not SUB: that's now one of the three claimed operations.
     const auto graph
         = buildPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::DIV);
     const auto applicable = engineManager.getApplicableEngineIds(handle, wrap(graph));
@@ -298,11 +297,10 @@ TEST(TestKernelIngestorEngine, PrefersHipdnnDescriptorDirOverEverything)
     EXPECT_EQ(descriptorSearchDirectory(), existing.path());
 }
 
-/// A stale override is ignored rather than obeyed. The install-tree CTestTestfile.cmake is
-/// generated from the same ENVIRONMENT list as the build-tree one, so it ships this build's
-/// absolute staging path; on a test machine that directory does not exist. Without this
-/// guard the override wins, both remaining branches are skipped, and the installed suite
-/// silently loads zero descriptor sets.
+/// A stale override must be ignored, not obeyed: the install-tree CTestTestfile.cmake
+/// bakes in this build's absolute staging path via ENVIRONMENT, which won't exist on
+/// another machine -- without this guard the installed suite would silently load zero
+/// descriptor sets.
 TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorDirThatDoesNotExist)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
@@ -315,11 +313,9 @@ TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorDirThatDoesNotExist)
         << "resolved to " << resolved;
 }
 
-/// With the env unset the answer comes from step 2 or step 3, and both end in the same
-/// fixed offset. Pinning the suffix is what distinguishes "resolved a real directory" from
-/// the empty path a failed lookup would produce -- before this, step 2 falling through
-/// silently was indistinguishable from step 2 working, which is how it could have shipped
-/// broken.
+/// With the env unset, resolution falls through to step 2 or 3, both ending in the same
+/// fixed suffix. Pinning that suffix catches a silent fallthrough to an empty path,
+/// which would otherwise be indistinguishable from a real resolved directory.
 TEST(TestKernelIngestorEngine, FallsBackToAModuleRelativeOrInstalledPath)
 {
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset("HIPDNN_DESCRIPTOR_DIR",
@@ -332,10 +328,9 @@ TEST(TestKernelIngestorEngine, FallsBackToAModuleRelativeOrInstalledPath)
         << "resolved to " << resolved << ", which does not end in " << HIPDNN_DESCRIPTOR_SUBDIR;
 }
 
-/// The mechanism step 2 rests on, asserted directly: an address resolves to the module that
-/// contains it. In this static test binary that is the executable itself. A symbol-name
-/// lookup could answer for a different module -- every provider exports the same plugin
-/// entry points -- which is why the resolver keys on an address instead.
+/// Asserts the mechanism step 2 rests on: an address resolves to the module containing
+/// it. Keyed on address rather than symbol name because every provider exports the same
+/// plugin entry points, so a name lookup could answer for the wrong module.
 TEST(TestKernelIngestorEngine, ResolvesAModuleDirectoryFromAnAddressWithinIt)
 {
     const auto directory = hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(

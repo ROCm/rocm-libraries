@@ -124,12 +124,11 @@ inline std::filesystem::path getLoadedLibraryDirectory(const char* libraryName)
     return std::filesystem::path(result.data()).parent_path();
 }
 
-/// The directory of the module @p address belongs to.
-///
-/// The Windows counterpart of the dladdr() form: the address already names the module, so
-/// this works however the module was loaded and needs nothing exported. Prefer it when
-/// asking "where am I loaded from" about the calling module -- pass the address of one of
-/// its own functions. UNCHANGED_REFCOUNT because the caller is not taking ownership.
+/// The directory of the module @p address belongs to -- the Windows counterpart of the
+/// dladdr() form: it works however the module was loaded and needs nothing exported, so
+/// prefer it over the by-name form when asking "where am I loaded from" about the calling
+/// module itself. Uses GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT since the caller isn't
+/// taking ownership.
 inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* address)
 {
     HMODULE handle = nullptr;
@@ -149,9 +148,8 @@ inline std::filesystem::path getLoadedLibraryDirectoryForAddress(const void* add
         throw std::runtime_error("Failed to get loaded library path for address");
     }
 
-    // Canonicalized for the same reason as the dladdr form: callers resolve sibling paths
-    // against this, so a module reached through a symlink must answer with the directory
-    // its siblings actually sit in.
+    // Canonicalized so a module reached through a symlink answers with the directory its
+    // siblings actually sit in, same as the dladdr form on Linux.
     std::error_code failed;
     const auto resolved = std::filesystem::weakly_canonical(result.data(), failed);
     return (failed ? std::filesystem::path(result.data()) : resolved).parent_path();

@@ -22,19 +22,15 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 void registerNativeIngestorSymbols();
 
 /// The directory discoverDescriptorSets() reads descriptor files from: HIPDNN_DESCRIPTOR_DIR
-/// if set, the installed copy otherwise. Only the install path is compiled in -- a baked
-/// build-tree path would ship inside the plugin and win over the installed files on any host
-/// where it happened to exist, so nothing would ever exercise the installed ones. Tests and
-/// run-from-build-dir set the variable. Declared here so a test loads exactly what the
-/// provider loads: restating the order in a test is how the two silently drift apart.
+/// if set, else the installed copy. Only the install path is compiled in -- a baked
+/// build-tree path would ship inside the plugin and shadow the installed files. Declared
+/// here so tests load exactly what the provider loads.
 std::filesystem::path descriptorSearchDirectory();
 
-/// Every descriptor set this provider serves, read from installed files. Registers symbols
-/// first, because validation asks the registry whether each descriptor's symbol exists: a
-/// set is returned only if it can actually be built, which is what lets
-/// Container::copyEngineIds advertise ids before any engine is constructed. A malformed or
-/// unresolvable descriptor costs its pack or its engine, never the provider. Memoized, so
-/// two scans can never disagree.
+/// Every descriptor set this provider serves. Registers symbols first so validation can
+/// check each descriptor's symbol exists -- a set returns only if buildable, which lets
+/// Container::copyEngineIds advertise ids before any engine is constructed. A malformed
+/// descriptor costs its pack, never the provider. Memoized, so two scans can't disagree.
 const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescriptorSets();
 
 /// The device resolver every descriptor-backed engine in this provider shares.

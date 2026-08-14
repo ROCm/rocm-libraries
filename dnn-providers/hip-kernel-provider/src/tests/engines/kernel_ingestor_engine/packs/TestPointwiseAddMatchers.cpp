@@ -222,10 +222,9 @@ INSTANTIATE_TEST_SUITE_P(
 // Graph-scoped operation matchers: the one fact separating this engine's packs
 // ---------------------------------------------------------------------------
 
-/// The shared matcher above deliberately admits any operation, so these are what stop a
-/// multiplication reaching an add kernel. Asserted for both packs against both graphs,
-/// because "each accepts its own" and "each refuses the other's" are separate claims and
-/// a matcher that returned true unconditionally would satisfy only the first.
+/// The shared matcher deliberately admits any operation; these are what stop a
+/// multiplication reaching an add kernel. Both directions are asserted because a
+/// matcher that always returned true would satisfy only one of the two claims.
 TEST(TestPointwiseOperationMatchers, EachPackAdmitsOnlyItsOwnOperation)
 {
     const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));

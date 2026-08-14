@@ -33,16 +33,11 @@
  * @brief The conv-forward engine's native half: matching, scoring, dispatch, and the
  *        one function that registers them.
  *
- * A second engine beside Pointwise, split on graph node type rather than operation:
- * `ConvolutionFwdAttributes` is a structurally different node from `PointwiseAttributes`,
- * so this engine's single graph matcher checks a different node type outright rather
- * than sharing an applicability matcher and adding an operation matcher the way
- * Pointwise's packs do (PointwiseNative.cpp). One pack, one operation, so
- * PackSymbols::operationMatcher (tests/.../PointwiseTestGraphs.hpp) is empty for it.
- *
- * Deliberately narrow: only stride 1, dilation 1, no padding, cross-correlation, packed
- * NCHW/KCRS/NKPQ, FLOAT or HALF. The matcher must refuse everything outside that shape
- * rather than let the naive kernel compute a wrong answer.
+ * A second engine beside Pointwise, split on graph node type (`ConvolutionFwdAttributes`
+ * vs `PointwiseAttributes`) rather than operation, so one pack needs no operation
+ * matcher of its own. Deliberately narrow -- stride 1, dilation 1, no padding,
+ * cross-correlation, packed NCHW/KCRS/NKPQ, FLOAT/HALF -- and the matcher must refuse
+ * everything outside that shape rather than let the naive kernel compute wrong answers.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -111,11 +106,10 @@ bool allEqual(const flatbuffers::Vector<int64_t>* values, size_t expectedSize, i
 }
 
 /// True when @p tensor is a supported rank, holds packed row-major strides for its own
-/// dims, is real device data, and is a dtype this pack's kernel is compiled for.
-///
-/// The packed-strides check matters because the kernel takes no stride arguments at
-/// all: it derives every offset from dims alone, so a tensor merely ordered NCHW but
-/// not contiguous would be read at the wrong offset without ever failing to match.
+/// dims, is real device data, and is a dtype this pack's kernel is compiled for. The
+/// packed-strides check matters because the kernel takes no stride arguments at all --
+/// a tensor merely ordered NCHW but not contiguous would be read at the wrong offset
+/// without ever failing to match.
 bool isSupportedOperand(const data_objects::TensorAttributes& tensor)
 {
     const auto* dims = tensor.dims();
@@ -192,16 +186,13 @@ std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
 
 /**
  * @brief Graph-scoped applicability: is this the one conv shape this engine's kernel
- *        can launch?
- *
- * One pack, one operation, so this matcher (unlike Pointwise's) both admits the node
- * type and validates it in one pass -- there is no separate operation matcher to split
- * the work with.
+ *        can launch? One pack, one operation, so this matcher (unlike Pointwise's)
+ *        both admits the node type and validates it in one pass.
  */
 bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    // No device, no launch. Every fact this matcher selects on, including the device
-    // properties the compile is configured from, is meaningless without one.
+    // No device, no launch: the device properties the compile is configured from are
+    // meaningless without one.
     if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
     {
         return false;
@@ -258,10 +249,10 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
     const auto wR = wDims->Get(2);
     const auto wS = wDims->Get(3);
 
-    // Filter channels vs. input channels -- also the missing group-count refusal:
-    // grouped conv is encoded purely as a smaller w channel count, and this kernel has
-    // no notion of groups. prepare() takes c from x alone (below) and the kernel
-    // indexes w with it (ConvFwd.cpp); a filter with fewer channels reads off the end.
+    // Filter channels vs. input channels -- this also refuses grouped conv, which is
+    // encoded purely as a smaller w channel count; the kernel has no notion of groups
+    // and indexes w using c from x alone, so a filter with fewer channels would read
+    // past the end.
     if(wDims->Get(1) != xC)
     {
         return false;
@@ -274,9 +265,9 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
         return false;
     }
 
-    // y must be exactly the shape the kernel computes it for: total = n*k*p*q is
-    // derived entirely from x and w, and the kernel writes every index < total into y.
-    // A smaller y is an out-of-bounds write.
+    // y must be exactly the shape the kernel computes: total = n*k*p*q comes from x
+    // and w alone, and the kernel writes every index < total into y, so a smaller y
+    // overflows.
     if(yDims->Get(0) != xDims->Get(0) || yDims->Get(1) != wK || yDims->Get(2) != xH - wR + 1
        || yDims->Get(3) != xW - wS + 1)
     {
@@ -293,9 +284,8 @@ bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
 
 /**
  * @brief Kernel-scoped applicability: does this kernel's dtype match the graph's?
- *
- * Evaluated once per candidate kernel. Without it, an f32 graph could reach an f16
- * binary and return wrong numbers rather than failing.
+ *        Evaluated once per candidate kernel; without it an f32 graph could reach an
+ *        f16 binary and return wrong numbers rather than failing.
  */
 bool convFwdKernelMatches(const MatchContext& context, const KernelDefinition& kernel)
 {
@@ -458,12 +448,10 @@ const data_objects::TensorAttributes& requireTensor(const MatchContext& context,
 }
 
 /**
- * @brief The native dispatch behind this pack's UDD: sizes and launches the conv kernel.
- *
- * Splits per RFC 0017 §8.5: everything derived from the graph and chosen kernel
- * resolves once at plan build; execute only resolves device pointers by uid and
- * launches. A plan may execute concurrently from several threads, so nothing here
- * mutates after preparation.
+ * @brief The native dispatch behind this pack's UDD: sizes and launches the conv
+ *        kernel. Splits per RFC 0017 §8.5: everything graph/kernel-derived resolves
+ *        once at prepare(); execute() only resolves buffers and launches, so nothing
+ *        mutates once prepared and concurrent execution is safe.
  */
 class ConvFwdDispatchHandler : public hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>
 {
@@ -517,10 +505,9 @@ public:
 
         const auto p = h - r + 1;
         const auto q = width - s + 1;
-        // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits (element
-        // count is unbounded); the previous 32-bit product silently wrapped here and
-        // in the kernel body (ConvFwd.cpp), corrupting both the grid size and the
-        // kernel's own bounds guard.
+        // int64_t: n*k*p*q can exceed 2^31 for shapes this matcher admits. A 32-bit
+        // product here previously wrapped silently, corrupting both the grid size and
+        // the kernel's own bounds guard (ConvFwd.cpp).
         const int64_t total = static_cast<int64_t>(n) * k * p * q;
         const auto gridSize = static_cast<unsigned int>(
             (total + static_cast<int64_t>(blockSize) - 1) / static_cast<int64_t>(blockSize));
@@ -565,11 +552,9 @@ private:
     const compilation::IKernelCompiler& _kernelCompiler;
 };
 
-/// This pack's dispatch handler.
-///
-/// Process-lifetime: the registry holds a non-owning pointer to it while a provider's
-/// Container is created and destroyed per handle, so it must outlive every Container.
-/// The compiler it holds is a static for the same reason.
+/// This pack's dispatch handler, process-lifetime: the registry holds a non-owning
+/// pointer to it, but a provider's Container is created and destroyed per handle, so
+/// it (and the compiler it holds) must outlive every Container.
 const ConvFwdDispatchHandler& convFwdDispatchHandler()
 {
     static const HipMlopsKernelCompiler s_kernelCompiler;

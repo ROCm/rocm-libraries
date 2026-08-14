@@ -44,11 +44,8 @@
  * @file DescriptorLoader.hpp
  * @brief Reads descriptor files from disk into the types Descriptors.hpp models.
  *
- * The UED follows RFC 0020, which is the source of truth for that file; the other five
- * follow RFC 0017 §4 until their own follow-ups land.
- *
- * One descriptor per file, and the filename suffix is the only thing that types it. The
- * `id` field inside is authoritative for identity; the stem is never parsed:
+ * One descriptor per file; the filename suffix is the only thing that types it. The `id`
+ * field inside is authoritative for identity, the stem is never parsed:
  *
  * | Filename          | Struct               |
  * |-------------------|----------------------|
@@ -59,63 +56,30 @@
  * | `<name>.udd.json` | DispatchDescriptor   |
  * | `<name>.kdp.json` | KernelDescriptorPack |
  *
- * The stem is free-form documentation: `pointwise_add.kdp.json` and `a.kdp.json` are read
- * identically, and a non-empty stem is required, so a bare `.ued.json` is not a descriptor.
- * Directories under the root are organizational only -- the tree is walked recursively and
- * a file's folder means nothing to the loader. A `.json` (or `.jsonc`, never a loadable
- * extension) whose name matches no suffix is logged at WARN and skipped before it is
- * opened.
+ * Directories under the root are organizational only -- the walk is recursive and a
+ * file's folder means nothing here. A `.json`/`.jsonc` matching no suffix is a WARN and
+ * skip, not an error. Every file carries a required `version`, gated per type (FILE_TYPES
+ * below) by RFC 0017 §4: accept iff the major matches and the minor is no newer.
  *
- * Every file carries a required `version`, `major.minor`, gated by RFC 0017 §4's rule:
- * accept iff the major equals this build's and the minor is no newer -- per type (the
- * `FileType` row below), not one shared pair, so the first type to advance a minor cannot
- * silently widen what the other five accept. A file this build cannot read is skipped
- * whole rather than half-understood.
+ * The UED follows RFC 0020 (source of truth); the other five follow RFC 0017 §4 until
+ * their own follow-ups land. Two deliberate divergences from RFC 0020 §4.2, pending an
+ * amendment: no `schema` member -- the filename already carries that fact, and a file
+ * whose name and body disagree has no correct reading; and `version` required on all six
+ * types, not just the UED -- a type with no version can't be gated by §11.1 at all.
+ * `sdk_version` sits on the UED rather than the UMD as RFC 0017 §4 has it; see the note at
+ * parseEngineDescriptor().
  *
- * Three deliberate divergences from RFC 0020 §4.2, all pending an amendment; a §11.3
- * schema validator would reject these files until it lands:
+ * Apart from the UED and KDP, whose keys the RFCs fix, every JSON key is the snake_case
+ * spelling of its C++ field, and an unrecognized key is a parse error, not a silent
+ * no-op -- so a typo is reported rather than ignored. The KDP's `kernelDescriptors` key
+ * is camelCase, the RFCs' own inconsistency, kept as-is rather than silently "fixed".
  *
- * - There is no `schema` member. §4.2 requires it, with the exact value `hipdnn.ued/v1`.
- *   Here the filename carries that information, so the field would be a second spelling of
- *   a fact the name already states -- two places to disagree, and a file whose name and
- *   body disagree has no correct reading. Naming the type outside the file is also what
- *   lets a `.json` that names no descriptor type be skipped before it is opened. A file
- *   still carrying the key is rejected as an unknown key rather than ignored.
- * - `version` is required on all six types. RFC 0020 §4.2 mandates it for the UED and no
- *   RFC yet covers the other five, so this is stricter than the letter of the spec -- but
- *   RFC 0017 §4 versions every file type independently, and a type carrying no version
- *   cannot be gated by the §11.1 accept rule at all. A KMD that gained a field in a later
- *   minor would otherwise be read by an older runtime with no way to refuse it.
- * - `sdk_version` sits on the UED where RFC 0017 §4 puts it on the UMD. See the note at
- *   parseEngineDescriptor().
+ * Only fields Descriptors.hpp models are parsed; the RFCs describe more (declarative
+ * `nodes`/`criteria`, `features_signature`) that arrive with follow-up RFCs. This loader
+ * mirrors the structs exactly, so a new field is a change in both places and nowhere else.
  *
- * A third, narrower deviation from RFC 0017 §4 rather than RFC 0020: a KMD `fields` entry
- * allows only `{name, type, default_value}`. The RFC's own example field also carries
- * `optional` and spells the default `default` rather than `default_value`; MetadataField
- * (Descriptors.hpp) has neither an `optional` member nor that spelling, so a conforming
- * field is rejected as an unknown key until the struct grows one -- not done here, since
- * Descriptors.hpp belongs to a different change.
- *
- * Apart from the UED and KDP, whose keys the RFCs fix (RFC 0020 §4.2 for the UED; RFC
- * 0017 §4 and RFC 0020 §7/§10.3/§A.2 for the KDP), every JSON key is the `snake_case`
- * spelling of the C++ field name, and any key not spelled by the struct is a parse error
- * rather than a silent no-op, so a typo is reported instead of ignored. The KDP's
- * `kernelDescriptors` key is camelCase -- the RFCs' own inconsistency, kept rather than
- * silently "fixed" so a reader does not mistake it for a typo here. Optional keys, with
- * their defaults: `default_value` (absent -> std::nullopt), `priority` (absent -> 0),
- * `arch` (absent -> empty, meaning arch-independent), and `knobs` / `behavior_notes` /
- * `numerical_notes` / a kernel's own `metadata` (absent -> empty). The UED's `metadata`
- * (its KMD reference) is required despite the shared name. Everything else is required.
- *
- * The authored format is deliberately a subset of what the RFCs describe, carrying only
- * what Descriptors.hpp models: the declarative `nodes`/`criteria`, `grid`/`block`/
- * `args_signature`, and `features_signature` have no parsed representation yet, so they
- * are rejected as unknown keys. They arrive with the follow-up RFCs that add the fields;
- * because this loader is a mechanical mirror of the structs, adding a field is a change in
- * both places and nowhere else.
- *
- * Nothing here throws to its caller. A malformed file, an unresolvable cross-reference,
- * or an unregistered native symbol is logged at ERROR naming the file, id and name, and
+ * Nothing here throws to its caller: a malformed file, unresolved cross-reference, or
+ * unregistered native symbol is logged at ERROR naming the file, id and name, and
  * skipped, so one bad descriptor never costs a working engine.
  */
 namespace hipdnn_plugin_sdk::ingestor
@@ -126,10 +90,8 @@ template <typename T>
 struct CatalogEntry
 {
     T descriptor;
-    /// The parsed document, kept so a second file claiming the same id can be compared
-    /// against this one by content. Comparing the parsed JSON ignores key order and
-    /// whitespace; comparing the parsed structs instead would need an operator== on all
-    /// seven descriptor types that nothing else in the system wants.
+    /// Kept so a second file claiming the same id can be compared by content: parsed JSON
+    /// ignores key order/whitespace, unlike adding operator== to all seven struct types.
     nlohmann::json source;
     std::filesystem::path path; ///< first file that defined this id
     bool conflicted = false; ///< two files disagreed; treat as absent
@@ -164,12 +126,11 @@ inline constexpr std::string_view SUFFIX_UMD = ".umd.json";
 inline constexpr std::string_view SUFFIX_UDD = ".udd.json";
 inline constexpr std::string_view SUFFIX_KDP = ".kdp.json";
 
-/// One row per descriptor file type: the suffix that selects it, the `major.minor` RFC 0017
-/// §4 has this build accept for it (one row per type, not a build-wide pair, so the first
-/// type to reach 1.1 cannot widen what the other five accept), and the parse-and-insert
-/// function. Declared here, ahead of every parse function, so versionIsSupported() below
-/// can take a row by reference; FILE_TYPES itself is assembled further down, after every
-/// parse function it names exists to take the address of.
+/// One row per descriptor file type: the suffix that selects it, the `major.minor` this
+/// build accepts per RFC 0017 §4 (per type, not a build-wide pair, so one type reaching
+/// 1.1 can't widen what the others accept), and the parse-and-insert function. Declared
+/// ahead of the parse functions so versionIsSupported() below can take a row by
+/// reference; FILE_TYPES itself is assembled further down.
 struct FileType
 {
     std::string_view suffix;
@@ -238,22 +199,19 @@ inline std::string
     return text;
 }
 
-/// A descriptor's declared `major.minor`. Deliberately not `hipdnn_data_sdk::Version`,
-/// which is `major.minor.patch`: RFC 0020 §4.2 spells this field with exactly two
-/// components, so `1.0.0` is a malformed descriptor version rather than a second opinion
-/// about the same value. The two types also answer different questions -- this one gates
-/// the file at load, `Version` gates a graph against an engine at match time.
+/// A descriptor's declared `major.minor`. Deliberately not `hipdnn_data_sdk::Version`
+/// (`major.minor.patch`): RFC 0020 §4.2 spells this field with exactly two components,
+/// and the two types gate different things -- this one a file at load, `Version` a graph
+/// against an engine at match time.
 struct DescriptorVersion
 {
     int major = 0;
     int minor = 0;
 };
 
-/// Parses `<major>.<minor>`, each a plain digit run.
-///
-/// The halves are separate integers, not a decimal fraction: RFC 0020 §11.1 compares them
-/// as integers, so `1.10` is newer than `1.9`. Reading the field as a number would order
-/// those two backwards, which is why this never goes near a float.
+/// Parses `<major>.<minor>` as two separate integers, not a decimal fraction: RFC 0020
+/// §11.1 compares them as integers, so `1.10` is newer than `1.9` -- reading the field as
+/// a float would order those two backwards.
 inline DescriptorVersion parseDescriptorVersion(const std::string& text, const std::string& where)
 {
     const std::string_view all{text};
@@ -278,16 +236,10 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
     return version;
 }
 
-/// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed, so a
-/// file this build cannot read is skipped whole rather than half-understood.
-///
-/// @p fileType names the type and carries the major/minor this build accepts for it (D3:
-/// one row per type, not a build-wide pair, so the first type to reach 1.1 cannot widen
-/// what the other five accept).
-///
-/// Runs ahead of the catalog insert, which is what puts it ahead of duplicate detection:
-/// RFC 0020 §10.2.1 requires an unsupported-version UED to drop for its version alone and
-/// leave the descriptors it would have collided with standing.
+/// RFC 0017 §4's accept rule, run for every descriptor before its body is parsed and
+/// ahead of the catalog insert: RFC 0020 §10.2.1 requires an unsupported-version UED to
+/// drop for its version alone and leave the descriptors it would have collided with
+/// standing.
 inline bool versionIsSupported(const nlohmann::json& document,
                                const FileType& fileType,
                                const std::filesystem::path& path)
@@ -523,6 +475,9 @@ inline bool coerceToDeclaredType(MetadataValue& value, MetadataType declared)
     return false;
 }
 
+/// Deviates from RFC 0017 §4: the RFC's example field also carries `optional` and spells
+/// the default `default`, but MetadataField has neither, so a conforming field is
+/// rejected as an unknown key until the struct grows one.
 inline MetadataSchema parseMetadataSchema(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_KMD};
@@ -667,13 +622,10 @@ inline std::vector<std::string> requireArchList(const nlohmann::json& object,
 inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
 {
     const std::string where{SUFFIX_UED};
-    // `sdk_version` is a known deviation from RFC 0020 §4.2, whose field table and
-    // `additionalProperties: false` schema do not list it: RFC 0017 §4 puts the graph
-    // schema version on the UMD ("Every other descriptor needs only its own version"),
-    // while the ingestor carries it on the engine, because every descriptor under an
-    // engine reads the tokens that engine's binding produced and so must agree on one
-    // schema. Accepted here pending the RFC amendment that moves the field; a §11.3
-    // schema validator would reject it until then.
+    // `sdk_version` deviates from RFC 0020 §4.2, whose field table and schema don't list
+    // it: RFC 0017 §4 puts the graph schema version on the UMD, but every descriptor
+    // under an engine reads tokens that engine's binding produced, so it belongs on the
+    // engine instead. Accepted here pending the RFC amendment that moves the field.
     requireOnlyKeys(root,
                     {"version",
                      "id",
@@ -710,10 +662,9 @@ inline EngineDescriptor parseEngineDescriptor(const nlohmann::json& root)
     requireNoDuplicates(engine.numericalNotes, "numerical note", where);
 
     // The graph schema this engine's descriptors were authored against. Absent leaves
-    // the struct's baseline default, which every graph's floor is at least equal to, so
-    // an engine that declares nothing keeps behaving as it did before the field existed.
-    // Gating on it is match-time and belongs to the engine (Descriptors.hpp); the loader
-    // only carries the value.
+    // the struct's baseline default, so an engine declaring nothing behaves as it did
+    // before the field existed. Gating is match-time and belongs to the engine
+    // (Descriptors.hpp); the loader only carries the value.
     if(const auto it = root.find("sdk_version"); it != root.end())
     {
         try
@@ -763,22 +714,17 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     const std::string kindText = requireString(root, "kind", where);
     source.kind = kernelSourceKindFromString(kindText, where);
     // Only EMBEDDED_SOURCE has an implementation the dispatch handler can call, and that
-    // handler never inspects source.kind -- it always calls getKernelSrc(sourceFile,
-    // entryPoint), so accepting another kind here would leave applicability advertising
-    // a kernel that throws inside getKernelSrc("") at plan-build time instead of one this
-    // loader's own fail(...) path rejects at load, where the pack still drops cleanly.
+    // handler never inspects source.kind -- so accepting another kind here would let
+    // applicability advertise a kernel that throws inside getKernelSrc("") at
+    // plan-build time instead of failing cleanly at load.
     if(source.kind == KernelSourceKind::EMBEDDED_SOURCE)
     {
-        // Not cross-checked against the provider's embedded kernel map: that map
-        // (`hip_plugin::getKernelSrc`, generated per provider by KernelEmbedding.cmake)
-        // is provider-specific with no plugin_sdk-level registry shaped like
-        // NativeRegistry::isRegistered to check against here. A typo'd source_file or
-        // entry_point is a non-empty string that reaches getKernelSrc() and throws at
-        // plan-build time -- after applicability has already promised the graph, the
-        // same late-failure mode the match/dispatch/score pre-flight in
-        // loadValidatedDescriptorSets() closes for those three. Closing it here needs a
-        // registry the provider populates at startup that this loader can query the same
-        // way; not added speculatively.
+        // Not cross-checked against the provider's embedded kernel map: that map is
+        // provider-specific with no plugin_sdk-level registry to check against. A
+        // typo'd source_file/entry_point reaches getKernelSrc() and throws at
+        // plan-build time -- the same late-failure mode the match/dispatch/score
+        // pre-flight in loadValidatedDescriptorSets() closes for those three. Not
+        // closed here without a provider-populated registry to query.
         source.sourceFile = requireString(root, "source_file", where);
         source.entryPoint = requireString(root, "entry_point", where);
     }
@@ -899,17 +845,12 @@ inline void insertCatalogEntry(DescriptorMap<T>& map,
                                                             << " name='" << name << "'");
         return;
     }
-    // Parsed-JSON equality, not byte equality: `source` is the already-parsed
-    // nlohmann::json document, so two files differing only in whitespace, key order, or
-    // an int-vs-float spelling of the same number still compare equal here. That is the
-    // right comparison -- those differences never survive into the parsed descriptor
-    // either, so treating them as a real collision would fail a duplicate shard over a
-    // formatting choice. A per-arch layout shipping one shared UED is the case this
-    // collapses to one rather than tripping the drop-all rule. RFC 0020 §10.2.1 says
-    // drop every UED in an id collision, but its reason is that keep-the-first leaves
-    // which definition won up to load order; with semantically identical content there
-    // is no second definition to choose between. Differing content under one id is a
-    // real collision and drops both, below.
+    // Parsed-JSON equality, not byte equality: whitespace, key order, or int-vs-float
+    // spelling never survive into the parsed descriptor either, so treating them as a
+    // real collision would fail a duplicate shard over a formatting choice -- e.g. a
+    // per-arch layout shipping one shared UED. RFC 0020 §10.2.1's drop-all rule exists
+    // because keep-the-first leaves which definition won up to load order; with
+    // identical content there is no second definition to choose between.
     if(it->second.source == source)
     {
         HIPDNN_PLUGIN_LOG_INFO("descriptor loader: duplicate identical descriptor "
@@ -982,13 +923,11 @@ inline bool
     return true;
 }
 
-/// RFC 0020 §12: an engine named in HIPDNN_DISABLE_ENGINES is skipped before registration,
-/// so it never loads and never claims its name or id. An entry may be the UED `name`, the
-/// 64-bit engine id that name hashes to (decimal or `0x` hex), or the UED's own UUID; an
-/// entry matching nothing is ignored, because one list is expected to span providers.
-///
-/// Read per load rather than cached: loads are rare, and a cached first read would make
-/// the variable order-dependent inside a shared test binary.
+/// RFC 0020 §12: an engine named in HIPDNN_DISABLE_ENGINES is skipped before
+/// registration. An entry may be the UED `name`, the 64-bit engine id it hashes to
+/// (decimal or `0x` hex), or the UED's own UUID; an entry matching nothing is ignored,
+/// since one list is expected to span providers. Read per load, not cached, since a
+/// cached first read would make this order-dependent inside a shared test binary.
 inline bool isEngineDisabled(const EngineDescriptor& engine)
 {
     const auto list = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DISABLE_ENGINES", "");
@@ -1041,9 +980,9 @@ inline bool isEngineDisabled(const EngineDescriptor& engine)
     return false;
 }
 
-/// D1: `schema` this row's type must carry. D3: `major`/`minor` this build accepts for
-/// it, six independent rows rather than one shared pair, so raising one type's version
-/// is a one-row edit that cannot silently widen what the other five accept.
+/// Each row names the suffix it matches and the `major`/`minor` this build accepts for
+/// it -- six independent pairs rather than one shared pair, so raising one type's
+/// version cannot silently widen what the other five accept.
 inline constexpr std::array FILE_TYPES{
     FileType{SUFFIX_KMD,
              1,
@@ -1126,16 +1065,12 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
         return catalog;
     }
 
-    // `arch` prunes at match time only (buildCatalog, per MatchContext call), not here:
-    // the calling device is unknown at load time. Folders under the root are purely
-    // organizational -- the walk is recursive and a file's directory means nothing to
-    // the loader, so nothing here groups files by architecture.
-    //
-    // skip_permission_denied: without it, one unreadable subdirectory turns the whole
-    // iterator into end() instead of just not descending into that one entry, silently
-    // losing every engine after it -- a real risk once engines live in their own
-    // subfolders. Iterated with the error_code overloads throughout rather than a
-    // range-for or the throwing increment(), since this loader promises never to throw.
+    // `arch` prunes at match time only, not here -- the calling device is unknown at
+    // load, and folders are purely organizational (the walk is recursive; a file's
+    // directory means nothing to the loader). skip_permission_denied keeps one
+    // unreadable subdirectory from turning the whole iterator into end() and silently
+    // losing every engine after it; iterated with error_code overloads throughout since
+    // this loader promises never to throw.
     std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
     auto walk = std::filesystem::recursive_directory_iterator(
         root, std::filesystem::directory_options::skip_permission_denied, error);
@@ -1489,12 +1424,10 @@ inline std::vector<DescriptorSet> resolveDescriptorSets(const DescriptorCatalog&
         sets.push_back(std::move(set));
     }
 
-    // Packs are only ever reached through the per-engine scan above (entry.descriptor.
-    // engineId == engine.id), so a pack naming an id no UED descriptor defines is never
-    // visited by any loop and would otherwise vanish with no diagnostic -- the one silent
-    // failure in a loader where every other rejection is logged. Diagnostics only: this
-    // never changes what gets loaded. Sorted by id, like every other diagnostic here, so
-    // the log order is a function of the files rather than of unordered_map hash order.
+    // Packs are only ever reached through the per-engine scan above, so a pack naming an
+    // id no UED defines would otherwise vanish with no diagnostic -- the one silent
+    // failure in a loader where every other rejection is logged. Diagnostics only; never
+    // changes what gets loaded.
     std::vector<const CatalogEntry<KernelDescriptorPack>*> orphans;
     for(const auto& [id, entry] : catalog.packs)
     {
@@ -1584,13 +1517,10 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
 
     for(auto& set : resolveDescriptorSets(loadDescriptorCatalog(root)))
     {
-        // Symbols are checked here rather than inside KernelIngestorStateManager's
-        // constructor, where the other cross-reference validation lives. Moving them there
-        // would cover hand-built packs too, but that constructor is handed an
-        // already-built heuristic rather than the UHD, so the score symbol would still
-        // have to be checked out here. Checking at load is what the ticket requires:
-        // getDispatchDetails() throws only *after* applicability has told hipDNN the engine
-        // will serve the graph, which is far too late to skip a descriptor.
+        // Checked here rather than inside KernelIngestorStateManager's constructor, where
+        // the other cross-reference validation lives, because getDispatchDetails() throws
+        // only *after* applicability has told hipDNN the engine will serve the graph --
+        // far too late to skip a descriptor.
         bool resolvable = true;
         for(const auto& matcher : set.matchers)
         {
@@ -1625,29 +1555,20 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
             resolvable = false;
         }
 
-        // A name hashing onto an engine someone else already registered is dropped, and
-        // the incumbent stands: RFC 0020 §10.2.1's drop-all applies to the UEDs in a
-        // collision, and a hand-written engine is not one of them. Skipped for a name this
-        // loader itself registered, because reloading a directory must be idempotent.
+        // A name hashing onto an engine someone else already registered is dropped and the
+        // incumbent stands (RFC 0020 §10.2.1's drop-all applies to UEDs in a collision, not
+        // to a hand-written engine); skipped for a name this loader itself registered, so
+        // reloading a directory is idempotent. Rarely reachable by design -- §4.2 requires
+        // a scoped `namespace:local` name and every built-in is unscoped, so this needs an
+        // FNV-1a collision between the two spellings, not a literal name clash.
         //
-        // Rarely reachable by design: §4.2 requires a scoped `namespace:local` name and
-        // every built-in is unscoped (HIP_MLOPS_ENGINE, MIOPEN_ENGINE), so a literal
-        // collision cannot be authored -- this fires on an FNV-1a collision between the
-        // two spellings.
-        //
-        // Scope: the registry behind getEngineIdToNameMap() is process-wide but private to
-        // one plugin, which is built with hidden visibility and --exclude-libs=ALL. Two
-        // plugins can therefore claim one engine id without either seeing the other, and
-        // the backend does not adjudicate it: EnginePluginManager::validateBeforeAdding
-        // checks the API version string and ABI major only, with no id dedup (the
-        // heuristic plugin manager has that check; the engine one never grew it). Nothing
-        // a loader can fix -- neither side is visible from here -- so cross-plugin
-        // uniqueness is a backend concern. Descriptors raise the odds of tripping it,
-        // since a UED name comes from a file rather than a curated macro list.
-        //
-        // In-process pairs this cannot see -- two hand-written engines, or anything
-        // registering after the load -- are caught by EngineManager::addEngine, which logs
-        // the duplicate rather than letting the map discard it in silence.
+        // Blind spot: the registry behind getEngineIdToNameMap() is private to one plugin
+        // (hidden visibility, --exclude-libs=ALL), so two plugins can claim one engine id
+        // without either seeing the other -- EnginePluginManager::validateBeforeAdding
+        // checks only the API version and ABI major, with no id dedup. Not fixable here;
+        // a backend concern. In-process pairs this can't see (two hand-written engines, or
+        // anything registering after load) are caught by EngineManager::addEngine, which
+        // logs the duplicate instead of letting the map discard it in silence.
         const auto& registered = hipdnn_data_sdk::utilities::getEngineIdToNameMap();
         const auto claimed
             = registered.find(hipdnn_data_sdk::utilities::engineNameToId(set.engine.name));
@@ -1669,13 +1590,10 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
 
         try
         {
-            // Built only to prove the set validates, then thrown away: the state manager's
-            // constructor is where duplicate-metadata-tuple and cross-reference validation
-            // lives, and Container::copyEngineIds is static -- it advertises ids with no
-            // container in existence, so an engine that parses but fails to construct would
-            // make the advertised count exceed the constructed one. Extracting
-            // validateAndIndexPacks() into a predicate both this and that constructor call
-            // would remove this discarded second walk.
+            // Built only to prove the set validates, then thrown away: Container::copyEngineIds
+            // is static and would otherwise advertise an id for a set that fails to
+            // construct. Extracting validateAndIndexPacks() into a shared predicate would
+            // remove this discarded second walk.
             auto probe = makeStateManager<THandle>(set);
             static_cast<void>(probe);
         }
@@ -1687,12 +1605,11 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
             continue;
         }
 
-        // Best-effort, and a throw here is logged and ignored: registration only improves
-        // plugin-side diagnostics, because the registry is process-local to a plugin built
-        // with hidden visibility and --exclude-libs=ALL, so the backend's copy never sees it
-        // and hipdnn_list_engines still renders these engines as hex (AICK-1901). Real name
-        // collisions are already rejected above, so a throw here means the name was
-        // registered by an earlier call and is not a reason to drop a working engine.
+        // Best-effort; a throw here is logged and ignored. Registration only improves
+        // plugin-side diagnostics (the registry is process-local, hidden visibility, so
+        // hipdnn_list_engines still renders these as hex -- AICK-1901); real name
+        // collisions are already rejected above, so a throw here just means an earlier
+        // call already registered this name.
         auto& registeredNames = detail::registeredEngineNames();
         try
         {
