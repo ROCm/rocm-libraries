@@ -196,9 +196,10 @@ def get_gpu_revision_target(c):
     help={
         "rocisa_dir": "Path to the rocisa source directory (default: rocisa/ next to this file).",
         "stinkytofu_prefix": "Install prefix for the stinkytofu build (default: build_tmp/stinkytofu-install).",
+        "static": "Build stinkytofu static (BUILD_SHARED_LIBS=OFF) instead of the default shared build.",
     }
 )
-def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
+def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, static=False):
     """Install rocisa as an editable pip package.
 
     Not required before `invoke build-client` — the client build enables
@@ -208,8 +209,12 @@ def rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
 
     Builds and installs stinkytofu locally first so rocisa uses
     find_package(stinkytofu) — mirroring how TheRock wires the two together.
+
+    Pass --static to build stinkytofu static instead of shared — useful for
+    exercising the static-plugin path covered by
+    rocisa/test/test_pass_plugin.py::TestHelloWorldPassIntegrationStatic.
     """
-    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix)
+    _pip_install_rocisa(c, rocisa_dir, stinkytofu_prefix, shared=not static)
 
 
 def _load_stinkytofu_tasks():
@@ -227,13 +232,18 @@ def _load_stinkytofu_tasks():
     return mod
 
 
-def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) -> None:
+def _build_and_install_stinkytofu(
+    c, install_prefix: pathlib.Path, rocm: str, shared: bool = True
+) -> None:
     """Build stinkytofu and install it to install_prefix so rocisa can find_package it.
 
     Build flags come from stinkytofu_tasks.cmake_build_args() — the single source
     of truth — so a new required cmake option only needs to be added there.
     Compiler selection mirrors shared/stinkytofu/tasks.py `invoke build`.
     cmake is incremental, so repeat calls are a fast no-op when nothing changed.
+
+    shared=False builds stinkytofu static (BUILD_SHARED_LIBS=OFF) instead of
+    the default shared library.
     """
     stinkytofu_src = _TASKS_DIR.parent.parent.parent / "shared" / "stinkytofu"
     build_dir = install_prefix.parent / "stinkytofu-build"
@@ -256,7 +266,9 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
         # into the installed libstinkytofu RPATH for this dev/standalone build.
         "-DSTINKYTOFU_INSTALL_RPATH_USE_LINK_PATH=ON",
         # tests/python OFF for the rocisa integration build; examples ON (default).
-        *st.cmake_build_args(install_prefix=install_prefix, tests=False, python=False),
+        *st.cmake_build_args(
+            install_prefix=install_prefix, tests=False, python=False, shared=shared
+        ),
     ]
     if shutil.which("ninja"):
         cmake_cmd.append("-G Ninja")
@@ -270,7 +282,7 @@ def _build_and_install_stinkytofu(c, install_prefix: pathlib.Path, rocm: str) ->
     c.run(shlex.join(["cmake", "--install", str(build_dir)]))
 
 
-def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
+def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None, shared=True):
     """Editable-install rocisa via scikit-build-core.
 
     Factored out of the `rocisa` task so `build_client` can reuse it to keep
@@ -281,6 +293,9 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     via find_package(stinkytofu) — the same path TheRock uses. This exercises
     the installed package layout (stinkytofuConfig.cmake, exported targets) so
     breakage is caught early in the dev/CI workflow.
+
+    shared=False builds and links a static stinkytofu instead of the default
+    shared library.
     """
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else _TASKS_DIR / "rocisa"
     rocm = _detect_rocm()
@@ -290,11 +305,15 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
         if stinkytofu_prefix
         else _TASKS_DIR / "build_tmp" / "stinkytofu-install"
     )
-    _build_and_install_stinkytofu(c, prefix, rocm)
+    _build_and_install_stinkytofu(c, prefix, rocm, shared=shared)
 
     cmake_args = (
         f"-DROCM_PATH={rocm}"
         f" -DROCISA_INCLUDE_BUILD_INFO=ON"
+        # Compiles the HelloWorldPass example plugin directly into _rocisa so
+        # TestHelloWorldPassIntegrationStatic can exercise the compiled-in
+        # plugin path regardless of whether stinkytofu above is shared or static.
+        f" -DROCISA_BUILD_HELLOWORLD_STATIC_PLUGIN=ON"
     )
     if shutil.which("ccache"):
         cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
