@@ -182,6 +182,11 @@ int main() {
     require(Scalar::zero(ScalarType::Float6E2M3).as<float>() == 0.0f &&
                 Scalar::one(ScalarType::Float6E2M3).as<float>() == 1.0f,
             "Runtime scalar zero/one construction failed for a packed type.");
+    require(scalarElementGroupSize(ScalarType::Float32) == 1 &&
+                scalarElementGroupSize(ScalarType::Int4) == 2 &&
+                scalarElementGroupSize(ScalarType::Float6E2M3) == 4 &&
+                scalarElementGroupSize(ScalarType::Int12) == 2,
+            "Scalar element group sizes do not match byte-addressable groups.");
 
     bool invalidScalarStorageRejected = false;
     try {
