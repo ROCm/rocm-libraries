@@ -49,6 +49,8 @@
  * @note SwInstructionPrefetchAbsBaseSgpr: low index of the reserved 3-SGPR abs-prefetch base
  *        (even-aligned pair s[base:base+1] + scratch s[base+2]), auto-allocated in Tensile
  *        `_initKernel`. -1 = not reserved / pass no-ops (also -1 for Stream-K / non-gfx1250).
+ * @note TimePasses: print a per-pass wall-time report to stderr after the pipeline runs
+ *        (Tensile `StinkyTofuTimePasses`, stinkytofu-opt `--time-passes`).
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -76,6 +78,7 @@
     X(DebugPass, std::string)                     \
     X(PassOrderSnapshotJson, std::string)         \
     X(VerifyEach, bool)                           \
+    X(TimePasses, bool)                           \
     X(EnableRemarks, bool)                        \
     X(EnableWaitCntInsertion, bool)               \
     X(EnableLoopCarriedTokenDeps, bool)           \

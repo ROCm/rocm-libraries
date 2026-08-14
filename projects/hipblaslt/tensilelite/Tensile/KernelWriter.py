@@ -6781,6 +6781,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                # colliding stepping is targeted) tells StinkyTofu which cost table to use.
                                "ArchName": str(globalParameters.get("StinkyTofuArchName") or ""),
                                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+                               # Per-pass wall-time report on stderr once the pipeline has run.
+                               # Forced on while profiling kernel-generation time; restore
+                               "TimePasses": bool(globalParameters.get("StinkyTofuTimePasses") or False),
                                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
                                "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
                                "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),

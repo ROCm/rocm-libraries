@@ -395,6 +395,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# StinkyTofu per-pass wall time (stderr).  After each kernel's pipeline finishes,
+# report self time, inclusive total, and run count for every pass that ran, so a
+# slow kernel generation can be attributed to individual passes.
+globalParameters["StinkyTofuTimePasses"] = False
+
 # Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
 # When set, each kernel's StinkyTofu module writes its cost file here via
 # StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).

@@ -46,6 +46,7 @@
 #include "stinkytofu/serialization/asm/RawAsmParser.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/support/StandardInstrumentations.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 using namespace stinkytofu;
 
@@ -173,7 +174,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
         if (arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3") continue;
         if (arg.substr(0, 2) == "--") {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
-                arg == "--verify-each" || arg == "--preserve-symbolic-regs" ||
+                arg == "--verify-each" || arg == "--time-passes" ||
+                arg == "--preserve-symbolic-regs" ||
                 arg == "--preserve-comments" || arg.starts_with("--ds-read-order=") ||
                 arg.starts_with("--ds-read-queue-depth=") ||
                 arg.starts_with("--ds-read-drain-latency=") ||
@@ -311,6 +313,7 @@ int main(int argc, char** argv) {
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -369,6 +372,7 @@ int main(int argc, char** argv) {
         std::cerr << "  -O<N>            Run the registered pipeline at opt level N (0-3)\n";
         std::cerr << "  --remarks        Enable optimization remarks on stderr\n";
         std::cerr << "  --verify-each    Verify StinkyTofu ASM IR after every pass\n";
+        std::cerr << "  --time-passes    Report per-pass wall time on stderr\n";
         std::cerr << "  --list-passes    List all available passes\n";
         std::cerr << "  --version        Show version information\n";
         std::cerr << "  --help           Show this help message\n\n";
@@ -549,6 +553,7 @@ int main(int argc, char** argv) {
     bool emitAsm = false;
     bool enableRemarks = false;
     bool verifyEach = false;
+    bool timePasses = false;
     bool preserveSymbolicRegs = false;
     bool preserveComments = false;
     std::string outputFile;
@@ -559,6 +564,7 @@ int main(int argc, char** argv) {
         if (std::string(argv[i]) == "--emit-asm") emitAsm = true;
         if (std::string(argv[i]) == "--remarks") enableRemarks = true;
         if (std::string(argv[i]) == "--verify-each") verifyEach = true;
+        if (std::string(argv[i]) == "--time-passes") timePasses = true;
         if (std::string(argv[i]) == "--preserve-symbolic-regs") preserveSymbolicRegs = true;
         if (std::string(argv[i]) == "--preserve-comments") preserveComments = true;
         if (std::string(argv[i]) == "--debug-pass" && i + 1 < argc) {
@@ -764,6 +770,7 @@ int main(int argc, char** argv) {
             moduleOpts.OptLevel = optLevel;
             moduleOpts.EnableRemarks = enableRemarks;
             moduleOpts.VerifyEach = verifyEach;
+            moduleOpts.TimePasses = timePasses;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -788,11 +795,17 @@ int main(int argc, char** argv) {
             stinkytofu::PassManager passManager;
             stinkytofu::registerAllAnalyses(passManager.getAnalysisManager());
 
+            // Pipeline mode gets its session from Backend (ModuleOptions.TimePasses);
+            // here there is no module, so the driver owns it.
+            stinkytofu::TimePassesSession timing(timePasses, parsedFunc->funcName, std::cerr);
+
             passManager.addInstrumentation(createDebugPrintInstrumentation());
             if (verifyEach) {
                 passManager.addInstrumentation(
                     std::make_shared<stinkytofu::VerifyInstrumentation>());
             }
+            if (auto timer = stinkytofu::getActiveTimePasses())
+                passManager.addInstrumentation(std::move(timer));
             passManager.setPassFeatureConfig(passFeatureConfig);
             gemmTileConfig.arch = arch;
             passManager.setGemmTileConfig(gemmTileConfig);

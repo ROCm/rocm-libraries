@@ -22,11 +22,14 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/Backend.hpp"
 
+#include <iostream>
+
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/ModulePassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#include "stinkytofu/support/TimePassesInstrumentation.hpp"
 
 namespace stinkytofu {
 Backend::Backend(StinkyAsmModule& module) : module(module) {}
@@ -38,6 +41,13 @@ std::array<int, 3> Backend::getArch() const {
 bool Backend::runOptimization() {
     auto* pipeline = BackendRegistry::getArchPipeline(module.getArch());
     if (!pipeline || !pipeline->builder) return true;
+
+    // Opened before the pipeline is built so the builder installs the session's
+    // observer on every PassManager it creates. Declared ahead of mpm, so the
+    // report prints once all the passes are done.
+    const std::string kernelLabel =
+        module.getOutputName().empty() ? module.getName() : module.getOutputName();
+    TimePassesSession timing(module.getModuleOptions().TimePasses, kernelLabel, std::cerr);
 
     ModulePassManager mpm;
     if (!pipeline->builder(mpm, module, module.getPassBuilder())) return true;
