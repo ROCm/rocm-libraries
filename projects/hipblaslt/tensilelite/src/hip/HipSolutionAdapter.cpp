@@ -171,6 +171,13 @@ namespace TensileLite
                     }
                 );
             }
+            else if(error == hipErrorFileNotFound)
+            {
+                // Callers probe several name/xnack variants and expect misses;
+                // the aggregate failure is reported by the caller, so a missing
+                // variant is not an error worth printing here.
+                return error;
+            }
             else if(error)
             {
                 std::cerr << "hipModuleLoad failed: " << path.c_str() << std::endl

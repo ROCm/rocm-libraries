@@ -119,6 +119,9 @@ namespace TensileLite
 #endif // TENSILE_USE_BF16
 #ifdef TENSILE_USE_FP8_BF8
     using TypedGemm_F8_F8_S = TypedGemm<Float8, Float8, Float8, Float8, float, float>;
+    // TileQuant: bf16 inputs, fp8 output. C=Float8 matches D but is never read; beta=0 is
+    // required by TileQuant validation, so the C=Float8 choice is inert.
+    using TypedGemm_B_B_F8_S = TypedGemm<BFloat16, BFloat16, Float8, Float8, float, float>;
     using TypedGemm_F8_B8_S = TypedGemm<Float8, Float8, BFloat8, BFloat8, float, float>;
     using TypedGemm_F8_H_S  = TypedGemm<Float8, Float8, Half, Half, float, float>;
     using TypedGemm_F8_B_S  = TypedGemm<Float8, Float8, BFloat16, BFloat16, float, float>;

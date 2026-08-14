@@ -1530,7 +1530,7 @@ namespace rocisa
             {
                 kStr += "  - 1\n";
             }
-            else if(codeObjectVersion == "5")
+            else if(codeObjectVersion == "5" || codeObjectVersion == "6")
             {
                 kStr += "  - 2\n";
             }
@@ -1571,6 +1571,16 @@ namespace rocisa
             SignatureArgument sa(offset, name, kind, type, addrSpaceQual.value_or(""));
             argList.push_back(sa);
             offset += sa.size;
+        }
+
+        // Advance the kernarg byte offset to the next multiple of alignment
+        // without emitting a named argument. Returns the pad bytes inserted.
+        int alignKernArg(int alignment)
+        {
+            int aligned = ((offset + alignment - 1) / alignment) * alignment;
+            int pad     = aligned - offset;
+            offset      = aligned;
+            return pad;
         }
 
         std::string prettyPrint(const std::string& indent = "") const override
@@ -1629,6 +1639,11 @@ namespace rocisa
                     const std::optional<std::string>& addrSpaceQual = std::nullopt)
         {
             codeMeta.addArg(name, kind, type, addrSpaceQual);
+        }
+
+        int alignKernArg(int alignment)
+        {
+            return codeMeta.alignKernArg(alignment);
         }
 
         void addDescriptionTopic(const std::string& text)
