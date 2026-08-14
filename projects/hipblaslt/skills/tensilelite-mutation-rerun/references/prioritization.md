@@ -1,144 +1,152 @@
-# Prioritizing mutation work
+# Choosing the next module to test
 
-Choose the next mutation target from measured, reviewable evidence. The goal is
-not a universal score; it is a defensible next-work decision whose inputs and
-rationale remain understandable after the campaign context is gone.
+Choose the next mutation target from measurements that another developer can
+review. The goal is not one universal score. The goal is a clear decision whose
+inputs and reasoning remain understandable after the current campaign ends.
 
-## 1. Fix the candidate universe
+## 1. Keep one fixed list of candidate modules
 
-List candidate source modules before comparing metrics. For each candidate,
-record one status:
+List the source modules before comparing them. Give every module one status:
 
-- `completed`: mutation run and triage certified for the pinned source/config;
-- `ready`: covering set and environment are ready for a mutation slice;
-- `coverage-gap`: tests do not yet meet the target-module threshold;
-- `deferred`: a named dependency, cost, or design decision blocks work;
-- `out-of-scope`: generated, third-party, data-only, or otherwise excluded with
-  rationale; or
-- `pending-evidence`: required metrics or provenance are missing.
+- `completed`: the mutation run and result review are certified for the
+  recorded source and settings;
+- `ready`: the selected tests and environment are ready for a mutation slice;
+- `coverage-gap`: the tests do not execute the required percentage of the
+  target file;
+- `deferred`: a named dependency, cost, or design decision prevents work;
+- `out-of-scope`: generated, third-party, data-only, or otherwise excluded,
+  with a reason; or
+- `pending-evidence`: a required measurement or environment record is
+  missing.
 
-Do not infer candidate modules from characterization directory names alone. A
-directory may cover multiple modules, and one module may be covered by multiple
-directories. Map source modules to explicit test selections.
+Do not infer source modules from directory names used by tests that record
+current behavior. One directory may test several modules, and one module may
+need several test directories. Map every source module to an explicit test
+selection.
 
-Freeze the candidate list for one comparison. Adding or removing candidates can
-change normalized ranks even when every raw metric is unchanged.
+Keep the candidate list unchanged for one comparison. Adding or removing a
+module can change a scaled rank even when every raw measurement stays the same.
 
-## 2. Prefer direct mutation and coverage evidence
+## 2. Prefer direct test and mutation measurements
 
-Collect, in priority order:
+Collect these measurements in order:
 
-1. Exact target-module line/branch coverage and uncovered-line count.
-2. Prior non-killed counts by native status.
-3. Strictly verified residual survivors and no-test pressure.
-4. Inconclusive/timeout/segfault pressure requiring environment work.
-5. Deterministic covering-set availability.
-6. Cost: baseline duration, mutant count, and estimated rerun time.
+1. The percentage of the exact target file executed by tests, including branch
+   coverage and the count of lines not executed.
+2. Counts of prior not-killed mutants, separated by mutmut's original status.
+3. Mutants that review confirmed still survive or have no test.
+4. Timeouts, segmentation faults, and other unresolved results that require
+   environment work.
+5. Whether a repeatable covering-test selection exists.
+6. Cost: unchanged-source test duration, mutant count, and estimated rerun
+   time.
 
-Record source SHA, tool versions, configuration, test selection, command, and
-artifact path for every measured value.
+For every measured value, record the source commit ID, tool versions, settings,
+test selection, command, and output path.
 
-Do not compare mutation counts from incompatible mutmut versions, target sets,
-pragmas, or covered-lines settings.
+Do not compare mutation counts from different mutmut versions, target sets,
+excluded lines, or covered-line settings.
 
-## 3. Use proxy metrics only as context
+## 3. Use secondary measurements only to break ties
 
-Complexity, LOC, import coupling, and recent source churn can help break ties,
-but they are not substitutes for measured mutation/coverage evidence.
+Code complexity, lines of code, imports, and recent edits may help choose
+between otherwise similar modules. They do not replace measured test coverage
+or mutation results.
 
-If used, define them precisely:
+Define every secondary measurement:
 
-- LOC: physical, logical, or executable lines;
-- complexity: tool/version and aggregation rule;
-- coupling: parsed import graph scope, excluding or including tests explicitly;
-- churn: time window and source of commit history.
+- lines of code: physical lines, logical statements, or executable lines;
+- complexity: the tool, tool version, and method used to combine values;
+- connections to other modules: the parsed import graph and whether tests are
+  included; and
+- recent edits: the time window and Git history used.
 
-Textual substring counts across Python files are not import-graph in-degree and
-must not be labeled a floor or authoritative coupling metric.
+Counting text matches in Python files does not measure how many modules import a
+target. Do not label that count as an import measurement.
 
-## 4. Do not fake a composite score
+## 4. Do not calculate a score from missing data
 
-Do not compute a score when required inputs are missing. Mark the value
-`PENDING` and choose work through explicit review instead.
+When a required input is missing, mark the value `PENDING`. Choose the next
+work through explicit review instead of inventing a number.
 
 Before adopting a weighted score, require a committed decision record that
 defines:
 
-- why each metric predicts mutation-test value;
-- metric units and valid ranges;
-- fixed candidate universe;
-- normalization baseline;
-- weights and sensitivity analysis;
-- treatment of missing/inconclusive inputs; and
-- when the formula is versioned or retired.
+- why each measurement predicts useful mutation work;
+- units and allowed ranges;
+- the fixed module list;
+- how values are scaled before combining them;
+- weights and how small weight changes affect the order;
+- treatment of missing or unresolved inputs; and
+- when the formula must receive a new version or be retired.
 
-Scores normalized over different candidate sets are not directly comparable.
-Never retain hardcoded dispositions from a private or missing plan as if they
-were computed output.
+Scores calculated from different module lists cannot be compared directly. Do
+not copy final statuses from a private or missing plan and present them as
+calculated output.
 
-## 5. Apply a reviewable decision order
+## 5. Use this default decision order
 
-Use this default decision sequence:
+1. Do not rerun a `completed` module unless its source or settings changed, or
+   a later report shows a possible regression.
+2. For `coverage-gap` modules, first add a repeatable test selection that
+   executes enough of the target file.
+3. Resolve environment-caused timeouts and unresolved results before
+   interpreting a mutation score.
+4. Among `ready` modules, prefer modules with many confirmed survivors or
+   no-test results, important product behavior, and manageable run time.
+5. Use complexity, imports, code size, and recent edits only to break a tie
+   supported by direct evidence.
+6. Keep every deferred or out-of-scope reason visible.
 
-1. Do not rerun a `completed` target unless source/config changed or regression
-   evidence requires re-audit.
-2. Address `coverage-gap` targets by adding deterministic covering tests before
-   spending time on mutmut.
-3. Resolve environment-driven inconclusive/timeout pressure before interpreting
-   mutation score.
-4. Among `ready` targets, prefer high verified survivor/no-test pressure and
-   high product criticality with a manageable run cost.
-5. Use complexity/coupling/churn only to break evidence-based ties.
-6. Keep deferred and out-of-scope reasons explicit; never silently omit them.
+Product importance is a human decision. Record why a module matters to shipped
+behavior, validation, code generation, or frequently changed code.
 
-Product criticality is a human judgment. Record why the module matters to
-shipping behavior, validation, code generation, or frequently changed paths.
+## 6. Record the selection
 
-## 6. Decision record
-
-For the selected module, write:
+Write:
 
 ```text
-candidate universe and source SHA
+fixed module list and source commit ID
 selected module
 current status
-covering-set artifact and target coverage
-prior mutation/triage evidence
+covering-test record and target-file coverage
+prior mutation and review results
 estimated cost
-proxy metrics used, with definitions
-why this candidate outranks the nearest alternatives
-known blockers and required CI/device coverage
-reviewer/owner decision
+secondary measurements used and their definitions
+why this module ranks above the nearest alternatives
+known blockers and required automated or device checks
+reviewer or owner decision
 ```
 
 Store the decision with the campaign handoff or tracked issue. Do not create a
-history directory that is neither committed nor consumed.
+history directory that is neither committed nor read by another tool.
 
-## 7. Re-evaluate
+## 7. Measure again when inputs change
 
-Rebuild the candidate evidence when:
+Rebuild the comparison when:
 
-- the base/source SHA changes materially;
-- target or test selections change;
-- mutmut/coverage versions or settings change;
-- a target is completed;
+- the source commit changes in a way that affects the modules;
+- target modules or test selections change;
+- mutmut or coverage versions or settings change;
+- a module is completed;
 - a new coverage gap or regression appears; or
-- run-cost measurements invalidate the plan.
+- measured run time invalidates the plan.
 
-Preserve old receipts as historical evidence, but do not assert stale counts or
-dispositions as current truth.
+Keep old run records as historical evidence. Do not present their counts or
+decisions as current after inputs change.
 
-## 8. Future automation bar
+## 8. Requirements for future automation
 
-Implement automated ranking only when there is a real recurring consumer and:
+Automate the ranking only when a real recurring workflow will consume it and:
 
-- all candidates map to source modules;
-- all required metrics have validated schemas and provenance;
-- missing/invalid ranges fail closed;
-- import coupling uses a real parsed graph;
-- normalization is stable across snapshots;
-- formula/version changes are explicit; and
-- history is committed or consumed by CI.
+- every candidate maps to a source module;
+- every required measurement has a validated file format and source record;
+- missing values and invalid ranges stop the calculation;
+- module connections use a parsed import graph;
+- scaling remains stable across saved comparisons;
+- formula and version changes are explicit; and
+- history is committed or consumed by automated GitHub checks.
 
-Tests must use a fixed fixture repository rather than the live source tree and
-must prove candidate-set changes cannot silently rewrite historical meaning.
+Tests must use a fixed example repository, not the live source tree. They must
+prove that changing the candidate list cannot silently change the meaning of
+past results.

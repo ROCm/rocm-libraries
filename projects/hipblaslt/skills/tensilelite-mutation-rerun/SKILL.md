@@ -30,11 +30,12 @@ ordinary TensileLite builds and tests do not depend on them.
 
 ## Choose the next target
 
-When the target is not already specified, read
-[references/prioritization.md](references/prioritization.md). Build a fixed,
-reviewed candidate universe; use measured coverage and mutation evidence; keep
-missing inputs explicitly pending; and record the human rationale for the next
-module. Do not present an arbitrary weighted proxy as an objective ranking.
+When the user has not selected a module, read
+[references/prioritization.md](references/prioritization.md). First make a
+fixed list of modules to compare. Use measured test coverage, mutation results,
+and run time. Mark missing measurements instead of inventing values. Record
+which module a person selected and why. Do not present a weighted score as
+objective fact unless the team has reviewed its inputs and formula.
 
 ## Run one investigation
 
