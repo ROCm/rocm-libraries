@@ -191,10 +191,17 @@ install_pytest_deps() {
   python_bin="$(command -v python3.12 || command -v python3)"
   PYTHON="${python_bin}"
 
-  "${PYTHON}" -m pip install --quiet \
-    pytest pyyaml msgpack \
-    pytest-xdist pytest-timeout \
-    syrupy tqdm joblib numpy filelock
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install \
+      pytest pyyaml msgpack \
+      pytest-xdist pytest-timeout \
+      syrupy tqdm joblib numpy filelock
+  else
+    "${PYTHON}" -m pip install --quiet \
+      pytest pyyaml msgpack \
+      pytest-xdist pytest-timeout \
+      syrupy tqdm joblib numpy filelock
+  fi
 }
 
 run_timed "install pytest deps" install_pytest_deps
