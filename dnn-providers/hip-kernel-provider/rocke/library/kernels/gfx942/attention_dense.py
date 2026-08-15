@@ -1073,9 +1073,9 @@ def _build_attention_dense_single_buffer(
         K_lds = b.smem_alloc(dtype, [1, BN, LDROW], name_hint="Klds")
     if USE_CFVST:
         # V stored TRANSPOSED (P1 conflict-free V): [dim, token] with token inner and
-        # padded by tuning.v_row_pad, so the PV A-operand read is a contiguous
+        # padded by resolved_v_row_pad, so the PV A-operand read is a contiguous
         # ds_read_b64 rather than P0's 4 element-wise ds_read_u16. Filled by the
-        # perm_b32 store path below. This is one of exactly TWO reads of v_row_pad --
+        # perm_b32 store path below. This is one of exactly TWO reads that SIZE V_lds --
         # the other is the _lds_bytes budget -- and both take it from the same
         # resolved struct, so the budget cannot under-count this allocation.
         V_LDROW = BN + tuning.resolved_v_row_pad(spec)
