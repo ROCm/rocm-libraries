@@ -2971,6 +2971,18 @@ class Solution(collections.abc.Mapping):
                  "NumWaves on B), so TDMWaveSpread=%d would name a second, contradictory count "
                  "for the same tensors" % state["TDMWaveSpread"])
           return
+        # Compares block counts only: LdsOffsetBlkA/B are assigned later.
+        decoupled, blkA, blkB = decouplePgrBlocks(state)
+        if decoupled and blkA != blkB:
+          reject(state, printRejectionReason,
+                 "TDMFuse=2 requires an equal decoupled pair: MXSB rides A's descriptor set but "
+                 "follows B's LDS block count, so a divergent pair carries two cadences on the "
+                 "one shared set and its single swap arm cannot express both. The three-way arm "
+                 "is unimplemented rather than impossible -- the hand-written fuseMXA kernel has "
+                 "none to copy, because its cadences are equal. Got PrefetchGlobalReadA=%d and "
+                 "PrefetchGlobalReadB=%d, resolving to %d and %d LDS blocks"
+                 % (state["PrefetchGlobalReadA"], state["PrefetchGlobalReadB"], blkA, blkB))
+          return
         # These guards must stay exactly tdmFuseAMx's preconditions; if they drift,
         # decline rather than accept a name the writer will not honour.
         if not tdmFuseAMx(state):
