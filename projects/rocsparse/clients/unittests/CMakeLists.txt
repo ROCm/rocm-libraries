@@ -125,7 +125,12 @@ rocm_install(TARGETS rocsparse-unit-test COMPONENT tests)
 set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   rocsparse_unit_test_main.cpp
   unit_test_host_conversion_sort.cpp
-  unit_test_internal_collectives.cpp
+  unit_test_internal_collectives_blockreduce.cpp
+  unit_test_internal_collectives_warpreduce.cpp
+  unit_test_internal_collectives_segmented.cpp
+  unit_test_internal_collectives_search.cpp
+  unit_test_internal_collectives_shfl.cpp
+  unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
   unit_test_internal_hostblocks.cpp
 )
