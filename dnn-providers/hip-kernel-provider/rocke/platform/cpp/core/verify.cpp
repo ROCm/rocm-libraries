@@ -29,8 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "ir/device_print_internal.h"
 #include "rocke/ir.h"
-#include "rocke/ir_internal.h"
 
 /* ----------------------------------------------------- diagnostic buffer */
 

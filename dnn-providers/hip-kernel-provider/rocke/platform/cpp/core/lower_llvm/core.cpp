@@ -1961,6 +1961,7 @@ static void ll_register_all(void)
 {
     memset(rocke_ll_dispatch, 0, sizeof rocke_ll_dispatch);
     rocke_ll_register_arith();
+    rocke_ll_register_device_print();
     rocke_ll_register_convert();
     rocke_ll_register_mem();
     rocke_ll_register_mma();

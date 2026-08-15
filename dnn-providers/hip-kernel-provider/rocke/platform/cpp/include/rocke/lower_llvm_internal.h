@@ -528,6 +528,7 @@ void rocke_ll_set_handler(rocke_opcode_t opcode, rocke_ll_op_fn fn);
  * every bucket's handlers are present in rocke_ll_dispatch before lowering. Each
  * is DEFINED in its own bucket .c file. */
 void rocke_ll_register_arith(void); /* bucket 1 */
+void rocke_ll_register_device_print(void);
 void rocke_ll_register_convert(void); /* bucket 2 */
 void rocke_ll_register_mem(void); /* bucket 3 */
 void rocke_ll_register_mma(void); /* bucket 4 */
