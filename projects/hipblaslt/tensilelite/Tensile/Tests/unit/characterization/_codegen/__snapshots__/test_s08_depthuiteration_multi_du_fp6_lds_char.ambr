@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s08_depthuiteration_multi_du_fp6_lds_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x1024_MI16WSwObnVxwJelBB2IUKiagWxz5338gc33N4Ia91svmHs=',
+      'err': 0,
+    }),
+  ])
+# ---
