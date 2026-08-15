@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_s06_loopbody_dtv_pack_bufferidx_off_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT128x128x32_MI16grhMev0jkgSKBPOLmOboLgG0_BbqqKP1DYmbsDBJvCc=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_MX_B_UserArgs_MT192x192x32_MI16C4TRwEQjBk5TJfQM45fiIQJA_yn3_CWp407pia8v1cQ=',
+      'err': 0,
+    }),
+  ])
+# ---
