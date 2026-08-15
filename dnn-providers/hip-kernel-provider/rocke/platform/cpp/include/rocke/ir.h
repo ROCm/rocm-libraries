@@ -482,7 +482,7 @@ typedef enum rocke_print_item_kind
 typedef struct rocke_print_item
 {
     rocke_print_item_kind_t kind;
-    const char* text; /* TEXT: ASCII without NUL; otherwise NULL             */
+    const char* text; /* TEXT: NUL-terminated ASCII C string; otherwise NULL */
     rocke_value_t* value; /* VALUE: required; otherwise NULL                    */
     const char* format; /* VALUE: bool/i32/u32/f32/ptr; NULL selects default */
 } rocke_print_item_t;
@@ -794,7 +794,8 @@ rocke_value_t* rocke_b_thread_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
-/* Emit one canonical Text/Value record. style is currently "compact".
+/* Emit one canonical Text/Value record. Text items are NUL-terminated ASCII C
+ * strings, so the first NUL ends the input. style is currently "compact".
  * termination is "ensure_newline" or "none". predicate may be NULL. The
  * implementation rejects records that exceed its configured safety limits. */
 void rocke_b_device_print(rocke_ir_builder_t* b,

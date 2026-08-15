@@ -69,6 +69,19 @@ def test_device_print_lowering_uses_canonical_formats_and_predicate() -> None:
     assert llvm.count("call i64 @__ockl_printf_append_string_n") == 1
 
 
+def test_device_print_text_transport_has_one_trailing_nul() -> None:
+    builder = IRBuilder("print_text_terminator")
+    builder.device_print("abc", termination="none")
+    llvm = lower_kernel_to_llvm(builder.kernel, arch="gfx950")
+    assert (
+        "@.rocke.printf.0 = private unnamed_addr addrspace(4) constant "
+        '[4 x i8] c"abc\\00", align 1'
+    ) in llvm
+    assert (
+        "ptr addrspacecast (ptr addrspace(4) @.rocke.printf.0 to ptr), " "i64 4, i32 1)"
+    ) in llvm
+
+
 def test_device_print_seven_and_eight_value_packet_boundary() -> None:
     for count, expected_groups in ((7, (7,)), (8, (7, 1))):
         b = IRBuilder(f"print_{count}")
@@ -100,6 +113,14 @@ def test_device_print_verifier_rejects_mutated_record() -> None:
     assert any("incompatible" in message for message in messages)
 
 
+def test_device_print_verifier_rejects_mutated_text_with_nul() -> None:
+    kernel = deepcopy(_build_print_kernel())
+    op = kernel.body.ops[-1]
+    op.attrs["items"][0]["text"] = "state=\x00hidden"
+    messages = [diagnostic.message for diagnostic in verify(kernel)]
+    assert any("contains NUL" in message for message in messages)
+
+
 @pytest.mark.parametrize("attribute", ["predicate_operand", "operand"])
 def test_device_print_verifier_rejects_boolean_operand_indexes(attribute: str) -> None:
     kernel = deepcopy(_build_print_kernel())
@@ -122,6 +143,8 @@ def test_device_print_builder_rejects_invalid_contracts() -> None:
         b.device_print("x" * (_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES + 1))
     with pytest.raises(ValueError, match="ASCII"):
         b.device_print("lambda=λ")
+    with pytest.raises(ValueError, match="NUL"):
+        b.device_print("visible\x00hidden")
     with pytest.raises(ValueError, match="termination"):
         b.device_print("x", termination="sometimes")
 
