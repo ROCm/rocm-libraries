@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s09_assignderivedparameters_storerem_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_UserArgs_MT128x128x16eGS1iaEQJ4szAijJQCYuiFxFTu0jdVE69jXnU8Bt5vI=',
+      'err': 0,
+    }),
+  ])
+# ---
