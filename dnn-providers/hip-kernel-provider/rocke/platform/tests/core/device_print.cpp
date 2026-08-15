@@ -92,6 +92,14 @@ int main(void)
         return fail("canonical format lowering missing");
     if(!strstr(llvm, "br i1 %eq3, label %device.print."))
         return fail("predicate branch missing");
+    if(!strstr(llvm, "sext i32 -5 to i64"))
+        return fail("signed i32 promotion missing");
+    if(!strstr(llvm, "zext i32 -5 to i64"))
+        return fail("unsigned i32 promotion missing");
+    if(!strstr(llvm, "fpext float 0x401A000000000000 to double"))
+        return fail("f32 promotion missing");
+    if(!strstr(llvm, "bitcast double %printf_f64.3 to i64"))
+        return fail("f64 payload bitcast missing");
     if(!strstr(llvm, "ptrtoint ptr addrspace(1) %p to i64"))
         return fail("pointer lowering missing");
 

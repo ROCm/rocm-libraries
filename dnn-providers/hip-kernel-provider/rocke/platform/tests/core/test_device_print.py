@@ -60,6 +60,10 @@ def test_device_print_lowering_uses_canonical_formats_and_predicate() -> None:
     assert 'c"false\\00"' in llvm
     assert "i64 5, i64 6" in llvm
     assert "br i1 %eq3, label %device.print." in llvm
+    assert "sext i32 -5 to i64" in llvm
+    assert "zext i32 -5 to i64" in llvm
+    assert "fpext float 0x401A000000000000 to double" in llvm
+    assert "bitcast double %printf_f64.3 to i64" in llvm
     assert "ptrtoint ptr addrspace(1) %p to i64" in llvm
     assert "call i64 @__ockl_printf_append_args" in llvm
     assert llvm.count("call i64 @__ockl_printf_append_string_n") == 2
