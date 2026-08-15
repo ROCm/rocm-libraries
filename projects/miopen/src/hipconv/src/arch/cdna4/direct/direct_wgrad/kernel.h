@@ -439,8 +439,13 @@ __global__ __launch_bounds__(cfg.threads(),
                                                                int py,
                                                                int px)
 {
-    conv2d_direct_wgrad_impl<cfg, DT>(
-        in, delta, wgrad, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
+    {
+        conv2d_direct_wgrad_impl<cfg, DT>(
+            in, delta, wgrad, N, groups, c_per_group, k_per_group, hi, wi, ho, wo, py, px);
+    }
 }
 
 // The launch's operands are not the tensors the LaunchFn signature names.
