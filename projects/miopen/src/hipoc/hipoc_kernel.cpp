@@ -242,4 +242,20 @@ HIPOCKernelInvoke HIPOCKernel::Invoke(hipStream_t stream,
 {
     return HIPOCKernelInvoke{stream, fun, ldims, gdims, name, callback, coop_launch};
 }
+
+std::optional<int>
+HIPOCKernel::GetMaxActiveBlocksPerMultiprocessor(std::size_t block_size,
+                                                  std::size_t dyn_shared_mem_bytes) const
+{
+    if(fun == nullptr)
+        return std::nullopt;
+
+    int occupancy = 0;
+    const auto status = hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
+        &occupancy, fun, static_cast<int>(block_size), dyn_shared_mem_bytes);
+    if(status != hipSuccess)
+        return std::nullopt;
+
+    return occupancy;
+}
 } // namespace miopen

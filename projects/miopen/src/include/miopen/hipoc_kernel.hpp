@@ -35,6 +35,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -268,6 +269,14 @@ struct HIPOCKernel
     HIPOCKernelInvoke Invoke(hipStream_t stream,
                              std::function<void(hipEvent_t, hipEvent_t)> callback = nullptr,
                              bool coop_launch                                     = false) const;
+
+    /// Queries the max resident blocks/CU this compiled kernel achieves at the given block
+    /// size, via hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(). Returns std::nullopt
+    /// if the query could not be answered (no resolved function, or the driver call itself
+    /// failed) -- never throws.
+    MIOPEN_INTERNALS_EXPORT std::optional<int>
+    GetMaxActiveBlocksPerMultiprocessor(std::size_t block_size,
+                                        std::size_t dyn_shared_mem_bytes = 0) const;
 };
 
 } // namespace miopen
