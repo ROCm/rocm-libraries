@@ -1,0 +1,74 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S09 assignDerivedParameters: Sparse metadata GRVW/GLT/LDS + rejects.
+#
+# Target: Tensile/SolutionStructs/Solution.py  (assignDerivedParameters, mode=derive)
+#
+# config_harness.solutions_from_config only derives benchmarkProblems[0] (the
+# FIRST BenchmarkProblems entry), so the primary block must exercise the
+# currently-missing lines. sparse_pack.yaml already covers the Sparse=1
+# non-DTVSM path, so this targets the Sparse==2 (SparseB) non-DTVSM path, which
+# no existing _designed config exercises:
+#   - 4075-4079: Sparse==2 GRVWB grvw/vw derivation + GRVWB%4 reject
+#   - 4094-4095: Sparse==2 partialM branch
+#   - 4363:      Sparse==2 sub-branch of the <glvwMlimit GRVW fallback
+#   - 4531-4541: DirectToLdsMetadata block for sparseTc='B'
+# DirectToVgprSparseMetadata=0 keeps the LDS metadata path (enters 4071 block).
+################################################################################
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS NT, Sparse=2 (SparseB), metadata via LDS (DTVSM=0)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: H
+      DestDataType: H
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Sparse: 2
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DirectToVgprSparseMetadata: [False]
+        - DirectToLdsMetadata: [0, 1]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - ExpandPointerSwap: [False]
+        - StaggerU: [0]
+        - WorkGroupMapping: [8]
+        - 1LDSBuffer: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
