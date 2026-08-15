@@ -1,0 +1,69 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S03 localWriteDo: FP8 -> F16 LDS-write conversion.
+#
+# Target missing lines in Tensile/KernelWriterAssembly.py (localWriteDo), the
+#   elif (DataType%s.isAnyFloat8() and MacDataType%s.isHalf()):  path:
+#   12819,12820 : newBlockWidth==0.25, glvw==1, Hascvtf16_fp8_sf32 (VCvtScaleFP8toF16)
+#   12882,12883 : newBlockWidth==0.5,  Hascvtf16_fp8_sf32 (sel select) arm
+#   12900,12902,12904,12906 : newBlockWidth (large), Hascvtf16_fp8_sf32 for-vi arm
+#
+# Gate: on gfx950 asmCaps["Hascvtf16_fp8_sf32"] is True, so the VCvtScaleFP8toF16
+# arms fire.  Conversion happens on LOCAL WRITE (NOT ConvertAfterDS) when
+# DataTypeA=F8 (isAnyFloat8) and MacDataTypeA=H (from DataType=h default).
+#
+# newBlockWidth = globalReadInstruction.blockWidth = GlobalReadVectorWidthA*bpe/4
+# with fp8 bpe=1: GRVWA=1 -> 0.25 ; GRVWA=2 -> 0.5 ; GRVWA=8 -> 2.0 (large arm).
+# Fork GlobalReadVectorWidthA over [1,2,8] to sweep all three newBlockWidth arms.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F8HS TN — FP8 A input, half MacType, convert on local write (no ConvertAfterDS)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+          - [32, 32, 16, 1, 1, 1, 1, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [1, 2, 8]
+        - GlobalReadVectorWidthB: [8]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
