@@ -144,6 +144,69 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
 set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3/rocsparse_csrmm_default_alg.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_determine_indextype.cpp
+  # --- Added for unit_test_internal_infostructs.cpp -------------------------
+  # Member functions of the internal info structs are defined (non-inline) in
+  # these library TUs; librocsparse hides them (CXX_VISIBILITY_PRESET "hidden"),
+  # so the defining TU is compiled into this test binary. Host-pure logic; they
+  # compile under -x hip only because their include chain pulls HIP intrinsics.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_numeric_boost.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgemm_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_adaptive_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_lrb_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_nnzsplit_info.cpp
+  # --- Standalone-link support (self-contained on ut-infra) -----------------
+  # The info-struct TUs above reference internal helpers that librocsparse
+  # hides (CXX_VISIBILITY_PRESET "hidden"): error/warning_message, the
+  # hip->rocsparse status mapper, the rocsparse handle/blas/debug/envariables
+  # infrastructure their (de)allocation paths pull in, and the enum
+  # stringifiers used for logging. Compile in the closure of defining TUs so
+  # this binary links WITHOUT the sibling public-API family-leaf tests present
+  # (i.e. each PR builds independently in CI). Build wiring only -- no
+  # library/src changes.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_message.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_handle.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_blas_rocblas.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_debug.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_envariables.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_argdescr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_error.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/auxiliary/rocsparse_auxiliary.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_mat_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_position_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_data_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_trm_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_assign_async.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_bsric0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_bsrilu0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_csric0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_csrilu0_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_pivot_info_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_singular_info_t.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_sorted_coo2csr_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_valset.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_datatype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/common/rocsparse_indextype_utils.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrmv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csritsv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrmv_info.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_spgeam.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_nnz.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_numeric.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_symbolic.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_nnz_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_numeric_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/extra/rocsparse_csrgeam_symbolic_impl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_convert_array.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_convert_scalar.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcoo2csr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2csr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_exclusive_scan.cpp
+  # --------------------------------------------------------------------------
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure
@@ -191,6 +254,19 @@ target_link_libraries(rocsparse-unit-test-device PRIVATE
   hip::host
   hip::device
 )
+
+# rocsparse_blas_rocblas.cpp is compiled into this target (see
+# ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES). When rocBLAS is present the clients
+# directory defines -DROCSPARSE_WITH_ROCBLAS (clients/CMakeLists.txt), so that
+# TU includes <rocblas/rocblas.h> and calls into rocBLAS. Mirror the library
+# (library/CMakeLists.txt links roc::rocblas) so this test target picks up
+# rocBLAS's include directories and symbols in that configuration; without it
+# the compile fails with "'rocblas/rocblas.h' file not found" under the CI
+# with-rocBLAS build. Test-only; no library change. When rocBLAS is absent the
+# macro is undefined and the TU compiles as a stub, so no link is needed.
+if(rocblas_FOUND AND TARGET roc::rocblas)
+  target_link_libraries(rocsparse-unit-test-device PRIVATE roc::rocblas)
+endif()
 
 apply_omp_settings(rocsparse-unit-test-device)
 
