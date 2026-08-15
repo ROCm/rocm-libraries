@@ -3,11 +3,10 @@
 /*
  * verify.c -- IR verifier, faithful C99 port of rocke/core/verify.py.
  *
- * Walks a rocke_kernel_def_t and accumulates rocke_diag_t diagnostics. Helper
- * map:
+ * Walks a rocke_kernel_def_t and accumulates rocke_diag_t diagnostics. Helper map:
  *
  *   Python                       C99 (this file)
- *   -------------------------- -----------------------------------------------
+ *   --------------------------   -----------------------------------------------
  *   _Verifier.err/warn           v_err() / v_warn()
  *   _check_type                  check_type()
  *   _check_region                check_region()
@@ -706,11 +705,11 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     if(iv)
     {
         /* iv type comes from the operands' lower type per Python only for the
-     * yield check; for scope we register iv with its declared iv_type. The
-     * Python body scope uses Type(iv_type); type identity does not feed
-     * further checks beyond presence, so use lower's type as a stand-in is
-     * NOT done -- register with lower (operands share type). Use iv_type if
-     * resolvable to a scalar singleton, else lower. */
+         * yield check; for scope we register iv with its declared iv_type. The
+         * Python body scope uses Type(iv_type); type identity does not feed
+         * further checks beyond presence, so use lower's type as a stand-in is
+         * NOT done -- register with lower (operands share type). Use iv_type if
+         * resolvable to a scalar singleton, else lower. */
         const char* ivt = rocke_attr_get_str(&op->attrs, "iv_type");
         const rocke_type_t* t = ivt ? rocke_scalar_by_name(ivt) : NULL;
         if(!t)
@@ -925,10 +924,10 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
             v_errf(&v, NULL, "duplicate kernel parameter id '%s'", vname);
         }
         /* param id strings must outlive the scope table -> they live in the
-     * kernel arena; but vname here is a stack buffer. Stash a heap copy by
-     * registering an arena-independent strdup. Use the param->name + '%'
-     * stable storage instead: the Param.name pointer is stable, but we need
-     * the leading '%'. Build a small persistent buffer. */
+         * kernel arena; but vname here is a stack buffer. Stash a heap copy by
+         * registering an arena-independent strdup. Use the param->name + '%'
+         * stable storage instead: the Param.name pointer is stable, but we need
+         * the leading '%'. Build a small persistent buffer. */
         char* stable = (char*)malloc(strlen(vname) + 1);
         if(!stable)
         {
@@ -944,14 +943,14 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     check_region(&v, k->body, 1);
 
     /* The scope holds pointers; param ids were heap-strdup'd above (leak: the
-   * scope table is freed below but the strings would leak). Free those before
-   * releasing the table. Op result names are arena-owned (kernel), not freed
-   * here. We distinguish param strdups by re-walking: they are exactly the
-   * first k->num_params entries inserted. Simpler: track and free them. */
+     * scope table is freed below but the strings would leak). Free those before
+     * releasing the table. Op result names are arena-owned (kernel), not freed
+     * here. We distinguish param strdups by re-walking: they are exactly the
+     * first k->num_params entries inserted. Simpler: track and free them. */
     /* Free heap-allocated param-id strings (the only malloc'd scope names). */
     /* (They were inserted first; but inner defs were truncated away already.) */
     /* To avoid double-free / dangling, we conservatively scan for names that
-   * begin with '%' and equal "%"+param->name, freeing each once. */
+     * begin with '%' and equal "%"+param->name, freeing each once. */
     for(int i = 0; i < k->num_params; ++i)
     {
         char vname[160];

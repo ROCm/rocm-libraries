@@ -409,8 +409,7 @@ rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
         return (rocke_value_t*)rocke_i_set_err(
             b,
             ROCKE_ERR_VALUE,
-            "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, got "
-            "%s",
+            "global_load_vN supports f16/bf16/i16/f32/i32/fp8e4m3/bf8e5m2/i8, got %s",
             en);
     }
     vt = rocke_vector_type(b, dtype, n);
@@ -511,11 +510,11 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
     }
     else
     {
-        (void)rocke_i_set_err(b,
-                              ROCKE_ERR_VALUE,
-                              "global_store_vN supports "
-                              "f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, got %s",
-                              en);
+        (void)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "global_store_vN supports f16/bf16/i16/f32/i32/i8/fp8e4m3/bf8e5m2, got %s",
+            en);
         return;
     }
     ops[0] = ptr;

@@ -14,9 +14,8 @@
  *   gpu.thread_id / gpu.block_id.
  *
  * Every shared helper (rocke_ll_emit, rocke_ll_operand, rocke_ll_llvm_type,
- * rocke_ll_need, rocke_ll_fresh, rocke_ll_fp32_hex, rocke_ll_binop,
- * rocke_ll_fail, ...) lives in BUCKET 0; this file only calls them through the
- * internal header.
+ * rocke_ll_need, rocke_ll_fresh, rocke_ll_fp32_hex, rocke_ll_binop, rocke_ll_fail, ...)
+ * lives in BUCKET 0; this file only calls them through the internal header.
  */
 #include "rocke/lower_llvm_internal.h"
 
@@ -610,8 +609,7 @@ static void _op_math_exp2(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "exp2", "exp2.f32", "exp2.f32");
 }
-/* Python _op_math_exp2_fast -> llvm.amdgcn.exp2.f32 (native v_exp_f32, no
- * guard). */
+/* Python _op_math_exp2_fast -> llvm.amdgcn.exp2.f32 (native v_exp_f32, no guard). */
 static void _op_math_exp2_fast(rocke_lower_t* L, const rocke_op_t* op)
 {
     ll_math_f32_unary(L, op, "exp2_fast", "amdgcn.exp2.f32", "amdgcn.exp2.f32");

@@ -56,8 +56,8 @@ static const struct
     int min_rocm_major;
     int min_rocm_minor;
     /* Datalayout generation: false = the LLVM20 plain-p8 shape, true = the
-   * LLVM21+ indexed-p8 shape. Python's _DATALAYOUT_KIND_FLAVORS partition,
-   * as a column. */
+     * LLVM21+ indexed-p8 shape. Python's _DATALAYOUT_KIND_FLAVORS partition,
+     * as a column. */
     bool modern;
 } ROCKE_LL_FLAVOR_LADDER[] = {
     {ROCKE_LLVM_FLAVOR_LLVM20, "llvm20", 0, 0, false},
@@ -117,8 +117,8 @@ bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor)
 }
 
 /* The lowerer's private symbols live in namespace ckc; the public entry points
- * (rocke_llvm_flavor_name/from_name above, rocke_lower_kernel_to_llvm[_ex]
- * below) stay at global scope under their extern "C" header declarations. */
+ * (rocke_llvm_flavor_name/from_name above, rocke_lower_kernel_to_llvm[_ex] below)
+ * stay at global scope under their extern "C" header declarations. */
 namespace ckc
 {
 
@@ -485,9 +485,9 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     }
 
     /* Tier 2: an operator-set root. Python's _rocm_root_libdirs gives an env
-   * root ONLY "<root>/lib" -- the "core-<X>/lib" glob is applied to
-   * /opt/rocm* alone -- so probing the core subdir here too would make the C
-   * side accept a root Python skips. */
+     * root ONLY "<root>/lib" -- the "core-<X>/lib" glob is applied to
+     * /opt/rocm* alone -- so probing the core subdir here too would make the C
+     * side accept a root Python skips. */
     for(i = 0; i < sizeof(ROOT_ENVS) / sizeof(ROOT_ENVS[0]); ++i)
     {
         const char* root = getenv(ROOT_ENVS[i]);
@@ -496,11 +496,11 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     }
 
     /* Tier 3: discovered installs. Python runs its two globs as separate
-   * passes, so every discovered root's "core-<X>/lib" is probed before ANY
-   * root's plain "lib"; a packaged install keeps the real runtime in the
-   * versioned subdir. Roots are ordered newest-first, which combined with
-   * the newest-first core subdir gives the same order as Python sorting the
-   * full glob by _version_key. */
+     * passes, so every discovered root's "core-<X>/lib" is probed before ANY
+     * root's plain "lib"; a packaged install keeps the real runtime in the
+     * versioned subdir. Roots are ordered newest-first, which combined with
+     * the newest-first core subdir gives the same order as Python sorting the
+     * full glob by _version_key. */
     nroots = ll_list_opt_rocm_roots(roots, LL_MAX_OPT_ROOTS);
     for(tier = 0; tier < 2; ++tier)
     {
@@ -516,10 +516,10 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
     }
 
     /* Tier 4: Python's _system_rocm_version -- no comgr found anywhere, but an
-   * install still records a version. This deliberately reads /opt/rocm ONLY,
-   * not $ROCM_PATH: Python's fallback is that exact hardcoded path, and
-   * honouring the env root here would resolve a different flavor than Python
-   * whenever $ROCM_PATH names a tree with no comgr in it. */
+     * install still records a version. This deliberately reads /opt/rocm ONLY,
+     * not $ROCM_PATH: Python's fallback is that exact hardcoded path, and
+     * honouring the env root here would resolve a different flavor than Python
+     * whenever $ROCM_PATH names a tree with no comgr in it. */
     if(ll_read_rocm_version_file("/opt/rocm", &major, &minor))
         return ll_flavor_for_rocm(major, minor);
 
@@ -536,8 +536,7 @@ static rocke_llvm_flavor_t ll_resolve_flavor(void)
  *
  * Written with designated initializers so a row reads as the set of Python
  * ISABackend overrides it stands for -- the defaults (legacy s_waitcnt, no
- * async counter, type-agnostic tr16) are what the Python base class supplies.
- */
+ * async counter, type-agnostic tr16) are what the Python base class supplies. */
 #define LL_BACKEND_CDNA_DEFAULTS                                                              \
     .datalayout = NULL, .triple = NULL, .buffer_rsrc_word3 = ROCKE_LL_BUFFER_RSRC_WORD3_CDNA, \
     .encode_waitcnt = rocke_ll_encode_waitcnt_gfx9_10, .kind = ROCKE_LL_ISA_CDNA,             \
@@ -656,9 +655,9 @@ const rocke_isa_backend_t* rocke_ll_backend_for(const char* arch, rocke_status_t
 [[noreturn]] void rocke_ll_fail(rocke_lower_t* L, rocke_status_t st, const char* fmt, ...)
 {
     /* Format the reason once (bounded exactly like the legacy sink), then raise.
-   * This [[noreturn]]s via ckc::raise_status. The thrown exception is caught at
-   * the lowerer boundary and translated back into the status code + caller
-   * `err` buffer, so the extern "C" ABI is unchanged. */
+     * This [[noreturn]]s via ckc::raise_status. The thrown exception is caught at
+     * the lowerer boundary and translated back into the status code + caller
+     * `err` buffer, so the extern "C" ABI is unchanged. */
     (void)L; /* the lowerer no longer carries a sticky error; we raise instead */
     char buf[ROCKE_ERR_MSG_CAP];
     va_list ap;
@@ -1001,8 +1000,8 @@ const char* rocke_ll_param_llvm_type(rocke_lower_t* L, const rocke_param_t* p)
     if(p->type && p->type->kind == ROCKE_TYPE_PTR)
     {
         /* addr_space override (P17): a pointer param can be pinned to a
-     * different space than its IR type says. The function header and any
-     * call site passing that param must name the same type. */
+         * different space than its IR type says. The function header and any
+         * call site passing that param must name the same type. */
         ovr = rocke_attr_get_str(&p->attrs, "addr_space");
         if(ovr && strcmp(ovr, "constant") == 0)
             return "ptr addrspace(4)";
@@ -1149,7 +1148,7 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
 {
     /* LLVM spells a float hex constant as the 64-bit hex of the double value
-   * of the rounded fp32 constant. */
+     * of the rounded fp32 constant. */
     float f = (float)x;
     double rounded = (double)f;
     uint64_t bits;
@@ -1160,7 +1159,7 @@ const char* rocke_ll_fp32_hex(rocke_lower_t* L, double x)
 const char* rocke_ll_fp16_hex(rocke_lower_t* L, double x)
 {
     /* LLVM IR: half 0xH<4 hex>. Convert double -> IEEE-754 binary16 (round to
-   * nearest even) without relying on _Float16 support. */
+     * nearest even) without relying on _Float16 support. */
     float f = (float)x;
     uint32_t fb;
     memcpy(&fb, &f, sizeof fb);
@@ -1589,14 +1588,14 @@ static void
         }
 
         /* Recurse into sub-regions. scf.for gets a conservative loop_end: the
-     * last preorder index of the loop subtree (idx + size - 1), not the
-     * for-op's own (earlier) index, so allocations defined inside the loop
-     * are extended across the whole loop and interfere as they must.
-     *
-     * For a nested loop, an allocation used only in the inner loop can be
-     * re-read on a later outer iteration, so its live range must reach the
-     * enclosing loop's end too -- take the max with any enclosing loop_end
-     * (loop_end < 0 means "no enclosing loop", i.e. Python's None). */
+         * last preorder index of the loop subtree (idx + size - 1), not the
+         * for-op's own (earlier) index, so allocations defined inside the loop
+         * are extended across the whole loop and interfere as they must.
+         *
+         * For a nested loop, an allocation used only in the inner loop can be
+         * re-read on a later outer iteration, so its live range must reach the
+         * enclosing loop's end too -- take the max with any enclosing loop_end
+         * (loop_end < 0 means "no enclosing loop", i.e. Python's None). */
         for(int r = 0; r < op->num_regions; r++)
         {
             int child_loop_end;
@@ -1698,7 +1697,7 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     }
 
     /* ---- sort by live-interval start (stable: preserve declaration order for
-   *      ties, like Python's sorted key) ---- */
+     *      ties, like Python's sorted key) ---- */
     /* Build an index array and sort it. Simple insertion sort (few allocs). */
     int* order = (int*)rocke_arena_calloc(&L->arena, n * sizeof(int));
     if(!order)
@@ -1742,12 +1741,12 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
     {
         int gi = order[si]; /* smem_globals index */
         /* Dead allocations (never read/written/address-taken) consume no pool
-     * space: the pre-pool lowering emitted them as their own addrspace(3)
-     * globals that the AMDGPU backend dead-strips. Folding them into the
-     * single referenced pool would make their bytes count and can overflow
-     * the 64 KB LDS limit (the fp16 D128 nw=4 attention Acc_lds regression).
-     * offsets[] is calloc'd to 0, so a dead alloc keeps a harmless offset 0
-     * and is simply not given a slot. Mirrors Python's `used` filter. */
+         * space: the pre-pool lowering emitted them as their own addrspace(3)
+         * globals that the AMDGPU backend dead-strips. Folding them into the
+         * single referenced pool would make their bytes count and can overflow
+         * the 64 KB LDS limit (the fp16 D128 nw=4 attention Acc_lds regression).
+         * offsets[] is calloc'd to 0, so a dead alloc keeps a harmless offset 0
+         * and is simply not given a slot. Mirrors Python's `used` filter. */
         if(!intervals[gi].used)
             continue;
         const rocke_type_t* stype = L->smem_globals.data[gi].stype;
@@ -1756,10 +1755,10 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
         int first_seq = intervals[gi].first_seq;
         int last_seq = intervals[gi].last_seq;
         /* Exclusive (cshuffle no-alias) allocations must not reuse another
-     * allocation's slot and must never be reused, so they occupy their own
-     * byte range. Skipping the reuse search forces a fresh slot; recording
-     * it with the sentinel last_seq below keeps it permanently "live" so
-     * nothing else packs onto it. (Mirrors Python's _EXCL_LAST_SEQ.) */
+         * allocation's slot and must never be reused, so they occupy their own
+         * byte range. Skipping the reuse search forces a fresh slot; recording
+         * it with the sentinel last_seq below keeps it permanently "live" so
+         * nothing else packs onto it. (Mirrors Python's _EXCL_LAST_SEQ.) */
         int excl = stype ? stype->smem_exclusive : 0;
         const int ROCKE_LL_EXCL_LAST_SEQ = 1 << 30;
 
@@ -1772,12 +1771,12 @@ void rocke_ll_compute_smem_layout(rocke_lower_t* L)
                 continue; /* still live, interference */
             int aligned_off = (slots[k].offset + aln - 1) & ~(aln - 1);
             /* Reusing slot k places this allocation at [aligned_off,
-       * aligned_off+seg). Because it may be larger than slot k's original
-       * footprint, that range can spill upward into a DIFFERENT slot that
-       * is still live while this allocation is live -- which would alias
-       * two simultaneously-live allocations and corrupt data. Reject any
-       * candidate whose placed range overlaps a still-live slot; slots
-       * already dead before first_seq are safe to overlap. */
+             * aligned_off+seg). Because it may be larger than slot k's original
+             * footprint, that range can spill upward into a DIFFERENT slot that
+             * is still live while this allocation is live -- which would alias
+             * two simultaneously-live allocations and corrupt data. Reject any
+             * candidate whose placed range overlaps a still-live slot; slots
+             * already dead before first_seq are safe to overlap. */
             int placed_end = aligned_off + seg;
             int conflict = 0;
             for(int j = 0; j < num_slots; j++)
@@ -1873,10 +1872,10 @@ const char*
         return L->smem_pool_name;
 
     /* Reuse a base pointer already computed for this allocation in the current
-   * block: the byte offset is a compile-time constant, so one GEP per
-   * (block, allocation) suffices and dominates all later same-block uses
-   * (instructions within a block execute sequentially). Mirrors Python
-   * _smem_base_cache. */
+     * block: the byte offset is a compile-time constant, so one GEP per
+     * (block, allocation) suffices and dominates all later same-block uses
+     * (instructions within a block execute sequentially). Mirrors Python
+     * _smem_base_cache. */
     const rocke_ll_block_t* blk = rocke_ll_current(L);
     for(size_t i = 0; i < L->smem_base_cache.len; i++)
     {
@@ -2118,9 +2117,9 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     rocke_strbuf_appendf(out, "target triple = \"%s\"\n", tr ? tr : "");
     rocke_strbuf_append(out, "\n");
 
-    /* smem pool: a single unified addrspace(3) global backing all smem
-   * allocations. align 16 satisfies all segment alignments (strictest: 16 B for
-   * ds_read_b64_tr_b8 on i8/fp8 tiles). */
+    /* smem pool: a single unified addrspace(3) global backing all smem allocations.
+     * align 16 satisfies all segment alignments (strictest: 16 B for ds_read_b64_tr_b8
+     * on i8/fp8 tiles). */
     if(L->smem_globals.len > 0 && L->smem_pool_name && L->smem_pool_size > 0)
     {
         rocke_strbuf_appendf(out,
@@ -2145,16 +2144,16 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
         rocke_strbuf_append(out, "\n");
 
     /* Needed intrinsic declarations, in canonical TABLE order (then dynamic
-   * decls). This mirrors finalize iterating self._decls in insertion order.
-   *
-   * Python builds self._decls as dict(_INTRINSIC_DECLS) then .update(
-   * _INTRINSIC_DECLS_LLVM22_OVERRIDES) for the LLVM22 flavor. dict.update
-   * REPLACES the value text for an existing key but PRESERVES that key's
-   * original insertion position. So we must iterate the base table in order
-   * and, per needed key, emit the override text when the flavor is LLVM22 and
-   * the key has an override -- NOT emit all overrides in a separate leading
-   * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
-   * front of the declare block). */
+     * decls). This mirrors finalize iterating self._decls in insertion order.
+     *
+     * Python builds self._decls as dict(_INTRINSIC_DECLS) then .update(
+     * _INTRINSIC_DECLS_LLVM22_OVERRIDES) for the LLVM22 flavor. dict.update
+     * REPLACES the value text for an existing key but PRESERVES that key's
+     * original insertion position. So we must iterate the base table in order
+     * and, per needed key, emit the override text when the flavor is LLVM22 and
+     * the key has an override -- NOT emit all overrides in a separate leading
+     * loop (which would float overridden keys, e.g. make.buffer.rsrc, to the
+     * front of the declare block). */
     bool any_need = false;
     int novr = 0;
     const rocke_ll_decl_t* ovr = rocke_ll_flavor_overrides(L->flavor, &novr);
@@ -2242,8 +2241,8 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     if(L->kernel)
     {
         /* waves_per_eu mirrors the Python lowerer: a bare int N emits "N,N",
-     * a 2-element tuple (lo,hi) -- serialized as the INT_LIST l:[ i:lo, i:hi ]
-     * -- emits "lo,hi". */
+         * a 2-element tuple (lo,hi) -- serialized as the INT_LIST l:[ i:lo, i:hi ]
+         * -- emits "lo,hi". */
         const rocke_attr_value_t* wpe_v = rocke_attr_get(&L->kernel->attrs, "waves_per_eu");
         if(wpe_v && wpe_v->kind == ROCKE_ATTR_INT)
         {
@@ -2267,8 +2266,8 @@ void rocke_ll_finalize(rocke_lower_t* L, rocke_strbuf_t* out)
     rocke_strbuf_append(out, " norecurse nounwind }\n");
 
     /* Python finalize does "\n".join(out) with a trailing "" element, so the
-   * file ends in a single newline; when the fp-atomic metadata is present it
-   * is preceded by a blank line (out.append("") before "!1 = !{}"). */
+     * file ends in a single newline; when the fp-atomic metadata is present it
+     * is preceded by a blank line (out.append("") before "!1 = !{}"). */
     if(L->needs_fp_atomic_md)
     {
         rocke_strbuf_append(out, "\n!1 = !{}\n");
@@ -2311,11 +2310,11 @@ static void ll_lower_into(rocke_lower_t* L,
                       arch ? arch : "(null)");
     }
     /* The AMDGPU datalayout is FLAVOR-KEYED (Python backend.datalayout(flavor)
-   * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
-   * LLVM22. backend_for installs the LLVM20 form by default; rebind the
-   * resolved backend's datalayout to the form for the resolved flavor.
-   * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
-   * does not mutate the canonical per-arch descriptors. */
+     * via _datalayout_for_flavor): the p8 field drifts between LLVM20 and
+     * LLVM22. backend_for installs the LLVM20 form by default; rebind the
+     * resolved backend's datalayout to the form for the resolved flavor.
+     * L->backend points at the static LL_BACKEND_RESOLVED scratch copy, so this
+     * does not mutate the canonical per-arch descriptors. */
     LL_BACKEND_RESOLVED.datalayout = rocke_ll_datalayout_for_flavor(L->flavor);
 
     /* Entry block (ll_make_block raises on OOM). */
@@ -2332,8 +2331,8 @@ static void ll_lower_into(rocke_lower_t* L,
         rocke_ll_fail(L, ROCKE_ERR_OOM, "out buffer");
     }
     /* finalize raises (rocke_ll_fail -> throw) on OOM; free `sb` before the
-   * exception propagates so the throw path does not leak its heap buffer.
-   * Codegen-neutral: the success path is unchanged. */
+     * exception propagates so the throw path does not leak its heap buffer.
+     * Codegen-neutral: the success path is unchanged. */
     try
     {
         rocke_ll_finalize(L, &sb);
@@ -2409,8 +2408,8 @@ static rocke_status_t ll_lower_kernel_to_llvm_ex_impl(const rocke_kernel_def_t* 
     rocke_vec_init(&L.yield_stack);
 
     /* A failure anywhere in lowering raises a ckc::Error; catch it here so the
-   * arena is always destroyed, then translate it into the legacy status code +
-   * caller `err` buffer (keeping the extern "C" ABI unchanged). */
+     * arena is always destroyed, then translate it into the legacy status code +
+     * caller `err` buffer (keeping the extern "C" ABI unchanged). */
     try
     {
         ll_lower_into(&L, kernel, flavor, arch, out_text);

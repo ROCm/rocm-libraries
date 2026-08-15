@@ -9,23 +9,23 @@
  *
  *   Python                         C99 (this header)
  *   ----------------------------   --------------------------------------------
- *   class Type (frozen)            rocke_type_t  (tagged union, kind
- * discriminant) VectorType/PtrType/SmemType    -> same struct, kind =
- * VECTOR/PTR/SMEM class Value (mutable)          rocke_value_t class Op
- * (mutable)             rocke_op_t class Region rocke_region_t class Param
- * rocke_param_t class KernelDef                rocke_kernel_def_t class
- * IRBuilder                rocke_ir_builder_t op.name : str rocke_opcode_t enum
- * (ROCKE_OP_*) + name table op.attrs : Dict[str, Any]      rocke_attr_map_t
- * (sorted key -> variant value) raise ValueError/TypeError     rocke_status_t
- * return code + builder->err msg
- *   **attrs kwargs                 explicit option structs
- * (rocke_param_opts_t...)
+ *   class Type (frozen)            rocke_type_t  (tagged union, kind discriminant)
+ *     VectorType/PtrType/SmemType    -> same struct, kind = VECTOR/PTR/SMEM
+ *   class Value (mutable)          rocke_value_t
+ *   class Op (mutable)             rocke_op_t
+ *   class Region                   rocke_region_t
+ *   class Param                    rocke_param_t
+ *   class KernelDef                rocke_kernel_def_t
+ *   class IRBuilder                rocke_ir_builder_t
+ *   op.name : str                  rocke_opcode_t enum (ROCKE_OP_*) + name table
+ *   op.attrs : Dict[str, Any]      rocke_attr_map_t (sorted key -> variant value)
+ *   raise ValueError/TypeError     rocke_status_t return code + builder->err msg
+ *   **attrs kwargs                 explicit option structs (rocke_param_opts_t...)
  *   @property result/is_pure       rocke_op_result()/rocke_op_is_pure() getters
  *
  * Lifetime: every node returned by the builder is owned by the builder's arena
- * (rocke_ir_builder_t.arena). Nothing is freed individually;
- * rocke_ir_builder_free() (or arena reset) bulk-frees the whole graph --
- * mirroring Python GC lifetime.
+ * (rocke_ir_builder_t.arena). Nothing is freed individually; rocke_ir_builder_free()
+ * (or arena reset) bulk-frees the whole graph -- mirroring Python GC lifetime.
  *
  * Error model: the builder is sticky-failing. The first operation that fails
  * sets builder->status != ROCKE_OK and records a message in builder->err; every
@@ -65,8 +65,8 @@ typedef enum rocke_status
  * ROCKE_ERR_MSG_CAP-sized field; we never grow it for a long reason string).
  * snprintf is overflow-safe, so the only effect of truncation is a shortened
  * human-readable message -- never memory unsafety and never emitted IR (these
- * are reject/error paths). The localized pragma blesses exactly this idiom
- * while keeping -Werror=format-truncation active everywhere else, so any NEW,
+ * are reject/error paths). The localized pragma blesses exactly this idiom while
+ * keeping -Werror=format-truncation active everywhere else, so any NEW,
  * unintended truncation (e.g. into a codegen name buffer) is still caught. */
 #if defined(__GNUC__)
 #define ROCKE_ERR_SNPRINTF(buf, cap, ...)                                   \
@@ -85,14 +85,14 @@ typedef enum rocke_status
 
 typedef enum rocke_type_kind
 {
-    ROCKE_TYPE_SCALAR = 0, /* i1/i8/i16/i32/i64/bf16/f16/f32/fp8e4m3/bf8e5m2 */
+    ROCKE_TYPE_SCALAR = 0, /* i1/i8/i16/i32/i64/bf16/f16/f32/fp8e4m3/bf8e5m2     */
     ROCKE_TYPE_VECTOR, /* vec<elem x count>                                  */
     ROCKE_TYPE_PTR, /* ptr<pointee, space>                                */
     ROCKE_TYPE_SMEM /* smem<elem, [shape...]>                             */
 } rocke_type_kind_t;
 
-/* Canonical scalar type tags. The scalar singletons (rocke_i32() etc.) carry
- * one of these so consumers can switch on the element kind without strcmp. */
+/* Canonical scalar type tags. The scalar singletons (rocke_i32() etc.) carry one
+ * of these so consumers can switch on the element kind without strcmp. */
 typedef enum rocke_scalar_kind
 {
     ROCKE_SCALAR_I1 = 0,
@@ -111,8 +111,7 @@ typedef enum rocke_scalar_kind
 /* A Type. `name` is the canonical textual form ("i32", "vec<f16x4>",
  * "ptr<f16,global>", "smem<f16, [64x32]>") -- byte-identical to Python so the
  * printer/lowerers reproduce existing output. Scalar types are interned
- * singletons; composite types are arena-allocated and value-compared by name.
- */
+ * singletons; composite types are arena-allocated and value-compared by name. */
 typedef struct rocke_type
 {
     rocke_type_kind_t kind;
@@ -133,8 +132,8 @@ typedef struct rocke_type
     const int* shape; /* arena-owned array of dim sizes            */
     int rank; /* number of dims in shape                   */
     int smem_exclusive; /* 1 => smem-pool packer gives this alloc its own
-                       * byte range (cshuffle no-alias mode). Kept OUT of
-                       * `name` so default (0) stays byte-identical.       */
+                         * byte range (cshuffle no-alias mode). Kept OUT of
+                         * `name` so default (0) stays byte-identical.       */
 } rocke_type_t;
 
 /* -------------------------------------------------------------- attr values */
@@ -419,8 +418,7 @@ typedef struct rocke_value
 } rocke_value_t;
 
 /* Operation. `opcode` replaces the Python op.name string; `name` keeps the
- * dotted text for printing. operands/results/regions are arena-backed arrays.
- */
+ * dotted text for printing. operands/results/regions are arena-backed arrays. */
 typedef struct rocke_op
 {
     rocke_opcode_t opcode;
@@ -445,8 +443,7 @@ typedef struct rocke_region
 } rocke_region_t;
 
 /* Kernel parameter ABI options (the Python **attrs on IRBuilder.param). A field
- * is "unset" via the *_set companion flag so defaults match Python (absent
- * key).
+ * is "unset" via the *_set companion flag so defaults match Python (absent key).
  */
 typedef struct rocke_param_opts
 {
@@ -574,8 +571,8 @@ const rocke_type_t* rocke_bf8e5m2(void);
 /* Look up a scalar singleton by canonical name ("i32",...); NULL if unknown. */
 const rocke_type_t* rocke_scalar_by_name(const char* name);
 
-/* Composite type constructors (arena-allocated, name computed
- * Python-identically). VectorType(elem,count) -> "vec<{elem}x{count}>"
+/* Composite type constructors (arena-allocated, name computed Python-identically).
+ * VectorType(elem,count) -> "vec<{elem}x{count}>"
  * PtrType(pointee,space) -> "ptr<{pointee},{space}>"
  * SmemType(elem,shape)   -> "smem<{elem}, [{d0}x{d1}...]>"  */
 const rocke_type_t* rocke_vector_type(rocke_ir_builder_t* b, const rocke_type_t* elem, int count);
@@ -616,13 +613,11 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt);
 
 /* ============================ OPCODE TABLE ============================== */
 
-/* Canonical dotted name for an opcode ("arith.add"); "" for ROCKE_OP_INVALID.
- */
+/* Canonical dotted name for an opcode ("arith.add"); "" for ROCKE_OP_INVALID. */
 const char* rocke_opcode_name(rocke_opcode_t op);
 /* Reverse map: dotted name -> opcode; ROCKE_OP_INVALID if unknown. */
 rocke_opcode_t rocke_opcode_from_name(const char* name);
-/* True if the op is side-effect-free (Python PURE_OP_NAMES / is_pure_op_name).
- */
+/* True if the op is side-effect-free (Python PURE_OP_NAMES / is_pure_op_name). */
 bool rocke_opcode_is_pure(rocke_opcode_t op);
 
 /* ============================== OP GETTERS ============================== */
@@ -636,8 +631,8 @@ int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k);
 
 /* ============================== BUILDER ================================= */
 
-/* Construct/destruct. rocke_ir_builder_new allocates the builder's own arena
- * and an empty kernel with an "entry" region as the current region. */
+/* Construct/destruct. rocke_ir_builder_new allocates the builder's own arena and
+ * an empty kernel with an "entry" region as the current region. */
 rocke_status_t rocke_ir_builder_init(rocke_ir_builder_t* b, const char* kernel_name);
 void rocke_ir_builder_free(rocke_ir_builder_t* b);
 bool rocke_ir_builder_ok(const rocke_ir_builder_t* b);
@@ -654,8 +649,8 @@ void rocke_b_region_leave(rocke_ir_builder_t* b); /* pop  */
 rocke_region_t* rocke_b_current_region(rocke_ir_builder_t* b);
 
 /* Generic op builder. Creates fresh result Values (one per result_types entry,
- * named with result_name_hint), builds the Op, links results back, emits it,
- * and returns it. attrs/regions may be NULL. This is IRBuilder._op. */
+ * named with result_name_hint), builds the Op, links results back, emits it, and
+ * returns it. attrs/regions may be NULL. This is IRBuilder._op. */
 rocke_op_t* rocke_b_op(rocke_ir_builder_t* b,
                        rocke_opcode_t opcode,
                        rocke_value_t* const* operands,
@@ -1139,8 +1134,7 @@ rocke_value_t* rocke_b_s_wqm(rocke_ir_builder_t* b, rocke_value_t* mask);
 rocke_value_t* rocke_b_av_load_b128(rocke_ir_builder_t* b, rocke_value_t* ptr);
 void rocke_b_av_store_b128(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* data);
 rocke_value_t* rocke_b_s_alloc_vgpr(rocke_ir_builder_t* b, int count);
-/* mov_dpp: exactly one of row_shr/row_shl must be >= 0 (the other < 0 = unset).
- */
+/* mov_dpp: exactly one of row_shr/row_shl must be >= 0 (the other < 0 = unset). */
 rocke_value_t* rocke_b_mov_dpp(
     rocke_ir_builder_t* b, rocke_value_t* data, int row_shr, int row_shl, bool bound_ctrl);
 /* permlane32_swap returns two values via out params (new_lo, new_hi). */
@@ -1339,9 +1333,8 @@ void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
 void rocke_b_sched_group_barrier(rocke_ir_builder_t* b, int mask, int count, int group);
 
 /* ----- compile-time loops (Python static_for / unroll are pure host control
- * flow; in C the caller simply writes a C for-loop calling the body. No IR op
- * is emitted, so no builder entry point is needed. Documented here for parity.)
- */
+ * flow; in C the caller simply writes a C for-loop calling the body. No IR op is
+ * emitted, so no builder entry point is needed. Documented here for parity.) */
 
 /* ----- control flow ----- */
 rocke_for_t rocke_b_scf_for(rocke_ir_builder_t* b,
