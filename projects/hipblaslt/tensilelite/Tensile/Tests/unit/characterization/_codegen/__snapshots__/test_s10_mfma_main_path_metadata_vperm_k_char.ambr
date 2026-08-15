@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s10_mfma_main_path_metadata_vperm_k_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_HHS_BH_SPAML0_UserArgs_MT64x64x327oQt_i7-szRj3Fkyx0gpvzB5UJ6n9P1vDgit3JcQais=',
+      'err': 0,
+    }),
+  ])
+# ---
