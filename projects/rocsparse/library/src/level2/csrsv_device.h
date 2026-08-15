@@ -331,8 +331,12 @@ namespace rocsparse
         // Get the row this warp will operate on. The diagonal solve has no
         // inter-row dependencies, so it does not require (and is not given) a
         // row map; rows are processed in their natural order.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
         const J row = (fill_mode == rocsparse_fill_mode_diagonal) ? static_cast<J>(idx + offset)
                                                                   : map[idx + offset];
+#else
+        const J row = map[idx + offset];
+#endif
 
         // Current row entry point and exit point
         const I row_begin = csr_row_ptr[row] - idx_base;

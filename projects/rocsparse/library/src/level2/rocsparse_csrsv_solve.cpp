@@ -86,15 +86,13 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     // Initialize buffers
     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     // Diagonal-only solve: x_i = alpha * b_i / a_ii. Every row is independent, so
     // no dependency analysis, row map or transposed structure is required. The
     // matrix is its own transpose; for the conjugate transpose case the values
     // are conjugated on the fly.
     if(descr->fill_mode == rocsparse_fill_mode_diagonal)
     {
-        // A diagonal solve divides by the diagonal entry. A unit diagonal is
-        // treated as a_ii = 1, so the solve reduces to the identity scaling
-        // x_i = alpha * b_i, which the kernel below produces directly.
 
         // Zero pivot reporting
         RETURN_IF_ROCSPARSE_ERROR(
@@ -176,6 +174,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                       handle->pointer_mode == rocsparse_pointer_mode_host);
         return rocsparse_status_success;
     }
+#endif
 
     const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
     if(csrsv == nullptr)

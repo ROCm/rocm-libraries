@@ -45,96 +45,6 @@
 
 //! [doc example]
 
-//
-// Apply a single triangular/diagonal solve  y = op(A)^-1 (alpha * x)  with
-// sptrsv on the given matrix view. The incomplete LDL^H factor is exposed
-// through separate spmat descriptors that share the same factor arrays but
-// carry different fill modes / diagonal types, so each solve keeps its own
-// (reusable) analysis.
-//
-static int sptrsv_solve(rocsparse_handle            handle,
-                        rocsparse_const_spmat_descr mat,
-                        rocsparse_operation         operation,
-                        const double*               alpha,
-                        rocsparse_const_dnvec_descr x,
-                        rocsparse_dnvec_descr       y)
-{
-    rocsparse_sptrsv_descr sptrsv_descr;
-    ROCSPARSE_CHECK(rocsparse_create_sptrsv_descr(&sptrsv_descr));
-
-    const rocsparse_sptrsv_alg alg = rocsparse_sptrsv_alg_default;
-    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(
-        handle, sptrsv_descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr));
-    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
-                                               sptrsv_descr,
-                                               rocsparse_sptrsv_input_operation,
-                                               &operation,
-                                               sizeof(operation),
-                                               nullptr));
-
-    const rocsparse_datatype datatype = rocsparse_datatype_f64_r;
-    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
-                                               sptrsv_descr,
-                                               rocsparse_sptrsv_input_scalar_datatype,
-                                               &datatype,
-                                               sizeof(datatype),
-                                               nullptr));
-    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
-                                               sptrsv_descr,
-                                               rocsparse_sptrsv_input_compute_datatype,
-                                               &datatype,
-                                               sizeof(datatype),
-                                               nullptr));
-
-    // The analysis is cached per matrix view and reused across right-hand sides.
-    const rocsparse_analysis_policy analysis_policy = rocsparse_analysis_policy_reuse;
-    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
-                                               sptrsv_descr,
-                                               rocsparse_sptrsv_input_analysis_policy,
-                                               &analysis_policy,
-                                               sizeof(analysis_policy),
-                                               nullptr));
-
-    size_t buffer_size;
-    void*  temp_buffer;
-
-    // Analysis stage.
-    ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(
-        handle, sptrsv_descr, mat, x, y, rocsparse_sptrsv_stage_analysis, &buffer_size, nullptr));
-    HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
-    ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
-                                     sptrsv_descr,
-                                     mat,
-                                     x,
-                                     y,
-                                     rocsparse_sptrsv_stage_analysis,
-                                     buffer_size,
-                                     temp_buffer,
-                                     nullptr));
-    HIP_CHECK(hipFree(temp_buffer));
-    temp_buffer = nullptr;
-
-    // Compute stage.
-    ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(
-        handle, sptrsv_descr, rocsparse_sptrsv_input_scalar_alpha, alpha, sizeof(alpha), nullptr));
-    ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(
-        handle, sptrsv_descr, mat, x, y, rocsparse_sptrsv_stage_compute, &buffer_size, nullptr));
-    HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
-    ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
-                                     sptrsv_descr,
-                                     mat,
-                                     x,
-                                     y,
-                                     rocsparse_sptrsv_stage_compute,
-                                     buffer_size,
-                                     temp_buffer,
-                                     nullptr));
-    HIP_CHECK(hipFree(temp_buffer));
-
-    ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
-    return 0;
-}
-
 int main()
 {
     //
@@ -496,22 +406,264 @@ int main()
     ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&vecZ, m, dz, data_type));
     ROCSPARSE_CHECK(rocsparse_create_dnvec_descr(&vecX, m, dx, data_type));
 
+    // The three solves share the same algorithm and reuse their (cached)
+    // analysis across right-hand sides.
+    const rocsparse_sptrsv_alg      alg             = rocsparse_sptrsv_alg_default;
+    const rocsparse_analysis_policy analysis_policy = rocsparse_analysis_policy_reuse;
+
+    size_t buffer_size;
+    void*  temp_buffer;
+
     // 1. Solve L y = b.
-    if(sptrsv_solve(handle, matL, rocsparse_operation_none, &alpha, vecB, vecY) != 0)
     {
-        return -1;
+        rocsparse_sptrsv_descr sptrsv_descr;
+        ROCSPARSE_CHECK(rocsparse_create_sptrsv_descr(&sptrsv_descr));
+
+        const rocsparse_operation operation = rocsparse_operation_none;
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(
+            handle, sptrsv_descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_operation,
+                                                   &operation,
+                                                   sizeof(operation),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_scalar_datatype,
+                                                   &data_type,
+                                                   sizeof(data_type),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_compute_datatype,
+                                                   &data_type,
+                                                   sizeof(data_type),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_analysis_policy,
+                                                   &analysis_policy,
+                                                   sizeof(analysis_policy),
+                                                   nullptr));
+
+        // Analysis stage.
+        ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
+                                                     sptrsv_descr,
+                                                     matL,
+                                                     vecB,
+                                                     vecY,
+                                                     rocsparse_sptrsv_stage_analysis,
+                                                     &buffer_size,
+                                                     nullptr));
+        HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
+        ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
+                                         sptrsv_descr,
+                                         matL,
+                                         vecB,
+                                         vecY,
+                                         rocsparse_sptrsv_stage_analysis,
+                                         buffer_size,
+                                         temp_buffer,
+                                         nullptr));
+        HIP_CHECK(hipFree(temp_buffer));
+
+        // Compute stage.
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_scalar_alpha,
+                                                   &alpha,
+                                                   sizeof(alpha),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
+                                                     sptrsv_descr,
+                                                     matL,
+                                                     vecB,
+                                                     vecY,
+                                                     rocsparse_sptrsv_stage_compute,
+                                                     &buffer_size,
+                                                     nullptr));
+        HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
+        ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
+                                         sptrsv_descr,
+                                         matL,
+                                         vecB,
+                                         vecY,
+                                         rocsparse_sptrsv_stage_compute,
+                                         buffer_size,
+                                         temp_buffer,
+                                         nullptr));
+        HIP_CHECK(hipFree(temp_buffer));
+
+        ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
     }
 
     // 2. Solve D z = y (diagonal-only solve).
-    if(sptrsv_solve(handle, matD, rocsparse_operation_none, &alpha, vecY, vecZ) != 0)
     {
-        return -1;
+        rocsparse_sptrsv_descr sptrsv_descr;
+        ROCSPARSE_CHECK(rocsparse_create_sptrsv_descr(&sptrsv_descr));
+
+        const rocsparse_operation operation = rocsparse_operation_none;
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(
+            handle, sptrsv_descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_operation,
+                                                   &operation,
+                                                   sizeof(operation),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_scalar_datatype,
+                                                   &data_type,
+                                                   sizeof(data_type),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_compute_datatype,
+                                                   &data_type,
+                                                   sizeof(data_type),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_analysis_policy,
+                                                   &analysis_policy,
+                                                   sizeof(analysis_policy),
+                                                   nullptr));
+
+        // Analysis stage.
+        ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
+                                                     sptrsv_descr,
+                                                     matD,
+                                                     vecY,
+                                                     vecZ,
+                                                     rocsparse_sptrsv_stage_analysis,
+                                                     &buffer_size,
+                                                     nullptr));
+        HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
+        ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
+                                         sptrsv_descr,
+                                         matD,
+                                         vecY,
+                                         vecZ,
+                                         rocsparse_sptrsv_stage_analysis,
+                                         buffer_size,
+                                         temp_buffer,
+                                         nullptr));
+        HIP_CHECK(hipFree(temp_buffer));
+
+        // Compute stage.
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_scalar_alpha,
+                                                   &alpha,
+                                                   sizeof(alpha),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
+                                                     sptrsv_descr,
+                                                     matD,
+                                                     vecY,
+                                                     vecZ,
+                                                     rocsparse_sptrsv_stage_compute,
+                                                     &buffer_size,
+                                                     nullptr));
+        HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
+        ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
+                                         sptrsv_descr,
+                                         matD,
+                                         vecY,
+                                         vecZ,
+                                         rocsparse_sptrsv_stage_compute,
+                                         buffer_size,
+                                         temp_buffer,
+                                         nullptr));
+        HIP_CHECK(hipFree(temp_buffer));
+
+        ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
     }
 
     // 3. Solve L^H x = z (transpose of the stored lower factor).
-    if(sptrsv_solve(handle, matLt, rocsparse_operation_transpose, &alpha, vecZ, vecX) != 0)
     {
-        return -1;
+        rocsparse_sptrsv_descr sptrsv_descr;
+        ROCSPARSE_CHECK(rocsparse_create_sptrsv_descr(&sptrsv_descr));
+
+        const rocsparse_operation operation = rocsparse_operation_transpose;
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(
+            handle, sptrsv_descr, rocsparse_sptrsv_input_alg, &alg, sizeof(alg), nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_operation,
+                                                   &operation,
+                                                   sizeof(operation),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_scalar_datatype,
+                                                   &data_type,
+                                                   sizeof(data_type),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_compute_datatype,
+                                                   &data_type,
+                                                   sizeof(data_type),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_analysis_policy,
+                                                   &analysis_policy,
+                                                   sizeof(analysis_policy),
+                                                   nullptr));
+
+        // Analysis stage.
+        ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
+                                                     sptrsv_descr,
+                                                     matLt,
+                                                     vecZ,
+                                                     vecX,
+                                                     rocsparse_sptrsv_stage_analysis,
+                                                     &buffer_size,
+                                                     nullptr));
+        HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
+        ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
+                                         sptrsv_descr,
+                                         matLt,
+                                         vecZ,
+                                         vecX,
+                                         rocsparse_sptrsv_stage_analysis,
+                                         buffer_size,
+                                         temp_buffer,
+                                         nullptr));
+        HIP_CHECK(hipFree(temp_buffer));
+
+        // Compute stage.
+        ROCSPARSE_CHECK(rocsparse_sptrsv_set_input(handle,
+                                                   sptrsv_descr,
+                                                   rocsparse_sptrsv_input_scalar_alpha,
+                                                   &alpha,
+                                                   sizeof(alpha),
+                                                   nullptr));
+        ROCSPARSE_CHECK(rocsparse_sptrsv_buffer_size(handle,
+                                                     sptrsv_descr,
+                                                     matLt,
+                                                     vecZ,
+                                                     vecX,
+                                                     rocsparse_sptrsv_stage_compute,
+                                                     &buffer_size,
+                                                     nullptr));
+        HIP_CHECK(hipMalloc(&temp_buffer, buffer_size));
+        ROCSPARSE_CHECK(rocsparse_sptrsv(handle,
+                                         sptrsv_descr,
+                                         matLt,
+                                         vecZ,
+                                         vecX,
+                                         rocsparse_sptrsv_stage_compute,
+                                         buffer_size,
+                                         temp_buffer,
+                                         nullptr));
+        HIP_CHECK(hipFree(temp_buffer));
+
+        ROCSPARSE_CHECK(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
     }
 
     // Copy the solution back to the host and print it.

@@ -49,13 +49,6 @@ if (rocblas_FOUND)
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
 endif()
 
-# Keep rocsparse_fill_mode_diagonal available to the clients' own translation
-# units even when the feature is disabled in the public API, so client switch
-# statements over rocsparse_fill_mode remain valid.
-if (NOT BUILD_WITH_FILL_MODE_DIAGONAL)
-  add_compile_options(-DROCSPARSE_KEEP_INTERNAL_FILL_MODE_DIAGONAL)
-endif()
-
 if (BUILD_CLIENTS_ONLY)
   find_package(rocsparse 4.0.0 REQUIRED)
 endif()

@@ -381,22 +381,16 @@ namespace rocsparse
         const rocsparse_format    format    = A->format;
         const rocsparse_operation operation = sptrsv_descr->get_operation();
 
-#ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
-        // The diagonal fill mode was disabled at build time
-        // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF).
-        ROCSPARSE_CHECKARG(2,
-                           A,
-                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
-                           rocsparse_status_not_implemented);
-#endif
-        // The diagonal fill mode is supported by the CSR and CSC formats. A unit
-        // diagonal is treated as a_ii = 1, reducing the solve to the identity
-        // scaling x_i = alpha * b_i.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
         ROCSPARSE_CHECKARG(2,
                            A,
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal
                             && format != rocsparse_format_csr && format != rocsparse_format_csc),
                            rocsparse_status_not_implemented);
+#else
+        ROCSPARSE_CHECKARG(
+            2, A, (static_cast<int>(A->descr->fill_mode) == 2), rocsparse_status_not_implemented);
+#endif
 
         switch(sptrsv_stage)
         {
@@ -552,22 +546,16 @@ namespace rocsparse
         const rocsparse_sptrsv_stage previous_stage = sptrsv_descr->get_stage();
         const rocsparse_sptrsv_alg   alg            = sptrsv_descr->get_alg();
 
-#ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
-        // The diagonal fill mode was disabled at build time
-        // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF).
-        ROCSPARSE_CHECKARG(2,
-                           A,
-                           (A->descr->fill_mode == rocsparse_fill_mode_diagonal),
-                           rocsparse_status_not_implemented);
-#endif
-        // The diagonal fill mode is supported by the CSR and CSC formats. A unit
-        // diagonal is treated as a_ii = 1, reducing the solve to the identity
-        // scaling x_i = alpha * b_i.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
         ROCSPARSE_CHECKARG(2,
                            A,
                            (A->descr->fill_mode == rocsparse_fill_mode_diagonal
                             && format != rocsparse_format_csr && format != rocsparse_format_csc),
                            rocsparse_status_not_implemented);
+#else
+        ROCSPARSE_CHECKARG(
+            2, A, (static_cast<int>(A->descr->fill_mode) == 2), rocsparse_status_not_implemented);
+#endif
 
         ROCSPARSE_CHECKARG(1,
                            sptrsv_descr,

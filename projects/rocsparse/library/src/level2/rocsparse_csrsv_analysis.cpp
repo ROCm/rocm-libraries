@@ -471,6 +471,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
                        (descr->storage_mode != rocsparse_storage_mode_sorted),
                        rocsparse_status_requires_sorted_storage);
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     // The diagonal solve has no inter-row dependencies, hence requires no
     // dependency analysis. Make sure a csrsv info object exists so the solve
     // stage has a valid handle and return early.
@@ -488,6 +489,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
         }
         return rocsparse_status_success;
     }
+#endif
 
     auto info = A->info;
     // Differentiate the analysis policies

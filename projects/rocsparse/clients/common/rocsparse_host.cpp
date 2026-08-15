@@ -2200,6 +2200,7 @@ void host_csrsv(rocsparse_operation  trans,
     *struct_pivot  = M + 1;
     *numeric_pivot = M + 1;
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     if(fill_mode == rocsparse_fill_mode_diagonal)
     {
         // Diagonal-only solve: y_i = alpha * x_i / a_ii. A diagonal matrix is its
@@ -2245,6 +2246,7 @@ void host_csrsv(rocsparse_operation  trans,
         *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
         return;
     }
+#endif
 
     if(trans == rocsparse_operation_none)
     {

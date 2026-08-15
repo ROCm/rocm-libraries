@@ -269,11 +269,9 @@ void cpu_csrsv(rocsparse_operation  trans,
 #if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     if(fill_mode == rocsparse_fill_mode_diagonal)
     {
-        // Diagonal-only solve: y_i = alpha * x_i / a_ii. A diagonal matrix is its
-        // own transpose; only the conjugate transpose conjugates the diagonal. A
-        // unit diagonal is treated as a_ii = 1, so the solve reduces to the
-        // identity scaling y_i = alpha * x_i. (The switch cases below keep a
-        // diagonal stub only to satisfy -Wswitch; this branch does the work.)
+        // A diagonal matrix is its own transpose; only the conjugate transpose
+        // conjugates the diagonal. (The switch cases below keep a diagonal stub
+        // only to satisfy -Wswitch; this branch does the work.)
         const bool conj = (trans == rocsparse_operation_conjugate_transpose);
         for(J row = 0; row < M; ++row)
         {
@@ -740,11 +738,8 @@ void testing_sptrsv(const Arguments& arg)
 #endif
 
 #ifndef ROCSPARSE_WITH_FILL_MODE_DIAGONAL
-    // The diagonal fill mode can be disabled at build time
-    // (BUILD_WITH_FILL_MODE_DIAGONAL=OFF). rocsparse_gentest.py still maps
-    // rocsparse_fill_mode_diagonal to 2 regardless of the build flag, so skip
-    // those cases in that configuration instead of letting them fail with
-    // rocsparse_status_invalid_value.
+    // gentest maps rocsparse_fill_mode_diagonal to 2 regardless of the build
+    // flag; skip those cases here rather than let them fail.
     if(arg.uplo == static_cast<rocsparse_fill_mode>(2))
     {
         return;
