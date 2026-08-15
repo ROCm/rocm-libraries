@@ -343,6 +343,14 @@ static void check_device_print(verifier_t* v, const rocke_op_t* op)
     unsigned char* referenced = NULL;
     size_t text_bytes = 0;
     int value_count = 0;
+    rocke_device_print_limits_t limits;
+    char limit_error[256];
+
+    if(!rocke_i_device_print_limits(&limits, limit_error, sizeof(limit_error)))
+    {
+        v_errf(v, op, "gpu.device_print: %s", limit_error);
+        return;
+    }
 
     if(op->num_results)
         v_errf(v, op, "gpu.device_print: expected no results");
@@ -447,16 +455,10 @@ static void check_device_print(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "gpu.device_print: item %d has unknown kind '%s'", i, kind);
     }
 
-    if(text_bytes > ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES)
-        v_errf(v,
-               op,
-               "gpu.device_print: literal text exceeds %d bytes",
-               ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES);
-    if(value_count > ROCKE_DEVICE_PRINT_MAX_VALUES)
-        v_errf(v,
-               op,
-               "gpu.device_print: expanded value count exceeds %d",
-               ROCKE_DEVICE_PRINT_MAX_VALUES);
+    if(text_bytes > limits.max_literal_bytes)
+        v_errf(v, op, "gpu.device_print: literal text exceeds %zu bytes", limits.max_literal_bytes);
+    if(value_count > limits.max_value_count)
+        v_errf(v, op, "gpu.device_print: expanded value count exceeds %d", limits.max_value_count);
     for(int i = 0; i < op->num_operands; ++i)
     {
         if(i != predicate_index && (!referenced || !referenced[i]))

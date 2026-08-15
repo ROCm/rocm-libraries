@@ -1,12 +1,92 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "device_print_internal.h"
 #include "rocke/error_boundary.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
+
+#define ROCKE_I_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES 4096
+#define ROCKE_I_DEVICE_PRINT_DEFAULT_MAX_VALUE_COUNT 64
+#define ROCKE_I_DEVICE_PRINT_MAX_CONFIGURED_LIMIT INT_MAX
+
+static int parse_device_print_limit(
+    const char* name, int default_value, int* value, char* error, size_t error_capacity)
+{
+    const char* raw = getenv(name);
+    const char* begin;
+    const char* limit;
+    const char* cursor;
+    char* end;
+    long parsed;
+
+    if(!raw)
+    {
+        *value = default_value;
+        return 1;
+    }
+    begin = raw;
+    while(*begin && isspace((unsigned char)*begin))
+        ++begin;
+    if(!*begin)
+    {
+        *value = default_value;
+        return 1;
+    }
+    limit = begin + strlen(begin);
+    while(limit > begin && isspace((unsigned char)limit[-1]))
+        --limit;
+    for(cursor = begin; cursor < limit; ++cursor)
+    {
+        if(!isdigit((unsigned char)*cursor))
+            goto invalid;
+    }
+    errno = 0;
+    parsed = strtol(begin, &end, 10);
+    if(errno == 0 && end == limit && parsed >= 1
+       && parsed <= ROCKE_I_DEVICE_PRINT_MAX_CONFIGURED_LIMIT)
+    {
+        *value = (int)parsed;
+        return 1;
+    }
+invalid:
+    if(error && error_capacity)
+        snprintf(error,
+                 error_capacity,
+                 "%s='%s' is invalid; expected a base-10 integer in [1, %d]",
+                 name,
+                 raw,
+                 ROCKE_I_DEVICE_PRINT_MAX_CONFIGURED_LIMIT);
+    return 0;
+}
+
+int rocke_i_device_print_limits(rocke_device_print_limits_t* limits,
+                                char* error,
+                                size_t error_capacity)
+{
+    int literal_bytes;
+    if(!limits
+       || !parse_device_print_limit("ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES",
+                                    ROCKE_I_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES,
+                                    &literal_bytes,
+                                    error,
+                                    error_capacity)
+       || !parse_device_print_limit("ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT",
+                                    ROCKE_I_DEVICE_PRINT_DEFAULT_MAX_VALUE_COUNT,
+                                    &limits->max_value_count,
+                                    error,
+                                    error_capacity))
+        return 0;
+    limits->max_literal_bytes = (size_t)literal_bytes;
+    return 1;
+}
 
 int rocke_i_valid_print_text(const unsigned char* text, size_t* bytes)
 {
@@ -66,11 +146,15 @@ static void device_print_impl(rocke_ir_builder_t* b,
     int operand_count = 0;
     int value_count = 0;
     size_t text_bytes = 0;
+    rocke_device_print_limits_t limits;
+    char limit_error[256];
     int i;
     if(!rocke_i_live(b))
         return;
     if(num_items < 0 || (num_items > 0 && !items))
         return (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "device_print: invalid items");
+    if(!rocke_i_device_print_limits(&limits, limit_error, sizeof(limit_error)))
+        return (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s", limit_error);
     style = style ? style : "compact";
     termination = termination ? termination : "ensure_newline";
     if(strcmp(style, "compact") != 0)
@@ -144,14 +228,14 @@ static void device_print_impl(rocke_ir_builder_t* b,
         else
             return (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "device_print: unknown item kind");
     }
-    if(text_bytes > ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES)
+    if(text_bytes > limits.max_literal_bytes)
         return (void)rocke_i_set_err(b,
                                      ROCKE_ERR_VALUE,
-                                     "device_print: literal text exceeds %d bytes",
-                                     ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES);
-    if(value_count > ROCKE_DEVICE_PRINT_MAX_VALUES)
+                                     "device_print: literal text exceeds %zu bytes",
+                                     limits.max_literal_bytes);
+    if(value_count > limits.max_value_count)
         return (void)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "device_print: more than %d values", ROCKE_DEVICE_PRINT_MAX_VALUES);
+            b, ROCKE_ERR_VALUE, "device_print: more than %d values", limits.max_value_count);
 
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "items", 0);

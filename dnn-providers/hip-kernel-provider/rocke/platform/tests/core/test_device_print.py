@@ -8,11 +8,11 @@ from copy import deepcopy
 import pytest
 
 from rocke.core.ir import (
-    DEVICE_PRINT_MAX_LITERAL_BYTES,
     F32,
     IRBuilder,
     PrintValue,
     PtrType,
+    _DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES,
 )
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
@@ -118,12 +118,68 @@ def test_device_print_builder_rejects_invalid_contracts() -> None:
     integer = b.const_i32(1)
     with pytest.raises(TypeError, match="not compatible"):
         b.device_print(PrintValue(integer, "f32"))
-    with pytest.raises(ValueError, match=str(DEVICE_PRINT_MAX_LITERAL_BYTES)):
-        b.device_print("x" * (DEVICE_PRINT_MAX_LITERAL_BYTES + 1))
+    with pytest.raises(ValueError, match=str(_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES)):
+        b.device_print("x" * (_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES + 1))
     with pytest.raises(ValueError, match="ASCII"):
         b.device_print("lambda=λ")
     with pytest.raises(ValueError, match="termination"):
         b.device_print("x", termination="sometimes")
+
+
+def test_device_print_limits_are_internal() -> None:
+    import rocke
+    import rocke.core
+
+    assert not hasattr(rocke, "DEVICE_PRINT_MAX_LITERAL_BYTES")
+    assert not hasattr(rocke, "DEVICE_PRINT_MAX_VALUES")
+    assert not hasattr(rocke.core, "DEVICE_PRINT_MAX_LITERAL_BYTES")
+    assert not hasattr(rocke.core, "DEVICE_PRINT_MAX_VALUES")
+
+
+def test_device_print_environment_limit_overrides(monkeypatch) -> None:
+    monkeypatch.setenv("ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES", " 4 ")
+    accepted = IRBuilder("literal_limit_accepted")
+    accepted.device_print("1234", termination="none")
+    rejected = IRBuilder("literal_limit_rejected")
+    with pytest.raises(ValueError, match="exceeds 4 literal bytes"):
+        rejected.device_print("12345", termination="none")
+
+    raised_limit = _DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES + 1
+    monkeypatch.setenv("ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES", str(raised_limit))
+    accepted = IRBuilder("raised_literal_limit")
+    accepted.device_print("x" * raised_limit, termination="none")
+
+    monkeypatch.setenv("ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT", "1")
+    rejected = IRBuilder("value_limit_rejected")
+    first = rejected.const_i32(1)
+    second = rejected.const_i32(2)
+    with pytest.raises(ValueError, match="exceeds 1 expanded values"):
+        rejected.device_print(first, second)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "1_0", "abc", "2147483648"])
+def test_device_print_environment_limit_rejects_invalid_values(
+    monkeypatch, value: str
+) -> None:
+    name = "ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES"
+    monkeypatch.setenv(name, value)
+    builder = IRBuilder("invalid_environment_limit")
+    with pytest.raises(ValueError, match=name):
+        builder.device_print("x")
+
+
+def test_device_print_environment_empty_is_unset(monkeypatch) -> None:
+    monkeypatch.setenv("ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES", "   ")
+    builder = IRBuilder("empty_environment_limit")
+    with pytest.raises(ValueError, match=str(_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES)):
+        builder.device_print("x" * (_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES + 1))
+
+
+def test_device_print_verifier_uses_environment_limits(monkeypatch) -> None:
+    kernel = _build_print_kernel()
+    monkeypatch.setenv("ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT", "1")
+    messages = [diagnostic.message for diagnostic in verify(kernel)]
+    assert any("expanded value count exceeds 1" in message for message in messages)
 
 
 def test_device_print_percent_is_literal_text() -> None:

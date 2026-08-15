@@ -35,8 +35,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from .ir import (
-    DEVICE_PRINT_MAX_LITERAL_BYTES,
-    DEVICE_PRINT_MAX_VALUES,
     KernelDef,
     Op,
     Region,
@@ -45,6 +43,7 @@ from .ir import (
     VectorType,
     PtrType,
     SmemType,
+    _device_print_limits,
 )
 
 ERROR = "error"
@@ -377,6 +376,11 @@ class _Verifier:
                 self.err(f"{name}: must have no operands and no results", op)
 
     def _check_device_print(self, op: Op) -> None:
+        try:
+            max_literal_bytes, max_value_count = _device_print_limits()
+        except ValueError as error:
+            self.err(f"gpu.device_print: {error}", op)
+            return
         if op.results:
             self.err("gpu.device_print: expected no results", op)
         if op.attrs.get("style") != "compact":
@@ -480,16 +484,14 @@ class _Verifier:
                     f"gpu.device_print: item {index} has unknown kind {kind!r}", op
                 )
 
-        if text_bytes > DEVICE_PRINT_MAX_LITERAL_BYTES:
+        if text_bytes > max_literal_bytes:
             self.err(
-                "gpu.device_print: literal text exceeds "
-                f"{DEVICE_PRINT_MAX_LITERAL_BYTES} bytes",
+                f"gpu.device_print: literal text exceeds {max_literal_bytes} bytes",
                 op,
             )
-        if value_count > DEVICE_PRINT_MAX_VALUES:
+        if value_count > max_value_count:
             self.err(
-                "gpu.device_print: expanded value count exceeds "
-                f"{DEVICE_PRINT_MAX_VALUES}",
+                f"gpu.device_print: expanded value count exceeds {max_value_count}",
                 op,
             )
         expected = set(range(len(op.operands)))

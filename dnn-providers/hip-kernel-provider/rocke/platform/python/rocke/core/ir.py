@@ -24,6 +24,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -51,10 +52,41 @@ FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
 
 
-# Canonical device-print record limits. These are part of the frontend and IR
-# contract, so callers can size records without duplicating verifier policy.
-DEVICE_PRINT_MAX_LITERAL_BYTES = 4096
-DEVICE_PRINT_MAX_VALUES = 64
+_DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES = 4096
+_DEVICE_PRINT_DEFAULT_MAX_VALUE_COUNT = 64
+_DEVICE_PRINT_MAX_CONFIGURED_LIMIT = 2_147_483_647
+
+
+def _device_print_limit(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    value_text = raw.strip()
+    if not all("0" <= character <= "9" for character in value_text):
+        raise ValueError(
+            f"{name}={raw!r} is invalid; expected a base-10 integer in "
+            f"[1, {_DEVICE_PRINT_MAX_CONFIGURED_LIMIT}]"
+        )
+    value = int(value_text, 10)
+    if not 1 <= value <= _DEVICE_PRINT_MAX_CONFIGURED_LIMIT:
+        raise ValueError(
+            f"{name}={raw!r} is invalid; expected a base-10 integer in "
+            f"[1, {_DEVICE_PRINT_MAX_CONFIGURED_LIMIT}]"
+        )
+    return value
+
+
+def _device_print_limits() -> tuple[int, int]:
+    return (
+        _device_print_limit(
+            "ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES",
+            _DEVICE_PRINT_DEFAULT_MAX_LITERAL_BYTES,
+        ),
+        _device_print_limit(
+            "ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT",
+            _DEVICE_PRINT_DEFAULT_MAX_VALUE_COUNT,
+        ),
+    )
 
 
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
@@ -1255,6 +1287,7 @@ class IRBuilder:
         operands: List[Value] = []
         text_bytes = 0
         value_count = 0
+        max_literal_bytes, max_value_count = _device_print_limits()
 
         for item in items:
             if isinstance(item, str):
@@ -1307,14 +1340,13 @@ class IRBuilder:
 
         if not canonical:
             raise ValueError("device_print record must contain at least one item")
-        if text_bytes > DEVICE_PRINT_MAX_LITERAL_BYTES:
+        if text_bytes > max_literal_bytes:
             raise ValueError(
-                "device_print record exceeds "
-                f"{DEVICE_PRINT_MAX_LITERAL_BYTES} literal bytes"
+                f"device_print record exceeds {max_literal_bytes} literal bytes"
             )
-        if value_count > DEVICE_PRINT_MAX_VALUES:
+        if value_count > max_value_count:
             raise ValueError(
-                f"device_print record exceeds {DEVICE_PRINT_MAX_VALUES} expanded values"
+                f"device_print record exceeds {max_value_count} expanded values"
             )
 
         attrs: Dict[str, Any] = {"items": canonical, "style": style}

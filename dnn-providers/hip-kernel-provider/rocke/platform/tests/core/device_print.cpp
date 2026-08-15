@@ -10,6 +10,13 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+#ifdef ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES
+#error "device-print limits must not be part of the public C API"
+#endif
+#ifdef ROCKE_DEVICE_PRINT_MAX_VALUES
+#error "device-print limits must not be part of the public C API"
+#endif
+
 static_assert(ROCKE_OP_MEMREF_GLOBAL_LOAD == 65, "public opcode ABI changed");
 static_assert(ROCKE_OP_CF_RETURN == 179, "public opcode ABI changed");
 static_assert(ROCKE_OP_GPU_DEVICE_PRINT == 180, "new opcodes must be appended");
@@ -18,6 +25,71 @@ static int fail(const char* message)
 {
     fprintf(stderr, "%s\n", message);
     return 1;
+}
+
+static int set_test_environment(const char* name, const char* value)
+{
+#ifdef _WIN32
+    return _putenv_s(name, value);
+#else
+    return setenv(name, value, 1);
+#endif
+}
+
+static int clear_test_environment(const char* name)
+{
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return unsetenv(name);
+#endif
+}
+
+static int expect_text_limit(const char* text, int accepted, const char* error_fragment)
+{
+    rocke_ir_builder_t b;
+    rocke_print_item_t item = {ROCKE_PRINT_TEXT, text, NULL, NULL};
+    if(rocke_ir_builder_init(&b, "text_limit") != ROCKE_OK)
+        return fail("text-limit builder init failed");
+    rocke_b_device_print(&b, &item, 1, NULL, "compact", "none");
+    int actual = rocke_ir_builder_ok(&b);
+    if(actual != accepted)
+    {
+        const char* error = rocke_ir_builder_error(&b);
+        fprintf(stderr, "unexpected text-limit result: %s\n", error ? error : "no error");
+        rocke_ir_builder_free(&b);
+        return 1;
+    }
+    if(!accepted && error_fragment)
+    {
+        const char* error = rocke_ir_builder_error(&b);
+        if(!error || !strstr(error, error_fragment))
+        {
+            fprintf(stderr, "missing text-limit error fragment: %s\n", error_fragment);
+            rocke_ir_builder_free(&b);
+            return 1;
+        }
+    }
+    rocke_ir_builder_free(&b);
+    return 0;
+}
+
+static int expect_value_limit(void)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "value_limit") != ROCKE_OK)
+        return fail("value-limit builder init failed");
+    rocke_value_t* first = rocke_b_const_i32(&b, 1);
+    rocke_value_t* second = rocke_b_const_i32(&b, 2);
+    rocke_print_item_t items[] = {
+        {ROCKE_PRINT_VALUE, NULL, first, NULL},
+        {ROCKE_PRINT_VALUE, NULL, second, NULL},
+    };
+    rocke_b_device_print(&b, items, 2, NULL, "compact", "none");
+    const char* error = rocke_ir_builder_error(&b);
+    int failed = rocke_ir_builder_ok(&b) || !error || !strstr(error, "more than 1 values");
+    rocke_ir_builder_free(&b);
+    return failed ? fail("device_print did not enforce configured value limit") : 0;
 }
 
 static int expect_invalid_text(const char* text)
@@ -34,8 +106,20 @@ static int expect_invalid_text(const char* text)
 
 int main(void)
 {
+    const char* literal_limit = "ROCKE_ENGINE_DEVICE_PRINT_MAX_LITERAL_BYTES";
+    const char* value_limit = "ROCKE_ENGINE_DEVICE_PRINT_MAX_VALUE_COUNT";
     const char non_ascii[] = {(char)0x80, '\0'};
     if(expect_invalid_text(non_ascii))
+        return 1;
+
+    if(set_test_environment(literal_limit, " 4 ") || expect_text_limit("1234", 1, NULL)
+       || expect_text_limit("12345", 0, "exceeds 4 bytes"))
+        return 1;
+    if(set_test_environment(literal_limit, "0") || expect_text_limit("x", 0, literal_limit)
+       || clear_test_environment(literal_limit))
+        return 1;
+    if(set_test_environment(value_limit, "1") || expect_value_limit()
+       || clear_test_environment(value_limit))
         return 1;
 
     rocke_ir_builder_t b;
