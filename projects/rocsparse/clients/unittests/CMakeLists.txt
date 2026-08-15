@@ -132,11 +132,14 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collectives_shfl.cpp
   unit_test_internal_collectives_boost.cpp
   unit_test_internal_infostructs.cpp
-  unit_test_internal_hostblocks.cpp
+  unit_test_internal_hostblocks_bitops.cpp
+  unit_test_internal_hostblocks_csrmm_alg.cpp
+  unit_test_internal_hostblocks_indextype.cpp
+  unit_test_internal_hostblocks_itilu0.cpp
 )
 
-# Host building-block library translation units under test by
-# unit_test_internal_hostblocks.cpp. Compiled into the device (GPU) test binary
+# Host building-block library translation units under test by the
+# unit_test_internal_hostblocks_*.cpp files. Compiled into the device (GPU) test binary
 # because their include chain (rocsparse_control.hpp -> rocsparse_common.hpp)
 # requires the HIP compile mode; the routines themselves are host-pure logic.
 # This is build wiring only -- NO library source changes. Subsequent leaves
