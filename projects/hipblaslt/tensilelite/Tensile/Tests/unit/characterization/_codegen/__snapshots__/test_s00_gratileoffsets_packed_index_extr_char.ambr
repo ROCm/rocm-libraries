@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_s00_gratileoffsets_packed_index_extr_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HSS_STA_BH_UserArgs_MT128x128x64_PbIufJlhl2P5D2wYKYOwifL3NCPnrnAzatrvDI0v1ec=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HSS_STA_BH_UserArgs_MT64x128x64_M_vguio6FQLk7bFeyo4E38itv1Cg_SNOS7myJattY8lE=',
+      'err': 0,
+    }),
+  ])
+# ---
