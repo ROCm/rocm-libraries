@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s07_usef32xemulation_register_layout_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_S_MX_B_UserArgs_MT128x192x32_MI161MI8PJHJWHsFhU-cJ4YnELEbY6QGH7WPUgne9BBvZHo=',
+      'err': 0,
+    }),
+  ])
+# ---
