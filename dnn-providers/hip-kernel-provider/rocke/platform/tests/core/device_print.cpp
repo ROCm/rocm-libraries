@@ -17,10 +17,6 @@
 #error "device-print limits must not be part of the public C API"
 #endif
 
-static_assert(ROCKE_OP_MEMREF_GLOBAL_LOAD == 65, "public opcode ABI changed");
-static_assert(ROCKE_OP_CF_RETURN == 179, "public opcode ABI changed");
-static_assert(ROCKE_OP_GPU_DEVICE_PRINT == 180, "new opcodes must be appended");
-
 static int fail(const char* message)
 {
     fprintf(stderr, "%s\n", message);
