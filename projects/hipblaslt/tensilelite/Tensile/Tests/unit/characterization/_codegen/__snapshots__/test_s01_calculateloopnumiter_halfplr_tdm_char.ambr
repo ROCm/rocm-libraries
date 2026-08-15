@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s01_calculateloopnumiter_halfplr_tdm_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT32x32x256_MI16xmY2ilLkzS3To5rMoubmczqlkN-1syIedJzXXRoeGsP8=',
+      'err': 0,
+    }),
+  ])
+# ---
