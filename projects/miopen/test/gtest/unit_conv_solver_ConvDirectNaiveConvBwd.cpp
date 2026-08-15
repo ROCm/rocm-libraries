@@ -181,6 +181,44 @@ TEST_P(CPU_UnitTestConvSolverDirectNaiveDevApplicabilityBwd_NONE, ConvDirectNaiv
     this->RunTest(miopen::solver::conv::ConvDirectNaiveConvBwd{});
 };
 
+// The wide-block (1024) path in ConvDirectNaiveConvBwd's GetSolution now queries live
+// occupancy on the compiled kernel to decide viability, falling back to a small arch
+// allowlist (gfx90a/gfx942/gfx950) only if that query can't be answered. gfx1201 is outside
+// that allowlist, and compiling against a mocked arch that doesn't match the physical test
+// GPU means the probe kernel can't be loaded here -- so this exercises the fallback path and
+// asserts GetSolution degrades to a valid block size instead of throwing.
+TEST(CPU_UnitTestConvDirectNaiveConvBwdBlockSize_NONE, OccupancyQueryFallbackDoesNotThrow)
+{
+    const auto& all_known_devs = GetAllKnownDevices();
+    const auto it              = std::find_if(
+        all_known_devs.begin(), all_known_devs.end(), [](const auto& kv) {
+            return kv.second.name == "gfx1201";
+        });
+    ASSERT_NE(it, all_known_devs.end()) << "gfx1201 missing from GetAllKnownDevices()";
+
+    auto handle = MockHandle{it->second, false};
+
+    const auto conv_config = GetConvTestCases(miopenHalf)[0];
+    const auto problem = conv_config.GetProblemDescription(miopen::conv::Direction::BackwardData);
+
+    const auto ctx = [&] {
+        auto tmp = miopen::ExecutionContext{&handle};
+        problem.SetupFloats(tmp);
+        problem.SetupComputeType(tmp);
+        return tmp;
+    }();
+
+    const auto solver = miopen::solver::conv::ConvDirectNaiveConvBwd{};
+    ASSERT_TRUE(solver.IsApplicable(ctx, problem));
+
+    miopen::solver::ConvSolution solution;
+    ASSERT_NO_THROW(solution = solver.GetSolution(ctx, problem));
+    ASSERT_FALSE(solution.construction_params.empty());
+
+    const auto block_size = solution.construction_params[0].l_wk[0];
+    EXPECT_TRUE(block_size == 256 || block_size == 1024) << "unexpected block size: " << block_size;
+};
+
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_UnitTestConvSolverDirectNaiveBwd_FP16,
