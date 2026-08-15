@@ -21,6 +21,16 @@ hipdnn_generate_version_header(hipdnn_plugin_sdk)
 
 target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk)
 
+# The ingestor headers are wholly inside `#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR`, and they
+# are installed whenever it is set. Carrying the definition on the exported target is what
+# makes them usable: without it a consumer that find_package()s this SDK gets the headers
+# on disk and they preprocess to nothing, so the types are simply absent with no
+# diagnostic naming the cause. INTERFACE propagates to both the build tree and the
+# installed hipdnn_plugin_sdkTargets.cmake, so in-tree and out-of-tree consumers agree.
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_compile_definitions(hipdnn_plugin_sdk INTERFACE HIPDNN_ENABLE_KERNEL_INGESTOR)
+endif()
+
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 
 target_include_directories(
