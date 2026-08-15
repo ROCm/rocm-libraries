@@ -7,8 +7,9 @@
  * name/reverse/purity tables, and a handful of Op/KernelDef getters.
  *
  * Faithful port of the corresponding pieces of rocke.core.ir (Type,
- * VectorType, PtrType, SmemType, Op.result/is_pure, KernelDef.max_workgroup_size,
- * PURE_OP_NAMES / is_pure_op_name, and the op.name string vocabulary).
+ * VectorType, PtrType, SmemType, Op.result/is_pure,
+ * KernelDef.max_workgroup_size, PURE_OP_NAMES / is_pure_op_name, and the
+ * op.name string vocabulary).
  *
  * All composite types and attr storage live in the builder arena; scalar
  * singletons are static. Nothing here frees individually.
@@ -173,7 +174,7 @@ const rocke_type_t* rocke_smem_type(
     t->smem_exclusive = exclusive; /* guarded to 0/1 above */
 
     /* Build the "[d0xd1x...]" body, then the full canonical name. The Python
-     * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
+   * form is f"smem<{elem.name}, [{'x'.join(...)}]>". */
     cap = 32 + (size_t)rank * 16;
     buf = (char*)rocke_arena_alloc(&b->arena, cap);
     if(!buf)
@@ -486,6 +487,7 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* gpu.* */
     "gpu.thread_id",
     "gpu.block_id",
+    "gpu.device_print",
 
     /* memref.* */
     "memref.global_load",
@@ -712,6 +714,7 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* gpu.* */
     /* gpu.thread_id */ true,
     /* gpu.block_id  */ true,
+    /* gpu.device_print */ false,
 
     /* memref.* (all effectful) */
     /* global_load                  */ false,

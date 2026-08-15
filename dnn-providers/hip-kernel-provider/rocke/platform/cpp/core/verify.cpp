@@ -3,10 +3,11 @@
 /*
  * verify.c -- IR verifier, faithful C99 port of rocke/core/verify.py.
  *
- * Walks a rocke_kernel_def_t and accumulates rocke_diag_t diagnostics. Helper map:
+ * Walks a rocke_kernel_def_t and accumulates rocke_diag_t diagnostics. Helper
+ * map:
  *
  *   Python                       C99 (this file)
- *   --------------------------   -----------------------------------------------
+ *   -------------------------- -----------------------------------------------
  *   _Verifier.err/warn           v_err() / v_warn()
  *   _check_type                  check_type()
  *   _check_region                check_region()
@@ -290,6 +291,7 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     static const char* mma_keys[] = {"op_id"};
     static const char* yield_keys[] = {"num"};
     static const char* asm_keys[] = {"template", "constraints"};
+    static const char* print_keys[] = {"items", "style"};
     switch(o)
     {
     case ROCKE_OP_ARITH_CONSTANT:
@@ -308,10 +310,153 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     case ROCKE_OP_TILE_INLINE_ASM:
         *n = 2;
         return asm_keys;
+    case ROCKE_OP_GPU_DEVICE_PRINT:
+        *n = 2;
+        return print_keys;
     default:
         *n = 0;
         return NULL;
     }
+}
+
+static int print_format_compatible(const rocke_type_t* t, const char* format)
+{
+    if(!t || !format)
+        return 0;
+    if(strcmp(format, "bool") == 0)
+        return strcmp(tn(t), "i1") == 0;
+    if(strcmp(format, "i32") == 0 || strcmp(format, "u32") == 0)
+        return strcmp(tn(t), "i32") == 0;
+    if(strcmp(format, "f32") == 0)
+        return strcmp(tn(t), "f32") == 0;
+    if(strcmp(format, "ptr") == 0)
+        return t->kind == ROCKE_TYPE_PTR && t->space && strcmp(t->space, "global") == 0;
+    return 0;
+}
+
+static void check_device_print(verifier_t* v, const rocke_op_t* op)
+{
+    const rocke_attr_value_t* items = rocke_attr_get(&op->attrs, "items");
+    const char* style = rocke_attr_get_str(&op->attrs, "style");
+    const rocke_attr_value_t* pred_attr = rocke_attr_get(&op->attrs, "predicate_operand");
+    int predicate_index = -1;
+    unsigned char* referenced = NULL;
+    size_t text_bytes = 0;
+    int value_count = 0;
+
+    if(op->num_results)
+        v_errf(v, op, "gpu.device_print: expected no results");
+    if(!style || strcmp(style, "compact") != 0)
+        v_errf(v, op, "gpu.device_print: prototype style must be 'compact'");
+    if(!items || items->kind != ROCKE_ATTR_LIST || items->u.list.count <= 0)
+    {
+        v_errf(v, op, "gpu.device_print: items must be a non-empty list");
+        return;
+    }
+
+    if(pred_attr)
+    {
+        if(pred_attr->kind != ROCKE_ATTR_INT || pred_attr->u.i < 0
+           || pred_attr->u.i >= op->num_operands)
+            v_errf(v, op, "gpu.device_print: predicate_operand is out of range");
+        else
+        {
+            predicate_index = (int)pred_attr->u.i;
+            if(strcmp(tn(op->operands[predicate_index]->type), "i1") != 0)
+                v_errf(v, op, "gpu.device_print: predicate operand must have type i1");
+        }
+    }
+
+    if(op->num_operands > 0)
+    {
+        referenced = (unsigned char*)calloc((size_t)op->num_operands, 1);
+        if(!referenced)
+        {
+            v_errf(v, op, "gpu.device_print: verifier OOM");
+            return;
+        }
+    }
+
+    for(int i = 0; i < items->u.list.count; ++i)
+    {
+        const rocke_attr_map_t* item = items->u.list.items[i];
+        const char* kind = item ? rocke_attr_get_str(item, "kind") : NULL;
+        if(!item || !kind)
+        {
+            v_errf(v, op, "gpu.device_print: item %d must be an attr map with kind", i);
+            continue;
+        }
+        if(strcmp(kind, "text") == 0)
+        {
+            const char* text = rocke_attr_get_str(item, "text");
+            if(item->count != 2 || !text)
+                v_errf(v, op, "gpu.device_print: malformed Text item %d", i);
+            else
+                text_bytes += strlen(text);
+        }
+        else if(strcmp(kind, "value") == 0)
+        {
+            const char* format = rocke_attr_get_str(item, "format");
+            const char* layout = rocke_attr_get_str(item, "layout");
+            int64_t operand_index = -1;
+            if(item->count != 4 || !rocke_attr_get_int(item, "operand", &operand_index) || !format
+               || !layout)
+            {
+                v_errf(v, op, "gpu.device_print: malformed Value item %d", i);
+                continue;
+            }
+            if(strcmp(layout, "scalar") != 0)
+                v_errf(v, op, "gpu.device_print: Value item %d layout must be scalar", i);
+            if(operand_index < 0 || operand_index >= op->num_operands)
+            {
+                v_errf(v, op, "gpu.device_print: Value item %d operand is out of range", i);
+                continue;
+            }
+            if(operand_index == predicate_index)
+            {
+                v_errf(v, op, "gpu.device_print: Value item %d references the predicate", i);
+                continue;
+            }
+            if(referenced && referenced[operand_index])
+            {
+                v_errf(v,
+                       op,
+                       "gpu.device_print: operand %lld is referenced more than once",
+                       (long long)operand_index);
+                continue;
+            }
+            if(referenced)
+                referenced[operand_index] = 1;
+            ++value_count;
+            if(!print_format_compatible(op->operands[operand_index]->type, format))
+                v_errf(v,
+                       op,
+                       "gpu.device_print: format '%s' is incompatible with operand "
+                       "%lld type %s",
+                       format,
+                       (long long)operand_index,
+                       tn(op->operands[operand_index]->type));
+        }
+        else
+            v_errf(v, op, "gpu.device_print: item %d has unknown kind '%s'", i, kind);
+    }
+
+    if(text_bytes > 4096)
+        v_errf(v, op, "gpu.device_print: literal text exceeds 4096 UTF-8 bytes");
+    if(value_count > 64)
+        v_errf(v, op, "gpu.device_print: expanded value count exceeds 64");
+    for(int i = 0; i < op->num_operands; ++i)
+    {
+        if(i != predicate_index && (!referenced || !referenced[i]))
+        {
+            v_errf(v,
+                   op,
+                   "gpu.device_print: every non-predicate operand must be referenced "
+                   "once");
+            break;
+        }
+    }
+    free(referenced);
 }
 
 static void check_region(verifier_t* v, const rocke_region_t* region, int is_kernel_body);
@@ -459,6 +604,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    op->num_operands);
         }
     }
+    else if(o == ROCKE_OP_GPU_DEVICE_PRINT)
+    {
+        check_device_print(v, op);
+    }
     else if(o == ROCKE_OP_CF_RETURN)
     {
         if(op->num_operands || op->num_results)
@@ -544,11 +693,11 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     if(iv)
     {
         /* iv type comes from the operands' lower type per Python only for the
-         * yield check; for scope we register iv with its declared iv_type. The
-         * Python body scope uses Type(iv_type); type identity does not feed
-         * further checks beyond presence, so use lower's type as a stand-in is
-         * NOT done -- register with lower (operands share type). Use iv_type if
-         * resolvable to a scalar singleton, else lower. */
+     * yield check; for scope we register iv with its declared iv_type. The
+     * Python body scope uses Type(iv_type); type identity does not feed
+     * further checks beyond presence, so use lower's type as a stand-in is
+     * NOT done -- register with lower (operands share type). Use iv_type if
+     * resolvable to a scalar singleton, else lower. */
         const char* ivt = rocke_attr_get_str(&op->attrs, "iv_type");
         const rocke_type_t* t = ivt ? rocke_scalar_by_name(ivt) : NULL;
         if(!t)
@@ -763,10 +912,10 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
             v_errf(&v, NULL, "duplicate kernel parameter id '%s'", vname);
         }
         /* param id strings must outlive the scope table -> they live in the
-         * kernel arena; but vname here is a stack buffer. Stash a heap copy by
-         * registering an arena-independent strdup. Use the param->name + '%'
-         * stable storage instead: the Param.name pointer is stable, but we need
-         * the leading '%'. Build a small persistent buffer. */
+     * kernel arena; but vname here is a stack buffer. Stash a heap copy by
+     * registering an arena-independent strdup. Use the param->name + '%'
+     * stable storage instead: the Param.name pointer is stable, but we need
+     * the leading '%'. Build a small persistent buffer. */
         char* stable = (char*)malloc(strlen(vname) + 1);
         if(!stable)
         {
@@ -782,14 +931,14 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     check_region(&v, k->body, 1);
 
     /* The scope holds pointers; param ids were heap-strdup'd above (leak: the
-     * scope table is freed below but the strings would leak). Free those before
-     * releasing the table. Op result names are arena-owned (kernel), not freed
-     * here. We distinguish param strdups by re-walking: they are exactly the
-     * first k->num_params entries inserted. Simpler: track and free them. */
+   * scope table is freed below but the strings would leak). Free those before
+   * releasing the table. Op result names are arena-owned (kernel), not freed
+   * here. We distinguish param strdups by re-walking: they are exactly the
+   * first k->num_params entries inserted. Simpler: track and free them. */
     /* Free heap-allocated param-id strings (the only malloc'd scope names). */
     /* (They were inserted first; but inner defs were truncated away already.) */
     /* To avoid double-free / dangling, we conservatively scan for names that
-     * begin with '%' and equal "%"+param->name, freeing each once. */
+   * begin with '%' and equal "%"+param->name, freeing each once. */
     for(int i = 0; i < k->num_params; ++i)
     {
         char vname[160];

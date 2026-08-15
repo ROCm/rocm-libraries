@@ -120,6 +120,7 @@ _REQUIRED_ATTRS: Dict[str, List[str]] = {
     "tile.mma": ["op_id"],
     "scf.yield": ["num"],
     "tile.inline_asm": ["template", "constraints"],
+    "gpu.device_print": ["items", "style"],
 }
 
 
@@ -367,9 +368,130 @@ class _Verifier:
                     f"{len(op.operands)}",
                     op,
                 )
+        elif name == "gpu.device_print":
+            self._check_device_print(op)
         elif name == "cf.return":
             if op.operands or op.results:
                 self.err(f"{name}: must have no operands and no results", op)
+
+    def _check_device_print(self, op: Op) -> None:
+        if op.results:
+            self.err("gpu.device_print: expected no results", op)
+        if op.attrs.get("style") != "compact":
+            self.err("gpu.device_print: prototype style must be 'compact'", op)
+
+        items = op.attrs.get("items")
+        if not isinstance(items, list) or not items:
+            self.err("gpu.device_print: items must be a non-empty list", op)
+            return
+
+        predicate_index = op.attrs.get("predicate_operand")
+        if predicate_index is not None:
+            if not isinstance(predicate_index, int) or not (
+                0 <= predicate_index < len(op.operands)
+            ):
+                self.err("gpu.device_print: predicate_operand is out of range", op)
+                predicate_index = None
+            elif op.operands[predicate_index].type.name != "i1":
+                self.err("gpu.device_print: predicate operand must have type i1", op)
+
+        text_bytes = 0
+        value_count = 0
+        referenced: Set[int] = set()
+        supported = {"bool", "i32", "u32", "f32", "ptr"}
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                self.err(f"gpu.device_print: item {index} must be an attr map", op)
+                continue
+            kind = item.get("kind")
+            if kind == "text":
+                if set(item) != {"kind", "text"}:
+                    self.err(f"gpu.device_print: malformed Text item {index}", op)
+                    continue
+                text = item.get("text")
+                if not isinstance(text, str):
+                    self.err(f"gpu.device_print: Text item {index} is not a string", op)
+                    continue
+                if "\x00" in text:
+                    self.err(f"gpu.device_print: Text item {index} contains NUL", op)
+                try:
+                    text_bytes += len(text.encode("utf-8"))
+                except UnicodeEncodeError:
+                    self.err(
+                        f"gpu.device_print: Text item {index} is not valid UTF-8", op
+                    )
+            elif kind == "value":
+                if set(item) != {"format", "kind", "layout", "operand"}:
+                    self.err(f"gpu.device_print: malformed Value item {index}", op)
+                    continue
+                operand_index = item.get("operand")
+                logical = item.get("format")
+                if item.get("layout") != "scalar":
+                    self.err(
+                        f"gpu.device_print: Value item {index} layout must be scalar",
+                        op,
+                    )
+                if logical not in supported:
+                    self.err(
+                        f"gpu.device_print: Value item {index} has unsupported format {logical!r}",
+                        op,
+                    )
+                if not isinstance(operand_index, int) or not (
+                    0 <= operand_index < len(op.operands)
+                ):
+                    self.err(
+                        f"gpu.device_print: Value item {index} operand is out of range",
+                        op,
+                    )
+                    continue
+                if operand_index == predicate_index:
+                    self.err(
+                        f"gpu.device_print: Value item {index} references the predicate",
+                        op,
+                    )
+                    continue
+                if operand_index in referenced:
+                    self.err(
+                        f"gpu.device_print: operand {operand_index} is referenced more than once",
+                        op,
+                    )
+                    continue
+                referenced.add(operand_index)
+                value_count += 1
+                ty = op.operands[operand_index].type
+                compatible = (
+                    (logical == "bool" and ty.name == "i1")
+                    or (logical in ("i32", "u32") and ty.name == "i32")
+                    or (logical == "f32" and ty.name == "f32")
+                    or (
+                        logical == "ptr"
+                        and isinstance(ty, PtrType)
+                        and ty.space == "global"
+                    )
+                )
+                if not compatible:
+                    self.err(
+                        f"gpu.device_print: format {logical!r} is incompatible with "
+                        f"operand {operand_index} type {ty.name}",
+                        op,
+                    )
+            else:
+                self.err(
+                    f"gpu.device_print: item {index} has unknown kind {kind!r}", op
+                )
+
+        if text_bytes > 4096:
+            self.err("gpu.device_print: literal text exceeds 4096 UTF-8 bytes", op)
+        if value_count > 64:
+            self.err("gpu.device_print: expanded value count exceeds 64", op)
+        expected = set(range(len(op.operands)))
+        if predicate_index is not None:
+            expected.remove(predicate_index)
+        if referenced != expected:
+            self.err(
+                "gpu.device_print: every non-predicate operand must be referenced once",
+                op,
+            )
 
     # ---- scf.for ----
 

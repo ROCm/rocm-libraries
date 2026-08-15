@@ -14,6 +14,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/smoke.cpp")
 endif()
 
 if(BUILD_TESTING)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/core/device_print.cpp")
+    add_executable(rocke_device_print core/device_print.cpp)
+    target_link_libraries(rocke_device_print PRIVATE rocke_core)
+    add_test(NAME rocke_device_print COMMAND rocke_device_print)
+    set_tests_properties(rocke_device_print
+                         PROPERTIES LABELS "ckc;unit;host")
+  endif()
+
   # ck.dsl.ir/v1 serializer round-trip + verifier test. Proves
   # lower(parse(serialize(k))) == lower(k) byte-for-byte, serialization
   # idempotence, and a clean verifier pass for the buildable GEMM configs.

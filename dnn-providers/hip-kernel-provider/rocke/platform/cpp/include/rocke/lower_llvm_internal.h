@@ -1,9 +1,9 @@
 /* Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  * SPDX-License-Identifier: MIT
  *
- * rocke/lower_llvm_internal.h -- PRIVATE shared declarations for the C99 port of
- * rocke.core.lower_llvm. NOT a public API: only the lower_llvm_*.c translation
- * units include this. The public contract is rocke/lower_llvm.h.
+ * rocke/lower_llvm_internal.h -- PRIVATE shared declarations for the C99 port
+ * of rocke.core.lower_llvm. NOT a public API: only the lower_llvm_*.c
+ * translation units include this. The public contract is rocke/lower_llvm.h.
  *
  * The Python lowerer is one stateful object, ``_Lowerer``, with ~140 per-op
  * methods, a block/CFG model, a flavor-keyed intrinsic-declaration table, an
@@ -18,8 +18,8 @@
  * table that bucket 0 builds (rocke_ll_dispatch), and each bucket registers its
  * own handlers via a per-bucket rocke_ll_register_<bucket>() hook (see below).
  *
- * Naming: internal helpers are prefixed rocke_ll_ (ll = lower_llvm) to keep them
- * out of the public rocke_ / rocke_b_ namespace.
+ * Naming: internal helpers are prefixed rocke_ll_ (ll = lower_llvm) to keep
+ * them out of the public rocke_ / rocke_b_ namespace.
  *
  * These declarations live in the internal C++ namespace ckc (the engine's
  * private symbols). The public lowerer entry points (rocke_lower_kernel_to_llvm
@@ -79,7 +79,8 @@ bool rocke_ll_flavor_is_modern(rocke_llvm_flavor_t flavor);
 /* CDNA buffer-resource-descriptor DWORD3 (Python ISABackend.buffer_rsrc_word3
  * == 0x00027000). RDNA word3 differs (0x31014000) -- see backend struct. */
 #define ROCKE_LL_BUFFER_RSRC_WORD3_CDNA 0x00027000
-/* RDNA (gfx10/11/12) "raw" SRD DWORD3 (Python Gfx11RdnaBackend.buffer_rsrc_word3
+/* RDNA (gfx10/11/12) "raw" SRD DWORD3 (Python
+ * Gfx11RdnaBackend.buffer_rsrc_word3
  * == 0x31014000). gfx11/gfx12 share this value. */
 #define ROCKE_LL_BUFFER_RSRC_WORD3_RDNA 0x31014000
 
@@ -112,10 +113,12 @@ extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM22_OVERRIDES_COUNT;
 extern const rocke_ll_decl_t ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES[];
 extern const int ROCKE_LL_INTRINSIC_DECLS_LLVM23_OVERRIDES_COUNT;
 
-/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors). */
+/* Resolve the flavor-specific override table (NULL/0 for non-modern flavors).
+ */
 const rocke_ll_decl_t* rocke_ll_flavor_overrides(rocke_llvm_flavor_t flavor, int* out_count);
 
-/* ---------------------------------------------------------- anyptr overloads */
+/* ---------------------------------------------------------- anyptr overloads
+ */
 
 /* One accepted address space of an llvm_anyptr_ty intrinsic, with the LLVM
  * pointer text that names it. Mirrors one entry of the Python
@@ -190,25 +193,25 @@ typedef struct rocke_isa_backend
     int (*encode_waitcnt)(int vmcnt, int expcnt, int lgkmcnt);
     rocke_ll_isa_kind_t kind; /* CDNA (reject WMMA) vs RDNA (emit WMMA)      */
     /* Python ISABackend.has_async_lds_counter: the gfx1250 dedicated async-DMA
-     * counter (s_wait_asynccnt + global_load_async_to_lds). True only on
-     * gfx1250; elsewhere s_wait_asynccnt lowers to nothing. Declared as a
-     * backend fact rather than tested by gfx-string prefix so the capability
-     * has one definition site per backend, as in Python. */
+   * counter (s_wait_asynccnt + global_load_async_to_lds). True only on
+   * gfx1250; elsewhere s_wait_asynccnt lowers to nothing. Declared as a
+   * backend fact rather than tested by gfx-string prefix so the capability
+   * has one definition site per backend, as in Python. */
     bool has_async_lds_counter;
     /* Python ISABackend.emits_legacy_s_waitcnt. gfx1250 replaced the
-     * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
-     * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt
-     * must emit nothing rather than an instruction the backend cannot select. */
+   * monolithic s_waitcnt with split counters (s_wait_dscnt / s_wait_loadcnt
+   * / ...) and llvm.amdgcn.s.waitcnt is NOT selectable there, so tile.s_waitcnt
+   * must emit nothing rather than an instruction the backend cannot select. */
     bool emits_legacy_s_waitcnt;
     /* Python ISABackend.emit_lds_barrier_drain: the memory wait that has to
-     * precede an LDS workgroup barrier. A function pointer because the two
-     * families emit different *text*, not a different immediate --
-     * gfx9/10/11 emit one monolithic s_waitcnt, gfx1250 emits split
-     * s_wait_loadcnt / s_wait_dscnt calls. */
+   * precede an LDS workgroup barrier. A function pointer because the two
+   * families emit different *text*, not a different immediate --
+   * gfx9/10/11 emit one monolithic s_waitcnt, gfx1250 emits split
+   * s_wait_loadcnt / s_wait_dscnt calls. */
     void (*emit_lds_barrier_drain)(rocke_lower_t* L, bool drain_vmem);
     /* Python ISABackend.ds_tr16_b128_spec. Returns false when the element type
-     * is one the opcode cannot carry (the caller then fails with the same
-     * message Python raises). */
+   * is one the opcode cannot carry (the caller then fails with the same
+   * message Python raises). */
     bool (*ds_tr16_b128_spec)(const char* elem_type, rocke_ll_tr16_spec_t* out);
 } rocke_isa_backend_t;
 
@@ -256,7 +259,7 @@ typedef struct rocke_ll_block
 typedef struct rocke_ll_smem_global
 {
     const char* gname; /* "@<short>.<kernel>" */
-    const rocke_type_t* stype; /* the SmemType (kind == ROCKE_TYPE_SMEM)         */
+    const rocke_type_t* stype; /* the SmemType (kind == ROCKE_TYPE_SMEM) */
 } rocke_ll_smem_global_t;
 
 /* IR-value-name -> @global-name mapping for smem allocs (Python
@@ -267,12 +270,20 @@ typedef struct rocke_ll_smem_name
     const char* gname;
 } rocke_ll_smem_name_t;
 
+typedef struct rocke_ll_printf_global
+{
+    const char* name;
+    const char* escaped;
+    int byte_count;
+} rocke_ll_printf_global_t;
+
 /* One cached smem base pointer: the byte-level GEP SSA name computed for
  * `gname` inside basic block `block`. Reused for later accesses of the same
  * allocation in the same block (which the GEP dominates), so a non-zero-offset
  * allocation accessed many times emits just one base GEP. Python
  * _smem_base_cache keyed by (block label, gname); here we key on the block
- * pointer -- one distinct arena object per block -- which groups identically. */
+ * pointer -- one distinct arena object per block -- which groups identically.
+ */
 typedef struct rocke_ll_smem_base_cache
 {
     const rocke_ll_block_t* block;
@@ -305,32 +316,35 @@ struct rocke_lower
     int tmp_counter;
 
     /* needed intrinsics, in first-need order (drives a sorted-by-table emit in
-     * finalize; the table order is canonical, this set records membership). */
+   * finalize; the table order is canonical, this set records membership). */
     ROCKE_VEC(rocke_ll_need_t) needs;
     bool needs_fp_atomic_md; /* _needs_fp_atomic_md      */
     bool needs_av_scope_md; /* agent-scope metadata for av.load/store.b128 */
 
     /* dynamically-registered decls (Python self._decls mutation, e.g. vector
-     * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */
+   * smax registers "llvm.smax.vNiW"). Keyed; consulted by _need fallback. */
     ROCKE_VEC(rocke_ll_decl_t) dyn_decls;
 
     /* smem pre-pass */
     ROCKE_VEC(rocke_ll_smem_global_t) smem_globals;
     ROCKE_VEC(rocke_ll_smem_name_t) smem_names;
+    ROCKE_VEC(rocke_ll_printf_global_t) printf_globals;
 
     /* smem pool: one unified addrspace(3) buffer; per-allocation byte offsets.
-     * Populated by rocke_ll_compute_smem_layout() after _collect_smem. */
-    ROCKE_VEC(int) smem_offsets; /* parallel to smem_globals: byte offset per alloc */
+   * Populated by rocke_ll_compute_smem_layout() after _collect_smem. */
+    ROCKE_VEC(int)
+    smem_offsets; /* parallel to smem_globals: byte offset per alloc */
     int smem_pool_size; /* total pool size in bytes (rounded to 16) */
     const char* smem_pool_name; /* "@smem_pool.<kernel>" */
-    ROCKE_VEC(rocke_ll_smem_base_cache_t) smem_base_cache; /* per-(block,alloc) base ptr */
+    ROCKE_VEC(rocke_ll_smem_base_cache_t)
+    smem_base_cache; /* per-(block,alloc) base ptr */
 
     /* scf.for yield recording stack (Python _yield_stack: list of list[str]).
-     * Each frame is a vector of operand strings. */
+   * Each frame is a vector of operand strings. */
     ROCKE_VEC(ROCKE_VEC(const char*) *) yield_stack;
 
     /* unroll trailing-sync elision marker (Python _unroll_elide_sync_op):
-     * points at the specific tile.sync op to skip, or NULL. */
+   * points at the specific tile.sync op to skip, or NULL. */
     const rocke_op_t* unroll_elide_sync_op;
 
     /* sticky error (the lowerer has no builder to carry it). */
@@ -344,9 +358,10 @@ struct rocke_lower
 
 /* Raise the lowering failure as a ckc::Error (mirroring the Python `raise`),
  * printf style. [[noreturn]]: it never returns -- the throw unwinds to the
- * lowerer boundary (rocke_lower_kernel_to_llvm), which translates it back into the
- * legacy status code + caller `err` buffer, so the extern "C" ABI is unchanged.
- * Any statement following a rocke_ll_fail() call is therefore unreachable. */
+ * lowerer boundary (rocke_lower_kernel_to_llvm), which translates it back into
+ * the legacy status code + caller `err` buffer, so the extern "C" ABI is
+ * unchanged. Any statement following a rocke_ll_fail() call is therefore
+ * unreachable. */
 [[noreturn]] void rocke_ll_fail(rocke_lower_t* L, rocke_status_t st, const char* fmt, ...);
 
 /* True if the lowerer is usable (non-null). The lowerer no longer carries a
@@ -517,14 +532,14 @@ extern rocke_ll_op_fn rocke_ll_dispatch[ROCKE_OP__COUNT];
 void rocke_ll_set_handler(rocke_opcode_t opcode, rocke_ll_op_fn fn);
 
 /* Per-bucket registration hooks. Bucket 0's init calls each of these once so
- * every bucket's handlers are present in rocke_ll_dispatch before lowering. Each
- * is DEFINED in its own bucket .c file. */
+ * every bucket's handlers are present in rocke_ll_dispatch before lowering.
+ * Each is DEFINED in its own bucket .c file. */
 void rocke_ll_register_arith(void); /* bucket 1 */
 void rocke_ll_register_convert(void); /* bucket 2 */
 void rocke_ll_register_mem(void); /* bucket 3 */
 void rocke_ll_register_mma(void); /* bucket 4 */
 void rocke_ll_register_crosslane(void); /* bucket 5 */
-void rocke_ll_register_vector(void); /* bucket 6 (also barriers/sched + flow)   */
+void rocke_ll_register_vector(void); /* bucket 6 (also barriers/sched + flow) */
 
 /* ====================================================================== */
 /* Shared multi-bucket op helpers (the Python private _lower_* helpers     */
