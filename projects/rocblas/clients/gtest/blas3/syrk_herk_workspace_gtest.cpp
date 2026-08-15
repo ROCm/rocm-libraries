@@ -92,15 +92,22 @@ namespace
     }
 
     template <typename T>
-    size_t query_workspace(rocblas_handle handle, rocblas_operation transA, bool strided, bool herk)
+    bool query_workspace(rocblas_handle    handle,
+                         rocblas_operation transA,
+                         bool              strided,
+                         bool              herk,
+                         size_t*           bytes)
     {
-        size_t bytes = 0;
-        CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+        *bytes = 0;
+        auto st = rocblas_start_device_memory_size_query(handle);
+        EXPECT_EQ(st, rocblas_status_success);
+        if(st != rocblas_status_success)
+            return false;
 
-        const T     alpha_t(1);
-        const T     beta_t(1);
-        const float alpha_r = 1;
-        const float beta_r  = 1;
+        const T         alpha_t(1);
+        const T         beta_t(1);
+        const float     alpha_r = 1;
+        const float     beta_r  = 1;
         const T* const* null_A  = nullptr;
         T* const*       null_C  = nullptr;
         const T*        null_As = nullptr;
@@ -110,75 +117,81 @@ namespace
         {
             if(strided)
             {
-                CHECK_ALLOC_QUERY(rocblas_herk_strided_batched<T>(handle,
-                                                                  rocblas_fill_upper,
-                                                                  transA,
-                                                                  c_n,
-                                                                  c_k,
-                                                                  &alpha_r,
-                                                                  null_As,
-                                                                  c_lda,
-                                                                  0,
-                                                                  &beta_r,
-                                                                  null_Cs,
-                                                                  c_ldc,
-                                                                  0,
-                                                                  c_batch_count));
+                st = rocblas_herk_strided_batched<T>(handle,
+                                                     rocblas_fill_upper,
+                                                     transA,
+                                                     c_n,
+                                                     c_k,
+                                                     &alpha_r,
+                                                     null_As,
+                                                     c_lda,
+                                                     0,
+                                                     &beta_r,
+                                                     null_Cs,
+                                                     c_ldc,
+                                                     0,
+                                                     c_batch_count);
             }
             else
             {
-                CHECK_ALLOC_QUERY(rocblas_herk_batched<T>(handle,
-                                                         rocblas_fill_upper,
-                                                         transA,
-                                                         c_n,
-                                                         c_k,
-                                                         &alpha_r,
-                                                         null_A,
-                                                         c_lda,
-                                                         &beta_r,
-                                                         null_C,
-                                                         c_ldc,
-                                                         c_batch_count));
+                st = rocblas_herk_batched<T>(handle,
+                                             rocblas_fill_upper,
+                                             transA,
+                                             c_n,
+                                             c_k,
+                                             &alpha_r,
+                                             null_A,
+                                             c_lda,
+                                             &beta_r,
+                                             null_C,
+                                             c_ldc,
+                                             c_batch_count);
             }
         }
         else
         {
             if(strided)
             {
-                CHECK_ALLOC_QUERY(rocblas_syrk_strided_batched<T>(handle,
-                                                                  rocblas_fill_upper,
-                                                                  transA,
-                                                                  c_n,
-                                                                  c_k,
-                                                                  &alpha_t,
-                                                                  null_As,
-                                                                  c_lda,
-                                                                  0,
-                                                                  &beta_t,
-                                                                  null_Cs,
-                                                                  c_ldc,
-                                                                  0,
-                                                                  c_batch_count));
+                st = rocblas_syrk_strided_batched<T>(handle,
+                                                     rocblas_fill_upper,
+                                                     transA,
+                                                     c_n,
+                                                     c_k,
+                                                     &alpha_t,
+                                                     null_As,
+                                                     c_lda,
+                                                     0,
+                                                     &beta_t,
+                                                     null_Cs,
+                                                     c_ldc,
+                                                     0,
+                                                     c_batch_count);
             }
             else
             {
-                CHECK_ALLOC_QUERY(rocblas_syrk_batched<T>(handle,
-                                                         rocblas_fill_upper,
-                                                         transA,
-                                                         c_n,
-                                                         c_k,
-                                                         &alpha_t,
-                                                         null_A,
-                                                         c_lda,
-                                                         &beta_t,
-                                                         null_C,
-                                                         c_ldc,
-                                                         c_batch_count));
+                st = rocblas_syrk_batched<T>(handle,
+                                             rocblas_fill_upper,
+                                             transA,
+                                             c_n,
+                                             c_k,
+                                             &alpha_t,
+                                             null_A,
+                                             c_lda,
+                                             &beta_t,
+                                             null_C,
+                                             c_ldc,
+                                             c_batch_count);
             }
         }
 
-        CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &bytes));
-        return bytes;
+        EXPECT_TRUE(st == rocblas_status_size_increased || st == rocblas_status_size_unchanged)
+            << "size query call returned " << rocblas_status_to_string(st);
+        if(!(st == rocblas_status_size_increased || st == rocblas_status_size_unchanged))
+            return false;
+
+        st = rocblas_stop_device_memory_size_query(handle, bytes);
+        EXPECT_EQ(st, rocblas_status_success);
+        return st == rocblas_status_success;
     }
 
     template <typename T>
@@ -193,7 +206,8 @@ namespace
         const rocblas_operation transA
             = herk ? rocblas_operation_conjugate_transpose : rocblas_operation_transpose;
 
-        const size_t workspace_bytes = query_workspace<T>(handle, transA, strided, herk);
+        size_t workspace_bytes = 0;
+        ASSERT_TRUE(query_workspace<T>(handle, transA, strided, herk, &workspace_bytes));
         // Path must be live: a zero query means we never reached the workspace
         // kernel, so a clean canary would be a false pass.
         ASSERT_GT(workspace_bytes, size_t(0))
