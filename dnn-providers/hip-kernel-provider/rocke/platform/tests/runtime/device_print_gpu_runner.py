@@ -32,6 +32,9 @@ def main() -> None:
         "DEVICE_PRINT_FALSE_SENTINEL",
         predicate=falsehood,
     )
+    # OCKL carries seven values per append call. This eight-value record forces a
+    # second chained call; the parent test requires the output to end in "7 8",
+    # verifying that the installed OCKL/runtime consumes the continuation correctly.
     builder.device_print(
         "DEVICE_PRINT_GPU ",
         truth,
