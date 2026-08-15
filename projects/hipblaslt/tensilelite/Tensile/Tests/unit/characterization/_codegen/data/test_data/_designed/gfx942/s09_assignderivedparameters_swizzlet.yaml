@@ -1,0 +1,71 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S09 DESIGNED SwizzleTensorA/B derivation + reject config for gfx942.
+#
+# Targets currently-missing arms in Tensile/SolutionStructs/Solution.py
+# assignDerivedParameters swizzle block. Probe-confirmed lines that fire during
+# the (rejected) derivation:
+#
+#   3742       SwizzleTensor pack-K / GRVW derivation arm.
+#   3789       SwizzleTensor GRVW derivation follow-on.
+#   3856       SwizzleTensorA requires DirectToVgprA reject  (DirectToVgprA=0).
+#   3861-3863  SwizzleTensorB requires DirectToVgprB reject  (DirectToVgprB=0).
+#   3867       SwizzleTensorB TN-only combined transpose check (always runs
+#              when SwizzleTensorB set).
+#
+# TN layout (TransposeA=True, TransposeB=False) satisfies both SwizzleTensorA
+# (TN or TT) and SwizzleTensorB (TN only). half datatype, gfx942 MFMA.
+# GlobalReadVectorWidthA/B=-1 => auto-derive via MIInputPerThread*SwizzlePackK.
+# ForkParameters cartesian enumerates the DirectToVgpr permutations so a single
+# derive pass trips the A-reject and B-reject arms; every fork rejects during
+# derivation, so 0 valid solutions survive (reachable-invalid, category A).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      SwizzleTensorA: True
+      SwizzleTensorB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  1, 1 ]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - DirectToVgprA: [False, True]
+        - DirectToVgprB: [False, True]
+        - UseSgprForGRO: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
