@@ -136,6 +136,18 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_hostblocks_csrmm_alg.cpp
   unit_test_internal_hostblocks_indextype.cpp
   unit_test_internal_hostblocks_itilu0.cpp
+  # Residual in-scope internal-routine coverage: device __global__ wrappers for
+  # collective/atomic/hash device helpers, plus host-path primitive helpers.
+  # unit_test_internal_primitives_host_extras.cpp additionally needs the
+  # segmented-radix-sort / radix-sort-pairs primitive TUs compiled in (appended
+  # to ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below) so this leaf links standalone.
+  unit_test_internal_collective_extras_wfreduce.cpp
+  unit_test_internal_collective_extras_atomics.cpp
+  unit_test_internal_collective_extras_elementwise.cpp
+  unit_test_internal_collective_extras_nontemporal.cpp
+  unit_test_internal_collective_extras_lower_bound.cpp
+  unit_test_internal_collective_extras_insert.cpp
+  unit_test_internal_primitives_host_extras.cpp
 )
 
 # Host building-block library translation units under test by the
@@ -209,6 +221,10 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcoo2csr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_coo2csr.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_exclusive_scan.cpp
+  # Added at this (extras) leaf for unit_test_internal_primitives_host_extras.cpp:
+  # sort_csr_column_indices / radix_sort_pairs primitive host wrappers.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_segmented_radix_sort_keys.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/primitives/rocsparse_radix_sort_pairs.cpp
   # --------------------------------------------------------------------------
 )
 
