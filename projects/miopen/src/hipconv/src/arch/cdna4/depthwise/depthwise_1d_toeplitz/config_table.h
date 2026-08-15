@@ -36,7 +36,7 @@ constexpr int ladder_len(int kh)
 constexpr std::size_t num_dw_configs()
 {
     constexpr auto filters = std::array{3, 5, 7, 9, 11};
-    std::size_t    wide    = 0;
+    std::size_t wide       = 0;
     for(int kh : filters)
         wide += ladder_len(kh);
     constexpr std::size_t num_variants = 4, num_wfold_variants = 4, num_wfolds = 2;
@@ -47,11 +47,11 @@ constexpr std::size_t num_dw_configs()
 struct Config
 {
     int waves_per_wg;
-    int kh              = 3;
-    int kw              = 3; // filter width (== kh for the shipped square filters)
-    int group_size      = 8;
-    int n_fold          = 8;
-    int stride          = 1;
+    int kh         = 3;
+    int kw         = 3; // filter width (== kh for the shipped square filters)
+    int group_size = 8;
+    int n_fold     = 8;
+    int stride     = 1;
     // Input-upsample factor: 1 for Fprop; for Dgrad it carries the forward stride
     // (dgrad = stride-1 rot180 correlation over dY upsampled by s).
     int dilation        = 1;
@@ -59,15 +59,15 @@ struct Config
     // Narrow-channel path (C % 8 != 0): no coalesced uint4 load/store, so one
     // 8-channel group per workgroup (waves_per_wg == 1), one channel at a time (b16)
     // and masked past C. LDS layout and MFMA match the wide path.
-    bool narrow_c       = false;
+    bool narrow_c = false;
     // Batch-folded W tiling: pack w_fold images into one 32-wide MFMA tile, each
     // contributing BLOCK_Q/w_fold columns of the same w-window. Fills the tile when a
     // single image leaves trailing tile-columns idle. w_fold == 1 is the one-image tile.
-    int w_fold          = 1;
+    int w_fold = 1;
     // Input LDS ring depth: 3 == triple-buffered (2 rows in flight to hide load
     // latency), 2 == double-buffered (33% less input LDS -> higher occupancy).
     // Must be >= 2.
-    int lds_buffers     = 3;
+    int lds_buffers = 3;
 
     constexpr int block_c() const { return group_size * waves_per_wg; }
     constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
@@ -88,8 +88,8 @@ constexpr auto make_configs()
     // Dgrad stays stride 1 and carries the forward stride in the upsample dilation.
     struct Variant
     {
-        int       stride;
-        int       dilation;
+        int stride;
+        int dilation;
         Direction direction;
     };
 
@@ -117,7 +117,7 @@ constexpr auto make_configs()
     // Folded: the wide stride-1 wave ladder once per (fold variant, w_fold). Large
     // filters shorten the ladder (ladder_len) to skip the spilling waves==16 rung.
     std::array<Config, num_dw_configs()> configs{};
-    std::size_t                          cfg = 0;
+    std::size_t cfg = 0;
     // Wide (C % 8 == 0): coalesced uint4 path, full wave ladder.
     for(int kh : filters)
         for(const auto& v : variants)
@@ -146,7 +146,7 @@ constexpr auto make_configs()
                                     // Single-wave (64-thread) fallback caps at 256 VGPRs;
                                     // large filters need double- not triple-buffering to
                                     // keep the input ring's in-flight rows out of scratch.
-                                    .lds_buffers  = (kh >= 5) ? 2 : 3};
+                                    .lds_buffers = (kh >= 5) ? 2 : 3};
     // Batch-folded (F in wfolds) wide stride-1 ladders (fprop + dgrad).
     for(int kh : filters)
         for(const auto& v : wfold_variants)
