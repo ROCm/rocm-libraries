@@ -139,6 +139,9 @@ const rocke_type_t* rocke_i_elem_of(const rocke_type_t* t);
 /* Lane count of a vector type, or 1 for a scalar. */
 int rocke_i_count_of(const rocke_type_t* t);
 
+/* Validate NUL-terminated ASCII text and optionally return its byte count. */
+int rocke_i_valid_print_text(const unsigned char* text, size_t* bytes);
+
 /* ------------------------------------------------------------- attr helpers */
 
 /* Build a small attr map IN the arena and return it by value (the map's

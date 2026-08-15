@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 
 /* ----------------------------------------------------- diagnostic buffer */
 
@@ -392,7 +393,13 @@ static void check_device_print(verifier_t* v, const rocke_op_t* op)
             if(item->count != 2 || !text)
                 v_errf(v, op, "gpu.device_print: malformed Text item %d", i);
             else
-                text_bytes += strlen(text);
+            {
+                size_t item_bytes = 0;
+                if(!rocke_i_valid_print_text((const unsigned char*)text, &item_bytes))
+                    v_errf(v, op, "gpu.device_print: Text item %d is not ASCII", i);
+                else
+                    text_bytes += item_bytes;
+            }
         }
         else if(strcmp(kind, "value") == 0)
         {
@@ -441,10 +448,16 @@ static void check_device_print(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "gpu.device_print: item %d has unknown kind '%s'", i, kind);
     }
 
-    if(text_bytes > 4096)
-        v_errf(v, op, "gpu.device_print: literal text exceeds 4096 UTF-8 bytes");
-    if(value_count > 64)
-        v_errf(v, op, "gpu.device_print: expanded value count exceeds 64");
+    if(text_bytes > ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES)
+        v_errf(v,
+               op,
+               "gpu.device_print: literal text exceeds %d bytes",
+               ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES);
+    if(value_count > ROCKE_DEVICE_PRINT_MAX_VALUES)
+        v_errf(v,
+               op,
+               "gpu.device_print: expanded value count exceeds %d",
+               ROCKE_DEVICE_PRINT_MAX_VALUES);
     for(int i = 0; i < op->num_operands; ++i)
     {
         if(i != predicate_index && (!referenced || !referenced[i]))

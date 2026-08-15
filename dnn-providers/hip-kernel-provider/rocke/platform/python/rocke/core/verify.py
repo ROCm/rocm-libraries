@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set
 
 from .ir import (
+    DEVICE_PRINT_MAX_LITERAL_BYTES,
+    DEVICE_PRINT_MAX_VALUES,
     KernelDef,
     Op,
     Region,
@@ -387,7 +389,7 @@ class _Verifier:
 
         predicate_index = op.attrs.get("predicate_operand")
         if predicate_index is not None:
-            if not isinstance(predicate_index, int) or not (
+            if type(predicate_index) is not int or not (
                 0 <= predicate_index < len(op.operands)
             ):
                 self.err("gpu.device_print: predicate_operand is out of range", op)
@@ -414,12 +416,10 @@ class _Verifier:
                     continue
                 if "\x00" in text:
                     self.err(f"gpu.device_print: Text item {index} contains NUL", op)
-                try:
-                    text_bytes += len(text.encode("utf-8"))
-                except UnicodeEncodeError:
-                    self.err(
-                        f"gpu.device_print: Text item {index} is not valid UTF-8", op
-                    )
+                if not text.isascii():
+                    self.err(f"gpu.device_print: Text item {index} is not ASCII", op)
+                else:
+                    text_bytes += len(text)
             elif kind == "value":
                 if set(item) != {"format", "kind", "layout", "operand"}:
                     self.err(f"gpu.device_print: malformed Value item {index}", op)
@@ -436,7 +436,7 @@ class _Verifier:
                         f"gpu.device_print: Value item {index} has unsupported format {logical!r}",
                         op,
                     )
-                if not isinstance(operand_index, int) or not (
+                if type(operand_index) is not int or not (
                     0 <= operand_index < len(op.operands)
                 ):
                     self.err(
@@ -480,10 +480,18 @@ class _Verifier:
                     f"gpu.device_print: item {index} has unknown kind {kind!r}", op
                 )
 
-        if text_bytes > 4096:
-            self.err("gpu.device_print: literal text exceeds 4096 UTF-8 bytes", op)
-        if value_count > 64:
-            self.err("gpu.device_print: expanded value count exceeds 64", op)
+        if text_bytes > DEVICE_PRINT_MAX_LITERAL_BYTES:
+            self.err(
+                "gpu.device_print: literal text exceeds "
+                f"{DEVICE_PRINT_MAX_LITERAL_BYTES} bytes",
+                op,
+            )
+        if value_count > DEVICE_PRINT_MAX_VALUES:
+            self.err(
+                "gpu.device_print: expanded value count exceeds "
+                f"{DEVICE_PRINT_MAX_VALUES}",
+                op,
+            )
         expected = set(range(len(op.operands)))
         if predicate_index is not None:
             expected.remove(predicate_index)

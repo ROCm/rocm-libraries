@@ -40,6 +40,8 @@ from __future__ import annotations
 
 from .ir import (
     BF16,
+    DEVICE_PRINT_MAX_LITERAL_BYTES,
+    DEVICE_PRINT_MAX_VALUES,
     F16,
     F32,
     FP8E4M3,
@@ -90,6 +92,8 @@ from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
     "BF16",
+    "DEVICE_PRINT_MAX_LITERAL_BYTES",
+    "DEVICE_PRINT_MAX_VALUES",
     "F16",
     "F32",
     "FP8E4M3",

@@ -25,6 +25,21 @@
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
+int rocke_i_valid_print_text(const unsigned char* text, size_t* bytes)
+{
+    size_t count = 0;
+    while(*text)
+    {
+        if(*text > 0x7f)
+            return 0;
+        ++text;
+        ++count;
+    }
+    if(bytes)
+        *bytes = count;
+    return 1;
+}
+
 /* ============================== TYPE SYSTEM ============================== */
 
 /* Interned scalar singletons. Static storage: never NULL, never arena-owned,

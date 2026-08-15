@@ -16,8 +16,24 @@ static int fail(const char* message)
     return 1;
 }
 
+static int expect_invalid_text(const char* text)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "invalid_text") != ROCKE_OK)
+        return fail("invalid text builder init failed");
+    rocke_print_item_t item = {ROCKE_PRINT_TEXT, text, NULL, NULL};
+    rocke_b_device_print(&b, &item, 1, NULL, "compact", "none");
+    int accepted = rocke_ir_builder_ok(&b);
+    rocke_ir_builder_free(&b);
+    return accepted ? fail("device_print accepted non-ASCII text") : 0;
+}
+
 int main(void)
 {
+    const char non_ascii[] = {(char)0x80, '\0'};
+    if(expect_invalid_text(non_ascii))
+        return 1;
+
     rocke_ir_builder_t b;
     if(rocke_ir_builder_init(&b, "print_proto") != ROCKE_OK)
         return fail("builder init failed");

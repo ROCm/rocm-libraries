@@ -39,16 +39,6 @@ from dataclasses import dataclass, field
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from .ir import (
-    BF8E5M2,
-    BF16,
-    F16,
-    F32,
-    FP8E4M3,
-    I1,
-    I8,
-    I16,
-    I32,
-    I64,
     KernelDef,
     Op,
     Param,
@@ -59,6 +49,13 @@ from .ir import (
     Value,
     VectorType,
 )
+
+
+# OCKL's append entry point carries exactly seven i64 argument slots per packet.
+_OCKL_PRINTF_ARGUMENT_SLOTS = 7
+
+# Nine significant digits preserve every f32 value through its decimal rendering.
+_DEVICE_PRINT_F32_FORMAT = b"%.9g"
 
 
 # Datalayout / triple. Copied verbatim from clang's output for the same
@@ -2432,7 +2429,7 @@ class _Lowerer:
                 )
                 arguments.append(("arg", tmp))
             elif logical == "f32":
-                format_bytes.extend(b"%.9g")
+                format_bytes.extend(_DEVICE_PRINT_F32_FORMAT)
                 ext = self._fresh("printf_f64")
                 bits = self._fresh("printf_arg")
                 self._current().emit(f"  {ext} = fpext float {operand} to double")
@@ -2505,11 +2502,11 @@ class _Lowerer:
             while (
                 argument_index < len(arguments)
                 and arguments[argument_index][0] == "arg"
-                and len(group) < 7
+                and len(group) < _OCKL_PRINTF_ARGUMENT_SLOTS
             ):
                 group.append(arguments[argument_index][1])
                 argument_index += 1
-            padded = group + ["0"] * (7 - len(group))
+            padded = group + ["0"] * (_OCKL_PRINTF_ARGUMENT_SLOTS - len(group))
             next_message = self._fresh("printf_msg")
             args = ", ".join(f"i64 {arg}" for arg in padded)
             self._current().emit(

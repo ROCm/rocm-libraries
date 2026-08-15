@@ -715,6 +715,15 @@ typedef struct print_argument
     const char* value;
 } print_argument_t;
 
+/* __ockl_printf_append_args carries exactly seven i64 argument slots. */
+enum
+{
+    ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS = 7
+};
+
+/* Nine significant digits preserve every f32 value through decimal rendering. */
+static const char* const device_print_f32_format = "%.9g";
+
 static rocke_ll_printf_global_t add_printf_global(rocke_lower_t* L, const char* data, size_t len)
 {
     rocke_ll_printf_global_t global;
@@ -814,7 +823,7 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
         {
             const char* as_f64 = rocke_ll_fresh(L, "printf_f64");
             const char* bits = rocke_ll_fresh(L, "printf_arg");
-            rocke_strbuf_append(&static_text, "%.9g");
+            rocke_strbuf_append(&static_text, device_print_f32_format);
             rocke_ll_emitf(L, "  %s = fpext float %s to double", as_f64, operand);
             rocke_ll_emitf(L, "  %s = bitcast double %s to i64", bits, as_f64);
             arguments[argument_count++].value = bits;
@@ -866,8 +875,10 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
         {
             char true_data[5] = {'t', 'r', 'u', 'e', '\0'};
             char false_data[6] = {'f', 'a', 'l', 's', 'e', '\0'};
-            rocke_ll_printf_global_t true_global = add_printf_global(L, true_data, 5);
-            rocke_ll_printf_global_t false_global = add_printf_global(L, false_data, 6);
+            rocke_ll_printf_global_t true_global
+                = add_printf_global(L, true_data, sizeof(true_data));
+            rocke_ll_printf_global_t false_global
+                = add_printf_global(L, false_data, sizeof(false_data));
             const char* selected = rocke_ll_fresh(L, "printf_bool_str");
             const char* generic = rocke_ll_fresh(L, "printf_bool_ptr");
             const char* selected_len = rocke_ll_fresh(L, "printf_bool_len");
@@ -883,8 +894,8 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
                            "  %s = select i1 %s, i64 %zu, i64 %zu",
                            selected_len,
                            arguments[i].value,
-                           (size_t)5,
-                           (size_t)6);
+                           sizeof(true_data),
+                           sizeof(false_data));
             ++i;
             rocke_ll_emitf(L,
                            "  %s = call i64 @__ockl_printf_append_string_n(i64 %s, "
@@ -898,9 +909,12 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
             continue;
         }
 
-        const char* args[7] = {"0", "0", "0", "0", "0", "0", "0"};
+        const char* args[ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS];
+        for(int slot = 0; slot < ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS; ++slot)
+            args[slot] = "0";
         int count = 0;
-        while(i < argument_count && !arguments[i].is_bool && count < 7)
+        while(i < argument_count && !arguments[i].is_bool
+              && count < ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS)
             args[count++] = arguments[i++].value;
         next = rocke_ll_fresh(L, "printf_msg");
         rocke_ll_emitf(L,

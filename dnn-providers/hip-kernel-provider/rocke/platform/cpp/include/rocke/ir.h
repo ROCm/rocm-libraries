@@ -482,10 +482,14 @@ typedef enum rocke_print_item_kind
     ROCKE_PRINT_VALUE = 1
 } rocke_print_item_kind_t;
 
+/* Canonical device-print record limits, measured before lowering. */
+#define ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES 4096
+#define ROCKE_DEVICE_PRINT_MAX_VALUES 64
+
 typedef struct rocke_print_item
 {
     rocke_print_item_kind_t kind;
-    const char* text; /* TEXT: UTF-8 without NUL; otherwise NULL             */
+    const char* text; /* TEXT: ASCII without NUL; otherwise NULL             */
     rocke_value_t* value; /* VALUE: required; otherwise NULL                    */
     const char* format; /* VALUE: bool/i32/u32/f32/ptr; NULL selects default */
 } rocke_print_item_t;
@@ -800,7 +804,9 @@ rocke_value_t* rocke_b_block_id_x(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_y(rocke_ir_builder_t* b);
 rocke_value_t* rocke_b_block_id_z(rocke_ir_builder_t* b);
 /* Emit one canonical Text/Value record. style is currently "compact".
- * termination is "ensure_newline" or "none". predicate may be NULL. */
+ * termination is "ensure_newline" or "none". predicate may be NULL. Records
+ * may contain at most ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES literal ASCII bytes
+ * and ROCKE_DEVICE_PRINT_MAX_VALUES Value items. */
 void rocke_b_device_print(rocke_ir_builder_t* b,
                           const rocke_print_item_t* items,
                           int num_items,

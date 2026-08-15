@@ -13,6 +13,7 @@
 
 #include <string.h>
 
+#include "rocke/error_boundary.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -79,60 +80,12 @@ static int print_format_compatible(const rocke_type_t* t, const char* format)
     return 0;
 }
 
-static int valid_utf8(const unsigned char* s, size_t* bytes)
-{
-    size_t n = 0;
-    while(*s)
-    {
-        unsigned char c = *s++;
-        int rest = 0;
-        uint32_t cp = 0;
-        if(c < 0x80)
-        {
-            ++n;
-            continue;
-        }
-        if((c & 0xe0) == 0xc0)
-        {
-            rest = 1;
-            cp = c & 0x1f;
-            if(cp < 2)
-                return 0;
-        }
-        else if((c & 0xf0) == 0xe0)
-        {
-            rest = 2;
-            cp = c & 0x0f;
-        }
-        else if((c & 0xf8) == 0xf0)
-        {
-            rest = 3;
-            cp = c & 0x07;
-        }
-        else
-            return 0;
-        n += (size_t)rest + 1;
-        while(rest-- > 0)
-        {
-            c = *s++;
-            if((c & 0xc0) != 0x80)
-                return 0;
-            cp = (cp << 6) | (c & 0x3f);
-        }
-        if(cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
-            return 0;
-    }
-    if(bytes)
-        *bytes = n;
-    return 1;
-}
-
-void rocke_b_device_print(rocke_ir_builder_t* b,
-                          const rocke_print_item_t* items,
-                          int num_items,
-                          rocke_value_t* predicate,
-                          const char* style,
-                          const char* termination)
+static void device_print_impl(rocke_ir_builder_t* b,
+                              const rocke_print_item_t* items,
+                              int num_items,
+                              rocke_value_t* predicate,
+                              const char* style,
+                              const char* termination)
 {
     rocke_attr_map_t attrs;
     rocke_value_t** operands = NULL;
@@ -191,9 +144,9 @@ void rocke_b_device_print(rocke_ir_builder_t* b,
         {
             const char* text = i >= input_items ? "\n" : items[i].text;
             size_t n = 0;
-            if(!text || !valid_utf8((const unsigned char*)text, &n))
+            if(!text || !rocke_i_valid_print_text((const unsigned char*)text, &n))
                 return (void)rocke_i_set_err(
-                    b, ROCKE_ERR_VALUE, "device_print: invalid UTF-8 Text");
+                    b, ROCKE_ERR_VALUE, "device_print: Text must contain only ASCII");
             text_bytes += n;
             rocke_attr_set_str(b, meta, "kind", "text");
             rocke_attr_set_str(b, meta, "text", text);
@@ -220,11 +173,14 @@ void rocke_b_device_print(rocke_ir_builder_t* b,
         else
             return (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "device_print: unknown item kind");
     }
-    if(text_bytes > 4096)
+    if(text_bytes > ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES)
+        return (void)rocke_i_set_err(b,
+                                     ROCKE_ERR_VALUE,
+                                     "device_print: literal text exceeds %d bytes",
+                                     ROCKE_DEVICE_PRINT_MAX_LITERAL_BYTES);
+    if(value_count > ROCKE_DEVICE_PRINT_MAX_VALUES)
         return (void)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "device_print: literal text exceeds 4096 bytes");
-    if(value_count > 64)
-        return (void)rocke_i_set_err(b, ROCKE_ERR_VALUE, "device_print: more than 64 values");
+            b, ROCKE_ERR_VALUE, "device_print: more than %d values", ROCKE_DEVICE_PRINT_MAX_VALUES);
 
     attrs = rocke_i_attrs(b);
     rocke_attr_set_int(b, &attrs, "items", 0);
@@ -238,6 +194,19 @@ void rocke_b_device_print(rocke_ir_builder_t* b,
         operands[operand_count++] = predicate;
     }
     (void)rocke_i_op0(b, ROCKE_OP_GPU_DEVICE_PRINT, operands, operand_count, &attrs);
+}
+
+void rocke_b_device_print(rocke_ir_builder_t* b,
+                          const rocke_print_item_t* items,
+                          int num_items,
+                          rocke_value_t* predicate,
+                          const char* style,
+                          const char* termination)
+{
+    (void)ckc::guard_builder(b, [&]() -> rocke_ir_builder_t* {
+        device_print_impl(b, items, num_items, predicate, style, termination);
+        return b;
+    });
 }
 
 /* ============================ global loads ============================== */

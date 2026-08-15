@@ -51,6 +51,12 @@ FP8E4M3 = Type("fp8e4m3")
 BF8E5M2 = Type("bf8e5m2")
 
 
+# Canonical device-print record limits. These are part of the frontend and IR
+# contract, so callers can size records without duplicating verifier policy.
+DEVICE_PRINT_MAX_LITERAL_BYTES = 4096
+DEVICE_PRINT_MAX_VALUES = 64
+
+
 # AMDGPU buffer-load AUX-byte cache-coherency hints. The AUX field of
 # the ``raw_ptr_buffer_load[_lds]`` intrinsics encodes the GLC and SLC
 # bits that bias the load's L1/L2 caching policy. Pass one of these
@@ -197,7 +203,7 @@ class Value:
 
 @dataclass(frozen=True)
 class PrintText:
-    """Compile-time UTF-8 text in a canonical device-print record."""
+    """Compile-time ASCII text in a canonical device-print record."""
 
     text: str
 
@@ -1261,11 +1267,9 @@ class IRBuilder:
                     raise TypeError("device_print Text must be a string")
                 if "\x00" in item.text:
                     raise ValueError("device_print Text must not contain NUL")
-                try:
-                    encoded = item.text.encode("utf-8")
-                except UnicodeEncodeError as exc:
-                    raise ValueError("device_print Text must be valid UTF-8") from exc
-                text_bytes += len(encoded)
+                if not item.text.isascii():
+                    raise ValueError("device_print Text must contain only ASCII")
+                text_bytes += len(item.text)
                 canonical.append({"kind": "text", "text": item.text})
                 continue
 
@@ -1303,10 +1307,15 @@ class IRBuilder:
 
         if not canonical:
             raise ValueError("device_print record must contain at least one item")
-        if text_bytes > 4096:
-            raise ValueError("device_print record exceeds 4096 literal UTF-8 bytes")
-        if value_count > 64:
-            raise ValueError("device_print record exceeds 64 expanded values")
+        if text_bytes > DEVICE_PRINT_MAX_LITERAL_BYTES:
+            raise ValueError(
+                "device_print record exceeds "
+                f"{DEVICE_PRINT_MAX_LITERAL_BYTES} literal bytes"
+            )
+        if value_count > DEVICE_PRINT_MAX_VALUES:
+            raise ValueError(
+                f"device_print record exceeds {DEVICE_PRINT_MAX_VALUES} expanded values"
+            )
 
         attrs: Dict[str, Any] = {"items": canonical, "style": style}
         if predicate is not None:

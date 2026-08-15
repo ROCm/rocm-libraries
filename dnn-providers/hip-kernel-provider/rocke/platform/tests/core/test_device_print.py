@@ -7,7 +7,13 @@ from copy import deepcopy
 
 import pytest
 
-from rocke.core.ir import F32, IRBuilder, PrintValue, PtrType
+from rocke.core.ir import (
+    DEVICE_PRINT_MAX_LITERAL_BYTES,
+    F32,
+    IRBuilder,
+    PrintValue,
+    PtrType,
+)
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.core.verify import verify
@@ -83,23 +89,37 @@ def test_device_print_verifier_rejects_mutated_record() -> None:
     assert any("incompatible" in message for message in messages)
 
 
+@pytest.mark.parametrize("attribute", ["predicate_operand", "operand"])
+def test_device_print_verifier_rejects_boolean_operand_indexes(attribute: str) -> None:
+    kernel = deepcopy(_build_print_kernel())
+    op = kernel.body.ops[-1]
+    if attribute == "predicate_operand":
+        op.attrs[attribute] = True
+    else:
+        op.attrs["items"][1][attribute] = False
+
+    messages = [diagnostic.message for diagnostic in verify(kernel)]
+    assert any("out of range" in message for message in messages)
+
+
 def test_device_print_builder_rejects_invalid_contracts() -> None:
     b = IRBuilder("invalid_print")
     integer = b.const_i32(1)
     with pytest.raises(TypeError, match="not compatible"):
         b.device_print(PrintValue(integer, "f32"))
-    with pytest.raises(ValueError, match="4096"):
-        b.device_print("x" * 4097)
+    with pytest.raises(ValueError, match=str(DEVICE_PRINT_MAX_LITERAL_BYTES)):
+        b.device_print("x" * (DEVICE_PRINT_MAX_LITERAL_BYTES + 1))
+    with pytest.raises(ValueError, match="ASCII"):
+        b.device_print("lambda=λ")
     with pytest.raises(ValueError, match="termination"):
         b.device_print("x", termination="sometimes")
 
 
-def test_device_print_percent_and_utf8_are_literal_text() -> None:
+def test_device_print_percent_is_literal_text() -> None:
     b = IRBuilder("print_text")
-    b.device_print("100% λ")
+    b.device_print("100% complete")
     llvm = lower_kernel_to_llvm(b.kernel, arch="gfx950")
-    assert "100%% " in llvm
-    assert "\\CE\\BB" in llvm
+    assert "100%% complete" in llvm
 
 
 def test_compile_propagates_device_library_feature(monkeypatch) -> None:

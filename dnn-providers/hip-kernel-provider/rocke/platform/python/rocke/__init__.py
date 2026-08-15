@@ -54,6 +54,8 @@ from __future__ import annotations
 from .core.ir import (
     BF8E5M2,
     BF16,
+    DEVICE_PRINT_MAX_LITERAL_BYTES,
+    DEVICE_PRINT_MAX_VALUES,
     F16,
     F32,
     FP8E4M3,
@@ -158,6 +160,8 @@ __all__ = [
     # core
     "BF8E5M2",
     "BF16",
+    "DEVICE_PRINT_MAX_LITERAL_BYTES",
+    "DEVICE_PRINT_MAX_VALUES",
     "F16",
     "F32",
     "FP8E4M3",
