@@ -248,45 +248,6 @@ Tests:
     - syrk_strided_batched: *single_precision
   stride_scale: 1
 
-# K >= syrk_k_lower_threshold (500) with N below the per-arch n_higher_threshold
-# selects the gemm-only path in rocblas_use_only_gemm, the sole caller of the
-# copy-triangular workspace kernel. syrk_large_batch above uses K == 2 and so
-# never reaches it, which is why the batch-sweep offset defect went unseen there.
-# Strides are set explicitly: syrk has no entry in rocblas_gentest.py's
-# stride_scale table, so the fallback would derive stride_a from the default
-# M == 128 and allocate two orders of magnitude more than these shapes need.
-- name: syrk_large_batch_only_gemm
-  category: stress
-  uplo: [ U, L ]
-  arguments:
-    # Boundary coverage of the gemm-only path only. It cannot detect the offset
-    # defect: at this batch_count the overrun is two elements spanning 12 bytes,
-    # inside the 64-byte roundup handle.hpp applies to every workspace request, so
-    # it never leaves the allocation for anything to observe.
-    - { N: 2, K: 500, lda: 500, ldc: 2, stride_a: 1000, stride_c: 4, batch_count: *c_grid_yz_require_passes, transA: T }
-    # This is the row that detects it. Two saturated grid-z passes, so the pre-fix
-    # offset compounds far enough that the overrun leaves the allocation. The
-    # workspace is supplied by the test so the client can put a guard behind it,
-    # which is a more direct signal than a value comparison: whether an overrun
-    # perturbs the results depends on what the pool placed behind the workspace,
-    # so values can come out correct even when the access is wrong.
-    # tri(2) * 131070 * sizeof(float) = 524280, rounded to 524288 by handle.hpp,
-    # plus 64 KiB of slack so an unrelated pool allocation cannot turn this into
-    # a spurious memory error. The overrun spans 256 KiB, far past that slack.
-    # Costs about 0.5 GB of device memory for A, and a host mirror of it, which is
-    # why this block is stress rather than pre_checkin.
-    - { N: 2, K: 500, lda: 500, ldc: 2, stride_a: 1000, stride_c: 4, batch_count: 131070, transA: T, user_allocated_workspace: 589824 }
-  alpha_beta:
-    - { alpha:  1.0, beta:  1.0 }
-  os_flags: [ LINUX ]
-  # rocblas_use_only_gemm gates the workspace path to gfx90a and gfx942, so
-  # anywhere else these rows would spend the memory above on the path that does
-  # not use the workspace. Extend this list if that gate gains an architecture.
-  gpu_arch: ['90a','942']
-  function:
-    - syrk_batched: *single_precision
-    - syrk_strided_batched: *single_precision
-
 - name: syrk_ILP64
   category: stress
   uplo: [ U, L ]

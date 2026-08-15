@@ -1,0 +1,20 @@
+---
+include: rocblas_common.yaml
+
+# Standalone canary for the syrk/herk copy-triangular batch-sweep workspace
+# overrun. Aliases A and supplies an exact-sized workspace with a trailing
+# guard, so the case fits pre_checkin rather than stress. Values alone cannot
+# detect this defect: save/restore use the same offset map.
+
+Tests:
+- name: syrk_herk_workspace_overrun
+  category: pre_checkin
+  function:
+    - syrk_batched_workspace_canary
+    - syrk_strided_batched_workspace_canary
+    - herk_batched_workspace_canary
+    - herk_strided_batched_workspace_canary
+  precision: *single_precision
+  os_flags: [ LINUX ]
+  gpu_arch: ['90a','942']
+...
