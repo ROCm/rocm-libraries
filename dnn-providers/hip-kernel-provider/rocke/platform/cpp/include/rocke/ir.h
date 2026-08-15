@@ -266,7 +266,6 @@ typedef enum rocke_opcode
     /* gpu.* */
     ROCKE_OP_GPU_THREAD_ID,
     ROCKE_OP_GPU_BLOCK_ID,
-    ROCKE_OP_GPU_DEVICE_PRINT,
 
     /* memref.* */
     ROCKE_OP_MEMREF_GLOBAL_LOAD,
@@ -398,6 +397,9 @@ typedef enum rocke_opcode
     ROCKE_OP_SCF_IF,
     ROCKE_OP_SCF_YIELD,
     ROCKE_OP_CF_RETURN,
+
+    /* Append-only public ABI extensions. Do not renumber existing opcodes. */
+    ROCKE_OP_GPU_DEVICE_PRINT,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;

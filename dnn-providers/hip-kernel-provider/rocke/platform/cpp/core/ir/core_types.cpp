@@ -502,7 +502,6 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     /* gpu.* */
     "gpu.thread_id",
     "gpu.block_id",
-    "gpu.device_print",
 
     /* memref.* */
     "memref.global_load",
@@ -633,7 +632,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "scf.for",
     "scf.if",
     "scf.yield",
-    "cf.return"};
+    "cf.return",
+
+    /* Append-only public ABI extensions. */
+    "gpu.device_print"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -729,7 +731,6 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* gpu.* */
     /* gpu.thread_id */ true,
     /* gpu.block_id  */ true,
-    /* gpu.device_print */ false,
 
     /* memref.* (all effectful) */
     /* global_load                  */ false,
@@ -860,7 +861,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* scf.for    */ false,
     /* scf.if     */ false,
     /* scf.yield  */ false,
-    /* cf.return  */ false};
+    /* cf.return  */ false,
+
+    /* append-only public ABI extensions */
+    /* gpu.device_print */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
