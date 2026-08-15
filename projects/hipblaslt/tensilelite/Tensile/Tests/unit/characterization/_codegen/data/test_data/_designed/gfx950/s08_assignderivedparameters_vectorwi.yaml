@@ -1,0 +1,63 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S08 assignDerivedParameters VectorWidth re-derivation (gfx950).
+#
+# Target: Tensile/SolutionStructs/Solution.py
+#   2494,2495,2496,2498 : UseF32XEmulation + TLUA + numSubTiles>1 VW//=numSubTiles
+#                         adjust (2498 = SourceSwap StoreVectorWidth clamp)
+#
+# Mechanism (gfx950 MFMA XF32 emulation):
+#   DataType=S + F32XdlMathOp=X + HPA -> UseF32XEmulation + UseMFMAF32XEmulation.
+#   NT layout (TransposeA=False,TransposeB=True) -> TLUA=True AND TLUB=True.
+#   MI 16x16x32 with MIWaveTile=[4,4], DepthU==MatrixInstK(32), PGR>0,
+#   ExpandPointerSwap=False, 1LDSBuffer=0 -> _canEnableSubIter()==True so
+#   numSubTiles=2 during the VW re-derivation window (F32X sub-iter is only
+#   disabled later at ~2826, after these lines).
+#   VectorWidthA/B left at -1 -> derived to 4 (regPerElem(F32)=1 -> optVW=4,
+#   MIWaveTile%4==0). Then 4 % (4*2) != 0 trips the F32X while-loop -> VW//=2.
+#   SourceSwap=True + StoreVectorWidth=4 (>2) trips the 2496/2498 clamp.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType: F32 -> XF32 emulation, NT (TLUA=TLUB=True)
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      F32XdlMathOp: X
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 4, 2, 2]
+        - DepthU: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - StoreVectorWidth: [4]
+        - StaggerU: [0]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
