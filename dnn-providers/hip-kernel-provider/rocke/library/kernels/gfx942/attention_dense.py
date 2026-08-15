@@ -526,9 +526,10 @@ def _use_exp2_fast(head_size: int, dtype: str) -> bool:
     bf16 D128 was previously the sole holdout. An earlier fused-rescale schedule
     (plan §6.1) spilled with exp2_fast (175 -> 256 VGPR / 22 spill, over the
     waves-per-eu=2 cap), so the policy disabled it. The current lazy-rescale schedule
-    does not spill: rocprofv3 register capture on the shipped bf16-D128 causal kernel
-    (GQA 32/8, Sq 1024-16384, both the default and persistent grids) reads a lower VGPR
-    count with exp2_fast than without, 0 scratch, numerically identical to plain exp2.
+    does not spill: an ``llvm-readelf --notes`` read of the compiled code object
+    (``.private_segment_fixed_size``/``.vgpr_count``) on the shipped bf16-D128 kernel --
+    both the default and persistent grids -- reports 0 scratch and a lower VGPR count
+    with exp2_fast than without, numerically identical to plain exp2.
     The holdout is therefore stale and removed. (The stale numbers were measured against
     the pre-lazy-rescale body; the register profile has since changed sign.) head_size is
     no longer a gate -- correctness holds for every head_size (the <= 0 precondition is

@@ -849,7 +849,11 @@ def _walk_op_names(op):
         (64, "fp16", True),
         (128, "fp16", True),
         (64, "bf16", True),  # fused rescale gave the headroom (P2)
-        (128, "bf16", True),  # exp2_fast enabled: lazy-rescale schedule no longer spills
+        (
+            128,
+            "bf16",
+            True,
+        ),  # exp2_fast enabled: lazy-rescale schedule no longer spills
     ],
 )
 def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expected):
