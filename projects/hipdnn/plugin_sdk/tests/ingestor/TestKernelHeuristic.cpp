@@ -3,10 +3,13 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -115,6 +118,156 @@ TEST(TestIngestorKernelHeuristic, BreaksRemainingTiesOnKernelIdForStabilityAcros
 
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked.front().kernelId, lowerId);
+}
+
+TEST(TestIngestorKernelHeuristic, RanksNanScoringKernelsBelowEveryFiniteScore)
+{
+    // A pack's score() is arbitrary code, so NaN is reachable. NaN compares false against
+    // everything, which would make it read as equivalent to every kernel while finite
+    // scores stayed ordered -- not a strict weak ordering, and UB for stable_sort.
+    const ScopedNanScore nanScore;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto nanId = testId(0x01);
+    const auto smallId = testId(0x02);
+    const auto largeId = testId(0x03);
+    catalog.entries
+        = {makeDefinition(nanId, 4096), makeDefinition(smallId, 64), makeDefinition(largeId, 256)};
+
+    const NativeKernelHeuristic heuristic(NAN_SCORE_SYMBOL);
+    const auto ranked = heuristic.rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 3U);
+    // The finite kernels keep their own order, and the NaN one sinks to the back.
+    EXPECT_EQ(ranked[0].kernelId, largeId);
+    EXPECT_EQ(ranked[1].kernelId, smallId);
+    EXPECT_EQ(ranked[2].kernelId, nanId);
+}
+
+TEST(TestIngestorKernelHeuristic, KeepsFiniteScoresOrderedWhenAScorerReturnsNan)
+{
+    // The damage a NaN does is to the *other* kernels: it reads as equivalent to every
+    // one of them, so finite scores get separated by it and stop being sorted among
+    // themselves. Interleave NaN and finite so a broken comparator cannot look sorted by
+    // accident, then assert the finite subsequence is still descending.
+    //
+    // Determinism alone is too weak an assertion to make here: stable_sort against a
+    // broken comparator is reliably *wrong* rather than random, so a repeat-and-compare
+    // check passes even with the bug present.
+    const ScopedNanScore nanScore;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    std::vector<DescriptorId> nanIds;
+    for(uint8_t seed = 1; seed <= 6; ++seed)
+    {
+        const bool scoresNan = (seed % 2 == 0);
+        catalog.entries.push_back(makeDefinition(testId(seed), scoresNan ? 4096 : 64 * seed));
+        if(scoresNan)
+        {
+            nanIds.push_back(testId(seed));
+        }
+    }
+
+    const NativeKernelHeuristic heuristic(NAN_SCORE_SYMBOL);
+    const auto ranked = heuristic.rank(catalog, context);
+    ASSERT_EQ(ranked.size(), catalog.entries.size());
+
+    const auto scoresNan = [&nanIds](const DescriptorId& id) {
+        return std::find(nanIds.begin(), nanIds.end(), id) != nanIds.end();
+    };
+
+    int64_t previousBlockSize = std::numeric_limits<int64_t>::max();
+    bool seenNan = false;
+    for(const auto& entry : ranked)
+    {
+        if(scoresNan(entry.kernelId))
+        {
+            seenNan = true;
+            continue;
+        }
+        // Every finite kernel must outrank every NaN one, and stay ordered among its peers.
+        EXPECT_FALSE(seenNan) << "a finite score ranked below a NaN score";
+        const int64_t blockSize = entry.getIntMetadata(BLOCK_SIZE);
+        EXPECT_LE(blockSize, previousBlockSize) << "finite scores are no longer descending";
+        previousBlockSize = blockSize;
+    }
+
+    // And the result is reproducible, which is the promise the fallback ordering makes.
+    const auto repeated = heuristic.rank(catalog, context);
+    ASSERT_EQ(repeated.size(), ranked.size());
+    for(size_t i = 0; i < ranked.size(); ++i)
+    {
+        EXPECT_EQ(ranked[i].kernelId, repeated[i].kernelId) << "ranking diverged at index " << i;
+    }
+}
+
+TEST(TestIngestorKernelHeuristic, BreaksTiesAmongNanScoringKernelsOnPriorityThenKernelId)
+{
+    // NaN kernels collapse to one score, so the existing tie-break chain must still
+    // order them -- otherwise "ranks last" would be an unordered heap at the back.
+    const ScopedNanScore nanScore;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    Catalog catalog;
+    const auto lowPriorityId = testId(0x01);
+    const auto tiedLowerId = testId(0x02);
+    const auto tiedHigherId = testId(0x03);
+    // Listed with the higher id first, so passing requires the tie-break to reorder them
+    // rather than merely preserving input order.
+    catalog.entries = {makeDefinition(lowPriorityId, 4096, 1),
+                       makeDefinition(tiedHigherId, 4096, 5),
+                       makeDefinition(tiedLowerId, 4096, 5)};
+
+    const NativeKernelHeuristic heuristic(NAN_SCORE_SYMBOL);
+    const auto ranked = heuristic.rank(catalog, context);
+
+    ASSERT_EQ(ranked.size(), 3U);
+    EXPECT_EQ(ranked[0].kernelId, tiedLowerId); // priority 5, lower id wins the tie
+    EXPECT_EQ(ranked[1].kernelId, tiedHigherId); // priority 5
+    EXPECT_EQ(ranked[2].kernelId, lowPriorityId); // priority 1 sinks despite the id order
+}
+
+TEST(TestIngestorKernelHeuristic, TreatsInfiniteScoresAsOrdinaryExtremes)
+{
+    // Infinities are already a valid strict weak ordering; they must keep ranking
+    // normally rather than being lumped in with NaN.
+    const ScopedTestSymbols symbols;
+    const TestGraph graph;
+    const auto properties = testDeviceProperties();
+    const MatchContext context{graph, 0, properties};
+
+    ScoreRegistry::registerSymbol(
+        "hipdnn.kernel_ingestor.test.infinite_score",
+        +[](const KernelDefinition& kernel, const MatchContext&) -> double {
+            return kernel.getIntMetadata(BLOCK_SIZE) == 4096
+                       ? std::numeric_limits<double>::infinity()
+                       : -std::numeric_limits<double>::infinity();
+        });
+
+    Catalog catalog;
+    const auto positiveInfinityId = testId(0x01);
+    const auto negativeInfinityId = testId(0x02);
+    catalog.entries
+        = {makeDefinition(negativeInfinityId, 64), makeDefinition(positiveInfinityId, 4096)};
+
+    {
+        const NativeKernelHeuristic heuristic("hipdnn.kernel_ingestor.test.infinite_score");
+        const auto ranked = heuristic.rank(catalog, context);
+
+        ASSERT_EQ(ranked.size(), 2U);
+        EXPECT_EQ(ranked.front().kernelId, positiveInfinityId);
+        EXPECT_EQ(ranked.back().kernelId, negativeInfinityId);
+    }
+
+    ScoreRegistry::unregisterSymbol("hipdnn.kernel_ingestor.test.infinite_score");
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNativeKind)

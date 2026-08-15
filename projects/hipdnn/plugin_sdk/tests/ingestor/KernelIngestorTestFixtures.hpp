@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -383,6 +384,37 @@ public:
 
     ScopedConstantScore(const ScopedConstantScore&) = delete;
     ScopedConstantScore& operator=(const ScopedConstantScore&) = delete;
+};
+
+constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score";
+
+/// Scores the largest block size NaN and everything else by block size, so a ranking
+/// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
+/// one pack poisoning the order for the rest, not merely losing its own place.
+inline double scoreNanForLargestBlock(const KernelDefinition& kernel,
+                                      const MatchContext& /*context*/)
+{
+    return kernel.getIntMetadata(BLOCK_SIZE) == 4096
+               ? std::numeric_limits<double>::quiet_NaN()
+               : static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
+}
+
+/// RAII: must outlive the heuristic naming this scorer, which resolves at construction.
+class ScopedNanScore
+{
+public:
+    ScopedNanScore()
+    {
+        ScoreRegistry::registerSymbol(NAN_SCORE_SYMBOL, &scoreNanForLargestBlock);
+    }
+
+    ~ScopedNanScore()
+    {
+        ScoreRegistry::unregisterSymbol(NAN_SCORE_SYMBOL);
+    }
+
+    ScopedNanScore(const ScopedNanScore&) = delete;
+    ScopedNanScore& operator=(const ScopedNanScore&) = delete;
 };
 
 /// RAII: registers only the block-size scorer, for hand-wired matchers.

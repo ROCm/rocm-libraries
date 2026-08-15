@@ -6,6 +6,8 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -35,13 +37,23 @@ public:
 
     /// Orders @p catalog best-first, breaking ties on `priority`, then descriptor id
     /// bytes (stable across runs).
+    ///
+    /// A NaN score ranks last rather than poisoning the order. `score()` is supplied by
+    /// the pack, so its value is outside this class's control, and NaN compares false
+    /// against everything -- it would read as equivalent to every kernel while real
+    /// scores stayed ordered among themselves, which is not a strict weak ordering and
+    /// is undefined behaviour for stable_sort. Mapping it to -infinity keeps the order
+    /// total, so a pack that returns NaN loses selection quality without costing
+    /// determinism or reaching UB. Infinities are already well-ordered and pass through.
     std::vector<KernelDefinition> rank(const Catalog& catalog, const MatchContext& context) const
     {
         std::vector<std::pair<double, const KernelDefinition*>> scored;
         scored.reserve(catalog.entries.size());
         for(const auto& entry : catalog.entries)
         {
-            scored.emplace_back(score(entry, context), &entry);
+            const double raw = score(entry, context);
+            scored.emplace_back(std::isnan(raw) ? -std::numeric_limits<double>::infinity() : raw,
+                                &entry);
         }
 
         std::stable_sort(scored.begin(), scored.end(), [](const auto& lhs, const auto& rhs) {
