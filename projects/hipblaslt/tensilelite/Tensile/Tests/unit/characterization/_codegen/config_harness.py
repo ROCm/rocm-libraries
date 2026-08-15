@@ -198,11 +198,14 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
         kwa = KernelWriterAssembly(assembler, DebugConfig())
 
         # Steady-state warm-up (see codegen_harness for the rationale): the very
-        # first emit in a process accumulates scheduler state, so emit one
-        # throwaway kernel before recording results.
-        if not _ch._WARMED and kernels:
+        # first emit in a process accumulates process-global scheduler state, so
+        # emit one throwaway kernel before recording results. This warm-up runs
+        # per call (not once per process): the warmed state is keyed to *this*
+        # config's kernels, so a test recorded in isolation and the same test run
+        # after others in a shared xdist worker both emit the identical
+        # self-warmed steady state -- goldens stay order-invariant.
+        if kernels:
             _emit_one(kwa, kernels[0], splitGSU, canonical)
-            _ch._WARMED = True
 
         for kernel in kernels:
             results.append(_emit_one(kwa, kernel, splitGSU, canonical))
