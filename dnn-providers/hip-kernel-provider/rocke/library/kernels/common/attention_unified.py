@@ -1032,6 +1032,17 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # combo and a much heavier prelude.
     if _enable_combo_2d(problem) and problem.sliding_window > 0:
         return problem.block_size
+    # fp16 & bf16 D128 single-batch sliding-window: force T=64. The generic
+    # 2*block_size tile would give T=32 at block_size=16, whose 256 outer
+    # iterations at S=8192 under-amortise the per-iter cost. T=64 halves the
+    # iteration count; measured ~1.5-1.8x on gfx950 (MI355X) across both dtypes
+    # and 5 GQA configs (numerically identical to narrow -- bf16/fp16 ULP).
+    if (
+        _enable_single_batch_combo(problem)
+        and problem.sliding_window > 0
+        and problem.head_size == 128
+    ):
+        return 64
     # Single-batch (num_seqs == 1) d128/d64 prefill full-combo cohort.
     # Autotuner-proven KV tile per shape (gfx950, no-SW):
     #   * d128 -> T = 2 * block_size (32). The d128 winners all kept the
@@ -1632,7 +1643,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         them per-score, so biased single-batch prefill takes the combo path
         instead of the fallback. Only softcap/sinks are excluded (above)
         because the mask-limit shortcut can't fold them.
-      * no sliding window (the mask-once / mask-limit opts require no-SW).
+      * sliding window: fp16 D128 only -- the transposed-32x32 path is ~1.65x
+        faster here than the narrow 16x16 path (both numerically equal); other
+        SW shapes keep their existing routing, and the no-SW VALU sub-flags
+        auto-disable via _enable_transposed_subflags.
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
         split-KV path via ``select_path``, and the autotuner's win starts at
@@ -1648,7 +1662,18 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
-    if problem.sliding_window > 0:
+    # fp16 & bf16 D128 sliding-window (block_size==16 only) route to the
+    # transposed-32x32 fp32 online-softmax path (~1.5-1.8x faster than the narrow
+    # 16x16 path; both numerically equal to narrow). Measured on gfx950 (MI355X)
+    # across 5 GQA configs, square + chunked prefill, windows 1024-8192, both
+    # dtypes. Scoped to block_size==16: there use_k_single_buffer stays False, so
+    # the block_m=128 > tile_size=64 aliasing collision cannot fire (bs 32/64
+    # would need the _enable_k_single_buffer geometry guard and are unmeasured,
+    # so they keep their existing routing). Other SW shapes unchanged; the no-SW
+    # VALU sub-flags auto-disable for SW via _enable_transposed_subflags.
+    if problem.sliding_window > 0 and not (
+        problem.head_size == 128 and problem.block_size == 16
+    ):
         return False
     if problem.head_size not in (64, 128):
         return False
