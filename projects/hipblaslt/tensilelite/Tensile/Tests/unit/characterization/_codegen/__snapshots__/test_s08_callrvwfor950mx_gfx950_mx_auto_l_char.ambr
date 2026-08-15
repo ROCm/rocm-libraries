@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s08_callrvwfor950mx_gfx950_mx_auto_l_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgrglFDjYOTpZxSZ_4GTw1L0bp9Q0V5YcP6J9xw03QNac=',
+      'err': 0,
+    }),
+  ])
+# ---
