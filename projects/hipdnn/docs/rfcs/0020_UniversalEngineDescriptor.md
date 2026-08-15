@@ -76,6 +76,12 @@ is not itself a divergence.
   hashed into the engine-id space and must not collide.
 - **Duplicate detection (§ 10.2.1).** An independent descriptor-`id` check; drop all UEDs in a
   genuine collision, but accept content-identical `id` duplicates, loading them as one.
+- **Role-scoped, arch-keyed heuristics (§ 4.4).** 0017 sketches a single `heuristic` id; this RFC
+  replaces it with three optional, arch-keyed maps — `sort_kernel_catalog` (the kernel-selection
+  heuristic 0017 describes), `predict_engine_tflops`, and `predict_applicable_kernels` — so an engine's
+  distinct selection jobs, and per-architecture model choice, are expressible without a schema change
+  later. `version` stays `1.0`: the UED is not yet consumed, so v1.0 is revised in place rather than
+  bumped.
 
 No other silent contradictions; this draft aims to formalize 0017. Any conflict surfaced during
 review is recorded here.
@@ -85,7 +91,7 @@ review is recorded here.
 An engine lives in **two distinct id spaces**, which the UED keeps separate:
 
 **(a) The descriptor UUID (`id`).** Every descriptor carries a stable UUID used only for
-cross-references among descriptor files: a KDP names its UED by this id; a UED names its UHD
+cross-references among descriptor files: a KDP names its UED by this id; a UED names its UHDs
 and KMD by theirs (RFC 0017 § 4). It is internal to the descriptor graph and never crosses the
 hipDNN library boundary.
 
@@ -97,7 +103,7 @@ and support claims key on.
 
 | Concern | Identifier |
 |---|---|
-| A KDP naming its UED; a UED naming its UHD/KMD | descriptor UUID `id` |
+| A KDP naming its UED; a UED naming its UHDs/KMD | descriptor UUID `id` |
 | hipDNN selecting among engines; logs; support claims | 64-bit engine id (FNV-1a of `name`) |
 
 The UED `name` is therefore load-bearing only where the engine surfaces outside the descriptor
@@ -119,7 +125,20 @@ and a separate `version` field (`major.minor`) that the accept rule gates on (§
   "version":         "1.0",                        // major.minor; gated at load (§ 11)
   "id":              "efc9eae4-fe33-4cb0-a593-95d771dc13b2",  // UUID; referenced by KDPs (§ 3a)
   "name":            "rocke:attention_dense_fwd",  // globally-unique, scoped engine name (§ 3b)
-  "heuristic":       "ae896b07-80cd-473c-b3f4-6a8892998519",  // one UHD id (required)
+
+  // Three role-scoped, arch-keyed UHD maps (§ 4.4). Each maps a gfx target — or the
+  // "default" catch-all — to a UHD id. All three are optional; the common case sets
+  // only sort_kernel_catalog.
+  "sort_kernel_catalog": {                         // kernel-selection heuristic: ranks the catalog (required in practice)
+    "gfx950":  "ae896b07-80cd-473c-b3f4-6a8892998519",
+    "gfx942":  "1f0c8d22-4b7e-49a1-9d3c-6e2a5f8b1074",
+    "default": "c93e17aa-2d6b-4f10-8e75-3a9c04b6f2e1"
+  },
+  "predict_engine_tflops": {                       // optional: cheap engine-level estimate, used at engine selection
+    "gfx950":  "7b1e9c40-5a2f-4d8b-91c6-0e3d7a2f6b58"
+  },
+  // "predict_applicable_kernels": { … }           // optional, future: generates the candidate set (§ 4.4)
+
   "metadata":        "9ae0b215-32a7-49d1-96df-e9b05e1927ea",  // one KMD id (required)
   "knobs":           ["split_k", "tile_m"],        // optional: KMD field names to expose (§ 5)
   "behavior_notes":  ["runtime_compilation"],      // optional (§ 6)
@@ -130,8 +149,8 @@ and a separate `version` field (`major.minor`) that the accept rule gates on (§
 ### 4.2 Normative schema (version 1.0)
 
 A conforming UED is a JSON object with exactly the members below. Members not listed are
-rejected under the version rule (§ 11). The object has no logic; it is identity, two required
-references, and optional annotations.
+rejected under the version rule (§ 11). The object has no logic; it is identity, one required
+metadata reference, up to three role-scoped heuristic maps, and optional annotations.
 
 **Field specification (normative).**
 
@@ -141,13 +160,48 @@ references, and optional annotations.
 | `version` | yes | string | `<major>.<minor>` (both numeric), e.g. `1.0`. The compatibility field the accept rule gates on (§ 11). |
 | `id` | yes | string | A UUID (RFC 4122) in canonical `8-4-4-4-12` hex form. Unique across all loaded descriptors, except that content-identical UEDs may share an `id` (§ 10.2.1). The cross-reference key a KDP's `engine` field uses (§ 3a). |
 | `name` | yes | string | Globally-unique, scoped engine name matching `^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$` (a `namespace:local` form, e.g. `rocke:SDPA`). Hashed (FNV-1a, 64-bit) into the hipDNN engine-id space (§ 3b). Non-empty; unique by both literal name and by hash. |
-| `heuristic` | yes | string | UUID of this engine's one UHD. Must resolve to a loadable UHD at load (§ 10.2). |
+| `sort_kernel_catalog` | no | object (arch → UUID) | The **kernel-selection heuristic** map (§ 4.4): each key is a gfx target (e.g. `gfx950`) or the literal `default`; each value a UHD UUID that must resolve at load (§ 10.2). This is the current main UHD — it ranks the catalog and picks the winning kernel. Absent => the engine has no kernel-selection model and falls back to deterministic ordering (RFC 0019 § 5). |
+| `predict_engine_tflops` | no | object (arch → UUID) | Optional **engine-estimate** map (§ 4.4): a cheap `f(graph) → expected performance` UHD consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution as above. |
+| `predict_applicable_kernels` | no | object (arch → UUID) | Optional, **future** **candidate-generator** map (§ 4.4): a UHD that produces the applicable candidate set for a combinatorial/JIT space, which `sort_kernel_catalog` then ranks. Same arch-key form and resolution. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 10.2). |
 | `knobs` | no | array of string | Each element is a field name declared in the referenced KMD (§ 5). No duplicates. Absent or `[]` => engine exposes no descriptor knobs. Every element must match a KMD field or it is a load error (§ 10.2). |
 | `behavior_notes` | no | array of string | hipDNN behavior-note tags ([RFC 0010](0010_BehaviorNotes.md)). No duplicates. Absent => none. |
 | `numerical_notes` | no | array of string | hipDNN numerical-note tags. No duplicates. Absent => none. |
 
-All three optional fields may be omitted; a valid engine can expose no knobs and carry no notes.
+All heuristic maps and the three trailing optional fields may be omitted; a valid engine can
+carry only its identity and `metadata`. A UED that names no `sort_kernel_catalog` is still valid
+— its kernels are ordered deterministically (RFC 0019 § 5) — though in practice every trained
+engine sets it.
+
+### 4.4 Heuristic roles and arch keying
+
+A UED carries **three role-scoped heuristic maps**, because an engine has more than one distinct
+selection job and they run at different points in the pipeline:
+
+| Field | Role | When it runs | RFC 0019 |
+|---|---|---|---|
+| `predict_engine_tflops` | Cheap engine-level performance estimate | Engine selection, before any catalog is built | "engine estimate (A)" |
+| `sort_kernel_catalog` | Ranks the catalog and picks the winning kernel | Kernel selection, after applicability | "config UHD / knob predictor (B)" — the current focus |
+| `predict_applicable_kernels` | Generates the candidate set to be ranked | During applicability, for a combinatorial/JIT space | future candidate generator (C) |
+
+The pipeline is therefore `predict_engine_tflops` (rank engines) → `predict_applicable_kernels`
+(produce candidates, when present) → `sort_kernel_catalog` (rank and pick). Each is **independently
+optional**: the common AOT engine sets only `sort_kernel_catalog`; `predict_engine_tflops` earns its
+place once engines compete or an opaque engine must report an estimate; `predict_applicable_kernels`
+is reserved for the JIT case where no enumerable catalog exists until something produces one.
+
+**Arch keying.** Each map's keys are gfx target names (matched exactly against the device's
+`gcnArchName`), plus an optional `default` catch-all. Resolution for a role on a given device:
+
+1. exact match on the device's gfx name, else
+2. the `default` entry, else
+3. the role is **unavailable** on that arch — `sort_kernel_catalog` unavailable means deterministic
+   ordering (RFC 0019 § 5); an unavailable estimate or generator simply is not consulted.
+
+The map chooses *which* model by architecture; it does not replace `$device.*` features. A single
+mapped model still generalizes across a family (SKUs of one gfx) through its device features — the
+map splits only where architectures genuinely diverge in metadata or heuristic behavior. One `default`
+entry covering every arch is the degenerate, fully device-feature-driven case.
 
 Each `major.minor` is a standalone JSON Schema **file** in the repository (§ 11.3); the inline copy
 below mirrors the authoritative `ued/1.0.json`, and a CI check verifies the match.
@@ -159,7 +213,7 @@ below mirrors the authoritative `ued/1.0.json`, and a CI check verifies the matc
   "title": "hipdnn.ued version 1.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "version", "id", "name", "heuristic", "metadata"],
+  "required": ["schema", "version", "id", "name", "metadata"],
   "properties": {
     "schema": {
       "type": "string",
@@ -178,10 +232,35 @@ below mirrors the authoritative `ued/1.0.json`, and a CI check verifies the matc
       "type": "string",
       "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$"
     },
-    "heuristic": {
-      "description": "Cross-reference: MUST resolve to a loadable UHD (semantic; see RFC 0020 section 10.2).",
-      "type": "string",
-      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    "sort_kernel_catalog": {
+      "description": "Arch -> UHD id. Kernel-selection heuristic; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 10.2).",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "minProperties": 1
+    },
+    "predict_engine_tflops": {
+      "description": "Arch -> UHD id. Optional engine-level estimate; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 10.2).",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "minProperties": 1
+    },
+    "predict_applicable_kernels": {
+      "description": "Arch -> UHD id. Optional, future candidate generator; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 10.2).",
+      "type": "object",
+      "propertyNames": { "type": "string", "minLength": 1 },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "minProperties": 1
     },
     "metadata": {
       "description": "Cross-reference: MUST resolve to a loadable KMD (semantic; see RFC 0020 section 10.2).",
@@ -235,7 +314,8 @@ already declares the field's type and default (RFC 0017 § 4). The UED's contrac
   withdraw it.
 - A knob's **legal values come from the catalog**, not the KMD's theoretical range; that is, the
   set of values the field takes among the kernels matching a given graph.
-- A knob's **default is the heuristic's top-ranked choice**, not a constant.
+- A knob's **default is the kernel-selection heuristic's top-ranked choice** (`sort_kernel_catalog`,
+  § 4.4), not a constant.
 - `knobs` governs only what the UED *declares*. hipDNN's reserved `global.` knobs
   ([RFC 0004](0004_EngineConfigKnobs.md)) are a separate namespace a descriptor-backed engine
   implements like any other engine; the two do not overlap.
@@ -251,12 +331,13 @@ engine declares them.
 
 A **UKD names no engine.** Its engine membership is determined by the **sibling UED referenced
 by its KDP**: the KDP carries `"engine": "<UED id>"`, and every child UKD inherits it, along
-with the pack's matchers and dispatch and the engine's heuristic and metadata schema (RFC 0017
+with the pack's matchers and dispatch and the engine's heuristics and metadata schema (RFC 0017
 § 4). The membership chain is **UKD -> KDP -> UED**, bound by the descriptor UUID `id`; there is no
 direct UKD->UED reference.
 
-One UED is typically shared by many KDPs, and so serves many UKDs: one engine, one UHD, one
-KMD, ranking a whole catalog of kernels over one feature space.
+One UED is typically shared by many KDPs, and so serves many UKDs: one engine, one metadata
+schema, and up to three role-scoped heuristics (§ 4.4), ranking a whole catalog of kernels over
+one feature space.
 
 ## 8. When a UED Is Loaded and Registered
 
@@ -301,8 +382,9 @@ hand-written engine-registration path. For each UED that passes validation (§ 1
 1. **Derives the engine id**: the 64-bit hash of the UED `name` (§ 3).
 2. **Instantiates one generic engine**: a single engine implementation that satisfies hipDNN's
    existing engine contract from descriptor data rather than hand-written code, one instance per
-   UED, bound to that UED's descriptors: its `heuristic` (UHD) and `metadata` (KMD) references
-   and the KDPs whose `engine` field names it.
+   UED, bound to that UED's descriptors: its heuristic maps (`sort_kernel_catalog` and any
+   `predict_engine_tflops` / `predict_applicable_kernels`; § 4.4) and its `metadata` (KMD)
+   reference, and the KDPs whose `engine` field names it.
 3. **Adds the engine to the provider's engine list** and records the name -> id mapping, so the
    host can enumerate the engine and diagnostics / support claims
    ([RFC 0015](0015_EngineSupportClaims.md)) key on the real name rather than a hex id.
@@ -337,9 +419,11 @@ but the contract is normative independently of that mechanism.
 These cannot be expressed in JSON Schema because they depend on other descriptors; each is
 performed at build time and run time alike:
 
-- **Reference resolution.** A UED's `heuristic` (UHD) and `metadata` (KMD) must each resolve to a
-  loadable descriptor of the correct kind; a dangling reference is an error. This is an
-  *existence* condition: the referent must be resolvable, not necessarily parsed.
+- **Reference resolution.** A UED's `metadata` (KMD) and every UHD id in its three heuristic maps
+  (`sort_kernel_catalog`, `predict_engine_tflops`, `predict_applicable_kernels`; § 4.4) must each
+  resolve to a loadable descriptor of the correct kind; a dangling reference is an error. This is an
+  *existence* condition: the referent must be resolvable, not necessarily parsed. An empty map is a
+  load error (a role is either absent or non-empty).
 - **`knobs` must be a subset of KMD field names.** A knob name no KMD field matches is an error
   (RFC 0017 § 4). Unlike reference resolution, this reads the KMD's declared field set, so the
   referenced KMD must be resolvable **to its field set**, more than existence.
@@ -348,7 +432,7 @@ performed at build time and run time alike:
 
 The full cross-descriptor reference-integrity check (which references must resolve, and to what)
 spans multiple descriptor types and is best specified at a higher level than the UED format.
-This RFC fixes only that a UED's own `heuristic` and `metadata` references are subject to it, at
+This RFC fixes only that a UED's own heuristic-map and `metadata` references are subject to it, at
 both build and run time.
 
 #### 10.2.1 Duplicate detection (descriptor `id` and `name`)
@@ -520,7 +604,8 @@ fuzzing, this RFC adds UED-specific coverage.
 - **Version accept rule** (§ 11.1): matrix of `file` vs `provider` `major.minor` read from the
   `version` field: same major/older-or-equal minor loads; newer minor rejected; any major mismatch
   dropped.
-- **Semantic checks** (§ 10.2): dangling `heuristic`/`metadata`; a `knobs` entry absent from
+- **Semantic checks** (§ 10.2): a dangling `metadata` or heuristic-map (`sort_kernel_catalog`,
+  `predict_engine_tflops`, `predict_applicable_kernels`) reference; a `knobs` entry absent from
   the KMD.
 - **Duplicate detection, drop-all** (§ 10.2.1): two UEDs differing in content but sharing an
   `id`; two sharing a `name`; two sharing both; a UED colliding by name with a built-in engine. In
@@ -551,12 +636,12 @@ The descriptor pipeline parses untrusted input on the drop-in path, so the loade
 ## 14. Glossary
 
 - **UED (Universal Engine Descriptor):** one engine, comprising a stable identity (`name` + UUID
-  `id`), the KMD field names it exposes as knobs, and its behavior/numerical notes. Names its one UHD
-  and one KMD by id. 1:1 with a hipDNN engine.
+  `id`), the KMD field names it exposes as knobs, and its behavior/numerical notes. Names its one KMD
+  and up to three role-scoped, arch-keyed UHD maps (§ 4.4) by id. 1:1 with a hipDNN engine.
 - **Engine id (64-bit):** the hipDNN-facing engine identifier, derived (FNV-1a) from the UED
   `name`; what the plugin reports to the backend and what selection/diagnostics key on.
 - **Descriptor UUID `id`:** the cross-reference identifier a descriptor carries; how a KDP
-  names its UED and a UED names its UHD/KMD. Distinct from the engine id.
+  names its UED and a UED names its UHDs/KMD. Distinct from the engine id.
 - **Generic engine:** the single C++ engine class that satisfies hipDNN's `IEngine` contract
   from descriptor data, one instance per UED.
 
@@ -605,7 +690,11 @@ declares (§ A.1); the notes are RFC 0010 annotations.
   "version":         "1.0",
   "id":              "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",   // UUID; KDPs name this via "engine"
   "name":            "rocke:attention_dense_fwd",              // globally-unique, scoped; hashed to the 64-bit engine id
-  "heuristic":       "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",   // this engine's one UHD
+  "sort_kernel_catalog": {                                     // this engine's kernel-selection heuristic (§ 4.4)
+    "gfx950":  "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
+    "default": "8e0d5f31-7c2a-4b16-93e8-1a6f4d902c57"
+  },
+  "predict_engine_tflops": { "gfx950": "5c9a1b73-2e4f-48d0-86b1-9f3e7a0c62d4" },
   "metadata":        "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40",   // the KMD (§ A.1)
   "knobs":           ["block_n", "waves_per_eu", "num_persistent"],  // all are KMD field names
   "behavior_notes":  ["runtime_compilation"],
@@ -626,9 +715,11 @@ The same engine with only required fields, no knobs, no notes:
   "version":   "1.0",
   "id":        "7d4c2a9e-3b6f-4e1a-8c5d-9a2f7b0e6c14",
   "name":      "rocke:attention_dense_fwd",
-  "heuristic": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93",
+  "sort_kernel_catalog": { "default": "2b7a4e1c-6f3d-4a8e-9c2b-5d1f0a7e8b93" },
   "metadata":  "9c53b6b0-9a1e-4b1d-8b5c-7e2d9a6f3c40"
 }
 ```
 
-Both load and register identically; § A.2 only surfaces knobs and notes that § A.3 leaves unset.
+Both load and register identically; § A.2 only surfaces the extra heuristic roles, knobs, and
+notes that § A.3 leaves unset. A single `default` entry serves every arch through device features
+(§ 4.4).
