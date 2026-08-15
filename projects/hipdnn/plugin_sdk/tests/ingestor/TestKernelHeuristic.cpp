@@ -417,8 +417,8 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_EQ(heuristic.score(makeDefinition(testId(0x01), 64), context),
-              heuristic.score(makeDefinition(testId(0x02), 4096), context));
+    EXPECT_EQ(heuristic.score(makeDefinition(testId(0x01), 64), context, BoundTokens{}),
+              heuristic.score(makeDefinition(testId(0x02), 4096), context, BoundTokens{}));
 }
 
 } // namespace
