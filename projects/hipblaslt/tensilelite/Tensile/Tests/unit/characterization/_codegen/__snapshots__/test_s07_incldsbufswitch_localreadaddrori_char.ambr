@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s07_incldsbufswitch_localreadaddrori_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_HHS_BH_UserArgs_MT64x64x32_MI16x18mIBUXZHaRBNwFPQHLD8-6LnE0QiCmyNtsHPU3cWTbg=',
+      'err': 0,
+    }),
+  ])
+# ---
