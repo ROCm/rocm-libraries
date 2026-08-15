@@ -340,6 +340,56 @@ TEST(TestKernelIngestorEngine, ResolvesAModuleDirectoryFromAnAddressWithinIt)
     EXPECT_TRUE(std::filesystem::is_directory(directory, exists)) << directory;
 }
 
+// ---------------------------------------------------------------------------
+// descriptorSearchDirectories(): appending the runtime drop-in root
+// ---------------------------------------------------------------------------
+
+/// With no runtime dir set, the provider's own tree is the only root -- no phantom
+/// second entry. HIPDNN_DESCRIPTOR_RUNTIME_DIR may already be set from an outer shell,
+/// so it's cleared here the same way FallsBackToAModuleRelativeOrInstalledPath clears
+/// HIPDNN_DESCRIPTOR_DIR: an explicit empty value, which the empty() check treats as
+/// absent.
+TEST(TestKernelIngestorEngine, ReturnsOnlyTheProviderTreeWhenRuntimeDirIsUnset)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "");
+
+    const auto roots = descriptorSearchDirectories();
+
+    ASSERT_EQ(roots.size(), 1U);
+    EXPECT_EQ(roots.front(), descriptorSearchDirectory());
+}
+
+/// A real runtime dir is additive, not a replacement: the provider's own tree still
+/// leads, the runtime dir lands second. Order matters to the loader's incumbent-wins
+/// duplicate rule, so it's asserted position by position rather than as a set.
+TEST(TestKernelIngestorEngine, AppendsHipdnnDescriptorRuntimeDirAfterTheProviderTree)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory runtimeDir(
+        std::filesystem::temp_directory_path() / "hip_kernel_provider_descriptor_runtime");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter override(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR", runtimeDir.path().string());
+
+    const auto roots = descriptorSearchDirectories();
+
+    ASSERT_EQ(roots.size(), 2U);
+    EXPECT_EQ(roots[0], descriptorSearchDirectory());
+    EXPECT_EQ(roots[1], runtimeDir.path());
+}
+
+/// A stale runtime dir must not add a root at all: the loader treats a missing root as
+/// "nothing to add", so a typo would otherwise silently vanish instead of failing loud.
+TEST(TestKernelIngestorEngine, IgnoresAHipdnnDescriptorRuntimeDirThatDoesNotExist)
+{
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter stale(
+        "HIPDNN_DESCRIPTOR_RUNTIME_DIR", "/nowhere/in/particular");
+
+    const auto roots = descriptorSearchDirectories();
+
+    ASSERT_EQ(roots.size(), 1U);
+    EXPECT_EQ(roots.front(), descriptorSearchDirectory());
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

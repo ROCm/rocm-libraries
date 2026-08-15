@@ -1100,26 +1100,24 @@ inline const FileType* findFileType(std::string_view filename)
     return nullptr;
 }
 
-} // namespace detail
-
-/**
- * @brief Every descriptor file under @p root, parsed and keyed by (type, id).
- *
- * Walks the tree in sorted path order and takes every file whose name ends in one of the
- * six type suffixes. Never throws: a file that fails to open, fails to parse, or violates
- * the authored format is logged at ERROR with its path and the reason, and skipped; a
- * `.json` naming no type is logged at WARN and skipped before it is opened.
- */
-inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root)
+/// @brief Appends every descriptor file under @p root to @p files, sorted by path.
+///
+/// Sorted per root rather than across all of them, so an earlier root's files stay ahead
+/// of a later one's and the incumbent of a conflicting pair never depends on how the two
+/// roots happen to be spelled. Never throws.
+inline void
+    collectDescriptorFiles(const std::filesystem::path& root,
+                           std::vector<std::pair<std::filesystem::path, const FileType*>>& files)
 {
-    DescriptorCatalog catalog;
-
+    // Collected locally so this root's group can be sorted before it joins @p files.
+    std::vector<std::pair<std::filesystem::path, const FileType*>> found;
     std::error_code error;
     if(!std::filesystem::is_directory(root, error))
     {
-        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: no descriptor directory at "
-                               << root << "; no descriptor-backed engines loaded");
-        return catalog;
+        // INFO, not WARN: a root that does not exist is the normal state of an optional
+        // drop-in tree, and only the caller knows whether ending with nothing is a fault.
+        HIPDNN_PLUGIN_LOG_INFO("descriptor loader: no descriptor directory at " << root);
+        return;
     }
 
     // `arch` prunes at match time only, not here -- the calling device is unknown at
@@ -1128,7 +1126,6 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
     // unreadable subdirectory from turning the whole iterator into end() and silently
     // losing every engine after it; iterated with error_code overloads throughout since
     // this loader promises never to throw.
-    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
     auto walk = std::filesystem::recursive_directory_iterator(
         root, std::filesystem::directory_options::skip_permission_denied, error);
     if(error)
@@ -1173,7 +1170,7 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
                 const std::string entryName = walk->path().filename().string();
                 if(const auto* fileType = detail::findFileType(entryName))
                 {
-                    files.emplace_back(walk->path(), fileType);
+                    found.emplace_back(walk->path(), fileType);
                 }
                 else
                 {
@@ -1215,9 +1212,36 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
     }
     // Sorted before parsing so which file of a conflicting pair is reported as the
     // incumbent, and the order the load lines appear in, never depend on the filesystem.
-    std::sort(files.begin(), files.end(), [](const auto& lhs, const auto& rhs) {
+    std::sort(found.begin(), found.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.first < rhs.first;
     });
+    files.insert(files.end(), found.begin(), found.end());
+}
+
+} // namespace detail
+
+/**
+ * @brief Every descriptor file under @p roots, parsed and keyed by (type, id).
+ *
+ * Walks each root in turn, taking every file whose name ends in one of the seven type
+ * suffixes. The roots feed one catalog, so two files claiming one id resolve by the same
+ * rules whether they sit in one root or in two: identical content collapses, and content
+ * that disagrees drops both. A later root therefore extends the earlier ones and cannot
+ * quietly redefine them.
+ *
+ * Never throws: a file that fails to open, fails to parse, or violates the authored
+ * format is logged at ERROR with its path and the reason, and skipped; a `.json` naming
+ * no type is logged at WARN and skipped before it is opened.
+ */
+inline DescriptorCatalog loadDescriptorCatalog(const std::vector<std::filesystem::path>& roots)
+{
+    DescriptorCatalog catalog;
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    for(const auto& root : roots)
+    {
+        detail::collectDescriptorFiles(root, files);
+    }
 
     for(const auto& [path, fileType] : files)
     {
@@ -1269,6 +1293,12 @@ inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root
     }
 
     return catalog;
+}
+
+/// @brief The one-root form: every descriptor file under @p root.
+inline DescriptorCatalog loadDescriptorCatalog(const std::filesystem::path& root)
+{
+    return loadDescriptorCatalog(std::vector<std::filesystem::path>{root});
 }
 
 /**
@@ -1608,7 +1638,7 @@ inline std::deque<std::string>& registeredEngineNames()
 } // namespace detail
 
 /**
- * @brief Every descriptor set under @p root that this provider can actually construct.
+ * @brief Every descriptor set under @p roots that this provider can actually construct.
  *
  * The provider-facing entry point, and the only place validation happens. A set survives
  * only if every native symbol it names is registered, its name claims an engine id no
@@ -1619,11 +1649,12 @@ inline std::deque<std::string>& registeredEngineNames()
  *          unregistered symbol is dropped.
  */
 template <typename THandle>
-inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesystem::path& root)
+inline std::vector<DescriptorSet>
+    loadValidatedDescriptorSets(const std::vector<std::filesystem::path>& roots)
 {
     std::vector<DescriptorSet> validated;
 
-    for(auto& set : resolveDescriptorSets(loadDescriptorCatalog(root)))
+    for(auto& set : resolveDescriptorSets(loadDescriptorCatalog(roots)))
     {
         // Checked here rather than inside KernelIngestorStateManager's constructor, where
         // the other cross-reference validation lives, because getDispatchDetails() throws
@@ -1739,10 +1770,22 @@ inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesys
         validated.push_back(std::move(set));
     }
 
+    std::string from;
+    for(const auto& root : roots)
+    {
+        from += (from.empty() ? "" : ", ") + root.string();
+    }
     HIPDNN_PLUGIN_LOG_INFO("descriptor loader: " << validated.size()
                                                  << " descriptor-backed engine(s) loaded from "
-                                                 << root);
+                                                 << from);
     return validated;
+}
+
+/// @brief The one-root form: every constructible descriptor set under @p root.
+template <typename THandle>
+inline std::vector<DescriptorSet> loadValidatedDescriptorSets(const std::filesystem::path& root)
+{
+    return loadValidatedDescriptorSets<THandle>(std::vector<std::filesystem::path>{root});
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

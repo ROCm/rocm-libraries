@@ -334,6 +334,21 @@ TEST(TestKernelIngestorStateManager, MatchesSeparatelyPerDevice)
     EXPECT_EQ(counters().graphCalls, 2);
 }
 
+TEST(TestKernelIngestorStateManager, NoDeviceYieldsAnEmptyCatalogEvenWhenMatchersWouldAccept)
+{
+    const ScopedSymbols symbols("test.graph", acceptAnyGraph, "test.kernel", countingFloatKernels);
+    const auto manager = makeStateManager();
+    const TestGraph graph(makeGraphId(0x61));
+    const auto properties = testDeviceProperties();
+
+    // Positive half first: same manager and graph, a real device, matchers that accept.
+    ASSERT_FALSE(manager->unsortedCatalog(MatchContext{graph, 0, properties}).entries.empty());
+
+    // Only the device id changes; the catalog must go empty before any matcher runs.
+    EXPECT_TRUE(
+        manager->unsortedCatalog(MatchContext{graph, NO_DEVICE, properties}).entries.empty());
+}
+
 TEST(TestKernelIngestorStateManager, RematchesEveryCallWhenTheGraphHasNoIdentity)
 {
     const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);

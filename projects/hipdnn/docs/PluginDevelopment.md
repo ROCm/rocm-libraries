@@ -506,6 +506,13 @@ product that a shape like `{-1,-1,1,1}` satisfies.
    `"version"`. Subdirectories are organizational only — the loader walks the tree and
    a `.json` matching no suffix is warned about and skipped.
 
+   The loader reads the provider's installed tree, and after it a runtime drop-in tree
+   when `HIPDNN_DESCRIPTOR_RUNTIME_DIR` names one. Both feed a single catalog, so a
+   drop-in can add engines beside the shipped ones but cannot quietly redefine one: two
+   files disagreeing over an id drop both, wherever they live. `HIPDNN_DESCRIPTOR_DIR` is
+   a separate lever that *replaces* the installed tree, and exists mostly for tests and
+   for running out of a build directory.
+
    A KDP's `kernelDescriptors` array holds either form, and a pack may mix them. An
    inline object is a kernel that ships with its pack; it must not carry `version`.
    A bare UUID string is a reference to a standalone `.ukd.json` file elsewhere in the

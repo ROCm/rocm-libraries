@@ -187,11 +187,6 @@ const data_objects::PointwiseAttributes* pointwiseNode(const MatchContext& conte
  */
 bool pointwiseGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
-    {
-        return false;
-    }
-
     // Exactly one node: this engine's kernels each serve one complete graph.
     const auto* attributesPtr = pointwiseNode(context);
     if(attributesPtr == nullptr)

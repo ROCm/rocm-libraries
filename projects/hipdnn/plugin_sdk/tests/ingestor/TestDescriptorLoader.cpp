@@ -326,6 +326,11 @@ std::vector<DescriptorSet> loadFrom(const std::filesystem::path& root)
     return resolveDescriptorSets(loadDescriptorCatalog(root));
 }
 
+std::vector<DescriptorSet> loadFromRoots(const std::vector<std::filesystem::path>& roots)
+{
+    return resolveDescriptorSets(loadDescriptorCatalog(roots));
+}
+
 } // namespace
 
 TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
@@ -383,6 +388,88 @@ TEST(TestDescriptorLoader, CollapsesIdenticalDuplicatesAcrossArchDirectories)
 
     ASSERT_EQ(sets.size(), 1u);
     EXPECT_EQ(sets.front().engine.name, "test:duplicated");
+}
+
+/// The whole point of the multi-root change: a set's seven files split across two roots
+/// still resolve as cross-root id references into one catalog.
+TEST(TestDescriptorLoader, ResolvesADescriptorSetSplitAcrossTwoRootsIntoOneEngine)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("split_roots"));
+    auto documents = makeSetDocuments('1', "test:split");
+    Documents rootADocuments;
+    Documents rootBDocuments;
+    for(auto& document : documents)
+    {
+        // UED/UHD/KMD in root A, the rest -- both UMDs, the UDD, and the KDP -- in root
+        // B: the engine can only be assembled by resolving ids across both roots.
+        auto& target = (document.suffix == ".ued.json" || document.suffix == ".uhd.json"
+                        || document.suffix == ".kmd.json")
+                           ? rootADocuments
+                           : rootBDocuments;
+        target.push_back(std::move(document));
+    }
+    const auto rootA = dir.path() / "a";
+    const auto rootB = dir.path() / "b";
+    writeDocuments(rootA, rootADocuments);
+    writeDocuments(rootB, rootBDocuments);
+
+    const auto sets = loadFromRoots({rootA, rootB});
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& set = sets.front();
+    EXPECT_EQ(set.engine.name, "test:split");
+    EXPECT_EQ(set.matchers.size(), 2u);
+    EXPECT_EQ(set.dispatches.size(), 1u);
+    ASSERT_EQ(set.packs.size(), 1u);
+    EXPECT_EQ(set.packs.front().kernels.size(), 3u);
+}
+
+TEST(TestDescriptorLoader, CollapsesAnIdenticalDescriptorSetPresentInBothRoots)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("identical_roots"));
+    const auto documents = makeSetDocuments('1', "test:mirrored");
+    writeDocuments(dir.path() / "a", documents);
+    writeDocuments(dir.path() / "b", documents);
+
+    const auto sets = loadFromRoots({dir.path() / "a", dir.path() / "b"});
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:mirrored");
+}
+
+TEST(TestDescriptorLoader, DropsAnIdTwoRootsDisagreeAbout)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("cross_root_conflict"));
+    const auto rootA = dir.path() / "a";
+    const auto rootB = dir.path() / "b";
+
+    writeDocuments(rootA, makeSetDocuments('1', "test:survivor"));
+
+    auto conflicted = makeSetDocuments('2', "test:conflicted");
+    writeDocuments(rootA, conflicted);
+    // Same id as the UED just written into root A, differing content, but filed under
+    // root B instead: the two roots feed one catalog, so this is a same-id conflict
+    // exactly as it would be inside a single root.
+    auto& engine = documentOfType(conflicted, ".ued.json");
+    engine["name"] = "test:conflicted_other";
+    writeDocument(rootB, TestDocument{".ued.json", engine});
+
+    const auto sets = loadFromRoots({rootA, rootB});
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:survivor");
+}
+
+TEST(TestDescriptorLoader, AMissingRootContributesNothingButTheOtherRootStillLoads)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("missing_root"));
+    const auto goodRoot = dir.path() / "good";
+    writeDocuments(goodRoot, makeSetDocuments('1', "test:present"));
+
+    const auto sets = loadFromRoots({dir.path() / "does-not-exist", goodRoot});
+
+    ASSERT_EQ(sets.size(), 1u);
+    EXPECT_EQ(sets.front().engine.name, "test:present");
 }
 
 TEST(TestDescriptorLoader, DropsAnIdTwoFilesDisagreeAbout)

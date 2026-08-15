@@ -191,13 +191,6 @@ std::optional<data_objects::DataType> graphDataType(const MatchContext& context)
  */
 bool convFwdGraphMatches(const MatchContext& context, BoundTokens& bound)
 {
-    // No device, no launch: the device properties the compile is configured from are
-    // meaningless without one.
-    if(context.deviceId == hipdnn_plugin_sdk::ingestor::NO_DEVICE)
-    {
-        return false;
-    }
-
     const auto* attributesPtr = convFwdNode(context);
     if(attributesPtr == nullptr)
     {

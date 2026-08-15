@@ -332,6 +332,17 @@ private:
 
     Catalog catalogFor(const MatchContext& context) const
     {
+        // Nothing below this line can be answered without a device: pack pruning reads
+        // the device's arch, matchers read its properties, and a kernel that somehow
+        // matched could not be launched. Answered once here rather than in every
+        // provider's matchers, where it is easy to leave out and impossible to see
+        // missing -- an empty catalog is what those matchers were producing anyway.
+        if(context.deviceId == NO_DEVICE)
+        {
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: no device resolved; no kernel applies");
+            return Catalog{};
+        }
+
         const auto key = cacheKey(context);
         if(key.has_value())
         {

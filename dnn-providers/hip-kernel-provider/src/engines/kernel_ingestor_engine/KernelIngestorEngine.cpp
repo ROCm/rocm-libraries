@@ -72,6 +72,32 @@ std::filesystem::path descriptorSearchDirectory()
     return HIPDNN_DESCRIPTOR_INSTALL_DIR;
 }
 
+std::vector<std::filesystem::path> descriptorSearchDirectories()
+{
+    std::vector<std::filesystem::path> roots{descriptorSearchDirectory()};
+
+    // Additive, where HIPDNN_DESCRIPTOR_DIR above replaces: this is where descriptors are
+    // dropped in beside a shipped install rather than instead of it. Validated the same
+    // way, since a stale path here would otherwise be a silent no-op -- the loader treats
+    // a missing root as "nothing to add", which is exactly what a typo looks like.
+    if(const auto runtime = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
+       !runtime.empty())
+    {
+        std::error_code notFound;
+        if(std::filesystem::is_directory(runtime, notFound))
+        {
+            roots.emplace_back(runtime);
+        }
+        else
+        {
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: HIPDNN_DESCRIPTOR_RUNTIME_DIR is set to '"
+                                   << runtime << "', which is not a directory; ignoring it");
+        }
+    }
+
+    return roots;
+}
+
 namespace
 {
 
@@ -122,7 +148,7 @@ const std::vector<hipdnn_plugin_sdk::ingestor::DescriptorSet>& discoverDescripto
         // at first use.
         registerNativeIngestorSymbols();
         return hipdnn_plugin_sdk::ingestor::loadValidatedDescriptorSets<Handle>(
-            descriptorSearchDirectory());
+            descriptorSearchDirectories());
     }();
 
     return s_sets;
