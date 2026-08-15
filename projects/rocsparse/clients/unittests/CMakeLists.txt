@@ -148,6 +148,16 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_collective_extras_lower_bound.cpp
   unit_test_internal_collective_extras_insert.cpp
   unit_test_internal_primitives_host_extras.cpp
+  # Host-path C-API coverage for previously-untested in-scope routines. These
+  # drive public entry points so the host dispatch/validation/buffer-size code
+  # in librocsparse (already coverage-instrumented) is counted. They link
+  # roc::rocsparse directly, so they need no compile-in library TUs.
+  unit_test_internal_util_checkmatrix.cpp
+  unit_test_internal_conversion_extras.cpp
+  unit_test_internal_extra_geam.cpp
+  unit_test_internal_level3_sddmm.cpp
+  unit_test_internal_level3_bsrmm.cpp
+  unit_test_internal_level2_extras.cpp
 )
 
 # Host building-block library translation units under test by the
