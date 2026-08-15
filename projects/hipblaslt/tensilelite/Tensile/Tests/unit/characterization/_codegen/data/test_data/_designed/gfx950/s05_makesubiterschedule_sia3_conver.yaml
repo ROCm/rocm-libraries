@@ -1,0 +1,66 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# PROBE candidate: KernelWriter._makeSubIterSchedule instPerPack arms.
+# Target currently-missing lines: 1297,1298 (ConvertAfterDS FP8 lrvwTile arms).
+#
+# P1: FP8 A NT ConvertAfterDS, LocalReadVectorWidth sweep -> lrvwTileA arms
+#     hit 1297/1298 (UMLDS Hascvt convert-after-DS pack path).
+# P2: MXFP8 A/B (MXBlockA/B=32, TransposeLDS=0 -> not UnrollMajorLDSMXS).
+# P3: Sparse HHS NT (DirectToVgprSparseMetadata=0, lrvwTileMetadata>1).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # P1: F8HS NT — FP8 A read to FP16, ConvertAfterDS, lrvwTile sweep
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - ConvertAfterDS: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - LocalReadVectorWidth: [8]
+        - VectorWidthA: [1, 4, 8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+
+  ########################################
+  # P2: MXFP8->S TN — MXBlockA/B=32, TransposeLDS=0 (not UnrollMajorLDSMXS)
+  ########################################
