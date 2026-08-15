@@ -1,0 +1,79 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S01 tailLoopAllocDTVVgpr: pack DTV alloc branch (A side, DirectToVgprA).
+#
+# Target: Tensile/KernelWriterAssembly.py (probe-confirmed 21/21 lines):
+#   1256, 3838, 5646,
+#   6936-6941, 6943, 6947-6951, 6953, 6957-6959,
+#   8660, 8661
+# These cover tailLoopAllocDTVVgpr's packDTVA/convDTVA branch (A side) and the
+# vgprBaseA checkout, plus the DirectToVgpr emit arms they feed.
+#
+# Reachability geometry (verified against Solution.py / Problem.py derivation):
+#   * TLUA = not TransposeA. TransposeA=False => TLUA=True.
+#   * TransposeLDS=1 + TLUA=True => UnrollMajorLDSA=False => lrvwTileA=VectorWidthA.
+#     Set VectorWidthA=2 (>1).
+#   * bf16 (numBytes=2 < 4) + TLUA + not enableGLTr => DTV pack path taken;
+#     forces ClusterLocalRead=1 (also set).
+#   * packDTVA = DirectToVgprA and lrvwTileA>1 and MIInputPerThread>1 == True.
+#   * VectorWidthA==GlobalReadVectorWidthA=2 (DTV "TLU + VW==GRVW" rule).
+#   * MIWaveTile[0]=mi[5]=2 => MIWaveTile[0] % VectorWidthA(2)==0.
+#   * MatrixInstBN==1 required for DirectToVgprA: mi[3]=1 => BN=1.
+#   * MIInputPerThread = 16*16*1//64 = 4 (>1).
+#   * NoTailLoop = (ASEM % DepthU == 0); ASEM defaults to 1 => tail loop runs.
+#
+# NN layout: TransposeA=False => TLUA=True (DTV side); TransposeB=False => TLUB=False,
+# satisfying "TransposeLds requires TLUA=0 or TLUB=0". DTVA+NN allowed with
+# TransposeLDS=1. Based on gfx942 seed.yaml BBS shape (proven DTV-doable on gfx942).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          # MIWaveTile = [mi[5], mi[6]] = [2, 1]; mi[5]=2 so MIWaveTile[0] %
+          # VectorWidthA(2) == 0. mi[3]=1 => MatrixInstBN=1 (DirectToVgprA req).
+          # MIInputPerThread = 16*16*1//64 = 4 (>1). wg0=mi[4]*mi[0]*mi[7]=64.
+          - [16, 16, 16, 1,  1,   2, 1,  4, 1 ]
+        - DirectToVgprA: [True]
+        - DirectToVgprB: [False]
+        - VectorWidthA: [2]
+        - GlobalReadVectorWidthA: [2]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 250]
