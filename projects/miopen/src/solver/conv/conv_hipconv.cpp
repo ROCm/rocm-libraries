@@ -25,6 +25,13 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
+// The maximum number of kernel configurations to include.
+//
+// Hipconv returns the estimated top-k configurations for the given layer parameters.
+// Ensure that every call site requests the same number of configs, so that the config
+// index is consistent across calls.
+constexpr std::size_t MAX_CONFIGS = hipconv::ALL_RANKED_CONFIGS;
+
 // Translate a MIOpen problem into hipconv's parameter struct.
 static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
 {
@@ -95,7 +102,7 @@ static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
 {
     if(config.index < 0)
         return nullptr;
-    const auto cfgs = hipconv::get_valid_configs(arch, par);
+    const auto cfgs = hipconv::get_valid_configs(arch, par, MAX_CONFIGS);
     if(config.index >= static_cast<int>(cfgs.size()))
         return nullptr;
     auto* kernel = cfgs[config.index];
@@ -108,8 +115,9 @@ static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
 
 void PerformanceConfigConvHipConv::InitFromArch(const void* arch, const ProblemDescription& problem)
 {
-    const auto par  = ToHipconvParams(problem);
-    const auto cfgs = hipconv::get_valid_configs(static_cast<hipconv::ArchHandle>(arch), par);
+    const auto par = ToHipconvParams(problem);
+    const auto cfgs =
+        hipconv::get_valid_configs(static_cast<hipconv::ArchHandle>(arch), par, MAX_CONFIGS);
     if(cfgs.empty())
     {
         index       = -1;
@@ -135,7 +143,7 @@ bool PerformanceConfigConvHipConv::SetNextValue(const ProblemDescription& proble
     if(!arch.has_value())
         return false;
     const auto par  = ToHipconvParams(problem);
-    const auto cfgs = hipconv::get_valid_configs(*arch, par);
+    const auto cfgs = hipconv::get_valid_configs(*arch, par, MAX_CONFIGS);
 
     if(index + 1 >= static_cast<int>(cfgs.size()))
         return false;
@@ -227,7 +235,7 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
     if(!arch.has_value())
         return 0;
     const auto par  = ToHipconvParams(problem);
-    const auto cfgs = hipconv::get_valid_configs(*arch, par);
+    const auto cfgs = hipconv::get_valid_configs(*arch, par, MAX_CONFIGS);
     size_t max_ws   = 0;
     for(auto* kernel : cfgs)
         max_ws = std::max(max_ws, hipconv::get_workspace_size(kernel, par));
