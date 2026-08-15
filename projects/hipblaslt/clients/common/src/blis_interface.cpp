@@ -26,12 +26,48 @@
 
 #include "blis.h"
 #include "omp.h"
+#include <algorithm>
+#include <cstdlib>
+#include <thread>
+#ifdef __linux__
+#include <sched.h>
+#endif
+
+// Processors this process may actually run on, which under an affinity mask is
+// narrower than the machine's core count.
+static int available_processor_count()
+{
+#ifdef __linux__
+    cpu_set_t set;
+    if(sched_getaffinity(0, sizeof(set), &set) == 0)
+        return CPU_COUNT(&set);
+#endif
+    const unsigned hardware = std::thread::hardware_concurrency();
+    return hardware ? static_cast<int>(hardware) : 1;
+}
+
+static void hipblaslt_set_default_blis_threads()
+{
+    // BLIS reads BLIS_NUM_THREADS, falling back to OMP_NUM_THREADS, on every
+    // simple-interface call; don't override an explicit choice.
+    const char* omp_requested = std::getenv("OMP_NUM_THREADS");
+    if(omp_requested && *omp_requested)
+        return;
+
+    const char* blis_requested = std::getenv("BLIS_NUM_THREADS");
+    if(blis_requested && *blis_requested)
+        return;
+
+    constexpr int max_default_threads = 8;
+    const int    threads = std::clamp(available_processor_count(), 1, max_default_threads);
+
+    bli_thread_set_num_threads(threads);
+}
 
 void setup_blis()
 {
 #ifndef _WIN32
     bli_init();
+    hipblaslt_set_default_blis_threads();
 #endif
 }
-
-static int initialize_blis = (setup_blis(), 0);
