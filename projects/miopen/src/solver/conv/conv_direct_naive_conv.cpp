@@ -32,6 +32,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/solver/problem_description_interpreter.hpp>
 #include <miopen/datatype.hpp>
+#include <optional>
 #include <ostream>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
@@ -345,9 +346,57 @@ void conv_internal::DebugPrintTensorStrides(const TensorDescriptor& inDesc,
 // max_grid_size = 2^32 / block_size = 4,294,967,296 / 256 = 16,777,216
 constexpr size_t MAX_GRID_SIZE = static_cast<size_t>(16) * 1024 * 1024; // 16M work groups max
 
+// Returns whether `large_block` achieves at least as many resident threads/CU as
+// `default_block` on the actual compiled (kernel_file, kernel_name, comp_options) kernel and
+// device -- i.e. whether widening the block is physically viable here, not just on the archs
+// this was originally swept on. std::nullopt means the query itself couldn't be answered (no
+// live device/driver behind this handle, e.g. the HIPNOGPU/Fin backend, or a compile/lookup
+// failure); callers must fall back to another heuristic in that case. Never throws.
+inline std::optional<bool>
+NaiveConvWideBlockOccupancyParity(const Handle& handle,
+                                   const std::string& kernel_file,
+                                   const std::string& kernel_name,
+                                   const std::string& comp_options,
+                                   size_t default_block,
+                                   size_t large_block)
+{
+    try
+    {
+        const Program program = handle.LoadProgram(kernel_file, comp_options, "", false);
+        if(!handle.HasProgram(kernel_file, comp_options))
+            handle.AddProgram(program, kernel_file, comp_options);
+
+        // Throwaway kernel, used only to resolve hipFunction_t; it is never launched, so the
+        // local/global dims it's constructed with are irrelevant.
+        const Kernel probe{program, kernel_name, {size_t{1}}, {size_t{1}}};
+
+        const auto occ_default = probe.GetMaxActiveBlocksPerMultiprocessor(default_block);
+        const auto occ_large   = probe.GetMaxActiveBlocksPerMultiprocessor(large_block);
+        if(!occ_default || !occ_large)
+            return std::nullopt;
+
+        const auto resident_default = static_cast<size_t>(*occ_default) * default_block;
+        const auto resident_large   = static_cast<size_t>(*occ_large) * large_block;
+        MIOPEN_LOG_I2("naive conv bwd occupancy: "
+                      << default_block << " thr/blk -> " << *occ_default << " blk/CU ("
+                      << resident_default << " thr/CU), " << large_block << " thr/blk -> "
+                      << *occ_large << " blk/CU (" << resident_large << " thr/CU)");
+        return *occ_large > 0 && resident_large >= resident_default;
+    }
+    catch(const std::exception& ex)
+    {
+        MIOPEN_LOG_I2("naive conv bwd block size: occupancy probe failed (" << ex.what()
+                                                                             << "), falling back");
+        return std::nullopt;
+    }
+}
+
 // Chooses the workgroup size for the 2D naive conv BWD-data launch.
-inline size_t
-NaiveConv2DBWDBlockSize(const Handle& handle, const std::string& kernel_file, size_t grid_size)
+inline size_t NaiveConv2DBWDBlockSize(const Handle& handle,
+                                       const std::string& kernel_file,
+                                       const std::string& kernel_name,
+                                       const std::string& comp_options,
+                                       size_t grid_size)
 {
     constexpr size_t default_block = 256;
 
@@ -360,11 +409,29 @@ NaiveConv2DBWDBlockSize(const Handle& handle, const std::string& kernel_file, si
     // work group count at n*hi (NHWC) / n*c (NCHW) and splits the per-group items across its
     // threads, so a wider group never reaches more CUs -- it only puts more resident waves on the
     // ones it does reach, which is what hides this memory-bound kernel's latency. Worth 1.3x-2.1x
-    // geomean, measured on gfx90a, gfx942 and gfx950 only.
+    // geomean, measured on gfx90a, gfx942 and gfx950.
     constexpr size_t large_block = 1024;
-    const auto device_name       = handle.GetDeviceName();
-    if(!(StartsWith(device_name, "gfx90a") || StartsWith(device_name, "gfx942") ||
-         StartsWith(device_name, "gfx950")))
+
+    // Ask the actual compiled kernel whether widening keeps (or improves) resident threads/CU
+    // on this device, so the decision generalizes past the 3 archs this was manually swept on.
+    // Falls back to that original arch allowlist only if the live query itself is unavailable.
+    const auto occupancy_ok = NaiveConvWideBlockOccupancyParity(
+        handle, kernel_file, kernel_name, comp_options, default_block, large_block);
+
+    bool wide_block_viable;
+    if(occupancy_ok.has_value())
+    {
+        wide_block_viable = *occupancy_ok;
+    }
+    else
+    {
+        const auto device_name = handle.GetDeviceName();
+        wide_block_viable      = StartsWith(device_name, "gfx90a") ||
+                                 StartsWith(device_name, "gfx942") ||
+                                 StartsWith(device_name, "gfx950");
+    }
+
+    if(!wide_block_viable)
         return default_block;
 
     // Measured crossover: at or above this many work groups per CU, 256 is the faster of the two.
@@ -1091,13 +1158,16 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
         MIOPEN_THROW("Unsupported layout");
     }
 
-    const auto kernel_file = ConvDirectNaiveConvKernelFile(ctx, problem);
-    size_t block_size      = NaiveConv2DBWDBlockSize(ctx.GetStream(), kernel_file, grid_size);
+    const auto kernel_file  = ConvDirectNaiveConvKernelFile(ctx, problem);
+    const auto kernel_name  = ConvDirectNaiveConvKernelName(problem);
+    const auto comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
+    size_t block_size       = NaiveConv2DBWDBlockSize(
+        ctx.GetStream(), kernel_file, kernel_name, comp_options, grid_size);
 
     KernelInfo kernel;
 
     kernel.kernel_file = kernel_file;
-    kernel.kernel_name = ConvDirectNaiveConvKernelName(problem);
+    kernel.kernel_name = kernel_name;
     kernel.g_wk.clear();
 
     kernel.g_wk.push_back(grid_size * block_size);
@@ -1110,7 +1180,7 @@ GetConv2DBWDSolution(const ExecutionContext& ctx, const ::miopen::conv::ProblemD
 
     const auto is_f8 = (kernel.kernel_file == FP8_NAIVE_CONV_KERNEL_FILE);
 
-    kernel.comp_options = ConvDirectNaiveConvCompileOption(ctx, problem);
+    kernel.comp_options = comp_options;
 
     int G_stride_idx = GetGroupStrideIndex(problem);
 
