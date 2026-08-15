@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s01_grafinaloffsetssingleloop_direct_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_UserArgs_MT64x64x64_MI16x1lUR48RS6Kt32WcWV_q-6wMDzkoqclnC5sLmcxAtTyrI=',
+      'err': 0,
+    }),
+  ])
+# ---
