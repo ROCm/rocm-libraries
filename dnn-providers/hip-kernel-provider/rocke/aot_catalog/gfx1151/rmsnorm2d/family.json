@@ -1,0 +1,902 @@
+{
+    "family": "rmsnorm2d_gfx1151",
+    "op_kind": "rmsnorm",
+    "arch": "gfx1151",
+    "dtype": [
+        "f16",
+        "bf16"
+    ],
+    "_comment": "Algorithm-level family: one folder per algorithm, every kernel carries its own dtype constraint (f16/bf16). All kernels share the same algorithm and tunable knob-space; the knobs are baked into each .co at produce time and surface here as each kernel's constraints. Catalog::candidatesFor gathers by op_kind and gates per-kernel on the dtype constraint, so f16 and bf16 coexist with no engine change.",
+    "kernels": [
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b128_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N2048_b64_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N2048_b64_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                64,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N1024_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N1024_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 1024
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N1024_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N1024_b128_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 1024
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N4096_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N4096_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_f16_N4096_b256_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_f16_N4096_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_f16_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_f16_b256_v4.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=4 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on 1024/2048/4096.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 4
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_f16_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_f16_b128_v8.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=8 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on 1024/2048/4096.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b128_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N2048_b64_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N2048_b64_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                64,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N4096_b512_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N4096_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_bf16_N4096_b256_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_bf16_N4096_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_bf16_b256_v4",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_bf16_b256_v4.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=4 (vec-aligned rows). Sole match for unlisted N; competes with the static specializations on 2048/4096.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 4
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_rmsnorm2d_fwd_dyn_bf16_b128_v8",
+            "co_file": "rocke_rmsnorm2d_fwd_dyn_bf16_b128_v8.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=8 (vec-aligned rows). Sole match for unlisted N; competes with the static specializations on 2048/4096.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}

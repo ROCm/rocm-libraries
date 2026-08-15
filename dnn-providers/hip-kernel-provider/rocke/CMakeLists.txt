@@ -96,3 +96,13 @@ if(ROCKE_BUILD_PYENV)
         DEPENDS "${_rocke_platform_wheel}" "${_rocke_library_wheel}"
         COMMENT "rocke-wheels: building platform + library Python wheels")
 endif()
+
+# ---------------------------------------------------------------------------
+# AOT catalog families: kernel-authoring + build for the throwaway AOT catalog
+# engine (src/engines/aot_catalog_engine/). Only meaningful when that consumer is
+# built; its producers run under the rocke build interpreter (${ROCKE_PYENV_PYTHON})
+# defined above, so this must follow the rocke-pyenv block.
+# ---------------------------------------------------------------------------
+if(ENABLE_AOT_CATALOG_ENGINE)
+    add_subdirectory(aot_catalog)
+endif()

@@ -50,6 +50,15 @@ option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
+# ON by default: the AOT catalog engine is safe to always compile in because it is
+# INERT without a catalog -- with nothing dropped in <plugin-dir>/aot_catalog it loads
+# zero kernels and declines every graph (fail-closed, never a wrong answer). Building
+# it by default means a catalog that later appears -- kernels dropped locally, or the
+# rocke families enabled in TheRock (HIPKERNELPROVIDER_ENABLE_ROCKE=ON) -- is picked up
+# with NO provider rebuild. Kernel PRODUCTION is the separate opt-in: the rocke
+# aot_catalog families only build when ENABLE_AOT_CATALOG_ENGINE and rocke are both ON.
+# (See src/engines/aot_catalog_engine/README.md.)
+option(ENABLE_AOT_CATALOG_ENGINE "Build the AOT catalog engine (inert until a catalog is present)" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -76,6 +85,12 @@ if(ENABLE_HIP_MLOPS_ENGINE)
     message(STATUS "HIP kernel engine enabled")
 else()
     message(STATUS "HIP kernel engine disabled")
+endif()
+
+if(ENABLE_AOT_CATALOG_ENGINE)
+    message(STATUS "AOT catalog engine enabled")
+else()
+    message(STATUS "AOT catalog engine disabled")
 endif()
 
 list(
@@ -145,6 +160,39 @@ set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
 message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
+
+# ============================================================================
+# AOT catalog paths -- single source of truth shared by the PRODUCER and the RUNTIME.
+# ============================================================================
+# The catalog (loose <arch>/<family>/{*.co, family.json}) is PRODUCED by the rocke
+# aot_catalog subsystem (rocke/aot_catalog/, when ENABLE_ROCKE + ENABLE_AOT_CATALOG_ENGINE)
+# and LOADED by the AOT catalog engine runtime (src/engines/aot_catalog_engine/).
+# It is placed at <plugin-dir>/${HIPDNN_AOT_CATALOG_RELDIR} in BOTH the build tree
+# and the install tree, so the runtime can self-locate it relative to the loaded
+# plugin binary (see catalog/ModulePath.cpp). A single relative offset therefore
+# works for both layouts. Hoisted here so producer and runtime never drift, and so
+# it is defined before add_subdirectory(rocke) below.
+#
+# The offset MUST live under an "arch_content/" prefix. TheRock's packaging captures
+# this device library's non-.so files into the shipped artifact via exactly one
+# recursive include glob -- "**/engines/arch_content/**" (see TheRock
+# ml-libs/artifact-hipkernelprovider.toml). Content placed anywhere else (e.g. a bare
+# "aot_catalog/") matches neither that glob nor the default "**/*.so" patterns, so it
+# is silently dropped from the package: the catalog would work in a local dev build
+# (runtime self-locates the build-tree copy) but be EMPTY once installed from a
+# package. Keeping it under arch_content/ is what makes the .co/family.json ship.
+#
+# The offset must ALSO NOT begin with a component that collides with a sibling plugin
+# .so basename in the same engines/ dir: the frontend loader, given the ABSOLUTE
+# basename "hip_kernel_provider", treats a directory of that name as a plugin dir
+# (finds no .so inside) and loads zero engines. "arch_content" collides with no such
+# basename, so it is safe. So this is "arch_content/aot_catalog", not
+# "aot_catalog" or "hip_kernel_provider/aot_catalog".
+set(HIPDNN_AOT_CATALOG_RELDIR "arch_content/aot_catalog")
+set(HIPDNN_AOT_CATALOG_BUILD_DIR
+    "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}/${HIPDNN_AOT_CATALOG_RELDIR}")
+set(HIPDNN_AOT_CATALOG_INSTALL_DIR
+    "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${HIPDNN_AOT_CATALOG_RELDIR}")
 
 # ============================================================================
 # YAML-based CTest categorization detection

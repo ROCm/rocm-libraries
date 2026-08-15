@@ -791,6 +791,7 @@ def build_implicit_gemm_conv(
             None,
         ]
     ] = None,
+    dyn: Optional[object] = None,
 ) -> KernelDef:
     """Build the IR for one implicit-GEMM conv instance.
 
@@ -820,7 +821,31 @@ def build_implicit_gemm_conv(
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
-    b = IRBuilder(spec.kernel_name())
+    # ``dyn`` (a DynamicConvGeometry, duck-typed to avoid a circular import)
+    # lifts all conv geometry to runtime scalars so one .co serves any shape.
+    # It is only compatible with the plain ``scf_for_iter`` K-loop path, whose
+    # loop bound is a runtime Value; the unrolled / basic / async paths bake a
+    # compile-time K-iter count and the chiplet swizzle bakes compile-time tile
+    # counts, so reject those combinations up front rather than silently baking
+    # the placeholder shape.
+    if dyn is not None:
+        if spec.async_dma or spec.unroll_k or spec.pipeline == "basic":
+            raise ValueError(
+                "dynamic conv requires the scf K-loop: set async_dma=False, "
+                "unroll_k=False, pipeline!='basic'"
+            )
+        if spec.chiplet_swizzle:
+            raise ValueError(
+                "dynamic conv is incompatible with chiplet_swizzle (grid tile "
+                "counts are unknown at build time; compute the grid on the host)"
+            )
+        if p.is_pointwise:
+            raise ValueError(
+                "dynamic conv placeholder problem must be non-pointwise so the "
+                "general descriptor path is taken (use DYNAMIC_CONV_PLACEHOLDER)"
+            )
+
+    b = IRBuilder(dyn.kernel_name(spec) if dyn is not None else spec.kernel_name())
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
@@ -837,6 +862,11 @@ def build_implicit_gemm_conv(
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
+    # On the dynamic path, declare the runtime geometry scalars (N, C, K, ...)
+    # right after the byte-length scalars so the packed kernarg layout matches
+    # the C++ adapter's binding order, then derive the GEMM extents as SSA.
+    if dyn is not None:
+        dyn.bind(b)
 
     # Resolve the MMA atom from the target catalog: an MFMA op on CDNA, a WMMA
     # op on gfx1151. ``op`` carries the per-lane fragment lengths and the
@@ -883,7 +913,7 @@ def build_implicit_gemm_conv(
 
     c0 = b.const_i32(0)
     c_block_k = b.const_i32(block_k)
-    c_K_gemm = b.const_i32(p.K_gemm)
+    c_K_gemm = dyn.K_gemm if dyn is not None else b.const_i32(p.K_gemm)
 
     # Grid: (block_n_idx, block_m_idx, 1). We follow gemm_universal:
     # block.x indexes N tile, block.y indexes M tile.
@@ -989,7 +1019,13 @@ def build_implicit_gemm_conv(
     # compile-time constant).  We skip the TensorDescriptor DAG entirely and
     # compute offsets as plain multiplications — no magic divisions, no pad
     # guards, no embed arithmetic.
-    if p.is_pointwise:
+    if dyn is not None:
+        # Runtime-generic descriptors: same transform-DAG shape as the static
+        # make_*_descriptor, with every numeric param lifted to runtime SSA.
+        A_desc = dyn.a_descriptor(dtype=spec.data.dtype_a)
+        B_desc = dyn.b_descriptor(dtype=spec.data.dtype_b)
+        _c_M_ir = _c_C_ir = _c_K_ir = _always_valid = None
+    elif p.is_pointwise:
         A_desc = None
         B_desc = None
         _c_M = p.M  # compile-time constant for bounds check
@@ -1536,7 +1572,7 @@ def build_implicit_gemm_conv(
     if epilogue_override is not None:
         epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
     elif spec.epilogue == "cshuffle":
-        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc, op=op)
+        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc, op=op, dyn=dyn)
     elif op.family == "wmma":
         # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane
         # decomposition (it predates the helper-based path); pass the bound
@@ -1553,9 +1589,10 @@ def build_implicit_gemm_conv(
             block_n_off_v,
             d_rsrc,
             c0,
+            dyn=dyn,
         )
     else:
-        _emit_direct_epilogue(b, spec, final_accs, grid, d_rsrc)
+        _emit_direct_epilogue(b, spec, final_accs, grid, d_rsrc, dyn=dyn)
     return b.kernel
 
 
@@ -1570,6 +1607,7 @@ def _emit_direct_epilogue(
     accs: Sequence[Value],
     grid: WarpGrid,
     d_rsrc: Value,
+    dyn: Optional[object] = None,
 ) -> None:
     """Per-lane scalar store driven by the D descriptor DAG.
 
@@ -1579,26 +1617,39 @@ def _emit_direct_epilogue(
     bit is the ``addr_fn``: the D descriptor maps
     ``(m, k_out) -> NHWK linear element offset`` via the
     coordinate-transform DAG.
+
+    On the dynamic path (``dyn`` set) the D descriptor and the ``m < M`` /
+    ``n < N_gemm`` store bounds come from the runtime geometry SSA.
     """
     p = spec.problem
-    if p.is_pointwise:
+    if dyn is not None:
+        D_desc = dyn.d_descriptor(dtype=spec.data.dtype_d)
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return D_desc.offset(b_, m=m_val, k_out=n_val)
+
+        bounds = (dyn.M, dyn.N_gemm)
+    elif p.is_pointwise:
         _c_K_ir = b.const_i32(p.kpg)
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return b_.add(b_.mul(m_val, _c_K_ir), n_val), b.const_i32(1)
 
+        bounds = (b.const_i32(p.M), b.const_i32(p.N_gemm))
     else:
         D_desc = make_d_descriptor(p, dtype=spec.data.dtype_d)
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
             return D_desc.offset(b_, m=m_val, k_out=n_val)
 
+        bounds = (b.const_i32(p.M), b.const_i32(p.N_gemm))
+
     DirectEpilogue(atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d).store(
         b,
         accs=accs,
         addr_fn=d_addr,
         d_rsrc=d_rsrc,
-        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm)),
+        bounds=bounds,
     )
 
 
@@ -1614,6 +1665,7 @@ def _emit_direct_epilogue_wmma(
     block_n_off: Value,
     d_rsrc: Value,
     c0: Value,
+    dyn: Optional[object] = None,
 ) -> None:
     """Per-lane store for the WMMA (gfx1151) accumulator layout.
 
@@ -1623,6 +1675,10 @@ def _emit_direct_epilogue_wmma(
     MFMA-specific ``MfmaAtom.lane_to_output``. Each slot is one element store
     routed through the same D descriptor + OOB-safe buffer-store idiom as the
     MFMA direct epilogue.
+
+    On the dynamic path (``dyn`` set) the ``m < M`` / ``n < N_gemm`` masks and
+    the D descriptor address come from the runtime geometry SSA, so the same
+    ``.co`` masks partial output tiles at any shape.
     """
     p = spec.problem
     mfmas_m = spec.mfmas_per_warp_m
@@ -1631,10 +1687,18 @@ def _emit_direct_epilogue_wmma(
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
 
-    c_M = b.const_i32(p.M)
-    c_N = b.const_i32(p.N_gemm)
-    _c_K_wmma = b.const_i32(p.kpg) if p.is_pointwise else None
-    D_desc = None if p.is_pointwise else make_d_descriptor(p, dtype=spec.data.dtype_d)
+    if dyn is not None:
+        c_M = dyn.M
+        c_N = dyn.N_gemm
+        _c_K_wmma = None
+        D_desc = dyn.d_descriptor(dtype=spec.data.dtype_d)
+    else:
+        c_M = b.const_i32(p.M)
+        c_N = b.const_i32(p.N_gemm)
+        _c_K_wmma = b.const_i32(p.kpg) if p.is_pointwise else None
+        D_desc = (
+            None if p.is_pointwise else make_d_descriptor(p, dtype=spec.data.dtype_d)
+        )
     c_map = op.c_layout()
     _fp32_out = spec.data.dtype_d == "fp32"
     _bf16_out = spec.data.dtype_d == "bf16"
@@ -1686,6 +1750,7 @@ def _emit_cshuffle_epilogue(
     d_rsrc: Value,
     *,
     op=None,
+    dyn: Optional[object] = None,
 ) -> None:
     """LDS-staged cshuffle epilogue — the runbook §9.3 lever.
 
@@ -1714,7 +1779,13 @@ def _emit_cshuffle_epilogue(
     ``op.c_layout().coord()`` instead of the MFMA ``atom.lane_to_output``.
     """
     p = spec.problem
-    if p.is_pointwise:
+    if dyn is not None:
+        D_desc = dyn.d_descriptor(dtype=spec.data.dtype_d)
+
+        def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+            return D_desc.offset(b_, m=m_val, k_out=n_val)
+
+    elif p.is_pointwise:
         _c_K_ir = b.const_i32(p.kpg)
 
         def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
@@ -1745,5 +1816,9 @@ def _emit_cshuffle_epilogue(
         accs=accs,
         addr_fn=d_addr,
         d_rsrc=d_rsrc,
-        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm)),
+        bounds=(
+            (dyn.M, dyn.N_gemm)
+            if dyn is not None
+            else (b.const_i32(p.M), b.const_i32(p.N_gemm))
+        ),
     )

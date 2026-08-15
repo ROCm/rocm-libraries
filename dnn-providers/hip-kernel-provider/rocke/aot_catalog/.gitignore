@@ -1,0 +1,8 @@
+# rocKE-AOT kernel binaries are churning build products compiled at build time by each
+# family's producer (see ../README.md §9). They are NEVER vendored into git; the build
+# emits them into ${AOT_CATALOG_BUILD_DIR} and TheRock packages them from there.
+#
+# (A future prebuilt-.co / AITER-ASM family that DOES check in its .co would add a
+#  per-family negation, e.g. `!gfx942/fmha_v3_fwd/*.co`, or force-add with `git add -f`.)
+*.co
+*.hsaco

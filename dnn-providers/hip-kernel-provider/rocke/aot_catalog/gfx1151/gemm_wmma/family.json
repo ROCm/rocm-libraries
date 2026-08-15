@@ -1,0 +1,148 @@
+{
+    "family": "gemm_wmma_gfx1151",
+    "op_kind": "matmul",
+    "arch": "gfx1151",
+    "dtype": [
+        "f16",
+        "bf16"
+    ],
+    "_comment": "Algorithm-level family: one folder per algorithm, every kernel carries its own dtype constraint (f16/bf16). All kernels share the same algorithm and tunable knob-space; the knobs are baked into each .co at produce time and surface here as each kernel's constraints. Catalog::candidatesFor gathers by op_kind and gates per-kernel on the dtype constraint, so f16 and bf16 coexist with no engine change.",
+    "kernels": [
+        {
+            "symbol": "rocke_wmma_gemm_wmma16x16x16_fp16_rcr_xm",
+            "co_file": "rocke_wmma_gemm_wmma16x16x16_fp16_rcr_xm.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 16
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 16
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 16
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "M",
+                        16
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "N",
+                        16
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                32,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_wmma_gemm_wmma16x16x16_bf16_rcr_xm",
+            "co_file": "rocke_wmma_gemm_wmma16x16x16_bf16_rcr_xm.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 16
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 16
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 16
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "M",
+                        16
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "N",
+                        16
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                32,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}

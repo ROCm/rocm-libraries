@@ -27,6 +27,10 @@ constexpr uint32_t EXPECTED_ENGINES = 0
                                       + 1
 #endif
 
+#ifdef HIPDNN_ENGINE_AOT_CATALOG
+                                      + 1
+#endif
+
     // Add more blocks like this as more engines are implemented
     ;
 

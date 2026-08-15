@@ -112,6 +112,20 @@ def _lt(b: IRBuilder, lhs: Value, rhs: Value) -> Value:
     return b.cmp_lt(lhs, rhs)
 
 
+def _as_i32(b: IRBuilder, x: Any) -> Value:
+    """Coerce an ``int`` (compile-time) or ``Value`` (runtime) to an i32 SSA value.
+
+    The runtime-bound transforms accept each numeric parameter as either a
+    Python ``int`` (baked as ``const_i32``, exactly like the compile-time
+    transforms) or an i32 SSA ``Value`` (a ``b.param(...)`` shape scalar or a
+    value derived from one). This is the same int-or-``Value`` convention
+    :class:`PadDynamic` and :class:`Indirect` already use.
+    """
+    if isinstance(x, Value):
+        return x
+    return b.const_i32(int(x))
+
+
 # ---------------------------------------------------------------------
 # Magic-number division (mirrors ck_tile/core/utility/magic_div.hpp)
 # ---------------------------------------------------------------------
@@ -1119,6 +1133,177 @@ def pad_dynamic(coord: str, *, lo: Any = None, hi: Any = None) -> PadDynamic:
 
 
 @dataclass(frozen=True)
+class EmbedDynamic(Transform):
+    """:class:`Embed` with ``strides`` / ``offset`` / ``lo`` / ``hi`` as runtime SSA.
+
+    Affine map ``lower = sum_i(strides[i] * upper[i]) + offset`` with a
+    ``lo <= lower < hi`` bound check, identical in shape to :class:`Embed` --
+    but every numeric parameter may be an ``int`` (compile-time, baked as
+    ``const_i32``) or an i32 SSA ``Value`` (runtime). This lifts the
+    compile-time-only restriction of :class:`Embed`, whose stride / offset /
+    bounds are frozen as ``const_i32`` operands.
+
+    The motivating use is the fully-runtime implicit-GEMM convolution: the
+    input-image halo embeds ``hi = ho*sH + y*dH - pH`` (valid iff
+    ``0 <= hi < Hi``) where ``sH`` / ``dH`` / ``pH`` / ``Hi`` are all launch-time
+    shape scalars, so one ``.co`` serves any stride / dilation / pad / image
+    size. Numerically it matches :class:`Embed` when the same values are passed
+    as ints.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    strides: Tuple[Any, ...]
+    offset: Any
+    lo: Any
+    hi: Any
+
+    def __init__(
+        self,
+        upper: Sequence[str],
+        lower: str,
+        strides: Sequence[Any],
+        offset: Any = 0,
+        lo: Any = None,
+        hi: Any = None,
+    ) -> None:
+        if len(upper) != len(strides):
+            raise ValueError(
+                f"EmbedDynamic expects len(upper) == len(strides) "
+                f"(got {upper!r}, {strides!r})"
+            )
+        object.__setattr__(self, "upper", tuple(upper))
+        object.__setattr__(self, "lower", (lower,))
+        object.__setattr__(self, "strides", tuple(strides))
+        object.__setattr__(self, "offset", offset)
+        object.__setattr__(self, "lo", lo)
+        object.__setattr__(self, "hi", hi)
+
+    @staticmethod
+    def _is_one(x: Any) -> bool:
+        return isinstance(x, int) and x == 1
+
+    @staticmethod
+    def _is_zero(x: Any) -> bool:
+        return isinstance(x, int) and x == 0
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        acc: Optional[Value] = None
+        valid_acc: Optional[Value] = None
+        for name, s in zip(self.upper, self.strides):
+            u = coords[name]
+            valid_acc = _and(b, valid_acc, u.valid)
+            term = u.value if self._is_one(s) else b.mul(u.value, _as_i32(b, s))
+            acc = term if acc is None else b.add(acc, term)
+        if not self._is_zero(self.offset):
+            off = _as_i32(b, self.offset)
+            acc = off if acc is None else b.add(acc, off)
+        if acc is None:
+            acc = b.const_i32(0)
+        bounds: Optional[Value] = None
+        if self.lo is not None:
+            bounds = _and(b, bounds, _ge(b, acc, _as_i32(b, self.lo)))
+        if self.hi is not None:
+            bounds = _and(b, bounds, _lt(b, acc, _as_i32(b, self.hi)))
+        valid = _and(b, valid_acc, bounds)
+        return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
+
+
+def embed_dynamic(
+    upper: Sequence[str],
+    into: str,
+    *,
+    strides: Sequence[Any],
+    offset: Any = 0,
+    lo: Any = None,
+    hi: Any = None,
+) -> EmbedDynamic:
+    """``embed`` with possibly-runtime strides / offset / bounds.
+
+    Each of ``strides`` / ``offset`` / ``lo`` / ``hi`` may be an ``int``
+    (compile-time) or an i32 SSA ``Value`` (runtime); ``lo`` / ``hi`` may be
+    ``None`` to skip that side of the bound check. Use when the affine map's
+    coefficients only become known at launch (conv stride / dilation / pad /
+    image extent).
+    """
+    return EmbedDynamic(upper, into, strides=strides, offset=offset, lo=lo, hi=hi)
+
+
+@dataclass(frozen=True)
+class UnmergeDynamic(Transform):
+    """:class:`Unmerge` whose split ``dims`` may be runtime SSA values.
+
+    Splits one flat upper coord into ``N`` lower coords, numerically identical
+    to :class:`Unmerge`, but each ``dims[i]`` may be an ``int`` (compile-time)
+    or an i32 SSA ``Value`` (runtime). It emits plain ``b.div`` / ``b.mod``
+    (which lower to hardware ``sdiv`` / ``srem``), so -- unlike
+    :class:`UnmergeMagicDiv`, whose magic constants require a compile-time
+    divisor -- it works when the divisor is a launch-time shape scalar.
+
+    Correctness requires the upper coord and all ``dims`` to be **non-negative**
+    (they are: conv ``m`` / ``k`` tile offsets and the ``N, Ho, Wo, R, S, C``
+    shape scalars), matching CK Tile's unsigned unmerge contract.
+
+    The reverse-suffix stride products ``prod(dims[i+1:])`` are emitted as SSA
+    (``b.mul``); they depend only on the loop-invariant shape scalars, so the
+    backend hoists them out of the K-loop (LICM). This is the correctness-first
+    v1 of the runtime coord unpack; the documented perf fast-follow replaces the
+    ``sdiv`` / ``srem`` with host-precomputed magic ``(multiplier, shift)`` args
+    fed to :func:`do_magic_division`.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    dims: Tuple[Any, ...]
+
+    def __init__(
+        self, upper_name: str, lowers: Sequence[str], dims: Sequence[Any]
+    ) -> None:
+        if len(lowers) != len(dims):
+            raise ValueError(
+                f"UnmergeDynamic expects len(lowers) == len(dims) "
+                f"(got {lowers!r}, {dims!r})"
+            )
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "dims", tuple(dims))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        n = len(self.lower)
+        # strides[i] = prod(dims[i+1:]) as SSA; strides[n-1] stays None (== 1).
+        strides: List[Optional[Value]] = [None] * n
+        run: Optional[Value] = None
+        for i in range(n - 1, 0, -1):
+            d_i = _as_i32(b, self.dims[i])
+            run = d_i if run is None else b.mul(run, d_i)
+            strides[i - 1] = run
+        out: Dict[str, CoordVar] = {}
+        for i, name in enumerate(self.lower):
+            st = strides[i]
+            quot = u.value if st is None else b.div(u.value, st)
+            if i == 0:
+                val = quot
+            else:
+                val = b.mod(quot, _as_i32(b, self.dims[i]))
+            out[name] = CoordVar(name, val, u.valid)
+        return out
+
+
+def unmerge_dynamic(
+    upper: str, into: Sequence[str], *, dims: Sequence[Any]
+) -> UnmergeDynamic:
+    """``unmerge`` (split 1 -> N) with possibly-runtime ``dims`` via ``div``/``mod``.
+
+    Drop-in runtime-divisor counterpart of :func:`unmerge` / :func:`unmerge_magic`
+    for use when the split dimensions are launch-time shape scalars (conv
+    ``m -> n, ho, wo`` over ``[N, Ho, Wo]`` and ``k -> y, x, c`` over
+    ``[R, S, C]``). Emits ``sdiv`` / ``srem``; requires non-negative operands.
+    """
+    return UnmergeDynamic(upper, into, dims)
+
+
+@dataclass(frozen=True)
 class Indirect(Transform):
     """Table-lookup transform: ``physical = table[base + upper]``.
 
@@ -1302,6 +1487,42 @@ class TensorDescriptor:
             upper_names=coord_names,
         )
 
+    @classmethod
+    def naive_runtime(
+        cls,
+        name: str,
+        *,
+        coord_names: Sequence[str],
+        strides: Sequence[Any],
+        dtype: Type = F16,
+        lengths: Optional[Sequence[Any]] = None,
+    ) -> "TensorDescriptor":
+        """Naive descriptor whose base ``strides`` may be runtime SSA values.
+
+        The compile-time :meth:`naive` bakes the row-major strides from ``int``
+        ``lengths``; this variant instead takes the base ``strides`` directly,
+        each of which may be an ``int`` or an i32 SSA ``Value``. Use it when the
+        innermost tensor extents are launch-time shape scalars, so the
+        row-major strides (e.g. conv input ``Hi*Wi*C`` / ``Wi*C`` / ``C``) are
+        themselves runtime values. ``lengths`` is informational only (the offset
+        path never reads it) and defaults to ``strides`` when omitted.
+
+        The returned descriptor composes with the same :meth:`transform` chain
+        as :meth:`naive`; :meth:`offset` handles ``Value`` strides transparently.
+        """
+        coord_names = tuple(coord_names)
+        strides = tuple(strides)
+        if len(coord_names) != len(strides):
+            raise ValueError("naive_runtime: coord_names / strides length mismatch")
+        return cls(
+            name=name,
+            base_names=coord_names,
+            base_lengths=tuple(lengths) if lengths is not None else strides,
+            base_strides=strides,
+            chain=(),
+            upper_names=coord_names,
+        )
+
     @property
     def dtype(self) -> Type:
         return F16  # for now; could be parametric
@@ -1451,7 +1672,10 @@ class TensorDescriptor:
                 )
             c = coords[name]
             valid = _and(b, valid, c.valid)
-            if stride == 1:
+            if isinstance(stride, Value):
+                # runtime stride (naive_runtime): always emit the multiply.
+                term = b.mul(c.value, stride)
+            elif stride == 1:
                 term = c.value
             else:
                 term = b.mul(c.value, b.const_i32(stride))
@@ -1640,6 +1864,7 @@ class TensorDescriptor:
 __all__ = [
     "CoordVar",
     "Embed",
+    "EmbedDynamic",
     "Freeze",
     "Indirect",
     "Insert",
@@ -1657,11 +1882,13 @@ __all__ = [
     "Transform",
     "Unmerge",
     "UnmergeDivMod",
+    "UnmergeDynamic",
     "UnmergeMagicDiv",
     "XorT",
     "calculate_magic_numbers",
     "do_magic_division",
     "embed",
+    "embed_dynamic",
     "freeze",
     "indirect",
     "insert",
@@ -1678,6 +1905,7 @@ __all__ = [
     "slice_",
     "unmerge",
     "unmerge_div_mod",
+    "unmerge_dynamic",
     "unmerge_magic",
     "xor_t",
 ]

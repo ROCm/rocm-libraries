@@ -1,0 +1,974 @@
+{
+    "family": "layernorm2d_gfx1151",
+    "op_kind": "layernorm",
+    "arch": "gfx1151",
+    "dtype": [
+        "f16",
+        "bf16"
+    ],
+    "_comment": "Algorithm-level family mirroring rmsnorm2d: one folder per algorithm, every kernel carries its own dtype+N constraints. LayerNorm subtracts the row mean and adds a per-column Beta (bias) on top of the scale by Gamma; the ABI is (X,Gamma,Beta,Y,M,N,eps). Static-N kernels bake N (exact N== match, tuned per shape); runtime-N '_dyn_' kernels read N from the i32 arg and match any N that is a multiple of vec, giving a general catch-all (parity with rmsnorm2d_dynamic). Catalog::candidatesFor gathers by op_kind and gates per-kernel on dtype+N, so f16/bf16, every static N tier, and the dynamic catch-all coexist with no engine change.",
+    "kernels": [
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N2048_b256_v4",
+            "co_file": "rocke_layernorm2d_fwd_f16_N2048_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N2048_b512_v4",
+            "co_file": "rocke_layernorm2d_fwd_f16_N2048_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N2048_b128_v8",
+            "co_file": "rocke_layernorm2d_fwd_f16_N2048_b128_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N2048_b64_v8",
+            "co_file": "rocke_layernorm2d_fwd_f16_N2048_b64_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                64,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N1024_b256_v4",
+            "co_file": "rocke_layernorm2d_fwd_f16_N1024_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 1024
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N1024_b128_v8",
+            "co_file": "rocke_layernorm2d_fwd_f16_N1024_b128_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 1024
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N4096_b512_v4",
+            "co_file": "rocke_layernorm2d_fwd_f16_N4096_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_f16_N4096_b256_v8",
+            "co_file": "rocke_layernorm2d_fwd_f16_N4096_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_bf16_N2048_b256_v4",
+            "co_file": "rocke_layernorm2d_fwd_bf16_N2048_b256_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_bf16_N2048_b512_v4",
+            "co_file": "rocke_layernorm2d_fwd_bf16_N2048_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_bf16_N2048_b128_v8",
+            "co_file": "rocke_layernorm2d_fwd_bf16_N2048_b128_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_bf16_N2048_b64_v8",
+            "co_file": "rocke_layernorm2d_fwd_bf16_N2048_b64_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 2048
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                64,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_bf16_N4096_b512_v4",
+            "co_file": "rocke_layernorm2d_fwd_bf16_N4096_b512_v4.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_bf16_N4096_b256_v8",
+            "co_file": "rocke_layernorm2d_fwd_bf16_N4096_b256_v8.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "equals": 4096
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_dyn_f16_b256_v4",
+            "co_file": "rocke_layernorm2d_fwd_dyn_f16_b256_v4.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=4 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on the listed N tiers.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 4
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_dyn_f16_b128_v8",
+            "co_file": "rocke_layernorm2d_fwd_dyn_f16_b128_v8.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=8 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on the listed N tiers.",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_dyn_bf16_b256_v4",
+            "co_file": "rocke_layernorm2d_fwd_dyn_bf16_b256_v4.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=4 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on the listed N tiers.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 4
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "rocke_layernorm2d_fwd_dyn_bf16_b128_v8",
+            "co_file": "rocke_layernorm2d_fwd_dyn_bf16_b128_v8.co",
+            "_comment": "Runtime-N: N read from the i32 arg. No N==<n> rule, so it matches any N that is a multiple of vec=8 (vec-aligned rows). Sole match for unlisted N (3072, 2432, ...); competes with the static specializations on the listed N tiers.",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 8
+                }
+            },
+            "grid": {
+                "x": "M",
+                "y": 1,
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "X",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Gamma",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Beta",
+                    "type": "ptr"
+                },
+                {
+                    "name": "Y",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "eps",
+                    "type": "f32"
+                }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}

@@ -1,0 +1,828 @@
+{
+    "family": "gemm_wmma_universal_gfx1151",
+    "op_kind": "matmul",
+    "arch": "gfx1151",
+    "dtype": [
+        "f16",
+        "bf16"
+    ],
+    "_comment": "Algorithm-level family: one folder per algorithm, every kernel carries its own dtype constraint (f16/bf16). All kernels share the same algorithm and tunable knob-space; the knobs are baked into each .co at produce time and surface here as each kernel's constraints. Catalog::candidatesFor gathers by op_kind and gates per-kernel on the dtype constraint, so f16 and bf16 coexist with no engine change.",
+    "kernels": [
+        {
+            "symbol": "ugemm_gfx1151_fp16_t64x64x32_w2x2x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_fp16_t64x64x32_w2x2x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_fp16_t128x128x32_w4x4x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_fp16_t128x128x32_w4x4x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        128
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_fp16_t128x128x32_w2x2x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_fp16_t128x128x32_w2x2x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        128
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_fp16_t128x64x32_w4x2x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_fp16_t128x64x32_w4x2x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_fp16_t128x128x32_w4x4x1_wt16x16x16_wmma_v1_intrawave_default",
+            "co_file": "ugemm_gfx1151_fp16_t128x128x32_w4x4x1_wt16x16x16_wmma_v1_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        128
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_fp16_t64x64x32_w2x2x1_wt16x16x16_wmma_v1_intrawave_default",
+            "co_file": "ugemm_gfx1151_fp16_t64x64x32_w2x2x1_wt16x16x16_wmma_v1_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "f16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_bf16_t64x64x32_w2x2x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_bf16_t64x64x32_w2x2x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_bf16_t128x128x32_w4x4x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_bf16_t128x128x32_w4x4x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        128
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_bf16_t128x128x32_w2x2x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_bf16_t128x128x32_w2x2x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        128
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_bf16_t128x64x32_w4x2x1_wt16x16x16_mem_intrawave_default",
+            "co_file": "ugemm_gfx1151_bf16_t128x64x32_w4x2x1_wt16x16x16_mem_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                256,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_bf16_t128x128x32_w4x4x1_wt16x16x16_wmma_v1_intrawave_default",
+            "co_file": "ugemm_gfx1151_bf16_t128x128x32_w4x4x1_wt16x16x16_wmma_v1_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 128
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        128
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        128
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                512,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        },
+        {
+            "symbol": "ugemm_gfx1151_bf16_t64x64x32_w2x2x1_wt16x16x16_wmma_v1_intrawave_default",
+            "co_file": "ugemm_gfx1151_bf16_t64x64x32_w2x2x1_wt16x16x16_wmma_v1_intrawave_default.co",
+            "constraints": {
+                "dtype": {
+                    "equals": "bf16"
+                },
+                "M": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "N": {
+                    "min": 1,
+                    "multiple_of": 64
+                },
+                "K": {
+                    "min": 1,
+                    "multiple_of": 32
+                }
+            },
+            "grid": {
+                "x": {
+                    "ceil_div": [
+                        "N",
+                        64
+                    ]
+                },
+                "y": {
+                    "ceil_div": [
+                        "M",
+                        64
+                    ]
+                },
+                "z": 1
+            },
+            "block": [
+                128,
+                1,
+                1
+            ],
+            "args_signature": [
+                {
+                    "name": "A",
+                    "type": "ptr"
+                },
+                {
+                    "name": "B",
+                    "type": "ptr"
+                },
+                {
+                    "name": "C",
+                    "type": "ptr"
+                },
+                {
+                    "name": "M",
+                    "type": "i32"
+                },
+                {
+                    "name": "N",
+                    "type": "i32"
+                },
+                {
+                    "name": "K",
+                    "type": "i32"
+                }
+            ],
+            "workspace_bytes": 0
+        }
+    ]
+}

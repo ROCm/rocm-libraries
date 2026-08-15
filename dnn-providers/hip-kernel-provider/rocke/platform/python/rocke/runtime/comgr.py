@@ -29,7 +29,12 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from ._ctypes_bind import _LazyFn
-from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
+from .runtime_coexistence import (
+    _IS_WINDOWS,
+    _add_dll_dir,
+    _candidate_lib_paths,
+    _register_dep_dirs,
+)
 
 
 # Status codes.
@@ -62,15 +67,30 @@ def _load_lib() -> ctypes.CDLL:
     # ``_torch_bundled_lib`` in ``runtime_coexistence`` for why a
     # torch-shipped libamd_comgr is preferred over /opt/rocm when torch is
     # in the process.
+    # Register comgr's transitive dependency dirs (its LLVM/Clang libs, which in a
+    # hermetic build live in a separate stage dir from comgr itself) BEFORE the load,
+    # so the Windows loader can resolve them. On POSIX this is a no-op -- the build
+    # forwards those dirs via LD_LIBRARY_PATH instead. See ``_register_dep_dirs``.
+    _register_dep_dirs("ROCKE_COMGR_DEP_DIRS")
     err = None
+    tried: List[str] = []
+    dep_dirs = os.environ.get("ROCKE_COMGR_DEP_DIRS")
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
+        exists = os.path.exists(p) if os.path.isabs(p) else None
+        tried.append(p if exists is None else f"{p} (exists={exists})")
         try:
             _add_dll_dir(p)
             return ctypes.CDLL(p)
         except OSError as e:
             err = e
     name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
-    raise ComgrError(f"cannot load {name} ({err!r})")
+    raise ComgrError(
+        f"cannot load {name} ({err!r}); tried {tried}; "
+        f"dep_dirs={dep_dirs!r}; LD_LIBRARY_PATH={os.environ.get('LD_LIBRARY_PATH')!r}. "
+        "Set ROCKE_COMGR_LIB to the full path of the comgr shared library, and "
+        "ROCKE_COMGR_DEP_DIRS (or LD_LIBRARY_PATH) to the dir(s) holding its "
+        "dependent libraries (comgr's LLVM/Clang shared libs)."
+    )
 
 
 # Lazy: resolved on first call so that rocke and torch can be imported
