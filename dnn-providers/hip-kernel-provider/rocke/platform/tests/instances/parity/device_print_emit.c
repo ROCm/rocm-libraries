@@ -38,9 +38,13 @@ static void build_mixed(rocke_ir_builder_t* b)
 static void build_packet_boundary(rocke_ir_builder_t* b, int count)
 {
     rocke_value_t* value = rocke_b_const_i32(b, 1);
+    rocke_value_t* true_value = rocke_b_cmp_eq(b, value, value);
+    rocke_value_t* false_value = rocke_b_cmp_ne(b, value, value);
     rocke_print_item_t items[8];
-    for(int i = 0; i < count; ++i)
+    items[0] = (rocke_print_item_t){ROCKE_PRINT_VALUE, NULL, true_value, NULL};
+    for(int i = 1; i < count - 1; ++i)
         items[i] = (rocke_print_item_t){ROCKE_PRINT_VALUE, NULL, value, "i32"};
+    items[count - 1] = (rocke_print_item_t){ROCKE_PRINT_VALUE, NULL, false_value, NULL};
     rocke_b_device_print(b, items, count, NULL, "compact", "ensure_newline");
 }
 

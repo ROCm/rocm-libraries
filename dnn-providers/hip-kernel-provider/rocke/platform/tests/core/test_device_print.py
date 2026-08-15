@@ -55,10 +55,10 @@ def test_device_print_canonical_record_roundtrip() -> None:
 
 def test_device_print_lowering_uses_canonical_formats_and_predicate() -> None:
     llvm = lower_kernel_to_llvm(_build_print_kernel(), arch="gfx950")
-    assert b"state=%lld unsigned=%llu f=%.9g ok=%s p=%p" in llvm.encode()
-    assert 'c"true\\00"' in llvm
-    assert 'c"false\\00"' in llvm
-    assert "i64 5, i64 6" in llvm
+    assert b"state=%lld unsigned=%llu f=%.9g ok=%c p=%p" in llvm.encode()
+    assert "select i1 %eq3, i64 116, i64 102" in llvm
+    assert 'c"true\\00"' not in llvm
+    assert 'c"false\\00"' not in llvm
     assert "br i1 %eq3, label %device.print." in llvm
     assert "sext i32 -5 to i64" in llvm
     assert "zext i32 -5 to i64" in llvm
@@ -66,15 +66,22 @@ def test_device_print_lowering_uses_canonical_formats_and_predicate() -> None:
     assert "bitcast double %printf_f64.3 to i64" in llvm
     assert "ptrtoint ptr addrspace(1) %p to i64" in llvm
     assert "call i64 @__ockl_printf_append_args" in llvm
-    assert llvm.count("call i64 @__ockl_printf_append_string_n") == 2
+    assert llvm.count("call i64 @__ockl_printf_append_string_n") == 1
 
 
 def test_device_print_seven_and_eight_value_packet_boundary() -> None:
     for count, expected_groups in ((7, (7,)), (8, (7, 1))):
         b = IRBuilder(f"print_{count}")
         value = b.const_i32(1)
-        b.device_print(*(PrintValue(value, "i32") for _ in range(count)))
+        true_value = b.cmp_eq(value, value)
+        false_value = b.cmp_ne(value, value)
+        items = [true_value]
+        items.extend(PrintValue(value, "i32") for _ in range(count - 2))
+        items.append(false_value)
+        b.device_print(*items)
         llvm = lower_kernel_to_llvm(b.kernel, arch="gfx950")
+        assert "%c" + "%lld" * (count - 2) + "%c\\0A" in llvm
+        assert llvm.count("i64 116, i64 102") == 2
         calls = [
             line
             for line in llvm.splitlines()

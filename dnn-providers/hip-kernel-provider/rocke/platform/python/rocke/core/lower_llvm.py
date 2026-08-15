@@ -2407,7 +2407,7 @@ class _Lowerer:
             print_block = self._new_block("device.print")
 
         format_bytes = bytearray()
-        arguments: List[Tuple[str, str]] = []
+        arguments: List[str] = []
 
         for item in items:
             if item["kind"] == "text":
@@ -2418,8 +2418,12 @@ class _Lowerer:
             operand = self._operand(value)
             logical = str(item["format"])
             if logical == "bool":
-                format_bytes.extend(b"%s")
-                arguments.append(("bool", operand))
+                format_bytes.extend(b"%c")
+                tmp = self._fresh("printf_arg")
+                # Encode bool as an i64 character payload so it follows normal
+                # append_args packetization and needs no bool-only append branch.
+                self._current().emit(f"  {tmp} = select i1 {operand}, i64 116, i64 102")
+                arguments.append(tmp)
             elif logical in ("i32", "u32"):
                 format_bytes.extend(b"%lld" if logical == "i32" else b"%llu")
                 tmp = self._fresh("printf_arg")
@@ -2427,21 +2431,21 @@ class _Lowerer:
                     f"  {tmp} = {'sext' if logical == 'i32' else 'zext'} "
                     f"i32 {operand} to i64"
                 )
-                arguments.append(("arg", tmp))
+                arguments.append(tmp)
             elif logical == "f32":
                 format_bytes.extend(_DEVICE_PRINT_F32_FORMAT)
                 ext = self._fresh("printf_f64")
                 bits = self._fresh("printf_arg")
                 self._current().emit(f"  {ext} = fpext float {operand} to double")
                 self._current().emit(f"  {bits} = bitcast double {ext} to i64")
-                arguments.append(("arg", bits))
+                arguments.append(bits)
             elif logical == "ptr":
                 format_bytes.extend(b"%p")
                 tmp = self._fresh("printf_arg")
                 self._current().emit(
                     f"  {tmp} = ptrtoint {_llvm_type(value.type)} {operand} to i64"
                 )
-                arguments.append(("arg", tmp))
+                arguments.append(tmp)
             else:
                 raise TypeError(
                     f"gpu.device_print unsupported logical format {logical!r}"
@@ -2449,7 +2453,7 @@ class _Lowerer:
 
         self._need("ockl.printf.begin")
         self._need("ockl.printf.append.string")
-        if any(kind == "arg" for kind, _ in arguments):
+        if arguments:
             self._need("ockl.printf.append.args")
         message = self._fresh("printf_msg")
         self._current().emit(f"  {message} = call i64 @__ockl_printf_begin(i64 0)")
@@ -2466,45 +2470,12 @@ class _Lowerer:
 
         argument_index = 0
         while argument_index < len(arguments):
-            kind, argument = arguments[argument_index]
-            if kind == "bool":
-                true_data = b"true\x00"
-                false_data = b"false\x00"
-                true_name = f"@.rocke.printf.{len(self._printf_globals)}"
-                self._printf_globals.append((true_name, true_data))
-                false_name = f"@.rocke.printf.{len(self._printf_globals)}"
-                self._printf_globals.append((false_name, false_data))
-                selected = self._fresh("printf_bool_str")
-                generic = self._fresh("printf_bool_ptr")
-                selected_len = self._fresh("printf_bool_len")
-                self._current().emit(
-                    f"  {selected} = select i1 {argument}, "
-                    f"ptr addrspace(4) {true_name}, ptr addrspace(4) {false_name}"
-                )
-                self._current().emit(
-                    f"  {generic} = addrspacecast ptr addrspace(4) {selected} to ptr"
-                )
-                self._current().emit(
-                    f"  {selected_len} = select i1 {argument}, "
-                    f"i64 {len(true_data)}, i64 {len(false_data)}"
-                )
-                argument_index += 1
-                next_message = self._fresh("printf_msg")
-                self._current().emit(
-                    f"  {next_message} = call i64 @__ockl_printf_append_string_n("
-                    f"i64 {message}, ptr {generic}, i64 {selected_len}, "
-                    f"i32 {1 if argument_index == len(arguments) else 0})"
-                )
-                message = next_message
-                continue
-
             group = []
             while (
                 argument_index < len(arguments)
-                and arguments[argument_index][0] == "arg"
                 and len(group) < _OCKL_PRINTF_ARGUMENT_SLOTS
             ):
-                group.append(arguments[argument_index][1])
+                group.append(arguments[argument_index])
                 argument_index += 1
             padded = group + ["0"] * (_OCKL_PRINTF_ARGUMENT_SLOTS - len(group))
             next_message = self._fresh("printf_msg")

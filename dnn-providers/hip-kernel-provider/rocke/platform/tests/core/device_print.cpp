@@ -88,8 +88,12 @@ int main(void)
     if(rocke_lower_kernel_to_llvm(kernel, ROCKE_LLVM_FLAVOR_AUTO, "gfx950", &llvm) != ROCKE_OK
        || !llvm)
         return fail("lowering failed");
-    if(!strstr(llvm, "state=%lld unsigned=%llu f=%.9g ok=%s p=%p"))
+    if(!strstr(llvm, "state=%lld unsigned=%llu f=%.9g ok=%c p=%p"))
         return fail("canonical format lowering missing");
+    if(!strstr(llvm, "select i1 %eq3, i64 116, i64 102"))
+        return fail("bool character lowering missing");
+    if(strstr(llvm, "c\"true\\00\"") || strstr(llvm, "c\"false\\00\""))
+        return fail("bool string globals remain");
     if(!strstr(llvm, "br i1 %eq3, label %device.print."))
         return fail("predicate branch missing");
     if(!strstr(llvm, "sext i32 -5 to i64"))

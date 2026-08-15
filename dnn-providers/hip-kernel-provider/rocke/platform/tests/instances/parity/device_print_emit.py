@@ -39,7 +39,12 @@ def _build(idx: int, *, arch: str = "gfx950") -> KernelDef:
     else:
         count = 7 if idx == 1 else 8
         value = b.const_i32(1)
-        b.device_print(*(PrintValue(value, "i32") for _ in range(count)))
+        true_value = b.cmp_eq(value, value)
+        false_value = b.cmp_ne(value, value)
+        items = [true_value]
+        items.extend(PrintValue(value, "i32") for _ in range(count - 2))
+        items.append(false_value)
+        b.device_print(*items)
     return b.kernel
 
 

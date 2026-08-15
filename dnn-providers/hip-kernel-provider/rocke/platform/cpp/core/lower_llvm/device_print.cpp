@@ -7,12 +7,6 @@
 
 namespace ckc
 {
-typedef struct print_argument
-{
-    int is_bool;
-    const char* value;
-} print_argument_t;
-
 /* __ockl_printf_append_args carries exactly seven i64 argument slots. */
 enum
 {
@@ -54,9 +48,8 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
     int predicate_index = pred_attr && pred_attr->kind == ROCKE_ATTR_INT ? (int)pred_attr->u.i : -1;
     rocke_ll_block_t* source_block = NULL;
     rocke_ll_block_t* print_block = NULL;
-    print_argument_t* arguments;
+    const char** arguments;
     int argument_count = 0;
-    int has_numeric_arguments = 0;
     rocke_strbuf_t static_text;
 
     if(!items || items->kind != ROCKE_ATTR_LIST)
@@ -66,7 +59,7 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
         source_block = rocke_ll_current(L);
         print_block = rocke_ll_new_block(L, "device.print");
     }
-    arguments = (print_argument_t*)rocke_arena_calloc(
+    arguments = (const char**)rocke_arena_calloc(
         &L->arena, sizeof(*arguments) * (size_t)(items->u.list.count + 1));
     if(!arguments)
         return (void)rocke_ll_fail(L, ROCKE_ERR_OOM, "device_print arguments");
@@ -100,10 +93,12 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
         const char* operand = rocke_ll_operand(L, value);
         if(strcmp(logical, "bool") == 0)
         {
-            rocke_strbuf_append(&static_text, "%s");
-            arguments[argument_count].is_bool = 1;
-            arguments[argument_count].value = operand;
-            ++argument_count;
+            const char* tmp = rocke_ll_fresh(L, "printf_arg");
+            rocke_strbuf_append(&static_text, "%c");
+            /* Encode bool as an i64 character payload so it follows normal append_args
+             * packetization and does not require a bool-only append branch. */
+            rocke_ll_emitf(L, "  %s = select i1 %s, i64 116, i64 102", tmp, operand);
+            arguments[argument_count++] = tmp;
         }
         else if(strcmp(logical, "i32") == 0 || strcmp(logical, "u32") == 0)
         {
@@ -114,8 +109,7 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
                            tmp,
                            strcmp(logical, "i32") == 0 ? "sext" : "zext",
                            operand);
-            arguments[argument_count++].value = tmp;
-            has_numeric_arguments = 1;
+            arguments[argument_count++] = tmp;
         }
         else if(strcmp(logical, "f32") == 0)
         {
@@ -124,8 +118,7 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
             rocke_strbuf_append(&static_text, device_print_f32_format);
             rocke_ll_emitf(L, "  %s = fpext float %s to double", as_f64, operand);
             rocke_ll_emitf(L, "  %s = bitcast double %s to i64", bits, as_f64);
-            arguments[argument_count++].value = bits;
-            has_numeric_arguments = 1;
+            arguments[argument_count++] = bits;
         }
         else if(strcmp(logical, "ptr") == 0)
         {
@@ -136,8 +129,7 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
                            bits,
                            rocke_ll_llvm_type(L, value->type),
                            operand);
-            arguments[argument_count++].value = bits;
-            has_numeric_arguments = 1;
+            arguments[argument_count++] = bits;
         }
         else
         {
@@ -148,7 +140,7 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
     }
     rocke_ll_need(L, "ockl.printf.begin");
     rocke_ll_need(L, "ockl.printf.append.string");
-    if(has_numeric_arguments)
+    if(argument_count > 0)
         rocke_ll_need(L, "ockl.printf.append.args");
     rocke_strbuf_append_char(&static_text, '\0');
     size_t format_len = static_text.len;
@@ -169,51 +161,12 @@ static void _op_gpu_device_print(rocke_lower_t* L, const rocke_op_t* op)
 
     for(int i = 0; i < argument_count;)
     {
-        if(arguments[i].is_bool)
-        {
-            char true_data[5] = {'t', 'r', 'u', 'e', '\0'};
-            char false_data[6] = {'f', 'a', 'l', 's', 'e', '\0'};
-            rocke_ll_printf_global_t true_global
-                = add_printf_global(L, true_data, sizeof(true_data));
-            rocke_ll_printf_global_t false_global
-                = add_printf_global(L, false_data, sizeof(false_data));
-            const char* selected = rocke_ll_fresh(L, "printf_bool_str");
-            const char* generic = rocke_ll_fresh(L, "printf_bool_ptr");
-            const char* selected_len = rocke_ll_fresh(L, "printf_bool_len");
-            next = rocke_ll_fresh(L, "printf_msg");
-            rocke_ll_emitf(L,
-                           "  %s = select i1 %s, ptr addrspace(4) %s, ptr addrspace(4) %s",
-                           selected,
-                           arguments[i].value,
-                           true_global.name,
-                           false_global.name);
-            rocke_ll_emitf(L, "  %s = addrspacecast ptr addrspace(4) %s to ptr", generic, selected);
-            rocke_ll_emitf(L,
-                           "  %s = select i1 %s, i64 %zu, i64 %zu",
-                           selected_len,
-                           arguments[i].value,
-                           sizeof(true_data),
-                           sizeof(false_data));
-            ++i;
-            rocke_ll_emitf(L,
-                           "  %s = call i64 @__ockl_printf_append_string_n(i64 %s, "
-                           "ptr %s, i64 %s, i32 %d)",
-                           next,
-                           message,
-                           generic,
-                           selected_len,
-                           i == argument_count ? 1 : 0);
-            message = next;
-            continue;
-        }
-
         const char* args[ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS];
         for(int slot = 0; slot < ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS; ++slot)
             args[slot] = "0";
         int count = 0;
-        while(i < argument_count && !arguments[i].is_bool
-              && count < ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS)
-            args[count++] = arguments[i++].value;
+        while(i < argument_count && count < ROCKE_OCKL_PRINTF_ARGUMENT_SLOTS)
+            args[count++] = arguments[i++];
         next = rocke_ll_fresh(L, "printf_msg");
         rocke_ll_emitf(L,
                        "  %s = call i64 @__ockl_printf_append_args(i64 %s, i32 %d, "
