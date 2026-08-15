@@ -168,3 +168,85 @@ jobs:
           LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
             ./build/bin/miopen_gtest --gtest_list_tests > test_list
           python3 projects/miopen/test/gtest/check_names.py --list test_list
+
+  # Runs the MIOpen dbsync test (StaticFDBSync) on GPU-less runners via the rocjitsu
+  # KMD interposer, spoofing the target arch with MIOPEN_DEVICE_ARCH. dbsync is a
+  # CPU-only find/perf-db consistency check (SKIP_KDB_TESTING=1, no kernel launch), so
+  # the emulated device only needs to exist; MIOPEN_DEVICE_ARCH selects which arch's
+  # solvers + DBs are validated. Each matrix leg builds CK/kernels + DBs for its own
+  # arch (the gate must exercise CK, since CK changes are what motivated ALMIOPEN-1779).
+  # Only arches whose StaticFDBSync param has an explicit (nonzero) CU count work under
+  # a single rocjitsu config; the num_cu==0 RDNA params (gfx1100/1102/1201) fall back to
+  # the emulated device's CU count and are deferred until matching-CU configs exist.
+  # gfx908 is excluded for now (currently broken).
+  miopen-dbsync-rocjitsu:
+    name: "MIOpen dbsync rocjitsu (${{ matrix.arch }})"
+    container:
+      image: rocm/miopen-dev:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [gfx942, gfx90a, gfx950]
+    runs-on: azure-linux-scale-rocm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
+
+      - name: Pull DVC files for rocm-libraries
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Checkout rocjitsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: 481982dfe23e181a302006747c561e7cf43e35ba # 2026-06-04
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      - name: Build rocjitsu KMD
+        run: |
+          apt-get update && apt-get install -y libdrm-dev
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
+
+      - name: Configure and build (${{ matrix.arch }})
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          cmake -S projects/miopen -B build \
+            -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+            -DCMAKE_BUILD_TYPE=release \
+            -DBUILD_DEV=OFF \
+            -DMIOPEN_TEST_DISCRETE=OFF \
+            -DMIOPEN_USE_MLIR=ON \
+            -DMIOPEN_GPU_SYNC=OFF \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DGPU_TARGETS="${{ matrix.arch }}" \
+            -DMIOPEN_INSTALL_GPU_DATABASES="${{ matrix.arch }}"
+          # miopen-generate-kernels (ALL) unpacks this arch's find/perf DBs into
+          # build/share/miopen/db; miopen_gtest is the test binary (db_sync.cpp is
+          # compiled in regardless of MIOPEN_TEST_DBSYNC).
+          cmake --build build --target miopen_gtest --target miopen-generate-kernels -j$(nproc)
+
+      - name: Run StaticFDBSync (rocjitsu, ${{ matrix.arch }})
+        run: |
+          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
+          export MIOPEN_DEVICE_ARCH=${{ matrix.arch }}
+          LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+            ./build/bin/miopen_gtest --gtest_filter='*StaticFDBSync*' --gtest_color=no
