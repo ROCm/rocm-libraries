@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_s04a_globalwriteelements_mbsk_singleb_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1-j5jGDtk6mXMPshjeetsq1Em7e8f2DwxWUsqixY9AHA=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x19f9T1zBFUCee_PKbBwDo0mZDSjFdvK4Pj9go1CaME3U=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_HHS_BH_UserArgs_MT16x16x16_MI16x1u3PXzIki0ZAj4A6cd1FEmvoRd_6TD62385NG222shAQ=',
+      'err': 0,
+    }),
+  ])
+# ---
