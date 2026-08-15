@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s01_openloop_pgr_3_early_exit_noglob_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8SS_BH_UserArgs_MT32x32x256_MI16dB7KS3BU26u_Hrtck0IJP_HyHtWBqUujFHW66PFAtWQ=',
+      'err': 0,
+    }),
+  ])
+# ---
