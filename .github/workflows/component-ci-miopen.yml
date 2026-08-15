@@ -173,12 +173,20 @@ jobs:
   # KMD interposer, spoofing the target arch with MIOPEN_DEVICE_ARCH. dbsync is a
   # CPU-only find/perf-db consistency check (SKIP_KDB_TESTING=1, no kernel launch), so
   # the emulated device only needs to exist; MIOPEN_DEVICE_ARCH selects which arch's
-  # solvers + DBs are validated. Each matrix leg builds CK/kernels + DBs for its own
-  # arch (the gate must exercise CK, since CK changes are what motivated ALMIOPEN-1779).
-  # Only arches whose StaticFDBSync param has an explicit (nonzero) CU count work under
-  # a single rocjitsu config; the num_cu==0 RDNA params (gfx1100/1102/1201) fall back to
-  # the emulated device's CU count and are deferred until matching-CU configs exist.
-  # gfx908 is excluded for now (currently broken).
+  # solvers + DBs are validated against the CK built into this job.
+  #
+  # Scoped to gfx90a on purpose. gfx90a is the only arch with no TheRock test runner, so
+  # this GPU-less job is its ONLY dbsync coverage. gfx942 and gfx950 are deliberately not
+  # run here: they are already dbsync-gated by TheRock's own CI, which builds CK from the
+  # matching source snapshot. This job instead links the CK preinstalled in
+  # rocm/miopen-dev:latest (find_package), whose CK can lag a freshly-refreshed SystemDB
+  # and then reject perf configs tuned against newer CK as "invalid" (false positives).
+  # Observed: the 2026-06-12 image's CK rejected 3 CK grouped-wrw perf configs from the
+  # 2026-06-24 gfx942 SystemDB refresh (#8174); gfx950's DB (#8081/#9111) is newer still.
+  # gfx90a's DB matches the container CK, so it is a reliable gate. (Adding gfx942/gfx950
+  # here would need CK built from the matching source, which TheRock already does.)
+  # Note: num_cu==0 RDNA params (gfx1100/1102/1201) also can't run under a single rocjitsu
+  # config; gfx908 is excluded (currently broken).
   miopen-dbsync-rocjitsu:
     name: "MIOpen dbsync rocjitsu (${{ matrix.arch }})"
     container:
@@ -186,7 +194,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [gfx942, gfx90a, gfx950]
+        arch: [gfx90a]
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Checkout repository
