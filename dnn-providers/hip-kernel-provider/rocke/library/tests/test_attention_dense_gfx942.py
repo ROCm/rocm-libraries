@@ -849,18 +849,17 @@ def _walk_op_names(op):
         (64, "fp16", True),
         (128, "fp16", True),
         (64, "bf16", True),  # fused rescale gave the headroom (P2)
-        (128, "bf16", False),  # spills on the .1k schedule even post-fused-rescale
+        (128, "bf16", True),  # exp2_fast enabled: lazy-rescale schedule no longer spills
     ],
 )
 def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expected):
-    """The exp2_fast decision is a spill fact, not a preference.
-
-    exp2_fast is numerically safe for every config (both softmax args <= 0), so the
-    gate exists ONLY to keep occupancy: its sooner-available result raises register
-    pressure, and bf16 D128's `.1k` MFMA schedule spills over the waves-per-eu=2 cap
-    (measured 175->256 VGPR / 22 spill) even after the P2 fused rescale freed ~28
-    VGPR. Every other config has the headroom. This pins the exact enabled set so a
-    future edit that flips one arm has to update this matrix on purpose.
+    """exp2_fast is enabled for every config -- both softmax args (m_i-m_new and
+    s-m_new) are <= 0, so exp2_fast is numerically safe universally. bf16 D128 was
+    previously held out for a register spill on the fused-rescale schedule (measured
+    175->256 VGPR / 22 spill over the waves-per-eu=2 cap); the current lazy-rescale
+    schedule does not spill (rocprofv3: lower VGPR, 0 scratch), so the holdout is
+    removed. This pins the exact enabled set so a future edit that flips an arm has to
+    update this matrix on purpose.
     """
     assert _use_exp2_fast(head_size, dtype) is expected
 
