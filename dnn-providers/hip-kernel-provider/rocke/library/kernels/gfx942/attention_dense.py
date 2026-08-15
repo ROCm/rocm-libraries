@@ -311,10 +311,11 @@ class Gfx942DenseTuning:
     #   Same status as ``lds_row_pad``: pad REMOVAL is settled-negative, the pad VALUE
     #   is inherited-and-not-re-derived-for-gfx942 and therefore OPEN -- and this is
     #   the very pad whose gfx950 sweep found 8 ~= no pad at all (see above).
-    #   Read in exactly two places -- the :func:`_lds_bytes` budget and the ``V_lds``
-    #   allocation in the builder -- and BOTH read this one field, so the budget can
-    #   no longer drift from the allocation.
-    v_row_pad: int = 8
+    #   Resolved via :meth:`resolved_v_row_pad` (``None`` -> :func:`_v_row_pad`): 64 on
+    #   the cfvst path (fp16-D128) to widen V_lds to pow2 128 so the swizzle engages,
+    #   else 8. Every read goes through that one resolver, so the budget cannot drift
+    #   from the allocation.
+    v_row_pad: int | None = None
 
     # use_cfvst: force the P1 conflict-free perm_b32 store-path V transpose on/off.
     #   None (default) -> :func:`_use_cfvst`, which owns the measured verdict.
@@ -371,6 +372,15 @@ class Gfx942DenseTuning:
         if self.use_cfvst is None:
             return _use_cfvst(spec.head_size, spec.dtype)
         return bool(self.use_cfvst)
+
+    def resolved_v_row_pad(self, spec: AttentionDenseSpec) -> int:
+        """Resolved V^T row pad (``None`` -> :func:`_v_row_pad`): 64 on the cfvst path
+        (fp16-D128) so V_lds is a pow2 128 wide and the bank-conflict swizzle engages,
+        else 8. Read by the builder's ``V_lds`` alloc AND the ``_lds_bytes`` budget so
+        the two cannot drift."""
+        if self.v_row_pad is None:
+            return _v_row_pad(spec.head_size, spec.dtype)
+        return int(self.v_row_pad)
 
     def resolved_use_exp2_fast(self, spec: AttentionDenseSpec) -> bool:
         """Resolved exp2_fast decision (``None`` -> :func:`_use_exp2_fast`)."""
@@ -434,8 +444,9 @@ def _tuning_name_tags(spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning") -> 
         parts.append(f"bm{tuning.block_m}")
     if tuning.lds_row_pad != _DEFAULT_TUNING.lds_row_pad:
         parts.append(f"krowpad{tuning.lds_row_pad}")
-    if tuning.v_row_pad != _DEFAULT_TUNING.v_row_pad:
-        parts.append(f"vrowpad{tuning.v_row_pad}")
+    vp = tuning.resolved_v_row_pad(spec)
+    if vp != _v_row_pad(spec.head_size, spec.dtype):
+        parts.append(f"vrowpad{vp}")
     cfvst = tuning.resolved_use_cfvst(spec)
     if cfvst != _use_cfvst(spec.head_size, spec.dtype):
         parts.append("cfvst1" if cfvst else "cfvst0")
@@ -551,6 +562,16 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
     Gate on rows-per-DMA == 1 (D128) AND fp16 so the LDS budget and the body agree.
     """
     return _rows_per_instr(head_size) == 1 and dtype == "fp16"
+
+
+def _v_row_pad(head_size: int, dtype: str) -> int:
+    """V^T row (token-axis) pad, in elements. 64 on the cfvst path (fp16-D128) makes the
+    ``V_lds`` row width a pow2 128 so the XOR bank-conflict swizzle (``col' = key ^
+    ((dim&31)<<2)``) stays in-bounds and engages; 8 (no swizzle, original layout)
+    everywhere else, where the transposed-V path is off. The swizzle halves the V-read
+    LDS bank conflicts; measured net-positive for fp16-D128 across Sq/GQA with no
+    regression, so it rides the same gate as :func:`_use_cfvst`."""
+    return 64 if _use_cfvst(head_size, dtype) else 8
 
 
 def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
@@ -682,9 +703,9 @@ def _lds_bytes(
     +``spec.lds_k_group_pad`` elements per group (D128 and the kpad-off D64 path are
     unchanged).
 
-    ``tuning.v_row_pad`` is read HERE and in the builder's ``V_lds`` allocation, and
-    nowhere else. Both sites read the same resolved struct, which is what stops the
-    budget from silently under-counting the allocation.
+    ``resolved_v_row_pad`` is read HERE and in the builder's ``V_lds`` allocation; both
+    sites go through the same resolver, so the budget cannot silently under-count the
+    allocation.
     """
     if _k_group_pad_active(spec, tuning):
         rpi = _rows_per_instr(spec.head_size)
@@ -693,7 +714,7 @@ def _lds_bytes(
         k_bytes = spec.block_n * _lds_row_stride(spec.head_size, tuning) * 2
     if tuning.resolved_use_cfvst(spec):
         # V transposed to [dim, token+pad] for the conflict-free store (D128).
-        v_bytes = spec.head_size * (spec.block_n + tuning.v_row_pad) * 2
+        v_bytes = spec.head_size * (spec.block_n + tuning.resolved_v_row_pad(spec)) * 2
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64, naive read).
         v_bytes = spec.block_n * _lds_row_stride(spec.head_size, tuning) * 2
@@ -827,7 +848,7 @@ def supports_attention_dense(
     # the same failure mode the spec's lds_k_group_pad % 8 check guards for ds_read_b128.
     for _pad_name, _pad in (
         ("lds_row_pad", tuning.lds_row_pad),
-        ("v_row_pad", tuning.v_row_pad),
+        ("v_row_pad", tuning.resolved_v_row_pad(spec)),
     ):
         if _pad < 0 or _pad % 4 != 0:
             return False, (
@@ -1057,8 +1078,12 @@ def _build_attention_dense_single_buffer(
         # perm_b32 store path below. This is one of exactly TWO reads of v_row_pad --
         # the other is the _lds_bytes budget -- and both take it from the same
         # resolved struct, so the budget cannot under-count this allocation.
-        V_LDROW = BN + tuning.v_row_pad
+        V_LDROW = BN + tuning.resolved_v_row_pad(spec)
         V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
+        # V^T bank-conflict swizzle (col' = key ^ ((dim&31)<<2)): needs a pow2 row
+        # width >= 128 so the XOR stays in-bounds. Gated OFF otherwise (default
+        # v_row_pad=8 -> width 72 -> no swizzle, original behavior preserved).
+        SWZ_V = (V_LDROW & (V_LDROW - 1)) == 0 and V_LDROW >= 128
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst
         # regresses it -- see _use_cfvst); read element-wise in read_v.
@@ -1141,15 +1166,20 @@ def _build_attention_dense_single_buffer(
                 x0, x1, b.const_i32(0x03020706)
             )  # (V[t0,d0+1], V[t1,d0+1])
             d1 = b.add(d0, b.const_i32(1))
+            if SWZ_V:
+                c0 = b.xor(t0, b.shl(b.land(d0, b.const_i32(31)), b.const_i32(2)))
+                c1 = b.xor(t0, b.shl(b.land(d1, b.const_i32(31)), b.const_i32(2)))
+            else:
+                c0, c1 = t0, t0
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0), d0, t0],
+                [b.const_i32(0), d0, c0],
                 b.bitcast(row_d0, VectorType(dtype, 2)),
                 2,
             )
             b.smem_store_vN(
                 V_lds,
-                [b.const_i32(0), d1, t0],
+                [b.const_i32(0), d1, c1],
                 b.bitcast(row_d1, VectorType(dtype, 2)),
                 2,
             )
@@ -1166,9 +1196,12 @@ def _build_attention_dense_single_buffer(
         if USE_CFVST:
             dim_row = b.add(b.const_i32(dt * 32), lane_m)
             key0 = b.add(b.const_i32(kk * 8), d_base)
-            return b.smem_load_vN(
-                V_lds, b.const_i32(0), dim_row, key0, dtype=dtype, n=4
-            )
+            col = key0
+            if SWZ_V:
+                col = b.xor(
+                    key0, b.shl(b.land(dim_row, b.const_i32(31)), b.const_i32(2))
+                )
+            return b.smem_load_vN(V_lds, b.const_i32(0), dim_row, col, dtype=dtype, n=4)
         dim_col = b.add(b.const_i32(dt * 32), lane_m)
         elems = []
         for j in range(4):

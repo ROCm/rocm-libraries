@@ -47,6 +47,7 @@ from kernels.gfx942.attention_dense import (
     _k_group_pad_active,
     _k_group_stride,
     _use_exp2_fast,
+    _v_row_pad,
     _tuned_waves_per_eu,
 )
 
@@ -863,6 +864,38 @@ def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expe
     future edit that flips one arm has to update this matrix on purpose.
     """
     assert _use_exp2_fast(head_size, dtype) is expected
+
+
+@pytest.mark.parametrize(
+    "head_size, dtype, expected",
+    [
+        (128, "fp16", 64),  # cfvst path: pow2-128 V_lds row so the XOR swizzle engages
+        (128, "bf16", 8),  # no cfvst (bf16 D128 spills) -> no swizzle
+        (64, "fp16", 8),  # D64 naive-V layout -> no swizzle
+        (64, "bf16", 8),
+    ],
+)
+def test_v_row_pad_policy_matches_the_cfvst_swizzle_matrix(head_size, dtype, expected):
+    """v_row_pad is 64 exactly on the cfvst path (fp16-D128), widening V_lds to a pow2
+    128 so the XOR bank-conflict swizzle engages; 8 everywhere else. Pins the enabled
+    set so a future edit that flips one arm updates this matrix on purpose."""
+    assert _v_row_pad(head_size, dtype) == expected
+
+
+def test_default_tuning_v_row_pad_resolves_through_policy():
+    """The shipped default leaves ``v_row_pad=None`` and resolves through the policy per
+    (head_size, dtype) -- 64 on fp16-D128 (swizzle on), 8 otherwise -- while an explicit
+    override still wins. Guards that production picks up the swizzle without a hand-set pad.
+    """
+    fp16_d128 = _spec(head_size=128, dtype="fp16")
+    bf16_d128 = _spec(head_size=128, dtype="bf16")
+    assert _DEFAULT_TUNING.v_row_pad is None
+    assert _DEFAULT_TUNING.resolved_v_row_pad(fp16_d128) == 64
+    assert _DEFAULT_TUNING.resolved_v_row_pad(bf16_d128) == 8
+    assert (
+        dataclasses.replace(_DEFAULT_TUNING, v_row_pad=16).resolved_v_row_pad(fp16_d128)
+        == 16
+    )
 
 
 @pytest.mark.parametrize(
