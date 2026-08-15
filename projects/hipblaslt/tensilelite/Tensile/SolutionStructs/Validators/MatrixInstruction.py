@@ -30,7 +30,7 @@ import rocisa
 from Tensile.Common import IsaVersion, IsaInfo, print2, elineno
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.DataType import DataType
-from Tensile.Common.MatrixInstructionNaming import matrixInstructionMnemonic
+from Tensile.Common.MatrixInstructionNaming import backendCapsLoaded, matrixInstructionMnemonic
 from Tensile.Common.ValidParameters import makeValidMatrixInstructions, makeValidMFMA, makeValidSMFMA, makeValidWMMA, makeValidSWMMAC
 
 from ..Utilities import reject
@@ -155,8 +155,27 @@ def matrixInstructionToMIParameters(
     return result
 
 
+def useF32XEmulationFor(solution, archCaps) -> bool:
+    """Whether the emitter will emulate f32 with bf16 halves for *solution*.
+
+    ``Solution.assignDerivedParameters`` sets ``UseF32XEmulation``, but
+    ``BenchmarkProblems`` validates before it constructs the ``Solution``, and
+    ``matrixInstructionToMIParameters`` derives only ``EnableF32XdlMathOp``. On that
+    path the key is missing rather than False, and reading the miss as False names
+    the xf32 instruction -- which has no WMMA opcode -- for every xf32 solution the
+    emitter would have emitted as bf16. Derive it the way Solution does instead.
+    """
+    stored = solution.get("UseF32XEmulation")
+    if stored is not None:
+        return bool(stored)
+    return bool(solution.get("EnableF32XdlMathOp", False)) and bool(
+        archCaps["HasF32XEmulation"]
+    )
+
+
 def unsupportedMatrixInstructionMnemonic(
-    solution, isa, mi4, miInputTypeA, miInputTypeB, computeDataType, isSparse, hasMFMA
+    solution, isa, mi4, miInputTypeA, miInputTypeB, computeDataType, isSparse, hasMFMA,
+    useF32XEmulation=False
 ):
     """Return the mnemonic this MatrixInstruction emits if StinkyTofu cannot lower it.
 
@@ -170,6 +189,10 @@ def unsupportedMatrixInstructionMnemonic(
     but only that one failure is absorbed, so a wrong argument still surfaces.
     """
     if not rocisa.isSupportedByStinkyTofu(tuple(isa)):
+        return None
+    if not backendCapsLoaded(isa):
+        # Naming the instruction here would read capability defaults and could reject
+        # a solution the emitter compiles fine, so decline rather than guess.
         return None
 
     ptype = solution["ProblemType"]
@@ -185,7 +208,7 @@ def unsupportedMatrixInstructionMnemonic(
             isSparse=isSparse,
             hasMFMA=hasMFMA,
             mfma1k=solution.get("MFMA_BF16_1K", False),
-            useF32XEmulation=solution.get("UseF32XEmulation", False),
+            useF32XEmulation=useF32XEmulation,
             mxBlock=max(ptype.get("MXBlockA", 0) or 0, ptype.get("MXBlockB", 0) or 0),
         )
     except RuntimeError:
@@ -338,7 +361,8 @@ def validateMIParameters(
             # and coerced from the raw enum ints library-logic YAML stores.
             unsupported = unsupportedMatrixInstructionMnemonic(
                 solution, isa, mi4, macDataTypeA, macDataTypeB,
-                _as_mac_dtype(ptype.get("ComputeDataType", miDataType)), isSparse, hasMFMA)
+                _as_mac_dtype(ptype.get("ComputeDataType", miDataType)), isSparse, hasMFMA,
+                useF32XEmulation=useF32XEmulationFor(solution, isaInfoMap[isa].archCaps))
             if unsupported is not None:
                 return not reject(
                     solution,

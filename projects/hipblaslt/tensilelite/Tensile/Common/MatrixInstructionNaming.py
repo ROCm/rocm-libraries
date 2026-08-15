@@ -154,6 +154,42 @@ def matrixInstructionTypes(
     return miInInstType, miOutInstType, negFlag
 
 
+def pinnedIsa(kernelInfo):
+    """The ISA *kernelInfo* has pinned, or None when the thread never pinned one.
+
+    The two backends spell "no kernel" differently. The stinkytofu adaptor uses
+    ``isa=None``; rocisa's ``KernelInfo`` is a C++ aggregate that the per-thread
+    map value-initialises on lookup, so an unpinned thread reads back ``(0, 0, 0)``.
+    Neither is an ISA anyone is running, and putting ``(0, 0, 0)`` back would leave
+    the thread pinned to one whose capability map is empty -- ``getAsmCaps`` indexes
+    ``m_isainfo`` with ``operator[]`` -- so everything the thread generated
+    afterwards would silently read capability defaults instead of the target's.
+    """
+    isa = getattr(kernelInfo, "isa", None)
+    if isa is None:
+        return None
+    isa = tuple(isa)
+    return isa if any(isa) else None
+
+
+def backendCapsLoaded(isa) -> bool:
+    """Whether the backend can name instructions for *isa* accurately.
+
+    ``matrixInstructionMnemonic`` takes the spelling from the ISA's assembler
+    capabilities -- which K an f8f6f4 encoding starts at, whether a scaled WMMA is
+    forced -- and rocisa serves those from a per-process map that only
+    ``rocIsa.init`` fills, read with ``operator[]``. A process that never ran init
+    for *isa*, such as a joblib/loky worker (handed globalParameters and nothing
+    else), gets an empty map and names an instruction the emitter never emits, so
+    a caller must not turn an answer from one into a rejection.
+    """
+    try:
+        return bool(rocIsa.getInstance().getIsaInfo(tuple(isa)).asmCaps)
+    except (AttributeError, RuntimeError):
+        # A backend that cannot be asked cannot be trusted to have answered either.
+        return False
+
+
 @contextmanager
 def _pinnedKernelIsa(isa, wavefrontSize: int):
     """Pin the thread's kernel ISA, then put back everything setKernel disturbs.
@@ -164,6 +200,7 @@ def _pinnedKernelIsa(isa, wavefrontSize: int):
     """
     ti = rocIsa.getInstance()
     prevKernel = ti.getKernel()
+    prevIsa = pinnedIsa(prevKernel)
     prevVgprIdx = ti.getVgprIdx()
     prevVgprMsb = ti.getVgprMsb()
 
@@ -171,10 +208,8 @@ def _pinnedKernelIsa(isa, wavefrontSize: int):
     try:
         yield
     finally:
-        # A thread that never pinned a kernel has no ISA to put back (the stinkytofu
-        # adaptor represents that as isa=None, which setKernel cannot express).
-        if prevKernel.isa is not None:
-            ti.setKernel(tuple(prevKernel.isa), prevKernel.wavefrontSize)
+        if prevIsa is not None:
+            ti.setKernel(prevIsa, prevKernel.wavefrontSize)
         for name, idx in prevVgprIdx.items():
             ti.setVgprIdx(name, idx)
         ti.setVgprMsb(prevVgprMsb)
