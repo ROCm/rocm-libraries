@@ -5,10 +5,6 @@ Documentation for hipFFT is available at
 
 ## (Unreleased) hipFFT 1.0.26
 
-### Added
-
-* Added amdgcnspirv architecture to client programs, so that they are functional even on gfx architectures that they have not been explicitly compiled in.
-
 ## hipFFT 1.0.24 for ROCm 7.14
 
 ### Added

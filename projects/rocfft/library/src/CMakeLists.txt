@@ -570,7 +570,6 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
-  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
 
   # On Windows, to run rocfft_aot_helper we need to be able to find
   # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH
