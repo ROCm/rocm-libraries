@@ -94,6 +94,7 @@ class Result:
     vec_a: int = 1
     vec_b: int = 1
     vec_c: int = 1
+    async_dma: bool = False
     passed: bool | None = None  # None when --verify was not requested
 
 
@@ -1465,6 +1466,7 @@ def _run_sweep(
         n_run += 1
 
         _va, _vb, _vc = ImplicitGemmConvSpec.default_vector_sizes(p.C, p.K, dtype)
+        _is_async = "_async" in artifact.kernel_name
         results.append(
             Result(
                 kernel_name=artifact.kernel_name,
@@ -1484,6 +1486,7 @@ def _run_sweep(
                 vec_a=_va,
                 vec_b=_vb,
                 vec_c=_vc,
+                async_dma=_is_async,
                 passed=kernel_passed,
             )
         )
@@ -1493,6 +1496,7 @@ def _run_sweep(
             f"warp={warp_m}x{warp_n} "
             f"atom={warp_tile_mn}x{warp_tile_mn}x{warp_tile_k} "
             f"{pipeline}/{epilogue:9s} "
+            f"{'async' if _is_async else 'sync ':5s} "
             f"vec={_va}/{_vb}/{_vc} "
             f"{cur_tflops:6.1f} TFLOPS  {ms:.3f} ms",
             flush=True,
@@ -1533,7 +1537,8 @@ def _run_sweep(
             f"warp={r.warp_m}x{r.warp_n} "
             f"atom={r.warp_tile_mn}x{r.warp_tile_mn}x{r.warp_tile_k} "
             f"vec={r.vec_a}/{r.vec_b}/{r.vec_c} "
-            f"{r.pipeline}/{r.epilogue}"
+            f"{r.pipeline}/{r.epilogue} "
+            f"{'async' if r.async_dma else 'sync '}"
         )
         if show_verify:
             v = "PASS" if r.passed else "FAIL"

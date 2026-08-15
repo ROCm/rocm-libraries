@@ -179,7 +179,10 @@ class ImplicitGemmConvSpec:
 
     pipeline: str = "mem"
     epilogue: str = "default"
-    async_dma: bool = False
+    # None (default): auto-detect from arch + geometry at build time.
+    # True: force async (raw_ptr_buffer_load_lds); error if incompatible.
+    # False: force sync (CoalescedTileLoader).
+    async_dma: Optional[bool] = None
     unroll_k: bool = False  # NEW: Clean Python-level K-loop unrolling
     lds_k_pad: Optional[int] = None
     # Per-operand vector widths (elements). ``None`` means auto-select via the
@@ -259,7 +262,7 @@ class ImplicitGemmConvSpec:
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
             self.acc_epilogue.tag(),
-            flags={"async": self.async_dma, "noalc": self.cshuffle_no_alias},
+            flags={"async": self.async_dma is True, "noalc": self.cshuffle_no_alias},
         )
 
     def validate(self) -> None:
@@ -280,9 +283,9 @@ class ImplicitGemmConvSpec:
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
         layout = self.effective_lds_layout()
-        if self.async_dma:
+        if self.async_dma is True:
             layout.validate_for_async()
-        if self.async_dma and self.lds_k_pad not in (None, 0):
+        if self.async_dma is True and self.lds_k_pad not in (None, 0):
             raise ValueError(
                 "async_dma requires lds_k_pad to be 0/None because "
                 "raw_ptr_buffer_load_lds writes a packed lane-contiguous tile"
@@ -302,7 +305,7 @@ class ImplicitGemmConvSpec:
             layout = self.lds_layout
         elif self.lds_k_pad is not None:
             layout = LdsLayout.padded_k(self.tile_k, self.lds_k_pad)
-        elif self.async_dma:
+        elif self.async_dma is True:
             layout = LdsLayout.packed_async(self.tile_k)
         else:
             layout = LdsLayout.padded_k(self.tile_k, 8 if self.tile_k >= 16 else 0)
@@ -361,6 +364,19 @@ def is_valid_spec_for_problem(
             f"grid_n {_grid_n} > {_MAX_GRID_DIM} (hardware gridDim.x cap): "
             f"N_gemm={problem.N_gemm} tile_n={spec.tile_n}"
         )
+
+    # Reject pipeline="basic" configs that would Python-unroll the K loop
+    # beyond 256 iterations — above this threshold IR size explodes and
+    # comgr compilation time grows unacceptably.
+    _MAX_BASIC_K_ITERS = 128
+    if spec.pipeline == "basic":
+        _k_iters = (problem.K_gemm + spec.tile_k - 1) // spec.tile_k
+        if _k_iters > _MAX_BASIC_K_ITERS:
+            return False, (
+                f"pipeline='basic' K-loop would unroll to {_k_iters} iterations "
+                f"(K_gemm={problem.K_gemm} tile_k={spec.tile_k}), "
+                f"exceeding the {_MAX_BASIC_K_ITERS}-iteration limit"
+            )
 
     return True, "ok"
 
@@ -443,7 +459,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     _ab_bytes = (
         _a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1]
     ) * _ab_dtype_bytes
-    _double = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    _double = spec.pipeline == "compv4" or spec.async_dma is True or spec.unroll_k
     _ab_lds = _ab_bytes * (2 if _double else 1)
     # cshuffle stages tile_m×tile_n elements at dtype_d (fp16/bf16 = 2B, fp32 = 4B).
     _c_dtype_bytes = 4 if spec.data.dtype_d == "fp32" else 2
@@ -466,7 +482,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     # is only available on the sync (non-async-DMA) CoalescedTileLoader path.
     # async_dma uses raw_ptr_buffer_load_lds which atomically loads directly
     # into LDS with no VGPR staging, making the split impossible.
-    if spec.pipeline == "basic" and spec.async_dma:
+    if spec.pipeline == "basic" and spec.async_dma is True:
         return False, "pipeline='basic' is incompatible with async_dma=True"
 
     # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
@@ -492,7 +508,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
                 f"(got {spec.epilogue!r}) on {arch}"
             )
         for flag, label in (
-            (spec.async_dma, "async_dma"),
+            (spec.async_dma is True, "async_dma"),
             (spec.unroll_k, "unroll_k"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
         ):
@@ -508,6 +524,47 @@ def _conv_mma_family(arch: str) -> str:
     from ...core.arch import ArchTarget
 
     return "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma"
+
+
+def _can_use_async_dma(spec: ImplicitGemmConvSpec, arch: str) -> bool:
+    """Return True if async DMA (raw_ptr_buffer_load_lds) can be used for this spec+arch.
+
+    Called when spec.async_dma is None (auto-detect). Returns False silently on any
+    incompatibility so the caller falls back to the sync path without raising.
+    """
+    from ...core.arch import ArchTarget
+    from ...helpers.loads import AsyncTileLoader
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError:
+        return False
+    if not target.memory.has_async_lds:
+        return False
+    if spec.pipeline == "basic":
+        return False
+    if _conv_mma_family(arch) == "wmma":
+        return False
+    if spec.lds_k_pad not in (None, 0):
+        return False
+    elem_bytes_a = {"fp16": 2, "bf16": 2, "fp32": 4}.get(spec.data.dtype_a, 2)
+    elem_bytes_b = {"fp16": 2, "bf16": 2, "fp32": 4}.get(spec.data.dtype_b, 2)
+    try:
+        AsyncTileLoader.choose_dwords(
+            tile_rows=spec.tile_m,
+            tile_cols=spec.tile_k,
+            block_size=spec.block_size,
+            elem_bytes=elem_bytes_a,
+        )
+        AsyncTileLoader.choose_dwords(
+            tile_rows=spec.tile_n,
+            tile_cols=spec.tile_k,
+            block_size=spec.block_size,
+            elem_bytes=elem_bytes_b,
+        )
+    except ValueError:
+        return False
+    return True
 
 
 def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
@@ -815,12 +872,23 @@ def build_implicit_gemm_conv(
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid conv_igemm spec for {arch}: {why}")
+
+    # Resolve async mode: explicit True/False are taken as-is; None = auto-detect.
+    if spec.async_dma is True:
+        use_async = True
+    elif spec.async_dma is False:
+        use_async = False
+    else:
+        use_async = _can_use_async_dma(spec, arch)
+
     p = spec.problem
     ir_dtype_a = _ir_dtype(spec.data.dtype_a)
     ir_dtype_b = _ir_dtype(spec.data.dtype_b)
     ir_dtype_d = _ir_dtype(spec.data.dtype_d)
 
     b = IRBuilder(spec.kernel_name())
+    if use_async and spec.async_dma is None:
+        b.kernel.name += "_async"
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
 
@@ -932,9 +1000,11 @@ def build_implicit_gemm_conv(
     # intrinsic produces. Use plain `[block_m, block_k]` instead;
     # bank conflicts (if they bind) move into the consumer's
     # ds_read distribution.
-    lds_layout = spec.effective_lds_layout()
-    if spec.async_dma:
+    if use_async:
+        lds_layout = LdsLayout.packed_async(block_k)
         lds_layout.validate_for_async()
+    else:
+        lds_layout = spec.effective_lds_layout()
     A_smem = b.smem_alloc(
         ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem"
     )
@@ -945,7 +1015,7 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
+    double_buffer = spec.pipeline == "compv4" or use_async or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
             ir_dtype_a, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1065,7 +1135,7 @@ def build_implicit_gemm_conv(
     # The list is mutated by `emit_load_phase`.
     k_off_capture: List[Optional[Value]] = [None]
 
-    if spec.async_dma:
+    if use_async:
         # Async DRAM -> LDS via `raw_ptr_buffer_load_lds`. Each wave
         # writes lane-contiguous LDS at the wave-uniform base computed
         # by AsyncTileLoader. Consumers (the MFMA phase) must place an
@@ -1112,9 +1182,7 @@ def build_implicit_gemm_conv(
             elem_dtype=ir_dtype_b,
         )
 
-    schedule = SchedulePolicy.for_pipeline(
-        "async_dma" if spec.async_dma else spec.pipeline
-    )
+    schedule = SchedulePolicy.for_pipeline("async_dma" if use_async else spec.pipeline)
     schedule.emit_prologue(b)
 
     def emit_load_phase(k_off: Value, A_dst: Value, B_dst: Value) -> None:
@@ -1140,7 +1208,7 @@ def build_implicit_gemm_conv(
         """
         k_off_capture[0] = k_off
 
-        if spec.async_dma:
+        if use_async:
             # ``CACHE_STREAM`` (SLC=1) is correct here: each K-tile is
             # consumed exactly once by the MFMA phase of the same iter
             # and then overwritten by the next iter's prefetch. Marking
@@ -1489,7 +1557,7 @@ def build_implicit_gemm_conv(
                 pending_staged = None
 
         final_accs = current_accs
-    elif not spec.async_dma:
+    elif not use_async:
         for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
         with for_op as (k0, iter_vars):
             emit_load_phase(k0, A_smem, B_smem)
@@ -1499,7 +1567,7 @@ def build_implicit_gemm_conv(
             b.scf_yield(*new_accs)
         final_accs = for_op.results
     else:
-        # async_dma path (now fixed as of d6119ef2b8a)
+        # async_dma path
         K_iters = (p.K_gemm + block_k - 1) // block_k
         bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
 
