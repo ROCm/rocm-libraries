@@ -36,6 +36,10 @@
 #include <ostream>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_USE_PACKED_KERNELS);
+// Debug/perf-comparison switch: forces the pre-occupancy-query behavior (arch allowlist
+// only) for the naive-conv bwd block size decision. Set to 1 to compare against the live
+// occupancy query; leave unset/0 for the default (occupancy-query) behavior.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_BWD_DISABLE_OCCUPANCY_BLOCKSIZE);
 
 namespace miopen {
 
@@ -391,6 +395,17 @@ NaiveConvWideBlockOccupancyParity(const Handle& handle,
     }
 }
 
+// Original arch allowlist: measured/validated only on these 3 archs. Used as the fallback
+// when a live occupancy query can't be answered, and (via
+// MIOPEN_DEBUG_CONV_DIRECT_NAIVE_BWD_DISABLE_OCCUPANCY_BLOCKSIZE) as a debug switch to
+// reproduce the pre-occupancy-query behavior for perf comparison.
+inline bool NaiveConvWideBlockLegacyArchAllowlist(const Handle& handle)
+{
+    const auto device_name = handle.GetDeviceName();
+    return StartsWith(device_name, "gfx90a") || StartsWith(device_name, "gfx942") ||
+           StartsWith(device_name, "gfx950");
+}
+
 // Chooses the workgroup size for the 2D naive conv BWD-data launch.
 inline size_t NaiveConv2DBWDBlockSize(const Handle& handle,
                                        const std::string& kernel_file,
@@ -412,23 +427,24 @@ inline size_t NaiveConv2DBWDBlockSize(const Handle& handle,
     // geomean, measured on gfx90a, gfx942 and gfx950.
     constexpr size_t large_block = 1024;
 
-    // Ask the actual compiled kernel whether widening keeps (or improves) resident threads/CU
-    // on this device, so the decision generalizes past the 3 archs this was manually swept on.
-    // Falls back to that original arch allowlist only if the live query itself is unavailable.
-    const auto occupancy_ok = NaiveConvWideBlockOccupancyParity(
-        handle, kernel_file, kernel_name, comp_options, default_block, large_block);
-
     bool wide_block_viable;
-    if(occupancy_ok.has_value())
+    if(env::enabled(MIOPEN_DEBUG_CONV_DIRECT_NAIVE_BWD_DISABLE_OCCUPANCY_BLOCKSIZE))
     {
-        wide_block_viable = *occupancy_ok;
+        // Debug: skip the live query entirely, reproducing the original arch-allowlist-only
+        // behavior, so it can be A/B compared against the occupancy-query path below.
+        wide_block_viable = NaiveConvWideBlockLegacyArchAllowlist(handle);
     }
     else
     {
-        const auto device_name = handle.GetDeviceName();
-        wide_block_viable      = StartsWith(device_name, "gfx90a") ||
-                                 StartsWith(device_name, "gfx942") ||
-                                 StartsWith(device_name, "gfx950");
+        // Ask the actual compiled kernel whether widening keeps (or improves) resident
+        // threads/CU on this device, so the decision generalizes past the 3 archs this was
+        // manually swept on. Falls back to the arch allowlist only if the live query itself
+        // is unavailable.
+        const auto occupancy_ok = NaiveConvWideBlockOccupancyParity(
+            handle, kernel_file, kernel_name, comp_options, default_block, large_block);
+        wide_block_viable = occupancy_ok.has_value()
+                                ? *occupancy_ok
+                                : NaiveConvWideBlockLegacyArchAllowlist(handle);
     }
 
     if(!wide_block_viable)
