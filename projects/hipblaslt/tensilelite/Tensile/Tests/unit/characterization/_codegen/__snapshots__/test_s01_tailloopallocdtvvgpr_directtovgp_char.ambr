@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_s01_tailloopallocdtvvgpr_directtovgp_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_BBS_BH_UserArgs_MT128x16x32_MI16xkMDJtx4OqYjnXMSFKZQZXatYKaDUDiLgOxCJmZl1KKM=',
+      'err': 0,
+    }),
+  ])
+# ---
