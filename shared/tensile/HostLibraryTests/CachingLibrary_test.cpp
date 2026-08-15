@@ -1250,4 +1250,24 @@ TEST(CachingLibrary, OverrideFromFile)
 
         std::filesystem::remove(path);
     }
+
+    // Raw file indices of 0 and InvalidOverrideSolutionIndex are rejected before mapping
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_zero.csv", "0");
+
+        EXPECT_FALSE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
+    {
+        auto lib  = makeLibrary();
+        auto path = writeOverrideFile("tensile_override_invalid.csv", "-1");
+
+        EXPECT_FALSE(lib->setOverridesFromFile(gpu, path.string(), mapRocblasIndex));
+        EXPECT_EQ(lib->findBestSolution(problem, gpu), solutionDefault);
+
+        std::filesystem::remove(path);
+    }
 }
