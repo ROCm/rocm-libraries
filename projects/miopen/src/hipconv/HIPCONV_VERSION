@@ -1,6 +1,6 @@
-EMU version: v0.2.2-0-gd15d406
-EMU commit: d15d4064a18de3761d1e2e87325726d57dd2bf58
-Snapshot date: 2026-08-14
+EMU version: v0.2.3-0-g5c14278
+EMU commit: 5c1427802e34edf5711fec485ec056b37297e6d7
+Snapshot date: 2026-08-16
 Arches: cdna3,cdna4,cdna5
 Files:
   ./.clang-format
