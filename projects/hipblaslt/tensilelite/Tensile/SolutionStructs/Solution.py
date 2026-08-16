@@ -2688,6 +2688,15 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
 
+    # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
+    # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
+    if state["TDMLoadWaveSync"]:
+      if state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "TDMLoadWaveSync requires ScheduleIterAlg=4 (StinkyTofu backend)")
+        return
+      if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
+        state["TDMLoadWaveSync"] = False
+
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]
@@ -5283,6 +5292,21 @@ class Solution(collections.abc.Mapping):
       state["GuaranteeNoPartialB"] = True
 
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
+
+    # GuaranteeNoPartial skips graShift (KernelWriter.py, "global read addresses: shift")
+    # and permits _UseSgprForGRO, both on the assumption that BufferLoad gives a
+    # hardware bounds check. global_load_tr has no num_records field, so that
+    # assumption does not hold for it: the free-dim overhang then reads past the
+    # tensor (page fault), and the dropped soffset in chooseGlobalRead's tr branch
+    # makes every transpose load address the same element (wrong results).
+    # Reachable only by tuning with AssertFree{0,1}ElementMultiple >= GRVW; no
+    # shipped solution does. Reject rather than mis-generate.
+    for tc in ("A", "B"):
+      if state["enableGLTr%s"%tc] and state["GuaranteeNoPartial%s"%tc]:
+        reject(state, printRejectionReason, "enableGLTr%s with GuaranteeNoPartial%s: "
+               "global_load_tr has no hardware bounds check, so AssertFree%uElementMultiple "
+               "must not remove graShift"%(tc, tc, 0 if tc == "A" else 1))
+        return
 
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:

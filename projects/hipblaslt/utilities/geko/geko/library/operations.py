@@ -58,12 +58,12 @@ from geko.library import _bank
 logger = logging.getLogger("GEKO")
 
 try:
-    DEFAULT_YAML_LOADER = yaml.CSafeLoader
+    SafeLoader = yaml.CSafeLoader
 except (ModuleNotFoundError, AttributeError):
     logger.warning("yaml.CSafeLoader not found, using yaml.SafeLoader")
     logger.warning("Please update the yaml package to the latest version")
     logger.warning("You can do this by running: pip install --upgrade pyyaml")
-    DEFAULT_YAML_LOADER = yaml.SafeLoader
+    SafeLoader = yaml.SafeLoader
 
 
 __all__ = [
@@ -91,7 +91,7 @@ def load_library(path: str | Path) -> Library:
     """
     logger.debug(f"Loading library file: {path}")
     with open(path) as f:
-        data = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        data = yaml.load(f, Loader=SafeLoader)
     return Library(data, Path(path).name)
 
 
@@ -241,7 +241,7 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
     df = df.sort_values(["m", "n", "batch_count", "k"])
 
     with open(match_table_path) as f:
-        match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        match_table = yaml.load(f, Loader=SafeLoader)
 
     lib_paths = set()
     for idx in df["solutionIdx"]:
@@ -396,7 +396,7 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
     except ImportError as e:
         raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
     
-    data = load_yaml_stream(library_path, DEFAULT_YAML_LOADER)
+    data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):
         raise ValueError(f"Library file '{library_path}' is not in list format.")
 
@@ -526,7 +526,7 @@ def from_full_dataframe(
         raise ValueError(f"Input DataFrame has missing fields")
 
     with open(match_table_path) as f:
-        match_table = yaml.load(f, Loader=DEFAULT_YAML_LOADER)
+        match_table = yaml.load(f, Loader=SafeLoader)
 
     lib_dir = Path(lib_dir)
     n_sols = len(df)

@@ -426,7 +426,8 @@ hipDNN-relevant configure presets:
 | `hipdnn-providers` | hipDNN core + integration-tests + MIOpen + hipBLASLt providers |
 | `hipdnn-providers-all` | `hipdnn-providers` + HIP-kernel provider |
 | `hipdnn-samples` | `hipdnn-providers` (hipDNN core + integration-tests + MIOpen + hipBLASLt providers) + samples |
-| `hipdnn-dev-all` | everything (all providers + integration-tests + samples) |
+| `hipdnn-dev-all` | everything (all providers + integration-tests + samples + Python bindings) |
+| `hipdnn-python` | hipDNN core + Python frontend bindings |
 
 > [!TIP]
 > The superbuild presets bake in the superbuild toolchain (`cmake/toolchains/rocm-clang.cmake`), which defaults to `/opt/rocm` on Linux and requires `-DROCM_PATH=<rocm-root>` on Windows. hipDNN developers may prefer to override it with the hipDNN toolchain by adding `-DCMAKE_TOOLCHAIN_FILE=projects/hipdnn/cmake/ClangToolChain.cmake` to the configure step. Benefits:
@@ -477,6 +478,7 @@ endif()
 | hipblaslt-provider | `dnn-providers/hipblaslt-provider/` | `hipblaslt_plugin` | hipBLASLt |
 | hip-kernel-provider | `dnn-providers/hip-kernel-provider/` | `hip_kernel_provider` | HIP, HIP-RTC |
 | hipdnn-samples | `projects/hipdnn/samples/` | `hipdnn_samples` | ROCm/HIP; provider plugins at runtime |
+| hipdnn-python | `projects/hipdnn/python/frontend_bindings/` | `hipdnn_frontend_bindings` | Python 3.12+, nanobind |
 
 The configure presets above select the components for you. To choose components directly instead, set `ROCM_LIBS_ENABLE_COMPONENTS`:
 
