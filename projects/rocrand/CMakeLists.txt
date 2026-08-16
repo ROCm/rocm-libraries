@@ -50,13 +50,14 @@ if (NOT DEFINED ENV{ROCM_PATH})
     set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
 
-# Install prefix
-set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
+if(NOT WIN32)
+    # Install prefix
+    set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
+endif()
 
 if(WIN32)
     set(CPACK_SOURCE_GENERATOR "ZIP")
     set(CPACK_GENERATOR "ZIP")
-    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path")
     set(INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
     set(CPACK_SET_DESTDIR OFF)
     set(CPACK_PACKAGE_INSTALL_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
