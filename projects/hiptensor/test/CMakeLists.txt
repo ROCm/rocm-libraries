@@ -404,6 +404,8 @@ set(_HIPTENSOR_DEVICE_TESTS
   "complex_scale_contraction_test_m4n4k4|01_contraction/complex_scale_test_params_rank4.yaml"
   "complex_scale_contraction_test_m5n5k5|01_contraction/complex_scale_test_params_rank5.yaml"
   "complex_scale_contraction_test_m6n6k6|01_contraction/complex_scale_test_params_rank6.yaml"
+  "plan_cache_test|01_contraction/plan_cache_test_params.yaml"
+  "plan_lifetime_test|NONE"
   "trinary_bilinear_contraction_test|NONE"
   "trinary_scale_contraction_test|NONE"
   "bilinear_contraction_with_unary_ops_test|NONE"
