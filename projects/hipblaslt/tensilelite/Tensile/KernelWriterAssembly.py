@@ -14963,6 +14963,8 @@ class KernelWriterAssembly(KernelWriter):
   #   isSize1=False: (SizeI % MT0) % blockSizeM == 0  → NonEdge  (else → edge)
   #                  blockSizeM = 16 for fp32 dest, 32 for 16-bit dest
   #   isSize1=True : (SizeJ % MT1) % 16 == 0          → NonEdge  (else → edge)
+  # With UseSubtileImpl + SourceSwap both remainders must instead be exactly 0,
+  # because that store path masks neither axis; see the two branches below.
   #
   # tmpSgpr must have at least 4 free SGPRs (same as checkIsEdge).
   # isEdgeTarget is the label to branch to when the tile IS an edge.
@@ -15001,8 +15003,8 @@ class KernelWriterAssembly(KernelWriter):
         # alignSize = divisor makes "aligned" mean "no remainder at all": the
         # power-of-2 branch below then ANDs with divisor-1 (a no-op on a remainder
         # already < divisor), and the enumerated branch only matches k=0.
-        # N needs no equivalent: the interleave is an M-axis remap, and a partial
-        # N tile validates cleanly across the whole N sweep.
+        # The N axis needs the same treatment for a different reason -- see the
+        # isSize1 branch below.
         alignSize = divisor
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
@@ -15016,6 +15018,22 @@ class KernelWriterAssembly(KernelWriter):
     else:
       divisor   = kernel["MacroTile1"]
       alignSize  = 1 if self.states.storeAlign8 else kernel["MatrixInstN"]
+      if kernel["UseSubtileImpl"] and kernel["SourceSwap"]:
+        # A partial N tile admitted here reaches a store path that has no N
+        # masking at all. The two subtile guard SGPRs gate only whether C is
+        # loaded, so a wave stores its full MacroTile1 columns however few are
+        # valid, and SrdD's num_records is BufferOOB, so nothing clamps the
+        # address. The surplus columns are written at their natural addresses:
+        # past the end of D for an unbatched GEMM, and on top of the next batch
+        # for a batched one, where they silently overwrite valid output.
+        # Measured overrun is exactly (MacroTile1 - SizeJ % MacroTile1) * M
+        # elements. This is not covered by the M-axis override above: the M
+        # remap is what breaks the M guard, whereas here it is the store path
+        # itself that is unmasked in N.
+        # alignSize = divisor sends any nonzero N remainder to the Edge path,
+        # which masks per element and is already the path taken (correctly) by
+        # remainders that are not multiples of MatrixInstN.
+        alignSize = divisor
       wgSgpr    = "WorkGroup1"
       nwgSgpr   = "NumWorkGroups1"
       # tmpS0 = SizeJ % MT1
