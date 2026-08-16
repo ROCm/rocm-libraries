@@ -12,16 +12,28 @@
 # (e.g. cdna3 config with gfx950 code objects) aborts with "invalid device function".
 # MIOPEN_DEVICE_ARCH selects which arch's DBs are validated.
 #
-# Supported set = arches TheRock builds AND rocjitsu has a KMD config for. Today that is
-# only gfx942 (cdna3) and gfx950 (cdna4). Adding more (gfx90a=cdna2, gfx125X=RDNA, ...)
-# requires a rocjitsu arch config in ROCm/rocm-systems first (and, for gfx90a, a TheRock
-# build too).
+# Supported set = arches TheRock builds AND rocjitsu has a KMD config for AND the run
+# actually completes (see gfx942 status below). Adding more (gfx90a=cdna2, gfx125X=RDNA,
+# ...) requires a rocjitsu arch config in ROCm/rocm-systems first (and, for gfx90a, a
+# TheRock build too).
 #
 # VALIDATED 2026-08-15 (gfx950, run 31865606916): fetch works with no AWS creds; the dist
 # carries libMIOpenCKGroupedConv_gfx950.so + gfx950100 DBs; with the cdna4 config
-# StaticFDBSync[gfx950] runs GPU-free end-to-end against source CK and surfaces real
-# "invalid perf config" ConvHipImplicitGemmGroupWrwXdlops entries (the stale gfx950
+# StaticFDBSync[gfx950] runs GPU-free end-to-end against source CK in ~25s and surfaces
+# real "invalid perf config" ConvHipImplicitGemmGroupWrwXdlops entries (the stale gfx950
 # grouped-wrw class PR #10043 predicted -- i.e. the #2266 material).
+#
+# gfx942 EXCLUDED from the matrix (2026-08-15, run 31890772516): with the matching cdna3
+# config, StaticFDBSync/3 (gfx942, 304 CU) STALLED -- ~200/many-thousand find-db lines
+# processed in 6 HOURS before the job was force-cancelled (vs 13s for the same DB locally
+# on real hardware). db_sync.cpp spawns min(hardware_concurrency(), 32) threads
+# (db_sync.cpp:1009-1010), each making a HIP device call per CK grouped-conv entry through
+# the rocjitsu interposer; something about that concurrency (or gfx942's much larger FDB)
+# stalls under rocjitsu/cdna3 specifically -- not root-caused, not a code bug in MIOpen.
+# gfx942 dbsync is ALREADY covered by TheRock's real GPU test job (gfx94X-dcgpu), so this
+# GPU-free path isn't needed there; not worth the CI cost until the stall is understood.
+# A next diagnostic step (not attempted): re-run with the runner's CPU affinity constrained
+# (e.g. taskset -c 0-3) to force fewer threads and see whether that avoids the stall.
 #
 # The fetch depends on ROCm/TheRock's `setup_test_environment` action + the MIOpen
 # component's `fetch_artifact_args`. Both `artifact_run_id` and `fetch_artifact_args` come
@@ -52,12 +64,15 @@ jobs:
   dbsync-rocjitsu:
     name: "dbsync rocjitsu (${{ matrix.arch }})"
     runs-on: azure-linux-scale-rocm
+    # Safety net: without this, a stall (see gfx942 note above) occupies the runner
+    # indefinitely instead of failing fast. 20 min is generous next to gfx950's ~25s run.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # Supported set: TheRock builds it AND rocjitsu has a matching KMD config.
+        # Supported + validated set only. gfx942 deliberately excluded -- see header note
+        # (stalls under rocjitsu/cdna3; also redundant with TheRock's real gfx94X GPU test).
         include:
-          - { arch: gfx942, family: gfx94X-dcgpu, rj_config: amdgpu_cdna3_kmd.json }
           - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna4_kmd.json }
     # Same runtime image TheRock's test-component uses for running the fetched dist, but
     # WITHOUT GPU device mounts (rocjitsu fakes the device). --user 0: the image defaults to
