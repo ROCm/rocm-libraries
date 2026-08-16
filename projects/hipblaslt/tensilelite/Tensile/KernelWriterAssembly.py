@@ -14868,6 +14868,34 @@ class KernelWriterAssembly(KernelWriter):
                     kernel["MacroTile1"], isSize1=True, isLongBranch=isLongBranch), pos=0)
                 currentInstLength += countInstruction(checkIsEdge)
               # If module, checking Size0 % MT0 > 0  (or subtile alignment for M)
+              #
+              # Under SourceSwap the M axis takes two checks instead of one,
+              # because the two partial-M classes want different Edge modules:
+              #   remainder not a multiple of VectorWidthA -> "Else", the scalar
+              #     store, the only one that can split a vector group;
+              #   any remaining nonzero remainder          -> "Then", the same
+              #     masked wide store a partial N tile uses. Both classes were
+              #     going to "Else" before, which costs 8x the store
+              #     instructions for the whole workgroup, not just its last tile.
+              # Each check is prepended, so the one added last runs first: the
+              # VectorWidthA check has to be added after the nonzero check, or a
+              # remainder of 5 would reach a store that masks 8 rows at a time.
+              routeMToVectorEdge = (
+                useSubtileEdgeCheck
+                and kernel["SourceSwap"]
+                and kernel["AdaptiveGemm"] == 0
+                and kernel["VectorWidthA"] > 1
+                # The guard's alignment unit and the target module's store width
+                # have to be the same number for the routing to be sound.
+                and kernel["VectorWidthA"] == vectorWidth
+              )
+              if routeMToVectorEdge:
+                isLongBranch = True if currentInstLength >= 16384 else False
+                with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfoM2") as tmpSgprInfo:
+                  checkIsEdge = edgeModule.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, \
+                    isEdgeTarget["Then"], isSize1=False, isLongBranch=isLongBranch, \
+                    alignSizeOverride=kernel["MacroTile0"]), pos=0)
+                  currentInstLength += countInstruction(checkIsEdge)
               isLongBranch = True if currentInstLength >= 16384 else False
               with self.allocTmpSgpr(4, tag="generateBetaModules_tmpSgprInfo5") as tmpSgprInfo:
                 if useSubtileEdgeCheck:
@@ -14969,7 +14997,8 @@ class KernelWriterAssembly(KernelWriter):
   # tmpSgpr must have at least 4 free SGPRs (same as checkIsEdge).
   # isEdgeTarget is the label to branch to when the tile IS an edge.
   ##############################################################################
-  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False):
+  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False,
+                         alignSizeOverride=None):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdgeSubtile")
@@ -14998,14 +15027,22 @@ class KernelWriterAssembly(KernelWriter):
         # The SourceSwap interleaved map gives a wave rows that are strided rather
         # than a prefix, so a leading-block count keeps the wrong rows and the
         # missing ones are never stored -- silently, since the guard itself is
-        # still well-formed. Send any partial M tile down the scalar Edge path,
-        # which computes per-row addresses and is layout-agnostic.
-        # alignSize = divisor makes "aligned" mean "no remainder at all": the
-        # power-of-2 branch below then ANDs with divisor-1 (a no-op on a remainder
-        # already < divisor), and the enumerated branch only matches k=0.
-        # The N axis needs the same treatment for a different reason -- see the
-        # isSize1 branch below.
-        alignSize = divisor
+        # still well-formed. So no partial M tile may take NonEdge.
+        #
+        # It does not follow that every partial M tile needs the scalar Edge
+        # path. The Edge path masks per element by clipping the store address to
+        # BufferOOB when coord0 >= SizeI, at the granularity of one store, which
+        # covers VectorWidthA consecutive M rows. A remainder that is a multiple
+        # of VectorWidthA leaves every one of those groups either wholly valid or
+        # wholly invalid, so the wide Edge store expresses it exactly; a
+        # remainder that is not would need a group split down the middle, which
+        # only the scalar Edge path can do. alignSize = VectorWidthA is that
+        # distinction, and the caller routes the two classes to the two paths.
+        #
+        # VectorWidthA == 1 means the local-read map is blocked rather than
+        # interleaved, and alignSize 1 would admit every remainder back into
+        # NonEdge. Fall back to divisor -- no remainder at all -- in that case.
+        alignSize = kernel["VectorWidthA"] if kernel["VectorWidthA"] > 1 else divisor
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -15043,6 +15080,12 @@ class KernelWriterAssembly(KernelWriter):
       module.add(SAddU32(dst=sgpr(tmpS1), src0=hex(-1), src1=sgpr(nwgSgpr)))
       # SCC = 1 if this is the last WG in dim 1
       module.add(SCmpGeU32(src0=sgpr(wgSgpr), src1=sgpr(tmpS1), comment="wg1 >= nwg1-1 ?"))
+
+    # A caller emitting more than one check on the same axis supplies the
+    # alignment it wants for this one; alignSizeOverride = divisor means
+    # "any nonzero remainder".
+    if alignSizeOverride is not None:
+      alignSize = alignSizeOverride
 
     # myRem = last WG ? (SizeX % divisor) : 0
     # Non-last WGs always take NonEdge (full tile), so myRem = 0 keeps them out of the edge branch.
