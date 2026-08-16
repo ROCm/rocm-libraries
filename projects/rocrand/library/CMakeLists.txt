@@ -127,8 +127,7 @@ rocm_install(
 )
 
 set(FORTRAN_SRCS_INSTALL_DIR "${CMAKE_INSTALL_PREFIX}/rocrand/src/fortran")
-set(LIB_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
-set(CONFIG_PACKAGE_INSTALL_DIR ${LIB_INSTALL_DIR}/cmake/rocrand)
+set(CONFIG_PACKAGE_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/rocrand)
 
 include(CMakePackageConfigHelpers)
 configure_package_config_file(
@@ -154,7 +153,10 @@ endif()
 
 # install library to C:\hipSDK\bin
 if (WIN32)
-    install (TARGETS rocrand DESTINATION "${CMAKE_INSTALL_PREFIX}/bin")
+    install(TARGETS rocrand
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     if (BUILD_TEST)
 	    add_custom_command(
 		    TARGET rocrand
