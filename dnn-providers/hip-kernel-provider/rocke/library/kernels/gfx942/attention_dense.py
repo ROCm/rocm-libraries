@@ -692,7 +692,7 @@ def _lds_bytes(
 
     K keeps the natural ``[token, dim]`` layout with :func:`_lds_row_stride` (async
     DMA target). V is TRANSPOSED to ``[dim, token]`` for the P1 conflict-free store, so
-    its footprint is ``D * (block_n + tuning.v_row_pad)`` rather than
+    its footprint is ``D * (block_n + resolved_v_row_pad)`` rather than
     ``block_n * row_stride``. 2 bytes/element is exact for every dtype in
     ``_SUPPORTED_DTYPES`` (bf16/fp16) and
     must be revisited if a narrower or wider element type is added. Shared with the
