@@ -23,33 +23,32 @@
  * ************************************************************************ */
 
 //
-// Unit tests for rocSPARSE internal host building-block routines.
+// Shared helper for the residual internal device-collective unit tests, split by
+// family across the unit_test_internal_collective_extras_*.cpp TUs (wfreduce,
+// atomics, elementwise, nontemporal, lower_bound, insert). Provides the runtime
+// wavefront-size accessor used by the warp-oriented tests. Header-only (inline)
+// so every topical TU that includes it stays self-contained; the helper lives in
+// a named namespace so it never clashes with the sibling collectives-leaf helper
+// of the same name when both sets of TUs are linked into the same
+// rocsparse-unit-test-device binary.
 //
-// NOTE ON TARGET: these routines are pure *host* logic (selectors/partitioners),
-// but their headers pull in rocsparse_control.hpp -> rocsparse_common.hpp, which
-// uses HIP device intrinsics (__ldg, ...) that only compile under `-x hip`. This
-// file therefore builds into the GPU test binary (rocsparse-unit-test-device),
-// NOT the host-only rocsparse-unit-test, and the matching library TUs
-// (rocsparse_csrmm_default_alg.cpp, rocsparse_determine_indextype.cpp) are
-// compiled in via ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES. The tests themselves
-// run host code and do not need to launch kernels.
-//
-// Exercises: csrmm_select_default_alg, determine_I/J_indextype, clz, host fnp2,
-// line_nnz_profile guard logic, itilu0 assign_b/unassign_b/buffer_layout, and
-// (after a behavior-preserving lift) ComputeRowBlocks/maxRowsInABlock.
-//
+#pragma once
+
 #include "unit_test_utils.hpp"
 
-#include "rocsparse_csrmm.hpp" // csrmm_select_default_alg + line_nnz_profile
-#include "rocsparse_determine_indextype.hpp" // determine_I/J_indextype
-
 #include <gtest/gtest.h>
-#include <vector>
 
-// Placeholder proving the device harness links the compiled-in host-building-
-// block TUs and runs; the real selector/partitioner tests live in the hostblocks
-// PR. Always passes.
-TEST(internal_hostblocks, harness_smoke)
+#include <cstdint>
+
+namespace rocsparse_ut_collective_extras
 {
-    SUCCEED();
-}
+    // Active device wavefront size (32 or 64); asserted so a misconfigured device
+    // fails loudly instead of silently skipping. Warp tests size their data and
+    // reference to this runtime value.
+    inline uint32_t require_wavefront_size()
+    {
+        const int ws = rocsparse_ut::device_warp_size();
+        EXPECT_TRUE(ws == 32 || ws == 64) << "unsupported device wavefront size: " << ws;
+        return static_cast<uint32_t>(ws);
+    }
+} // namespace rocsparse_ut_collective_extras
