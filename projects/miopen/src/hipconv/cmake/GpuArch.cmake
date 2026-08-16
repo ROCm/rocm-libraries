@@ -103,7 +103,12 @@ function(hipconv_autoshard)
     file(MAKE_DIRECTORY ${autogen_dir})
 
     if(NOT TARGET libautoshard)
-        add_library(libautoshard ${HIPCONV_ROOT}/cmake/libautoshard.cpp)
+        # Set the library type to STATIC explicitly.
+        #
+        # Without a type this follows BUILD_SHARED_LIBS, which MIOpen sets. A Windows DLL
+        # exports no symbols without dllexport, so the generators fail to link against
+        # make_autoshard.
+        add_library(libautoshard STATIC ${HIPCONV_ROOT}/cmake/libautoshard.cpp)
         target_include_directories(libautoshard PUBLIC ${HIPCONV_ROOT}/cmake/)
         target_compile_options(libautoshard PRIVATE ${HIPCONV_HOST_WARNING_FLAGS})
     endif()
