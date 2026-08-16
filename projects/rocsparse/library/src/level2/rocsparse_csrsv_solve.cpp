@@ -183,8 +183,15 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         local_col_data        = csrsv->get_transposed_col_ind();
         local_val_data        = csrt_val;
         local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
-        fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                         : rocsparse_fill_mode_lower;
+        switch(fill_mode)
+        {
+        case rocsparse_fill_mode_lower:
+            fill_mode = rocsparse_fill_mode_upper;
+            break;
+        case rocsparse_fill_mode_upper:
+            fill_mode = rocsparse_fill_mode_lower;
+            break;
+        }
     }
     else if(force_conj)
     {

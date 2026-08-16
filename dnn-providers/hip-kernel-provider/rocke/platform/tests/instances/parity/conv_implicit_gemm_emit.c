@@ -115,38 +115,16 @@ static int make_cfg(int idx, rocke_implicit_gemm_conv_spec_t* spec, const char**
         *arch = "gfx950";
         return 0;
     case 13:
-        /* wavelet pipeline, default epilogue (gfx1250 WMMA). */
-        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->tile_m = 32;
-        spec->tile_n = 32;
-        spec->tile_k = 32;
-        spec->warp_m = 1;
-        spec->warp_n = 1;
-        spec->warp_tile_m = 16;
-        spec->warp_tile_n = 16;
-        spec->warp_tile_k = 16;
-        spec->wave_size = 32;
-        spec->pipeline = "wavelet";
-        spec->epilogue = "default";
-        spec->num_load_waves = 2;
-        *arch = "gfx1250";
+        /* Grouped conv: groups=4, C=64->cpg=16, K=64->kpg=16. */
+        spec->problem = rocke_conv_problem_make(2, 14, 14, 64, 64, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 4;
+        *arch = "gfx950";
         return 0;
     case 14:
-        /* wavelet pipeline, cshuffle epilogue (gfx1250 WMMA). */
-        spec->problem = rocke_conv_problem_default(8, 56, 56, 64, 64, 3, 3);
-        spec->tile_m = 32;
-        spec->tile_n = 32;
-        spec->tile_k = 32;
-        spec->warp_m = 1;
-        spec->warp_n = 1;
-        spec->warp_tile_m = 16;
-        spec->warp_tile_n = 16;
-        spec->warp_tile_k = 16;
-        spec->wave_size = 32;
-        spec->pipeline = "wavelet";
-        spec->epilogue = "cshuffle";
-        spec->num_load_waves = 2;
-        *arch = "gfx1250";
+        /* Cardinality-grouped conv: groups=32, C=256->cpg=8, K=256->kpg=8. */
+        spec->problem = rocke_conv_problem_make(2, 8, 8, 256, 256, 3, 3, 1, 1, 1, 1, 1, 1);
+        spec->problem.groups = 32;
+        *arch = "gfx950";
         return 0;
     default:
         return -1;

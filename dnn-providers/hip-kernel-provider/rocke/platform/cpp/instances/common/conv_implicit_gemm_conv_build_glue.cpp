@@ -369,6 +369,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->block_n_off_v = ctx->grid.block_n_off;
     }
 
+    /* ---- grouped conv: group index + absolute output-filter base ---- (818-831)
+     * Python:
+     *   grouped = p.groups > 1
+     *   if grouped:
+     *       group_idx = b.block_id_z()
+     *       k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
+     *   else: group_idx = None; k_out_group_base = None
+     * Both are NULL for groups == 1 (byte-identical ungrouped path). */
+    if(ctx->p->groups > 1)
+    {
+        /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
+         * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
+        ctx->group_idx = rocke_b_block_id_z(b);
+        rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(ctx->p));
+        ctx->k_out_group_base = rocke_b_mul(b, ctx->group_idx, c_kpg);
+    }
+    else
+    {
+        ctx->group_idx = NULL;
+        ctx->k_out_group_base = NULL;
+    }
+
     /* ---- LDS plan ---- (894-896). lds_layout = spec.effective_lds_layout():
      * sync path pads each K-row by +8 halves (when tile_k >= 16) to dodge LDS
      * bank conflicts; the async / packed path uses +0 (lane-contiguous LDS).
@@ -456,15 +478,14 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
     ctx->load_vec = rocke_conv_choose_load_vec(spec);
     /* Mirror Python default_vector_sizes: clamp the tile-geometry vec by the largest
-     * power-of-two that divides C (A and B both stride along C in NHWC/KYXC layouts).
-     * Python: sizes = [8,4,2,1] for fp16/bf16, [4,2,1] for fp32; vec = largest s in
-     * sizes where C % s == 0.  For C=3 this yields vec=1; without the clamp the
-     * tile-geometry picker returns a wider vec that Python never uses, causing MISMATCH
-     * (e.g. the ImageNet-stem N1H224W224C3K64Y7X7 conv). */
+     * power-of-two that divides the per-group channel count (A strides over cpg,
+     * B strides over cpg). For groups==1 cpg==C -> byte-identical. For C=3 this
+     * yields vec=1; without the clamp the tile-geometry picker returns a wider vec
+     * that Python never uses, causing MISMATCH (e.g. ImageNet-stem C3 conv). */
     {
         bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
         int max_elem = is_fp32 ? 4 : 8;
-        int c_dim = ctx->p->C;
+        int c_dim = rocke_conv_problem_cpg(ctx->p);
         int max_ab = (c_dim % max_elem == 0) ? max_elem
                      : (c_dim % 4 == 0)      ? 4
                      : (c_dim % 2 == 0)      ? 2

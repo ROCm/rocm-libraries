@@ -35,6 +35,7 @@ target_sources(
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_kernels_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_batched_64.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_grouped_batched_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_strided_batched_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrkx_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrkx_herkx_kernels_64.cpp
@@ -231,5 +232,6 @@ target_sources(
     # src64/blas_ex/rocblas_geam_ex_kernels.cpp rocblas64_ex_source
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_ex_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_batched_ex_64.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_grouped_batched_ex_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_strided_batched_ex_64.cpp
     ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_ex_kernels_64.cpp)
