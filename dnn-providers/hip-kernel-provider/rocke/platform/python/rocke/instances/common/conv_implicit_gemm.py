@@ -113,7 +113,10 @@ class ImplicitGemmConvSpec:
     Pipeline options (mirror CK's compv4 family):
       - `pipeline="mem"`      : single-buffer LDS, no scheduler hints
       - `pipeline="compv3"`   : single-buffer LDS + sched_group_barrier
-                                interleave hints (overlap MFMA/DS_read)
+                                interleave hints (overlap MFMA/DS_read).
+                                On CDNA (gfx942/gfx950): MFMA intrawave hints.
+                                On gfx1250 (WMMA/wave32): WMMA intrawave hints
+                                via ``emit_wmma_compute_schedule``.
       - `pipeline="compv4"`   : double-buffer LDS (ping-pong A_smem/B_smem)
                                 + sched hints + s_setprio to push the K-loop
                                 into compute steady state
@@ -239,6 +242,14 @@ class ImplicitGemmConvSpec:
     # LDS reads + MFMA only. The launch block size becomes
     # block_size + num_load_waves * wave_size. Ignored for all other pipelines.
     num_load_waves: int = 4
+    # Python-level K-loop unrolling for pipeline="mem", "compv3", and "wavelet".
+    # 64 (default): unroll the K loop inline when K_iters <= 64; fall back to
+    # scf.for_iter when K_iters > 64.  Single-buffer for mem/compv3 (no extra
+    # LDS), guard-only for wavelet (already Python-unrolled).
+    # 0: disable unrolling entirely (keep dynamic scf.for_iter for all K_iters).
+    # is_valid_spec enforces a compile-time cost guard (unroll_k_max_iters *
+    # k_atoms * mfmas_m * mfmas_n <= 4096) to prevent IR explosion.
+    unroll_k_max_iters: int = 64
 
     @property
     def block_size(self) -> int:
@@ -541,22 +552,29 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     if spec.pipeline == "basic" and spec.async_dma:
         return False, "pipeline='basic' is incompatible with async_dma=True"
 
-    # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
-    # 16x16x16 atom (gfx11/gfx12) or 16x16x32 atom (gfx1250) with the simple
-    # ``mem`` pipeline + ``default`` epilogue and synchronous descriptor-driven
-    # loads. The richer MFMA-shaped paths (compv3/compv4 scheduler interleave,
-    # cshuffle LDS-staged C, async DMA, K-unroll, chiplet swizzle, grouped conv)
-    # are gated off until ported.
+    # WMMA (RDNA wave32) coverage: the 16x16x16 atom (gfx11/gfx12) or 16x16x32
+    # atom (gfx1250) with synchronous descriptor-driven loads.
+    # Pipeline support:
+    #   - ``mem``:     all WMMA arches (simple single-buffer, no hints)
+    #   - ``wavelet``: gfx1250 only — load/math wave specialization
+    #   - ``compv3``:  gfx1250 only — intrawave ds_read/WMMA interleave via
+    #                  ``emit_wmma_compute_schedule`` (``sched_group_barrier``
+    #                  MFMA mask == WMMA on GFX12 per LLVM ``isMFMAorWMMA``).
+    # The richer MFMA-shaped paths (compv4 scheduler interleave, async DMA,
+    # K-unroll, chiplet swizzle, grouped conv) are gated off until ported.
     if family == "wmma":
         if atom not in ((16, 16, 4), (16, 16, 16), (16, 16, 32)):
             return (
                 False,
                 f"WMMA conv supports only 16x16x4, 16x16x16, or 16x16x32 (got {atom}) on {arch}",
             )
-        if spec.pipeline not in ("mem", "wavelet"):
+        _allowed_pipelines = (
+            {"mem", "wavelet", "compv3"} if arch == "gfx1250" else {"mem", "wavelet"}
+        )
+        if spec.pipeline not in _allowed_pipelines:
             return False, (
-                f"WMMA conv supports only 'mem', or 'wavelet' pipeline "
-                f"(got {spec.pipeline!r}) on {arch}"
+                f"WMMA conv on {arch} supports only {sorted(_allowed_pipelines)} pipeline "
+                f"(got {spec.pipeline!r})"
             )
         if spec.epilogue not in ("default", "cshuffle"):
             return False, (
@@ -1406,6 +1424,29 @@ def build_implicit_gemm_conv(
                 for ni in range(mfmas_n):
                     new_accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], new_accs[flat])
                     flat += 1
+
+        # Intrawave WMMA schedule for compv3 on gfx1250: spread ds_reads evenly
+        # across WMMA groups so the post-RA scheduler keeps the matrix pipe fed.
+        # Mirrors gemm_universal's wmma_v1 path (isMFMAorWMMA makes WMMA mask == MFMA).
+        if spec.pipeline == "compv3":
+            from ...helpers.schedule import WmmaHotLoopInstList
+
+            il = WmmaHotLoopInstList.from_geometry(
+                block_size=spec.block_size,
+                m_per_block=spec.tile_m,
+                n_per_block=spec.tile_n,
+                k_per_block=spec.tile_k,
+                m_repeat=mfmas_m,
+                n_repeat=mfmas_n,
+                m_per_wmma=spec.warp_tile_m,
+                n_per_wmma=spec.warp_tile_n,
+                k_per_wmma=spec.warp_tile_k,
+                a_frag_len=a_per_lane,
+                b_frag_len=b_per_lane,
+                a_dtype_bytes=2,
+                b_dtype_bytes=2,
+            )
+            schedule.emit_wmma_compute_schedule(b, il)
         return new_accs
 
     def emit_mfma_phase(
@@ -1733,6 +1774,11 @@ def build_implicit_gemm_conv(
             # from the distinct issue queues, not from hardware scheduling at
             # s_barrier. Keep scf_if_else to avoid changing the validated path.
             # ----------------------------------------------------------------
+            # wavelet WMMA already emits Python-level for loops (b.const_i32(it*block_k)
+            # is a compile-time constant), so unroll_k_max_iters acts as a guard:
+            # reject via is_valid_spec when K_iters > unroll_k_max_iters.  The IR
+            # emitted here is identical in both cases — the guard just prevents
+            # accidentally building kernels with IR too large to compile quickly.
             with b.scf_if_else(is_math) as (math_ctx, load_ctx):
 
                 # ---- MATH WAVE branch ----
@@ -1878,6 +1924,25 @@ def build_implicit_gemm_conv(
                 emit_lds_write(pending_staged, A_smem, B_smem)
                 pending_staged = None
 
+        final_accs = current_accs
+    elif not spec.async_dma and (
+        spec.unroll_k_max_iters > 0
+        and spec.pipeline in ("mem", "compv3")
+        and (p.K_gemm + block_k - 1) // block_k <= spec.unroll_k_max_iters
+        and (p.K_gemm + block_k - 1) // block_k * k_atoms * mfmas_m * mfmas_n <= 4096
+    ):
+        # Python-unroll for mem/compv3: single-buffer, no scf.for_iter.
+        # Falls back to scf.for_iter when K_iters > unroll_k_max_iters or
+        # when actual unrolled IR cost (K_iters * k_atoms * mfmas_m * mfmas_n)
+        # would exceed 4096 MFMA ops.
+        K_iters = (p.K_gemm + block_k - 1) // block_k
+        current_accs = [v for _, v in accs]
+        for it in range(K_iters):
+            emit_load_phase(b.const_i32(it * block_k), A_smem, B_smem)
+            b.sync()
+            k_off_capture[0] = b.const_i32(it * block_k)
+            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
+            b.sync()
         final_accs = current_accs
     elif not spec.async_dma:
         for_op = b.scf_for_iter(c0, c_K_gemm, c_block_k, accs, iv_name="k0")
