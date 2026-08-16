@@ -141,6 +141,31 @@ class TestD256Gfx942BuilderContract(unittest.TestCase):
         )
         self.assertTrue(ok, msg=why)
 
+    def test_d256_entry_delegates_to_lean_natural_qk_body(self):
+        """HD==256 must build via the lean natural-QK body
+        (``_build_gfx942_4warp_gqa_d256_lean``): K/Q streamed direct-from-global,
+        single-buffer ``V_lds`` staged once, one masked kv-loop. Regression guard for the
+        develop D256 slowdown -- fails if the lean builder is absent or the ``HD==256``
+        entry stops delegating to it (the emitted IR would then diverge)."""
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        self.assertTrue(hasattr(t2d, "_build_gfx942_4warp_gqa_d256_lean"))
+        with _PinArch("gfx942"):
+            spec = au._tiled_spec_from_problem(_d256_problem())
+            via_entry = _lower_kernel_to_llvm_python(
+                t2d.build_gfx942_4warp_gqa(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+            via_lean = _lower_kernel_to_llvm_python(
+                t2d._build_gfx942_4warp_gqa_d256_lean(spec, arch="gfx942"),
+                arch="gfx942",
+                llvm_flavor="llvm20",
+            )
+        self.assertEqual(
+            via_entry, via_lean, "D256 entry must delegate to the lean natural-QK body"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
