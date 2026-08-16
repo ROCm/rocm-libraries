@@ -24,6 +24,7 @@
 #include <array>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,10 @@ inline bool tryAssembler(const IsaVersion&  isaVersion,
         std::cout << "return code: " << rcode << std::endl;
     }
 
+    // 127 means the assembler could not be executed at all (e.g. missing binary),
+    // which is not the same as the assembler rejecting this particular ISA/instruction.
+    if(rcode == 127)
+        throw std::runtime_error("Assembler not found or not executable: " + assemblerPath);
     if(rcode != 0)
         return false;
     return true;

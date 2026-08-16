@@ -33,12 +33,16 @@ exclude_patterns = [
 ]
 
 extensions = ["rocm_docs", "rocm_docs.doxygen"]
+
+# Theme-related settings
 html_theme = "rocm_docs_theme"
 html_theme_options = {
     "flavor": "rocm",
-    "repository_url": "https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipthreads",
+    "repository_url": "https://github.com/ROCm/rocm-libraries",
+    "path_to_docs": "projects/hipthreads/docs",
     "use_repository_button": True,
     "use_issues_button": True,
+    "use_download_button": True,
 }
 
 external_projects_current_project = "hipthreads"
