@@ -28,17 +28,23 @@
 
 namespace rocsparse
 {
-    template <rocsparse_int BLOCK_SIZE, typename T>
-    ROCSPARSE_KERNEL(BLOCK_SIZE)
-    void abs_kernel(rocsparse_int nnz_A, const T* csr_val_A, T* output)
+    template <uint32_t BLOCKSIZE, typename T>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void abs_kernel(int64_t nnz_A, const T* csr_val_A, T* output)
     {
-        rocsparse_int thread_id = hipThreadIdx_x + hipBlockIdx_x * BLOCK_SIZE;
+        const int64_t gid_x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+        const int64_t gid_y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-        if(thread_id >= nnz_A)
+        const int64_t grid_dim_x = hipGridDim_x * hipBlockDim_x;
+
+        // Map a 2D HIP grid to a 1D index
+        const int64_t gid = grid_dim_x * gid_y + gid_x;
+
+        if(gid >= nnz_A)
         {
             return;
         }
 
-        output[thread_id] = rocsparse::abs(csr_val_A[thread_id]);
+        output[gid] = rocsparse::abs(csr_val_A[gid]);
     }
 }

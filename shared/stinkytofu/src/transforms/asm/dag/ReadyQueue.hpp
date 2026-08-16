@@ -41,7 +41,7 @@ using namespace stinkytofu;
 // from BuildDefUseChain.hpp. All callers now use the shared implementation.
 
 // One (rule, register) hazard this node's issue must stamp: this node is a
-// producer under kCdna5HazardRules[ruleIdx] and writes the register at
+// producer under the arch's hazard rule table [ruleIdx] and writes the register at
 // regKey (regDepKey — register type folded in). Filled by the pre-scan.
 struct HazardFlag {
     int ruleIdx;
@@ -60,7 +60,7 @@ struct DAGNode {
     // opinion. Filled by the pre-scan; drives the MSB-affinity tiebreak in pickFreeBest.
     int requiredMsb = -1;
     // Hardware hazard: the exact (rule, register) pairs this node writes that some
-    // later consumer reads, per kCdna5HazardRules (a fixed producer->consumer cycle
+    // later consumer reads, per the arch's hazard rule table (a fixed producer->consumer cycle
     // gap keyed by register file). Filled by the pre-scan via the def-use user walk.
     // Non-empty means this node's issue must stamp the corresponding hazard gate(s)
     // (see CDNA5ReadyQueue::hazardGates_) so the consumer waits the gap out. That
@@ -153,6 +153,11 @@ class ReadyQueue {
 
     // Pick one node from the ready queue based on some strategy.
     virtual DAGNode* pickOne() = 0;
+
+    // Detached fillers to emit before the last picked node.
+    virtual std::vector<StinkyInstruction*> takePendingFillerInsts() {
+        return {};
+    }
 
     // Push a node into the ready queue which is ready to be scheduled
     // (i.e. all its deps are satisfied).

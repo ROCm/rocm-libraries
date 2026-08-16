@@ -29,6 +29,8 @@ subtrees:
     title: std to hip mapping
   - file: reference/limitations
     title: Limitations
+  - file: reference/environment-variables
+    title: Environment variables
   - file: reference/cpp_api
     title: API reference
 

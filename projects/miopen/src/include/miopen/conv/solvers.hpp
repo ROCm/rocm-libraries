@@ -4317,7 +4317,7 @@ struct PerformanceConfigHipImplicitGemmGroupBwdXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
@@ -4421,7 +4421,7 @@ struct PerformanceConfigHipImplicitGemmGroupWrwXdlops
     void DefaultKernelFromList(const ExecutionContext& ctx);
     MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
                                                const miopen::conv::ProblemDescription&);
-    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
     bool IsValidValue() const;
     bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
     {
