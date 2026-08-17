@@ -335,6 +335,67 @@ namespace TensileLite
         }
     }
 
+    StreamKStaticSplit streamKStaticSplit(
+        size_t tiles, size_t itersPerTile, size_t skGrid, int skFullTiles, bool forceDPOnly)
+    {
+        StreamKStaticSplit split;
+        if(skGrid == 0)
+            return split;
+
+        // Two-tile algorithm: each workgroup runs an even number of Stream-K
+        // iterations followed by an even number of data-parallel tiles. When
+        // the grid divides the tile count no Stream-K tiles are needed at all
+        // and every tile is data-parallel. Force-DP-only is a persistent
+        // DP-only use of StreamK=3: skTiles of zero keeps every output tile in
+        // the DP region.
+        const bool bigEnough = tiles > skGrid;
+        uint32_t   skTiles   = forceDPOnly ? 0u : static_cast<uint32_t>(skGrid);
+        if(!forceDPOnly && tiles % skGrid != 0)
+        {
+            skTiles = bigEnough ? static_cast<uint32_t>(skGrid * skFullTiles + tiles % skGrid)
+                                : static_cast<uint32_t>(tiles);
+            // Cap Stream-K tiles at total number of tiles in case of large multiplier
+            skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
+        }
+
+        split.skTiles      = skTiles;
+        split.skItersPerWG = static_cast<uint32_t>(skTiles * itersPerTile / skGrid);
+        split.extraIters   = static_cast<uint32_t>(static_cast<size_t>(skTiles) * itersPerTile
+                                                 - static_cast<size_t>(split.skItersPerWG)
+                                                       * skGrid);
+        return split;
+    }
+
+    bool streamKStaticSplitRowUniform(StreamKStaticSplit const& split,
+                                      size_t                    tiles,
+                                      size_t                    itersPerTile)
+    {
+        // A tile's fold signature is the ordered list of chunk lengths whose
+        // partials are summed to produce it, and two tiles are bitwise equal
+        // for identical inputs exactly when their signatures match. Every tile
+        // in the launch must therefore share one signature. Three ways that
+        // happens:
+        //
+        //  skTiles == 0        force-DP-only, so every tile is whole.
+        //  skItersPerWG == I   every StreamK chunk is one whole tile;
+        //                      equivalent to tiles % grid == 0.
+        //  skTiles == tiles && I % skItersPerWG == 0
+        //                      no data-parallel region, and every tile is cut
+        //                      into I/skItersPerWG equal chunks at identical
+        //                      offsets; equivalent to tiles | grid and
+        //                      (grid/tiles) | I.
+        //
+        // extraIters != 0 means chunks come in two lengths, so the chunk
+        // lattice has no single period and tile boundaries interleave with it
+        // irregularly. skItersPerWG != 0 is not implied by the rest: tiles == 0
+        // is reachable from the grouped-GEMM callers and would otherwise leave
+        // I % skItersPerWG undefined.
+        return split.skTiles == 0
+               || (split.extraIters == 0 && split.skItersPerWG != 0
+                   && (split.skItersPerWG == itersPerTile
+                       || (split.skTiles == tiles && itersPerTile % split.skItersPerWG == 0)));
+    }
+
     enum class KERNELARGTYPE
     {
         NORMAL   = 0,
@@ -1165,21 +1226,14 @@ namespace TensileLite
                     }
                     else
                     {
-                        int  sk3_fullTiles = pAMDGPU->skFullTiles;
-                        bool sk3_bigEnough = sk3_tiles > sk.grid;
-                        bool forceDPOnly   = sizeMapping.streamKForceDPOnly != 0;
-                        sk3_skTiles
-                            = forceDPOnly ? 0u : static_cast<uint32_t>(sk.grid);
-                        if(!forceDPOnly && sk3_tiles % sk.grid != 0)
-                        {
-                            sk3_skTiles
-                                = sk3_bigEnough
-                                      ? sk.grid * sk3_fullTiles + sk3_tiles % sk.grid
-                                      : sk3_tiles;
-                            sk3_skTiles = std::min(
-                                sk3_skTiles, static_cast<uint32_t>(sk3_tiles));
-                        }
-                        sk3_skItersPerWG = sk3_skTiles * sk3_itersPerTile / sk.grid;
+                        const StreamKStaticSplit sk3_split = streamKStaticSplit(
+                            sk3_tiles,
+                            sk3_itersPerTile,
+                            sk.grid,
+                            pAMDGPU->skFullTiles,
+                            sizeMapping.streamKForceDPOnly != 0);
+                        sk3_skTiles      = sk3_split.skTiles;
+                        sk3_skItersPerWG = sk3_split.skItersPerWG;
                     }
 
                     args.template append<uint32_t>("ItersPerTile",
@@ -1234,33 +1288,17 @@ namespace TensileLite
                 {
                     AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                    int fullTiles = pAMDGPU->skFullTiles;
 
-                    bool bigEnough = tiles > sk.grid;
-                    // skTiles is number of Stream-K tiles to complete
-                    // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
-                    // followed by an even number of data-parllel tiles.
-                    // If total tiles is evenly divisble by grid size,
-                    // then no Stream-K tiles are needed, all data-parallel
-                    // Force-DP-only mode is a persistent DP-only use of StreamK=3. Setting
-                    // skTiles to zero makes every output tile stay in the DP region.
-                    bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
-                    uint32_t skTiles = forceDPOnly ? 0 : sk.grid;
-                    // If not evenly divisible, determine number of Stream-K tiles
-                    if(!forceDPOnly && tiles % sk.grid != 0)
-                    {
-                        // Number of data-parallel tiles on each workgroup would be:
-                        // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
-                        skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                        // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                        skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
-                    }
+                    const StreamKStaticSplit split
+                        = streamKStaticSplit(tiles,
+                                             itersPerTile,
+                                             sk.grid,
+                                             pAMDGPU->skFullTiles,
+                                             sizeMapping.streamKForceDPOnly != 0);
 
-                    uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
-
-                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("SKItersPerWG", split.skItersPerWG);
                     args.template append<uint32_t>("skGrid", sk.grid);
-                    args.template append<uint32_t>("skTiles", skTiles);
+                    args.template append<uint32_t>("skTiles", split.skTiles);
                 }
             }
         }
