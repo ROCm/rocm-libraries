@@ -204,14 +204,10 @@ In general, the best practices consist of:
 - Validating and documenting supported operations, hardware requirements, and limitations.
 - Including unit tests and integration tests.
 
-Key files reference
-~~~~~~~~~~~~~~~~~~~
+Example engine plugin implementation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- `Plugin API interface <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h>`_
-- `Example plugin implementation <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/hip-kernel-provider/src/HipKernelContainer.cpp>`_
-- `Example engine manager <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/EngineManager.hpp>`_
-- `Example engine implementation <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/engines/MiopenEngine.cpp>`_
-
+A fully functional example of a hipDNN engine plugin is available `here <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/samples/example_engine_plugin/README.md>`_.
 
 Build configuration
 ~~~~~~~~~~~~~~~~~~~
@@ -447,7 +443,9 @@ Unit tests focus on the internal implementation of your plugin components:
 Integration tests
 -----------------
 
-Integration tests validate end-to-end functionality of your plugin:
+Integration tests validate end-to-end functionality of your plugin. There are currently two categories of integration tests, internal and external.
+
+Internal integration tests are run as part of the plugin's own test suite:
 
 - **Location**: ``<plugin_name>/src/integration_tests/``
 - **Purpose**: Validate correctness of graph execution and accuracy of results.
@@ -460,10 +458,12 @@ Integration tests validate end-to-end functionality of your plugin:
   - A GPU is typically required for meaningful validation. Use the ``SKIP_IF_NO_DEVICES()`` macro to automatically skip the test if no HIP devices are found.
   - Tests are divided into two categories designated by the prefix argument passed to ``INSTANTIATE_TEST_SUITE_P``.
 
+The internal integration tests are typically simple tests to ensure that the plugin is able to properly load and run kernels on GPU hardware. Integrations tests for numerical accuracy are better handled using the external integration tests (below).
+
     - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).
     - **Full**: These tests can contain regression shapes, large shapes, or slow shapes.
 
-For a comprehensive example of an integration test, see `IntegrationGpuBatchnormForwardInference.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp>`_.
+External integrations tests use an external integration test executable written to load plugins and perform end-to-end verification of graph operations using the plugin. For details on how to use the external integration test harness see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md>`_ in the hipDNN repo.
 
 .. note::
 
