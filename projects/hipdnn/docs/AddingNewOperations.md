@@ -107,9 +107,11 @@ Copy-paste this into your PR description.
 - [ ] All test layers from the matrix have at least one test (see Testing Requirements)
 - [ ] Lowering + lifting round-trip + tensor sharing + auto-UID + per-scalar tests present
 - [ ] `TestBackendEnumStringUtils.cpp` updated with new enum entries
-- [ ] Relevant checks from [`TESTING.md`](./TESTING.md) completed with commands from [`Building.md`](./Building.md)
+- [ ] `ninja check` passes.
+- [ ] `ninja format` + `ninja check_format` pass
+- [ ] ASAN build (`cmake -DBUILD_ADDRESS_SANITIZER=ON ..` + `ninja check`) clean
 - [ ] No clang-tidy errors, no compiler warnings
-- [ ] Coverage impact reviewed against the aspirational goal; enforcement status checked in [`KNOWN_GAPS.md`](./KNOWN_GAPS.md)
+- [ ] Test coverage ≥80% (no regression)
 ```
 
 ---
@@ -254,9 +256,15 @@ Each layer has a required test. Every checkbox in the [PR Checklist](#pr-checkli
 > Reuse the shared helpers from [`test_sdk/include/hipdnn_test_sdk/utilities/`](../test_sdk/include/hipdnn_test_sdk/utilities/): `IntegrationTestFixture`, `LoweringTestHelpers`, `LiftingTestHelpers`. Do not roll your own fixtures.
 
 > [!IMPORTANT]
-> Use the sanitizer procedure in [Building](./Building.md#address-sanitizer-build) and choose relevant checks from [Testing](./TESTING.md). Current sanitizer automation and platform limitations are tracked in [Known Gaps](./KNOWN_GAPS.md).
+> Run the AddressSanitizer build before submitting:
+> ```bash
+> cmake -DBUILD_ADDRESS_SANITIZER=ON ..
+> ninja check
+> ```
+> See [Building.md](./Building.md) for the full toolchain invocation.
 
-The 80% coverage figure is an aspirational project goal, not a verified required-status gate. See [Testing Strategy](./TESTING_STRATEGY.md) for the coverage model and [Known Gaps](./KNOWN_GAPS.md) for enforcement status.
+> [!IMPORTANT]
+> Test coverage must remain ≥80% per [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ---
 

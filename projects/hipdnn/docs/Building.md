@@ -269,7 +269,9 @@ cmake --build build/release --target coverage
 Build with `-DBUILD_ADDRESS_SANITIZER=ON` to compile hipDNN and its tests with AddressSanitizer instrumentation.
 
 > [!IMPORTANT]
-> Sanitizer CI coverage is partial. Label-enabled pull-request sanitizer workflows build sanitizer artifacts but do not currently run hipDNN sanitizer tests. Manual dispatches and scheduled device-ASAN workflows can run tests only when suitable sandbox runners are available. The commands below remain the canonical local procedure; see [Known Gaps](./KNOWN_GAPS.md) for automation and platform limitations.
+> ASAN is a manual process; there is no ASAN coverage in CI yet (planned). The ROCm build requirement differs by platform:
+> - **Linux** requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
+> - **Windows** does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
 
 Configure with ASAN enabled, build, then run the tests. `standard` is the recommended tier to run as the ASAN check:
 
@@ -280,9 +282,14 @@ ctest --test-dir build/release -L standard
 ```
 
 > [!NOTE]
-> `standard` is the recommended local ASAN check. Test-category interpretation belongs to [Testing Strategy](./TESTING_STRATEGY.md#ci-model-and-dated-workflow-snapshot); current sanitizer automation and platform limitations are tracked in [Known Gaps](./KNOWN_GAPS.md).
+> Any of the `quick`, `standard`, `comprehensive`, and `full` tiers is expected to run cleanly (no ASAN errors) under an ASAN build; `standard` is simply the default check. See [Testing Strategy § CI Model and Dated Workflow Snapshot](./TESTING_STRATEGY.md#ci-model-and-dated-workflow-snapshot) for what each tier covers.
 
-Tests that cannot run under ASAN on the target are excluded either by the `SKIP_IF_ASAN()` GTest macro or by disabling their ctest registration when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. An ASAN run reports those tests as skipped rather than failed.
+**Not every GPU architecture supports ASAN** on both Linux and Windows. Tests that cannot run under ASAN on the target are excluded one of two ways: individual tests guard themselves with the `SKIP_IF_ASAN()` GTest macro (so they skip at runtime under an ASAN build), or their ctest registration is disabled when configuring with `-DBUILD_ADDRESS_SANITIZER=ON`. Either way, an ASAN run reports the excluded tests as skipped rather than failing.
+
+**Current status:**
+
+- **Linux** - the ASAN test suite runs cleanly; all tests that are problematic under ASAN have been skipped, so a green run is expected.
+- **Windows** - ASAN is supported and builds/runs, but a few issues remain that are expected to be resolved soon, so a fully clean ASAN run is not yet available on Windows.
 
 #### Windows notes
 
@@ -290,18 +297,6 @@ The ASAN configure/build/test commands above apply on Windows as well (run from 
 
 - ctest sets up ASAN runtime discovery for you: the AddressSanitizer runtime DLL, the build's `bin` directory, and the ROCm `bin` directory are prepended to `PATH` for each test via CTest, so you do not need to add the Clang resource `lib/windows` directory to `PATH` by hand.
 - To reduce build time you may add `-DENABLE_CLANG_TIDY=OFF -DENABLE_CLANG_FORMAT=OFF` to the configure step, and set `-DGPU_TARGETS=<target>` for your GPU (auto-detection is not supported on Windows).
-
-### Thread Sanitizer Build
-
-ThreadSanitizer is supported for standalone Linux builds and instruments host-side data races. It cannot be enabled together with AddressSanitizer.
-
-```bash
-cmake --preset release -DBUILD_THREAD_SANITIZER=ON
-cmake --build build/release
-ctest --test-dir build/release -L standard --output-on-failure
-```
-
-No checked-in hipDNN TSAN CI lane exists. See [Known Gaps](./KNOWN_GAPS.md) for current automation limits.
 
 ### Disabling JSON Support
 By default, hipDNN includes JSON serialization support via [nlohmann_json](https://github.com/nlohmann/json). To build without the nlohmann_json dependency:
@@ -408,10 +403,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For contributor test selection, see the [provider or integration superbuild path](./TESTING.md#provider-or-integration-superbuild-path).
+Root-level `ctest` (i.e. `ctest --test-dir build` from the repository root) only sees the aggregated tests when `ROCM_LIBS_ENABLE_ROOT_CTEST` is `ON`. Set it with `-D` at configure time (as above) or via the environment before a first or fresh configure. The per-component `ninja` check targets do not require it. For test category targets and other details, see [Testing](./TESTING.md#development-workflow).
 
 > [!NOTE]
-> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or subset of tests using the targets in [Build Targets](#build-targets).
+> `hipdnn-dev-all` builds every provider, the integration tests, and the samples, so a bare `ctest` runs a large and potentially redundant suite. Scope the run to a category or a subset of tests instead; see [Development Workflow](./TESTING.md#development-workflow) for the available test paths.
 
 To build only hipDNN core from the superbuild (the same components as the [standalone build](#2-build-hipdnn), without the providers), use the `hipdnn` preset:
 

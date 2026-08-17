@@ -624,15 +624,55 @@ This function uses a two-call pattern:
 
 ## How to Test Plugins
 
-Provider tests follow three canonical references:
+> [!IMPORTANT]
+> Testing is crucial for ensuring plugin reliability and correctness. Plugins should include both unit tests and integration tests to validate their functionality.
 
-- [Testing](./TESTING.md) is the contributor action guide.
-- [Testing Strategy](./TESTING_STRATEGY.md) defines test layers and validation ownership.
-- [Coding Style and Naming Guidelines](./CodingStyleAndNamingGuidelines.md#11-test-naming-guidelines) defines test names.
+### Test Structure
 
-Keep provider-internal unit tests focused on provider implementation details. For graph execution and numerical correctness, use the shared cross-provider integration suite. New “run this graph and compare it with a reference” cases should be authored as data-driven bundles; provider-local C++ integration tests are reserved for special cases that bundles cannot express, such as error paths, provider-specific API behavior, determinism, and benchmarking knobs.
+Following the [Testing Strategy](./TESTING_STRATEGY.md), plugins should organize tests as follows:
 
-Bundle authoring is the default, but bundle execution remains opt-in and is not yet wired into provider CI. See the [provider integration test README](../../../dnn-providers/integration-tests/README.md) for bundle formats, tier mechanics, local enablement, provider wiring, and current execution status. Related limitations are indexed in [Known Gaps](./KNOWN_GAPS.md).
+```
+your_kernel_plugin_project/
+├── tests/                    # Unit tests
+│   ├── TestEngine.cpp
+│   ├── TestKernels.cpp
+│   └── TestUtilties.cpp
+└── integration_tests/        # End-to-end integration tests
+    ├── Operation1Test.cpp
+    └── Operation2Test.cpp
+```
+
+### Unit Tests
+
+Unit tests focus on the internal implementation of your plugin components:
+
+- **Location**: `plugins/<plugin_name>/tests/`
+- **Purpose**: Test individual components in isolation (engines, utilities, kernel logic)
+- **Requirements**:
+  - Must be fast-running
+  - GPU operations must be marked with `SKIP_IF_NO_DEVICES()` macro
+  - Use mocking/stubbing for dependencies where appropriate
+  - Should work on both Windows and Linux
+
+### Integration Tests
+
+Integration tests validate end-to-end functionality of your plugin:
+
+- **Location**: `plugins/<plugin_name>/integration_tests/`
+- **Purpose**: Validate correctness of graph execution and accuracy of results
+- **Requirements**:
+  - Test complete operation graphs
+  - Validate against reference implementations
+  - Test different data types, layouts, dimensions, and edge-cases for each
+  - Enable tests for all supported ASICs
+  - GPU typically required for meaningful validation
+  - Tests are divided into two categories described by the prefix argument passed to INSTANTIATE_TEST_SUITE_P
+    - **Smoke** - These tests are designed to test features using the smallest possible shape and run quickly (combined smoke test run time must be under 5 mins)
+    - **Full** - These tests can contain regression shapes, large shapes, or slow shapes
+
+For a comprehensive example of an integration test, see: [`dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp`](../../../dnn-providers/miopen-provider/integration_tests/IntegrationGpuBatchnormForwardInference.cpp)
+
+Moreover, see our [general testing principles](./TESTING_STRATEGY.md#principles).
 
 ## Example: [MIOpen Provider Plugin](../../../dnn-providers/miopen-provider/)
 
