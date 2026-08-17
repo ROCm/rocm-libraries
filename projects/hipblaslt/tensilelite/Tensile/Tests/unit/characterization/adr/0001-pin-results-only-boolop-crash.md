@@ -1,7 +1,7 @@
 # ADR 0001: Pin the `--results-only` constraint crash in TensileBenchmarkCluster
 
 Status:  Accepted
-Defect:  AIHPBLAS-XXXX (to file)
+Defect:  AIHPBLAS-4298
 
 ## Context
 While characterizing `TensileBenchmarkCluster`, the `--results-only` flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep or RunBenchmarkStep or RunResultsStep` during construction.

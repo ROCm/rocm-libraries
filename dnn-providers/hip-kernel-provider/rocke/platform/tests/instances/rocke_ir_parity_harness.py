@@ -126,6 +126,7 @@ def build_conv(
     pipeline="mem",
     epilogue="default",
     groups=1,
+    vector_size_c=None,
 ):
     def _build():
         from rocke.instances.common.conv_implicit_gemm import (
@@ -150,6 +151,7 @@ def build_conv(
             pipeline=pipeline,
             epilogue=epilogue,
             groups=groups,
+            vector_size_c=vector_size_c,
         )
         return build_implicit_gemm_conv(spec, arch=arch)
 
@@ -395,7 +397,7 @@ def _d256_problem():
         max_seqlen_q=4096,
         max_seqlen_k=4096,
         dtype="bf16",
-        num_sms=120,
+        num_cus=120,
     )
 
 
@@ -404,23 +406,32 @@ def _pinned_attention_arch(arch):
     """Pin the *memoized runtime device arch* the D256 fast routes gate on.
 
     Those routes consult ``_resolve_attention_arch`` -- NOT any per-case argument
-    -- and the spec builder holds a *bound* import of it, so both bindings are
-    patched wholesale (per its docstring: "Tests that monkeypatch this function
-    replace it wholesale"). Without this a non-gfx950 host silently selects the
-    FALLBACK spec and the recorded sha becomes host-dependent.
+    -- so a non-gfx950 host would otherwise select the FALLBACK spec and the
+    recorded sha would become host-dependent. Two things are pinned, and the
+    second is the load-bearing one:
+
+    * the function is rebound wholesale on its defining module (per its
+      docstring: "Tests that monkeypatch this function replace it wholesale");
+    * ``_RESOLVED_ATTENTION_ARCH``, the process-wide memo the function returns
+      before doing anything else, is set too. The memo is what makes the pin
+      independent of *how* a consumer reached the resolver: the spec builder
+      goes through its ``attention_unified`` module handle today, but a bound
+      import anywhere would freeze the function reference and see only the memo.
+      This harness is installed standalone (``platform/CMakeLists.txt``) and run
+      by ``rocke_installed_golden_test.py`` without the library test tree, so it
+      cannot delegate that invariant to a guard test.
     """
-    import builders.common.attention_spec_builder as asb
     import kernels.common.attention_unified as au
 
     pin = lambda: arch  # noqa: E731
-    o_au, o_asb = au._resolve_attention_arch, asb._resolve_attention_arch
+    o_fn, o_memo = au._resolve_attention_arch, au._RESOLVED_ATTENTION_ARCH
     au._resolve_attention_arch = pin
-    asb._resolve_attention_arch = pin
+    au._RESOLVED_ATTENTION_ARCH = arch
     try:
         yield
     finally:
-        au._resolve_attention_arch = o_au
-        asb._resolve_attention_arch = o_asb
+        au._resolve_attention_arch = o_fn
+        au._RESOLVED_ATTENTION_ARCH = o_memo
 
 
 def build_attention_d256_gfx950(arch):
@@ -810,6 +821,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -846,6 +858,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -863,6 +876,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -880,6 +894,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -897,6 +912,7 @@ def cases():
             tile_m=32,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # gfx90a conv mirrors the gfx942 MFMA path (wave64, 16x16x16 atom). gfx1250
@@ -917,6 +933,7 @@ def cases():
             tile_m=64,
             tile_n=32,
             tile_k=16,
+            epilogue="cshuffle",
         ),
     )
     # pipeline=basic: single-buffer global-read/compute overlap on gfx950.
@@ -937,6 +954,7 @@ def cases():
             tile_k=32,
             pipeline="basic",
             epilogue="default",
+            vector_size_c=1,
         ),
     )
     add(
@@ -1214,6 +1232,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1230,6 +1249,7 @@ def cases():
             k1=32,
             pool_tile_h=4,
             pool_tile_w=4,
+            epilogue="cshuffle",
         ),
     )
     add(
@@ -1550,6 +1570,20 @@ def cases():
                 "ragged": True,
                 "persistent": True,
                 "num_persistent": 256,
+            },
+        ),
+        # paged-KV load path (block_tables indirection). Gates the PAGED DSL through
+        # BOTH the golden (Python lowering byte-stability) and the cpp/python
+        # byte-identity gate. fp16 D128 sliding-window single-seq (the validated
+        # cohort); num_kv_blocks = seqlen_kv / block_size (32 = 512 / 16).
+        (
+            "paged_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
             },
         ),
     ):

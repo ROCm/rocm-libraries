@@ -370,7 +370,7 @@ def analyze(
     verify: bool = True,
     bench_freq: bool = False,
     device: int | None = None,
-) -> pd.DataFrame | None:
+) -> Tuple[pd.DataFrame | None, pd.DataFrame]:
     """Benchmark and analyze optimized kernels against reference libraries.
 
     Compares performance of tuned kernels vs reference implementation,
@@ -402,8 +402,8 @@ def analyze(
             If set, overrides devices.
 
     Returns:
-        pd.DataFrame | None: DataFrame with filtered kernels that meet criteria,
-            or None if no improvements found.
+        Tuple[pd.DataFrame | None, pd.DataFrame]: Tuple containing the final filtered DataFrame 
+            and the full DataFrame with winner column.
 
     Note:
         - Creates raw_results.csv with all benchmark data.
@@ -480,9 +480,12 @@ def analyze(
     if stats["e2e"].get("e2e_uplift_pct") is not None:
         logger.info(f"Weighted GEMM uplift of {stats['e2e']['e2e_uplift_pct']:.4f}%")
 
+    df["winner"] = "reference"
+    df.loc[mask, "winner"] = "tuned"
+    df = df.drop("valid", axis=1, errors="ignore")
     if mask.sum() == 0:
         logger.info(f"No kernels improve over the base library")
-        return None
+        return None, df
 
     final_enriched.drop(["valid", "lib"], axis=1, errors="ignore").to_csv(
         output_dir / "final_results.csv", index=False
@@ -493,4 +496,4 @@ def analyze(
         output_dir / "dashboard_data.csv", index=False
     )
 
-    return final_df.drop("valid", axis=1, errors="ignore")
+    return final_df.drop("valid", axis=1, errors="ignore"), df
