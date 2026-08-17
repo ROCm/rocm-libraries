@@ -1454,7 +1454,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        // Memory access error
+        // Memory access runtime error on gfx1250 (inconsistent across runs)
         // TODO: need fix
         if constexpr(LargeTensors)
         {

@@ -12,7 +12,7 @@ namespace ck {
 template <typename S, index_t NX, index_t NY, typename S2 = void>
 struct transpose_vectors;
 
-// transpose fp16 2x2
+// transpose b16 (bf16/fp16) 2x2
 template <typename T>
 __device__ void transpose_b16_2x2(const T& x0, const T& x1, T& y0, T& y1)
 {
