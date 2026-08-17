@@ -67,19 +67,32 @@ set(CK_IMPL_SOURCES
     ck_depthwise_bwd_data_impl.cpp
 )
 
-# Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
-set(CK_PLUGIN_TARGETS)
+# Group the requested GPU targets by base arch. The runtime loader strips target
+# features and looks up one .so per base arch, so a base arch that was requested
+# with several feature variants (e.g. gfx942:xnack- and gfx942:xnack+) must yield
+# ONE library carrying a code object for every variant. Keying the library on the
+# base arch and skipping duplicates would silently drop every variant after the
+# first, shipping a plugin whose code object does not match the requested xnack
+# setting.
+set(_CK_BASE_ARCHS)
 foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     ck_impl_base_arch("${gpu_target}" arch_base)
+    if(NOT arch_base IN_LIST _CK_BASE_ARCHS)
+        list(APPEND _CK_BASE_ARCHS ${arch_base})
+    endif()
+    list(APPEND _CK_VARIANTS_${arch_base} "${gpu_target}")
+endforeach()
+
+# Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
+set(CK_PLUGIN_TARGETS)
+foreach(arch_base IN LISTS _CK_BASE_ARCHS)
+    set(_arch_variants ${_CK_VARIANTS_${arch_base}})
+    list(GET _arch_variants 0 gpu_target)
     if(MIOPEN_CK_UNBUNDLE_PER_ARCH)
         miopen_sanitize_arch("${gpu_target}" arch_safe)
     endif()
 
     set(lib_name "MIOpenCKGroupedConv_${arch_base}")
-
-    if(TARGET ${lib_name})
-        continue()
-    endif()
 
     list(APPEND CK_PLUGIN_TARGETS ${lib_name})
     add_library(${lib_name} SHARED ${CK_IMPL_SOURCES})
@@ -100,10 +113,14 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
         target_link_libraries(${lib_name} PRIVATE "-Wl,--exclude-libs,ALL")
     endif()
 
-    # Full target string needed for correct device codegen
-    target_compile_options(${lib_name} PRIVATE
-        --offload-arch=${gpu_target}
-    )
+    # Full target strings needed for correct device codegen: one --offload-arch
+    # per requested feature variant of this base arch, so a single plugin carries
+    # a code object for every variant the build was asked for.
+    set(_offload_flags)
+    foreach(_variant IN LISTS _arch_variants)
+        list(APPEND _offload_flags --offload-arch=${_variant})
+    endforeach()
+    target_compile_options(${lib_name} PRIVATE ${_offload_flags})
 
     # Mark as building the DLL for dllexport on Windows
     target_compile_definitions(${lib_name} PRIVATE CK_IMPL_BUILDING_DLL)
@@ -145,11 +162,23 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # Link against MIOpen for shared types (ConvSolution, InvokerFactory, etc.)
     target_link_libraries(${lib_name} PRIVATE MIOpen)
 
-    # Install alongside MIOpen
+    # Install alongside MIOpen. The plugins are dlopen'd through their $ORIGIN
+    # rpath, so they must follow libMIOpen.so: under ASAN packaging rocm-cmake
+    # installs it into lib/asan (ROCMInstallTargets.cmake), and a plugin left in
+    # lib/ would never be found.
     set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")
+    if(ENABLE_ASAN_PACKAGING)
+        set(_plugin_libdir ${CMAKE_INSTALL_LIBDIR}/asan)
+        set(_plugin_bindir ${CMAKE_INSTALL_BINDIR}/asan)
+    else()
+        set(_plugin_libdir ${CMAKE_INSTALL_LIBDIR})
+        set(_plugin_bindir ${CMAKE_INSTALL_BINDIR})
+    endif()
+    # No COMPONENT: CMAKE_INSTALL_DEFAULT_COMPONENT_NAME is set to "runtime" by
+    # rocm-cmake, which is the same component libMIOpen.so is installed under.
     install(TARGETS ${lib_name}
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION ${_plugin_libdir}
+        RUNTIME DESTINATION ${_plugin_bindir}
     )
 endforeach()
 
