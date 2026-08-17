@@ -20,9 +20,9 @@ rocFFT transforms can take a variety of parameters, such as length, precision, v
 options, etc.  These are encoded into a human-readable string referred to as a FFT token.  For
 example,
 
-'''
+```
 complex_forward_len_8_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8_odist_8_ioffset_0_0_ooffset_0_0
-'''
+```
 
 describes a complex forward FFT of length 8, in-place, using single-precision, and input and output
 strides of 1 (with other information about batch distance and offset included as well).  This maps
@@ -47,7 +47,7 @@ host reference FFT library also allocates memory internally, which, in the case 
 not something from which rocfft-test can recover.  (Host-side OOM errors are generally bad news.)
 We also maintain a safety margin on how much memory we allocate in order to improve test robustness.
 
-The number of failed allocations is tracked and reported at the end of rocfft-test's execution.
+The number of failed allocations is tracked and reported at the end of `rocfft-test`'s execution.
 There is a command-line option to report allocation errors as failures instead of just skipped
 tests.
 
@@ -65,13 +65,13 @@ Correctness tests verify the behaviour of the library infrastructure.  For examp
 tests cover API behaviour for cases where a user man provide invalid parameters, or whether internal
 library infrastructure behaves as expected.
 
-The API correctness is handled by rocfft-test, where gtest names are 'rocfft_UnitTest.*'
+The API correctness is handled by rocfft-test, where gtest names are `rocfft_UnitTest.*`
 
 Testing for internal library correctness is handled by an internal ctest framework, which is
-controlled by the cmake option 'ROCFFT_BUILD_INTERNAL_TESTS', and the test executable is
-'library/src/tests/rocfft-internal-test'.  Some more computationally expensive tests (the array
+controlled by the cmake option `ROCFFT_BUILD_INTERNAL_TESTS`, and the test executable is
+`library/src/tests/rocfft-internal-test`.  Some more computationally expensive tests (the array
 format validation tests) are provided by rocfft-test under the gtest filter
-'reference_test/valid_length_stride.*'.
+`reference_test/valid_length_stride.*`.
 
 
 ### Bit-wise reproducibility tests
@@ -110,9 +110,9 @@ that this does not occur.
 Multi-process tests require a different execution path than single-process tests.  Accuracy tests
 are handled by rocfft-mpi-worker using the --accuracy option.  Multi-process tests target a large
 range of hardware configurations, and it is wasteful to reserve O(10^3) GPUs when running a two-GPU
-test.  The script 'scripts/rocfftslurmtest.py' divides the accuracy tests by hardware
-configurations, and submits this to slurm, where the script 'scripts/rocfft_mpi_test.py' launches
-'rocfft-mpi-worker' to test the transforms.  The use of a python script also allows recovery from
+test.  The script `scripts/rocfftslurmtest.py` divides the accuracy tests by hardware
+configurations, and submits this to slurm, where the script `scripts/rocfft_mpi_test.py` launches
+`rocfft-mpi-worker` to test the transforms.  The use of a python script also allows recovery from
 hangs and crashes, which are unfortunately common in distributed computing software development.
 The multi-process accuracy testing framework currently relies on reference computation on a single
 host node, which restricts the size of problems which can be tested.
@@ -161,6 +161,6 @@ but the mean minus the standard deviation is often negative, which is not only u
 difficult to plot when using a logarithmic scale.  Instead, we use bootstrap resampling to compute
 the confidence intervals on the median execution time.
 
-The above features are implemented in the python script 'scripts/perf/rocfft-perf', which also
-includes 'scripts/perf/suites.py', which defines the performance testing suites for rocFFT.
+The above features are implemented in the python script `scripts/perf/rocfft-perf`, which also
+includes `scripts/perf/suites.py`, which defines the performance testing suites for rocFFT.
 Multi-process performance testing is still in development.
