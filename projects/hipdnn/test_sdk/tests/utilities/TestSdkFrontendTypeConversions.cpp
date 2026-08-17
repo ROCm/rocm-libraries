@@ -178,6 +178,43 @@ TEST(TestSdkFrontendTypeConversions, CreateTensorFp4PackedWhenRequested)
     EXPECT_THROW(tensor->elementSize(), std::logic_error);
 }
 
+TEST(TestSdkFrontendTypeConversions, CreateTensorFp6UnpackedByDefault)
+{
+    const std::vector<int64_t> dims = {2, 4};
+    const std::vector<int64_t> strides = {4, 1};
+
+    auto e2m3 = createTensor(fe::DataType::FP6_E2M3, dims, strides);
+    auto e3m2 = createTensor(fe::DataType::FP6_E3M2, dims, strides);
+
+    ASSERT_NE(e2m3, nullptr);
+    ASSERT_NE(e3m2, nullptr);
+    EXPECT_EQ(e2m3->dims(), dims);
+    EXPECT_EQ(e3m2->strides(), strides);
+    // Unpacked: one 6-bit code per byte, so per-element size is well-defined.
+    EXPECT_EQ(e2m3->elementSize(), sizeof(hipdnn_data_sdk::types::fp6_e2m3));
+    EXPECT_EQ(e3m2->elementSize(), sizeof(hipdnn_data_sdk::types::fp6_e3m2));
+}
+
+TEST(TestSdkFrontendTypeConversions, CreateTensorFp6PackedWhenRequested)
+{
+    const std::vector<int64_t> dims = {2, 4};
+    const std::vector<int64_t> strides = {4, 1};
+
+    auto e2m3 = createTensor(fe::DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true);
+    auto e3m2 = createTensor(fe::DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true);
+
+    ASSERT_NE(e2m3, nullptr);
+    ASSERT_NE(e3m2, nullptr);
+    EXPECT_EQ(e2m3->dims(), dims);
+    // The packed FP6 variants store four values per three bytes and have no
+    // integer per-element size, which distinguishes them from the unpacked
+    // tensors.
+    EXPECT_THROW(e2m3->elementSize(), std::logic_error);
+    EXPECT_THROW(e3m2->elementSize(), std::logic_error);
+    EXPECT_TRUE(e2m3->isPacked());
+    EXPECT_TRUE(e3m2->isPacked());
+}
+
 TEST(TestSdkFrontendTypeConversions, PackSubByteElementsIgnoredForNonSubByteTypes)
 {
     const std::vector<int64_t> dims = {2, 2};
@@ -195,16 +232,11 @@ TEST(TestSdkFrontendTypeConversions, PackSubByteElementsThrowsForUnimplementedSu
     const std::vector<int64_t> dims = {2, 2};
     const std::vector<int64_t> strides = {2, 1};
 
+    // INT4 is the only sub-byte type still lacking a packed representation.
     EXPECT_THROW(createTensor(fe::DataType::INT4, dims, strides, /*packSubByteElements=*/true),
-                 std::runtime_error);
-    EXPECT_THROW(createTensor(fe::DataType::FP6_E2M3, dims, strides, /*packSubByteElements=*/true),
-                 std::runtime_error);
-    EXPECT_THROW(createTensor(fe::DataType::FP6_E3M2, dims, strides, /*packSubByteElements=*/true),
                  std::runtime_error);
 
     EXPECT_NO_THROW(createTensor(fe::DataType::INT4, dims, strides));
-    EXPECT_NO_THROW(createTensor(fe::DataType::FP6_E2M3, dims, strides));
-    EXPECT_NO_THROW(createTensor(fe::DataType::FP6_E3M2, dims, strides));
 }
 
 // ============================================================================

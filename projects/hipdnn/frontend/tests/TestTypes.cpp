@@ -88,6 +88,8 @@ TEST(TestTypes, GetDataTypeEnumFromType)
     EXPECT_EQ(getDataTypeEnumFromType<int32_t>(), DataType::INT32);
     EXPECT_EQ(getDataTypeEnumFromType<int8_t>(), DataType::INT8);
     EXPECT_EQ(getDataTypeEnumFromType<fp4_e2m1>(), DataType::FP4_E2M1);
+    EXPECT_EQ(getDataTypeEnumFromType<fp6_e2m3>(), DataType::FP6_E2M3);
+    EXPECT_EQ(getDataTypeEnumFromType<fp6_e3m2>(), DataType::FP6_E3M2);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e4m3>(), DataType::FP8_E4M3);
     EXPECT_EQ(getDataTypeEnumFromType<fp8_e5m2>(), DataType::FP8_E5M2);
     EXPECT_EQ(getDataTypeEnumFromType<int64_t>(), DataType::INT64);
