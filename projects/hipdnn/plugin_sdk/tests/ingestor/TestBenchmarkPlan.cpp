@@ -174,6 +174,8 @@ TEST(TestIngestorBenchmarkPlan, BenchmarkingOffBuildsAPlainPlanThatLaunchesTheRa
 /// what the null stream actually does on a given machine.
 struct BenchmarkTestHandle
 {
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) — models a real
+    // handle's instance accessor, which is what HasGetStream detects.
     hipStream_t getStream() const
     {
         return nullptr;

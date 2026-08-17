@@ -53,7 +53,8 @@ public:
     {
         if(_event != nullptr)
         {
-            hipEventDestroy(_event);
+            // Nothing actionable in a destructor; the event is being discarded anyway.
+            static_cast<void>(hipEventDestroy(_event));
         }
     }
 
@@ -247,7 +248,7 @@ private:
             return std::nullopt;
         }
 
-        const hipStream_t stream = handle.getStream();
+        const auto stream = handle.getStream();
         if(hipEventRecord(start.get(), stream) != hipSuccess)
         {
             return std::nullopt;

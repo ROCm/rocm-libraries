@@ -744,6 +744,8 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeThreeKernelWorkspaceSta
 /// BenchmarkPlan::execute()'s HIP calls, only its constructor's workspace query.
 struct StreamCapableHandle
 {
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) — models a real
+    // handle's instance accessor, which is what HasGetStream detects.
     hipStream_t getStream() const
     {
         return nullptr;
@@ -1187,8 +1189,8 @@ std::string variantCaseName(const ::testing::TestParamInfo<OverrideVariantCase>&
     std::string name = "Case" + std::to_string(info.index) + "_";
     for(const char character : info.param.envValue)
     {
-        name += std::isalnum(static_cast<unsigned char>(character)) ? std::string(1, character)
-                                                                    : std::string("_");
+        name += std::isalnum(static_cast<unsigned char>(character)) != 0 ? std::string(1, character)
+                                                                         : std::string("_");
     }
     if(name.back() == '_' && info.param.envValue.empty())
     {
