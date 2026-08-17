@@ -31,10 +31,9 @@ namespace hipdnn_data_sdk::utilities
 /// `Tensor<fp4_e2m1>::fillWithRandomValues` exactly: the same RNG sequence is
 /// generated in linear index order and packed into nibbles.
 ///
-/// Only dense (packed-stride) layouts are supported: a padded sub-byte layout
-/// has no well-defined nibble packing. Element-wise host access (`operator()`,
-/// iteration dereference) is not provided; this type is a buffer holder for the
-/// device variant pack.
+/// Only dense (packed-stride) layouts are supported. Element-wise host access
+/// (`operator()`, iteration dereference) is not provided; this type is a buffer
+/// holder for the device variant pack.
 class PackedFp4Tensor : public ITensor
 {
 public:
