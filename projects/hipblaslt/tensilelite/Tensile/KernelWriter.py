@@ -6754,6 +6754,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters1st["MX"]))
             module.add(self.resetTDMDescriptorForTail(kernel, tensorParameters2nd["MX"]))
+        # Metadata always uses the non-wave-separated descriptor (see initTDMDescriptor),
+        # regardless of NumWaves, so its tail reset is unconditional on the branch above.
+        if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and kernel["enableTDMMetadata"]:
+          module.add(self.resetTDMDescriptorForTail(kernel, tPM))
 
       # LDS mem tokens: baseline buffer 0 for tail-loop codegen
       self.resetLdsTokensForTailLoop()
@@ -11865,7 +11869,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.states.dcpTokenGate:
       for stages in self.states.memTokenLdsDcp.values():
         tokens.extend(stages)
-    if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
+    if kernel["TDMSplit"]:
       for row in self.states.memTokenLdsSplit:
         tokens.extend(row)
     return sorted(set(tokens))
