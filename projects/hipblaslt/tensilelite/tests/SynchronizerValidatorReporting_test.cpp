@@ -5,6 +5,7 @@
 
 #include "ResultReporter.hpp"
 #include "SynchronizerValidator.hpp"
+#include "TimingEvents.hpp"
 
 #include <memory>
 #include <string>
@@ -26,15 +27,15 @@ namespace
         {
             stringReports.emplace_back(key, value);
         }
-        void reportValue_uint(std::string const&, uint64_t) override { }
-        void reportValue_int(std::string const&, int64_t) override { }
-        void reportValue_double(std::string const&, double) override { }
-        void reportValue_sizes(std::string const&, std::vector<size_t> const&) override { }
+        void reportValue_uint(std::string const&, uint64_t) override {}
+        void reportValue_int(std::string const&, int64_t) override {}
+        void reportValue_double(std::string const&, double) override {}
+        void reportValue_sizes(std::string const&, std::vector<size_t> const&) override {}
         void reportValue_vecOfSizes(std::string const&,
                                     std::vector<std::vector<size_t>> const&) override
         {
         }
-        void finalizeReport() override { }
+        void finalizeReport() override {}
     };
 
     // Exposes the protected reporting state so the test can drive
@@ -55,6 +56,56 @@ namespace
         vm["check-streamk-sync"].value() = true;
         return vm;
     }
+
+    po::variables_map disabledArgs()
+    {
+        po::variables_map vm;
+        vm["check-streamk-sync"].value() = false;
+        return vm;
+    }
+
+    // validateWarmups ignores the events; TimingEvents(0, 0) creates none, so
+    // this needs no GPU.
+    void driveWarmup(SynchronizerValidator& validator)
+    {
+        TimingEvents events(0, 0);
+        validator.validateWarmups(nullptr, events, events);
+    }
+}
+
+// With NumElementsToValidate 0 and SyncsPerBenchmark 0, ReferenceValidator and
+// BenchmarkTimer both decline to run the solution. The validator must drive the
+// loop itself or its warmup -- and so the whole check -- never happens.
+TEST(SynchronizerValidatorReporting, EnabledValidatorRequestsARunInSolution)
+{
+    TestableSynchronizerValidator validator(enabledArgs());
+
+    validator.preSolution(nullptr);
+    EXPECT_TRUE(validator.needMoreRunsInSolution());
+}
+
+// One pass only, so it never extends a loop another listener is driving.
+TEST(SynchronizerValidatorReporting, RunIsRequestedOncePerSolution)
+{
+    TestableSynchronizerValidator validator(enabledArgs());
+
+    validator.preSolution(nullptr);
+    ASSERT_TRUE(validator.needMoreRunsInSolution());
+    driveWarmup(validator);
+    EXPECT_FALSE(validator.needMoreRunsInSolution());
+
+    // ...and it asks again for the next solution.
+    validator.preSolution(nullptr);
+    EXPECT_TRUE(validator.needMoreRunsInSolution());
+}
+
+TEST(SynchronizerValidatorReporting, DisabledValidatorRequestsNothing)
+{
+    TestableSynchronizerValidator validator(disabledArgs());
+
+    validator.preSolution(nullptr);
+    EXPECT_FALSE(validator.needMoreRunsInSolution());
+    EXPECT_EQ(validator.numWarmupRuns(), 0u);
 }
 
 TEST(SynchronizerValidatorReporting, CleanSolutionReportsNothing)
