@@ -213,7 +213,7 @@ TEST(TestSdpaBackwardAttributes, LogicalAndStrictEquality)
     attr1.set_causal_mask(true);
     attr1.set_causal_mask_bottom_right(false);
     attr1.dropout_probability = 0.1f;
-    attr1.set_attn_scale_value(0.125f);
+    attr1.set_attn_scale(0.125f);
     attr1.set_diagonal_band_left_bound(5);
     attr1.set_diagonal_band_right_bound(0);
     attr1.set_diagonal_alignment(hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
@@ -261,7 +261,7 @@ TEST(TestSdpaBackwardAttributes, LogicalAndStrictEquality)
     attr2.set_causal_mask(true);
     attr2.set_causal_mask_bottom_right(false);
     attr2.dropout_probability = 0.1f;
-    attr2.set_attn_scale_value(0.125f);
+    attr2.set_attn_scale(0.125f);
     attr2.set_diagonal_band_left_bound(5);
     attr2.set_diagonal_band_right_bound(0);
     attr2.set_diagonal_alignment(hipdnn_frontend::DiagonalAlignment::TOP_LEFT);
@@ -351,10 +351,10 @@ TEST(TestSdpaBackwardAttributes, LogicalAndStrictEquality)
     attr2.dropout_probability = 0.1f; // Revert
 
     // attn_scale_value mismatch
-    attr2.set_attn_scale_value(0.25f);
+    attr2.set_attn_scale(0.25f);
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_FALSE(attr1.logicallyEquals(attr2));
-    attr2.set_attn_scale_value(0.125f); // Revert
+    attr2.set_attn_scale(0.125f); // Revert
 
     // left_bound mismatch
     attr2.set_diagonal_band_left_bound(10);
@@ -384,7 +384,7 @@ TEST(TestSdpaBackwardAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(sparse1.logicallyEquals(sparse2));
 
     // Set-vs-unset should differ
-    sparse2.set_attn_scale_value(0.1f);
+    sparse2.set_attn_scale(0.1f);
     EXPECT_FALSE(sparse1 == sparse2);
     EXPECT_FALSE(sparse1.logicallyEquals(sparse2));
 
@@ -399,6 +399,8 @@ TEST(TestSdpaBackwardAttributes, LogicalAndStrictEquality)
     // Expecting: strict evaluation fails, but functional logical comparison passes
     EXPECT_FALSE(attr1 == attr2);
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
+}
+
 //==============================================================================
 // cuDNN source-compatibility setters (native surface)
 //==============================================================================
