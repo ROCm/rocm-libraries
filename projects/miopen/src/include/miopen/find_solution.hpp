@@ -54,6 +54,11 @@
 /// Elevate log messages for Search to warnings.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_WARN_SEARCH)
 
+// Restore the legacy lgbm_pcfg walk behavior where a "" (solver-default) entry
+// ranked ahead of real configs terminates the ranked walk. Default (unset) uses
+// the first-valid walk that skips "" and keeps going -- see the hook below.
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT)
+
 namespace miopen {
 
 struct AnyInvokeParams;
@@ -185,9 +190,18 @@ auto FindSolutionImpl(rank<1>,
     // config that passes IsValidPerformanceConfig — the bucket-argmax is globally
     // good but frequently invalid for a specific OOD shape, and committing to an
     // invalid top-1 forced the whole Find down to ConvDirectNaive (10-24x slower).
-    // A "" entry means the model preferred the solver default: stop and use it.
-    // Exhausting the walk falls through to GetDefaultPerformanceConfig below — we
-    // never leave the solver on an invalid config.
+    //
+    // The "" (solver-default) sentinel is SKIPPED, not treated as a walk
+    // terminator: the model ranks "" #0 for ~40% of buckets, and on OOD shapes
+    // that call is unreliable -- an observed gfx1100 grouped-conv used the slow
+    // default (~49ms) while a valid Wmma_CShuffle_V3 config ranked just below ""
+    // was ~2.4x faster and already in the catalog. Since exactly one config per
+    // solver is benchmarked in Hybrid/DynamicHybrid Find, letting "" short-circuit
+    // denied that solver its best valid config. We instead keep walking to the
+    // first valid non-empty config; every candidate is still validated, and
+    // exhausting the walk falls through to GetDefaultPerformanceConfig below, so we
+    // never leave the solver on an invalid config. Set
+    // MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT=1 to restore the legacy stop-on-"".
     if constexpr(std::is_same_v<Problem, ::miopen::conv::ProblemDescription>)
     {
         if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
@@ -195,16 +209,23 @@ auto FindSolutionImpl(rank<1>,
         {
             const auto ranked =
                 ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
-            using PerformanceConfig = decltype(s.GetDefaultPerformanceConfig(context, problem));
+            const bool stop_on_default = env::enabled(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT);
+            using PerformanceConfig    = decltype(s.GetDefaultPerformanceConfig(context, problem));
             for(const auto& desc : ranked)
             {
                 if(desc.empty())
                 {
-                    // Model preferred the solver default; it outranks the rest, so
-                    // stop and let the default fallthrough below handle it.
-                    MIOPEN_LOG_I2("lgbm_pcfg: default config outranks candidates for "
-                                  << s.SolverDbId());
-                    break;
+                    if(stop_on_default)
+                    {
+                        // Legacy behavior: treat a ranked "" as "default beats the
+                        // rest" and stop, letting the default fallthrough handle it.
+                        MIOPEN_LOG_I2("lgbm_pcfg: default config outranks candidates for "
+                                      << s.SolverDbId());
+                        break;
+                    }
+                    // Default behavior: skip "" and keep walking to the first valid
+                    // real config.
+                    continue;
                 }
                 PerformanceConfig cfg{};
                 cfg.Deserialize(desc);
