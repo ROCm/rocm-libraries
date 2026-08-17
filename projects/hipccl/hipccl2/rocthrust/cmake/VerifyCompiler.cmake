@@ -25,6 +25,10 @@ if(${LINK_HIP_DEVICE_LIBS})
     find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
 endif()
 
+if(HIP_COMPILER STREQUAL "nvcc")
+    message(FATAL_ERROR "rocThrust does not support the CUDA backend.")
+endif()
+
 if(${LINK_HIP_DEVICE_LIBS})
     # When building for HIP, make sure we have a hip-aware clang.
     if(HIP_COMPILER STREQUAL "clang")
@@ -37,5 +41,7 @@ if(${LINK_HIP_DEVICE_LIBS})
                 message(FATAL_ERROR "When LINK_HIP_DEVICE_LIBS is set to 'ON', then 'hipcc' or a HIP-aware Clang must be used as the C++ compiler.")
             endif()
         endif()
+    else()
+        message(FATAL_ERROR "When LINK_HIP_DEVICE_LIBS is set to 'ON', HIP_COMPILER must be `clang` (AMD ROCm platform)")
     endif()
 endif()
