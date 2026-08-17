@@ -79,9 +79,11 @@ def run_autotune():
             f"exhaustive={config.supports_exhaustive}"
         )
         for knob in config.knobs:
+            # knob.constraint describes the legal values, so a KnobSweepAxis can
+            # be generated from it instead of hardcoding candidates.
             print(
                 f"      {knob.knob_id}: type={knob.value_type.name}, "
-                f"default={knob.default_value}"
+                f"default={knob.default_value}, constraint={knob.constraint}"
             )
 
     if not configs:
@@ -155,7 +157,10 @@ def run_autotune():
         return
 
     # 5. The winning plan is already active: execute uses it directly.
-    print(f"\nActive engine after autotune: {graph.get_execution_plan_engine_id()}")
+    print(
+        f"\nActive plan after autotune: {graph.get_plan_name()} "
+        f"(engine {graph.get_execution_plan_engine_id()})"
+    )
     exec_result = graph.execute(
         handle,
         {tensor.get_uid(): buffer.ptr() for tensor, buffer in buffers.items()},

@@ -228,6 +228,25 @@ void graphBindings(nb::module_& m)
              &graph::Graph::get_execution_plan_count,
              "Number of compiled plans, including ones that failed to compile. Use with "
              "build_plans(BuildPlanPolicy.ALL) to drive a manual per-plan tuning loop.")
+        .def("get_autotune_workspace_size",
+             &graph::Graph::get_autotune_workspace_size,
+             "Largest workspace across the compiled, non-barred plans, or 0 when none "
+             "compiled. This is the compiled-plan counterpart of "
+             "get_estimated_max_workspace_size(), which covers the plan-spec path and "
+             "errors when no add_engine_*() spec was added.")
+        .def(
+            "get_plan_name",
+            [](const graph::Graph& g) {
+                std::string name;
+                const auto err = g.get_plan_name(name);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get plan name: " + err.get_message());
+                }
+                return name;
+            },
+            "Engine name of the active plan, for example the autotune winner. Raises "
+            "RuntimeError when no plan is active.")
         .def(
             "execute_plan_at_index",
             [](const graph::Graph& g,
@@ -400,10 +419,15 @@ void graphBindings(nb::module_& m)
              nb::arg("storage_config") = AutotuneStorageConfig{},
              "Benchmark autotune candidates and return one AutotuneResult per candidate.\n"
              "variant_pack maps either tensor UIDs or tensors to device pointers.\n"
-             "Pass workspace_size (from get_estimated_max_workspace_size()) for the plan-spec "
-             "path added via add_engine_*(); omit it for the compiled-plan path built with "
-             "build_plans(BuildPlanPolicy.ALL). The winning plan is left active, so a "
-             "following execute() uses it. Raises RuntimeError if autotuning fails.")
+             "Pass workspace_size for the plan-spec path added via add_engine_*(), sized "
+             "with get_estimated_max_workspace_size(); omit it for the compiled-plan path "
+             "built with build_plans(BuildPlanPolicy.ALL), sized with "
+             "get_autotune_workspace_size(). The winning plan is left active, so a "
+             "following execute() uses it, and get_plan_name() reports it. Raises "
+             "RuntimeError if autotuning fails.\n"
+             "The two C++ overloads taking a trailing userImpl pointer are not bound: that "
+             "argument exists for cuDNN signature compatibility and is ignored, so calling "
+             "this method covers them.")
         .def("autotune",
              &autotunePy<std::shared_ptr<graph::TensorAttributes>>,
              nb::arg("handle"),

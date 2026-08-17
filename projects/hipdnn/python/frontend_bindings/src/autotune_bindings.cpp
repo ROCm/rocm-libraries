@@ -6,11 +6,13 @@
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 #include <hipdnn_frontend/autotune/PlanSpec.hpp>
 #include <hipdnn_frontend/knob/Knob.hpp>
+#include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/filesystem.h>
 #include <nanobind/stl/map.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/unordered_set.h>
 #include <nanobind/stl/variant.h>
 #include <nanobind/stl/vector.h>
 
@@ -36,6 +38,26 @@ void autotuneBindings(nb::module_& m)
         .value("ABORT_ON_PRIMING_FAILURE", PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE)
         .value("BENCHMARK_UNPRIMED", PrimingFailurePolicy::BENCHMARK_UNPRIMED);
 
+    // Bind the concrete knob constraints. The C++ ConstraintKind discriminator exists
+    // so -fno-rtti callers can downcast; Python gets the concrete type instead and
+    // discriminates with isinstance(). Instances are copies, so they outlive their Knob.
+    nb::class_<IntConstraint>(m, "IntConstraint")
+        .def_prop_ro("min_value", &IntConstraint::getMinValue)
+        .def_prop_ro("max_value", &IntConstraint::getMaxValue)
+        .def_prop_ro("step", &IntConstraint::getStep)
+        .def_prop_ro("valid_values", &IntConstraint::getValidValues)
+        .def("__repr__", &IntConstraint::toString);
+
+    nb::class_<FloatConstraint>(m, "FloatConstraint")
+        .def_prop_ro("min_value", &FloatConstraint::getMinValue)
+        .def_prop_ro("max_value", &FloatConstraint::getMaxValue)
+        .def("__repr__", &FloatConstraint::toString);
+
+    nb::class_<StringConstraint>(m, "StringConstraint")
+        .def_prop_ro("max_length", &StringConstraint::getMaxLength)
+        .def_prop_ro("valid_values", &StringConstraint::getValidValues)
+        .def("__repr__", &StringConstraint::toString);
+
     // Bind KnobSetting: (knob id, value) pair accepted by add_engine()
     nb::class_<KnobSetting>(m, "KnobSetting")
         .def(nb::init<std::string, KnobValueVariant>(), nb::arg("knob_id"), nb::arg("value"))
@@ -58,6 +80,30 @@ void autotuneBindings(nb::module_& m)
              &Knob::validate,
              nb::arg("setting"),
              "Validate a KnobSetting against this knob's constraints.")
+        .def_prop_ro(
+            "constraint",
+            [](const Knob& knob) -> nb::object {
+                const auto* constraint = knob.constraint();
+                if(constraint == nullptr)
+                {
+                    return nb::none();
+                }
+                switch(constraint->kind())
+                {
+                case ConstraintKind::INT:
+                    return nb::cast(*static_cast<const IntConstraint*>(constraint));
+                case ConstraintKind::FLOAT:
+                    return nb::cast(*static_cast<const FloatConstraint*>(constraint));
+                case ConstraintKind::STRING:
+                    return nb::cast(*static_cast<const StringConstraint*>(constraint));
+                case ConstraintKind::EMPTY:
+                    break;
+                }
+                return nb::none();
+            },
+            "IntConstraint, FloatConstraint or StringConstraint describing the legal "
+            "values of this knob, so a sweep axis can be built from it, or None when the "
+            "knob is unconstrained.")
         .def("__repr__", &Knob::toString);
 
     // Bind EngineConfigInfo: engine metadata returned by Graph.get_engine_configs()

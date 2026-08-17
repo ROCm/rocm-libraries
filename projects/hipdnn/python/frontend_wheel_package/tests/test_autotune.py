@@ -295,6 +295,16 @@ def test_plan_index_primitives_on_empty_plan_list():
     assert "out of bounds" in executed.get_message()
 
 
+def test_workspace_and_plan_name_without_compiled_plans():
+    """The compiled-plan accessors report an empty graph without raising."""
+    graph = hipdnn.Graph()
+    assert graph.get_autotune_workspace_size() == 0
+
+    with pytest.raises(RuntimeError) as excinfo:
+        graph.get_plan_name()
+    assert "out of bounds" in str(excinfo.value)
+
+
 @pytest.mark.gpu
 def test_manual_plan_index_tuning_loop():
     """The per-plan-index primitives drive the cuDNN-style manual tuning loop."""
@@ -305,6 +315,12 @@ def test_manual_plan_index_tuning_loop():
 
     count = graph.get_execution_plan_count()
     assert count >= 1
+
+    # One buffer covers every candidate on the compiled-plan path.
+    autotune_workspace = graph.get_autotune_workspace_size()
+    assert autotune_workspace == max(
+        graph.get_workspace_size_plan_at_index(index) for index in range(count)
+    )
 
     variant_pack, buffers = _variant_pack(tensors)
     executed = []
@@ -332,12 +348,9 @@ def test_manual_plan_index_tuning_loop():
     # Selecting a plan by index makes it the plan a plain execute() runs.
     winner = executed[0]
     assert graph.build_plan_at_index(winner).is_good()
-    active_id = graph.get_execution_plan_engine_id()
-    # Unregistered plugin engines resolve to the unsigned hex of their id.
-    active_name = hipdnn.engine_id_to_name(active_id) or hex(
-        active_id & ((1 << 64) - 1)
-    )
-    assert active_name == graph.get_plan_name_at_index(winner)
+    # The active plan is the one selected, and get_plan_name() reports it without
+    # Python having to re-derive the engine-name fallback.
+    assert graph.get_plan_name() == graph.get_plan_name_at_index(winner)
     workspace_size = graph.get_workspace_size_plan_at_index(winner)
     workspace_buffer = (
         hipdnn.DeviceBuffer(workspace_size) if workspace_size > 0 else None
@@ -474,6 +487,43 @@ class TestAutotuneGpu:
             graph.autotune(handle, variant_pack, 0, workspace_size=0)
         assert "No execution plans were benchmarkable" in str(excinfo.value)
         assert "deselected" in str(excinfo.value)
+        assert buffers  # keep device allocations alive across the call
+
+    def test_compiled_plan_path_workspace_sizing(self):
+        """get_autotune_workspace_size() sizes the compiled-plan autotune path."""
+        graph, handle, tensors = _built_conv_graph()
+        assert graph.create_execution_plans().is_good()
+        assert graph.check_support().is_good()
+        assert graph.build_plans(hipdnn.BuildPlanPolicy.ALL).is_good()
+
+        # The plan-spec estimate is unavailable here: no add_engine_*() was called.
+        with pytest.raises(RuntimeError) as excinfo:
+            graph.get_estimated_max_workspace_size()
+        assert "plan specs" in str(excinfo.value)
+
+        workspace_size = graph.get_autotune_workspace_size()
+        assert workspace_size >= 0
+        workspace_buffer = (
+            hipdnn.DeviceBuffer(workspace_size) if workspace_size > 0 else None
+        )
+
+        variant_pack, buffers = _variant_pack(tensors)
+        cfg = hipdnn.AutotuneConfig()
+        cfg.strategy = hipdnn.AutotuneStrategy.FIXED_AVERAGE
+        cfg.warmup_iterations = 1
+        cfg.timed_iterations = 1
+        # No workspace_size argument: this is the compiled-plan overload.
+        results = graph.autotune(
+            handle,
+            variant_pack,
+            workspace_buffer.ptr() if workspace_buffer else 0,
+            config=cfg,
+        )
+        assert any(result.succeeded for result in results)
+        for result in results:
+            if result.succeeded:
+                assert result.workspace_size <= workspace_size
+        assert graph.get_plan_name()
         assert buffers  # keep device allocations alive across the call
 
     def test_autotune_returns_results(self):
@@ -781,10 +831,8 @@ class TestAutotuneGpu:
         assert name_graph.deselect_engines([configs[0].engine_name]) is name_graph
 
 
-# Driven in a child process: exercising real EXHAUSTIVE priming needs the
-# autotune test plugin, and the session's conftest has already pinned the
-# good-plugin stub in ABSOLUTE mode. Swapping the engine set in-process would
-# leak into every later test, so the probe gets its own interpreter.
+# Child-process probe (see _run_plugin_probe): real EXHAUSTIVE priming needs an
+# engine that exposes the benchmarking knob, which the session's stub does not.
 _PRIMING_PROBE = textwrap.dedent(
     """
     import json
@@ -872,9 +920,14 @@ _PRIMING_PROBE = textwrap.dedent(
 )
 
 
-@pytest.mark.gpu
-def test_exhaustive_priming_policies():
-    """EXHAUSTIVE priming runs, and the failure policy decides abort vs. unprimed."""
+def _run_plugin_probe(script, reason):
+    """Run `script` in a child process against the full test plugin directory.
+
+    The session's conftest pinned the good-plugin stub in ABSOLUTE mode, and that
+    engine exposes neither knobs nor exhaustive priming. Loading a second plugin
+    in-process would leak into every later test, so probes get their own
+    interpreter. Returns the JSON report the child prints.
+    """
     stub = helpers.stub_engine_path()
     if stub is None:
         pytest.skip("no test plugin directory known")
@@ -883,20 +936,26 @@ def test_exhaustive_priming_policies():
         "test_autotune_plugin.dll" if os.name == "nt" else "libtest_autotune_plugin.so"
     )
     if not plugin.is_file():
-        pytest.skip(f"{plugin} not installed; no engine supports exhaustive priming")
+        pytest.skip(f"{plugin} not installed; {reason}")
 
     env = dict(os.environ)
     env["HIPDNN_PLUGIN_DIR"] = str(plugin_dir)
     env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
     completed = subprocess.run(
-        [sys.executable, "-c", _PRIMING_PROBE],
+        [sys.executable, "-c", script],
         env=env,
         capture_output=True,
         text=True,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
-    report = json.loads(completed.stdout.strip().splitlines()[-1])
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.gpu
+def test_exhaustive_priming_policies():
+    """EXHAUSTIVE priming runs, and the failure policy decides abort vs. unprimed."""
+    report = _run_plugin_probe(_PRIMING_PROBE, "no engine supports exhaustive priming")
 
     assert report["capable"], "no loaded engine advertises the benchmarking knob"
     runs = report["runs"]
@@ -919,3 +978,117 @@ def test_exhaustive_priming_policies():
         assert "priming" in abort["error"].lower(), abort["error"]
     else:
         assert all(r["ran_exhaustive"] for r in abort["results"]), abort
+
+
+# Child-process probe (see _run_plugin_probe): the session's stub engine exposes
+# no knobs, so knob constraints need an engine that declares some.
+_CONSTRAINT_PROBE = textwrap.dedent(
+    """
+    import json
+
+    import hipdnn_frontend as hipdnn
+
+    graph = hipdnn.Graph()
+    graph.set_io_data_type(hipdnn.DataType.FLOAT)
+    graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
+    graph.set_compute_data_type(hipdnn.DataType.FLOAT)
+    x = hipdnn.Tensor.create([1, 2, 8, 8], hipdnn.DataType.FLOAT)
+    weight = hipdnn.Tensor.create([4, 2, 3, 3], hipdnn.DataType.FLOAT)
+    attrs = hipdnn.ConvFpropAttributes()
+    attrs.set_padding([1, 1])
+    attrs.set_stride([1, 1])
+    attrs.set_dilation([1, 1])
+    y = graph.conv_fprop(x, weight, attrs)
+    y.set_output(True)
+    assert graph.validate().is_good()
+    handle = hipdnn.create_handle()
+    assert graph.build_operation_graph(handle).is_good()
+
+    report = {"knobs": [], "sweep": None}
+    sweep_source = None
+    for config in graph.get_engine_configs():
+        for knob in graph.get_knobs_for_engine(config.engine_id):
+            constraint = knob.constraint
+            entry = {
+                "engine_id": config.engine_id,
+                "knob_id": knob.knob_id,
+                "value_type": knob.value_type.name,
+                "constraint": type(constraint).__name__,
+                "repr": repr(constraint),
+            }
+            if isinstance(constraint, hipdnn.IntConstraint):
+                entry["min_value"] = constraint.min_value
+                entry["max_value"] = constraint.max_value
+                entry["step"] = constraint.step
+                entry["valid_values"] = sorted(constraint.valid_values)
+                if sweep_source is None and constraint.valid_values:
+                    sweep_source = (config.engine_id, knob.knob_id, constraint)
+            elif isinstance(constraint, hipdnn.FloatConstraint):
+                entry["min_value"] = constraint.min_value
+                entry["max_value"] = constraint.max_value
+            elif isinstance(constraint, hipdnn.StringConstraint):
+                entry["max_length"] = constraint.max_length
+                entry["valid_values"] = sorted(constraint.valid_values)
+            # A constraint must accept the knob's own default and, for a bounded
+            # integer knob, reject a value past its maximum.
+            entry["default_ok"] = knob.validate(
+                hipdnn.KnobSetting(knob.knob_id, knob.default_value)
+            ).is_good()
+            if isinstance(constraint, hipdnn.IntConstraint):
+                entry["over_max_ok"] = knob.validate(
+                    hipdnn.KnobSetting(knob.knob_id, constraint.max_value + 1000)
+                ).is_good()
+            report["knobs"].append(entry)
+
+    # The payoff: a sweep axis built straight from a constraint is accepted.
+    if sweep_source is not None:
+        engine_id, knob_id, constraint = sweep_source
+        axis = hipdnn.KnobSweepAxis()
+        axis.knob_id = knob_id
+        axis.values = sorted(constraint.valid_values)
+        spec = hipdnn.EngineSweepSpec()
+        spec.engine_id = engine_id
+        spec.axes = [axis]
+        error = graph.add_engine_sweep([spec])
+        report["sweep"] = {
+            "engine_id": engine_id,
+            "knob_id": knob_id,
+            "values": axis.values,
+            "accepted": error.is_good(),
+            "message": error.get_message(),
+        }
+
+    print(json.dumps(report))
+    """
+)
+
+
+@pytest.mark.gpu
+def test_knob_constraints_describe_legal_values():
+    """Knob.constraint exposes the ranges a sweep axis can be generated from."""
+    report = _run_plugin_probe(_CONSTRAINT_PROBE, "no engine declares knobs")
+
+    knobs = report["knobs"]
+    assert knobs, "no loaded engine declares a knob"
+    kinds = {entry["constraint"] for entry in knobs}
+    assert {"IntConstraint", "FloatConstraint", "StringConstraint"} <= kinds, kinds
+
+    for entry in knobs:
+        assert entry["default_ok"], entry
+        assert entry["repr"].startswith(entry["constraint"]), entry
+        if entry["constraint"] == "IntConstraint":
+            assert entry["step"] >= 1, entry
+            assert entry["max_value"] >= entry["min_value"], entry
+            assert all(isinstance(v, int) for v in entry["valid_values"]), entry
+            # Either an explicit value list or a bounded range must reject this.
+            assert entry["over_max_ok"] is False, entry
+        elif entry["constraint"] == "FloatConstraint":
+            assert entry["max_value"] >= entry["min_value"], entry
+        elif entry["constraint"] == "StringConstraint":
+            assert entry["valid_values"] or entry["max_length"] > 0, entry
+            assert all(isinstance(v, str) for v in entry["valid_values"]), entry
+
+    sweep = report["sweep"]
+    assert sweep is not None, "no int knob published an explicit value list"
+    assert sweep["accepted"], sweep["message"]
+    assert len(sweep["values"]) > 1
