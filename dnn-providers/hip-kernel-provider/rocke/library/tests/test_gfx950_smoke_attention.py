@@ -3,10 +3,11 @@
 """gfx950 GPU smoke test for the library unified-attention decode path.
 
 Moved out of platform/tests/instances/test_rocke_gfx950_smoke.py: this lane
-invokes the library module ``builders.gfx950.attention.parity_unified_attention``,
-so it belongs in the library test tree (platform must never reference the moved
-library). It shares the committed gfx950 perf baseline, located via the
-sanctioned ``rocke.assets`` accessor.
+invokes the library module
+``builders.gfx950.attention.prefill.parity_unified_attention``, so it belongs in
+the library test tree (platform must never reference the moved library). It
+shares the committed gfx950 perf baseline, located via the sanctioned
+``rocke.assets`` accessor.
 
 Run on a gfx950 ROCm runner:
   HIP_VISIBLE_DEVICES=0 PYTHONPATH=rocke/platform/python:rocke/library \
@@ -109,7 +110,7 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
             report = Path(tmp) / "attention.json"
             out = self._run(
                 "-m",
-                "builders.gfx950.attention.parity_unified_attention",
+                "builders.gfx950.attention.prefill.parity_unified_attention",
                 "--scenario",
                 scenario,
                 "--attempts",
@@ -131,7 +132,7 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
             report = Path(tmp) / "attention.json"
             out = self._run(
                 "-m",
-                "builders.gfx950.attention.parity_unified_attention",
+                "builders.gfx950.attention.prefill.parity_unified_attention",
                 "--scenario",
                 "decode_d128_b16",
                 "--attempts",
