@@ -1637,11 +1637,16 @@ try
     // The diagonal fill mode is supported by the CSR and CSC formats. A unit
     // diagonal is treated as a_ii = 1, reducing the solve to the identity
     // scaling x_i = alpha * b_i.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     ROCSPARSE_CHECKARG(2,
                        A,
                        (A->descr->fill_mode == rocsparse_fill_mode_diagonal
                         && A->format != rocsparse_format_csr && A->format != rocsparse_format_csc),
                        rocsparse_status_not_implemented);
+#else
+    ROCSPARSE_CHECKARG(
+        2, A, (static_cast<int>(A->descr->fill_mode) == 2), rocsparse_status_not_implemented);
+#endif
 
     switch(sptrsm_stage)
     {
@@ -1722,11 +1727,16 @@ try
     // The diagonal fill mode is supported by the CSR and CSC formats. A unit
     // diagonal is treated as a_ii = 1, reducing the solve to the identity
     // scaling x_i = alpha * b_i.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     ROCSPARSE_CHECKARG(2,
                        A,
                        (A->descr->fill_mode == rocsparse_fill_mode_diagonal
                         && A->format != rocsparse_format_csr && A->format != rocsparse_format_csc),
                        rocsparse_status_not_implemented);
+#else
+    ROCSPARSE_CHECKARG(
+        2, A, (static_cast<int>(A->descr->fill_mode) == 2), rocsparse_status_not_implemented);
+#endif
 
     const rocsparse_datatype compute_type = sptrsm_descr->get_compute_datatype();
 

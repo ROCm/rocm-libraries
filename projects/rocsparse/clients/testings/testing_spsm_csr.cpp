@@ -96,6 +96,7 @@ void testing_spsm_csr_bad_arg(const Arguments& arg)
         select_bad_arg_analysis(rocsparse_spsm, nargs_to_exclude, args_to_exclude, PARAMS_SOLVE);
     }
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     // The diagonal fill mode requires a non-unit diagonal. Combining it with a
     // unit diagonal must return rocsparse_status_not_implemented.
     {
@@ -109,6 +110,7 @@ void testing_spsm_csr_bad_arg(const Arguments& arg)
         EXPECT_ROCSPARSE_STATUS(rocsparse_spsm(PARAMS_BUFFER_SIZE),
                                 rocsparse_status_not_implemented);
     }
+#endif
 
 #undef PARAMS_BUFFER_SIZE
 #undef PARAMS_ANALYSIS

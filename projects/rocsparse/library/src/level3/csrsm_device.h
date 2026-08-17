@@ -58,7 +58,11 @@ namespace rocsparse
         // Get the row this warp will operate on. The diagonal solve has no
         // inter-row dependencies and therefore is not given a row map; rows are
         // processed in their natural order.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
         const J row = (fill_mode == rocsparse_fill_mode_diagonal) ? idx : map[idx];
+#else
+        const J row = map[idx];
+#endif
 
         // Current row entry point and exit point
         const I row_begin = csr_row_ptr[row] - idx_base;

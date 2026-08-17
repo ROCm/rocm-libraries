@@ -83,6 +83,7 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
 
     auto csrsm_info = p_csrsm_info[0];
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
     // The diagonal solve has no inter-row dependencies, hence requires no
     // dependency analysis. Make sure a csrsm info object exists so the solve
     // stage has a valid handle and return early.
@@ -98,6 +99,7 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
         }
         return rocsparse_status_success;
     }
+#endif
 
     // Differentiate the analysis policies
     if(analysis == rocsparse_analysis_policy_reuse)

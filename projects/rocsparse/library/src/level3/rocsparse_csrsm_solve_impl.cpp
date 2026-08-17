@@ -143,7 +143,11 @@ namespace rocsparse
 
         // The diagonal solve has no inter-row dependencies and therefore needs
         // neither a row map nor a transposed structure.
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
         const bool is_diagonal = (descr->fill_mode == rocsparse_fill_mode_diagonal);
+#else
+        const bool is_diagonal = false;
+#endif
 
         // A diagonal solve divides by the diagonal entry. A unit diagonal is
         // treated as a_ii = 1, so the solve reduces to the identity scaling
@@ -224,9 +228,11 @@ namespace rocsparse
             case rocsparse_fill_mode_upper:
                 fill_mode = rocsparse_fill_mode_lower;
                 break;
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
             case rocsparse_fill_mode_diagonal:
                 // Unreachable: the diagonal case is excluded by is_diagonal above.
                 break;
+#endif
             }
         }
         else if(force_conj || (is_diagonal && trans_A == rocsparse_operation_conjugate_transpose))

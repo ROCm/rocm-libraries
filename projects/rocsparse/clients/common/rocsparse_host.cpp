@@ -4039,6 +4039,7 @@ void host_csrsm(J                    M,
         *struct_pivot  = M + 1;
         *numeric_pivot = M + 1;
 
+#if defined(ROCSPARSE_WITH_FILL_MODE_DIAGONAL)
         if(fill_mode == rocsparse_fill_mode_diagonal)
         {
             // A diagonal matrix is its own transpose, so its structure is reused
@@ -4059,7 +4060,9 @@ void host_csrsm(J                    M,
                          struct_pivot,
                          numeric_pivot);
         }
-        else if(transA == rocsparse_operation_none)
+        else
+#endif
+            if(transA == rocsparse_operation_none)
         {
             switch(fill_mode)
             {
