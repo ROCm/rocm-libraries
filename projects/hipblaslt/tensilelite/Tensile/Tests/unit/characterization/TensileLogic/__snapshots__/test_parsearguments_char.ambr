@@ -1,6 +1,7 @@
 # serializer version: 1
 # name: test_check_only_custom_kernels_with_options
   dict({
+    'Architecture': 'all',
     'CheckAll': False,
     'CheckOnlyCustomKernels': True,
     'CxxCompiler': 'amdclang++',
@@ -13,6 +14,7 @@
 # ---
 # name: test_defaults_only_logicpath
   dict({
+    'Architecture': 'all',
     'CheckAll': False,
     'CheckOnlyCustomKernels': False,
     'CxxCompiler': 'amdclang++',
@@ -25,6 +27,7 @@
 # ---
 # name: test_minimal_check_all
   dict({
+    'Architecture': 'all',
     'CheckAll': True,
     'CheckOnlyCustomKernels': False,
     'CxxCompiler': 'amdclang++',
