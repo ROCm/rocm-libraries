@@ -10,7 +10,7 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
 // id get_id() const;
 
@@ -38,13 +38,13 @@ int main(int, char**)
 #ifdef __HIP_DEVICE_COMPILE__
     {
         G g;
-        hip::thread t0 = support::make_test_thread(g);
-        hip::thread::id id0 = t0.get_id();
-        hip::thread t1;
-        hip::thread::id id1 = t1.get_id();
+        hip::wthread t0 = support::make_test_thread(g);
+        hip::wthread::id id0 = t0.get_id();
+        hip::wthread t1;
+        hip::wthread::id id1 = t1.get_id();
         assert(t0.get_id() == id0);
         assert(id0 != id1);
-        assert(t1.get_id() == hip::thread::id());
+        assert(t1.get_id() == hip::wthread::id());
         t0.join();
     }
 #endif

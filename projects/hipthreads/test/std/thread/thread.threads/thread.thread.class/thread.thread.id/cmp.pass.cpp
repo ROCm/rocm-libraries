@@ -10,15 +10,15 @@
 
 // <thread>
 
-// class thread::id
+// class wthread::id
 
-// bool operator==(thread::id x, thread::id y) noexcept;
-// bool operator!=(thread::id x, thread::id y) noexcept;
-// bool operator< (thread::id x, thread::id y) noexcept;
-// bool operator<=(thread::id x, thread::id y) noexcept;
-// bool operator> (thread::id x, thread::id y) noexcept;
-// bool operator>=(thread::id x, thread::id y) noexcept;
-// strong_ordering operator<=>(thread::id x, thread::id y) noexcept;
+// bool operator==(wthread::id x, wthread::id y) noexcept;
+// bool operator!=(wthread::id x, wthread::id y) noexcept;
+// bool operator< (wthread::id x, wthread::id y) noexcept;
+// bool operator<=(wthread::id x, wthread::id y) noexcept;
+// bool operator> (wthread::id x, wthread::id y) noexcept;
+// bool operator>=(wthread::id x, wthread::id y) noexcept;
+// strong_ordering operator<=>(wthread::id x, wthread::id y) noexcept;
 
 #include <hip/thread>
 #include <cassert>
@@ -28,17 +28,17 @@
 #include "force_include_hip.h"
 
 int main(int, char**) {
-  AssertComparisonsAreNoexcept<hip::thread::id>();
-  AssertComparisonsReturnBool<hip::thread::id>();
+  AssertComparisonsAreNoexcept<hip::wthread::id>();
+  AssertComparisonsReturnBool<hip::wthread::id>();
 #if TEST_STD_VER > 17
-  AssertOrderAreNoexcept<hip::thread::id>();
-  AssertOrderReturn<::std::strong_ordering, hip::thread::id>();
+  AssertOrderAreNoexcept<hip::wthread::id>();
+  AssertOrderReturn<::std::strong_ordering, hip::wthread::id>();
 #endif
 
-  hip::thread::id id1;
-  hip::thread::id id2;
+  hip::wthread::id id1;
+  hip::wthread::id id2;
 #ifdef __HIP_DEVICE_COMPILE__
-  hip::thread::id id3 = hip::this_thread::get_id();
+  hip::wthread::id id3 = hip::this_thread::get_id();
 #endif
 
   // `id1` and `id2` should compare equal

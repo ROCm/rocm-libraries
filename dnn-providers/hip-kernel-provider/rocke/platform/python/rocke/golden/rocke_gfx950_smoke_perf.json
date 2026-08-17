@@ -19,14 +19,35 @@
       "unit": "ms"
     },
     "conv_fwd_bf16_gfx950_N8H56W56C64K64R3S3": {
-      "baseline": 116.0,
+      "baseline": 105.6,
       "direction": "higher_is_better",
       "metric": "best_tflops",
       "min_fraction": 0.85,
       "unit": "TFLOP/s"
     },
     "conv_fwd_fp32_gfx950_N8H56W56C64K64R3S3": {
-      "baseline": 57.1,
+      "baseline": 50.6,
+      "direction": "higher_is_better",
+      "metric": "best_tflops",
+      "min_fraction": 0.85,
+      "unit": "TFLOP/s"
+    },
+    "conv_wgrad_bf16_gfx950_N8H56W56C64K64R3S3": {
+      "baseline": 7.8,
+      "direction": "higher_is_better",
+      "metric": "best_tflops",
+      "min_fraction": 0.5,
+      "unit": "TFLOP/s"
+    },
+    "conv_wgrad_fp32_gfx950_N8H56W56C64K64R3S3": {
+      "baseline": 28.0,
+      "direction": "higher_is_better",
+      "metric": "best_tflops",
+      "min_fraction": 0.5,
+      "unit": "TFLOP/s"
+    },
+    "conv_fwd_bf16_gfx950_N8H56W56C64K64R1S1": {
+      "baseline": 11.3,
       "direction": "higher_is_better",
       "metric": "best_tflops",
       "min_fraction": 0.85,

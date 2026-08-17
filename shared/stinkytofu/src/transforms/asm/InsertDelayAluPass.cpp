@@ -107,6 +107,14 @@ bool instructionWaitsForVALU(const StinkyInstruction& inst) {
 // Per-register delay info
 // ---------------------------------------------------------------------------
 struct DelayInfo {
+    // These stay here rather than moving to HWModel with the other per-arch
+    // hardware numbers. They are not timings the scheduler can be retuned against;
+    // they are the shape of the s_delay_alu encoding itself - how many DEP and
+    // SALU_CYCLE fields the instruction has - so they change only when the ISA
+    // encoding does, at which point this pass changes with it. They are also
+    // compile-time constants by necessity: they default-initialize the members
+    // below, and DelayInfo is the value type of RegKeyMap<DelayInfo> (see
+    // DelayState), which requires default construction.
     static constexpr unsigned VALU_MAX = 5;         // scoreboard: 4 entries (DEP_1..4)
     static constexpr unsigned TRANS_MAX = 4;        // scoreboard: 3 entries (DEP_1..3)
     static constexpr unsigned SALU_CYCLES_MAX = 4;  // SALU_CYCLE_1..3

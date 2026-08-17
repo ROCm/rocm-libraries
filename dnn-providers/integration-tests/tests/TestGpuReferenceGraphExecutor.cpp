@@ -18,6 +18,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 #include "ConvolutionFwdGraphTestUtils.hpp"
+#include "harness/ReferenceCapabilityError.hpp"
 #include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 namespace
@@ -430,7 +431,78 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableForRuntimePassByValueGraph)
 
 TEST(TestGpuReferenceGraphExecutor, IsApplicableForBakedScalarGraph)
 {
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+    const std::vector<int64_t> xDims{1, 1, 3, 3};
+    const std::vector<int64_t> wDims{1, 1, 1, 1};
+    const std::vector<int64_t> yDims{1, 1, 3, 3};
+    auto builder = createConvFwdGraph(1,
+                                      2,
+                                      3,
+                                      xDims,
+                                      wDims,
+                                      yDims,
+                                      generateStrides(xDims),
+                                      generateStrides(wDims),
+                                      generateStrides(yDims),
+                                      {0, 0},
+                                      {1, 1},
+                                      {1, 1},
+                                      DataType::FLOAT,
+                                      DataType::FLOAT);
+    GpuReferenceGraphExecutor executor;
+    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+}
+
+TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNotConsumed)
+{
+    const std::vector<int64_t> xDims{1, 1, 3, 3};
+    const std::vector<int64_t> wDims{1, 1, 1, 1};
+    const std::vector<int64_t> yDims{1, 1, 3, 3};
+    const auto xStrides = generateStrides(xDims);
+    const auto wStrides = generateStrides(wDims);
+    const auto yStrides = generateStrides(yDims);
+
+    flatbuffers::FlatBufferBuilder builder;
+
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "x", DataType::FLOAT, &xStrides, &xDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 2, "w", DataType::FLOAT, &wStrides, &wDims));
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 3, "y", DataType::FLOAT, &yStrides, &yDims));
+    tensors.push_back(CreateTensorAttributesDirect(builder,
+                                                   999,
+                                                   "unconsumed_pbv",
+                                                   DataType::FLOAT,
+                                                   &xStrides,
+                                                   &xDims,
+                                                   /*virtual_=*/false,
+                                                   TensorValue::NONE,
+                                                   /*value=*/0,
+                                                   /*is_runtime_pass_by_value=*/true));
+
+    const std::vector<int64_t> padding{0, 0};
+    const std::vector<int64_t> convStride{1, 1};
+    const std::vector<int64_t> dilation{1, 1};
+    auto convAttrs = CreateConvolutionFwdAttributesDirect(
+        builder, 1, 2, 3, &padding, &padding, &convStride, &dilation, ConvMode::CROSS_CORRELATION);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "conv_fwd_node",
+                                     DataType::FLOAT,
+                                     NodeAttributes::ConvolutionFwdAttributes,
+                                     convAttrs.Union()));
+
+    auto graph = CreateGraphDirect(builder,
+                                   "ConvFwdWithUnconsumedPbv",
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   &tensors,
+                                   &nodes);
+    builder.Finish(graph);
+
     GpuReferenceGraphExecutor executor;
     EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
@@ -456,22 +528,6 @@ TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenSupportedOpOutputIsRuntim
                                               /*outputIsRuntimePassByValue=*/true);
     GpuReferenceGraphExecutor executor;
     EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
-}
-
-TEST(TestGpuReferenceGraphExecutor, IsApplicableWhenRuntimePassByValueTensorIsNotConsumed)
-{
-    // A runtime-PBV tensor that no node consumes must NOT reject the graph:
-    // rejection is per node (only operands an op actually consumes), not a
-    // blanket graph-wide scan. The Pointwise node's own operands are PBV-free.
-    auto builder = createSimplePointwiseGraph(1,
-                                              2,
-                                              {4},
-                                              {1},
-                                              /*inputIsRuntimePassByValue=*/false,
-                                              /*outputIsRuntimePassByValue=*/false,
-                                              /*addUnconsumedPbvTensor=*/true);
-    GpuReferenceGraphExecutor executor;
-    EXPECT_TRUE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 }
 
 TEST(TestGpuReferenceGraphExecutor, IsNotApplicableWhenConvInputIsRuntimePassByValue)
@@ -522,65 +578,47 @@ TEST(TestGpuReferenceGraphExecutor, UnsupportedNodeTypeThrows)
 TEST(TestGpuReferenceGraphExecutor, MissingVariantPackEntryThrows)
 {
     SKIP_IF_NO_DEVICES();
-    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
+
+    // Use a convolution graph (a real GPU plan) so execution reaches the
+    // variant-pack lookup; an empty pack must surface as std::out_of_range.
+    const std::vector<int64_t> xDims = {1, 1, 4, 4};
+    const std::vector<int64_t> wDims = {1, 1, 3, 3};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
+    auto builder = createConvFwdGraph(10,
+                                      11,
+                                      12,
+                                      xDims,
+                                      wDims,
+                                      yDims,
+                                      generateStrides(xDims),
+                                      generateStrides(wDims),
+                                      generateStrides(yDims),
+                                      {0, 0},
+                                      {1, 1},
+                                      {1, 1},
+                                      DataType::FLOAT);
+
     const std::unordered_map<int64_t, void*> emptyPack;
     GpuReferenceGraphExecutor executor;
     EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), emptyPack),
                  std::out_of_range);
 }
 
-TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneExecutes)
+TEST(TestGpuReferenceGraphExecutor, PointwiseIsNotApplicable)
 {
     SKIP_IF_NO_DEVICES();
 
-    constexpr int64_t INPUT_UID = 1;
-    constexpr int64_t OUTPUT_UID = 2;
-    const std::vector<int64_t> dims = {4};
-    const std::vector<int64_t> strides = {1};
-
-    auto builder = createSimplePointwiseGraph(INPUT_UID, OUTPUT_UID, dims, strides);
-
-    std::array<float, 4> input = {2.0f, 3.0f, 5.0f, 7.0f};
-    std::array<float, 4> output = {};
-
-    std::unordered_map<int64_t, void*> variantPack;
-    variantPack[INPUT_UID] = input.data();
-    variantPack[OUTPUT_UID] = output.data();
+    // Pointwise has no GPU reference plan. It must report as not applicable so
+    // the AUTO verification cascade falls through to the CPU reference instead
+    // of comparing against a bogus GPU result.
+    auto builder = createSimplePointwiseGraph(1, 2, {4}, {1});
 
     GpuReferenceGraphExecutor executor;
-    executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+    EXPECT_FALSE(executor.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
 
-    EXPECT_FLOAT_EQ(output[0], 3.0f);
-    EXPECT_FLOAT_EQ(output[1], 4.0f);
-    EXPECT_FLOAT_EQ(output[2], 6.0f);
-    EXPECT_FLOAT_EQ(output[3], 8.0f);
-}
-
-TEST(TestGpuReferenceGraphExecutor, PointwiseDummyAddOneMultiDimensional)
-{
-    SKIP_IF_NO_DEVICES();
-
-    constexpr int64_t INPUT_UID = 1;
-    constexpr int64_t OUTPUT_UID = 2;
-    const std::vector<int64_t> dims = {2, 3};
-    const std::vector<int64_t> strides = {3, 1};
-
-    auto builder = createSimplePointwiseGraph(INPUT_UID, OUTPUT_UID, dims, strides);
-
-    std::array<float, 6> input = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f};
-    std::array<float, 6> output = {};
-
-    std::unordered_map<int64_t, void*> variantPack;
-    variantPack[INPUT_UID] = input.data();
-    variantPack[OUTPUT_UID] = output.data();
-
-    GpuReferenceGraphExecutor executor;
-    executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
-
-    for(size_t i = 0; i < input.size(); ++i)
-    {
-        EXPECT_FLOAT_EQ(output[i], input[i] + 1.0f) << "Mismatch at index " << i;
-    }
+    const std::unordered_map<int64_t, void*> variantPack;
+    EXPECT_THROW(executor.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack),
+                 hipdnn_integration_tests::ReferenceCapabilityError);
 }
 
 TEST(TestGpuReferenceGraphExecutorFp32, ConvFwdBasicExecutes)

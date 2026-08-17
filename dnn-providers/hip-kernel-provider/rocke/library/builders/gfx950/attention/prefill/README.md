@@ -128,6 +128,6 @@ prefill regime — so the dispatcher reaches the ~948-TFLOPS path, not the defau
 - gfx950-only (uses `ds_read_b64_tr_b16` and `v_exp_f32`).
 - Compiles through the rocke LLVM-direct (`backend="python"`) path. The `exp2_fast`
   op is mirrored in the **C++ engine** and covered by a `backend="both"`
-  byte-identity gate (`tests/test_attention_dense_golden.py::
-  test_attention_dense_cpp_python_byte_identity`) — the Python and C++ lowerings
+  byte-identity gate (`tests/test_attention_ir_cpp_parity.py::
+  test_attention_ir_cpp_python_byte_identity`) — the Python and C++ lowerings
   are byte-for-byte identical across every dense variant.

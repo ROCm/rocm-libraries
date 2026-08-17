@@ -96,6 +96,7 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 192, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]
 
@@ -167,5 +168,6 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 192, 1, 256]
+          - Exact: [1024, 1024, 1, 1024]
         - ActivationArgs:
           - [Enum: none]

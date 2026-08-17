@@ -23,12 +23,11 @@
 # ---
 # name: test_problem_predicate_compound
   dict({
-    'count': 10,
+    'count': 9,
     'tags': list([
       'BufferLoadOffsetLimitCheck',
       'BufferLoadOffsetLimitCheck_Beta',
       'BufferStoreOffsetLimitCheck',
-      'ClusterDimCheck',
       'GlobalSplitUCheckMinK',
       'KernelLanguageCompatible',
       'LeadingFree0SizesGreaterOrEqual',

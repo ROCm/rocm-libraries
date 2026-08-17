@@ -259,11 +259,11 @@ void rocke_sage_warp_kv_lane_loader(rocke_ir_builder_t* b,
         rocke_value_t* byte_off = rocke_sage_magic_div(b, lane_d_base, 2); /* = tid */
 
         rocke_value_t* packed_k
-            = rocke_b_global_load(b, ctx->K, rocke_b_add(b, k_row_base, byte_off), rocke_i8(), 1);
+            = rocke_b_global_load_i8(b, ctx->K, rocke_b_add(b, k_row_base, byte_off), 0);
         rocke_sage_codebook_i4_pair_to_f32(b, ctx->cb_k, packed_k, &out_k[0], &out_k[1]);
 
         rocke_value_t* packed_v
-            = rocke_b_global_load(b, ctx->V, rocke_b_add(b, v_row_base, byte_off), rocke_i8(), 1);
+            = rocke_b_global_load_i8(b, ctx->V, rocke_b_add(b, v_row_base, byte_off), 0);
         rocke_sage_codebook_i4_pair_to_f32(b, ctx->cb_v, packed_v, &out_v[0], &out_v[1]);
         return;
     }

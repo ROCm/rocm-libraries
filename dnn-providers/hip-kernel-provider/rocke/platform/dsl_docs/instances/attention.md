@@ -1,16 +1,22 @@
 # Attention Instances
 
-The attention implementation is spread across:
+The attention kernels are the SDPA/MHA product and live under `library/`
+(post-#8977 split): kernel defs in `library/kernels/`, verify/parity/bench
+drivers in `library/builders/`, dispatch in `library/dispatch/`. The reusable
+attention **helper** layer stays in `platform/` (`library → platform` one-way).
 
 Production tiled matrix-core, paged-KV decode:
-- `instances/common/attention_unified.py`
-- `instances/gfx950/attention_tiled_2d.py`, `instances/gfx942/attention_tiled_2d.py`
-- `instances/gfx950/attention_tiled_3d.py`, `instances/gfx942/attention_tiled_3d.py`
-- `instances/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
-- `helpers/attention.py`
+- `library/kernels/common/attention_unified.py`
+- `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
+- `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
+- `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
+- `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill
+- `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA)
+- `platform/python/rocke/helpers/attention.py`
 
- FMHA expansion (CK Tile `01_fmha` family parity), all under `instances/common/`:
+ FMHA expansion (CK Tile `01_fmha` family parity), all under `library/kernels/common/`:
 - `_fmha_common.py` -- shared FmhaCommonSpec + scalar-inner body
+- `_fmha_warp_body.py` -- shared warp-tiled inner body
 - `fmha_varlen.py` -- 01_fmha varlen
 - `fmha_appendkv.py` -- 01_fmha appendkv (with optional rotary)
 - `fmha_paged_prefill.py` -- 01_fmha pagedkv_prefill
@@ -19,36 +25,41 @@ Production tiled matrix-core, paged-KV decode:
 - `fmha_bwd.py` -- 01_fmha bwd (dQ / dK / dV atomic)
 - `fmha_fwd_fp8.py` -- 01_fmha fp8 (per-tensor scales)
 
-Helpers:
-- `helpers/rotary.py` -- RoPE (interleaved + half layouts)
-- `helpers/rng.py` -- Philox4x32-10 RNG for dropout
-- `helpers/attention.py` (ext) -- alibi_bias_log2, alibi_bias_matrix, custom_mask
+RDNA / gfx1250 WMMA forward:
+- `library/kernels/gfx1151/wmma_fmha_fwd.py` -- gfx1151 (RDNA) WMMA FMHA forward
+- `library/kernels/gfx1250/wmma_attention_fwd.py`, `library/kernels/gfx1250/_wmma_attention_common.py`
 
- Sage + sparse attention (CK Tile `49_sageattention`, `50_sparse_attn`), under `instances/common/`:
+Helpers (all under `platform/python/rocke/helpers/`):
+- `rotary.py` -- RoPE (interleaved + half layouts)
+- `rng.py` -- Philox4x32-10 RNG for dropout
+- `attention.py` (ext) -- alibi_bias_log2, alibi_bias_matrix, custom_mask
+- `mfma_attention.py`, `mfma_attention_bwd.py` -- dtype-specific MFMA dispatch
+
+ Sage + sparse attention (CK Tile `49_sageattention`, `50_sparse_attn`), under `library/kernels/common/`:
 - `sage_attention.py` -- 4 quant variants (fp16/bf16, fp8-bf16, i8-fp8, i4-fp8)
 - `sparse_attention.py` -- jenga + VSA sparse fwd
 
-Helpers:
-- `helpers/qk_scale.py` -- per-head / per-block Q+K scale loaders
-- `helpers/codebook.py` -- i8 / i4 -> fp8 codebook dequant chains
-- `helpers/sparse_iter.py` -- block-sparse bitmap + VSA LUT K-iterators
+Helpers (under `platform/python/rocke/helpers/`):
+- `qk_scale.py` -- per-head / per-block Q+K scale loaders
+- `codebook.py` -- i8 / i4 -> fp8 codebook dequant chains
+- `sparse_iter.py` -- block-sparse bitmap + VSA LUT K-iterators
 
 The shipped stack supports scalar correctness kernels, tiled 2D matrix-core
-kernels, and tiled 3D split-KV pipelines; added the v1 scalar-inner
-kernels for every FMHA variant CK Tile ships in `01_fmha`, and closed
-the roadmap with Sage attention (four quant variants sharing one builder) and
-two sparse attention kernels (Jenga block-sparse + VSA variable-size). All v2
-matrix-core hoists drop in via the same per-variant spec surface (same pattern
- used for StreamK / block-scale GEMM).
+kernels, and tiled 3D split-KV pipelines; scalar-inner kernels for every FMHA
+variant CK Tile ships in `01_fmha`; Sage attention (four quant variants sharing
+one builder); and two sparse attention kernels (Jenga block-sparse + VSA
+variable-size). Per-variant spec surfaces mirror the pattern used for StreamK /
+block-scale GEMM.
 
-Arch coverage: the cross-arch builders live in `instances/common/` and the
-arch-specialized tiled bodies in `instances/gfx942/` and `instances/gfx950/`
-(the gfx950 tiled-2D kernel uses the wide-K MFMA atoms + `ds_read_*_tr_*`;
-gfx942 uses the narrow 16x16x16 atom). The tiled FMHA forward
+Arch coverage: the cross-arch builders live in `library/kernels/common/` and the
+arch-specialized tiled bodies in `library/kernels/gfx942/`,
+`library/kernels/gfx950/`, and `library/kernels/gfx1250/` (the gfx950 tiled-2D
+kernel uses the wide-K MFMA atoms + `ds_read_*_tr_*`; gfx942 uses the narrow
+16x16x16 atom; gfx1250 uses wave32 WMMA). The tiled FMHA forward
 (`build_fmha_fwd_mfma`) emits one unified body that lowers to **MFMA on CDNA
 (gfx942 / gfx950, wave64)** or **WMMA on RDNA (gfx1151 / gfx1201 RDNA4,
 wave32)** by selecting the atom family from the target's MMA catalog; the
-scalar unified 2D/3D kernels compile on all four arches.
+scalar unified 2D/3D kernels compile across the supported arches.
 
 ## Main Concepts
 
@@ -72,9 +83,9 @@ The runtime caches HSACO and launchers by semantic problem keys. This matters be
 
 ## Attention Features
 
-Current coverage (verified via `examples/gfx950/attention/parity_unified_attention.py` `default` scenario set):
+Current coverage (verified via `library/builders/gfx950/attention/prefill/parity_unified_attention.py` `default` scenario set):
 
-- causal masking (`helpers/attention.py::causal_mask`);
+- causal masking (`rocke.helpers.attention::causal_mask`);
 - sliding window (`sliding_window_mask`);
 - softcap (`apply_softcap_log2`, `apply_softcap_scalar`);
 - sinks;
@@ -109,8 +120,8 @@ already live in `attention_tiled_2d.py` / `attention_tiled_3d.py` and will be
 hoisted under the same `FmhaCommonSpec` in v2.
 
 The FP8 path uses the existing `cvt_fp8_to_f32` / `cvt_bf8_to_f32`
-intrinsics and per-tensor scales. Per-block / per-head Q+K scales arrive in
- via `helpers.qk_scale` and are wired into `instances.sage_attention`.
+intrinsics and per-tensor scales. Per-block / per-head Q+K scales arrive
+via `rocke.helpers.qk_scale` and are wired into `kernels.common.sage_attention`.
 
 CK Tile ``49_sageattention``, ``50_sparse_attn``:
 - Sage attention fwd with four ``quant_mode`` variants:
@@ -131,7 +142,7 @@ CK Tile ``49_sageattention``, ``50_sparse_attn``:
 File:
 
 ```text
-helpers/attention.py
+platform/python/rocke/helpers/attention.py
 ```
 
 Important helper ideas:
@@ -152,7 +163,7 @@ Attention uses both raw IR and descriptors. Addressing is descriptor-friendly; b
 File:
 
 ```text
-instances/common/attention_unified.py
+library/kernels/common/attention_unified.py
 ```
 
 Concept:
@@ -202,7 +213,7 @@ Correctness-sensitive details:
 File:
 
 ```text
-instances/gfx950/attention_tiled_2d.py  (gfx942 variant: instances/gfx942/attention_tiled_2d.py)
+library/kernels/gfx950/attention_tiled_2d.py  (variants: library/kernels/gfx942/attention_tiled_2d.py, library/kernels/gfx1250/attention_tiled_2d.py)
 ```
 
 Concept:
@@ -279,7 +290,7 @@ Tiled 2D is useful for chunked prefill, sliding-window rows, and moderate contex
 Files:
 
 ```text
-instances/gfx950/attention_tiled_3d.py  (gfx942 variant: instances/gfx942/attention_tiled_3d.py)
+library/kernels/gfx950/attention_tiled_3d.py  (variants: library/kernels/gfx942/attention_tiled_3d.py, library/kernels/gfx1250/attention_tiled_3d.py)
 ```
 
 The 3D path has two stages:

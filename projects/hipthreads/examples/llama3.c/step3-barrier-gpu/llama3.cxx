@@ -218,7 +218,7 @@ std::tuple<Transformer*, Config, float*> build_transformer(const char *checkpoin
   thrust::copy_n(&config, 1, config_ptr_dev);
 
   // Initialize weights and state on device
-  hip::thread(
+  hip::wthread(
     [] __device__ (Transformer *t, float *weights_ptr, int shared_weights) {
       // Set up weight pointers within the device memory buffer
       t->weights = memory_map_weights(&t->config, weights_ptr, shared_weights);
@@ -234,7 +234,7 @@ std::tuple<Transformer*, Config, float*> build_transformer(const char *checkpoin
 
 void free_transformer(Transformer *transformer, float *weights_ptr) {
   // Destruct RunState on device to free unique_ptr allocations
-  hip::thread([] __device__ (Transformer *t) {
+  hip::wthread([] __device__ (Transformer *t) {
       t->state.~RunState();
     }, transformer
   ).join();
@@ -345,10 +345,10 @@ void __device__ matmul(float *xout, float *x, float *w, int n, int d, int tid, i
 
 std::unique_ptr<float[]> forward(Transformer *transformer, int token, int pos, int vocab_size) {
   constexpr size_t num_threads = 128;
-  std::vector<hip::thread> threads{num_threads};
+  std::vector<hip::wthread> threads{num_threads};
 
   for (int tid = 0; tid < num_threads; ++tid) {
-    threads[tid] = hip::thread([] __device__ (Transformer *t, int token, int pos, int tid) {
+    threads[tid] = hip::wthread([] __device__ (Transformer *t, int token, int pos, int tid) {
       Config *p = &t->config;
       TransformerWeights *w = &t->weights;
       RunState *s = &t->state;
@@ -518,7 +518,7 @@ std::unique_ptr<float[]> forward(Transformer *transformer, int token, int pos, i
     t.join();
   }
 
-  // Copy logits back to host. We can't use thrust APIs here because there is still a hip::thread on
+  // Copy logits back to host. We can't use thrust APIs here because there is still a hip::wthread on
   // the stack from generate/chat.
   float *logits_device_ptr;
   HIP_CHECK(hipMemcpyAsync(&logits_device_ptr, &transformer->state.logits_raw, sizeof(float*), hipMemcpyDeviceToHost, g_stream));
@@ -952,9 +952,9 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;                  // position in the sequence
 
-  // Constructing a dummy hip::thread keeps the persistent scheduler kernel alive across iterations
+  // Constructing a dummy hip::wthread keeps the persistent scheduler kernel alive across iterations
   // of the while loop. This prevents us from repeatedly spinning up/down every time we call forward
-  hip::thread _;
+  hip::wthread _;
 
   while (pos < steps) {
 
@@ -1032,9 +1032,9 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char
 
   int pos = 0; // position in the sequence
 
-  // Constructing a dummy hip::thread keeps the persistent scheduler kernel alive across iterations
+  // Constructing a dummy hip::wthread keeps the persistent scheduler kernel alive across iterations
   // of the while loop. This prevents us from repeatedly spinning up/down every time we call forward
-  hip::thread _;
+  hip::wthread _;
 
   while (pos < steps) {
 

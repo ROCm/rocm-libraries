@@ -45,13 +45,13 @@ int main(int, char**) {
     hip::spin_condition_variable &cv = *cv_ptr;
     hip::spin_mutex &mutex = *mutex_ptr;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<hip::spin_mutex> lock(mutex);
       ready = true;
       cv.wait(lock, [&] { return !likely_spurious; });
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }
@@ -89,14 +89,14 @@ int main(int, char**) {
     hip::spin_condition_variable &cv = *cv_ptr;
     hip::spin_mutex &mutex = *mutex_ptr;
 
-    hip::thread t1 = support::make_test_thread([&] {
+    hip::wthread t1 = support::make_test_thread([&] {
       hip::unique_lock<hip::spin_mutex> lock(mutex);
       ready = true;
       cv.wait(lock, [] { return true; });
       awoken = true;
     });
 
-    hip::thread t2 = support::make_test_thread([&] {
+    hip::wthread t2 = support::make_test_thread([&] {
       while (!ready) {
         // spin
       }

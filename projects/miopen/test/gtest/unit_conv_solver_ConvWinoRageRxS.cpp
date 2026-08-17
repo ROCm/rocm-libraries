@@ -37,9 +37,14 @@ auto GetConvTestCases(miopenDataType_t datatype)
         // rage v4.6
         TestCase{{1, 16, 135, 240}, {16, 16, 3, 3}, {1, 1}, {1, 1}, {1, 1}, datatype},
         TestCase{{2,  4,  64,  64}, {16,  4, 3, 3}, {1, 1}, {1, 1}, {1, 1}, datatype},
-        // rage v4.7/v4.9
+        // rage v4.9
         TestCase{{1, 16, 135, 240}, {16, 16, 5, 5}, {2, 2}, {1, 1}, {1, 1}, datatype},
         TestCase{{2,  4,  64,  64}, {16,  4, 5, 5}, {2, 2}, {1, 1}, {1, 1}, datatype},
+        // rage v4.9 asymmetric R!=S
+        TestCase{{1, 16, 135, 240}, {16, 16, 3, 5}, {1, 2}, {1, 1}, {1, 1}, datatype},
+        TestCase{{1, 16, 135, 240}, {16, 16, 5, 3}, {2, 1}, {1, 1}, {1, 1}, datatype},
+        // larger C/spatial to exercise the multi-dispatch (n_groups = CUs * n_dispatches) path
+        TestCase{{2, 64,  64,  64}, {64, 64, 3, 3}, {1, 1}, {1, 1}, {1, 1}, datatype},
         // group convs
         TestCase{{2, 15,  28,  28}, {15,  3, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 5, datatype},
         TestCase{{2, 15,  28,  28}, {15,  3, 5, 5}, {2, 2}, {1, 1}, {1, 1}, 5, datatype},
@@ -55,6 +60,9 @@ auto GetConvTestCasesWrw(miopenDataType_t datatype)
         // clang-format off
         TestCase{{1, 16,  5,  5}, {16, 16, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
         TestCase{{1, 32,  7,  7}, { 4, 32, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        // asymmetric R!=S
+        TestCase{{1, 16,  7,  7}, {16, 16, 3, 5}, {1, 2}, {1, 1}, {1, 1}, datatype},
+        TestCase{{1, 16,  7,  7}, {16, 16, 5, 3}, {2, 1}, {1, 1}, {1, 1}, datatype},
         // group convs
         TestCase{{1, 16,  5,  5}, {16,  1, 3, 3}, {0, 0}, {1, 1}, {1, 1}, 16, datatype},
         TestCase{{2, 16, 28, 28}, {16,  1, 5, 5}, {2, 2}, {1, 1}, {1, 1}, 16, datatype},
@@ -65,7 +73,8 @@ auto GetConvTestCasesWrw(miopenDataType_t datatype)
 const auto& GetTestParams()
 {
     static const auto params = [] {
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx120X);
+        auto p =
+            miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X);
         return p;
     }();
     return params;
@@ -149,6 +158,13 @@ auto GetConvTestCasesNHWC(miopenDataType_t datatype)
             datatype,
             {{1, 1}, {1, 1}, {1, 1}}
         },
+        // asymmetric R!=S
+        TestCase{
+            {datatype, miopenTensorNHWC, {1, 40, 20, 20}},
+            {datatype, miopenTensorNHWC, {20, 20, 3, 5}},
+            datatype,
+            {{1, 2}, {1, 1}, {1, 1}, 2}
+        },
         // clang-format on
     };
 }
@@ -185,6 +201,13 @@ auto GetConvTestCasesNHWCWrw(miopenDataType_t datatype)
             {datatype, miopenTensorNHWC, {8, 40, 1, 1}},
             datatype,
             {{0, 0}, {1, 1}, {1, 1}}
+        },
+        // asymmetric R!=S
+        TestCase{
+            {datatype, miopenTensorNHWC, {1, 40, 20, 20}},
+            {datatype, miopenTensorNHWC, {20, 20, 3, 5}},
+            datatype,
+            {{1, 2}, {1, 1}, {1, 1}, 2}
         },
         // clang-format on
     };

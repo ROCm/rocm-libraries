@@ -36,7 +36,10 @@ def getCustomKernelFilepath(name, directory=CUSTOM_KERNEL_PATH):
     return os.path.join(directory, (name + ".s"))
 
 def getAllCustomKernelNames(directory=CUSTOM_KERNEL_PATH):
-    return [fname[:-2] for fname in os.listdir(directory) if fname.endswith(".s")]
+    # Sorted in alphabetical order so that custom-kernel enumeration (notably the CustomKernels: ["*"]
+    # wildcard) does not depend on os.listdir order, which varies with the
+    # filesystem and with how the package was installed.
+    return sorted(fname[:-2] for fname in os.listdir(directory) if fname.endswith(".s"))
 
 def getCustomKernelContents(name, directory=CUSTOM_KERNEL_PATH):
     try:

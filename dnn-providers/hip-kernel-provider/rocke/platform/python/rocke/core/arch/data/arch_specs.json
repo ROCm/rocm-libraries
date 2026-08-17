@@ -170,6 +170,7 @@
         "sgprs": 106
       },
       "mma": [
+        {"family": "wmma", "a": "fp32", "b": "fp32", "c": "fp32", "m": 16, "n": 16, "k": 4, "op_id": "wmma_gfx1250_f32_16x16x4_f32"},
         {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx1250_f32_16x16x32_f16"},
         {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "wmma_gfx1250_f32_16x16x32_bf16"},
         {"family": "wmma", "a": "fp8", "b": "fp8", "c": "fp32", "m": 16, "n": 16, "k": 64, "op_id": "wmma_gfx1250_f32_16x16x64_fp8_fp8"},

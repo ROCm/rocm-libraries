@@ -11,9 +11,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// ~thread();
+// ~wthread();
 
 #include <cassert>
 #include <cstdlib>
@@ -67,7 +67,7 @@ int main(int, char**)
 
         unsigned int before = hip::__hipthreads_misuse_count;
         {
-          hip::thread t = support::make_test_thread(g);
+          hip::wthread t = support::make_test_thread(g);
           hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(250));
           // t is still joinable here; its destructor runs at the closing brace
           // and must be detected as misuse.
