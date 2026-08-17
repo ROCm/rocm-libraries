@@ -127,22 +127,19 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     // Check if device arch was seen during training (RFC 0019 §9.3).
     // A model trained only on gfx942 has no basis for ranking gfx950, so an
     // out-of-distribution device degrades rather than extrapolating.
-    auto archIt = deviceVars.find(DEVICE_ARCH_KEY);
-    if(archIt != deviceVars.end())
+    // Note: arch already extracted above, reuse the variable
+    if(!arch.empty() && arch != "default")
     {
-        if(const auto* archStr = std::get_if<std::string>(&archIt->second))
-        {
-            result.trace.deviceArch = *archStr;
-            result.trace.archWasTrained = adapter->isTrainedForArch(*archStr);
+        result.trace.deviceArch = arch;
+        result.trace.archWasTrained = adapter->isTrainedForArch(arch);
 
-            if(!result.trace.archWasTrained)
-            {
-                HIPDNN_SDK_LOG_WARN("UHD: engine "
-                                    << engineId << " uhd='" << cfg.uhdId << "' model version='"
-                                    << adapter->getModelVersion() << "' was not trained for arch '"
-                                    << *archStr << "'; using static order");
-                return degrade("device arch '" + *archStr + "' not in training set");
-            }
+        if(!result.trace.archWasTrained)
+        {
+            HIPDNN_SDK_LOG_WARN("UHD: engine "
+                                << engineId << " uhd='" << cfg.uhdId << "' model version='"
+                                << adapter->getModelVersion() << "' was not trained for arch '"
+                                << arch << "'; using static order");
+            return degrade("device arch '" + arch + "' not in training set");
         }
     }
 

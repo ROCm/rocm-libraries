@@ -88,8 +88,8 @@ struct EngineEntry
 
     /// Resolve UHD by arch (RFC 0019 §8.3).
     /// Tries exact arch match, then "default", then returns nullopt.
-    std::optional<UhdConfig> resolveUhd(const std::unordered_map<std::string, UhdConfig>& roleMap,
-                                         const std::string& arch) const;
+    static std::optional<UhdConfig> resolveUhd(const std::unordered_map<std::string, UhdConfig>& roleMap,
+                                                const std::string& arch);
 
     /// Helper: resolve sort_kernel_catalog UHD (the main one).
     std::optional<UhdConfig> resolveSortKernelCatalog(const std::string& arch) const
@@ -203,6 +203,13 @@ public:
     /// @returns Adapter or nullptr if engine not found or adapter creation fails.
     /// @deprecated Use the (entry, cfg, role, arch) overload for multi-role support.
     std::shared_ptr<IUhdAdapter> getOrCreateAdapter(int64_t engineId) const;
+
+    /// Legacy: Get or create the feature extractor for an engine's default UHD.
+    /// @param entry Snapshot from getEngine().
+    /// @returns Extractor or nullptr if entry is null or signature is empty.
+    /// @deprecated Use the (entry, cfg, role, arch) overload for multi-role support.
+    std::shared_ptr<FeatureExtractor>
+        getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry) const;
 
     /// Legacy: Get or create the feature extractor for an engine, resolved by ID.
     /// @param engineId Engine to get extractor for.

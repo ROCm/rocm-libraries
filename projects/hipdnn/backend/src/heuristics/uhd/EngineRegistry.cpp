@@ -21,7 +21,7 @@ namespace hipdnn_backend::heuristics::uhd
 
 std::optional<UhdConfig> EngineEntry::resolveUhd(
     const std::unordered_map<std::string, UhdConfig>& roleMap,
-    const std::string& arch) const
+    const std::string& arch)
 {
     // RFC 0019 §8.3: Try exact arch match, then "default", then nullopt
     auto it = roleMap.find(arch);
@@ -242,8 +242,8 @@ void EngineRegistry::validateFeaturesHash(const UhdConfig& cfg,
     if(cfg.adapterType == "tree_data" || cfg.adapterType == "onnx" || cfg.adapterType == "table")
     {
         HIPDNN_SDK_LOG_WARN("UHD: engine "
-                            << entry.engineId << " uhd='" << cfg.uhdId << "' adapter '"
-                            << cfg.adapterType
+                            << engineId << " role='" << role << "' arch='" << arch
+                            << "' uhd='" << cfg.uhdId << "' adapter '" << cfg.adapterType
                             << "' declares a features_signature but no features_hash; the "
                                "feature contract with the model artifact cannot be enforced");
     }
