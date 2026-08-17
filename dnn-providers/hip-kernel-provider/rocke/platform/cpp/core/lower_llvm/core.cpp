@@ -1923,6 +1923,53 @@ void rocke_ll_set_handler(rocke_opcode_t opcode, rocke_ll_op_fn fn)
     }
 }
 
+static void ll_emit_selected_debug_values(rocke_lower_t* L, const rocke_op_t* op)
+{
+    if(L->debug == NULL || op == NULL || op->num_results == 0)
+    {
+        return;
+    }
+    const rocke_attr_value_t* selected = rocke_attr_get(&L->kernel->attrs, "debug_values");
+    if(selected == NULL || selected->kind != ROCKE_ATTR_LIST)
+    {
+        return;
+    }
+    for(int r = 0; r < op->num_results; r++)
+    {
+        const rocke_value_t* result = op->results[r];
+        for(int i = 0; i < selected->u.list.count; i++)
+        {
+            const rocke_attr_map_t* item = selected->u.list.items[i];
+            const char* value_name = rocke_attr_get_str(item, "value");
+            if(value_name == NULL || strcmp(value_name, result->name) != 0)
+            {
+                continue;
+            }
+            const char* name = rocke_attr_get_str(item, "name");
+            const char* type_name = rocke_attr_get_str(item, "type");
+            const char* loc = rocke_attr_get_str(item, "loc");
+            if(name == NULL || type_name == NULL || loc == NULL)
+            {
+                rocke_ll_fail(L, ROCKE_ERR_VALUE, "invalid debug_values entry");
+            }
+            int dbg = rocke_ll_debug_location_id(L, L->debug, loc);
+            if(dbg < 0)
+            {
+                rocke_ll_fail(L, ROCKE_ERR_VALUE, "debug value %s has no usable location", name);
+            }
+            int variable = rocke_ll_debug_variable_id(L, L->debug, name, type_name, loc);
+            rocke_ll_need(L, "dbg.value");
+            rocke_ll_emitf(L,
+                           "  call void @llvm.dbg.value(metadata %s %s, metadata !%d, "
+                           "metadata !DIExpression()), !dbg !%d",
+                           rocke_ll_llvm_type(L, result->type),
+                           rocke_ll_operand(L, result),
+                           variable,
+                           dbg);
+        }
+    }
+}
+
 void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
 {
     if(!rocke_ll_live(L) || !op)
@@ -1946,6 +1993,7 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
     if(dbg < 0)
     {
         fn(L, op);
+        ll_emit_selected_debug_values(L, op);
         return;
     }
     /* One op can append to several blocks and can create new ones (scf.for
@@ -1969,6 +2017,7 @@ void rocke_ll_lower_op(rocke_lower_t* L, const rocke_op_t* op)
         }
     }
     fn(L, op);
+    ll_emit_selected_debug_values(L, op);
     for(size_t i = 0; i < L->blocks.len; i++)
     {
         rocke_ll_block_t* blk = L->blocks.data[i];
@@ -2365,7 +2414,9 @@ static void ll_lower_into(rocke_lower_t* L,
        && ((dbg_attr->kind == ROCKE_ATTR_BOOL && dbg_attr->u.b)
            || (dbg_attr->kind == ROCKE_ATTR_INT && dbg_attr->u.i)))
     {
-        L->debug = rocke_ll_debug_create(L, kernel->name);
+        const rocke_attr_value_t* values = rocke_attr_get(&kernel->attrs, "debug_values");
+        bool has_variables = values && values->kind == ROCKE_ATTR_LIST && values->u.list.count > 0;
+        L->debug = rocke_ll_debug_create(L, kernel->name, has_variables);
     }
 
     /* Entry block (ll_make_block raises on OOM). */

@@ -388,6 +388,7 @@ def _resolve_llvm_flavor() -> str:
 # (ROCm 7.2+). The dict KEY stays the same across flavors so the
 # lowerer's ``_need(...)`` call sites are flavor-agnostic.
 _INTRINSIC_DECLS: Dict[str, str] = {
+    "dbg.value": "declare void @llvm.dbg.value(metadata, metadata, metadata)",
     "workitem.x": "declare i32 @llvm.amdgcn.workitem.id.x()",
     "workitem.y": "declare i32 @llvm.amdgcn.workitem.id.y()",
     "workitem.z": "declare i32 @llvm.amdgcn.workitem.id.z()",
@@ -1227,7 +1228,7 @@ class _DebugInfo:
     the metadata small and, as measured, leaves codegen untouched.
     """
 
-    def __init__(self, kernel_name: str) -> None:
+    def __init__(self, kernel_name: str, has_variables: bool = False) -> None:
         self._kernel_name = kernel_name
         self._flag_id = _DEBUG_MD_BASE
         self._empty_id = _DEBUG_MD_BASE + 1
@@ -1236,6 +1237,7 @@ class _DebugInfo:
         self._cu_id = _DEBUG_MD_BASE + 4
         self.subprogram_id = _DEBUG_MD_BASE + 5
         self._next_id = _DEBUG_MD_BASE + 6
+        self._has_variables = has_variables
         self._primary_file: Optional[str] = None
         self._primary_line = 0
         self._file_ids: Dict[str, int] = {}
@@ -1369,12 +1371,58 @@ class _DebugInfo:
                 continue
             lines[i] = f"{line}, !dbg !{dbg}"
 
+    def variable_id(self, name: str, type_name: str, loc: str) -> int:
+        """Create one scalar source variable for ``llvm.dbg.value``."""
+        if not self._has_variables:
+            raise ValueError("debug variable metadata was not enabled")
+        frames = _parse_loc(loc)
+        if not frames:
+            raise ValueError(f"debug value {name!r} has no usable source location")
+        frame = frames[0]
+        type_specs = {
+            "i1": (1, "DW_ATE_boolean"),
+            "i8": (8, "DW_ATE_signed"),
+            "i16": (16, "DW_ATE_signed"),
+            "i32": (32, "DW_ATE_signed"),
+            "i64": (64, "DW_ATE_signed"),
+            "f16": (16, "DW_ATE_float"),
+            "bf16": (16, "DW_ATE_float"),
+            "f32": (32, "DW_ATE_float"),
+            "fp8e4m3": (8, "DW_ATE_float"),
+            "bf8e5m2": (8, "DW_ATE_float"),
+        }
+        spec = type_specs.get(type_name)
+        if spec is None:
+            raise ValueError(f"unsupported debug scalar type {type_name!r}")
+        size, encoding = spec
+        type_id = self._alloc()
+        variable_id = self._alloc()
+        file_id = self._file_id(frame.path)
+        scope_id = (
+            self._lexical_block_id(frame.path)
+            if len(frames) == 1
+            else self._inlined_subprogram_id(frame)
+        )
+        escaped_type = _escape_md_string(type_name)
+        escaped_name = _escape_md_string(name)
+        self._nodes.append(
+            f'!{type_id} = !DIBasicType(name: "{escaped_type}", size: {size}, '
+            f"encoding: {encoding})"
+        )
+        self._nodes.append(
+            f'!{variable_id} = !DILocalVariable(name: "{escaped_name}", '
+            f"scope: !{scope_id}, file: !{file_id}, "
+            f"line: {frame.line}, type: !{type_id})"
+        )
+        return variable_id
+
     def render(self) -> List[str]:
         if self._primary_file is None:
             return []
         # The subprogram stands in for the kernel builder function, so anchor it
         # at the earliest line seen in the primary file.
         line = max(1, self._primary_line)
+        emission_kind = "FullDebug" if self._has_variables else "LineTablesOnly"
         return [
             f"!llvm.module.flags = !{{!{self._flag_id}}}",
             f"!llvm.dbg.cu = !{{!{self._cu_id}}}",
@@ -1386,7 +1434,7 @@ class _DebugInfo:
             f"!{self._primary_file_id} = {_di_file(self._primary_file)}",
             f"!{self._cu_id} = distinct !DICompileUnit(language: DW_LANG_Python, "
             f'file: !{self._primary_file_id}, producer: "rocke", isOptimized: true, '
-            f"runtimeVersion: 0, emissionKind: LineTablesOnly)",
+            f"runtimeVersion: 0, emissionKind: {emission_kind})",
             f'!{self.subprogram_id} = distinct !DISubprogram(name: "{self._kernel_name}", '
             f"scope: !{self._primary_file_id}, file: !{self._primary_file_id}, "
             f"line: {line}, type: !{self._subroutine_id}, scopeLine: {line}, "
@@ -1438,8 +1486,19 @@ class _Lowerer:
         # IRBuilder's ``capture_loc`` / ROCKE_DEBUG_LOC). When off, not one byte
         # of the emitted .ll changes, so the byte-identity gate and the IR
         # goldens are untouched.
+        debug_values = kernel.attrs.get("debug_values", [])
+        if not isinstance(debug_values, list):
+            raise ValueError("kernel debug_values must be a list")
+        self._debug_values: Dict[str, List[Dict[str, str]]] = {}
+        for selection in debug_values:
+            if not isinstance(selection, dict):
+                raise ValueError("each debug_values entry must be a mapping")
+            value_name = str(selection.get("value", ""))
+            self._debug_values.setdefault(value_name, []).append(selection)
         self._debug: Optional[_DebugInfo] = (
-            _DebugInfo(kernel.name) if kernel.attrs.get("debug_info") else None
+            _DebugInfo(kernel.name, bool(debug_values))
+            if kernel.attrs.get("debug_info")
+            else None
         )
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
@@ -1915,6 +1974,7 @@ class _Lowerer:
         )
         if dbg is None:
             method(op)
+            self._emit_selected_debug_values(op)
             return
         # One op can append to several blocks and can create new ones (scf.for
         # builds a header/body/latch/exit diamond), so remember where each block
@@ -1922,8 +1982,30 @@ class _Lowerer:
         # their children first, and those keep their own tighter locations.
         marks = {id(blk): len(blk.lines) for blk in self._blocks}
         method(op)
+        self._emit_selected_debug_values(op)
         for blk in self._blocks:
             _DebugInfo.annotate(blk.lines, marks.get(id(blk), 0), dbg)
+
+    def _emit_selected_debug_values(self, op: Op) -> None:
+        if self._debug is None:
+            return
+        for result in op.results:
+            for selection in self._debug_values.get(result.name, []):
+                loc = str(selection["loc"])
+                dbg = self._debug.location_id(loc)
+                if dbg is None:
+                    raise ValueError(
+                        f"debug value {selection['name']!r} has no usable location"
+                    )
+                variable = self._debug.variable_id(
+                    str(selection["name"]), str(selection["type"]), loc
+                )
+                self._need("dbg.value")
+                self._current().emit(
+                    "  call void @llvm.dbg.value("
+                    f"metadata {_llvm_type(result.type)} {self._operand(result)}, "
+                    f"metadata !{variable}, metadata !DIExpression()), !dbg !{dbg}"
+                )
 
     def lower_region(self, region: Region) -> None:
         for op in region.ops:

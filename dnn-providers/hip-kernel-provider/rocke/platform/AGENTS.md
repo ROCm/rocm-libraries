@@ -352,6 +352,33 @@ dual-engine vs Python-only split.
 - Emitters without a C++ port path (extends the not-yet-ported cpp-backend gap;
   see `helpers_classification.md`)
 
+## Issue tracking with br (beads_rust)
+
+**Note:** `br` is non-invasive and never executes git commands. After
+`br sync --flush-only`, you must manually run `git add .beads/ && git commit`.
+
+The rocKE tracker is scoped to this `platform/` directory. Run `br` commands
+from here so they resolve `platform/.beads/`, not another component's tracker.
+
+Agent workflow:
+
+1. Run `br ready` to find unblocked work.
+2. Run `br show <id>` before starting an issue.
+3. Run `br update <id> --status in_progress` before implementation.
+4. Record newly discovered work with `br create` and link dependencies with
+   `br dep add`.
+5. Run `br close <id>` only after implementation and validation are complete.
+6. Export and commit tracker state explicitly:
+
+   ```bash
+   br sync --flush-only
+   git add .beads/
+   git commit -m "sync beads"
+   ```
+
+The portable `.beads/issues.jsonl` file is authoritative in git. SQLite and
+runtime files remain local and ignored.
+
 ## Key env flags
 
 | flag | meaning |
