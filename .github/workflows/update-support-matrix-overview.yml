@@ -1,0 +1,44 @@
+name: Update support matrix overview
+
+on:
+  schedule:
+    # Nightly at 03:17 UTC (off-minute to avoid the :00 stampede)
+    - cron: '17 3 * * *'
+  push:
+    branches:
+      - develop
+    paths:
+      - 'dnn-providers/integration-tests/integration-test-bundles/**/*.support.json'
+      - 'dnn-providers/integration-tests/scripts/render_support_matrix.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: develop
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Regenerate overview
+        run: python3 dnn-providers/integration-tests/scripts/render_support_matrix.py --overview-only
+
+      - name: Commit if changed
+        run: |
+          cd dnn-providers/integration-tests
+          if git diff --quiet SUPPORT_MATRIX_OVERVIEW.md 2>/dev/null; then
+            echo "Overview is up to date, nothing to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add SUPPORT_MATRIX_OVERVIEW.md
+            git commit -m "chore: regenerate support matrix overview"
+            git push
+          fi
