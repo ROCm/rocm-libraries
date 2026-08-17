@@ -744,8 +744,9 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeThreeKernelWorkspaceSta
 /// BenchmarkPlan::execute()'s HIP calls, only its constructor's workspace query.
 struct StreamCapableHandle
 {
-    // NOLINTNEXTLINE(readability-convert-member-functions-to-static) — models a real
-    // handle's instance accessor, which is what HasGetStream detects.
+    // Non-static: this models a real handle's instance accessor, which is what
+    // HasGetStream detects.
+    // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     hipStream_t getStream() const
     {
         return nullptr;
