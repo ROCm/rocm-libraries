@@ -1501,6 +1501,24 @@ def runTileEngineGemmTests(String arch, String compiler) {
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
+def runDispatcherTests(String arch, String compiler) {
+    def execute_cmd = """
+        cd build && \
+        cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
+            -D CMAKE_CXX_COMPILER="${compiler}" \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D GPU_TARGETS="${arch}" \
+            -D CK_TILE_DISPATCHER=ON \
+            -D BUILD_DISPATCHER_BINDINGS=ON \
+            -D DISPATCHER_RULE_SET=tests .. && \
+        ninja -j${nthreads()} dispatcher_gemm_lib && \
+        python3 ../dispatcher/examples/gemm/python/tile_engine_dispatcher_bridge.py \
+            --demo sweep \
+            --size 1024 \
+            --arch ${arch}"""
+    buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+}
+
 def runBuildCKAndTests(String arch) {
     def gpuTarget
     def extraSetupArgs = ""
