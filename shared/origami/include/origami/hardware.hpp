@@ -211,13 +211,8 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
-      case architecture_t::gfx1250: {
-        // TODO: Update with real gfx1250 constants when available
-        auto c                       = get_gfx950_arch_constants(std::nullopt);
-        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
-        return c;
-      }
+      case architecture_t::gfx1250:
+        return {12.49, 1.21875121875121875122 * 7.4, 4.5, 4, std::make_tuple(0, 0.004, 0), 1.5};
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
