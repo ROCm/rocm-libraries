@@ -9,9 +9,10 @@
  *        paths share the same buffer but are not scanned, so residue they leave
  *        is reported against the next scanned matmul.
  *
- *        Single-threaded, non-capturing debugging only: the scan synchronizes
- *        the stream and zeroes a handle-wide buffer, which would disrupt a
- *        concurrent kernel on another stream and is illegal during graph capture.
+ *        Single-threaded debugging only: the scan synchronizes the stream and
+ *        zeroes a handle-wide buffer, which would disrupt a concurrent kernel
+ *        on another stream. Skipped entirely during HIP graph capture, since
+ *        both operations are illegal there.
  */
 
 #pragma once
@@ -20,9 +21,11 @@
 
 #include "handle.h"
 #include "rocblaslt-types.h"
+#include "utility.hpp"
 
-#include <cstdio>
 #include <hip/hip_runtime.h>
+#include <iostream>
+#include <mutex>
 #include <vector>
 
 // Blocks on `stream` to read the buffer back, and reports it if any int is
@@ -34,21 +37,32 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     if(!handle || !handle->check_streamk_sync || !handle->Synchronizer)
         return;
 
+    // Skip during HIP graph capture: the sync and memset below cannot be
+    // sequenced into a captured graph.
+    hipStreamCaptureStatus cap = hipStreamCaptureStatusNone;
+    if(hipStreamIsCapturing(stream, &cap) == hipSuccess && cap != hipStreamCaptureStatusNone)
+        return;
+
     constexpr size_t count = hipblaslt_streamk_synchronizer_ints;
     constexpr size_t bytes = count * sizeof(int);
 
-    std::vector<int> host(count);
-    hipError_t       err = hipStreamSynchronize(stream);
+    if(handle->check_streamk_sync_host.size() != count)
+        handle->check_streamk_sync_host.assign(count, 0);
+    std::vector<int>& host = handle->check_streamk_sync_host;
+
+    hipError_t err = hipStreamSynchronize(stream);
     if(err == hipSuccess)
         err = hipMemcpy(host.data(), handle->Synchronizer, bytes, hipMemcpyDeviceToHost);
-    // `host` is zero-initialized, so an unreported failure here would read as a
-    // clean buffer.
+    // `host` may hold a previous scan's contents on failure, so an unreported
+    // failure here could read as a stale (possibly clean) buffer.
     if(err != hipSuccess)
     {
-        fprintf(stderr,
-                "[hipBLASLt CHECK_STREAMK_SYNC] %s: readback failed (%s); buffer not checked.\n",
-                label,
-                hipGetErrorString(err));
+        std::lock_guard<std::mutex> lk(log_mutex);
+        std::ostream*               sink = get_logger_os();
+        if(!sink)
+            sink = &std::cerr;
+        *sink << "[hipBLASLt CHECK_STREAMK_SYNC] " << label << ": readback failed ("
+              << hipGetErrorString(err) << "); buffer not checked." << std::endl;
         return;
     }
 
@@ -66,14 +80,15 @@ inline void hipblaslt_check_streamk_sync_scan(rocblaslt_handle handle,
     if(nonzero == 0)
         return;
 
-    fprintf(stderr,
-            "[hipBLASLt CHECK_STREAMK_SYNC] %s: Synchronizer left dirty "
-            "(%zu/%zu ints nonzero, first at offset %zu) -- the kernel did "
-            "not self-clean its work-queue state.\n",
-            label,
-            nonzero,
-            count,
-            first);
+    {
+        std::lock_guard<std::mutex> lk(log_mutex);
+        std::ostream*               sink = get_logger_os();
+        if(!sink)
+            sink = &std::cerr;
+        *sink << "[hipBLASLt CHECK_STREAMK_SYNC] " << label << ": Synchronizer left dirty ("
+              << nonzero << "/" << count << " ints nonzero, first at offset " << first
+              << ") -- the kernel did not self-clean its work-queue state." << std::endl;
+    }
 
     // hipblasLtCreate zeroes the buffer once and every matmul is scanned, so
     // restoring zero here keeps the next call's baseline clean and stops this

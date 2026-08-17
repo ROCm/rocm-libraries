@@ -7,6 +7,12 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Introduced a new API: hipBLASLt-ext::isSolutionSupported(). This API is used by new hipBLASLt integration from rocBLAS to check if a given solution is supported for a certain GPU and Problem Type. 
+* `HIPBLASLT_CHECK_STREAMK_SYNC` environment variable: opt-in post-launch
+  dirty-buffer check for the StreamK Synchronizer buffer (`1`/`0` or
+  `true`/`false`). Covers `rocblaslt_matmul_impl` only. Unlike
+  `HIPBLASLT_CHECK_NUMERICS`, each covered call pays a stream sync and a
+  device-to-host copy, so this is single-threaded debugging use only, not
+  for concurrent-stream workloads.
 
 ## hipBLASLt 1.4.0
 

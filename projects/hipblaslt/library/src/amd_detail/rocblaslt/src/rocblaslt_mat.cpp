@@ -241,11 +241,11 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
-    // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
-    hipblaslt_check_streamk_sync_scan(handle, stream, "rocblaslt_matmul_impl");
-
     if(st == rocblaslt_status_success)
     {
+        // No-op unless HIPBLASLT_CHECK_STREAMK_SYNC is set.
+        hipblaslt_check_streamk_sync_scan(handle, stream, "rocblaslt_matmul_impl");
+
         const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
         if(call_id != 0)
         {

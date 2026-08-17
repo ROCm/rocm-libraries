@@ -134,6 +134,9 @@ struct _rocblaslt_handle
     // HIPBLASLT_CHECK_STREAMK_SYNC state. Read once in the ctor; opt-in via
     // env. See check_streamk_sync.hpp for the checker protocol.
     bool check_streamk_sync = false;
+    // Host staging buffer for the Synchronizer readback, grown once to full
+    // size on first use and reused across every scanned call.
+    std::vector<int> check_streamk_sync_host;
 };
 
 /********************************************************************************
