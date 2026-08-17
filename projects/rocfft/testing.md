@@ -4,9 +4,9 @@ This document describes the testing strategy for rocFFT.
 
 ## Component Overview
 
-rocFFT is a FFT gpu library.
+rocFFT is a FFT GPU library.
 
-The HIP kernels are produced via a code generator embedded in the library, which are compilbed using
+The HIP kernels are produced via a code generator embedded in the library, which are compiled using
 hipRTC.  Transforms are available for single-process single-device, single-process multi-device, and
 multi-process single/multi-device.
 
@@ -16,25 +16,71 @@ rocFFT tests rely on googletest and some python scripts included in the rocFFT g
 
 ## Test naming
 
-TODO: talk about test name tokenization
+rocFFT transforms can take a variety of parameters, such as length, precision, various data layout
+options, etc.  These are encoded into a human-readable string referred to as a FFT token.  For
+example,
+
+'''
+complex_forward_len_8_single_ip_batch_1_istride_1_CI_ostride_1_CI_idist_8_odist_8_ioffset_0_0_ooffset_0_0
+'''
+
+describes a complex forward FFT of length 8, in-place, using single-precision, and input and output
+strides of 1 (with other information about batch distance and offset included as well).  This maps
+1:1 with information provided to the library via the public API.  Multi-device transforms are also
+covered by this tokenization format (though the format becomes increasingly verbose as more
+information is added).  The token format is not part of the public API or rocFFT, but can be useful
+for users when providing bug reports or otherwise inspecting logs.  The tokens are used for both
+accuracy and performance tests.
 
 ## Resources and runtime robustness
 
-TODO: talk about how memory footprint restrictions, and hipskip.
+rocFFT tests will attempt to use as all of GPU's memory, and all of the host's memory in order to
+test as many transform sizes as possible. rocfft-test will query the device and the host in order to
+determine if a given problem size will fit into the available hardware resources, and will either
+not generate the test (if the memory footprint exceeds the hardware's availabilty) or skips the
+tests (if rocfft-test detects at runtime that not enough memory is available).  Since the runtime
+code to detect available memory and the actual memory allocation occur at different times, and we
+don't have a mutex on allocating memory on the host or the device, it may be that the available
+memory, as reported by runtime queries, is not actually available at allocation time.  For both host
+and device allocations, if the allocator returns failure, then that test is skipped.  However, the
+host reference FFT library also allocates memory internally, which, in the case of a OOM error, is
+not something from which rocfft-test can recover.  (Host-side OOM errors are generally bad news.)
+We also maintain a safety margin on how much memory we allocate in order to improve test robustness.
+
+The numer of failed allocations is tracked and reported at the end of rocfft-test's execution.
+There is a command-line option to report allocation errors as failures instead of just skipped
+tests.
+
+In and APU setting, the accounting of host and device memory is complicated by the fact that this
+is, in fact, a shared memory pool.  To deal with this, host memory and device memory are allocated
+via structs that track this accounting, with extra care given to the somewhat overly optimistic hip
+runtime, which may not track host memory allocations.
+
 
 ## Testing objectives
 
 ### Correctness tests
 
-These tests verify the API behaviour, as well as some internal structure.  Some of this is coverd by
-rocfft-test (gtest names are roccfft_UnitTest.*, but also reference_test/valid_length_stride.*)
+Correctness tests verify the behaviour of the library infrastructure.  For example, correctness
+tests cover API behaviour for cases where a user man provide invalid parameters, or whether
+internal library infrastructure behaves as expected.
 
-TODO: internal ctest stuff.
+The API correctness is handled by rocfft-test, where gtest names are 'roccfft_UnitTest.*'
 
-### Bitwise reproducibility tests
+Testing for internal library correctenss is handled by an internal ctest framework, which is
+controlled by the cmake option 'ROCFFT_BUILD_INTERNAL_TESTS', and the test executable is
+'library/src/tests/rocfft-internal-test'.  Some more computationally expensive tests (the array
+format validation tests) are provided by rocff-test under the gtest filter
+'reference_test/valid_length_stride.*'.
 
-rocFFT offers bitwise reproducibility!  We test this by hashing the output using, and re-running the
-test suite to verify bitwise reproducbility.
+
+### Bit-wise reproducibility tests
+
+rocFFT offers bit-wise reproducibility!  We test this by hashing the output using, and re-running
+the test suite to verify bitwise reproducbility.  Bit-wise reproducibility requires that one be
+running the same version of rocFFT, identical rocm stacks (compiler/runtime/driver), and the same
+GPU model.
+
 
 ### Accuracy tests
 
@@ -47,22 +93,74 @@ that value. Thus, the reported precision-based epsilon values reported at the en
 can be used as a bound for running the tests again.
 
 rocfft-test makes use of randomization.  A random static random seed can be provided via
-command-line options, but should not be used in a general testing environment; the purpose
-here is to reproduce tests in the case of failures.  Randomized test selection is stable
-under test addition or removal, but not under test name changes (the test name, via gtest, is
-used in conjunction with the random seed to determine the random number generator which determines
-whether the individual test is run). 
+command-line options, but should not be used in a general testing environment; the purpose here is
+to reproduce tests in the case of failures.  Randomized test selection is stable under test addition
+or removal, but not under test name changes (the test name, via gtest, is used in conjunction with
+the random seed to determine the random number generator which determines whether an individual test
+is run).
 
 We will randomly select tests to run from a predefined set of parameters.  These tests can be
 controlled by options in rocfft-test.  In addition to a random selection of tests, we also randomly
 generate tests, and the number of these randomly-generated tests can also be controlled via
 command-line.  Since one can specify the data decomposition (ie lengths and strides) fully in
 rocFFT, care must be taken to avoid invalid configurations, which is basically when arrays
-self-alias.  This is handled by the array validator algorithm in rocFFT, which guarantees that
-this does not occur.
+self-alias.  This is handled by the array format validator algorithm in rocFFT, which guarantees
+that this does not occur.
 
-TODO: multi-proc accuracy tests.
+Multi-process tests require a different execution path than single-process tests.  Accuracy tests
+are handled by rocfft-mpi-worker using the --accuracy option.  Multi-process tests target a large
+range of hardware configurations, and it is wasteful to reserve O(10^3) GPUs when running a two-GPU
+test.  The script 'scripts/rocfftslurmtest.py' divides the accuracy tests by hardware
+configurations, and submits this to slurm, where the script 'scripts/rocfft_mpi_test.py' launches
+'rocfft-mpi-worker' to test the transforms.  The use of a python script also allows recovery from
+hangs and crashes, which are unfortunately common in distributed computing software development.
+The multi-process accuracy testing framework currently relies on reference computation on a single
+host node, which restricts the size of problems which can be tested.
+
 
 ### Performance tests
 
-TODO: 
+Performance tests focus on a different parameter space than the accuracy tests.  For example, while
+it's important that the length-1 transforms perform correctly (accuracy), the transform is actually
+the identity operation, and the highest-performance option for softwar that needs to perform a
+length-1 transform is to not use rocFFT, but to perform no operation at all.
+
+Performance tests must deal with jitter.  Jitter is the tendency for execution time to include some
+level of noise, and the GPU is not immune to this behaviour.  The results of naive performance
+regression tests will consist almost entirely of false-positive results if jitter is not accounted
+for in the experimental design and analysis of results.  rocFFT manages jitter via experimental
+design and a multi-hypothesis statistical testing framework.
+
+In order to eliminate the correlation between jitter and testing case, the performance-testing
+experimental design is to load both the control and test versions of the rocFFT library into the
+same executable and randomize the execution order for the two cases.  This is handled by
+dyna-rocfft-bench (and dyna_rocfft_mpi_worker for the multi-process case) using dlopen for Linux and
+/LoadLibraryA for Windows.  For cases where this framework does not apply (eg comparing perfomance
+between two different devices) rocfft-bench is usable as a single-library client, though the risk of
+false-positives is naturally higher.  On the other hand, one is unlikely to be testing the
+performance impact of a software change between two different devices, so the importance of
+false-positives is fairly small in this case.
+
+Post-processing of the data from the test is handled by statistical tests, and we have implemented
+the T-test, Mood's median test, and the Mann-Whitney U test (also known as the Wilcoxon rank-sum
+test).  While the data distribution of execution times does not follow a normal distribution, the
+T-test only requires that the difference between the distributions follows is normally distributed,
+which is generally accepted to be true when thee sample size is at least 20.  The three tests answer
+subtly different questions, ie the differences of the mean, the median, or the rank, though, for
+realistic data, these tend to be all agree.  Since we also test multiple points in parameter space
+together, it's also important to use a multi-hypothesis testing framework in order to avoid
+p-hacking oneself.  rocFFT implements the Bonferroni correction and the Benjamini–Hochberg
+procedurein order to reduce the false-positive rate.
+
+In addition to statistical testing, rocFFT provides confidence intervals for transform execution
+time.  Since the data tends to not be normally distributed and have long tails, the central tendency
+of the execution time is better represented by the median than by the mean, which has the added
+benefit of being invariant under monotonic transformation (eg time -> gflops or bandwidth).  We also
+do not use the standard deviation to express confidence intervals; not only is the data not normal,
+but the mean minus the standard deviation is often negative, which is not only unphysical, but quite
+difficult to plot when using a logarithmic scale.  Instead, we use bootstrap resampling to compute
+the confidence intervals on the median execution time.
+
+The above features are implemented in the python script 'scripts/perf/rocfft-perf', which also
+includes 'scripts/perf/suites.py', which defines the performance testing suites for rocFFT.
+Multi-process performance testing is still in development.
