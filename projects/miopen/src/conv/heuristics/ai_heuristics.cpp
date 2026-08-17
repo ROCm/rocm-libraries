@@ -845,11 +845,22 @@ ProcessAndCachePredictions(const conv::ProblemDescription& problem,
     // Process predictions (sort by probability, filter invalid solvers)
     auto result = ProcessPredictions(predictions, solver_map, use_nd);
 
-    // TunaNet override: promote GemmBwdRest for point-output backward-data problems
-    if(problem.Is3d() && conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
+    // TunaNet override: promote the GEMM solvers for point-output problems
+    if(conv::IsFwdDataPointOutputStrideEqFilter(problem) &&
+       problem.GetWeights().GetType() != miopenInt8)
+    {
+        PromoteSolverToFront(result, "GemmFwdRest");
+        MIOPEN_LOG_I2("TunaNet override: promoting GemmFwdRest for point-output forward");
+    }
+    if(conv::IsBwdDataPointOutputStrideEqFilter(problem))
     {
         PromoteSolverToFront(result, "GemmBwdRest");
         MIOPEN_LOG_I2("TunaNet override: promoting GemmBwdRest for point-output backward-data");
+    }
+    if(conv::IsWrwPointOutputStrideEqFilter(problem))
+    {
+        PromoteSolverToFront(result, "GemmWrwUniversal");
+        MIOPEN_LOG_I2("TunaNet override: promoting GemmWrwUniversal for point-output wrw");
     }
 
     // Cache results for future use

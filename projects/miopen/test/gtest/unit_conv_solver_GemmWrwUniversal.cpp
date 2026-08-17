@@ -35,6 +35,10 @@ auto GetConvTestCases(miopenDataType_t datatype)
     return std::vector{
         // clang-format off
         TestCase{{1, 8, 8, 8}, {8, 8, 3, 3}, {0, 0}, {1, 1}, {1, 1}, datatype},
+        // 2D patch-embedding wrw: Ho=Wo=1, stride==filter (GemmWrwUniversal fast path)
+        TestCase{{4, 3, 14, 14}, {1280, 3, 14, 14}, {0, 0}, {14, 14}, {1, 1}, datatype},
+        // 3D point-output wrw: Do=Ho=Wo=1, stride==filter (GemmWrwUniversal fast path)
+        TestCase{{4, 3, 4, 4, 4}, {1280, 3, 4, 4, 4}, {0, 0, 0}, {4, 4, 4}, {1, 1, 1}, datatype},
         // clang-format on
     };
 }

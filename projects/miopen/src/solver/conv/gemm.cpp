@@ -142,8 +142,8 @@ float GemmFwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
         if(wDesc.GetType() == miopenInt8 && yDesc.GetType() != miopenInt32)
             n_CastTensor = 1;
     }
-    // 3D point-output fwd path with stride==filter can run one strided-batched GEMM.
-    else if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+    // Point-output fwd path with stride==filter can run one strided-batched GEMM.
+    else if(miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) &&
             wDesc.GetType() != miopenInt8)
     {
         n_gemm_runs            = 1;
@@ -877,7 +877,7 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
     decltype(auto) wDesc  = problem.GetWeights();
     decltype(auto) yDesc  = problem.GetOut();
 
-    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) && wDesc.GetType() != miopenInt8)
+    if(miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) && wDesc.GetType() != miopenInt8)
         return 0;
 
     const auto spatial_dim = conv.GetSpatialDimension();
@@ -973,7 +973,7 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
     if(GemmFwd1x1_0_2{}.IsApplicable(context, problem))
         return false;
 
-    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+    if(miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) &&
        problem.GetWeights().GetType() != miopenInt8)
         return true;
 
@@ -1002,8 +1002,7 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
     const auto use_batched_fwd_point_output =
-        miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
-        wDesc.GetType() != miopenInt8;
+        miopen::conv::IsFwdDataPointOutputStrideEqFilter(problem) && wDesc.GetType() != miopenInt8;
 
     auto solution         = ConvSolution{miopenStatusSuccess};
     solution.workspace_sz = workspace_req;
