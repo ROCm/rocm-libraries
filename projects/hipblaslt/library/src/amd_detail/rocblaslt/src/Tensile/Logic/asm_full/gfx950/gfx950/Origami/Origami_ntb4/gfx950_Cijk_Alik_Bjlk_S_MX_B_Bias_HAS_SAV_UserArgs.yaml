@@ -6583,7 +6583,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKXCCMapping: 0
     SubGroup0: 4
@@ -6822,7 +6822,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 1
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
@@ -7067,7 +7067,7 @@
     StoreSwapAddr: false
     StoreSyncOpt: 0
     StoreVectorWidth: 4
-    StreamK: 3
+    StreamK: 5
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKXCCMapping: 0
