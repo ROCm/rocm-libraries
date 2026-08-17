@@ -6,6 +6,27 @@ include(CheckCXXCompilerFlag)
 # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
 check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
 
+# Publish the CK header ROOTS as usage requirements of every exported instance
+# library.
+#
+# Consumers spell CK includes root-relative -- e.g.
+#   #include <ck/ck.hpp>
+#   #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp>
+# -- so the search path has to contain <prefix>/include, not only the leaf
+# directories the headers happen to live in. Exporting leaves alone left those
+# includes unresolvable through the imported composable_kernel::<target> and
+# forced every consumer (MIOpen among them) to inject -isystem by hand. The
+# BUILD_INTERFACE entries do the same for in-tree/FetchContent consumers, which
+# previously got no include directories at all.
+function(ck_add_header_usage_requirements TARGET_NAME)
+    target_include_directories(${TARGET_NAME} PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
+        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
+endfunction()
+
 function(add_instance_library INSTANCE_NAME)
     message(DEBUG "adding instance ${INSTANCE_NAME}")
     set(result 1)
@@ -572,6 +593,7 @@ if(CK_DEVICE_OTHER_INSTANCES AND (NOT MIOPEN_REQ_LIBS_ONLY OR HIPTENSOR_REQ_LIBS
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/quantization>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/softmax>
         )
+        ck_add_header_usage_requirements(device_other_operations)
         rocm_install(TARGETS device_other_operations
             EXPORT device_other_operationsTargets)
         rocm_install(EXPORT device_other_operationsTargets
@@ -593,6 +615,7 @@ if(CK_DEVICE_GEMM_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_L
         target_include_directories(device_gemm_operations PUBLIC
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu>
         )
+        ck_add_header_usage_requirements(device_gemm_operations)
         rocm_install(TARGETS device_gemm_operations
             EXPORT device_gemm_operationsTargets)
         rocm_install(EXPORT device_gemm_operationsTargets
@@ -614,6 +637,7 @@ if(CK_DEVICE_MHA_INSTANCES AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LI
             add_library(composablekernels::device_mha_operations ALIAS device_mha_operations)
             target_compile_features(device_mha_operations PUBLIC)
             set_target_properties(device_mha_operations PROPERTIES POSITION_INDEPENDENT_CODE ON)
+            ck_add_header_usage_requirements(device_mha_operations)
 
             rocm_install(TARGETS device_mha_operations
                 EXPORT device_mha_operationsTargets)
@@ -638,6 +662,7 @@ if(CK_DEVICE_CONTRACTION_INSTANCES AND (NOT MIOPEN_REQ_LIBS_ONLY OR HIPTENSOR_RE
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/contraction>
         )
+        ck_add_header_usage_requirements(device_contraction_operations)
         rocm_install(TARGETS device_contraction_operations
             EXPORT device_contraction_operationsTargets)
         rocm_install(EXPORT device_contraction_operationsTargets
@@ -659,6 +684,7 @@ if(CK_DEVICE_REDUCTION_INSTANCES AND (NOT MIOPEN_REQ_LIBS_ONLY OR HIPTENSOR_REQ_
         target_include_directories(device_reduction_operations PUBLIC
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/reduce>
         )
+        ck_add_header_usage_requirements(device_reduction_operations)
         rocm_install(TARGETS device_reduction_operations
             EXPORT device_reduction_operationsTargets)
         rocm_install(EXPORT device_reduction_operationsTargets
@@ -693,6 +719,7 @@ if(CK_DEVICE_CONV_INSTANCES AND (NOT HIPTENSOR_REQ_LIBS_ONLY OR MIOPEN_REQ_LIBS_
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_bwd_weight>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ck/library/tensor_operation_instance/gpu/grouped_conv_fwd>
     )
+    ck_add_header_usage_requirements(device_conv_operations)
     rocm_install(TARGETS device_conv_operations
         EXPORT device_conv_operationsTargets)
     rocm_install(EXPORT device_conv_operationsTargets
