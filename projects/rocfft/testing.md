@@ -12,6 +12,11 @@ multi-process single/multi-device.
 
 rocFFT tests rely on googletest and some python scripts included in the rocFFT git repository.
 
+## Develoment Workflow
+
+Tests are compiled with `BUILD_CLIENTS_TESTS` and `BUILD_CLIENTS_BENCH`, or just `BUILD_CLIENTS` to
+cover both.
+
 # Testing Strategy and Layers
 
 ## Test naming
@@ -57,13 +62,22 @@ via structs that track this accounting, with extra care given to the somewhat ov
 runtime, which may not track host memory allocations.
 
 
-## Testing objectives
+## Testing strategy
 
-### Correctness tests
+### Unit test strategy
 
-Correctness tests verify the behaviour of the library infrastructure.  For example, correctness
-tests cover API behaviour for cases where a user man provide invalid parameters, or whether internal
-library infrastructure behaves as expected.
+#### Environment support
+
+rocFFT supports a variety of OSes, as defined in the ROCm documentation.  The current CI in TheRock
+only covers 4 device architectures, and 2 OSes.  Support for later versions of C++ are often
+unavailable in older Linux OSes; not testing compilation+smoke-test in these environments may break
+compilation or execution in these cases.
+
+#### Unit tests
+
+Unit tests are correctness tests verify the behaviour of the library infrastructure.  For example,
+correctness tests cover API behaviour for cases where a user man provide invalid parameters, or
+whether internal library infrastructure behaves as expected.
 
 The API correctness is handled by rocfft-test, where gtest names are `rocfft_UnitTest.*`
 
@@ -73,16 +87,16 @@ controlled by the cmake option `ROCFFT_BUILD_INTERNAL_TESTS`, and the test execu
 format validation tests) are provided by rocfft-test under the gtest filter
 `reference_test/valid_length_stride.*`.
 
+### Integration test strategy
 
-### Bit-wise reproducibility tests
+#### Bit-wise reproducibility tests
 
 rocFFT offers bit-wise reproducibility!  We test this by hashing the output using, and re-running
 the test suite to verify bit-wise reproducibility.  Bit-wise reproducibility requires that one be
 running the same version of rocFFT, identical ROCm stacks (compiler/runtime/driver), and the same
 GPU model.
 
-
-### Accuracy tests
+#### Accuracy tests
 
 The accuracy tests are all given as accuracy_test.vs_fftw, using FFTW for reference computation.  L2
 and L-infinity error bound scaling for FFT is known analytically, and we use this fact for
@@ -117,8 +131,24 @@ hangs and crashes, which are unfortunately common in distributed computing softw
 The multi-process accuracy testing framework currently relies on reference computation on a single
 host node, which restricts the size of problems which can be tested.
 
+Multi-process tests are currently not covered by CI in TheRock due to a lack of infrastructure.
 
-### Performance tests
+Accuracy tests should be run, unless otherwise specified by the developer, on all architectures that
+are supported by the rocFFT library.  Currently, TheRock only tests on a subset of the supported
+architectures.
+
+### ASAN / TSAN / Sanitizer Coverage
+
+ASAN (address sanitizer) coverage is enabled in rocFFT via `BUILD_ADDRESS_SANITIZER`.
+
+TSAN (thread sanitizer) and other sanitizer enabled in rocFFT.
+
+clange-format is run to check for code format issues.
+
+cppcheck is run for static analysis.
+
+
+### Benchmarking and Performance Validation
 
 Performance tests focus on a different parameter space than the accuracy tests.  For example, while
 it's important that the length-1 transforms perform correctly (accuracy), the transform is actually
@@ -164,3 +194,30 @@ the confidence intervals on the median execution time.
 The above features are implemented in the python script `scripts/perf/rocfft-perf`, which also
 includes `scripts/perf/suites.py`, which defines the performance testing suites for rocFFT.
 Multi-process performance testing is still in development.
+
+Performance tests should be run, unless otherwise specified by the developer, on all
+architectures that are supported by the rocFFT library.
+
+Performance testing is currently not implemented in TheRock due to infrastructure issues.
+
+
+## Pre-submit / CI Gates
+
+Pre-submit tests currently cover unit tests and accuracy tests for:
+
+** gfx94X, gfx950, gfx125X on Linux in a docker image
+** gfx1151 on Windows
+
+The CI tests in TheRock reduce the test probability to 1% due to performance issues in the CI
+infrastucture, which results in an uncomfortably low number of tests being run.  Previously the test
+probability was at 100%.
+
+Static analysis (formatting and cppcheck) is gating for PRs.
+
+There are no multi-gpu tests run, performance tests isn't run, and multi-process tests are not run.
+These gaps are due to infractucture availability issues.
+
+### Desired testing standard 
+
+Our objective is to have targetted static analysis, unit test, integration tests, and performance
+tests on all architectures combinations that rocFFT supports.
