@@ -74,11 +74,6 @@ if(BUILD_DISPATCHER_TESTS)
     add_subdirectory(tests)
 endif()
 
-# CI search-space budget for run_gemm_search_space.py.
-# 0 = no cap (full space); matches tile_engine's TILE_ENGINE_SAMPLING_TIER=daily (~500/op).
-set(DISPATCHER_GEMM_BUDGET "500" CACHE STRING
-    "Max GemmKernelConfig instances for CI search-space runner (0 = no cap)")
-
 # Optional: Build Python bindings
 option(BUILD_DISPATCHER_PYTHON "Build Python bindings for dispatcher" OFF)
 if(BUILD_DISPATCHER_PYTHON)

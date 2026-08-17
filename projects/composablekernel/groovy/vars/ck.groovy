@@ -1510,8 +1510,7 @@ def runDispatcherTests(String arch, String compiler) {
             -D GPU_TARGETS="${arch}" \
             -D CK_TILE_DISPATCHER=ON \
             -D BUILD_DISPATCHER_BINDINGS=ON \
-            -D DISPATCHER_RULE_SET=tests \
-            -D DISPATCHER_GEMM_BUDGET=500 .. && \
+            -D DISPATCHER_RULE_SET=tests .. && \
         ninja -j${nthreads()} dispatcher_gemm_lib && \
         python3 ../dispatcher/tests/run_gemm_search_space.py \
             --arch ${arch} \
