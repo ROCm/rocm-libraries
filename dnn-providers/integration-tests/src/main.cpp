@@ -6,8 +6,12 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -20,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -29,6 +34,7 @@
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
+#include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
@@ -162,9 +168,10 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--emit-support-observations")
             .default_value(false)
             .implicit_value(true)
-            .help("Print ##support-observation:{json} lines to stdout during the run, "
-                  "one per (bundle, case, engine, arch, platform). Pure side effect: "
-                  "never changes the verdict. CI greps stdout into a JSONL file for "
+            .help("Emit a ##support-snapshot:{json} line to stdout after the run "
+                  "containing all (bundle, case, engine) observations for this "
+                  "target. Pure side effect: never changes the verdict. CI greps "
+                  "stdout into a JSON file for "
                   "scripts/harvest_support_observations.py.");
         std::vector<std::string> remainingArgs;
         try
@@ -465,6 +472,43 @@ int main(int argc, char** argv) noexcept
             if(!writeSummary.errors.empty())
             {
                 exitCode = 1;
+            }
+        }
+
+        if(hipdnn_integration_tests::TestConfig::get().emitSupportObservations())
+        {
+            const auto& log = hipdnn_integration_tests::bundle::SupportObservationLog::get();
+            if(!log.empty())
+            {
+                auto snapshots
+                    = log.toSnapshotJsons(hipdnn_integration_tests::bundle::resolveDataDir());
+
+                auto envOr = [](const char* name) -> std::string {
+                    const char* v = std::getenv(name);
+                    return v ? v : "";
+                };
+
+                const auto now
+                    = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                std::tm utc{};
+#ifdef _WIN32
+                gmtime_s(&utc, &now);
+#else
+                gmtime_r(&now, &utc);
+#endif
+                std::array<char, 32> tsBuf{};
+                std::strftime(tsBuf.data(), tsBuf.size(), "%Y-%m-%dT%H:%M:%SZ", &utc);
+
+                const nlohmann::json provenance = {{"rocm_version", envOr("ROCM_VERSION")},
+                                                   {"commit", envOr("CI_COMMIT_SHA")},
+                                                   {"run_id", envOr("CI_RUN_ID")},
+                                                   {"timestamp", std::string(tsBuf.data())}};
+
+                for(auto& snapshot : snapshots)
+                {
+                    snapshot["provenance"] = provenance;
+                    std::cout << "##support-snapshot:" << snapshot.dump() << std::endl;
+                }
             }
         }
 

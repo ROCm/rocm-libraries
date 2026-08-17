@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for harvest_support_observations.py.
 
-Most tests build a small bundle tree in ``tmp_path``, hand the tool a few JSONL
-lines, and assert on the exact proposal -- no GPU, no CI data, no C++ build.
+Most tests build a small bundle tree in ``tmp_path``, hand the tool a snapshot
+JSON file, and assert on the exact proposal -- no GPU, no CI data, no C++ build.
 
 The design rules the tool exists to enforce (RFC 0015 §12.2) are all negative:
 never downgrade, never delete, never infer across targets, never write to the
@@ -34,9 +34,9 @@ from harvest_support_observations import (
     ObservationKey,
     harvest,
     index_bundles,
-    load_observations,
+    load_snapshots,
     main,
-    parse_observation,
+    parse_snapshot,
     read_sidecar,
     render_sidecar,
     report_coverage,
@@ -92,33 +92,57 @@ def _sweep_bundle(
 def _record(
     bundle: str,
     engine: str = MIOPEN,
-    target: tuple[str, str] = GFX942,
     verdict: str = SUPPORTED,
     case_id: str | None = None,
     **extra,
-) -> str:
+) -> dict:
     record = {
         "bundle": bundle,
         "case_id": case_id,
         "engine": engine,
-        "arch": target[0],
-        "platform": target[1],
         "verdict": verdict,
         "enforcement_level": "full",
-        "provenance": {"run_id": "ci-1", "commit": "abc123"},
     }
     record.update(extra)
-    return json.dumps(record)
+    return record
 
 
-def _jsonl(path: Path, lines: list[str]) -> Path:
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def _snapshot(
+    path: Path,
+    records: list[dict],
+    target: tuple[str, str] = GFX942,
+) -> Path:
+    data = {
+        "schema_version": 1,
+        "target": {"arch": target[0], "platform": target[1]},
+        "observations": records,
+    }
+    path.write_text(json.dumps(data) + "\n", encoding="utf-8")
     return path
 
 
-def _run(root: Path, tmp_path: Path, lines: list[str], name: str = "obs.jsonl"):
-    """Load one JSONL file and diff it against ``root``."""
-    merged, hints, stats = load_observations([_jsonl(tmp_path / name, lines)])
+def _run(
+    root: Path,
+    tmp_path: Path,
+    records: list[dict],
+    target: tuple[str, str] = GFX942,
+    name: str = "obs.json",
+):
+    """Load one snapshot file and diff it against ``root``."""
+    merged, hints, stats = load_snapshots([_snapshot(tmp_path / name, records, target)])
+    return harvest(merged, hints, index_bundles(root), root), stats
+
+
+def _run_multi(
+    root: Path,
+    tmp_path: Path,
+    shards: list[tuple[list[dict], tuple[str, str]]],
+):
+    """Load multiple snapshot files (one per target) and diff against ``root``."""
+    paths = []
+    for i, (records, target) in enumerate(shards):
+        paths.append(_snapshot(tmp_path / f"shard-{i}.json", records, target))
+    merged, hints, stats = load_snapshots(paths)
     return harvest(merged, hints, index_bundles(root), root), stats
 
 
@@ -145,58 +169,76 @@ def bundle_root(tmp_path: Path) -> Path:
 # --------------------------------------------------------------------------
 
 
-class TestParseObservation:
-    def test_parses_a_well_formed_record(self) -> None:
-        key, verdict, graph = parse_observation(_record("quick/A"))
+class TestParseSnapshot:
+    def _snap(self, records, target=GFX942, **overrides):
+        data = {
+            "schema_version": 1,
+            "target": {"arch": target[0], "platform": target[1]},
+            "observations": records,
+        }
+        data.update(overrides)
+        return data
+
+    def test_parses_a_well_formed_snapshot(self) -> None:
+        parsed = parse_snapshot(self._snap([_record("quick/A")]))
+        assert len(parsed) == 1
+        key, verdict, graph = parsed[0]
         assert key == ObservationKey("quick/A", None, MIOPEN, "gfx942", "linux")
         assert verdict == SUPPORTED
         assert graph is None
 
     def test_carries_the_optional_graph_hint(self) -> None:
-        _, _, graph = parse_observation(_record("quick/A", graph="Small"))
+        parsed = parse_snapshot(self._snap([_record("quick/A", graph="Small")]))
+        _, _, graph = parsed[0]
         assert graph == "Small"
 
     def test_case_id_becomes_part_of_the_key(self) -> None:
-        key, _, _ = parse_observation(_record("full/S", case_id="case_0"))
+        parsed = parse_snapshot(self._snap([_record("full/S", case_id="case_0")]))
+        key, _, _ = parsed[0]
         assert key.case_id == "case_0"
         assert key.unit == ("full/S", "case_0")
 
-    @pytest.mark.parametrize(
-        ("line", "fragment"),
-        [
-            ("{not json", "invalid JSON"),
-            ("[]", "must be an object"),
-            ('{"bundle": "a"}', "'engine'"),
-            (
-                '{"bundle": "", "engine": "E", "arch": "g", '
-                '"platform": "linux", "verdict": "supported"}',
-                "'bundle'",
-            ),
-        ],
-    )
-    def test_rejects_structurally_broken_records(
-        self, line: str, fragment: str
-    ) -> None:
-        with pytest.raises(ValueError, match=fragment):
-            parse_observation(line)
+    def test_rejects_non_object_snapshot(self) -> None:
+        with pytest.raises(ValueError, match="must be an object"):
+            parse_snapshot([])
+
+    def test_rejects_wrong_schema_version(self) -> None:
+        with pytest.raises(ValueError, match="schema_version"):
+            parse_snapshot(self._snap([], schema_version=99))
+
+    def test_rejects_missing_target(self) -> None:
+        with pytest.raises(ValueError, match="'target'"):
+            parse_snapshot({"schema_version": 1, "observations": []})
+
+    def test_rejects_observation_missing_engine(self) -> None:
+        bad_obs = {"bundle": "a", "verdict": "supported"}
+        with pytest.raises(ValueError, match="'engine'"):
+            parse_snapshot(self._snap([bad_obs]))
+
+    def test_rejects_empty_bundle_name(self) -> None:
+        bad_obs = {"bundle": "", "engine": "E", "verdict": "supported"}
+        with pytest.raises(ValueError, match="'bundle'"):
+            parse_snapshot(self._snap([bad_obs]))
 
     def test_rejects_an_unrecognised_verdict(self) -> None:
         with pytest.raises(ValueError, match="unknown verdict"):
-            parse_observation(_record("quick/A", verdict="maybe"))
+            parse_snapshot(self._snap([_record("quick/A", verdict="maybe")]))
 
     def test_rejects_a_platform_no_sidecar_may_contain(self) -> None:
-        """The proposal has to be mergeable, and the verifier rejects this."""
         with pytest.raises(ValueError, match="invalid platform"):
-            parse_observation(_record("quick/A", target=("gfx942", "freebsd")))
+            parse_snapshot(self._snap([], target=("gfx942", "freebsd")))
 
     def test_rejects_an_unrecognised_enforcement_level(self) -> None:
         with pytest.raises(ValueError, match="enforcement_level"):
-            parse_observation(_record("quick/A", enforcement_level="paranoid"))
+            parse_snapshot(
+                self._snap([_record("quick/A", enforcement_level="paranoid")])
+            )
 
     def test_ignores_the_shape_of_provenance(self) -> None:
         """Never read here; a malformed one must not cost a real observation."""
-        key, _, _ = parse_observation(_record("quick/A", provenance="whatever"))
-        assert key.bundle == "quick/A"
+        data = self._snap([_record("quick/A")], provenance="whatever")
+        parsed = parse_snapshot(data)
+        assert parsed[0][0].bundle == "quick/A"
 
 
 # --------------------------------------------------------------------------
@@ -207,64 +249,62 @@ class TestParseObservation:
 class TestUnion:
     def test_supported_survives_a_later_decline(self, tmp_path: Path) -> None:
         """A flaky engine or a stale shard must not retract an accepted graph."""
-        first = _jsonl(tmp_path / "a.jsonl", [_record("quick/A")])
-        second = _jsonl(tmp_path / "b.jsonl", [_record("quick/A", verdict=DECLINED)])
-        merged, _, _ = load_observations([first, second])
+        first = _snapshot(tmp_path / "a.json", [_record("quick/A")])
+        second = _snapshot(tmp_path / "b.json", [_record("quick/A", verdict=DECLINED)])
+        merged, _, _ = load_snapshots([first, second])
         assert list(merged.values()) == [SUPPORTED]
 
     def test_the_merge_does_not_depend_on_file_order(self, tmp_path: Path) -> None:
-        first = _jsonl(tmp_path / "a.jsonl", [_record("quick/A")])
-        second = _jsonl(tmp_path / "b.jsonl", [_record("quick/A", verdict=DECLINED)])
-        forward, _, _ = load_observations([first, second])
-        backward, _, _ = load_observations([second, first])
+        first = _snapshot(tmp_path / "a.json", [_record("quick/A")])
+        second = _snapshot(tmp_path / "b.json", [_record("quick/A", verdict=DECLINED)])
+        forward, _, _ = load_snapshots([first, second])
+        backward, _, _ = load_snapshots([second, first])
         assert forward == backward
 
     def test_unknown_never_displaces_an_answer(self, tmp_path: Path) -> None:
-        path = _jsonl(
-            tmp_path / "a.jsonl",
+        path = _snapshot(
+            tmp_path / "a.json",
             [
                 _record("quick/A", verdict=DECLINED),
                 _record("quick/A", verdict=UNKNOWN),
             ],
         )
-        merged, _, _ = load_observations([path])
+        merged, _, _ = load_snapshots([path])
         assert list(merged.values()) == [DECLINED]
 
     def test_reading_the_same_file_twice_changes_nothing(self, tmp_path: Path) -> None:
-        path = _jsonl(tmp_path / "a.jsonl", [_record("quick/A")])
-        once, _, _ = load_observations([path])
-        twice, _, _ = load_observations([path, path])
+        path = _snapshot(tmp_path / "a.json", [_record("quick/A")])
+        once, _, _ = load_snapshots([path])
+        twice, _, _ = load_snapshots([path, path])
         assert once == twice
 
     def test_targets_do_not_bleed_into_each_other(self, tmp_path: Path) -> None:
         """(bundle, case, engine, arch, platform) is the whole key."""
-        path = _jsonl(
-            tmp_path / "a.jsonl",
-            [
-                _record("quick/A", target=GFX942),
-                _record("quick/A", target=GFX90A, verdict=DECLINED),
-            ],
+        gfx942 = _snapshot(tmp_path / "a.json", [_record("quick/A")], target=GFX942)
+        gfx90a = _snapshot(
+            tmp_path / "b.json",
+            [_record("quick/A", verdict=DECLINED)],
+            target=GFX90A,
         )
-        merged, _, _ = load_observations([path])
+        merged, _, _ = load_snapshots([gfx942, gfx90a])
         assert len(merged) == 2
         assert {k.arch: v for k, v in merged.items()} == {
             "gfx942": SUPPORTED,
             "gfx90a": DECLINED,
         }
 
-    def test_a_malformed_line_costs_only_itself(self, tmp_path: Path) -> None:
-        path = _jsonl(
-            tmp_path / "a.jsonl",
-            ["{broken", _record("quick/A"), "", "also not json"],
-        )
-        merged, _, stats = load_observations([path])
+    def test_a_malformed_snapshot_costs_only_itself(self, tmp_path: Path) -> None:
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        good = _snapshot(tmp_path / "good.json", [_record("quick/A")])
+        merged, _, stats = load_snapshots([bad, good])
         assert len(merged) == 1
-        assert stats.records_malformed == 2
+        assert stats.files_failed == 1
         assert stats.records_valid == 1
 
     def test_an_unreadable_file_is_skipped_not_fatal(self, tmp_path: Path) -> None:
-        good = _jsonl(tmp_path / "a.jsonl", [_record("quick/A")])
-        merged, _, stats = load_observations([tmp_path / "missing.jsonl", good])
+        good = _snapshot(tmp_path / "a.json", [_record("quick/A")])
+        merged, _, stats = load_snapshots([tmp_path / "missing.json", good])
         assert len(merged) == 1
         assert stats.files_read == 1
         assert stats.files_failed == 1
@@ -299,7 +339,7 @@ class TestAdditions:
         self, bundle_root: Path, tmp_path: Path
     ) -> None:
         _single_bundle(bundle_root, "quick/A", claims={MIOPEN: {"gfx1151": ["linux"]}})
-        result, _ = _run(bundle_root, tmp_path, [_record("quick/A", target=GFX1151)])
+        result, _ = _run(bundle_root, tmp_path, [_record("quick/A")], target=GFX1151)
         assert _proposed(result, "quick/A/Small.support.json")["claims"] == {
             MIOPEN: {"gfx1151": ["linux", "windows"]}
         }
@@ -364,12 +404,12 @@ class TestNeverDowngrades:
     ) -> None:
         """The conflict path must not become an accidental veto."""
         _single_bundle(bundle_root, "quick/A", claims={MIOPEN: {"gfx942": ["linux"]}})
-        result, _ = _run(
+        result, _ = _run_multi(
             bundle_root,
             tmp_path,
             [
-                _record("quick/A", verdict=DECLINED),
-                _record("quick/A", target=GFX90A),
+                ([_record("quick/A", verdict=DECLINED)], GFX942),
+                ([_record("quick/A")], GFX90A),
             ],
         )
         assert len(result.conflicts) == 1
@@ -386,13 +426,18 @@ class TestNeverDowngrades:
             MLOPS: {"gfx1151": ["windows"]},
         }
         _single_bundle(bundle_root, "quick/A", claims=committed)
-        result, _ = _run(
+        result, _ = _run_multi(
             bundle_root,
             tmp_path,
             [
-                _record("quick/A", verdict=DECLINED),
-                _record("quick/A", engine=MLOPS, verdict=DECLINED),
-                _record("quick/A", target=GFX1151),
+                (
+                    [
+                        _record("quick/A", verdict=DECLINED),
+                        _record("quick/A", engine=MLOPS, verdict=DECLINED),
+                    ],
+                    GFX942,
+                ),
+                ([_record("quick/A")], GFX1151),
             ],
         )
         proposed = _proposed(result, "quick/A/Small.support.json")["claims"]
@@ -421,13 +466,18 @@ class TestSweeps:
     ) -> None:
         """Mirrors regroupSweepClaims(): one group per distinct footprint."""
         _sweep_bundle(bundle_root, "full/S", ["case_0", "case_1", "case_2"])
-        result, _ = _run(
+        result, _ = _run_multi(
             bundle_root,
             tmp_path,
             [
-                _record("full/S", case_id="case_0"),
-                _record("full/S", case_id="case_2"),
-                _record("full/S", case_id="case_1", target=GFX90A),
+                (
+                    [
+                        _record("full/S", case_id="case_0"),
+                        _record("full/S", case_id="case_2"),
+                    ],
+                    GFX942,
+                ),
+                ([_record("full/S", case_id="case_1")], GFX90A),
             ],
         )
         assert _proposed(result, "full/S/support.json")["claims"] == {
@@ -456,7 +506,8 @@ class TestSweeps:
         result, _ = _run(
             bundle_root,
             tmp_path,
-            [_record("full/S", case_id="case_1", target=GFX90A)],
+            [_record("full/S", case_id="case_1")],
+            target=GFX90A,
         )
         assert _proposed(result, "full/S/support.json")["claims"] == {
             MIOPEN: [
@@ -472,13 +523,13 @@ class TestSweeps:
         self, bundle_root: Path, tmp_path: Path
     ) -> None:
         _sweep_bundle(bundle_root, "full/S", ["a_case", "m_case", "z_case"])
-        result, _ = _run(
+        result, _ = _run_multi(
             bundle_root,
             tmp_path,
             [
-                _record("full/S", case_id="z_case", target=GFX942),
-                _record("full/S", case_id="a_case", target=GFX90A),
-                _record("full/S", case_id="m_case", target=GFX1151),
+                ([_record("full/S", case_id="z_case")], GFX942),
+                ([_record("full/S", case_id="a_case")], GFX90A),
+                ([_record("full/S", case_id="m_case")], GFX1151),
             ],
         )
         groups = _proposed(result, "full/S/support.json")["claims"][MIOPEN]
@@ -704,7 +755,7 @@ class TestCoverage:
         _single_bundle(
             bundle_root, "quick/A", claims={MIOPEN: {"gfx1151": ["windows"]}}
         )
-        result, _ = _run(bundle_root, tmp_path, [_record("quick/A", target=GFX942)])
+        result, _ = _run(bundle_root, tmp_path, [_record("quick/A")])
         report_coverage(result, __import__("sys").stdout)
         out = capsys.readouterr().out
         assert "gfx1151 / windows" in out
@@ -730,7 +781,7 @@ class TestCli:
         self, bundle_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _single_bundle(bundle_root, "quick/A")
-        observations = _jsonl(tmp_path / "obs.jsonl", [_record("quick/A")])
+        observations = _snapshot(tmp_path / "obs.json", [_record("quick/A")])
         assert main(self._args(bundle_root, observations, "--dry-run")) == 0
         out = capsys.readouterr().out
         assert "+++ b/quick/A/Small.support.json" in out
@@ -740,7 +791,7 @@ class TestCli:
         self, bundle_root: Path, tmp_path: Path
     ) -> None:
         _single_bundle(bundle_root, "quick/A")
-        observations = _jsonl(tmp_path / "obs.jsonl", [_record("quick/A")])
+        observations = _snapshot(tmp_path / "obs.json", [_record("quick/A")])
         output = tmp_path / "proposed"
         assert (
             main(self._args(bundle_root, observations, "--output-dir", str(output)))
@@ -757,7 +808,7 @@ class TestCli:
         before = {
             path: path.read_bytes() for path in bundle_root.rglob("*") if path.is_file()
         }
-        observations = _jsonl(tmp_path / "obs.jsonl", [_record("quick/A")])
+        observations = _snapshot(tmp_path / "obs.json", [_record("quick/A")])
         main(self._args(bundle_root, observations, "--output-dir", str(tmp_path / "p")))
         after = {
             path: path.read_bytes() for path in bundle_root.rglob("*") if path.is_file()
@@ -767,16 +818,16 @@ class TestCli:
     def test_output_dir_is_required_without_dry_run(
         self, bundle_root: Path, tmp_path: Path
     ) -> None:
-        observations = _jsonl(tmp_path / "obs.jsonl", [_record("quick/A")])
+        observations = _snapshot(tmp_path / "obs.json", [_record("quick/A")])
         assert main(self._args(bundle_root, observations)) == 1
 
     def test_a_missing_bundle_tree_fails(self, tmp_path: Path) -> None:
-        observations = _jsonl(tmp_path / "obs.jsonl", [_record("quick/A")])
+        observations = _snapshot(tmp_path / "obs.json", [_record("quick/A")])
         assert main(self._args(tmp_path / "nope", observations, "--dry-run")) == 1
 
     def test_no_readable_observation_file_fails(self, bundle_root: Path) -> None:
         assert (
-            main(self._args(bundle_root, bundle_root / "missing.jsonl", "--dry-run"))
+            main(self._args(bundle_root, bundle_root / "missing.json", "--dry-run"))
             == 1
         )
 
@@ -785,8 +836,8 @@ class TestCli:
     ) -> None:
         """Non-zero here would block the pipeline meant to surface them."""
         _single_bundle(bundle_root, "quick/A", claims={MIOPEN: {"gfx942": ["linux"]}})
-        observations = _jsonl(
-            tmp_path / "obs.jsonl", [_record("quick/A", verdict=DECLINED)]
+        observations = _snapshot(
+            tmp_path / "obs.json", [_record("quick/A", verdict=DECLINED)]
         )
         assert main(self._args(bundle_root, observations, "--dry-run")) == 0
         assert "=== Conflicts (1) ===" in capsys.readouterr().out
@@ -795,7 +846,7 @@ class TestCli:
         self, bundle_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _single_bundle(bundle_root, "quick/A")
-        observations = _jsonl(tmp_path / "obs.jsonl", [_record("quick/A")])
+        observations = _snapshot(tmp_path / "obs.json", [_record("quick/A")])
         main(self._args(bundle_root, observations, "--dry-run"))
         assert "Observation Coverage" not in capsys.readouterr().out
         main(self._args(bundle_root, observations, "--dry-run", "--coverage-report"))
@@ -805,8 +856,8 @@ class TestCli:
         self, bundle_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _single_bundle(bundle_root, "quick/A")
-        observations = _jsonl(
-            tmp_path / "obs.jsonl", [_record("quick/A", engine="NOT_AN_ENGINE")]
+        observations = _snapshot(
+            tmp_path / "obs.json", [_record("quick/A", engine="NOT_AN_ENGINE")]
         )
         main(self._args(bundle_root, observations, "--dry-run"))
         assert "NOT_AN_ENGINE" in capsys.readouterr().err
@@ -898,21 +949,24 @@ class TestRealBundleTree:
         output that has already been merged must produce an empty diff, not a
         pull request that reasserts what is already committed.
         """
-        lines = []
+        by_target: dict[tuple[str, str], list[dict]] = {}
         for relative, engine, case, arch, platform in sorted(
             _walk_sidecar_cells(DEFAULT_BUNDLES_DIR)
         ):
             directory = Path(relative).parent.as_posix()
-            lines.append(
+            by_target.setdefault((arch, platform), []).append(
                 _record(
                     directory,
                     engine=engine,
-                    target=(arch, platform),
                     verdict=SUPPORTED,
                     case_id=case or None,
                 )
             )
-        merged, hints, _ = load_observations([_jsonl(tmp_path / "obs.jsonl", lines)])
+        paths = [
+            _snapshot(tmp_path / f"snap-{i}.json", records, target)
+            for i, (target, records) in enumerate(by_target.items())
+        ]
+        merged, hints, _ = load_snapshots(paths)
         result = harvest(merged, hints, entries, DEFAULT_BUNDLES_DIR)
         assert result.proposals == []
         assert result.conflicts == []
@@ -922,18 +976,23 @@ class TestRealBundleTree:
     ) -> None:
         """No warnings from a replay means bundle paths, case ids, and the
         single-graph/sweep split all agree between the tree and this indexer."""
-        lines = [
-            _record(
-                Path(relative).parent.as_posix(),
-                engine=engine,
-                target=(arch, platform),
-                case_id=case or None,
+        by_target: dict[tuple[str, str], list[dict]] = {}
+        for relative, engine, case, arch, platform in sorted(
+            _walk_sidecar_cells(DEFAULT_BUNDLES_DIR)
+        ):
+            directory = Path(relative).parent.as_posix()
+            by_target.setdefault((arch, platform), []).append(
+                _record(
+                    directory,
+                    engine=engine,
+                    case_id=case or None,
+                )
             )
-            for relative, engine, case, arch, platform in sorted(
-                _walk_sidecar_cells(DEFAULT_BUNDLES_DIR)
-            )
+        paths = [
+            _snapshot(tmp_path / f"snap-{i}.json", records, target)
+            for i, (target, records) in enumerate(by_target.items())
         ]
-        merged, hints, _ = load_observations([_jsonl(tmp_path / "obs.jsonl", lines)])
+        merged, hints, _ = load_snapshots(paths)
         capsys.readouterr()
         result = harvest(merged, hints, entries, DEFAULT_BUNDLES_DIR)
         assert capsys.readouterr().err == ""

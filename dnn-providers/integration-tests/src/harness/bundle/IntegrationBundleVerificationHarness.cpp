@@ -4,17 +4,9 @@
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
 #include <algorithm>
-#include <array>
-#include <chrono>
-#include <cstdlib>
-#include <ctime>
-#include <iostream>
 #include <ostream>
 #include <set>
 #include <sstream>
-#include <system_error>
-
-#include <nlohmann/json.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
@@ -46,72 +38,6 @@
 
 namespace hipdnn_integration_tests::bundle
 {
-
-namespace
-{
-
-std::string bundleKeyForObservation(const std::filesystem::path& sidecarPath)
-{
-    const auto directory = sidecarPath.parent_path();
-    const auto bundleRoot = resolveDataDir();
-
-    std::error_code ec;
-    const auto relative = std::filesystem::relative(directory, bundleRoot, ec);
-
-    if(ec || relative.empty() || *relative.begin() == "..")
-    {
-        return directory.generic_string();
-    }
-    return relative.generic_string();
-}
-
-std::string currentUtcTimestampForObservation()
-{
-    const auto seconds = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-
-    std::tm utc{};
-#ifdef _WIN32
-    gmtime_s(&utc, &seconds);
-#else
-    gmtime_r(&seconds, &utc);
-#endif
-
-    std::array<char, 32> buffer{};
-    const std::size_t written
-        = std::strftime(buffer.data(), buffer.size(), "%Y-%m-%dT%H:%M:%SZ", &utc);
-    return {buffer.data(), written};
-}
-
-void emitObservationLine(const std::string& bundle,
-                         const nlohmann::json& caseId,
-                         const std::string& engineName,
-                         const std::string& arch,
-                         const std::string& platform,
-                         ObservedSupport support,
-                         const std::string& enforcementLevel)
-{
-    auto envOr = [](const char* name) -> std::string {
-        const char* v = std::getenv(name);
-        return v ? v : "";
-    };
-
-    nlohmann::json record;
-    record["bundle"] = bundle;
-    record["case_id"] = caseId;
-    record["engine"] = engineName;
-    record["arch"] = arch;
-    record["platform"] = platform;
-    record["verdict"] = toString(support);
-    record["enforcement_level"] = enforcementLevel;
-    record["provenance"] = {{"rocm_version", envOr("ROCM_VERSION")},
-                            {"commit", envOr("CI_COMMIT_SHA")},
-                            {"run_id", envOr("CI_RUN_ID")},
-                            {"timestamp", currentUtcTimestampForObservation()}};
-
-    std::cout << "##support-observation:" << record.dump() << std::endl;
-}
-
-} // namespace
 
 // ---- virtual defaults ------------------------------------------------------
 
@@ -343,7 +269,6 @@ void IntegrationBundleVerificationHarness::recordSupportObservations()
 
     const std::string arch = baseArchToken(TestConfig::get().getCurrentArch());
     const std::string platform = currentPlatform();
-    const bool emitToStdout = TestConfig::get().emitSupportObservations();
 
     const auto recordOne = [&](const LoadedEngine& engine, ObservedSupport support) {
         SupportObservationLog::get().record({_claimLocator,
@@ -352,18 +277,6 @@ void IntegrationBundleVerificationHarness::recordSupportObservations()
                                              platform,
                                              support,
                                              _bundle->metadata.enforcementLevel});
-
-        if(emitToStdout)
-        {
-            emitObservationLine(bundleKeyForObservation(_claimLocator.sidecarPath),
-                                _claimLocator.isSweep() ? nlohmann::json(_claimLocator.caseId)
-                                                        : nlohmann::json(nullptr),
-                                engine.name,
-                                arch,
-                                platform,
-                                support,
-                                toString(_bundle->metadata.enforcementLevel));
-        }
     };
 
     const auto recordAllAs = [&](ObservedSupport support) {

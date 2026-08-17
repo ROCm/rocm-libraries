@@ -3,9 +3,15 @@
 
 #pragma once
 
+#include <filesystem>
+#include <map>
 #include <mutex>
 #include <string>
+#include <system_error>
+#include <tuple>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include "harness/bundle/SupportClaims.hpp"
@@ -67,8 +73,11 @@ struct SupportObservation
     }
 };
 
-// Process-wide log of support observations. Populated during
-// --write-support-claims runs and drained once after RUN_ALL_TESTS().
+// Process-wide log of support observations. Internally a keyed map with upsert
+// semantics (SUPPORTED > DECLINED > UNKNOWN), so duplicate records for the same
+// cell are collapsed in-place rather than accumulated. Populated during
+// --write-support-claims and --emit-support-observations runs and drained once
+// after RUN_ALL_TESTS().
 class SupportObservationLog
 {
 public:
@@ -83,35 +92,140 @@ public:
     SupportObservationLog(SupportObservationLog&&) = delete;
     SupportObservationLog& operator=(SupportObservationLog&&) = delete;
 
+    // Upsert: higher verdict wins (SUPPORTED > DECLINED > UNKNOWN).
     void record(SupportObservation observation)
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        _observations.push_back(std::move(observation));
+        CellKey key{observation.claimLocator.sidecarPath,
+                    observation.claimLocator.caseId,
+                    observation.engineName,
+                    observation.arch,
+                    observation.platform};
+        CellValue val{observation.support,
+                      observation.enforcementLevel,
+                      observation.claimLocator.diagnosticPath};
+
+        auto it = _cells.find(key);
+        if(it == _cells.end() || verdictRank(val.support) > verdictRank(it->second.support))
+        {
+            _cells.insert_or_assign(std::move(key), std::move(val));
+        }
     }
 
+    // Bridge: reconstruct the flat vector that SupportClaimWriter consumes.
     std::vector<SupportObservation> all() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        return _observations;
+        std::vector<SupportObservation> result;
+        result.reserve(_cells.size());
+        for(const auto& [key, val] : _cells)
+        {
+            result.push_back(SupportObservation{
+                SupportClaimLocator{key.sidecarPath, key.caseId, val.diagnosticPath},
+                key.engineName,
+                key.arch,
+                key.platform,
+                val.support,
+                val.enforcementLevel});
+        }
+        return result;
     }
 
     bool empty() const
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        return _observations.empty();
+        return _cells.empty();
     }
 
     void reset()
     {
         const std::lock_guard<std::mutex> lock(_mutex);
-        _observations.clear();
+        _cells.clear();
+    }
+
+    // Build one snapshot JSON per unique (arch, platform) target in the log.
+    // Multi-GPU runs produce multiple snapshots; single-GPU runs (the common
+    // case) produce exactly one.  `bundleRoot` turns absolute sidecar paths
+    // into relative bundle keys (e.g. "quick/Conv/Default").
+    std::vector<nlohmann::json> toSnapshotJsons(const std::filesystem::path& bundleRoot) const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+
+        // Group cells by target — preserves map ordering within each group.
+        std::map<std::pair<std::string, std::string>, nlohmann::json> targetObs;
+        for(const auto& [key, val] : _cells)
+        {
+            std::error_code ec;
+            const auto relative
+                = std::filesystem::relative(key.sidecarPath.parent_path(), bundleRoot, ec);
+            const std::string bundle = (ec || relative.empty() || *relative.begin() == "..")
+                                           ? key.sidecarPath.parent_path().generic_string()
+                                           : relative.generic_string();
+
+            nlohmann::json obs;
+            obs["bundle"] = bundle;
+            obs["case_id"]
+                = key.caseId.empty() ? nlohmann::json(nullptr) : nlohmann::json(key.caseId);
+            obs["engine"] = key.engineName;
+            obs["verdict"] = toString(val.support);
+            obs["enforcement_level"] = toString(val.enforcementLevel);
+
+            targetObs[{key.arch, key.platform}].push_back(std::move(obs));
+        }
+
+        std::vector<nlohmann::json> snapshots;
+        snapshots.reserve(targetObs.size());
+        for(auto& [target, observations] : targetObs)
+        {
+            nlohmann::json snapshot;
+            snapshot["schema_version"] = 1;
+            snapshot["target"] = {{"arch", target.first}, {"platform", target.second}};
+            snapshot["observations"] = std::move(observations);
+            snapshots.push_back(std::move(snapshot));
+        }
+        return snapshots;
     }
 
 private:
     SupportObservationLog() = default;
 
+    struct CellKey
+    {
+        std::filesystem::path sidecarPath;
+        std::string caseId;
+        std::string engineName;
+        std::string arch;
+        std::string platform;
+
+        bool operator<(const CellKey& rhs) const
+        {
+            return std::tie(sidecarPath, caseId, engineName, arch, platform)
+                   < std::tie(rhs.sidecarPath, rhs.caseId, rhs.engineName, rhs.arch, rhs.platform);
+        }
+    };
+
+    struct CellValue
+    {
+        ObservedSupport support = ObservedSupport::UNKNOWN;
+        EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
+        std::string diagnosticPath;
+    };
+
+    static int verdictRank(ObservedSupport s)
+    {
+        switch(s)
+        {
+        case ObservedSupport::SUPPORTED:
+            return 2;
+        case ObservedSupport::DECLINED:
+            return 1;
+        default:
+            return 0;
+        }
+    }
+
     mutable std::mutex _mutex;
-    std::vector<SupportObservation> _observations;
+    std::map<CellKey, CellValue> _cells;
 };
 
 } // namespace hipdnn_integration_tests::bundle

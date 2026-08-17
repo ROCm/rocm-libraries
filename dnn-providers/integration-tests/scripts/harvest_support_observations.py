@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Offline consumer for ``--emit-support-observations`` JSONL (RFC 0015 §12).
+"""Offline consumer for ``--emit-support-observations`` snapshots (RFC 0015 §12).
 
 A run of the integration-test binary observes, for every graph it registers and
 every engine loaded into the handle, whether that engine accepts the graph on
-the machine the run happened on.  ``--emit-support-observations`` writes those
-observations out as JSONL.  This tool reads them back, compares them against
-the ``.support.json`` sidecars committed to the tree, and proposes the lines
-the sidecars are missing.
+the machine the run happened on.  ``--emit-support-observations`` writes a
+single snapshot JSON to stdout at the end of the run.  This tool reads one or
+more snapshot files, compares them against the ``.support.json`` sidecars
+committed to the tree, and proposes the lines the sidecars are missing.
 
 Why an offline consumer at all
 ------------------------------
 One CI run sees one ASIC on one OS, and usually only a shard of the bundles.
 A sidecar has to hold the union across every ASIC, so no single run is in a
 position to rewrite one -- it would erase the targets it did not visit.
-Unioning the JSONL from every shard first, and only then diffing, is what makes
-the update safe to compute.  ``--write-support-claims`` (the C++ bootstrap
+Unioning the snapshots from every shard first, and only then diffing, is what
+makes the update safe to compute.  ``--write-support-claims`` (the C++ bootstrap
 path) rewrites sidecars in place from a single run precisely because it is
 *not* this: it is the one-machine tool you point at an empty tree.
 
@@ -56,7 +56,7 @@ through this tool untouched.
 Usage
 -----
     python3 harvest_support_observations.py \\
-        --observations ci-run-1.jsonl ci-run-2.jsonl \\
+        --observations snapshot-1.json snapshot-2.json \\
         --bundles-dir integration-test-bundles \\
         --output-dir /tmp/proposed-sidecars
 
@@ -166,44 +166,34 @@ class ObservationKey:
 class LoadStats:
     files_read: int = 0
     files_failed: int = 0
-    lines_read: int = 0
     records_valid: int = 0
     records_malformed: int = 0
 
 
-def _field_error(record: dict) -> str | None:
-    """Return why ``record`` is unusable, or None when it is well-formed.
+def _observation_error(obs: dict) -> str | None:
+    """Return why one observation entry is unusable, or None when well-formed.
 
-    Only the fields the tool acts on are enforced.  ``provenance`` is carried
-    by the emitter for traceability and never read here, so a malformed one is
-    not worth discarding a real observation over.
+    ``arch`` and ``platform`` are validated at the snapshot level (``target``),
+    not per-observation.
     """
-    for name in ("bundle", "engine", "arch", "platform", "verdict"):
-        value = record.get(name)
+    for name in ("bundle", "engine", "verdict"):
+        value = obs.get(name)
         if not isinstance(value, str) or not value:
             return f"field '{name}' must be a non-empty string, got {value!r}"
 
-    verdict = record["verdict"]
+    verdict = obs["verdict"]
     if verdict not in VERDICT_RANK:
         return f"unknown verdict {verdict!r} (expected one of {sorted(VERDICT_RANK)})"
 
-    platform = record["platform"]
-    if platform not in VALID_PLATFORMS:
-        # Passing this through would land a token in a sidecar that
-        # verify_support_claims.py rejects, i.e. a proposal that cannot merge.
-        return (
-            f"invalid platform {platform!r} (expected one of {sorted(VALID_PLATFORMS)})"
-        )
-
-    case_id = record.get("case_id")
+    case_id = obs.get("case_id")
     if case_id is not None and (not isinstance(case_id, str) or not case_id):
         return f"field 'case_id' must be a non-empty string or null, got {case_id!r}"
 
-    graph = record.get("graph")
+    graph = obs.get("graph")
     if graph is not None and (not isinstance(graph, str) or not graph):
         return f"field 'graph' must be a non-empty string or null, got {graph!r}"
 
-    level = record.get("enforcement_level")
+    level = obs.get("enforcement_level")
     if level is not None and level not in VALID_ENFORCEMENT_LEVELS:
         return (
             f"invalid enforcement_level {level!r}"
@@ -213,42 +203,77 @@ def _field_error(record: dict) -> str | None:
     return None
 
 
-def parse_observation(line: str) -> tuple[ObservationKey, str, str | None] | None:
-    """Parse one JSONL line into ``(key, verdict, graph)``, or None if unusable.
+def parse_snapshot(
+    data: dict,
+) -> list[tuple[ObservationKey, str, str | None]]:
+    """Parse a snapshot dict into a list of ``(key, verdict, graph)`` tuples.
 
-    ``graph`` is the optional single-graph disambiguator; see
-    :class:`BundleEntry` for when it is needed.
+    Validates ``schema_version``, ``target``, and each observation entry.
+    Raises :class:`ValueError` for structural problems.  Individual malformed
+    observations are collected and re-raised as a single ``ValueError`` listing
+    all problems, so the caller can report them together.
     """
-    try:
-        record = json.loads(line)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid JSON ({exc})") from exc
-    if not isinstance(record, dict):
-        raise ValueError(f"record must be an object, got {type(record).__name__}")
+    if not isinstance(data, dict):
+        raise ValueError(f"snapshot must be an object, got {type(data).__name__}")
 
-    problem = _field_error(record)
-    if problem is not None:
-        raise ValueError(problem)
+    version = data.get("schema_version")
+    if version != 1:
+        raise ValueError(f"unsupported schema_version {version!r} (expected 1)")
 
-    key = ObservationKey(
-        bundle=record["bundle"],
-        case_id=record.get("case_id"),
-        engine=record["engine"],
-        arch=record["arch"],
-        platform=record["platform"],
-    )
-    return key, record["verdict"], record.get("graph")
+    target = data.get("target")
+    if not isinstance(target, dict):
+        raise ValueError(f"'target' must be an object, got {type(target).__name__}")
+    arch = target.get("arch")
+    if not isinstance(arch, str) or not arch:
+        raise ValueError(f"target.arch must be a non-empty string, got {arch!r}")
+    platform = target.get("platform")
+    if not isinstance(platform, str) or not platform:
+        raise ValueError(
+            f"target.platform must be a non-empty string, got {platform!r}"
+        )
+    if platform not in VALID_PLATFORMS:
+        raise ValueError(
+            f"invalid platform {platform!r} (expected one of {sorted(VALID_PLATFORMS)})"
+        )
+
+    observations = data.get("observations")
+    if not isinstance(observations, list):
+        raise ValueError(
+            f"'observations' must be an array, got {type(observations).__name__}"
+        )
+
+    results: list[tuple[ObservationKey, str, str | None]] = []
+    errors: list[str] = []
+    for i, obs in enumerate(observations):
+        if not isinstance(obs, dict):
+            errors.append(f"observations[{i}]: must be an object")
+            continue
+        problem = _observation_error(obs)
+        if problem is not None:
+            errors.append(f"observations[{i}]: {problem}")
+            continue
+        key = ObservationKey(
+            bundle=obs["bundle"],
+            case_id=obs.get("case_id"),
+            engine=obs["engine"],
+            arch=arch,
+            platform=platform,
+        )
+        results.append((key, obs["verdict"], obs.get("graph")))
+    if errors:
+        raise ValueError("; ".join(errors))
+    return results
 
 
-def load_observations(
+def load_snapshots(
     paths: list[pathlib.Path],
 ) -> tuple[dict[ObservationKey, str], dict[ObservationKey, str], LoadStats]:
-    """Read and union every JSONL file.
+    """Read and union every snapshot JSON file.
 
     Returns the merged ``key -> verdict`` map, the ``key -> graph`` hints seen
     alongside it, and the load statistics.  The union is the whole merge
-    strategy: files are append-only evidence, so reading them in any order, or
-    reading the same one twice, gives the same answer.
+    strategy: snapshots are append-only evidence, so reading them in any order,
+    or reading the same one twice, gives the same answer.
     """
     merged: dict[ObservationKey, str] = {}
     graph_hints: dict[ObservationKey, str] = {}
@@ -258,22 +283,26 @@ def load_observations(
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            warn(f"{path}: cannot read observations ({exc}); skipping file")
+            warn(f"{path}: cannot read snapshot ({exc}); skipping file")
             stats.files_failed += 1
             continue
         stats.files_read += 1
 
-        for number, line in enumerate(text.splitlines(), start=1):
-            if not line.strip():
-                continue
-            stats.lines_read += 1
-            try:
-                parsed = parse_observation(line)
-            except ValueError as exc:
-                warn(f"{path}:{number}: {exc}; skipping record")
-                stats.records_malformed += 1
-                continue
-            key, verdict, graph = parsed
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            warn(f"{path}: invalid JSON ({exc}); skipping file")
+            stats.files_failed += 1
+            continue
+
+        try:
+            parsed = parse_snapshot(data)
+        except ValueError as exc:
+            warn(f"{path}: {exc}; skipping file")
+            stats.records_malformed += 1
+            continue
+
+        for key, verdict, graph in parsed:
             stats.records_valid += 1
             if VERDICT_RANK[verdict] > VERDICT_RANK.get(merged.get(key), -1):
                 merged[key] = verdict
@@ -781,9 +810,9 @@ def report_summary(
     stats = result.stats
     additions = sum(len(proposal.additions) for proposal in result.proposals)
     rows = [
-        ("observation files read", load_stats.files_read),
-        ("observation files unreadable", load_stats.files_failed),
-        ("records read", load_stats.lines_read),
+        ("snapshot files read", load_stats.files_read),
+        ("snapshot files unreadable", load_stats.files_failed),
+        ("records valid", load_stats.records_valid),
         ("records malformed (skipped)", load_stats.records_malformed),
         ("distinct cells after union", distinct_cells),
         ("unknown verdicts discarded", stats.unknown_discarded),
@@ -853,8 +882,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         required=True,
         type=pathlib.Path,
-        metavar="JSONL",
-        help="observation files emitted by --emit-support-observations",
+        metavar="JSON",
+        help="snapshot JSON files emitted by --emit-support-observations",
     )
     parser.add_argument(
         "--bundles-dir",
@@ -893,9 +922,9 @@ def main(argv: list[str] | None = None) -> int:
         warn(f"{args.bundles_dir}: no such bundle tree")
         return 1
 
-    merged, graph_hints, load_stats = load_observations(args.observations)
+    merged, graph_hints, load_stats = load_snapshots(args.observations)
     if load_stats.files_read == 0:
-        warn("no observation file could be read")
+        warn("no snapshot file could be read")
         return 1
 
     warn_unknown_engines({key.engine for key in merged}, "the observation files")
