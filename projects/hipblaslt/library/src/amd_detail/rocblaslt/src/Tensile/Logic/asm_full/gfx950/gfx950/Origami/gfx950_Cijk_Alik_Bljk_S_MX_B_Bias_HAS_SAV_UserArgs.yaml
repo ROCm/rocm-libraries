@@ -296,7 +296,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -5401,7 +5401,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -8312,7 +8312,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -10911,7 +10911,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -11479,7 +11479,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -19394,7 +19394,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -25342,7 +25342,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -37760,7 +37760,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -39943,7 +39943,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
@@ -41150,7 +41150,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 2
     SubGroup1: 128
     SubGroupA: 2
@@ -41446,7 +41446,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -41745,7 +41745,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -42039,7 +42039,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 2
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 16
     SubGroupA: 4
@@ -42331,7 +42331,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -42928,7 +42928,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 4
     SubGroup1: 64
     SubGroupA: 4
@@ -44421,7 +44421,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -44719,7 +44719,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 8
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -45014,7 +45014,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 8
     SubGroup1: 32
     SubGroupA: 8
@@ -45329,7 +45329,7 @@
     StreamKAtomic: 0
     StreamKFixupTreeReduction: 0
     StreamKForceDPOnly: 0
-    StreamKXCCMapping: 4
+    StreamKXCCMapping: 0
     SubGroup0: 16
     SubGroup1: 16
     SubGroupA: 16
