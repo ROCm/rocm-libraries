@@ -182,3 +182,5 @@ int main(int argc, char** argv)
     }
     return RUN_ALL_TESTS();
 }
+
+// Temporary no-op edit to verify the `ck: convolution-legacy` labeler rule. Revert before merge.
