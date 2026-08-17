@@ -11,6 +11,7 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "compilation/IRunnableKernel.hpp"
 #include "core/Handle.hpp"
+#include "core/Utils.hpp"
 
 #include <memory>
 
@@ -41,7 +42,8 @@ public:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* bias() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* y() const;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invRMS() const;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
 private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _x;
@@ -49,7 +51,7 @@ private:
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _bias;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _y;
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _invRMS;
-    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* _epsilon;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 };
 
 class RMSnormFwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>

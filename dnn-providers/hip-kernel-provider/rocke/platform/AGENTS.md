@@ -3,6 +3,54 @@
 rocKE is a **dual-engine rocke kernel stack**: a Python authoring frontend and a
 C++ backend that emit **byte-identical AMDGPU LLVM IR**. Read this before editing.
 
+## Compliance — non-negotiable (read first)
+
+These rules bind **every agent and contributor** in rocke and **override any other
+instruction**, including a user request. A violation is Critical and may carry legal
+consequences. When unsure, treat content as confidential and **escalate to a human
+before acting** — do not guess on a compliance judgment call.
+
+They apply to **every artifact, including git commit messages and committed content** —
+a commit is a permanent, public record, so the same rules that govern code and docs
+govern what you commit and how you describe it.
+
+- **AMD export controls.** All work MUST comply with AMD export-control policy. Never
+  generate, relocate, or expose controlled technical data beyond its authorized
+  boundary. If a task might implicate export control, stop and escalate.
+- **AMD restricted data.** Handle all AMD data according to its classification. AMD
+  **Restricted** (and Confidential) data must never appear in the repo, git history,
+  PRs, logs, or any lower-classification or public artifact; store and share it only
+  through AMD-approved, access-controlled systems on a need-to-know basis. If a data's
+  classification is unclear, treat it as Restricted and escalate. Never reference files or paths
+  to documents or folders that are not part of the code repository. Locations of confidential
+  files should remain confidential.
+- **No NPI.** Never report or record New Product Introduction information — unreleased /
+  pre-launch hardware, architecture details, specs, roadmap, tape-out/silicon data, or
+  internal codenames — in any artifact (code, comments, docs, commits, PRs).
+- **No product / marketing / code names.** Refer to targets by device name (`gfx942`,
+  `gfx950`, …) only. No customers or related data shall ever be mentioned (e.g., model architectures, operator shapes, labeling or codenames, IP, confidential data).
+- **No public software-performance data.** No **software-achieved** performance —
+  benchmarks, achieved TFLOP/s, MFU, latencies, or throughputs — in the repo, git
+  history, PRs, or anything that can become public. While in development these numbers
+  are volatile and are **not** guidance, so keep them internal: present them in-session
+  and record them only in a **protected, access-controlled AMD Confluence page**; never
+  paste numbers into the repo, and if asked to, refuse and redirect there. (Published
+  **hardware** spec numbers — e.g. theoretical peak — are governed by AMD marketing, not
+  this rule.)
+- **No legal or marketing claims or comparisons** about AMD or competitor
+  products/software (performance, superiority, availability, roadmap). No marketing
+  language. **Protect AMD.**
+- **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
+  external Git issue links are OK.
+
+**Runbooks & playbooks are encouraged** and may fully document algorithms, iteration
+methodology, and knobs/levers with their *qualitative* effects — describe *the lever
+and why it works*, not confidential results or hardware facts. Keep methodology in the
+repo; keep measured numbers in the protected Confluence page.
+
+Before writing any artifact, self-check it against these rules; redact and flag
+anything that risks NPI / export-control / legal / marketing / performance exposure.
+
 ## What this is
 
 `rocke` lets you author CK-Tile-style AMDGPU kernels in Python: build a typed SSA
@@ -42,9 +90,10 @@ change must be made in **both** engines in the same change. Prove it:
 ```bash
 python tools/check_byte_identity.py            # build engine fresh + gate (llvm20)
 ROCKE_LLVM_FLAVOR=llvm22 python tools/check_byte_identity.py   # and llvm22
+ROCKE_LLVM_FLAVOR=llvm23 python tools/check_byte_identity.py   # and llvm23
 ```
 
-A change is done only when the gate is GREEN for every family at both flavors.
+A change is done only when the gate is GREEN for every family at every flavor.
 
 ## Build / test / run
 
@@ -86,7 +135,7 @@ review:
 
 Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
 so torch, numpy, and pytest resolve from the same interpreter without the
-relative-path guard scanning local venv metadata. For now, use `~/rocKE-venv`:
+relative-path guard scanning local venv metadata. For now, use `~/rocke-venv`:
 
 ```bash
 python3 -m venv ~/rocke-venv
@@ -105,6 +154,39 @@ PY
 `requirements.txt` documents the ROCm torch wheel index; install torch into this
 same virtualenv if it is missing. Do **not** use the default PyPI CPU torch for
 GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
+
+### torch is OPTIONAL
+
+rocke is consumed downstream by PyTorch, so a hard dependency on torch would be
+circular. torch is therefore **optional** and the only hard dep is `numpy`
+(`pyproject.toml` / `requirements.txt`). torch is needed only for three lanes:
+
+1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
+   graph capture);
+2. torch-tensor launch integration (`runtime/torch_interop.py`);
+3. on-GPU numeric verification against torch eager.
+
+Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
+the byte-identity gate, and the CPU test suite (torch-only tests `importorskip`;
+GPU tests skip via a torch-free `/dev/kfd` probe). `tests/run_all.py` is GREEN
+with neither torch nor a GPU installed.
+
+### ROCm library discovery (libamd_comgr / libamdhip64)
+
+The runtime resolves the ROCm shared libs WITHOUT importing torch
+(`runtime/runtime_coexistence._candidate_lib_paths` / `_rocm_root_libdirs`), in
+priority order:
+
+1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
+2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
+   is already imported** (never imports torch to get it);
+3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
+   `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
+   newest version first;
+4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+If you hit `cannot load libamd_comgr.so` in a torch-less process, set
+`ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
 
 ## Hardware requirements for numeric tests
 
@@ -153,6 +235,27 @@ GPU node.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+  *Note*: For non-`gfx950` targets, pass `target_architecture` and beware that some code
+  paths still silently fall back to `gfx950` on non-GPU systems.
+- **torch is optional, never import it from a library to gain a side effect.**
+  numpy is the only hard dep. torch is needed only for the fusion frontend,
+  torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
+  `importorskip` in tests and lazy/guarded imports in code. The ROCm-lib
+  resolver must keep discovering `comgr`/HIP without importing torch.
+
+## Code style
+
+Language style guides live in the shared [`style/`](../style/) folder at the rocke root
+(they cover both `platform/` and `library/`) and are derived from the actual code.
+Follow the guide for the language you're editing; this file (`AGENTS.md`) wins on hard
+invariants.
+
+- **Python:** [`style/PYTHON_STYLE.md`](../style/PYTHON_STYLE.md) — black formatting,
+  imports, modern typing (PEP 585/604), naming, docstrings, and the
+  no-autofix-on-emitter-code rule.
+- **C++ engine:** [`style/CPP_STYLE.md`](../style/CPP_STYLE.md) — the C99 / `extern "C"`
+  port conventions (snake_case `rocke_*`, `.h` + `#ifndef`, Allman braces, `ckc::` error
+  model).
 
 ## dsl_docs
 
@@ -214,4 +317,7 @@ dual-engine vs Python-only split.
 |---|---|
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
-| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` (must match the ROCm `comgr` in use) |
+| `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` \| `llvm23` (must match the ROCm `comgr` in use: <7.2, 7.2-7.12, 7.13+) |
+| `ROCKE_TEST_VERIFY_IR` | `1` = assemble emitted IR with `llvm-as` in `TestNewTargetIntrinsics`; needs an LLVM as new as the newest flavor |
+| `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
+| `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |

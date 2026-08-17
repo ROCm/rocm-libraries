@@ -30,7 +30,11 @@ enum class NodeType
     CUSTOM_OP = 16,
     REDUCTION = 17,
     RESAMPLE_FWD = 18,
-    RMS_NORM_BACKWARD = 19
+    RMS_NORM_BACKWARD = 19,
+    LAYERNORM_BACKWARD = 20,
+    RESAMPLE_BWD = 21,
+    MOE_GROUPED_MATMUL = 22,
+    MOE_GROUPED_MATMUL_BWD = 23
 };
 
 } // namespace hipdnn_frontend::graph

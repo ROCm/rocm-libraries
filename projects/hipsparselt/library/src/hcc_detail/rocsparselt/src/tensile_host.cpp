@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -310,6 +310,7 @@ namespace
         TensileLite::TensorDescriptor scaleC{"scaleC"};
         TensileLite::TensorDescriptor scaleD{"scaleD"};
         TensileLite::TensorDescriptor scaleAlphaVec{"scaleAlphaVec"};
+        TensileLite::TensorDescriptor gate{"gate"};
 
         // The ContractionProblemGemm
         TensileLite::ContractionProblemGemm tensileProblem(a,
@@ -327,7 +328,8 @@ namespace
                                                        batchIndex,
                                                        boundIndex,
                                                        static_cast<double>(*prob.beta),
-                                                       prob.workspaceSize);
+                                                       prob.workspaceSize,
+                                                       gate);
         tensileProblem.setComputeInputTypeA(Tensile_Ti);
         tensileProblem.setComputeInputTypeB(Tensile_Ti);
         tensileProblem.setAlphaType(Tensile_Tc);
@@ -424,6 +426,19 @@ namespace
                                                                                 : d.sizes()[0],
                                             prob.order == rocsparselt_order_row);
         }
+
+        // set gate residual
+        if(prob.gate != nullptr)
+        {
+            auto             gateType    = hipDataType_to_tensile_type(prob.gate_type);
+            std::vector<size_t> gateSizes   = {prob.m, prob.n, prob.batch_count};
+            std::vector<size_t> gateStrides = {prob.row_stride_g,
+                                               prob.col_stride_g,
+                                               prob.batch_stride_g};
+            tensileProblem.setUseGateResidual(true);
+            tensileProblem.setGateResidual(gateType, gateSizes, gateStrides);
+        }
+
         return tensileProblem;
     }
 
@@ -469,6 +484,9 @@ namespace
 
         // set bias vector
         inputs.bias = reinterpret_cast<const void*>(prob.bias_vector);
+
+        // set gate residual
+        inputs.gateResidual = reinterpret_cast<const void*>(prob.gate);
         if(prob.alpha_vector_scaling)
             inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.alpha);
 

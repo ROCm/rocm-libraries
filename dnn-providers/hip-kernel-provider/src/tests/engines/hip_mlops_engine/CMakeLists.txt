@@ -3,6 +3,8 @@
 
 target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestHipMlopsEngine.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestHipMlopsKernelCompiler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestHipMlopsModuleCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormFwdTrainingActivPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/Batchnorm/TestBatchnormFwdInferencePlan.cpp
@@ -21,5 +23,8 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/TestRMSnormBwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/TestRMSnormBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/RMSnorm/TestRMSnormApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleApplicabilityChecks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResamplePlanBuilder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/Resample/TestResampleFwdPlan.cpp
 
 )

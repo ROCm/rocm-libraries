@@ -1,6 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# NOTE: The wheel-provisioning logic in this script (venv creation, ROCm SDK
+# wheel install from nightlies/S3, and `rocm-sdk init`) has been ported to
+# Python in:
+#   projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts/windows_rocm_setup.py
+# That port is what the hipdnn-superbuild / hipdnn-superbuild-test skills use so
+# they can provision without PowerShell. This file is intentionally left
+# untouched otherwise: its existing consumers -- interactive users and
+# tools/dnn-benchmarking/setup.ps1 (which depends on the in-shell venv
+# activation and the ROCM_WHEEL_VENV env var this script publishes, neither of
+# which a child Python process can do for a parent shell) -- must keep working
+# unchanged. Keep the install logic here and in windows_rocm_setup.py in sync.
+
 <#
 .SYNOPSIS
     Sets up a ROCm Windows development environment using Python wheels.
@@ -68,6 +80,9 @@ function Resolve-RocmArtifactGroup {
 
 $RocmArtifactGroup = Resolve-RocmArtifactGroup -Target $GpuTarget
 $LibrariesWheelTarget = $RocmArtifactGroup.ToLower().Replace('-', '_')
+# Multi-arch nightlies use a single index and select the GPU via a bare
+# `device-<arch>` extra (no family/-all suffix), e.g. gfx942-all -> device-gfx942.
+$DeviceTarget = $GpuTarget.ToLower() -replace '-all$', ''
 $VerifiedGpuTarget = $GpuTarget.ToLower() -match "^(gfx115[0-9]|gfx(120[0-9]|110[0-9]|103[0-9]|90[0-9])(-all)?)$"
 if (-not $VerifiedGpuTarget) {
     Write-Warning "GPU target '$GpuTarget' is not in the verified list (gfx115x, gfx120x[-all], gfx110x[-all], gfx103x[-all], gfx90x[-all]). Wheel install may not work."
@@ -85,6 +100,7 @@ if ($SHA) {
 Write-Host "  Venv Path:  $VenvPath"
 Write-Host "  Clang Path: $ClangPath"
 Write-Host "  GPU Target: $GpuTarget"
+Write-Host "  Device (nightly): device-$DeviceTarget"
 Write-Host "  Wheel Group: $RocmArtifactGroup"
 Write-Host ""
 
@@ -130,8 +146,8 @@ if (-not $SkipInstall) {
             "$BaseUrl/rocm_sdk_libraries_$LibrariesWheelTarget-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl" `
             "$BaseUrl/rocm_sdk_devel-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl"
     } else {
-        Write-Host "  Source: ROCm nightlies (group: $RocmArtifactGroup)" -ForegroundColor Yellow
-        pip install --index-url "https://rocm.nightlies.amd.com/v2/$RocmArtifactGroup/" "rocm[libraries,devel]"
+        Write-Host "  Source: ROCm multi-arch nightlies (device: $DeviceTarget)" -ForegroundColor Yellow
+        pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DeviceTarget]"
     }
 
     if ($LASTEXITCODE -ne 0) {

@@ -141,7 +141,10 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/reduction_attributes.fbs
             schemas/resample_common.fbs
             schemas/resample_fwd_attributes.fbs
+            schemas/resample_bwd_attributes.fbs
             schemas/tensor_attributes.fbs
+            schemas/moe_grouped_matmul_attributes.fbs
+            schemas/moe_grouped_matmul_bwd_attributes.fbs
         SCHEMAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/schemas"
         GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/hipdnn_flatbuffers_sdk/data_objects"
         OUTPUT_NAMESPACE hipdnn_flatbuffers_sdk

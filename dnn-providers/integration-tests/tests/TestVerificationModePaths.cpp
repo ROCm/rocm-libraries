@@ -25,13 +25,13 @@
 
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_integration_tests;
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests::bundle;
 
 namespace
 {
@@ -39,19 +39,19 @@ namespace
 using EngineStub = std::function<void(std::unordered_map<int64_t, void*>&)>;
 using RefStub = std::function<void(ReferenceExecutorType, std::unordered_map<int64_t, void*>&)>;
 
-class ModeTestableHarness : public IntegrationGraphGoldenReferenceVerificationHarness
+class ModeTestableHarness : public IntegrationBundleVerificationHarness
 {
 public:
     ModeTestableHarness(VerificationMode mode, EngineStub engineStub, RefStub refStub)
-        : IntegrationGraphGoldenReferenceVerificationHarness(/*requiresDevice=*/false)
+        : IntegrationBundleVerificationHarness(/*requiresDevice=*/false)
         , _mode(mode)
         , _engineStub(std::move(engineStub))
         , _refStub(std::move(refStub))
     {
     }
 
-    using IntegrationGraphGoldenReferenceVerificationHarness::SetUp;
-    using IntegrationGraphGoldenReferenceVerificationHarness::TestBody;
+    using IntegrationBundleVerificationHarness::SetUp;
+    using IntegrationBundleVerificationHarness::TestBody;
 
 protected:
     VerificationMode getVerificationMode() const override

@@ -192,15 +192,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_OPENCL_CONVOLUTIONS``
-        | Controls OpenCL-written convolution kernels.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP``
-        | Controls OpenCL Wave64 without workgroup behavior.
-      - | 0: Disable
-        | 1: Enable
 
 Solution selection
 ==================
@@ -370,6 +361,11 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
 
     * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2``
         | Controls Winograd Fury RxS F(3,2) solution.
+      - | 0: Disable
+        | 1: Enable
+
+    * - | ``MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3``
+        | Controls Winograd Rage RxS F(2,3) solution.
       - | 0: Disable
         | 1: Enable
 
@@ -850,13 +846,6 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | Prefers older CO format when both v2 and v3 are supported.
       - | 1, "yes", "true", "enable", "enabled": Prefer v2 over v3
         | 0, "no", "false", "disable", "disabled": Use newer format
-
-    * - | ``MIOPEN_DEBUG_OPENCL_ENFORCE_CODE_OBJECT_VERSION``
-        | Enforces CO format for OpenCL kernels (HIP backend only).
-      - | Unset: Auto-detect CO version (default)
-        | 2: Always build to v2 CO
-        | 3: Always build to v3 CO
-        | 4: Always build to v4 CO
 
 RNN control
 ===========

@@ -57,11 +57,6 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include <miopen/config.hpp>
 
-#if MIOPEN_BACKEND_OPENCL
-#include <miopen/oclkernel.hpp>
-#include <miopen/clhelper.hpp>
-#include <miopen/ocldeviceinfo.hpp>
-#endif
 #include <miopen/db_path.hpp>
 #include <miopen/conv/db_getter.hpp>
 #include <miopen/execution_context.hpp>
@@ -69,15 +64,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <miopen/problem_description.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/ramdb.hpp>
-
-#if MIOPEN_BACKEND_OPENCL
-#define CL_TARGET_OPENCL_VERSION 120
-#ifdef __APPLE__
-#include <OpenCL/opencl.h>
-#else
-#include <CL/cl.h>
-#endif
-#endif
 
 #ifdef __APPLE__
 #include <mach/mach_time.h> // for mach_absolute_time() and friends

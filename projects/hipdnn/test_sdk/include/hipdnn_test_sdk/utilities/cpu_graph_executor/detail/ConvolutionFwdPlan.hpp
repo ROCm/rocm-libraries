@@ -120,6 +120,8 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->w_tensor_uid(), WDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->y_tensor_uid(), OutputDataTypeEnum);
 
+        CHECK_NO_RAGGED_TENSORS(tensorMap);
+
         return true;
     }
 

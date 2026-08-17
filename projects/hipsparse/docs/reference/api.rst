@@ -180,6 +180,8 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseCooSetPointers`       |
 +------------------------------------------+
+|:cpp:func:`hipsparseBlockedEllSetPointers`|
++------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetSize`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseSpMatGetFormat`       |
@@ -456,6 +458,11 @@ Function name                                     single double single complex d
 :cpp:func:`hipsparseSpGEMMreuse_nnz()`            x      x      x              x
 :cpp:func:`hipsparseSpGEMMreuse_copy()`           x      x      x              x
 :cpp:func:`hipsparseSpGEMMreuse_compute()`        x      x      x              x
+:cpp:func:`hipsparseSpGEAM_createDescr()`         x      x      x              x
+:cpp:func:`hipsparseSpGEAM_destroyDescr()`        x      x      x              x
+:cpp:func:`hipsparseSpGEAM_bufferSize()`          x      x      x              x
+:cpp:func:`hipsparseSpGEAM_nnz()`                 x      x      x              x
+:cpp:func:`hipsparseSpGEAM()`                     x      x      x              x
 :cpp:func:`hipsparseSDDMM_bufferSize()`           x      x      x              x
 :cpp:func:`hipsparseSDDMM_preprocess()`           x      x      x              x
 :cpp:func:`hipsparseSDDMM()`                      x      x      x              x

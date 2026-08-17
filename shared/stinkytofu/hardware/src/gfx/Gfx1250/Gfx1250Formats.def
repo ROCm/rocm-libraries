@@ -311,7 +311,7 @@ DEF_FORMAT(VOP3P,
     .unit = VALU,
     .encoding = {64},
     .maxOperands = 4,
-    .flags = {},
+    .flags = {VALU},
     .fields = {
         {D0, vdst, vgpr, 32},
         {S0, src0, src, 32},
@@ -472,7 +472,7 @@ DEF_FORMAT(WMMA,
     .encoding = {64},
     .maxOperands = 4,
     .cost = {1, 8},
-    .coissue = 0x00F0,
+    .coissue = 0x00CC,
     .flags = {WMMA},
     .fields = {
         {D0, vdst, vgpr, 256},
@@ -485,7 +485,7 @@ DEF_FORMAT(WMMA,
 DEF_FORMAT(WMMA_INT8,
     .parent = WMMA,
     .cost = {1, 16},
-    .coissue = 0xFF00,
+    .coissue = 0xCCCC,
 )
 
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
@@ -497,7 +497,7 @@ DEF_FORMAT(WMMA_FLOAT8MIX_16x16x64,
 DEF_FORMAT(WMMA_FLOAT8MIX_16x16x128,
     .parent = WMMA,
     .cost = {1, 8},
-    .coissue = 0x00E0,
+    .coissue = 0x00C8,
 )
 
 // Sparse Wave Matrix Multiply-Accumulate
@@ -720,6 +720,39 @@ DEF_FORMAT(VGLOBAL,
     .microcode = MC_VGLOBAL,
     .unit = GlobalMemory,
     .encoding = {96},
+)
+
+// VGLOBAL_ATOMIC_SADDR - returning global-segment atomic (SADDR form):
+//   global_atomic_* vdst, vaddr, vsrc, saddr
+// vdst is a pure destination (returned old value), vsrc supplies the data, vaddr is
+// the 32-bit per-lane offset, saddr the 64-bit scalar base. Tagged GLOBALAtomic so the
+// emitter appends th:TH_ATOMIC_RETURN, the instruction is zero-cost-classified, and ALU
+// hazards bucket it as VMEM (EV_VGPR_VMEM_READ) -- not FLAT. NOTE: like all returning
+// atomics, it is NOT tracked by the waitcnt dataflow (returning atomics are untracked) --
+// the consumer's wait is emitted manually by the caller.
+// ImplicitReadEXEC: the hardware reads EXEC.
+DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
+    .parent = VGLOBAL,
+    .flags = {GLOBALAtomic, ImplicitReadEXEC},
+    .fields = {
+        {D0, vdst, vgpr, 32},
+        {S0, vaddr, vgpr, 32},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
+)
+
+// VGLOBAL_ASYNC_FROM_LDS - gfx1250 async store LDS -> global:
+//   global_store_async_from_lds_* vaddr(64), dsaddr(32), saddr(64); no dest.
+// Shared by all size variants (b8/b32/b64/b128) via the DEF_BATCH.
+DEF_FORMAT(VGLOBAL_ASYNC_FROM_LDS,
+    .parent = VGLOBAL,
+    .flags = {GLOBALStoreAsyncFromLds},
+    .fields = {
+        {S0, vaddr, vgpr, 64},
+        {S1, vsrc, vgpr, 32},
+        {S2, saddr, sreg, 64},
+    },
 )
 
 // VSCRATCH - scratch memory (96-bit encoding)

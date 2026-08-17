@@ -29,7 +29,7 @@ tables.
         | **1**: hipBLASLt is preferred as the GEMM backend, but will fallback to Tensile on problems for which hipBLASLt does not provide a solution or when errors are encountered using the hipBLASLt backend.
 
     * - | ``ROCBLAS_USE_HIPBLASLT_BATCHED``
-        | Manual control to selectively disable the use of hipBlasLt only for the batched GEMMs. ``ROCBLAS_USE_HIPBLASLT=0`` disables the ``ROCBLAS_USE_HIPBLASLT_BATCHED`` variable, because hipBlasLt would not be enabled.
+        | Deprecated. Manual control to selectively disable the use of hipBLASLt only for the batched GEMMs. ``ROCBLAS_USE_HIPBLASLT=0`` disables the ``ROCBLAS_USE_HIPBLASLT_BATCHED`` variable, because hipBLASLt would not be enabled. This variable should no longer be required and is planned for removal in a future release.
       - 1
       - :ref:`Control the GEMM backend <rocblas-tensile-hipblaslt>`
       - | **Unset**: GEMM batched default backend.

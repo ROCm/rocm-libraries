@@ -49,7 +49,8 @@ public:
     const MiopenTensor& bias() const;
     const MiopenTensor& estMean() const;
     const MiopenTensor& variance() const;
-    double epsilonValue() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
     const std::optional<MiopenActivationDescriptor>& optActivation() const;
     const std::optional<MiopenTensor>& activationOut() const;
@@ -61,7 +62,7 @@ private:
     MiopenTensor _bias;
     MiopenTensor _estMean;
     MiopenTensor _variance;
-    double _epsilonValue;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     std::optional<MiopenActivationDescriptor> _optActivation;
     std::optional<MiopenTensor> _activationOut;

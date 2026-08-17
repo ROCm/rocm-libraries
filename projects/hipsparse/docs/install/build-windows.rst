@@ -21,7 +21,7 @@ instructions.
 Prerequisites
 =============
 
-hipSPARSE requires a :doc:`ROCm-enabled platform <compatibility/compatibility-matrix>`.
+hipSPARSE requires a :doc:`ROCm-enabled platform <rocm:compatibility/compatibility-matrix>`.
 
 Building hipSPARSE from source
 =================================

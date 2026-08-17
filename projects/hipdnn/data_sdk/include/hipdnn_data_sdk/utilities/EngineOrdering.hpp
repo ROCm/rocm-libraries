@@ -18,6 +18,8 @@ namespace hipdnn_data_sdk::utilities
  *
  * Ordering rationale:
  * - MIOPEN_ENGINE first: Default engine with full operation support
+ * - ASM_SDPA_ENGINE (ASM) next: Preferred SDPA path, ranked above rocKE
+ * - ROCKE_ENGINE (rocKE) next: SDPA fallback below ASM
  * - Other engines middle: Stable order preserved for predictability
  * - MIOPEN_ENGINE_DETERMINISTIC last: Limited to conv operations only,
  *   deprioritized due to performance trade-offs and reduced operation support
@@ -28,7 +30,8 @@ namespace hipdnn_data_sdk::utilities
  */
 inline void sortEngineIds(std::vector<int64_t>& engineIds)
 {
-    // Sort engine IDs: MIOPEN_ENGINE first, MIOPEN_ENGINE_DETERMINISTIC last, others in middle
+    // Sort engine IDs: MIOPEN_ENGINE first, then ASM_SDPA (ASM), then ROCKE,
+    // others in the middle, MIOPEN_ENGINE_DETERMINISTIC last.
     // Using index-based sorting with std::sort to achieve stable sort behavior
 
     std::vector<size_t> indices(engineIds.size());
@@ -39,11 +42,19 @@ inline void sortEngineIds(std::vector<int64_t>& engineIds)
         {
             return 0;
         }
-        if(engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID)
+        if(engineId == hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_ID)
+        {
+            return 1;
+        }
+        if(engineId == hipdnn_data_sdk::utilities::ROCKE_ENGINE_ID)
         {
             return 2;
         }
-        return 1; // Other engines
+        if(engineId == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID)
+        {
+            return 4;
+        }
+        return 3; // Other engines
     };
 
     std::sort(indices.begin(), indices.end(), [&](size_t i, size_t j) {

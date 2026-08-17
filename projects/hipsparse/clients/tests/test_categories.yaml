@@ -82,15 +82,23 @@ test_categories:
     description: "Quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/*.level2*"
+      - "quick/spmv_*"
+      - "quick/spsv_*"
     exclude:
       - "*known_bug*"
     labels:
       - "ffm-quick"
 
   ffm-full:
-    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    description: "Alias of ffm-quick: quick level1, level2, and level3 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/*.level2*"
+      - "quick/*.level3*"
+      - "quick/*.conversion*"
+      - "quick/spmv_*"
+      - "quick/spsv_*"
     exclude:
       - "*known_bug*"
     labels:
@@ -100,15 +108,23 @@ test_categories:
     description: "Alias of ffm-quick: quick level1 and level2 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/*.level2*"
+      - "quick/spmv_*"
+      - "quick/spsv_*"
     exclude:
       - "*known_bug*"
     labels:
       - "emulation-quick"
 
   emulation-full:
-    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    description: "Alias of ffm-quick: quick level1, level2, and level3 tests only"
     test_patterns:
       - "quick/*.level1*"
+      - "quick/*.level2*"
+      - "quick/*.level3*"
+      - "quick/*.conversion*"
+      - "quick/spmv_*"
+      - "quick/spsv_*"
     exclude:
       - "*known_bug*"
     labels:

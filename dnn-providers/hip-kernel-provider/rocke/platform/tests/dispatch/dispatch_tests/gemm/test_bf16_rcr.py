@@ -42,9 +42,9 @@ class TestBf16RcrDispatch(unittest.TestCase):
         req = _bf16(64, 32, 16, "gfx950")
         for c in gemm_bf16_candidates():
             if "rdna" in c.name:
-                ok, why = c.supports(req)
+                ok, why = c.admits(req)
                 self.assertFalse(ok)
-                self.assertIn("family", why)
+                self.assertIn("arch 'gfx950' not in", why)
 
     def test_unique_candidate_names(self):
         names = [c.name for c in gemm_bf16_candidates()]

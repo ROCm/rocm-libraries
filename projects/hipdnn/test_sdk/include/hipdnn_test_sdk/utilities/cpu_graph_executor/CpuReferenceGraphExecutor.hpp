@@ -13,12 +13,14 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/MatmulPlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanBuilderRegistry.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PointwisePlan.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/RMSNormFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ReductionPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
 
@@ -164,12 +166,16 @@ private:
             return detail::ConvolutionWrwSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes:
             return detail::LayernormFpropSignatureKey(node, tensorMap);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes:
+            return detail::LayernormBpropSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::MatmulAttributes:
             return detail::MatmulSignatureKey(node, tensorMap, computeType);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormAttributes:
             return detail::RMSNormFwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes:
             return detail::RMSNormBwdSignatureKey(node, tensorMap);
+        case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::ResampleFwdAttributes:
+            return detail::ResampleFwdSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::BlockScaleDequantizeAttributes:
             return detail::BlockScaleDequantizeSignatureKey(node, tensorMap);
         case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes:

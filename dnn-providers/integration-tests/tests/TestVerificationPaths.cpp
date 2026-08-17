@@ -13,19 +13,19 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
-#include "harness/golden/BundleDiscovery.hpp"
-#include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests::bundle;
 
 namespace
 {
 
 std::filesystem::path goldenDataRoot()
 {
-    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration_test_bundles";
+    return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
 }
 
 std::filesystem::path batchNormSmallBundle()

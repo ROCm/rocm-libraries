@@ -61,6 +61,7 @@ set(rocsparse_source
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
   src/common/rocsparse_numeric_boost.cpp
+  src/common/rocsparse_line_nnz_profile.cpp
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -383,6 +384,7 @@ set(rocsparse_source
   src/level3/rocsparse_csrmm_buffer_size.cpp
   src/level3/rocsparse_csrmm_analysis.cpp
   src/level3/rocsparse_csrmm.cpp
+  src/level3/rocsparse_csrmm_default_alg.cpp
   src/level3/rocsparse_cscmm_impl.cpp
   src/level3/rocsparse_cscmm_buffer_size.cpp
   src/level3/rocsparse_cscmm_analysis.cpp
@@ -484,6 +486,7 @@ set(rocsparse_source
   src/extra/rocsparse_bsrgemm.cpp
   src/extra/rocsparse_spgemm.cpp
   src/extra/rocsparse_spgeam.cpp
+  src/extra/rocsparse_spmat_scale.cpp
   #
   # Preconditioner
   #
@@ -577,6 +580,7 @@ set(rocsparse_source
   src/conversion/rocsparse_csxsldu_buffer_size.cpp
   src/conversion/rocsparse_csxsldu_preprocess.cpp
   src/conversion/rocsparse_csxsldu_compute.cpp
+  src/conversion/rocsparse_dense2bell.cpp
   src/conversion/rocsparse_dense2csr.cpp
   src/conversion/rocsparse_dense2coo.cpp
   src/conversion/rocsparse_prune_dense2csr.cpp

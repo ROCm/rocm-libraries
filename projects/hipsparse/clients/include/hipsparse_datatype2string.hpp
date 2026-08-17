@@ -553,6 +553,8 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
     case HIPSPARSE_SPMV_BSR_ALG1:
         return "bsr_alg1";
 #endif
+    case HIPSPARSE_SPMV_CSR_ALG3:
+        return "csr_alg3";
     }
     return "invalid";
 }

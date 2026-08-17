@@ -10,6 +10,9 @@ table SerializedExecutionPlan {
     tensor_uids: [int64];
     plugin_payload: [ubyte];
     is_override_shape_enabled: bool = false;
+    // Required byte alignment of each tensor's device pointer. Parallel to
+    // tensor_uids: tensor_alignments[i] applies to tensor_uids[i].
+    tensor_alignments: [int64];
 }
 
 root_type SerializedExecutionPlan;

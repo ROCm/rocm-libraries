@@ -213,6 +213,41 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         ai++;
     }
 
+    /* LICM hoist: per-reg invariants constant across all KV tiles (Python lines
+     * 772-810). qp_r, qh_r, row_ok, and causal_lim depend only on CTA-level
+     * constants and the per-thread row index — none of which change inside the
+     * KV loop. ALiBi slopes are per query-head: also loop-invariant. */
+    {
+        int hoist_reg;
+        for(hoist_reg = 0; hoist_reg < 4; hoist_reg++)
+        {
+            rocke_value_t* row = rocke__c_row(ctx, hoist_reg);
+            rocke_value_t* qp_r_div = rocke_b_div(b, row, rocke_b_const_i32(b, cfg->NQK));
+            rocke_value_t* qp_r = rocke_b_add(b, ctx->qb_start_pos, qp_r_div);
+            rocke_value_t* qh_mul
+                = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, cfg->NQK));
+            rocke_value_t* qh_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, cfg->NQK));
+            rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
+            rocke_value_t* ok_a = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
+            rocke_value_t* ok_b = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, cfg->NUM_QH));
+            ctx->hoist_qp_r[hoist_reg] = qp_r;
+            ctx->hoist_qh_r[hoist_reg] = qh_r;
+            ctx->hoist_row_ok[hoist_reg] = rocke_b_land(b, ok_a, ok_b);
+            ctx->hoist_causal_lim[hoist_reg] = rocke_b_add(b, ctx->context_len, qp_r);
+            ctx->hoist_alibi[hoist_reg] = NULL;
+        }
+        if(cfg->USE_ALIBI)
+        {
+            for(hoist_reg = 0; hoist_reg < 4; hoist_reg++)
+            {
+                rocke_value_t* qh_r = ctx->hoist_qh_r[hoist_reg];
+                rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, cfg->NUM_QH));
+                ctx->hoist_alibi[hoist_reg] = rocke_b_masked_global_load(
+                    b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
+            }
+        }
+    }
+
     rocke_for_t kvloop = rocke_b_scf_for_iter(b,
                                               ctx->tile_start,
                                               ctx->tile_end,
@@ -320,42 +355,24 @@ void rocke_gfx950_attention_tiled_3d_emit_softmax_loop(
         rocke_gfx950_attention_tiled_3d_issue_v(ctx, kv_tile_iv, cur_buf);
         rocke_gfx950_attention_tiled_3d_issue_k(ctx, safe_next_tile, nxt_buf);
 
-        /* ---------------- alibi slopes (per-row) ---------------- */
-        if(cfg->USE_ALIBI)
+        /* alibi_per_row: use hoisted slopes (NULL when USE_ALIBI is false). */
+        for(reg = 0; reg < 4; reg++)
         {
-            for(reg = 0; reg < 4; reg++)
-            {
-                rocke_value_t* row = rocke__c_row(ctx, reg);
-                rocke_value_t* qh_r_mul
-                    = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, cfg->NQK));
-                rocke_value_t* qh_r_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, cfg->NQK));
-                rocke_value_t* qh_r = rocke_b_add(b, qh_r_mul, qh_r_mod);
-                rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, cfg->NUM_QH));
-                alibi_per_row[reg] = rocke_b_masked_global_load(
-                    b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
-            }
+            alibi_per_row[reg] = ctx->hoist_alibi[reg];
         }
 
         /* ---------------- masked scores ---------------- */
         for(reg = 0; reg < 4; reg++)
         {
-            rocke_value_t* row = rocke__c_row(ctx, reg);
-            rocke_value_t* qp_r_div = rocke_b_div(b, row, rocke_b_const_i32(b, cfg->NQK));
-            rocke_value_t* qp_r = rocke_b_add(b, ctx->qb_start_pos, qp_r_div);
-            rocke_value_t* qh_r_mul
-                = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, cfg->NQK));
-            rocke_value_t* qh_r_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, cfg->NQK));
-            rocke_value_t* qh_r = rocke_b_add(b, qh_r_mul, qh_r_mod);
-            rocke_value_t* row_ok_a = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-            rocke_value_t* row_ok_b = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, cfg->NUM_QH));
-            rocke_value_t* row_ok = rocke_b_land(b, row_ok_a, row_ok_b);
+            rocke_value_t* qp_r = ctx->hoist_qp_r[reg];
+            rocke_value_t* row_ok = ctx->hoist_row_ok[reg];
+            rocke_value_t* causal_lim = ctx->hoist_causal_lim[reg];
             for(n = 0; n < cfg->QK_N_TILES; n++)
             {
                 rocke_value_t* ca_n = rocke_b_const_i32(b, n);
                 rocke_value_t* ca_16 = rocke_b_const_i32(b, 16);
                 rocke_value_t* col_abs = rocke_b_add(
                     b, rocke_b_add(b, tile_off, rocke_b_mul(b, ca_n, ca_16)), ctx->lane_col);
-                rocke_value_t* causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
                 rocke_value_t* causal_ok = rocke_b_cmp_le(b, col_abs, causal_lim);
                 rocke_value_t* in_prefix = rocke_b_cmp_lt(b, col_abs, ctx->max_seq_prefix_len);
                 rocke_value_t* m_ok

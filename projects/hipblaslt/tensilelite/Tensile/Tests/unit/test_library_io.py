@@ -62,3 +62,54 @@ def test_writeMsgPack_uses_zlib_compression(tmp_path):
     # zlib.decompress raises if the bytes are not valid zlib
     decompressed = zlib.decompress(gz_bytes)
     assert len(decompressed) > 0
+
+
+def test_writeMsgPack_removes_stale_uncompressed(tmp_path):
+    """A pre-existing uncompressed .dat is deleted so it cannot shadow the .zlib."""
+    dat = tmp_path / "library.dat"
+    dat.write_bytes(b"stale uncompressed payload from a previous build")
+
+    writeMsgPack(str(dat), {"key": "value"})
+
+    assert not dat.exists()
+    assert (tmp_path / "library.dat.zlib").exists()
+
+
+def test_writeMsgPack_missing_stale_uncompressed_is_noop(tmp_path):
+    """Absence of an uncompressed sibling is not an error."""
+    dest = str(tmp_path / "library.dat")
+
+    writeMsgPack(dest, {"key": "value"})
+
+    assert (tmp_path / "library.dat.zlib").exists()
+
+
+def test_writeMsgPack_reader_contract_is_zlib_wrapped_msgpack(tmp_path):
+    """The on-disk format the C++ loader depends on: zlib(msgpack(data)).
+
+    This guards the producer side of the Python-writer -> C++-reader contract:
+    the C++ ``readCompressedMsgObject`` inflates the file then msgpack-parses
+    the result, so the writer must emit exactly that, for non-trivial nested
+    data, with no extra framing.
+    """
+    dest = str(tmp_path / "library.dat")
+    data = {
+        "0": "TensileLibrary_gfx942_kernels_fallback_gfx942_0",
+        "10": "TensileLibrary_gfx942_kernels_fallback_gfx942_10",
+        "nested": {"a": [1, 2, 3], "b": {"c": "d"}},
+    }
+
+    writeMsgPack(dest, data)
+
+    raw = zlib.decompress((tmp_path / "library.dat.zlib").read_bytes())
+    assert msgpack.unpackb(raw, raw=False, strict_map_key=False) == data
+
+
+def test_writeMsgPack_empty_mapping_roundtrips(tmp_path):
+    """Corner case: an empty mapping still produces a loadable .zlib."""
+    dest = str(tmp_path / "library.dat")
+
+    writeMsgPack(dest, {})
+
+    raw = zlib.decompress((tmp_path / "library.dat.zlib").read_bytes())
+    assert msgpack.unpackb(raw, raw=False, strict_map_key=False) == {}

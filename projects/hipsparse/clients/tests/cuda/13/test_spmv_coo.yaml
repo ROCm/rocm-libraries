@@ -48,6 +48,7 @@ Tests:
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_COO_ALG1,
              HIPSPARSE_SPMV_COO_ALG2]
+  call_preprocess: [true, false]
 
 - name: spmv_coo
   category: pre_checkin
@@ -72,6 +73,7 @@ Tests:
              nos5,
              nos6,
              nos7]
+  call_preprocess: [true]
 
 - name: spmv_coo
   category: pre_checkin
@@ -93,3 +95,4 @@ Tests:
              shipsec1,
              bibd_22_8,
              scircuit]
+  call_preprocess: [true]

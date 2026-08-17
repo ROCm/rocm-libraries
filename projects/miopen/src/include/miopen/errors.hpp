@@ -58,7 +58,6 @@ struct Exception : std::exception
     const char* what() const noexcept override { return message.c_str(); }
 };
 
-MIOPEN_EXPORT std::string OpenCLErrorMessage(int error, const std::string& msg = "");
 MIOPEN_EXPORT std::string HIPErrorMessage(int error, const std::string& msg = "");
 
 template <class... Params>
@@ -86,8 +85,6 @@ template <class... Params>
         }                                                                              \
     } while(false)
 
-#define MIOPEN_THROW_CL_STATUS(...) \
-    MIOPEN_THROW(miopenStatusUnknownError, miopen::OpenCLErrorMessage(__VA_ARGS__))
 #define MIOPEN_THROW_HIP_STATUS(...) \
     MIOPEN_THROW(miopenStatusUnknownError, miopen::HIPErrorMessage(__VA_ARGS__))
 

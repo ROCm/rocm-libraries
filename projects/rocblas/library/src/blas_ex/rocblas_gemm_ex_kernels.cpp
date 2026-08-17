@@ -20,7 +20,7 @@
  *
  * ************************************************************************ */
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 #include "../blas3/Tensile/gemm_tensile.hpp"
 #endif
 #include "../../src/src64/blas_ex/rocblas_gemm_ex_64.hpp"
@@ -185,7 +185,7 @@ bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
 // if no Tensile then we use rocblas_internal_gemm_ex_typecasting_64 and rocblas_internal_gemm_ex_64
 // with source kernels so don't even provide rocblas_internal_gemm_ex
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 
 template <bool BATCHED, typename TScal, typename TiConstPtr, typename ToConstPtr, typename ToPtr>
 rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
@@ -661,7 +661,7 @@ rocblas_status gemm_ex_typecasting(rocblas_handle     handle,
     return status;
 }
 
-#endif // BUILD_WITH_TENSILE
+#endif // BUILD_WITH_TENSILE || BUILD_WITH_HIPBLASLT
 
 template <bool BATCHED>
 rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
@@ -720,7 +720,7 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
         stride_b, beta, c, offsetCin, ldc, stride_c, d, offsetDin, ldd, stride_d, batch_count, \
         algo, solution_index, rocblas_gemm_flags(flags)
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
     if(!sourceSolutionBased)
     {
         if(a_type == rocblas_datatype_f64_r && b_type == rocblas_datatype_f64_r
@@ -799,14 +799,17 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
             rb_status = rocblas_status_not_implemented;
         }
 
-        return rb_status;
+        // Return if backend succeeded or failed with a real error.
+        // Otherwise fall through to rocBLAS source GEMM (same as blas3 gemm).
+        if(rb_status != rocblas_status_not_implemented)
+            return rb_status;
     }
     else
 #endif
     {
         sourceSolutionBased = true;
     }
-    // use source 64 kernels if no tensile
+    // use source kernels when explicitly requested or backend is not_implemented
 
     if(flags & rocblas_gemm_flags_check_solution_index)
     {
@@ -908,6 +911,124 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
 }
 
 #undef EX_TYPECASTING_PARM
+
+#include "blas_ex/rocblas_gemm_grouped_batched_ex.hpp"
+
+template <typename API_INT>
+ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
+    rocblas_internal_gemm_grouped_batched_ex_template(rocblas_handle           handle,
+                                                      const rocblas_operation* transa_array,
+                                                      const rocblas_operation* transb_array,
+                                                      const API_INT*           m_array,
+                                                      const API_INT*           n_array,
+                                                      const API_INT*           k_array,
+                                                      const void*              alpha_array,
+                                                      const void* const*       Aarray,
+                                                      rocblas_datatype         a_type,
+                                                      const API_INT*           lda_array,
+                                                      const void* const*       Barray,
+                                                      rocblas_datatype         b_type,
+                                                      const API_INT*           ldb_array,
+                                                      const void*              beta_array,
+                                                      const void* const*       Carray,
+                                                      rocblas_datatype         c_type,
+                                                      const API_INT*           ldc_array,
+                                                      void* const*             Darray,
+                                                      rocblas_datatype         d_type,
+                                                      const API_INT*           ldd_array,
+                                                      API_INT                  group_count,
+                                                      const API_INT*           group_size,
+                                                      rocblas_datatype         compute_type,
+                                                      rocblas_gemm_algo        algo,
+                                                      int32_t                  solution_index,
+                                                      uint32_t                 flags)
+{
+    const size_t scalar_stride = rocblas_gemm_ex_compute_type_size(compute_type);
+    int64_t      idx           = 0;
+
+    for(API_INT g = 0; g < group_count; ++g)
+    {
+        const void* alpha_g
+            = static_cast<const char*>(alpha_array) + static_cast<size_t>(g) * scalar_stride;
+        const void* beta_g
+            = static_cast<const char*>(beta_array) + static_cast<size_t>(g) * scalar_stride;
+
+        rocblas_status status = rocblas_gemm_ex_template<true>(
+            handle,
+            transa_array[g],
+            transb_array[g],
+            m_array[g],
+            n_array[g],
+            k_array[g],
+            alpha_g,
+            reinterpret_cast<const void*>(Aarray + idx),
+            a_type,
+            0,
+            lda_array[g],
+            0,
+            reinterpret_cast<const void*>(Barray + idx),
+            b_type,
+            0,
+            ldb_array[g],
+            0,
+            beta_g,
+            reinterpret_cast<const void*>(Carray + idx),
+            c_type,
+            0,
+            ldc_array[g],
+            0,
+            const_cast<void*>(reinterpret_cast<const void*>(Darray + idx)),
+            d_type,
+            0,
+            ldd_array[g],
+            0,
+            group_size[g],
+            compute_type,
+            algo,
+            solution_index,
+            flags);
+        if(status != rocblas_status_success)
+            return status;
+        idx += group_size[g];
+    }
+    return rocblas_status_success;
+}
+
+#ifdef INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE
+#error INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE already defined
+#endif
+
+#define INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE(TI_)       \
+    template ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status    \
+        rocblas_internal_gemm_grouped_batched_ex_template<TI_>( \
+            rocblas_handle           handle,                    \
+            const rocblas_operation* transa_array,              \
+            const rocblas_operation* transb_array,              \
+            const TI_*               m_array,                   \
+            const TI_*               n_array,                   \
+            const TI_*               k_array,                   \
+            const void*              alpha_array,               \
+            const void* const*       Aarray,                    \
+            rocblas_datatype         a_type,                    \
+            const TI_*               lda_array,                 \
+            const void* const*       Barray,                    \
+            rocblas_datatype         b_type,                    \
+            const TI_*               ldb_array,                 \
+            const void*              beta_array,                \
+            const void* const*       Carray,                    \
+            rocblas_datatype         c_type,                    \
+            const TI_*               ldc_array,                 \
+            void* const*             Darray,                    \
+            rocblas_datatype         d_type,                    \
+            const TI_*               ldd_array,                 \
+            TI_                      group_count,               \
+            const TI_*               group_size,                \
+            rocblas_datatype         compute_type,              \
+            rocblas_gemm_algo        algo,                      \
+            int32_t                  solution_index,            \
+            uint32_t                 flags);
+
+INSTANTIATE_GEMM_GROUPED_BATCHED_EX_TEMPLATE(rocblas_int)
 
 #ifdef INSTANTIATE_GEMM_EX_TEMPLATE
 #error INSTANTIATE_GEMM_EX_TEMPLATE already defined

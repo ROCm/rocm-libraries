@@ -279,10 +279,11 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
 ///   `fitsInFloat32`.
 /// - `LiteralString`:
 ///   - Exactly `BufferOOB`: +4 (Tensile-style sentinel encodings).
-///   - Prefix `label` (e.g. `label_Activation_None_VW8`): pick comparison
-///   offset = map value when
-///     `labelByteOffset` is non-null and contains this key; otherwise use
-///     `currentByteOffsetBeforeInst`. +4 if that offset > 64, else 0.
+///   - Prefix `label` (e.g. `label_Activation_None_VW8`): always +4. A label
+///     operand is an unresolved `FK_PCRel_4` relocation, so the assembler always
+///     uses the `0xff` inline-literal slot and reserves a 32-bit literal word,
+///     independent of the label's resolved address or its position
+///     (`labelByteOffset` / `currentByteOffsetBeforeInst` are therefore ignored).
 ///   - VALU mnemonic ending in `_f32`: whole token is unsigned `0x` / `0X` hex
 ///   → interpret as float32
 ///     bits; cost like `LiteralDouble` above. Does not apply to SALU or
@@ -290,10 +291,11 @@ int getEffectiveBaseSizeInBytesImpl(const StinkyInstruction& inst) {
 ///   - Anything else: +4 when decimal/hex parsing yields a non-short int32, or
 ///   `asmSetSymbols` binds
 ///     the token to a non-short int (e.g. `0x4100`).
-int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
-                             const std::unordered_map<std::string, int64_t>* labelByteOffset,
-                             int64_t currentByteOffsetBeforeInst,
-                             const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+int getLiteralExtraBytesImpl(
+    const StinkyInstruction& inst,
+    [[maybe_unused]] const std::unordered_map<std::string, int64_t>* labelByteOffset,
+    [[maybe_unused]] int64_t currentByteOffsetBeforeInst,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     if (const HwInstDesc* desc = inst.getHwInstDesc();
         desc && desc->microcode == MicrocodeFormat::MC_SMEM) {
         return 0;
@@ -308,6 +310,10 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
     }
     if (inst.is(InstFlag::IF_FLATLoad) || inst.is(InstFlag::IF_FLATStore) ||
         inst.is(InstFlag::IF_FLATAtomic)) {
+        return 0;
+    }
+    if (inst.is(InstFlag::IF_GLOBALLoad) || inst.is(InstFlag::IF_GLOBALStore) ||
+        inst.is(InstFlag::IF_GLOBALAtomic)) {
         return 0;
     }
     if (const HwInstDesc* desc = inst.getHwInstDesc();
@@ -326,8 +332,7 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
         return 0;
     }
 
-    auto countLiteralExtra = [&inst, labelByteOffset, currentByteOffsetBeforeInst, asmSetSymbols](
-                                 const StinkyRegister& reg, int& extra) {
+    auto countLiteralExtra = [&inst, asmSetSymbols](const StinkyRegister& reg, int& extra) {
         using T = StinkyRegister::Type;
         if (reg.dataType == T::LiteralInt) {
             if (!isShortLiteralInt(reg.literalInt)) extra += 4;
@@ -339,14 +344,18 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
             if (lit == "BufferOOB") {
                 extra += 4;
             } else if (lit.size() >= 5 && lit.compare(0, 5, "label") == 0) {
-                if (labelByteOffset) {
-                    auto it = labelByteOffset->find(lit);
-                    if (it != labelByteOffset->end())
-                        extra += (it->second > 64) ? 4 : 0;
-                    else
-                        extra += (currentByteOffsetBeforeInst > 64) ? 4 : 0;
-                } else
-                    extra += (currentByteOffsetBeforeInst > 64) ? 4 : 0;
+                // A label operand is always emitted as a FK_PCRel_4 relocation: it
+                // takes the 0xff inline-literal slot and reserves a 32-bit literal
+                // word, regardless of the eventual resolved address. The value is
+                // unknown at encode time, so the assembler cannot fold it into an
+                // inline short constant (0..64). Verified with
+                // `llvm-mc -triple=amdgcn -mcpu=gfx1250 -show-encoding`:
+                //   s_add_i32 s66, label, 4 -> [0xff,0x84,0x42,0x81,A,A,A,A]  (8 B)
+                //   s_add_i32 s66, label, 0 -> [0xff,0x80,0x42,0x81,A,A,A,A]  (8 B)
+                //   s_add_i32 s66, 0, label -> [0x80,0xff,0x42,0x81,A,A,A,A]  (8 B)
+                //   s_add_i32 s66, 0, 0     -> [0x80,0x80,0x42,0x81]          (4 B)
+                // So a label is always +4, independent of its address or position.
+                extra += 4;
             } else {
                 if (tryAddLiteralExtraForValuF32HexFloatBits(inst, lit, extra))
                     ;
@@ -407,8 +416,9 @@ void addAlignmentPaddingFromDirectiveNode(IRBase* node, int64_t baseByteOffset, 
     const int64_t pad = paddingBytesForCodeAlignment(off, N);
     totalBytes += pad;
     if (debugOut && pad != 0)
-        *debugOut << "  [.align " << N << " padding=" << pad << " bytes, total=" << totalBytes
-                  << " bytes]\n";
+        *debugOut << "  [.align " << N << " padding=" << pad
+                  << " bytes, total=" << (baseByteOffset + totalBytes)
+                  << " bytes, totalBytes in BB=" << totalBytes << " bytes]\n";
 }
 
 void addAlignmentPaddingForLabelInstruction(const StinkyInstruction& inst, int64_t baseByteOffset,
@@ -422,7 +432,8 @@ void addAlignmentPaddingForLabelInstruction(const StinkyInstruction& inst, int64
             totalBytes += pad;
             if (debugOut && pad != 0)
                 *debugOut << "  [label .align " << ld->alignment << " padding=" << pad
-                          << " bytes, total=" << totalBytes << " bytes]\n";
+                          << " bytes, total=" << (baseByteOffset + totalBytes)
+                          << " bytes, totalBytes in BB=" << totalBytes << " bytes]\n";
         }
     }
 }

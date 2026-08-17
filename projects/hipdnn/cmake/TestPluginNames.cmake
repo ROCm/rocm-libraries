@@ -41,6 +41,13 @@ set(HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET "test_second_override_plugin")
 set(HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET "test_malformed_version_plugin")
 set(HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET "test_version_zero_plugin")
 
+# Runtime pass-by-value fake: reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+set(HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET "test_pass_by_value_plugin")
+
+# Runtime pass-by-value RECORDER fake: reports "1.2.0" and records the scalar it
+# resolves from device_buffers at execute, for delivery verification.
+set(HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET "test_pass_by_value_recorder_plugin")
+
 # Heuristic plugin test names
 set(TEST_GOOD_HEURISTIC_PLUGIN_NAME "test_good_heuristic_plugin")
 set(TEST_INCOMPLETE_HEURISTIC_API_PLUGIN_NAME "test_incomplete_heuristic_api_plugin")

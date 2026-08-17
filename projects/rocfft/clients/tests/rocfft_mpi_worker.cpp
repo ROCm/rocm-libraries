@@ -26,20 +26,9 @@
 int main(int argc, char* argv[])
 {
 #ifdef ROCFFT_DYNA_MPI_WORKER
-    return mpi_worker_main<std::vector<dyna_rocfft_params>, true>(
-        "dynamic rocFFT MPI worker process",
-        argc,
-        argv,
-        [](const std::vector<std::string>& lib_strings) {
-            std::vector<dyna_rocfft_params> all_params;
-            for(auto& lib : lib_strings)
-                all_params.emplace_back(lib);
-            return all_params;
-        });
+    using params_t = std::vector<dyna_rocfft_params>;
 #else
-    return mpi_worker_main<std::array<rocfft_params, 1>, false>(
-        "rocFFT MPI worker process", argc, argv, [](const std::vector<std::string>&) {
-            return std::array<rocfft_params, 1>();
-        });
+    using params_t = std::array<rocfft_params, 1>;
 #endif
+    return mpi_worker_main<params_t>("rocFFT MPI worker process", argc, argv);
 }

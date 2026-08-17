@@ -144,6 +144,28 @@ TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForUnsupportedGraph)
     EXPECT_FALSE(applicable);
 }
 
+TEST_F(TestMiopenConvPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidConvFwdGraph(
+        {4, 4, 4, 4},
+        {64, 16, 4, 1},
+        {4, 4, 1, 1},
+        {4, 1, 1, 1},
+        {4, 4, 4, 4},
+        {64, 16, 4, 1},
+        {0, 0},
+        {0, 0},
+        {1, 1},
+        {1, 1},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const bool applicable = _planBuilder.isApplicable(*_dummyHandle, graph);
+    EXPECT_FALSE(applicable);
+}
+
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForSupportedGraph)
 {
     {

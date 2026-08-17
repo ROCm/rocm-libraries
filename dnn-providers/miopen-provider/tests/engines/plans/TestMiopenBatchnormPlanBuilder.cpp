@@ -89,6 +89,22 @@ TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForGraphWithUnsup
     EXPECT_FALSE(applicable);
 }
 
+TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    // Execute-time override shapes can diverge from the compile-time dims this
+    // builder matched exactly; the graph opts in, so the builder must decline.
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormWithVarianceInferenceGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
+}
+
 TEST_F(TestMiopenBatchnormPlanBuilder, IsApplicableReturnsFalseForUnsupportedAttributes)
 {
     const MockGraph mockGraph;

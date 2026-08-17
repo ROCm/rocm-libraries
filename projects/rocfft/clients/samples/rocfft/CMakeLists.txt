@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +63,16 @@ foreach( sample ${sample_list} )
 
   add_executable( ${sample} ${sample}.cpp ../../../shared/data_gen_device.cpp )
 
+  # On Linux, always include amdgcnspirv target so the clients work
+  # on an architecture that the runtime supports but was not
+  # specified a build time
+  # TODO: amdgcnspirv is not compatible with ASAN.
+  get_target_property(sample_opts ${sample} COMPILE_OPTIONS)
+  if( NOT WIN32 AND NOT sample_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+    target_compile_options( ${sample} PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( ${sample} PRIVATE --offload-arch=amdgcnspirv )
+  endif()
+
   target_include_directories(
     ${sample}
     PRIVATE
@@ -106,15 +116,7 @@ foreach( sample ${sample_list} )
                         RUNTIME_OUTPUT_DIRECTORY 
                         ${SAMPLES_ROCFFT_OUT_DIR})
 
-  if( CUDA_FOUND )
-    target_include_directories( ${sample}
-      PRIVATE
-        $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-        $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-      )
-    target_compile_definitions( ${sample} PRIVATE __HIP_PLATFORM_NVCC__ )
-  endif( )
-  target_link_libraries( ${sample} PRIVATE ${ROCFFT_CLIENTS_HOST_LINK_LIBS} ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
+  target_link_libraries( ${sample} PRIVATE hip::host hip::device )
 
 endforeach( )
 

@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,26 +20,55 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Benchmarks
+# Get the current branch, or fall back to DETACHED
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} symbolic-ref -q --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE BRANCH_NAME
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(BRANCH_NAME STREQUAL "")
+  set(BRANCH_NAME "DETACHED")
+endif()
 
-function(add_rocrand_benchmark benchmark_src legacy)
+# Get the short commit hash
+execute_process(
+  COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  OUTPUT_VARIABLE COMMIT_HASH
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+# Register a benchmark target
+function(add_benchmark benchmark_src)
   get_filename_component(BENCHMARK_TARGET ${benchmark_src} NAME_WE)
   add_executable(${BENCHMARK_TARGET} ${benchmark_src})
 
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 14)
+    set_property(TARGET ${BENCHMARK_TARGET} PROPERTY CUDA_STANDARD 17)
     set_source_files_properties(${benchmark_src} PROPERTIES LANGUAGE CUDA)
     target_compile_options(${BENCHMARK_TARGET}
       PRIVATE
         $<$<COMPILE_LANGUAGE:CUDA>:--expt-extended-lambda>
     )
-    target_link_libraries(${BENCHMARK_TARGET} ${CUDA_curand_LIBRARY})
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE ${CUDA_curand_LIBRARY})
   else()
-    target_link_libraries(${BENCHMARK_TARGET} hip::device)
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE rocrand hip::device)
   endif()
-  target_link_libraries(${BENCHMARK_TARGET} rocrand)
-  if(NOT legacy)
-    target_link_libraries(${BENCHMARK_TARGET} benchmark::benchmark)
+
+  target_include_directories(${BENCHMARK_TARGET} PRIVATE
+    "${PROJECT_SOURCE_DIR}/library/src"
+    "${PROJECT_SOURCE_DIR}/../../shared/primbench")
+
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC BRANCH_NAME="${BRANCH_NAME}")
+  target_compile_definitions(${BENCHMARK_TARGET} PUBLIC COMMIT_HASH="${COMMIT_HASH}")
+
+  if(WIN32)
+    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE PRIMBENCH_NO_MONITORING)
+  elseif(HIP_COMPILER STREQUAL "nvcc")
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE nvidia-ml)
+  else()
+    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
   endif()
 
   set_target_properties(${BENCHMARK_TARGET}
@@ -53,32 +82,77 @@ function(add_rocrand_benchmark benchmark_src legacy)
     # for now adding in all .dll as dependency chain is not cmake based on win32
     file( GLOB third_party_dlls
     LIST_DIRECTORIES ON
-    CONFIGURE_DEPENDS 
+    CONFIGURE_DEPENDS
     ${HIP_DIR}/bin/*.dll
     ${CMAKE_SOURCE_DIR}/rtest.*
     )
     foreach( file_i ${third_party_dlls})
-      add_custom_command( TARGET ${BENCHMARK_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/benchmark )
+      add_custom_command(
+        TARGET ${BENCHMARK_TARGET} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/benchmark
+        COMMENT "Synchronizing ${file_i} to benchmark output directory"
+      )
     endforeach( file_i )
   endif()
 endfunction()
 
-add_rocrand_benchmark("benchmark_rocrand_host_api.cpp" OFF)
-add_rocrand_benchmark("benchmark_rocrand_device_api.cpp" OFF)
-if(HIP_COMPILER STREQUAL "nvcc")
-  add_rocrand_benchmark("benchmark_curand_host_api.cpp" OFF)
-  add_rocrand_benchmark("benchmark_curand_device_api.cpp" OFF)
-endif()
-
-if(BUILD_LEGACY_BENCHMARK)
-  add_rocrand_benchmark("benchmark_rocrand_generate.cpp" ON)
-  add_rocrand_benchmark("benchmark_rocrand_kernel.cpp"   ON)
-  if(HIP_COMPILER STREQUAL "nvcc")
-    add_rocrand_benchmark("benchmark_curand_generate.cpp" ON)
-    add_rocrand_benchmark("benchmark_curand_kernel.cpp"   ON)
-  endif()
-endif()
+add_benchmark("benchmark_device_api.cpp")
+add_benchmark("benchmark_host_api.cpp")
 
 if(BUILD_BENCHMARK_TUNING)
-  add_subdirectory(tuning)
+  if(HIP_COMPILER STREQUAL "nvcc")
+    message(FATAL_ERROR "Configuration tuning is currently supported for AMD GPUs only")
+  endif()
+
+  set(CMAKE_CXX_STANDARD 17)
+
+  add_executable(benchmark_rocrand_tuning
+    tuning_host_api.cpp
+    tuning/lfsr113.cpp
+    tuning/mrg31k3p.cpp
+    tuning/mrg32k3a.cpp
+    tuning/mt19937.cpp
+    tuning/mtgp32.cpp
+    tuning/philox.cpp
+    tuning/threefry2x32_20.cpp
+    tuning/threefry2x64_20.cpp
+    tuning/threefry4x32_20.cpp
+    tuning/threefry4x64_20.cpp
+    tuning/xorwow.cpp
+  )
+
+  target_link_libraries(benchmark_rocrand_tuning PRIVATE rocrand hip::device)
+  target_include_directories(benchmark_rocrand_tuning PRIVATE
+    "${CMAKE_BINARY_DIR}/benchmark"
+    "${PROJECT_SOURCE_DIR}/benchmark"
+    "${PROJECT_SOURCE_DIR}/library/src"
+    "${PROJECT_SOURCE_DIR}/../../shared/primbench")
+
+  set(BENCHMARK_TUNING_MIN_GRID_SIZE 32768 CACHE STRING
+    "Configurations with fewer total number of threads are omitted")
+  set(BENCHMARK_TUNING_THREAD_OPTIONS "64, 128, 256, 512, 1024" CACHE STRING
+    "Comma-separated list of benchmarked block sizes")
+  set(BENCHMARK_TUNING_BLOCK_OPTIONS "64, 128, 256, 512, 1024, 2048" CACHE STRING
+    "Comma-separated list of benchmarked grid sizes")
+
+  target_compile_definitions(benchmark_rocrand_tuning PRIVATE
+      BENCHMARK_TUNING_MIN_GRID_SIZE=${BENCHMARK_TUNING_MIN_GRID_SIZE}
+      BENCHMARK_TUNING_THREAD_OPTIONS=${BENCHMARK_TUNING_THREAD_OPTIONS}
+      BENCHMARK_TUNING_BLOCK_OPTIONS=${BENCHMARK_TUNING_BLOCK_OPTIONS}
+  )
+
+  target_compile_definitions(benchmark_rocrand_tuning PUBLIC BRANCH_NAME="${BRANCH_NAME}")
+  target_compile_definitions(benchmark_rocrand_tuning PUBLIC COMMIT_HASH="${COMMIT_HASH}")
+
+  if(WIN32)
+    target_compile_definitions(benchmark_rocrand_tuning PRIVATE PRIMBENCH_NO_MONITORING)
+  else()
+    target_link_libraries(benchmark_rocrand_tuning PRIVATE amd_smi)
+  endif()
+
+  if(NOT WIN32)
+    foreach(amdgpu_target ${AMDGPU_TARGETS})
+        target_compile_options(rocrand PRIVATE --offload-arch=${amdgpu_target})
+    endforeach()
+  endif()
 endif()

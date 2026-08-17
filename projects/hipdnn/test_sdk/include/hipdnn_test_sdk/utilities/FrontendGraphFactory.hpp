@@ -272,7 +272,7 @@ public:
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::BatchnormAttributes bnAttrs;
         bnAttrs.set_epsilon(epsilonTensorAttr);
@@ -360,7 +360,7 @@ public:
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         const graph::BatchnormInferenceAttributesVarianceExt bnAttrs;
         auto yAttr = graphObj.batchnorm_inference_variance_ext(xTensorAttr,
@@ -459,7 +459,7 @@ public:
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::LayernormAttributes lnAttrs;
         lnAttrs.set_epsilon(epsilonTensorAttr);
@@ -502,7 +502,7 @@ public:
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto epsilonTensorAttr = std::make_shared<graph::TensorAttributes>();
-        epsilonTensorAttr->set_value(1e-5).set_name("epsilon");
+        epsilonTensorAttr->set_compile_time_constant(1e-5).set_name("epsilon");
 
         graph::RMSNormAttributes rmsAttrs;
         rmsAttrs.set_epsilon(epsilonTensorAttr);
@@ -605,7 +605,7 @@ public:
             .set_resample_mode(hipdnn_frontend::ResampleMode::AVGPOOL_EXCLUDE_PADDING)
             .set_padding_mode(hipdnn_frontend::PaddingMode::ZERO_PAD);
 
-        auto yAttr = graphObj.resample_fwd(xTensorAttr, resampleAttrs);
+        auto yAttr = graphObj.resample(xTensorAttr, resampleAttrs)[0];
         yAttr->set_output(true);
 
         return graphObj;

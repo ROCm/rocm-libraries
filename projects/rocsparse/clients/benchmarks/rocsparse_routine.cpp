@@ -97,10 +97,6 @@ rocsparse_status rocsparse_routine::dispatch_indextype(const char cindextype, co
     const bool                mixed     = (cindextype == 'm');
     switch(indextype)
     {
-    case rocsparse_indextype_u16:
-    {
-        break;
-    }
     case rocsparse_indextype_i32:
     {
         return dispatch_call<FNAME, T, int32_t>(arg);
@@ -226,6 +222,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_spmv_csr.hpp"
 #include "testing_spmv_ell.hpp"
 #include "testing_spsv_coo.hpp"
+#include "testing_spsv_csc.hpp"
 #include "testing_spsv_csr.hpp"
 #include "testing_sptrsv.hpp"
 #include "testing_v2_spmv_bsr.hpp"
@@ -244,6 +241,11 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gebsrmm.hpp"
 #include "testing_gemmi.hpp"
 #include "testing_sddmm.hpp"
+#include "testing_sddmm_batched_coo.hpp"
+#include "testing_sddmm_batched_coo_aos.hpp"
+#include "testing_sddmm_batched_csc.hpp"
+#include "testing_sddmm_batched_csr.hpp"
+#include "testing_sddmm_batched_ell.hpp"
 #include "testing_spmm_batched_bell.hpp"
 #include "testing_spmm_batched_coo.hpp"
 #include "testing_spmm_batched_csc.hpp"
@@ -254,6 +256,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_spmm_csc.hpp"
 #include "testing_spmm_csr.hpp"
 #include "testing_spsm_coo.hpp"
+#include "testing_spsm_csc.hpp"
 #include "testing_spsm_csr.hpp"
 
 // Extra
@@ -305,6 +308,7 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_dense2coo.hpp"
 #include "testing_dense2csc.hpp"
 #include "testing_dense2csr.hpp"
+#include "testing_dense_to_sparse_bell.hpp"
 #include "testing_dense_to_sparse_coo.hpp"
 #include "testing_dense_to_sparse_csc.hpp"
 #include "testing_dense_to_sparse_csr.hpp"
@@ -556,8 +560,10 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJABCT_X(cscmm, testing_spmm_csc);
         DEFINE_CASE_IJABCT_X(cscmm_batched, testing_spmm_batched_csc);
         DEFINE_CASE_IJT_X(csrsm, testing_spsm_csr);
+        DEFINE_CASE_IJT_X(cscsm, testing_spsm_csc);
         DEFINE_CASE_T_FLOAT_ONLY(csrsort);
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
+        DEFINE_CASE_IJT_X(cscsv, testing_spsv_csc);
         DEFINE_CASE_IJT_X(spitsv_csr, testing_spitsv_csr);
         DEFINE_CASE_IJT(spic0);
 #ifdef ROCSPARSE_WITH_ILDLT0
@@ -577,6 +583,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T(dense2coo);
         DEFINE_CASE_T(dense2csc);
         DEFINE_CASE_T(dense2csr);
+        DEFINE_CASE_IT(dense_to_sparse_bell);
         DEFINE_CASE_IT(dense_to_sparse_coo);
         DEFINE_CASE_IJT(dense_to_sparse_csc);
         DEFINE_CASE_IJT(dense_to_sparse_csr);
@@ -611,6 +618,11 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_T_REAL_ONLY(roti);
         DEFINE_CASE_T(sctr);
         DEFINE_CASE_IJABCT(sddmm);
+        DEFINE_CASE_IABCT_X(sddmm_batched_ell, testing_sddmm_batched_ell);
+        DEFINE_CASE_IABCT_X(sddmm_batched_coo, testing_sddmm_batched_coo);
+        DEFINE_CASE_IABCT_X(sddmm_batched_coo_aos, testing_sddmm_batched_coo_aos);
+        DEFINE_CASE_IJABCT_X(sddmm_batched_csr, testing_sddmm_batched_csr);
+        DEFINE_CASE_IJABCT_X(sddmm_batched_csc, testing_sddmm_batched_csc);
         DEFINE_CASE_IT(sparse_to_dense_coo);
         DEFINE_CASE_IJT(sparse_to_dense_csc);
         DEFINE_CASE_IJT(sparse_to_dense_csr);

@@ -18,19 +18,19 @@ namespace hip_kernel_provider::rmsnorm
 {
 // --- Component Validators ---
 
-void RMSnormValidator::checkTensorLayoutsAndDimsSupported()
+void RMSnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     // Skip tensors with embedded scalar values (epsilon) - they don't have layouts or dimensions to validate
     std::vector<TensorDescriptor> tensors;
-    tensors.reserve(_tensorMap.size());
+    tensors.reserve(tensorIds.size());
 
-    for(const auto& [id, attr] : _tensorMap)
+    for(const auto& id : tensorIds)
     {
-        if(attr->value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        auto attr = _tensorMap.at(id);
+        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(attr))
         {
-            continue;
+            tensors.emplace_back(attr);
         }
-        tensors.emplace_back(attr);
     }
 
     validateConsistentDimensions(tensors);
@@ -157,7 +157,11 @@ void RMSnormValidator::checkTensorConfigSupported(
         statTensorIds.push_back(rmsNormAttr.inv_rms_tensor_uid().value());
     }
 
-    checkTensorLayoutsAndDimsSupported();
+    std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
+    allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
+    allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
+
+    checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
 }
@@ -179,7 +183,11 @@ void RMSnormValidator::checkBwdTensorConfigSupported(
         affineTensorIds.push_back(rmsNormBwdAttr.dbias_tensor_uid().value());
     }
 
-    checkTensorLayoutsAndDimsSupported();
+    std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
+    allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
+    allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
+
+    checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(ioTensorIds, affineTensorIds, statTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds);
 }

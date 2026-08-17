@@ -39,7 +39,7 @@ core/lower_llvm.py
 runtime/comgr.py
   ctypes over libamd_comgr; LLVM IR -> bitcode -> relocatable -> HSACO.
 
-runtime/hip_module.py, runtime/launcher.py, runtime/torch_module.py
+runtime/hip_module.py, runtime/launcher.py, runtime/torch_interop.py
   Load HSACO, pack args, resolve streams, launch, time, manage workspace
   and per-stream pending-args lifetime.
 ```
@@ -53,15 +53,20 @@ Two side paths:
 
 CK Tile is powerful, but several pieces are hard to iterate on in C++:
 
-- template instantiation is slow for large dispatcher sweeps (often minutes per kernel);
+- C++ template metaprogramming, used for fine control over device code generation, results in slow compile times; this is exacerbated by large number of kernels needed to be compiled for the kernel parameter tuning;
 - coordinate-transform DAGs are clean as algebra but verbose in C++ templates;
 - non-bijective mappings (convolution padding, paged attention page tables) are not simple layout permutations;
-- debugging a generated kernel is easier when the IR is small, inspectable, and generated in milliseconds (typical DSL warm compile: 5-30 ms).
+- debugging a generated kernel is easier when the IR is small, inspectable and fast to generate.
 
 `rocke` keeps the performance levers close to the hardware:
 
 - explicit LDS allocation and layout (`tile.smem_alloc`, `LdsLayout`);
-- raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 = `0x00027000` on CDNA; the RDNA backends use the gfx10+ raw SRD word3 `0x31014000`);
+- raw AMDGPU buffer descriptors (`tile.buffer_rsrc` with DW3 selected by the
+  exact gfx backend, not inferred from accelerator family:
+  gfx90a/gfx942/gfx950 use `0x00027000`,
+  gfx11-generic/gfx1151/gfx1201 use `0x31014000`, and the gfx1250 backend
+  currently inherits `0x31014000` as a bring-up placeholder pending
+  validation of its 57-bit SRD model);
 - async DRAM-to-LDS via `raw_ptr_buffer_load_lds`;
 - MFMA atoms keyed by dtype and shape (`MfmaAtom`);
 - `s_waitcnt`, `s.barrier`, `sched_group_barrier`, `s_setprio`;
@@ -184,9 +189,19 @@ The verified test `test_ssa_value_cannot_be_used_as_python_bool` pins this.
 
 ## Architecture Targets
 
-Default target: `amdgcn-amd-amdhsa--gfx950` (CDNA3 / MI355X-class). The DSL also supports the other CDNA targets `gfx942` (and the older `gfx908 / gfx90a` for the atoms that exist there) and the RDNA WMMA targets `gfx1151` (RDNA3.5, wave32) and `gfx1201` (RDNA4, wave32). The ISA backend is selected from the gfx string by `core/isa/backend.py::backend_for` (`BACKEND_REGISTRY`). The K-packed f16/bf16 atoms (`16x16x32`, `32x32x16`) are gfx950-only; gfx942's f16/bf16 catalog is `{16x16x16, 32x32x8}`. Wave size is 64 on the CDNA backends and 32 on the RDNA (gfx11/gfx12) WMMA backends.
+Default target: `amdgcn-amd-amdhsa--gfx950`. `known_arches()` lists the catalog.
+Each `ArchTarget` records one rocKE-validated wavefront mode; it does not imply that
+every target can switch modes. gfx942/gfx950 are wave64-only; gfx1250 is wave32-only.
+gfx1151, gfx11-generic, and gfx1201 also support wave64, but their catalog rows admit
+wave32. Validators accept only catalog atoms, and `backend_for()` selects the ISA
+rules. Atom availability is therefore an exact-gfx property, not a result of wave
+width.
 
-The `_DATALAYOUT` string in `core/lower_llvm.py` is the clang-emitted gfx950 layout. The lowerer also selects an LLVM **flavor** (`llvm20` vs `llvm22`) keyed by ROCm release (llvm22 for ROCm >= 7.2), which adjusts a small set of intrinsic signatures; see `_detect_llvm_flavor` / the `llvm_flavor=` override.
+[`core/lower_llvm.py`](../../python/rocke/core/lower_llvm.py) selects a
+clang-derived datalayout and intrinsic signatures for the resolved LLVM flavor
+(`llvm20` or `llvm22`). The choice follows the COMGR library vintage rather
+than the gfx target; see `_detect_llvm_flavor()` and the `llvm_flavor=`
+override.
 
 ## The Most Common Failure Modes
 

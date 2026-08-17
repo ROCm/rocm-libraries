@@ -11,7 +11,7 @@
 # Run:
 #   python library/tests/differential/numeric_attention.py [--arch gfx950]
 #
-# Needs GPU access (torch.cuda). Build/compile (comgr) does not need GPU.
+# Needs GPU access (HIP). Build/compile (comgr) does not need GPU.
 
 from __future__ import annotations
 
@@ -59,19 +59,37 @@ class NumericResult:
         return self.status == "GREEN"
 
 
-def _torch_dtype(torch, dtype: str):
-    return {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
+def _np_dtype(dtype: str):
+    """Map a spec dtype key to a numpy host dtype.
+
+    Only fp16/fp32 are supported torch-free: numpy has no native bfloat16 and
+    this harness does not pull in ml_dtypes. Every current ATTN_CONFIG is f16,
+    so bf16 is a clean, explicit error rather than dead scaffolding -- add a
+    real bf16 host encoding here if a bf16 config is ever introduced.
+    """
+    import numpy as np
+
+    try:
+        return {"fp16": np.float16, "fp32": np.float32}[dtype]
+    except KeyError:
+        raise NotImplementedError(
+            f"dtype {dtype!r} has no torch-free numpy host encoding "
+            "(numpy lacks bfloat16 and this harness avoids ml_dtypes); "
+            "all current ATTN_CONFIGS are f16"
+        ) from None
 
 
-def _compare(torch, out, ref_f32, tol: Tol) -> Tuple[float, float, float]:
+def _compare(out, ref_f32, tol: Tol) -> Tuple[float, float, float]:
     """Return (max_abs_diff, max_rel_diff, worst allclose margin)."""
-    out_f32 = out.to(torch.float32)
-    diff = (out_f32 - ref_f32).abs()
-    max_abs = float(diff.max().item())
-    denom = ref_f32.abs().clamp_min(1e-12)
-    max_rel = float((diff / denom).max().item())
-    allowed = tol.atol + tol.rtol * ref_f32.abs()
-    margin = float((diff - allowed).max().item())
+    import numpy as np
+
+    out_f32 = out.astype(np.float32)
+    diff = np.abs(out_f32 - ref_f32)
+    max_abs = float(diff.max())
+    denom = np.clip(np.abs(ref_f32), 1e-12, None)
+    max_rel = float((diff / denom).max())
+    allowed = tol.atol + tol.rtol * np.abs(ref_f32)
+    margin = float((diff - allowed).max())
     return max_abs, max_rel, margin
 
 
@@ -123,31 +141,10 @@ ATTN_CONFIGS: List[AttnCfg] = [
 _ATTN_TOL = Tol(rtol=0.0, atol=2e-2)
 
 
-def _ref_attention_torch(torch, Q, K, V, *, causal: bool):
-    """Dense attention ref (fp32 math), Q/K/V shape (Sq|Sk, H, D)."""
-    import math as _m
-
-    d = Q.shape[-1]
-    q = Q.to(torch.float32)
-    k = K.to(torch.float32)
-    v = V.to(torch.float32)
-    # scores[i,h,j] = sum_d q[i,h,d]*k[j,h,d]
-    scores = torch.einsum("ihd,jhd->ihj", q, k) / _m.sqrt(d)
-    if causal:
-        sq, sk = Q.shape[0], K.shape[0]
-        qpos = torch.arange(sq, device=q.device)[:, None, None]
-        kpos = torch.arange(sk, device=q.device)[None, None, :]
-        scores = torch.where(kpos <= qpos, scores, torch.full_like(scores, -1e30))
-    scores = scores - scores.max(dim=-1, keepdim=True).values
-    probs = torch.exp(scores)
-    probs = probs / probs.sum(dim=-1, keepdim=True)
-    return torch.einsum("ihj,jhd->ihd", probs, v)
-
-
 def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
     import math as _m
 
-    import torch
+    import numpy as np
 
     from rocke.core.arch import ArchTarget
     from rocke.helpers.compile import compile_kernel
@@ -159,7 +156,10 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
         fmha_fwd_mfma_grid,
         is_valid_spec,
     )
-    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from rocke.numeric.references import dense_attention_reference
+    from rocke.runtime.host_buffers import as_u8_buffer
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import DeviceMem, KernelLauncher, LaunchConfig
 
     tol_key = _ELEM_TOL_KEY.get(cfg.dtype, cfg.dtype)
     res = NumericResult(
@@ -214,12 +214,12 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
 
     B, Hq, Hk, D = cfg.batch, cfg.heads, cfg.kv_heads, cfg.head_size
     Sq, Sk = cfg.seqlen_q, cfg.seqlen_k
-    td = _torch_dtype(torch, tol_key)
-    torch.manual_seed(0xA11E)
-    Q = (torch.randn((B, Sq, Hq, D), device="cuda", dtype=torch.float32) * 0.3).to(td)
-    K = (torch.randn((B, Sk, Hk, D), device="cuda", dtype=torch.float32) * 0.3).to(td)
-    V = (torch.randn((B, Sk, Hk, D), device="cuda", dtype=torch.float32) * 0.3).to(td)
-    Out = torch.zeros((B, Sq, Hq, D), device="cuda", dtype=td)
+    np_dtype = _np_dtype(tol_key)
+    rng = np.random.default_rng(0xA11E)
+    Q = (rng.standard_normal((B, Sq, Hq, D)) * 0.3).astype(np_dtype)
+    K = (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np_dtype)
+    V = (rng.standard_normal((B, Sk, Hk, D)) * 0.3).astype(np_dtype)
+    Out = np.zeros((B, Sq, Hq, D), dtype=np_dtype)
 
     scale_log2 = float(1.0 / _m.sqrt(D) * _m.log2(_m.e))
     sig = (
@@ -241,49 +241,65 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
         .scalar("soh", "i32")
         .build()
     )
-    values = {
-        "Out": Out,
-        "Q": Q,
-        "K": K,
-        "V": V,
-        "scale": scale_log2,
-        "Sq": Sq,
-        "Sk": Sk,
-        "sqt": Hq * D,
-        "sqh": D,
-        "skt": Hk * D,
-        "skh": D,
-        "svt": Hk * D,
-        "svh": D,
-        "sot": Hq * D,
-        "soh": D,
-    }
     grid = fmha_fwd_mfma_grid(spec, batch=B)
     block = (target.wave_size, 1, 1)
 
+    # Torch-free device I/O: DeviceMem RAII buffers (freed when they leave
+    # scope), numpy host arrays uploaded as raw bytes, and the DeviceMem
+    # objects passed straight into the launcher values (pack_args reads their
+    # .ptr()). fence=True makes the launch stream-synchronize before returning,
+    # so the d2h readback observes a finished kernel.
+    rt = Runtime()
     try:
+        q_dev = DeviceMem(Q.nbytes)
+        k_dev = DeviceMem(K.nbytes)
+        v_dev = DeviceMem(V.nbytes)
+        o_dev = DeviceMem(Out.nbytes)
+        rt.memcpy_h2d(q_dev.ptr(), as_u8_buffer(Q), Q.nbytes)
+        rt.memcpy_h2d(k_dev.ptr(), as_u8_buffer(K), K.nbytes)
+        rt.memcpy_h2d(v_dev.ptr(), as_u8_buffer(V), V.nbytes)
+        rt.memset(o_dev.ptr(), 0, Out.nbytes)
+        values = {
+            "Out": o_dev,
+            "Q": q_dev,
+            "K": k_dev,
+            "V": v_dev,
+            "scale": scale_log2,
+            "Sq": Sq,
+            "Sk": Sk,
+            "sqt": Hq * D,
+            "sqh": D,
+            "skt": Hk * D,
+            "skh": D,
+            "svt": Hk * D,
+            "svh": D,
+            "sot": Hq * D,
+            "soh": D,
+        }
         launcher = KernelLauncher(
             hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
         )
         launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
-        torch.cuda.synchronize()
+        rt.memcpy_d2h(as_u8_buffer(Out), o_dev.ptr(), Out.nbytes)
     except Exception as e:  # noqa: BLE001
         res.status = "LAUNCH_FAIL"
-        res.detail = f"launch raised: {e}"
+        res.detail = f"device I/O or launch raised: {e}"
         return res
 
-    # Reference per batch (expand KV heads for GQA).
-    ref = torch.empty_like(Out, dtype=torch.float32)
+    # Reference per batch (expand KV heads for GQA). out_dtype=None keeps the
+    # reference in fp32 -- the full-precision compare this harness has always
+    # used (do not truncate the reference to the kernel dtype).
+    ref = np.empty((B, Sq, Hq, D), dtype=np.float32)
     for bi in range(B):
         if Hk != Hq:
             rep = Hq // Hk
-            Kb = K[bi].repeat_interleave(rep, dim=1)
-            Vb = V[bi].repeat_interleave(rep, dim=1)
+            Kb = np.repeat(K[bi], rep, axis=1)
+            Vb = np.repeat(V[bi], rep, axis=1)
         else:
             Kb, Vb = K[bi], V[bi]
-        ref[bi] = _ref_attention_torch(torch, Q[bi], Kb, Vb, causal=cfg.causal)
+        ref[bi] = dense_attention_reference(Q[bi], Kb, Vb, causal=cfg.causal)
 
-    max_abs, max_rel, margin = _compare(torch, Out, ref, tol)
+    max_abs, max_rel, margin = _compare(Out, ref, tol)
     res.max_abs_diff = max_abs
     res.max_rel_diff = max_rel
     res.margin = margin
@@ -300,14 +316,23 @@ def run_attn_config(cfg: AttnCfg, arch: str = "gfx950") -> NumericResult:
 # Driver
 # ---------------------------------------------------------------------
 def _check_gpu() -> Optional[str]:
-    try:
-        import torch
-    except Exception as e:  # noqa: BLE001
-        return f"torch import failed: {e}"
-    if not torch.cuda.is_available():
+    """Gate this harness on a visible HIP device via the torch-free probe.
+
+    The harness is torch-free: data generation is numpy and device I/O goes
+    through DeviceMem + the HIP runtime, so it gates on the resource it actually
+    uses -- ``rocke.runtime.hip_module.get_device_arch()``. This is the same
+    probe the test *gates* use. (It inverts the old torch-era rationale: when
+    the driver drove ``torch.cuda`` in-process, probing HIP first would dlopen
+    the system HIP before torch bound its own; with torch gone there is no such
+    ordering hazard and the HIP probe is the correct, direct check.)
+    """
+    from rocke.runtime.hip_module import get_device_arch
+
+    if get_device_arch(0) is None:
         return (
-            "torch.cuda.is_available() is False -- run under sudo -E "
-            "(the login user is not in the GPU device group)"
+            "no HIP device visible (get_device_arch() is None) -- on a GPU box, "
+            "ensure the user is in the render/video groups with access to "
+            "/dev/kfd and /dev/dri (e.g. run under sudo -E)"
         )
     return None
 
@@ -339,9 +364,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         sys.stderr.write(f"GPU unavailable: {gpu_err}\n")
         return 3
 
-    import torch
+    from rocke.runtime.hip_module import get_device_arch, get_device_name
 
-    print(f"L6 NUMERIC ATTN  arch={args.arch}  device={torch.cuda.get_device_name(0)}")
+    dev_arch = get_device_arch(0)
+    dev_name = get_device_name(0) or "?"
+    print(f"L6 NUMERIC ATTN  arch={args.arch}  device={dev_arch} ({dev_name})")
     results = run_all(arch=args.arch, only=args.only)
 
     rows: List[Dict[str, Any]] = []

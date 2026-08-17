@@ -660,3 +660,265 @@ TEST_F(IntegrationTensorDescriptorApi, FinalizeWithoutRequiredAttributesFails)
 
     hipdnnBackendDestroyDescriptor(desc);
 }
+
+// =============================================================================
+// RFC-0016 Runtime Pass-By-Value attributes
+// =============================================================================
+
+// Contract: HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE (1308) is a settable +
+// gettable bool that round-trips through finalize.
+TEST_F(IntegrationTensorDescriptorApi, RuntimePassByValueFlagRoundTrips)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    bool flag = true;
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            desc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &flag),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    bool gotFlag = false;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &gotFlag),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_TRUE(gotFlag);
+    EXPECT_EQ(elementCount, 1);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: the runtime flag defaults to false when never set.
+TEST_F(IntegrationTensorDescriptorApi, RuntimePassByValueFlagDefaultsFalse)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    bool gotFlag = true;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &gotFlag),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_FALSE(gotFlag);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: HIPDNN_ATTR_TENSOR_IS_BY_VALUE (1307) reports value-presence: true
+// once a VALUE_EXT scalar has been set.
+TEST_F(IntegrationTensorDescriptorApi, IsByValueTrueWhenValueSet)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    float tensorValue = K_SCALAR_VALUE;
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        static_cast<int64_t>(sizeof(float)),
+                                        &tensorValue),
+              HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    bool isByValue = false;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_BY_VALUE,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &isByValue),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_TRUE(isByValue);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: IS_BY_VALUE reads false when no VALUE_EXT scalar was set.
+TEST_F(IntegrationTensorDescriptorApi, IsByValueFalseWhenNoValueSet)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    bool isByValue = true;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_BY_VALUE,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &isByValue),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_FALSE(isByValue);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: IS_BY_VALUE is read-only — attempting to set it must fail.
+TEST_F(IntegrationTensorDescriptorApi, IsByValueIsReadOnly)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    bool isByValue = true;
+    EXPECT_NE(hipdnnBackendSetAttribute(
+                  desc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &isByValue),
+              HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: HIPDNN_ATTR_TENSOR_CONSTANT_VALUE is a read-only alias of
+// HIPDNN_ATTR_TENSOR_VALUE_EXT (same integer 1306) — set via VALUE_EXT, both
+// read back identical bytes.
+TEST_F(IntegrationTensorDescriptorApi, ConstantValueAliasesValueExt)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    float tensorValue = K_SCALAR_VALUE;
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        static_cast<int64_t>(sizeof(float)),
+                                        &tensorValue),
+              HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t viaExtCount = 0;
+    float viaExt = 0.0f;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        static_cast<int64_t>(sizeof(float)),
+                                        &viaExtCount,
+                                        &viaExt),
+              HIPDNN_STATUS_SUCCESS);
+
+    int64_t viaConstCount = 0;
+    float viaConst = 0.0f;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_CONSTANT_VALUE,
+                                        HIPDNN_TYPE_CHAR,
+                                        static_cast<int64_t>(sizeof(float)),
+                                        &viaConstCount,
+                                        &viaConst),
+              HIPDNN_STATUS_SUCCESS);
+
+    EXPECT_EQ(viaExtCount, viaConstCount);
+    EXPECT_FLOAT_EQ(viaExt, viaConst);
+    EXPECT_FLOAT_EQ(viaConst, K_SCALAR_VALUE);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: the runtime flag (1308) and value-presence (1307) are independent —
+// flag true with no value: IS_BY_VALUE false, runtime flag true.
+TEST_F(IntegrationTensorDescriptorApi, FlagTrueWithoutValueIsIndependent)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    bool flag = true;
+    ASSERT_EQ(
+        hipdnnBackendSetAttribute(
+            desc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, &flag),
+        HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    bool isByValue = true;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_BY_VALUE,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &isByValue),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_FALSE(isByValue);
+
+    bool gotFlag = false;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &gotFlag),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_TRUE(gotFlag);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}
+
+// Contract: value set with flag left default — IS_BY_VALUE true, runtime flag
+// false.
+TEST_F(IntegrationTensorDescriptorApi, ValueWithoutFlagIsIndependent)
+{
+    auto desc = createTensorDesc();
+    ASSERT_NE(desc, nullptr);
+
+    ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
+
+    float tensorValue = K_SCALAR_VALUE;
+    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_VALUE_EXT,
+                                        HIPDNN_TYPE_CHAR,
+                                        static_cast<int64_t>(sizeof(float)),
+                                        &tensorValue),
+              HIPDNN_STATUS_SUCCESS);
+
+    ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
+
+    int64_t elementCount = 0;
+    bool isByValue = false;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_BY_VALUE,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &isByValue),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_TRUE(isByValue);
+
+    bool gotFlag = true;
+    EXPECT_EQ(hipdnnBackendGetAttribute(desc,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &gotFlag),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_FALSE(gotFlag);
+
+    hipdnnBackendDestroyDescriptor(desc);
+}

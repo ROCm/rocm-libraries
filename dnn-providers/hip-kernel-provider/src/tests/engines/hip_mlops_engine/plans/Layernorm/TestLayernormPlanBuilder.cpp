@@ -72,6 +72,20 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsTrueForValidInferenceGraph)
     EXPECT_TRUE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
+TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForOverrideShapeEnabledGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+        {588, 196, 14, 1},
+        {1, 3, 14, 14},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        /*overrideShapeEnabled=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
 // ============================================================================
 // isApplicable - invalid graphs
 // ============================================================================
@@ -87,6 +101,28 @@ TEST_F(TestLayernormPlanBuilder, IsApplicableReturnsFalseForTwoNodeGraph)
     const bool applicable = _planBuilder.isApplicable(_dummyHandle, mockGraph);
 
     EXPECT_FALSE(applicable);
+}
+
+TEST_F(TestLayernormPlanBuilder, IsNotApplicableForBatchnormGraph)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
+}
+
+TEST_F(TestLayernormPlanBuilder, IsNotApplicableForNonF32ComputeType)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph(
+        {150528, 50176, 224, 1},
+        {1, 3, 224, 224},
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    EXPECT_FALSE(_planBuilder.isApplicable(_dummyHandle, graph));
 }
 
 // ============================================================================

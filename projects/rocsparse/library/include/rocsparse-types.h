@@ -29,7 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
-#include "rocsparse-version.h"
+#include "rocsparse-config.h"
 #include "rocsparse_bfloat16.h"
 
 #include <float.h>
@@ -557,6 +557,11 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
+// The deprecated u16 index type is removed from the public enum when
+// ROCSPARSE_WITH_U16_REMOVED is defined, but it is retained internally
+// (ROCSPARSE_KEEP_INTERNAL_U16) so that the library can still recognize and
+// gracefully reject the value without triggering -Wswitch warnings.
+#if !defined(ROCSPARSE_WITH_U16_REMOVED) || defined(ROCSPARSE_KEEP_INTERNAL_U16)
     rocsparse_indextype_u16
     [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
                  "release. Use "
@@ -564,6 +569,7 @@ typedef enum rocsparse_indextype_
     = 1, /**< 16-bit unsigned integer. \deprecated This index type is unsupported and will be
             removed in a future release. Use \ref rocsparse_indextype_i32 or \ref
             rocsparse_indextype_i64 instead. */
+#endif
     rocsparse_indextype_i32 = 2, /**< 32-bit signed integer. */
     rocsparse_indextype_i64 = 3 /**< 64-bit signed integer. */
 } rocsparse_indextype;
@@ -1259,7 +1265,13 @@ typedef enum rocsparse_spildlt0_input_
     rocsparse_spildlt0_input_boost_tolerance, /**< Select diagonal boosting tolerance on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_boost_value, /**< Select diagonal boosting value on a SpILDLT0 descriptor. */
     rocsparse_spildlt0_input_singularity_tolerance, /**< Select singularity tolerance for input on a SpILDLT0 descriptor. */
-    rocsparse_spildlt0_input_diag, /**< Set the device pointer to the dense array of \p m real-valued diagonal entries of \f$D\f$ for output from SpILDLT0. */
+    rocsparse_spildlt0_input_diag [[deprecated(
+        "rocsparse_spildlt0_input_diag is deprecated and "
+        "will be removed in a future "
+        "release. The diagonal D is always stored in-place "
+        "on the (implicit unit) diagonal "
+        "of the L factor and can be read back from "
+        "there.")]], /**< Optionally set the device pointer to a dense array of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ as an output of SpILDLT0 (\p m entries per batch, batch \p b at offset \p b * \p m). \f$D\f$ is always real, even for complex matrices (\p float* for \p s and \p c, \p double* for \p d and \p z). \deprecated \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor; read it back from there instead. */
 } rocsparse_spildlt0_input;
 
 /*! \ingroup types_module
