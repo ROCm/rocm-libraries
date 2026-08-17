@@ -14474,7 +14474,7 @@ class KernelWriterAssembly(KernelWriter):
     # StreamK-split shapes (e.g. 200x57344x8192, 256x256x16384). It is dropped from
     # the lent set below at zero SGPR cost: the epilogue kernarg block first-fits
     # into the remaining dead SRD holes (SrdA/SrdB/MXSA/MXSB), so next_free_sgpr is
-    # unchanged (96, still under the gfx950 MaxSgpr=102 cap).
+    # unchanged (still under the gfx950 MaxSgpr cap).
     _lendNames = ["LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
                   "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
                   "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
@@ -14492,7 +14492,7 @@ class KernelWriterAssembly(KernelWriter):
     # --- lend main-loop-dead input VGPR tiles to the store (large macro tiles) ---
     # For macro tiles > 256x256 the scheduler kept the terminal MFMAs in the loop
     # (no weave), so every input VGPR tile (A/B/scaleA/scaleB) is dead at this
-    # terminal NLL point. The loop already peaks at 256 arch VGPRs; if the store's
+    # terminal NLL point. The loop already peaks at the architectural VGPR limit; if the store's
     # temporaries (valuC window / coord0/1 / element batch) checked out fresh
     # registers on top, the high-water mark would exceed the single-wave occupancy
     # budget and codegen would reject the kernel. Mark the dead tiles Available
@@ -16061,8 +16061,8 @@ class KernelWriterAssembly(KernelWriter):
     # already an exact-zero / bitwise-equality test.
     #
     # SGPR budget: this is deliberately held to the same temp footprint as the pre-fold
-    # code (one 4-aligned quad + two singles). MT64x448 / MT448x64 overflow MaxSgpr at
-    # +1, so nothing here may hold an extra live temp: 'bad' and 'off' are the only
+    # code (one 4-aligned quad + two singles). MT64x448 / MT448x64 overflow MaxSgpr by
+    # a single register, so nothing here may hold an extra live temp: 'bad' and 'off' are the only
     # persistent ones, the pointer quad is released as soon as it is folded in, and the
     # StreamK scratch is acquired only after that release. 'off' carries the SMEM soffset
     # until the load is waited for and is reused as divide scratch strictly afterwards.
@@ -16119,8 +16119,8 @@ class KernelWriterAssembly(KernelWriter):
           # offset compute + the two SLoad* into the ptr quad) as a SEPARATE module. When
           # hoisting is enabled, stash it on self so the LogicalScheduler splices it BEFORE
           # the first preloop global_read: the s_waitcnt kmcnt(0) (kept below in the guard
-          # body) is then covered by the whole prefetch buffer_load window instead of the
-          # ~3-instruction emitAccSeed cover, erasing the ~92-cycle lgkmcnt stall. ptr is
+        # body) is then covered by the whole prefetch buffer_load window instead of the
+        # short emitAccSeed cover, erasing the lgkmcnt stall. ptr is
           # taken from the free pool (live SRDs / persistent state excluded) and nothing in
           # the prefetch window writes an sgpr temp, so the quad is not clobbered across the
           # hoist. Keeping ptr(4)+off(1) live across the shadow lifts the SGPR peak.

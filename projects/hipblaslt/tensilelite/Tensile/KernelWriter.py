@@ -5173,7 +5173,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # VALU whose only consumers are the post-barrier ds_reads and the main-loop LR
     # swaps. For a subtile fused-store kernel that prefetches (PGR>=1) we DEFER these
     # three modules into the pre-loop global-read shadow (LogicalScheduler splices them
-    # in just before the wait_gr drain) so ~750 cycles of address math overlaps the
+    # in just before the wait_gr drain) so this address math overlaps the
     # in-flight prefetch buffer_loads instead of sitting on the pre-main-loop critical
     # path. The functions are still CALLED here, in the same order, so vgpr/sgpr-pool
     # checkout/checkin bookkeeping is byte-identical -- only the emission position of the
@@ -5239,7 +5239,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # emitFusedStoreGuard, and the former PostLoopStored (did-fuse dedup bit) is
     # eliminated -- the post-loop dedup re-evaluates the same guard instead of
     # carrying a bit across endSummation (see post-loop code below). Both flags being
-    # persistent added +2 to the store-path SGPR peak (MT256x256 fp4 hit 104 > 102).
+    # persistent raised the store-path SGPR peak over the cap on MT256x256 fp4.
 
       # SGPR-defer: SrdD's value is NOT hoisted before the main loop. Hoisting would
       # require SrdD to be main-loop-resident (4 SGPRs across the loop), overflowing
@@ -5351,11 +5351,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # Guard branches target the adjacent doPostLoopStoreLabel -> short is fine.
         module.add(self.emitFusedStoreGuard(kernel, doPostLoopStoreLabel))
         # The skip jump spans the post-loop store-init + store body. That span is
-        # tile-dependent and, measured, sits well inside the short-branch window
-        # (85 KB / 15350 instructions of a 128 KB / 16384 budget on MT256x64, the
-        # largest tile carrying the fused store), so it must not be hard-coded to
-        # the 32-bit form: doing so took a 3-SGPR temp at the pool's high-water
-        # mark, pushing 31 kernels past MaxSgpr. Leave a placeholder and let
+        # tile-dependent and sits well inside the short-branch window even on the
+        # largest tile carrying the fused store, so it must not be hard-coded to
+        # the 32-bit form: doing so took an extra SGPR temp at the pool's high-water
+        # mark, pushing some kernels past MaxSgpr. Leave a placeholder and let
         # updateBranchPlaceHolder choose from the measured distance once the body
         # has been emitted -- if it does pick the long form, the temp is allocated
         # there instead, after the store temps have been checked back in.
@@ -5514,18 +5513,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     gfx1250 parks the whole set -- that is what the mechanism was built for.
 
-    gfx950 + PostLoopStoreInNll needs far less. Its store epilogue peaks at 104
-    against a MaxSgpr of 102 on the large tiles, so only 2 registers are missing
+    gfx950 + PostLoopStoreInNll needs far less. Its store epilogue peaks just over
+    the SGPR cap on the large tiles, so only a couple of registers are missing
     -- but what matters is not the count, it is that the freed slots form a
     CONTIGUOUS run. The allocations that set the peak (SrdA/B/MXSA/MXSB, then the
     store batch temp) need 4- and 2-aligned blocks, so scattered single-register
-    holes let nothing compact. Measured: any two or three of these constants
-    still leaves 8-10 kernels over the cap, while the contiguous four below take
-    all 468 to zero overflow.
+    holes let nothing compact. Parking any two or three of these constants still
+    leaves kernels over the cap, while the contiguous four below clear the
+    overflow entirely.
 
-    That drops ItersPerTile (48 readback sites), StreamKIdx (23) and skTiles (15)
-    from the parked set -- 86 of the 114 sites, and most of the ~38 instructions
-    per dispatch the full stash costs.
+    That drops ItersPerTile, StreamKIdx and skTiles from the parked set -- most of
+    the readback sites, and most of the per-dispatch instructions the full stash
+    costs.
     """
     if not self.isStreamKConstantsToVgprEnabled(kernel):
       return []

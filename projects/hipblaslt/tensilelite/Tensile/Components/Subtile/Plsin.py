@@ -76,8 +76,8 @@ def computeSubtilePlsin(kernel):
     weaveLA = 2
     numStorePairs = (miwt[0] * miwt[1] // 2) if (bool(miwt) and len(miwt) == 2) else 0
     overlapPossible = numStorePairs > weaveLA
-    # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the 102-SGPR
-    # gfx9 ceiling; auto-disable just those.
+    # MX-block-scaled fp4 extreme skews ([2,16]/[16,2]) overflow the gfx9 SGPR
+    # ceiling; auto-disable just those.
     mxBlockScaled = bool(kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"])
     mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
                                 min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
@@ -92,7 +92,7 @@ def computeSubtilePlsin(kernel):
                       or (not streamKAtomicFree)
                       or (not barrierFreeStore))
     # Register / spill budget: the fused store would overflow the arch-VGPR /
-    # 102-SGPR ceiling for this tile. ALWAYS enforced.
+    # SGPR ceiling for this tile. ALWAYS enforced.
     registerFail = ((not spillFree)
                     or (not storeFitsVgpr)
                     or (not mxBlockScaleSgprFits))

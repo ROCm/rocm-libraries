@@ -3592,8 +3592,8 @@ class LogicalScheduler:
         # ComputeStoreVgprsMFMA), so it can be INTERLEAVED into the NGLL MFMA stream:
         # the coord VALU is issued into the gaps AFTER each v_mfma_scale, hiding under
         # the (long) MFMA compute latency instead of running as an exposed serial
-        # block before the store (the measured ~72-104 exposed VALU cyc/tile before
-        # the first accvgpr_read). The FUSED store then reuses these VGPRs and skips
+        # block before the store (exposed VALU before the first
+        # accvgpr_read). The FUSED store then reuses these VGPRs and skips
         # its own notLocalSplitUGlobalWriteIndices; cleanupGlobalWrite in the store
         # checks them in exactly once, completing the checkout(NGLL)/checkin(store)
         # pairing (each NGLL_Cui/NLL_Cui pair is emitted contiguously, so the pool
@@ -3943,8 +3943,8 @@ class LogicalScheduler:
         # loop's MFMA gaps rather than packing them into the first few. The terminal
         # MFMAs of the fused NLL run back-to-back (their operands' local reads are
         # already done, so there is no LDS work left to interleave) and ATT shows
-        # those exposed MFMAs stall ~48c each, while an MFMA that follows any
-        # VALU/SALU stalls ~0c. Spreading fills the terminal gaps too. Placement
+        # those exposed MFMAs stall, while an MFMA that follows any
+        # VALU/SALU does not. Spreading fills the terminal gaps too. Placement
         # itself is delegated to the shared _weaveFillersIntoMfmaGaps.
         totalMfma = sum(1 for i in flat
                         if isinstance(i, (MFMAInstruction, MXMFMAInstruction)))
@@ -4106,7 +4106,7 @@ class LogicalScheduler:
         # kernelBodySubtile stashed the A/B + scale LR-offset modules (lraTileAssignment,
         # its DTL swap-vgpr init, lraTileAssignmentScaleSwizzled) on the writer instead of
         # emitting them in the prologue. Splice them into the preloop right before the
-        # first wait_gr, so this ~750-cycle loop-invariant VALU runs while the prefetch
+        # first wait_gr, so this loop-invariant VALU runs while the prefetch
         # buffer_loads are in flight (their only consumers -- the post-barrier ds_reads and
         # main-loop LR swaps -- come after this point). Inserted BEFORE the guard fold so
         # the address math is front-loaded into the shadow. The preloop is emitted
