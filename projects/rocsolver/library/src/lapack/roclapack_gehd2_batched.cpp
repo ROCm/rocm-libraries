@@ -36,18 +36,18 @@ rocblas_status rocsolver_gehd2_batched_impl(rocblas_handle handle,
                                             const I ihi,
                                             U A,
                                             const I lda,
-                                            T* ipiv,
-                                            const rocblas_stride stridep,
+                                            T* tau,
+                                            const rocblas_stride strideP,
                                             const I batch_count)
 {
     ROCSOLVER_ENTER_TOP("gehd2_batched", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda,
-                        "--strideP", stridep, "--batch_count", batch_count);
+                        "--strideP", strideP, "--batch_count", batch_count);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, ipiv, batch_count);
+    rocblas_status st = rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, tau, batch_count);
     if(st != rocblas_status_continue)
         return st;
 
@@ -88,7 +88,7 @@ rocblas_status rocsolver_gehd2_batched_impl(rocblas_handle handle,
         init_scalars(handle, (T*)scalars);
 
     // execution
-    return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv, stridep,
+    return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP,
                                        batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
                                        (T*)diag);
 }
@@ -109,13 +109,13 @@ rocblas_status rocsolver_sgehd2_batched(rocblas_handle handle,
                                         const rocblas_int ihi,
                                         float* const A[],
                                         const rocblas_int lda,
-                                        float* ipiv,
-                                        const rocblas_stride stridep,
+                                        float* tau,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehd2_batched_impl<float>(handle, n, ilo, ihi, A, lda, ipiv,
-                                                          stridep, batch_count);
+    return rocsolver::rocsolver_gehd2_batched_impl<float>(handle, n, ilo, ihi, A, lda, tau, strideP,
+                                                          batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -127,13 +127,13 @@ rocblas_status rocsolver_dgehd2_batched(rocblas_handle handle,
                                         const rocblas_int ihi,
                                         double* const A[],
                                         const rocblas_int lda,
-                                        double* ipiv,
-                                        const rocblas_stride stridep,
+                                        double* tau,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehd2_batched_impl<double>(handle, n, ilo, ihi, A, lda, ipiv,
-                                                           stridep, batch_count);
+    return rocsolver::rocsolver_gehd2_batched_impl<double>(handle, n, ilo, ihi, A, lda, tau,
+                                                           strideP, batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -145,13 +145,13 @@ rocblas_status rocsolver_cgehd2_batched(rocblas_handle handle,
                                         const rocblas_int ihi,
                                         rocblas_float_complex* const A[],
                                         const rocblas_int lda,
-                                        rocblas_float_complex* ipiv,
-                                        const rocblas_stride stridep,
+                                        rocblas_float_complex* tau,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehd2_batched_impl<rocblas_float_complex>(
-        handle, n, ilo, ihi, A, lda, ipiv, stridep, batch_count);
+        handle, n, ilo, ihi, A, lda, tau, strideP, batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -163,13 +163,13 @@ rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
                                         const rocblas_int ihi,
                                         rocblas_double_complex* const A[],
                                         const rocblas_int lda,
-                                        rocblas_double_complex* ipiv,
-                                        const rocblas_stride stridep,
+                                        rocblas_double_complex* tau,
+                                        const rocblas_stride strideP,
                                         const rocblas_int batch_count)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
     return rocsolver::rocsolver_gehd2_batched_impl<rocblas_double_complex>(
-        handle, n, ilo, ihi, A, lda, ipiv, stridep, batch_count);
+        handle, n, ilo, ihi, A, lda, tau, strideP, batch_count);
 #else
     return rocblas_status_not_implemented;
 #endif

@@ -37,7 +37,7 @@ rocblas_status rocsolver_gehrd_impl(rocblas_handle handle,
                                     const I ihi,
                                     U A,
                                     const I lda,
-                                    T* ipiv)
+                                    T* tau)
 try
 {
     ROCSOLVER_ENTER_TOP("gehrd", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda);
@@ -46,7 +46,7 @@ try
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_gehrd_argCheck(handle, n, ilo, ihi, lda, A, ipiv);
+    rocblas_status st = rocsolver_gehrd_argCheck(handle, n, ilo, ihi, lda, A, tau);
     if(st != rocblas_status_continue)
         return st;
 
@@ -95,7 +95,7 @@ try
 
     // execution
     return rocsolver_gehrd_template<false, false, T>(
-        handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv, strideP, batch_count, (T*)scalars,
+        handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP, batch_count, (T*)scalars,
         work_workArr, (T*)norms_tmptr, diag_beta, (T*)F, (T*)work_vec, (T*)Y);
 }
 catch(...)
@@ -119,10 +119,10 @@ rocblas_status rocsolver_sgehrd(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 float* A,
                                 const rocblas_int lda,
-                                float* ipiv)
+                                float* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehrd_impl<float>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehrd_impl<float>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -134,10 +134,10 @@ rocblas_status rocsolver_dgehrd(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 double* A,
                                 const rocblas_int lda,
-                                double* ipiv)
+                                double* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehrd_impl<double>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehrd_impl<double>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -149,10 +149,10 @@ rocblas_status rocsolver_cgehrd(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 rocblas_float_complex* A,
                                 const rocblas_int lda,
-                                rocblas_float_complex* ipiv)
+                                rocblas_float_complex* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehrd_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehrd_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -164,10 +164,10 @@ rocblas_status rocsolver_zgehrd(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 rocblas_double_complex* A,
                                 const rocblas_int lda,
-                                rocblas_double_complex* ipiv)
+                                rocblas_double_complex* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehrd_impl<rocblas_double_complex>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehrd_impl<rocblas_double_complex>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif

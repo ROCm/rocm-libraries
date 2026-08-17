@@ -148,10 +148,10 @@ rocblas_status rocsolver_gehrd_argCheck(rocblas_handle handle,
                                         const I ihi,
                                         const I lda,
                                         T A,
-                                        U ipiv,
+                                        U tau,
                                         const I batch_count = 1)
 {
-    return rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, ipiv, batch_count);
+    return rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, tau, batch_count);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I, typename U>
@@ -163,7 +163,7 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
                                         const rocblas_stride shiftA,
                                         const I lda,
                                         const rocblas_stride strideA,
-                                        T* ipiv,
+                                        T* tau,
                                         const rocblas_stride strideP,
                                         const I batch_count,
                                         T* scalars,
@@ -186,7 +186,7 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
 
     // if the active submatrix is small, use the unblocked algorithm directly
     if(dim <= GEHRD_GEHD2_SWITCHSIZE)
-        return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv,
+        return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau,
                                            strideP, batch_count, scalars, work_workArr, norms_tmptr,
                                            diag_beta);
 
@@ -213,7 +213,7 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
 
         // Reduce columns i:i+ib-1 to Hessenberg form and generate matrix Y = A * V * T
         rocsolver_lahr2_template<T>(handle, ihi, i + 1, ib, A, shiftA + idx2D(0, i, lda), lda,
-                                    strideA, ipiv + i, strideP, F, ldf, strideF, Y, 0, ldy, strideY,
+                                    strideA, tau + i, strideP, F, ldf, strideF, Y, 0, ldy, strideY,
                                     batch_count, work_workArr, norms_tmptr, work_vec, (T*)diag_beta);
 
         // Apply H from right to A(0:ihi-1, i+ib:ihi-1):  A -= Y * V^H (V = A(i+ib:ihi, i:i+ib-1))
@@ -262,7 +262,7 @@ rocblas_status rocsolver_gehrd_template(rocblas_handle handle,
 
     // reduce the remaining columns with the unblocked algorithm
     if(i < ihi - 1)
-        rocsolver_gehd2_template<T>(handle, n, i + 1, ihi, A, shiftA, lda, strideA, ipiv, strideP,
+        rocsolver_gehd2_template<T>(handle, n, i + 1, ihi, A, shiftA, lda, strideA, tau, strideP,
                                     batch_count, scalars, work_workArr, norms_tmptr, diag_beta);
 
     return rocblas_status_success;

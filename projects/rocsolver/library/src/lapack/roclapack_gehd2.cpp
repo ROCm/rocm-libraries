@@ -36,7 +36,7 @@ rocblas_status rocsolver_gehd2_impl(rocblas_handle handle,
                                     const I ihi,
                                     U A,
                                     const I lda,
-                                    T* ipiv)
+                                    T* tau)
 {
     ROCSOLVER_ENTER_TOP("gehd2", "-n", n, "--ilo", ilo, "--ihi", ihi, "--lda", lda);
 
@@ -44,7 +44,7 @@ rocblas_status rocsolver_gehd2_impl(rocblas_handle handle,
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, ipiv);
+    rocblas_status st = rocsolver_gehd2_argCheck(handle, n, ilo, ihi, lda, A, tau);
     if(st != rocblas_status_continue)
         return st;
 
@@ -53,7 +53,7 @@ rocblas_status rocsolver_gehd2_impl(rocblas_handle handle,
 
     // normal (non-batched non-strided) execution
     rocblas_stride strideA = 0;
-    rocblas_stride stridep = 0;
+    rocblas_stride strideP = 0;
     I batch_count = 1;
 
     // memory workspace sizes:
@@ -87,7 +87,7 @@ rocblas_status rocsolver_gehd2_impl(rocblas_handle handle,
         init_scalars(handle, (T*)scalars);
 
     // execution
-    return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, ipiv, stridep,
+    return rocsolver_gehd2_template<T>(handle, n, ilo, ihi, A, shiftA, lda, strideA, tau, strideP,
                                        batch_count, (T*)scalars, work_workArr, (T*)Abyx_norms,
                                        (T*)diag);
 }
@@ -108,10 +108,10 @@ rocblas_status rocsolver_sgehd2(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 float* A,
                                 const rocblas_int lda,
-                                float* ipiv)
+                                float* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehd2_impl<float>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehd2_impl<float>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -123,10 +123,10 @@ rocblas_status rocsolver_dgehd2(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 double* A,
                                 const rocblas_int lda,
-                                double* ipiv)
+                                double* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehd2_impl<double>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehd2_impl<double>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -138,10 +138,10 @@ rocblas_status rocsolver_cgehd2(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 rocblas_float_complex* A,
                                 const rocblas_int lda,
-                                rocblas_float_complex* ipiv)
+                                rocblas_float_complex* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehd2_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehd2_impl<rocblas_float_complex>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif
@@ -153,10 +153,10 @@ rocblas_status rocsolver_zgehd2(rocblas_handle handle,
                                 const rocblas_int ihi,
                                 rocblas_double_complex* A,
                                 const rocblas_int lda,
-                                rocblas_double_complex* ipiv)
+                                rocblas_double_complex* tau)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG)
-    return rocsolver::rocsolver_gehd2_impl<rocblas_double_complex>(handle, n, ilo, ihi, A, lda, ipiv);
+    return rocsolver::rocsolver_gehd2_impl<rocblas_double_complex>(handle, n, ilo, ihi, A, lda, tau);
 #else
     return rocblas_status_not_implemented;
 #endif

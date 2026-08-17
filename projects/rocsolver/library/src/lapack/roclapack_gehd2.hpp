@@ -86,7 +86,7 @@ rocblas_status rocsolver_gehd2_argCheck(rocblas_handle handle,
                                         const I ihi,
                                         const I lda,
                                         T A,
-                                        U ipiv,
+                                        U tau,
                                         const I batch_count = 1)
 {
     // order is important for unit tests:
@@ -103,7 +103,7 @@ rocblas_status rocsolver_gehd2_argCheck(rocblas_handle handle,
         return rocblas_status_continue;
 
     // 3. invalid pointers
-    if((n && !A) || (n > 1 && !ipiv))
+    if((n && !A) || (n > 1 && !tau))
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
@@ -118,7 +118,7 @@ rocblas_status rocsolver_gehd2_template(rocblas_handle handle,
                                         const rocblas_stride shiftA,
                                         const I lda,
                                         const rocblas_stride strideA,
-                                        T* ipiv,
+                                        T* tau,
                                         const rocblas_stride strideP,
                                         const I batch_count,
                                         T* scalars,
@@ -144,27 +144,27 @@ rocblas_status rocsolver_gehd2_template(rocblas_handle handle,
         rocsolver_larfg_template<T>(handle, ihi - i - 1, A, shiftA + idx2D(i + 1, i, lda), (S*)diag,
                                     i + 1 - ilo, dim, A,
                                     shiftA + idx2D(std::min(i + 2, n - 1), i, lda), (I)1, strideA,
-                                    (ipiv + i), strideP, batch_count, (T*)work_workArr, Abyx_norms);
+                                    (tau + i), strideP, batch_count, (T*)work_workArr, Abyx_norms);
 
         // apply reflector from the right to A(0:ihi-1,i+1:ihi-1)
         rocsolver_larf_template(handle, rocblas_side_right, ihi, ihi - i - 1, A,
-                                shiftA + idx2D(i + 1, i, lda), (I)1, strideA, (ipiv + i), strideP,
-                                A, shiftA + idx2D(0, i + 1, lda), lda, strideA, batch_count,
-                                scalars, Abyx_norms, (T**)work_workArr);
+                                shiftA + idx2D(i + 1, i, lda), (I)1, strideA, (tau + i), strideP, A,
+                                shiftA + idx2D(0, i + 1, lda), lda, strideA, batch_count, scalars,
+                                Abyx_norms, (T**)work_workArr);
 
         // conjugate tau
         if(COMPLEX)
-            rocsolver_lacgv_template<T>(handle, (I)1, ipiv, i, (I)1, strideP, batch_count);
+            rocsolver_lacgv_template<T>(handle, (I)1, tau, i, (I)1, strideP, batch_count);
 
         // apply reflector from the left to A(i+1:ihi-1,i+1:n-1)
         rocsolver_larf_template(handle, rocblas_side_left, ihi - i - 1, n - i - 1, A,
-                                shiftA + idx2D(i + 1, i, lda), (I)1, strideA, (ipiv + i), strideP,
-                                A, shiftA + idx2D(i + 1, i + 1, lda), lda, strideA, batch_count,
+                                shiftA + idx2D(i + 1, i, lda), (I)1, strideA, (tau + i), strideP, A,
+                                shiftA + idx2D(i + 1, i + 1, lda), lda, strideA, batch_count,
                                 scalars, Abyx_norms, (T**)work_workArr);
 
         // restore tau
         if(COMPLEX)
-            rocsolver_lacgv_template<T>(handle, (I)1, ipiv, i, (I)1, strideP, batch_count);
+            rocsolver_lacgv_template<T>(handle, (I)1, tau, i, (I)1, strideP, batch_count);
     }
 
     // restore subdiagonal values of A

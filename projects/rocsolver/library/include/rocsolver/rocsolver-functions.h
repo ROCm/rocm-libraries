@@ -18456,7 +18456,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i^H
+        H(i) = I - \text{tau}[i] \cdot v_i^{} v_i^H
     \f]
 
     where the first i elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i+1] = 1\f$.
@@ -18482,7 +18482,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of A.
     @param[out]
-    ipiv        pointer to type. Array on the GPU of dimension n-1.
+    tau        pointer to type. Array on the GPU of dimension n-1.
                 The Householder scalars.
     ********************************************************************/
 
@@ -18492,7 +18492,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sgehd2(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  float* A,
                                                  const rocblas_int lda,
-                                                 float* ipiv);
+                                                 float* tau);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dgehd2(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -18500,7 +18500,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dgehd2(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  double* A,
                                                  const rocblas_int lda,
-                                                 double* ipiv);
+                                                 double* tau);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_cgehd2(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -18508,7 +18508,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cgehd2(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  rocblas_float_complex* A,
                                                  const rocblas_int lda,
-                                                 rocblas_float_complex* ipiv);
+                                                 rocblas_float_complex* tau);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -18516,7 +18516,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  rocblas_double_complex* A,
                                                  const rocblas_int lda,
-                                                 rocblas_double_complex* ipiv);
+                                                 rocblas_double_complex* tau);
 //! @}
 
 /*! @{
@@ -18540,7 +18540,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
+        H_l^{}(i) = I - \text{tau}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18566,11 +18566,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
     @param[out]
-    ipiv        pointer to type. Array on the GPU (the size depends on the value of strideP).
-                Contains the vectors ipiv_l of corresponding Householder scalars.
+    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+                Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
-                Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
+                Stride from the start of one vector tau_l to the next one tau_(l+1).
                 There is no restriction for the value
                 of strideP. Normal usage is strideP >= n-1.
     @param[in]
@@ -18584,7 +18584,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sgehd2_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          float* const A[],
                                                          const rocblas_int lda,
-                                                         float* ipiv,
+                                                         float* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 
@@ -18594,7 +18594,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dgehd2_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          double* const A[],
                                                          const rocblas_int lda,
-                                                         double* ipiv,
+                                                         double* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 
@@ -18604,7 +18604,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cgehd2_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          rocblas_float_complex* const A[],
                                                          const rocblas_int lda,
-                                                         rocblas_float_complex* ipiv,
+                                                         rocblas_float_complex* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 
@@ -18614,7 +18614,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          rocblas_double_complex* const A[],
                                                          const rocblas_int lda,
-                                                         rocblas_double_complex* ipiv,
+                                                         rocblas_double_complex* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 //! @}
@@ -18640,7 +18640,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
+        H_l^{}(i) = I - \text{tau}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18670,11 +18670,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
                 Stride from the start of one matrix A_l to the next one A_(l+1).
                 There is no restriction for the value of strideA. The normal use case is strideA >= lda*n.
     @param[out]
-    ipiv        pointer to type. Array on the GPU (the size depends on the value of strideP).
-                Contains the vectors ipiv_l of corresponding Householder scalars.
+    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+                Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
-                Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
+                Stride from the start of one vector tau_l to the next one tau_(l+1).
                 There is no restriction for the value
                 of strideP. Normal usage is strideP >= n-1.
     @param[in]
@@ -18689,7 +18689,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sgehd2_strided_batched(rocblas_handle 
                                                                  float* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 float* ipiv,
+                                                                 float* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 
@@ -18700,7 +18700,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dgehd2_strided_batched(rocblas_handle 
                                                                  double* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 double* ipiv,
+                                                                 double* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 
@@ -18711,7 +18711,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cgehd2_strided_batched(rocblas_handle 
                                                                  rocblas_float_complex* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 rocblas_float_complex* ipiv,
+                                                                 rocblas_float_complex* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 
@@ -18722,7 +18722,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
                                                                  rocblas_double_complex* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 rocblas_double_complex* ipiv,
+                                                                 rocblas_double_complex* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 //! @}
@@ -18748,7 +18748,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i^H
+        H(i) = I - \text{tau}[i] \cdot v_i^{} v_i^H
     \f]
 
     where the first i elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[i+1] = 1\f$.
@@ -18774,7 +18774,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of A.
     @param[out]
-    ipiv        pointer to type. Array on the GPU of dimension n-1.
+    tau        pointer to type. Array on the GPU of dimension n-1.
                 The Householder scalars.
     ********************************************************************/
 
@@ -18784,7 +18784,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sgehrd(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  float* A,
                                                  const rocblas_int lda,
-                                                 float* ipiv);
+                                                 float* tau);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dgehrd(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -18792,7 +18792,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dgehrd(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  double* A,
                                                  const rocblas_int lda,
-                                                 double* ipiv);
+                                                 double* tau);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_cgehrd(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -18800,7 +18800,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cgehrd(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  rocblas_float_complex* A,
                                                  const rocblas_int lda,
-                                                 rocblas_float_complex* ipiv);
+                                                 rocblas_float_complex* tau);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
                                                  const rocblas_int n,
@@ -18808,7 +18808,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
                                                  const rocblas_int ihi,
                                                  rocblas_double_complex* A,
                                                  const rocblas_int lda,
-                                                 rocblas_double_complex* ipiv);
+                                                 rocblas_double_complex* tau);
 //! @}
 
 /*! @{
@@ -18832,7 +18832,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
+        H_l^{}(i) = I - \text{tau}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18858,11 +18858,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
     @param[out]
-    ipiv        pointer to type. Array on the GPU (the size depends on the value of strideP).
-                Contains the vectors ipiv_l of corresponding Householder scalars.
+    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+                Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
-                Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
+                Stride from the start of one vector tau_l to the next one tau_(l+1).
                 There is no restriction for the value
                 of strideP. Normal usage is strideP >= n-1.
     @param[in]
@@ -18876,7 +18876,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sgehrd_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          float* const A[],
                                                          const rocblas_int lda,
-                                                         float* ipiv,
+                                                         float* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 
@@ -18886,7 +18886,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dgehrd_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          double* const A[],
                                                          const rocblas_int lda,
-                                                         double* ipiv,
+                                                         double* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 
@@ -18896,7 +18896,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cgehrd_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          rocblas_float_complex* const A[],
                                                          const rocblas_int lda,
-                                                         rocblas_float_complex* ipiv,
+                                                         rocblas_float_complex* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 
@@ -18906,7 +18906,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
                                                          const rocblas_int ihi,
                                                          rocblas_double_complex* const A[],
                                                          const rocblas_int lda,
-                                                         rocblas_double_complex* ipiv,
+                                                         rocblas_double_complex* tau,
                                                          const rocblas_stride strideP,
                                                          const rocblas_int batch_count);
 //! @}
@@ -18932,7 +18932,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
     Each Householder matrix \f$H(i)\f$ is given by
 
     \f[
-        H_l^{}(i) = I - \text{ipiv}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
+        H_l^{}(i) = I - \text{tau}_l^{}[i] \cdot v_{l_i}^{} v_{l_i}^H
     \f]
 
     where the first i elements of the Householder vector \f$v_{l_i}\f$ are zero, and \f$v_{l_i}[i+1] = 1\f$.
@@ -18962,11 +18962,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
                 Stride from the start of one matrix A_l to the next one A_(l+1).
                 There is no restriction for the value of strideA. The normal use case is strideA >= lda*n.
     @param[out]
-    ipiv        pointer to type. Array on the GPU (the size depends on the value of strideP).
-                Contains the vectors ipiv_l of corresponding Householder scalars.
+    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+                Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
-                Stride from the start of one vector ipiv_l to the next one ipiv_(l+1).
+                Stride from the start of one vector tau_l to the next one tau_(l+1).
                 There is no restriction for the value
                 of strideP. Normal usage is strideP >= n-1.
     @param[in]
@@ -18981,7 +18981,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_sgehrd_strided_batched(rocblas_handle 
                                                                  float* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 float* ipiv,
+                                                                 float* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 
@@ -18992,7 +18992,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dgehrd_strided_batched(rocblas_handle 
                                                                  double* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 double* ipiv,
+                                                                 double* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 
@@ -19003,7 +19003,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_cgehrd_strided_batched(rocblas_handle 
                                                                  rocblas_float_complex* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 rocblas_float_complex* ipiv,
+                                                                 rocblas_float_complex* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 
@@ -19014,7 +19014,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_strided_batched(rocblas_handle 
                                                                  rocblas_double_complex* A,
                                                                  const rocblas_int lda,
                                                                  const rocblas_stride strideA,
-                                                                 rocblas_double_complex* ipiv,
+                                                                 rocblas_double_complex* tau,
                                                                  const rocblas_stride strideP,
                                                                  const rocblas_int batch_count);
 //! @}
