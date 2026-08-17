@@ -2317,10 +2317,9 @@ void host_ellsv(rocsparse_operation  trans,
 
     // Applying the transpose flips the triangular structure.
     const rocsparse_fill_mode eff_fill
-        = (!transpose)
-              ? fill_mode
-              : ((fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                          : rocsparse_fill_mode_lower);
+        = (!transpose) ? fill_mode
+                       : ((fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
+                                                                   : rocsparse_fill_mode_lower);
 
     // The right-hand side is accumulated in-place in y.
     for(I row = 0; row < M; ++row)
@@ -2329,9 +2328,7 @@ void host_ellsv(rocsparse_operation  trans,
     }
 
     // Accessors over the ELL storage (column-major with leading dimension M).
-    auto get_col = [&](I row, I p) -> I {
-        return ell_col_ind[(int64_t)p * M + row] - base;
-    };
+    auto get_col = [&](I row, I p) -> I { return ell_col_ind[(int64_t)p * M + row] - base; };
     auto get_val = [&](I row, I p) -> T {
         const T v = ell_val[(int64_t)p * M + row];
         return conj ? rocsparse_conj(v) : v;

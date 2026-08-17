@@ -319,8 +319,7 @@ namespace rocsparse
             {
                 rocsparse::ellsv_info_t* ellsv_info = mat->info->get_ellsv_info();
                 if(ellsv_info == nullptr
-                   || !ellsv_info->matches(
-                       trans, mat->descr->fill_mode, mat->descr->diag_type))
+                   || !ellsv_info->matches(trans, mat->descr->fill_mode, mat->descr->diag_type))
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::ellsv_analysis(handle, trans, mat, temp_buffer)));

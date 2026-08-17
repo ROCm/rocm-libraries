@@ -58,8 +58,8 @@ namespace rocsparse
     // Solve kernel wrapper resolving the (host/device) alpha scalar.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_solve_kernel(I m,
-                            I n,
+    void ellsv_solve_kernel(I       m,
+                            I       n,
                             int64_t ell_width,
                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                             const I* __restrict__ ell_col_ind,
@@ -174,7 +174,7 @@ namespace rocsparse
 
         rocsparse::primitives::double_buffer<int32_t> keys(done_array,
                                                            reinterpret_cast<int32_t*>(workspace2));
-        rocsparse::primitives::double_buffer<I>       vals(reinterpret_cast<I*>(workspace), row_map);
+        rocsparse::primitives::double_buffer<I> vals(reinterpret_cast<I*>(workspace), row_map);
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
             handle, keys, vals, m, startbit, endbit, rocprim_size, rocprim_buffer));
@@ -395,27 +395,26 @@ namespace rocsparse
         dim3 blocks((static_cast<size_t>(m) - 1) / BLOCKSIZE + 1);
         dim3 threads(BLOCKSIZE);
 
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::ellsv_transpose_count_kernel<BLOCKSIZE, I>),
-            blocks,
-            threads,
-            0,
-            stream,
-            m,
-            n,
-            ell_width,
-            reinterpret_cast<const I*>(ell_col_ind),
-            base,
-            counts);
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::ellsv_transpose_count_kernel<BLOCKSIZE, I>),
+                                           blocks,
+                                           threads,
+                                           0,
+                                           stream,
+                                           m,
+                                           n,
+                                           ell_width,
+                                           reinterpret_cast<const I*>(ell_col_ind),
+                                           base,
+                                           counts);
 
         // Determine the transposed width (maximum per-column count).
         std::vector<unsigned long long> h_counts(static_cast<size_t>(m));
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(h_counts.data(),
-                                                     counts,
-                                                     sizeof(unsigned long long)
-                                                         * static_cast<size_t>(m),
-                                                     hipMemcpyDeviceToHost,
-                                                     stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemcpyAsync(h_counts.data(),
+                                     counts,
+                                     sizeof(unsigned long long) * static_cast<size_t>(m),
+                                     hipMemcpyDeviceToHost,
+                                     stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         int64_t t_width = 0;
@@ -432,15 +431,14 @@ namespace rocsparse
         if(total > 0)
         {
             dim3 fill_blocks((total - 1) / BLOCKSIZE + 1);
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::ellsv_fill_col_ind_kernel<BLOCKSIZE, I>),
-                fill_blocks,
-                threads,
-                0,
-                stream,
-                total,
-                reinterpret_cast<I*>(ei->get_transposed_col_ind()),
-                static_cast<I>(m + base));
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::ellsv_fill_col_ind_kernel<BLOCKSIZE, I>),
+                                               fill_blocks,
+                                               threads,
+                                               0,
+                                               stream,
+                                               total,
+                                               reinterpret_cast<I*>(ei->get_transposed_col_ind()),
+                                               static_cast<I>(m + base));
         }
 
         // Reuse the counts array as per-column write positions.
@@ -503,14 +501,14 @@ namespace rocsparse
             const bool conjugate = (trans == rocsparse_operation_conjugate_transpose);
 
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::ellsv_build_transpose<I, T>(handle,
-                                                                             m,
-                                                                             cols,
-                                                                             A->ell_width,
-                                                                             A->const_col_data,
-                                                                             A->const_val_data,
-                                                                             A->idx_base,
-                                                                             conjugate,
-                                                                             ei)));
+                                                                              m,
+                                                                              cols,
+                                                                              A->ell_width,
+                                                                              A->const_col_data,
+                                                                              A->const_val_data,
+                                                                              A->idx_base,
+                                                                              conjugate,
+                                                                              ei)));
 
             col_ind  = ei->get_transposed_col_ind();
             n_solver = m;
@@ -605,7 +603,7 @@ namespace rocsparse
 rocsparse_status rocsparse::ellsv_analysis_buffer_size(rocsparse_handle            handle,
                                                        rocsparse_operation         trans,
                                                        rocsparse_const_spmat_descr A,
-                                                       size_t*                     buffer_size_in_bytes)
+                                                       size_t* buffer_size_in_bytes)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -845,8 +843,8 @@ rocsparse_status rocsparse::ellsv_solve(rocsparse_handle            handle,
     uint32_t wfsize = 0;
     rocsparse::ellsv_select_launch(handle, &sleep, &wfsize);
 
-#define ELLSV_SOLVE_DISPATCH(ITYPE, TTYPE)                          \
-    rocsparse::ellsv_compute<ITYPE, TTYPE>(                         \
+#define ELLSV_SOLVE_DISPATCH(ITYPE, TTYPE)  \
+    rocsparse::ellsv_compute<ITYPE, TTYPE>( \
         handle, ei, sleep, wfsize, trans, A, alpha, x, y, temp_buffer, is_host_mode)
 
     switch(A->col_type)

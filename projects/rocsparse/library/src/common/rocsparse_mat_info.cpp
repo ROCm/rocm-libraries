@@ -302,16 +302,6 @@ rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
     return this->m_sorted_coo2csr_info;
 }
 
-void _rocsparse_mat_info::set_ell2csr_info(rocsparse::ell2csr_info_t* value)
-{
-    this->m_ell2csr_info = value;
-}
-
-rocsparse::ell2csr_info_t* _rocsparse_mat_info::get_ell2csr_info()
-{
-    return this->m_ell2csr_info;
-}
-
 void _rocsparse_mat_info::set_ellsv_info(rocsparse::ellsv_info_t* value)
 {
     this->m_ellsv_info = value;
@@ -364,16 +354,6 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
 
         delete sorted_coo2csr_info;
         this->set_sorted_coo2csr_info(nullptr);
-    }
-
-    rocsparse::ell2csr_info_t* ell2csr_info = this->get_ell2csr_info();
-    if(ell2csr_info != nullptr)
-    {
-        hipStream_t default_stream = 0;
-        std::ignore                = ell2csr_info->free_memory(default_stream);
-
-        delete ell2csr_info;
-        this->set_ell2csr_info(nullptr);
     }
 
     rocsparse::ellsv_info_t* ellsv_info = this->get_ellsv_info();

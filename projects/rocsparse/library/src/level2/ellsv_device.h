@@ -43,8 +43,8 @@ namespace rocsparse
     // done_array and later sorted to obtain the row execution order.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_analysis_lower_kernel(I m,
-                                     I n,
+    void ellsv_analysis_lower_kernel(I       m,
+                                     I       n,
                                      int64_t ell_width,
                                      const I* __restrict__ ell_col_ind,
                                      int* __restrict__ done_array,
@@ -103,8 +103,8 @@ namespace rocsparse
     // entries.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_analysis_upper_kernel(I m,
-                                     I n,
+    void ellsv_analysis_upper_kernel(I       m,
+                                     I       n,
                                      int64_t ell_width,
                                      const I* __restrict__ ell_col_ind,
                                      int* __restrict__ done_array,
@@ -162,8 +162,8 @@ namespace rocsparse
     // the rows it depends on, exactly like the CSR solve but reading directly from
     // the ELL storage.
     template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void ellsv_device(I m,
-                                           I n,
+    ROCSPARSE_DEVICE_ILF void ellsv_device(I       m,
+                                           I       n,
                                            int64_t ell_width,
                                            T       alpha,
                                            const I* __restrict__ ell_col_ind,
@@ -289,8 +289,8 @@ namespace rocsparse
     // Count the number of valid entries per column (one thread per row).
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_transpose_count_kernel(I m,
-                                      I n,
+    void ellsv_transpose_count_kernel(I       m,
+                                      I       n,
                                       int64_t ell_width,
                                       const I* __restrict__ ell_col_ind,
                                       rocsparse_index_base idx_base,
@@ -330,8 +330,8 @@ namespace rocsparse
     // row of A). Entry (row, col) of A becomes entry (col, row) of A^T.
     template <uint32_t BLOCKSIZE, typename I, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void ellsv_transpose_scatter_kernel(I m,
-                                        I n,
+    void ellsv_transpose_scatter_kernel(I       m,
+                                        I       n,
                                         int64_t ell_width,
                                         const I* __restrict__ ell_col_ind,
                                         const T* __restrict__ ell_val,
@@ -363,8 +363,8 @@ namespace rocsparse
 
             t_col_ind[dest] = row + idx_base;
 
-            const T v    = ell_val[idx];
-            t_val[dest]  = conj ? rocsparse::conj(v) : v;
+            const T v   = ell_val[idx];
+            t_val[dest] = conj ? rocsparse::conj(v) : v;
         }
     }
 }

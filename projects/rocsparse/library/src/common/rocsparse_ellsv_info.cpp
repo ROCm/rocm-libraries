@@ -56,8 +56,8 @@ hipError_t rocsparse::ellsv_info_t::free_transposed(hipStream_t stream)
 hipError_t rocsparse::ellsv_info_t::free_memory(hipStream_t stream)
 {
     const hipError_t e0 = rocsparse_hipFreeAsync(this->m_row_map, stream);
-    this->m_row_map      = nullptr;
-    const hipError_t e1  = this->free_transposed(stream);
+    this->m_row_map     = nullptr;
+    const hipError_t e1 = this->free_transposed(stream);
     return (e0 != hipSuccess) ? e0 : e1;
 }
 
