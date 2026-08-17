@@ -5350,14 +5350,122 @@ namespace TensileLite
         return false;
     }
 
+    namespace
+    {
+        // Statically-knowable reasons a StreamK launch cannot be shown
+        // row-uniform: no resolved grid, reduction strategy or Synchronizer
+        // pointer is consulted, so both checkUniformSummationOrder() (which
+        // throws) and uniformSummationOrderSupported() (which quietly drops the
+        // solution from selection) can share one implementation and cannot
+        // disagree. Returns an empty string when nothing here objects.
+        //
+        // None of these fires for any solution in the shipped tuned logic. They
+        // fence configurations that are expressible but were never audited for
+        // this guarantee.
+        std::string streamKUniformSummationOrderObstacle(
+            SizeMapping const&                        sizeMapping,
+            ContractionSolution::ProblemType const&   problemType,
+            ContractionSolution::Problem const&       problem)
+        {
+            // Atomic fixup accumulates partial tiles in arrival order.
+            if(sizeMapping.streamKAtomic != 0)
+                return "StreamKAtomic=1";
+
+            // The partials write and the fixup read both build their store
+            // state coordinate-agnostically (lane-linear addressing, no
+            // coord0/coord1 term), which is what makes an out-of-range lane
+            // unable to influence an in-range one. UseInitialStridesCD turns
+            // optSingleColVgpr/optSharedColVgpr off outright
+            // (AsmStoreState.py), giving every element its own address calc, so
+            // that premise no longer holds. Note the parameter is mapOptional
+            // in the solution serialization: a record omitting it reads false,
+            // so this rejection is only as good as the logic files.
+            if(problemType.useInitialStridesCD)
+                return "UseInitialStridesCD=1 disables the coordinate-agnostic store "
+                       "addressing the StreamK partials path relies on";
+
+            // Same premise, different switch: more than one packed index in
+            // dimension 0 selects per-column address VGPRs and more than one in
+            // dimension 1 selects per-element ones (AsmStoreState.py). This is
+            // the expression the file already uses for the same question in
+            // projectedPerformance()/calculateDimensionM().
+            if(problem.freeIndicesA().size() > 1 || (sizeMapping.packBatchDims & 0x1))
+                return "a packed C0 index set disables the coordinate-agnostic store "
+                       "addressing the StreamK partials path relies on";
+            if(problem.freeIndicesB().size() > 1 || (sizeMapping.packBatchDims & 0x2))
+                return "a packed C1 index set disables the coordinate-agnostic store "
+                       "addressing the StreamK partials path relies on";
+
+            // WaveSplitK and LocalSplitU are mutually exclusive projections of
+            // WorkGroup[2] (Solution.py), so WorkGroup[2] > 1 with LocalSplitU
+            // == 1 is exactly WaveSplitK. Its redundant-lane store mask covers
+            // the D/TD stores, not the WS partials store StreamK uses, so all
+            // NumWaveSplitK lanes would write the same workspace address. No
+            // shipped solution combines the two; keeping the check inside the
+            // StreamK scope is deliberate, since every shipped WaveSplitK
+            // solution has StreamK=0 and refusing those would buy nothing.
+            if(sizeMapping.workGroupSize.z > 1 && sizeMapping.LocalSplitU <= 1)
+                return "WaveSplitK (WorkGroup[2]=" + std::to_string(sizeMapping.workGroupSize.z)
+                       + " with LocalSplitU=" + std::to_string(sizeMapping.LocalSplitU)
+                       + ") does not mask redundant lanes on the StreamK partials store";
+
+            // MX block scaling. Detected from the problem type, never from a
+            // kernel-name substring: thousands of shipped f32 records carry an
+            // _MX_ token that comes from F32XdlMathOp=XFloat32 and have no
+            // scale tensor at all, and MXBlock* is only ever emitted at
+            // problem-type level in the logic files.
+            if(problemType.mxBlockA != 0 || problemType.mxBlockB != 0)
+            {
+                // The granule size below is derived for one specific geometry.
+                // Change the swizzle format, the block size or MatrixInstK and
+                // 256 silently becomes the wrong number rather than a violated
+                // one, so pin the envelope the derivation covers. All shipped
+                // MX solutions satisfy all three.
+                if(problemType.mxScaleFormat != 1)
+                    return "MX scale format " + std::to_string(problemType.mxScaleFormat)
+                           + " under StreamK is not audited for uniform summation order";
+                if((problemType.mxBlockA != 0 && problemType.mxBlockA != 32)
+                   || (problemType.mxBlockB != 0 && problemType.mxBlockB != 32))
+                    return "an MX block size other than 32 under StreamK is not audited for "
+                           "uniform summation order";
+                if(sizeMapping.matrixInstruction[2] != 128)
+                    return "MX with MatrixInstK=" + std::to_string(sizeMapping.matrixInstruction[2])
+                           + " under StreamK is not audited for uniform summation order";
+
+                // The gfx950 HostPreSwizzle scale layout packs 32 M/N rows x 8
+                // MX blocks into one 256-byte granule addressed lane-linearly,
+                // so byte position inside a granule encodes both a row and a
+                // K-block. StreamK shifts the scale SRD by a scalar
+                // StreamKLocalStart*DepthU bytes; unless that is a whole number
+                // of granules it permutes rows against K-blocks and different
+                // rows of one tile consume scales from different K positions.
+                // Solution validation already forces this for MX fp4 (duUnit =
+                // numSubIterK * MatrixInstK * LocalSplitU = 256) but admits
+                // DepthU=128 for MX fp8, so assert it here.
+                constexpr size_t mxScaleSwizzleGranuleK = 256; // lrSubtileShape[1](2) * instK(128)
+                if(sizeMapping.depthU % mxScaleSwizzleGranuleK != 0)
+                    return "DepthU=" + std::to_string(sizeMapping.depthU)
+                           + " is not a multiple of the MX scale swizzle granule (256 K "
+                             "elements), so a StreamK K-cut can land inside a granule";
+            }
+
+            return {};
+        }
+    }
+
     bool ContractionSolution::uniformSummationOrderSupported(Problem const&  problem,
                                                              Hardware const& hardware) const
     {
         if(!problem.getParams().uniformSummationOrder())
             return true;
 
-        // Atomic fixup of partial tiles accumulates in arrival order.
-        if(sizeMapping.streamK != 0 && sizeMapping.streamKAtomic != 0)
+        // The statically-knowable StreamK obstacles, shared verbatim with
+        // checkUniformSummationOrder() so the two cannot drift. Turning them
+        // into a quiet non-selection rather than a throw is a better outcome
+        // for the caller, and the filter stays permissive by construction
+        // because every reason here is one the gate rejects too.
+        if(sizeMapping.streamK != 0
+           && !streamKUniformSummationOrderObstacle(sizeMapping, problemType, problem).empty())
             return false;
 
         // getAccumulation() may adapt this upward to 2 (MultipleBuffer) when
@@ -5405,9 +5513,13 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            // Atomic fixup accumulates partial tiles in arrival order.
-            if(sizeMapping.streamKAtomic != 0)
-                reject("StreamKAtomic=1");
+            // The statically-knowable obstacles (atomic fixup,
+            // UseInitialStridesCD, packed C0/C1, WaveSplitK, MX scale granule),
+            // shared with uniformSummationOrderSupported().
+            const std::string obstacle
+                = streamKUniformSummationOrderObstacle(sizeMapping, problemType, problem);
+            if(!obstacle.empty())
+                reject(obstacle);
 
             // Checked before the split arithmetic below, which models the tree
             // packing specifically: the parallel path reinterprets the same
