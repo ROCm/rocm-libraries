@@ -364,16 +364,29 @@ TEST_F(IntegrationGpuKernelIngestor, ReportsAKnobWhoseValuesComeFromTheCatalog)
     std::vector<Knob> knobs;
     result = graph->get_knobs_for_engine(engineId(), knobs);
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-    ASSERT_EQ(knobs.size(), 1U);
-    EXPECT_EQ(knobs[0].knobId(), BLOCK_SIZE_KNOB);
+
+    // Two knobs: the engine's own block_size, plus the benchmarking knob every
+    // descriptor-backed engine advertises out-of-band. Found by name rather than by
+    // index, since the out-of-band knob is prepended.
+    ASSERT_EQ(knobs.size(), 2U);
+    const auto blockSizeKnob = std::find_if(knobs.begin(), knobs.end(), [](const Knob& knob) {
+        return knob.knobId() == BLOCK_SIZE_KNOB;
+    });
+    ASSERT_NE(blockSizeKnob, knobs.end());
+    EXPECT_NE(std::find_if(knobs.begin(),
+                           knobs.end(),
+                           [](const Knob& knob) {
+                               return knob.knobId() == hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME;
+                           }),
+              knobs.end());
 
     // The HALF kernel is pruned for this FLOAT graph.
-    const auto* constraint = dynamic_cast<const IntConstraint*>(knobs[0].constraint());
+    const auto* constraint = dynamic_cast<const IntConstraint*>(blockSizeKnob->constraint());
     ASSERT_NE(constraint, nullptr);
     const auto& validValues = constraint->getValidValues();
     EXPECT_EQ(validValues, (std::unordered_set<int64_t>{64, 256}));
 
-    const auto* defaultValue = std::get_if<int64_t>(&knobs[0].defaultValue());
+    const auto* defaultValue = std::get_if<int64_t>(&blockSizeKnob->defaultValue());
     ASSERT_NE(defaultValue, nullptr);
     EXPECT_EQ(*defaultValue, 256);
 }
