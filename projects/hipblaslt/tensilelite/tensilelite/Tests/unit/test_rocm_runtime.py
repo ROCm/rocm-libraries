@@ -139,6 +139,18 @@ def test_resolve_system_rocm_prefers_environment(tmp_path, monkeypatch):
     assert result.source == "explicit ROCM_PATH"
 
 
+def test_resolve_system_rocm_rejects_empty_environment(monkeypatch):
+    monkeypatch.setenv("ROCM_PATH", "")
+
+    with pytest.raises(_rocm.TensileLiteRuntimeError) as exc_info:
+        _rocm._resolve_system_rocm()
+
+    assert str(exc_info.value) == (
+        "ROCM_PATH is set but empty.\n"
+        "Set ROCM_PATH to the matching conventional ROCm installation."
+    )
+
+
 def test_resolve_system_rocm_falls_back_to_path_discovery(tmp_path, monkeypatch):
     root = _root(tmp_path)
     monkeypatch.delenv("ROCM_PATH", raising=False)

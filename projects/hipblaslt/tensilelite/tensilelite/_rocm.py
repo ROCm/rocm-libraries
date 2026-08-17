@@ -267,8 +267,13 @@ def _validate_system_rocm(
 
 def _resolve_system_rocm() -> SystemRocmRoot:
     """Select a ROCm prefix from the environment, default location, or PATH."""
-    explicit = os.environ.get("ROCM_PATH")
-    if explicit:
+    if "ROCM_PATH" in os.environ:
+        explicit = os.environ["ROCM_PATH"]
+        if not explicit:
+            raise TensileLiteRuntimeError(
+                "ROCM_PATH is set but empty.\n"
+                "Set ROCM_PATH to the matching conventional ROCm installation."
+            )
         return _validated_system_rocm_root(Path(explicit).expanduser(), "explicit ROCM_PATH")
     if sys.platform != "win32" and Path("/opt/rocm").is_dir():
         return _validated_system_rocm_root(Path("/opt/rocm"), "/opt/rocm")
