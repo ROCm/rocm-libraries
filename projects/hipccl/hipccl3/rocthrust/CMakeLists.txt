@@ -71,8 +71,6 @@ cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installa
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 option(LINK_HIP_DEVICE_LIBS "Links against HIP device libraries. Required for device-side acceleration." ON)
 
-option(GRAFT_THRUST_ONTO_BINARIES "!!! TODO !!!" OFF)
-
 if((BUILD_TEST OR BUILD_BENCHMARK OR BUILD_EXAMPLE) AND NOT (${LINK_HIP_DEVICE_LIBS}))
     message(FATAL_ERROR "rocThrust tests, benchmarks, and examples must be built with LINK_HIP_DEVICE_LIBS=ON since they require device acceleration.")
 endif()
@@ -180,7 +178,7 @@ check_option(FETCH_METHOD_OPTIONS ROCRAND_FETCH_METHOD)
 include(cmake/Dependencies.cmake)
 
 # Verify that supported compilers are used
-if (NOT WIN32 OR NOT GRAFT_THRUST_ONTO_BINARIES)
+if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()
 
@@ -193,13 +191,11 @@ set(THRUST_HOST_SYSTEM CPP CACHE STRING "The host backend to target.")
 check_option(THRUST_HOST_SYSTEM_OPTIONS THRUST_HOST_SYSTEM)
 add_compile_definitions(THRUST_HOST_SYSTEM=THRUST_HOST_SYSTEM_${THRUST_HOST_SYSTEM})
 
-# If we're not grafting existing CUDA onto binaries, we must dissallow CUDA backend.
-if (NOT GRAFT_THRUST_ONTO_BINARIES)
-  set(THRUST_DEVICE_SYSTEM_OPTIONS OMP TBB CPP HIP)
-  set(THRUST_DEVICE_SYSTEM HIP CACHE STRING "The host backend to target.")
-  check_option(THRUST_DEVICE_SYSTEM_OPTIONS THRUST_DEVICE_SYSTEM)
-  add_compile_definitions(THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVICE_SYSTEM})
-endif()
+# Note CUDA backend is currently not supported, so disallow the option for now.
+set(THRUST_DEVICE_SYSTEM_OPTIONS OMP TBB CPP HIP)
+set(THRUST_DEVICE_SYSTEM HIP CACHE STRING "The host backend to target.")
+check_option(THRUST_DEVICE_SYSTEM_OPTIONS THRUST_DEVICE_SYSTEM)
+add_compile_definitions(THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVICE_SYSTEM})
 
 set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
@@ -234,13 +230,8 @@ endif()
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
 
-# Thrust (header-only) library
-if(GRAFT_THRUST_ONTO_BINARIES)
-  # If we're grafting CCCL we don't need the actual rocThrust library!
-  find_package(CCCL CONFIG REQUIRED)
-else()
-  add_subdirectory(thrust)
-endif()
+# Thrust (with HIP backend)
+add_subdirectory(thrust)
 
 if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
@@ -251,7 +242,7 @@ if(CODE_COVERAGE)
 endif()
 
 # Tests
-if(BUILD_TEST AND USE_SYSTEM_LIB AND NOT GRAFT_THRUST_ONTO_BINARIES)
+if(BUILD_TEST AND USE_SYSTEM_LIB)
   find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
   if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
     message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
@@ -270,7 +261,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 
   # Used by tests to define their RESOURCE_GROUPS
   set(DEFAULT_GPU_RESOURCE "gpus")
-
+  
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)
