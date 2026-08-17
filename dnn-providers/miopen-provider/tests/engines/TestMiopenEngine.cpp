@@ -9,8 +9,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "engines/MiopenEngine.hpp"
@@ -485,6 +487,124 @@ TEST(TestMiopenEngine, InitializeExecutionContextDefaultsBenchmarkingDisabledWhe
     engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
 
     EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
+}
+
+namespace
+{
+/// Builds a single-knob EngineConfig flatbuffer for "global.benchmarking", matching
+/// the shape the four tests above construct by hand. @p builder must outlive the
+/// returned wrapper's use.
+hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper
+    makeBenchmarkingKnobConfig(flatbuffers::FlatBufferBuilder& builder, int64_t value)
+{
+    auto knobIdOffset = builder.CreateString(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+    auto knobValue = hipdnn_flatbuffers_sdk::data_objects::CreateIntValue(builder, value);
+    hipdnn_flatbuffers_sdk::data_objects::KnobSettingBuilder knobSettingBuilder(builder);
+    knobSettingBuilder.add_knob_id(knobIdOffset);
+    knobSettingBuilder.add_value_type(hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue);
+    knobSettingBuilder.add_value(knobValue.Union());
+    auto knobSetting = knobSettingBuilder.Finish();
+
+    std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::KnobSetting>> knobsVector;
+    knobsVector.push_back(knobSetting);
+    auto knobs = builder.CreateVector(knobsVector);
+
+    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, knobs);
+    builder.Finish(engineConfig);
+
+    auto buffer = builder.Release();
+    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper(buffer.data(),
+                                                                             buffer.size());
+}
+} // namespace
+
+// Task 2.2c: HIPDNN_FORCE_BENCHMARKING honoured outside the isValid() branch, so it
+// also reaches the plain-execute path (no knob, or an invalid config).
+
+TEST(TestMiopenEngine, ForceBenchmarkingOnSetsBenchmarkingEnabledWithNoKnob)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "1");
+
+    const MiopenEngine engine(1);
+    const MockGraph mockGraph;
+    const HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    auto engineConfig = hipdnn_flatbuffers_sdk::data_objects::CreateEngineConfig(builder, 1, 0);
+    builder.Finish(engineConfig);
+    auto buffer = builder.Release();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper configWrapper(
+        buffer.data(), buffer.size());
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
+
+    EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
+}
+
+/// The case that regresses if the override were applied inside the isValid() branch:
+/// an invalid config is exactly the plain-execute path the override must still reach.
+TEST(TestMiopenEngine, ForceBenchmarkingOnSetsBenchmarkingEnabledWithAnInvalidConfig)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "true");
+
+    const MiopenEngine engine(1);
+    const MockGraph mockGraph;
+    const HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
+    const MockEngineConfig mockConfig;
+    EXPECT_CALL(mockConfig, isValid()).WillRepeatedly(::testing::Return(false));
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, mockConfig, ctx);
+
+    EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
+}
+
+/// The sharpest case: `0` forces off even when the knob itself asked for on -- what an
+/// `||` composition would get silently wrong.
+TEST(TestMiopenEngine, ForceBenchmarkingOffOverridesAKnobEnabledRun)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME, "0");
+
+    const MiopenEngine engine(1);
+    const MockGraph mockGraph;
+    const HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const auto configWrapper = makeBenchmarkingKnobConfig(builder, 1);
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
+
+    EXPECT_FALSE(ctx.executionSettings().benchmarkingEnabled());
+}
+
+/// A leaked environment variable must not make the existing four cases lie: this pins
+/// one of them (knob=1 -> enabled) with the variable explicitly cleared, so a CI runner
+/// carrying a stray HIPDNN_FORCE_BENCHMARKING from a prior test cannot silently pass.
+TEST(TestMiopenEngine, InitializeExecutionContextSetsBenchmarkingEnabledWithOverrideExplicitlyUnset)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
+        hipdnn_plugin_sdk::FORCE_BENCHMARKING_ENV_NAME);
+
+    const MiopenEngine engine(1);
+    const MockGraph mockGraph;
+    const HipdnnMiopenHandle dummyHandle;
+    MockHipdnnMiopenContext ctx;
+
+    flatbuffers::FlatBufferBuilder builder;
+    const auto configWrapper = makeBenchmarkingKnobConfig(builder, 1);
+
+    engine.initializeExecutionContext(dummyHandle, mockGraph, configWrapper, ctx);
+
+    EXPECT_TRUE(ctx.executionSettings().benchmarkingEnabled());
 }
 
 TEST(TestMiopenEngine, InitializeExecutionContextSkipsNonApplicableBuilders)

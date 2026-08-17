@@ -411,6 +411,12 @@ public:
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
 
+#### Implementing `global.benchmarking`
+
+The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per knob-filtered catalog entry, time each on the device on first `execute()`, and reuse the fastest for the plan's remaining life. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension when you want to reach every kernel a declared field distinguishes -- `global.benchmarking` and per-field sweeping are complementary, not alternatives. A provider adopting the ingestor gets benchmarking for free: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` does the rest -- advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan -- with no provider-side benchmarking code required.
+
+A provider implementing `global.benchmarking` by hand (rather than through the ingestor) must apply `hipdnn_plugin_sdk::benchmarkingOverrideFromEnv()` the same way the ingestor and MIOpen both do: as a `value_or`-style override, consulted *outside* any config-validity branch, composed as `override.value_or(knobValue)` -- **never** an OR. An OR cannot express "force off": a `false` override term never clears a `true` knob term, so `HIPDNN_FORCE_BENCHMARKING=0` would be unable to override a knob-enabled run, which is exactly the case a debugging override exists for.
+
 #### Deprecating Knobs
 
 When a knob is no longer needed, mark it as deprecated rather than removing it. All knobs have a deprecated flag on them that can be set.

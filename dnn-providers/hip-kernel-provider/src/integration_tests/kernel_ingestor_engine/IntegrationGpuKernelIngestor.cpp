@@ -24,6 +24,7 @@
 #include <hipdnn_frontend/knob/Knob.hpp>
 #include <hipdnn_frontend/knob/KnobConstraint.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
@@ -212,6 +213,35 @@ protected:
         buildAndCompile(graph, engineId());
     }
 
+    /// Like buildAndCompile(), but drives create_execution_plan_ext() with explicit
+    /// knob settings instead of create_execution_plans()'s heuristic default path --
+    /// the only way to set global.benchmarking, which add_engine_sweep() and the
+    /// default heuristic path both strip (plan §3 "The benchmarking knob is explicitly
+    /// excluded from the only enumeration path there is").
+    void buildAndCompileWithKnobs(Graph& graph,
+                                  int64_t pinnedEngineId,
+                                  const std::vector<KnobSetting>& knobSettings)
+    {
+        graph.set_preferred_engine_id_ext(pinnedEngineId);
+
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        ASSERT_FALSE(rankedEngineIds.empty());
+
+        result = graph.create_execution_plan_ext(rankedEngineIds.front(), knobSettings);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.check_support();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    }
+
     /// Builds fresh CPU/GPU tensor bundles for `graph`, executes once on GPU, verifies
     /// against CpuReferenceGraphExecutor, and reseeds inputs (`seed`) so repeated calls
     /// never compare stale buffers. `reductionLength` widens the tolerance for kernels
@@ -378,6 +408,40 @@ TEST_P(IntegrationGpuKernelIngestor, ExecutesTheSelectedKernelOnDevice)
     {
         executeAndVerify(*graph, workspace.get(), static_cast<unsigned int>(iteration));
     }
+}
+
+// global.benchmarking: the composite plan built when the knob is set
+
+/// Drives global.benchmarking=1 through the real frontend against the shipped
+/// pointwise pack, verifying the numerical result against the CPU reference exactly as
+/// every other case in this file does. Per plan §9 uncertainty 2, this asserts
+/// correctness of the result, never which candidate kernel won the internal timing --
+/// the two block-size-64/256 FLOAT candidates ReportsAKnobWhoseValuesComeFromTheCatalog
+/// already proves survive knob filtering for this graph may be indistinguishable
+/// within noise, and the feature is still correct if it picks either one (or falls
+/// back to the ranked front on an all-unusable sampling pass) as long as the winner
+/// actually executes and produces the right answer. This is also the only test in the
+/// whole feature that proves timing runs at all -- see 06-gotchas.md "Enumeration
+/// proves much less than it looks".
+TEST_F(IntegrationGpuKernelIngestor, ExecutesCorrectlyWithBenchmarkingEnabled)
+{
+    auto graph = buildPointwiseAddGraph();
+
+    std::vector<KnobSetting> knobSettings;
+    knobSettings.emplace_back(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, int64_t{1});
+    buildAndCompileWithKnobs(*graph, engineId(), knobSettings);
+
+    int64_t workspaceSize = 0;
+    ASSERT_EQ(graph->get_workspace_size(workspaceSize).code, ErrorCode::OK);
+    const hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+
+    // First execute() pays the priming/sampling cost (by design, see docs); the second
+    // reuses the cached winner. Both must still produce the correct numerical result --
+    // the sampling pass itself writes real answers into the caller's buffers on its
+    // final (delegated) call, and executeAndVerify() re-randomizes and re-checks every
+    // time, so a benchmarking-only correctness regression cannot hide behind either call.
+    executeAndVerify(*graph, workspace.get(), /*seed=*/0);
+    executeAndVerify(*graph, workspace.get(), /*seed=*/1);
 }
 
 TEST_F(IntegrationGpuKernelIngestor, ExecutesTwoIndependentlyBuiltGraphsCorrectly)
