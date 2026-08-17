@@ -12,18 +12,23 @@ on:
       - 'dnn-providers/integration-tests/scripts/render_support_matrix.py'
   workflow_dispatch:
 
+concurrency:
+  group: update-support-matrix-overview
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
   regenerate:
+    if: github.repository == 'ROCm/rocm-libraries'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: develop
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.12'
 
@@ -33,12 +38,12 @@ jobs:
       - name: Commit if changed
         run: |
           cd dnn-providers/integration-tests
-          if git diff --quiet SUPPORT_MATRIX_OVERVIEW.md 2>/dev/null; then
+          git add SUPPORT_MATRIX_OVERVIEW.md
+          if git diff --cached --quiet; then
             echo "Overview is up to date, nothing to commit."
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add SUPPORT_MATRIX_OVERVIEW.md
             git commit -m "chore: regenerate support matrix overview"
             git push
           fi

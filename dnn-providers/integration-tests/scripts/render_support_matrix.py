@@ -135,8 +135,6 @@ def _legend(overview_only: bool) -> list[str]:
     return [_LEGEND_PREFIX + LEGEND_DETAIL, ""]
 
 
-LEGEND = _legend(overview_only=False)
-
 # The full reference, rendered after the last target section.
 READING_GUIDE = [
     "## Reading guide",
@@ -1210,6 +1208,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.check:
         target = args.output
+        regen_cmd = REGEN_OVERVIEW_COMMAND if args.overview_only else REGEN_COMMAND
         if str(target) == "-":
             print("error: --check needs a file to compare against", file=sys.stderr)
             return 2
@@ -1217,7 +1216,7 @@ def main(argv: list[str] | None = None) -> int:
             committed = target.read_text(encoding="utf-8")
         except OSError as exc:
             print(f"error: cannot read {target} ({exc})", file=sys.stderr)
-            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            print(f"       regenerate it with: {regen_cmd}", file=sys.stderr)
             return 1
         if committed != document:
             print(
@@ -1225,7 +1224,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"the current sidecars",
                 file=sys.stderr,
             )
-            print(f"       regenerate it with: {REGEN_COMMAND}", file=sys.stderr)
+            print(f"       regenerate it with: {regen_cmd}", file=sys.stderr)
             return 1
         return 0
 

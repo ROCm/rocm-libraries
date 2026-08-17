@@ -23,10 +23,15 @@ from pathlib import Path
 import pytest
 from render_support_matrix import (
     DEFAULT_BUNDLES_DIR,
+    DEFAULT_MATRIX_PATH,
+    DEFAULT_OVERVIEW_PATH,
     FULL,
+    LEGEND_OVERVIEW,
     NO_LAYOUT,
     NONE,
     PARTIAL,
+    REGEN_COMMAND,
+    REGEN_OVERVIEW_COMMAND,
     ClaimUnit,
     collect_units,
     dtypes_of,
@@ -925,6 +930,233 @@ class TestCli:
         first = out.read_text()
         main(["--bundles-dir", str(bundle_root), "--output", str(out)])
         assert out.read_text() == first
+
+
+# --------------------------------------------------------------------------
+# Overview-only mode
+# --------------------------------------------------------------------------
+
+
+class TestOverviewOnly:
+    @pytest.fixture()
+    def overview(self, bundle_root: Path) -> str:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "a_nchw"}, {"id": "b_nhwc"}],
+            claims={
+                "MIOPEN_ENGINE": [
+                    {"cases": ["a_nchw", "b_nhwc"], "support": {"gfx942": ["linux"]}}
+                ]
+            },
+        )
+        _single_bundle(
+            bundle_root,
+            "full/Batchnorm/Default",
+            "Bn",
+            graph=_graph(nodes=[{"type": "BatchnormAttributes"}]),
+            claims={"HIP_MLOPS_ENGINE": {"gfx90a": ["linux"]}},
+        )
+        return render_markdown(collect_units(bundle_root), 0, overview_only=True)
+
+    def test_no_details_tags(self, overview: str) -> None:
+        assert "<details>" not in overview
+        assert "</details>" not in overview
+        assert "<summary>" not in overview
+
+    def test_no_reading_guide(self, overview: str) -> None:
+        assert "Reading guide" not in overview
+
+    def test_no_traceability_comments(self, overview: str) -> None:
+        assert "<!-- row:" not in overview
+
+    def test_no_overview_subheading(self, overview: str) -> None:
+        assert "### Overview" not in overview
+
+    def test_target_uses_plain_heading(self, overview: str) -> None:
+        assert "## gfx942 / linux" in overview or "## gfx90a / linux" in overview
+
+    def test_legend_is_overview_variant(self, overview: str) -> None:
+        assert "How to read a cell:" in overview
+        assert "Expand a row" not in overview
+
+    def test_regen_command_says_overview_only(self, overview: str) -> None:
+        assert "--overview-only" in overview
+
+    def test_no_per_family_detail(self, overview: str) -> None:
+        assert "per-(variant, dtype) detail" not in overview
+        assert "per-variant" not in overview.lower().split("how to read")[0]
+
+    def test_overview_table_is_still_present(self, overview: str) -> None:
+        assert "| Op family" in overview
+        assert "Batchnorm" in overview
+        assert "Conv" in overview
+
+    def test_empty_tree_overview(self) -> None:
+        document = render_markdown([], 0, overview_only=True)
+        assert "_No claim-bearing bundles found._" in document
+        assert "<details>" not in document
+
+
+class TestOverviewOnlyCli:
+    def test_overview_only_default_output_path(
+        self, bundle_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _single_bundle(
+            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
+        )
+        out = bundle_root.parent / "SUPPORT_MATRIX_OVERVIEW.md"
+        monkeypatch.setattr(
+            "render_support_matrix.DEFAULT_MATRIX_PATH",
+            bundle_root.parent / "SUPPORT_MATRIX.md",
+        )
+        monkeypatch.setattr("render_support_matrix.DEFAULT_OVERVIEW_PATH", out)
+        monkeypatch.setattr(
+            "render_support_matrix.INTEGRATION_TESTS_DIR", bundle_root.parent
+        )
+        assert main(["--bundles-dir", str(bundle_root), "--overview-only"]) == 0
+        assert out.exists()
+        content = out.read_text()
+        assert "<details>" not in content
+
+    def test_overview_only_explicit_output(
+        self, bundle_root: Path, tmp_path: Path
+    ) -> None:
+        _single_bundle(
+            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
+        )
+        out = tmp_path / "custom_overview.md"
+        assert (
+            main(
+                [
+                    "--bundles-dir",
+                    str(bundle_root),
+                    "--overview-only",
+                    "--output",
+                    str(out),
+                ]
+            )
+            == 0
+        )
+        assert out.exists()
+        assert "<details>" not in out.read_text()
+
+    def test_check_overview_only_uses_correct_regen_command(
+        self, bundle_root: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _single_bundle(
+            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
+        )
+        out = tmp_path / "overview.md"
+        main(
+            [
+                "--bundles-dir",
+                str(bundle_root),
+                "--overview-only",
+                "--output",
+                str(out),
+            ]
+        )
+        _single_bundle(
+            bundle_root,
+            "quick/Batchnorm/D",
+            "B",
+            graph=_graph(nodes=[{"type": "BatchnormAttributes"}]),
+            claims={"E": {"gfx942": ["linux"]}},
+        )
+        rc = main(
+            [
+                "--bundles-dir",
+                str(bundle_root),
+                "--overview-only",
+                "--output",
+                str(out),
+                "--check",
+            ]
+        )
+        assert rc == 1
+        assert "--overview-only" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# --check edge cases
+# --------------------------------------------------------------------------
+
+
+class TestCheckEdgeCases:
+    def test_check_stdout_returns_two(self, bundle_root: Path) -> None:
+        _single_bundle(
+            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
+        )
+        assert (
+            main(["--bundles-dir", str(bundle_root), "--output", "-", "--check"]) == 2
+        )
+
+    def test_check_json_format(self, bundle_root: Path) -> None:
+        import tempfile
+
+        out = Path(tempfile.mkdtemp()) / "matrix.json"
+        _single_bundle(
+            bundle_root, "quick/Conv/D", "C", claims={"E": {"gfx942": ["linux"]}}
+        )
+        main(
+            [
+                "--bundles-dir",
+                str(bundle_root),
+                "--format",
+                "json",
+                "--output",
+                str(out),
+            ]
+        )
+        assert (
+            main(
+                [
+                    "--bundles-dir",
+                    str(bundle_root),
+                    "--format",
+                    "json",
+                    "--output",
+                    str(out),
+                    "--check",
+                ]
+            )
+            == 0
+        )
+
+
+# --------------------------------------------------------------------------
+# Sidecar edge cases
+# --------------------------------------------------------------------------
+
+
+class TestSidecarEdgeCases:
+    def test_empty_claims_produces_claimless_unit(self, bundle_root: Path) -> None:
+        _single_bundle(
+            bundle_root,
+            "quick/Conv/Default",
+            "C",
+            claims={},
+        )
+        units = collect_units(bundle_root)
+        assert len(units) == 1
+        assert units[0].claims == {}
+
+    def test_overlapping_sweep_case_ids_merge_targets(self, bundle_root: Path) -> None:
+        _sweep_bundle(
+            bundle_root,
+            "quick/Conv/Sweep",
+            cases=[{"id": "c0"}, {"id": "c1"}],
+            claims={
+                "E": [
+                    {"cases": ["c0"], "support": {"gfx942": ["linux"]}},
+                    {"cases": ["c0"], "support": {"gfx90a": ["linux"]}},
+                ]
+            },
+        )
+        units = collect_units(bundle_root)
+        c0 = next(u for u in units if u.case_id == "c0")
+        assert c0.claims["E"] == {GFX942, GFX90A}
 
 
 # --------------------------------------------------------------------------
