@@ -8,11 +8,11 @@ cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 # Update these variables at release time
 #
 # Set the library version
-set(VERSION_STRING "5.0.0")
+set(VERSION_STRING "4.5.0")
 # Set the minimum required rocPRIM version
-set(MIN_ROCPRIM_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
 # Set the minimum required rocRAND version
-set(MIN_ROCRAND_PACKAGE_VERSION "4.1.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
+set(MIN_ROCRAND_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocRAND to search for when ROCRAND_FETCH_METHOD is set to PACKAGE.")
 # Set download branch for dependencies rocPRIM and rocRAND
 set(ROCM_DEP_RELEASE_BRANCH "release/therock-7.14" CACHE STRING "Download branch for ROCm dependencies")
 # --------------------------------------
@@ -35,9 +35,10 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(ALLOWED_CXX_STANDARDS 17 20 23 26)
-if(NOT CMAKE_CXX_STANDARD IN_LIST ALLOWED_CXX_STANDARDS)
-  message(FATAL_ERROR "Only C++17, C++20, C++23 and C++26 are supported")
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
 endif()
 
 # Set HIP flags
@@ -69,6 +70,8 @@ cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON
 cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Force download of non-ROCm dependencies (eg. Google Test, Google Benchmark)" OFF)
 option(LINK_HIP_DEVICE_LIBS "Links against HIP device libraries. Required for device-side acceleration." ON)
+
+option(GRAFT_THRUST_ONTO_BINARIES "!!! TODO !!!" OFF)
 
 if((BUILD_TEST OR BUILD_BENCHMARK OR BUILD_EXAMPLE) AND NOT (${LINK_HIP_DEVICE_LIBS}))
     message(FATAL_ERROR "rocThrust tests, benchmarks, and examples must be built with LINK_HIP_DEVICE_LIBS=ON since they require device acceleration.")
@@ -177,7 +180,7 @@ check_option(FETCH_METHOD_OPTIONS ROCRAND_FETCH_METHOD)
 include(cmake/Dependencies.cmake)
 
 # Verify that supported compilers are used
-if (NOT WIN32)
+if (NOT WIN32 OR NOT GRAFT_THRUST_ONTO_BINARIES)
   include(cmake/VerifyCompiler.cmake)
 endif()
 
@@ -190,15 +193,21 @@ set(THRUST_HOST_SYSTEM CPP CACHE STRING "The host backend to target.")
 check_option(THRUST_HOST_SYSTEM_OPTIONS THRUST_HOST_SYSTEM)
 add_compile_definitions(THRUST_HOST_SYSTEM=THRUST_HOST_SYSTEM_${THRUST_HOST_SYSTEM})
 
-# Note CUDA backend is currently not supported, so disallow the option for now.
-set(THRUST_DEVICE_SYSTEM_OPTIONS OMP TBB CPP HIP)
-set(THRUST_DEVICE_SYSTEM HIP CACHE STRING "The host backend to target.")
-check_option(THRUST_DEVICE_SYSTEM_OPTIONS THRUST_DEVICE_SYSTEM)
-add_compile_definitions(THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVICE_SYSTEM})
+# If we're not grafting existing CUDA onto binaries, we must dissallow CUDA backend.
+if (NOT GRAFT_THRUST_ONTO_BINARIES)
+  set(THRUST_DEVICE_SYSTEM_OPTIONS OMP TBB CPP HIP)
+  set(THRUST_DEVICE_SYSTEM HIP CACHE STRING "The host backend to target.")
+  check_option(THRUST_DEVICE_SYSTEM_OPTIONS THRUST_DEVICE_SYSTEM)
+  add_compile_definitions(THRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_${THRUST_DEVICE_SYSTEM})
+endif()
 
 set(COMPILE_OPTIONS -Wall -Wextra)
 if(NOT DISABLE_WERROR)
   list(APPEND COMPILE_OPTIONS -Werror)
+endif()
+
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
 if (WIN32)
@@ -225,8 +234,13 @@ endif()
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
 
-# Thrust (with HIP backend)
-add_subdirectory(thrust)
+# Thrust (header-only) library
+if(GRAFT_THRUST_ONTO_BINARIES)
+  # If we're grafting CCCL we don't need the actual rocThrust library!
+  find_package(CCCL CONFIG REQUIRED)
+else()
+  add_subdirectory(thrust)
+endif()
 
 if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
@@ -237,7 +251,7 @@ if(CODE_COVERAGE)
 endif()
 
 # Tests
-if(BUILD_TEST AND USE_SYSTEM_LIB)
+if(BUILD_TEST AND USE_SYSTEM_LIB AND NOT GRAFT_THRUST_ONTO_BINARIES)
   find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
   if (${rocprim_VERSION} VERSION_LESS ${MIN_ROCPRIM_PACKAGE_VERSION})
     message(WARNING "The installed rocprim version, ${rocprim_VERSION}, is less than the minimum required version ${MIN_ROCPRIM_PACKAGE_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
@@ -256,7 +270,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 
   # Used by tests to define their RESOURCE_GROUPS
   set(DEFAULT_GPU_RESOURCE "gpus")
-  
+
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32 AND BUILD_TEST)

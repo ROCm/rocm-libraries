@@ -183,11 +183,10 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
- * @brief StreamK=5 hybrid sub-path selector.
+ * @brief The tile-scheduling mode a kernel launches in.
  *
  * Picks between the SK3 static work-assignment sub-path and the SK4
- * dynamic per-XCD work-queue sub-path inside a single SK5 kernel
- * launch. Used by ::origami::streamk::select_hybrid_mode().
+ * dynamic per-XCD work-queue sub-path inside a single SK5 kernel launch.
  */
 enum class hybrid_mode_t : std::uint32_t {
   static_ = 0,        ///< SK3 static work-assignment sub-path
@@ -195,6 +194,14 @@ enum class hybrid_mode_t : std::uint32_t {
   count,              ///< Count of hybrid modes
   none = 0xFFFFFFFFu  ///< Explicitly invalid
 };
+
+/**
+ * @brief Convert hybrid_mode_t to string.
+ *
+ * @param mode Tile-scheduling mode
+ * @return std::string String representation of the mode
+ */
+ORIGAMI_EXPORT std::string hybrid_mode_to_string(hybrid_mode_t mode);
 
 /**
  * @brief Prediction mode types for latency estimation.
