@@ -342,6 +342,28 @@ namespace hipsparse_test
     };
 #endif
 
+    // clang-format 19 (math-ci) rewrites "#if(" to "#if (", which clang-format
+    // 18 (the repo pre-commit hook) reverts; disable so both formatters agree.
+    // clang-format off
+#if(defined(HIPSPARSE_WITH_SPGEAM) && (!defined(CUDART_VERSION) || CUDART_VERSION >= 13030))
+    // clang-format on
+    struct spgeam_struct
+    {
+        hipsparseSpGEAMDescr_t descr;
+        spgeam_struct()
+        {
+            hipsparseStatus_t status = hipsparseSpGEAM_createDescr(&descr);
+            verify_hipsparse_status_success(status, "ERROR: spgeam_struct constructor");
+        }
+
+        ~spgeam_struct()
+        {
+            hipsparseStatus_t status = hipsparseSpGEAM_destroyDescr(descr);
+            verify_hipsparse_status_success(status, "ERROR: spgeam_struct destructor");
+        }
+    };
+#endif
+
 } // namespace hipsparse_test
 
 using hipsparse_unique_ptr = std::unique_ptr<void, void (*)(void*)>;

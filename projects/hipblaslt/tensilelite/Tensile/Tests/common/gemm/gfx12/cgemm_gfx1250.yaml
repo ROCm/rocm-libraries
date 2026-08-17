@@ -1,0 +1,72 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  # gfx1250 CGEMM uses the WMMA TDM path (SIA4), so it does not share cgemm.yaml.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  Architecture: gfx1250
+
+BenchmarkProblems:
+  - # cgemm NN
+    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: False, TransposeB: False, UseBeta: True, Batched: True}
+    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
+      ForkParameters: &cwmma
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
+          - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - DepthU: [8, 16, 32]
+        - GlobalSplitU: [1]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [0, 2]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - WavefrontSize: [32]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+
+  - # cgemm NT
+    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: False, TransposeB: True, UseBeta: True, Batched: True}
+    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
+      ForkParameters: *cwmma
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+
+  - # cgemm TN
+    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: True, TransposeB: False, UseBeta: True, Batched: True}
+    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
+      ForkParameters: *cwmma
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+
+  - # cgemm TT + conjugate A and B
+    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: True, TransposeB: True, ComplexConjugateA: True, ComplexConjugateB: True, UseBeta: True, Batched: True}
+    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
+      ForkParameters: *cwmma
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]
+
+  - # cgemm NC (conjugate B)
+    - {OperationType: GEMM, DataType: C, DestDataType: C, ComputeDataType: C, TransposeA: False, TransposeB: True, ComplexConjugateB: True, UseBeta: True, Batched: True}
+    - BenchmarkCommonParameters: [{KernelLanguage: ["Assembly"]}]
+      ForkParameters: *cwmma
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [ [127,1,129], 0, [2], [63,1,64] ]

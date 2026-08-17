@@ -40,6 +40,7 @@ add_library(
     descriptors/LayernormBackwardOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/MoeGroupedMatmulOperationDescriptor.cpp
+    descriptors/MoeGroupedMatmulBwdOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/ProfilingControlDescriptor.cpp
     descriptors/ResampleBwdOperationDescriptor.cpp

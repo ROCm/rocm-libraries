@@ -45,14 +45,10 @@ of a constraint that silently never matches.
 
 from __future__ import annotations
 
-from .conv import CONV_REGISTRY, ConvRequest, dispatch_conv
 from .moe import MOE_REGISTRY, MoeRequest, dispatch_moe
 from .norm import NORM_REGISTRY, NormRequest, dispatch_norm
 
 __all__ = [
-    "CONV_REGISTRY",
-    "ConvRequest",
-    "dispatch_conv",
     "MOE_REGISTRY",
     "MoeRequest",
     "dispatch_moe",

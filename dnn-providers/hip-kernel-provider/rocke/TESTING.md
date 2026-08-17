@@ -206,12 +206,18 @@ apart?"* and nothing else:
 Key semantics:
 
 - **Both-reject is parity.** For an unsupported `(spec, arch)`, *both* engines must
-  reject it — counted parity-faithful (SKIP), not failure. Divergence is: one
-  accepts and one rejects, or both accept with different bytes.
+  reject it — counted parity-faithful (`BOTH_REJECTED`), not failure. Divergence
+  is: one accepts and one rejects, or both accept with different bytes. A family
+  where that is *all* that happened is a different matter: it compared no bytes,
+  so it fails as `ALL_REJECTED` rather than passing as green.
 - **CRASH is an implicit-oracle signal**, deliberately *not* laundered into
   "both rejected" — a segfault is a real failure the gate surfaces.
 - **RANGE_DRIFT** — the two emitters enumerating different config counts is itself
   a parity failure, caught independently of byte content.
+- **The gate fails closed.** Every family status is classified as passing or
+  failing in one place (`run_diff.py`'s `GATE_PASS` / `GATE_FAIL`); a status in
+  neither fails. A run that compared nothing — no families, no configs, or only
+  rejections — is a failure, not a green.
 - **Property/fuzz generation**
   ([`fuzz_diff.py`](platform/tests/instances/differential/fuzz_diff.py)) feeds the
   differential oracle with generated `(spec, arch)` inputs rather than a fixed list.
