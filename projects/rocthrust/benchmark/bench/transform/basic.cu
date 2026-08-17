@@ -32,7 +32,6 @@
 // rocThrust
 #include <thrust/copy.h>
 #include <thrust/count.h>
-#include <thrust/detail/functional/address_stability.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -48,6 +47,17 @@
 #include <vector>
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
+#endif
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+// CCCL 3.0 has moved 'proclaim_copyable_arguments' to libcudacxx.
+#  include _THRUST_LIBCXX_INCLUDE(functional)
+// TODO: realize instances of this macros once the CCCL 2.x branch is removed.
+#  define _THRUST_PROCLAIM_COPYABLE_ARGUMENTS _THRUST_PROCLAIM_COPYABLE_ARGUMENTS
+#else
+// TODO: remove this branch once we have remove CCCL 2.x support as this include will be removed!
+#  include <thrust/functional.h>
+#  define _THRUST_PROCLAIM_COPYABLE_ARGUMENTS thrust::detail::proclaim_copyable_arguments
 #endif
 
 template <class InT, class OutT>
@@ -187,7 +197,7 @@ struct mul
   {
     const T scalar = startScalar;
     return bench_transform(
-      c.begin(), c.end(), b.begin(), ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
+      c.begin(), c.end(), b.begin(), _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([=] THRUST_DEVICE(const T& ci) {
         return ci * scalar;
       }));
   }
@@ -205,7 +215,7 @@ struct add
       a.end(),
       b.begin(),
       c.begin(),
-      ::thrust::detail::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
+      _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
         return ai + bi;
       }));
   }
@@ -225,7 +235,7 @@ struct triad
       b.end(),
       c.begin(),
       a.begin(),
-      ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
+      _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([=] THRUST_DEVICE(const T& bi, const T& ci) {
         return bi + scalar * ci;
       }));
   }
@@ -245,7 +255,7 @@ struct nstream
       thrust::make_zip_iterator(a.end(), b.end(), c.end()),
       a.begin(),
       thrust::make_zip_function(
-        ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
+        _THRUST_PROCLAIM_COPYABLE_ARGUMENTS([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
           return ai + bi + scalar * ci;
         })));
   }

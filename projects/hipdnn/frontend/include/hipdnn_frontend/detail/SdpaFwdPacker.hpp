@@ -259,10 +259,14 @@ inline Error
 
     // Set enum parameters using dedicated backend enum types
     auto diagonalAlignment = toBackendDiagonalAlignment(attributes.diagonal_alignment);
+    if(!diagonalAlignment.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported diagonal alignment"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FWD_DIAGONAL_ALIGNMENT_EXT,
                                                HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT,
-                                               diagonalAlignment,
+                                               *diagonalAlignment,
                                                "SDPA fprop diagonal_alignment"));
 
     if(attributes.mma_core_mode != DataType::NOT_SET)
@@ -274,10 +278,14 @@ inline Error
     }
 
     auto implementationVal = toBackendAttentionImplementation(attributes.implementation);
+    if(!implementationVal.has_value())
+    {
+        return {ErrorCode::INVALID_VALUE, "Unsupported implementation"};
+    }
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
                                                HIPDNN_ATTR_SDPA_FWD_IMPLEMENTATION_EXT,
                                                HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT,
-                                               implementationVal,
+                                               *implementationVal,
                                                "SDPA fprop implementation"));
 
     // Set compute data type

@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_bsrmv_info.hpp"
+#include "rocsparse_coomv_info.hpp"
 #include "rocsparse_csrgemm_info.hpp"
 #include "rocsparse_csritsv_info.hpp"
 #include "rocsparse_csrmv_info.hpp"
@@ -47,6 +48,7 @@ struct _rocsparse_mat_info
 protected:
     rocsparse_csrmv_info csrmv_info{};
     rocsparse_bsrmv_info bsrmv_info{};
+    rocsparse_coomv_info coomv_info{};
 
     rocsparse::sorted_coo2csr_info_t* m_sorted_coo2csr_info{};
     rocsparse::ellsv_info_t*          m_ellsv_info{};
@@ -150,6 +152,9 @@ public:
 
     void                 set_bsrmv_info(rocsparse_bsrmv_info value);
     rocsparse_bsrmv_info get_bsrmv_info();
+
+    void                 set_coomv_info(rocsparse_coomv_info value);
+    rocsparse_coomv_info get_coomv_info();
 
     void set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value);
     rocsparse::sorted_coo2csr_info_t* get_sorted_coo2csr_info();

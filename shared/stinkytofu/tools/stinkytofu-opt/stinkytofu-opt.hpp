@@ -27,7 +27,9 @@
 #include <vector>
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
+#include "stinkytofu/analysis/asm/HazardGapAnalysisPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
+#include "stinkytofu/ir/DumpMemTokenIRStructurePass.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
@@ -61,6 +63,7 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 using namespace stinkytofu;
 
@@ -86,6 +89,11 @@ inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
+    // HazardGapAnalysisPass accepts optional arg: verbose
+    {"HazardGapAnalysisPass",
+     [](const std::vector<std::string>& args) {
+         return createHazardGapAnalysisPass(hasPassArg(args, "verbose"));
+     }},
     {"SetMatrixReusePass", [](const auto&) { return createSetMatrixReusePass(); }},
     {"SwInstructionPrefetchRelStaticPass",
      [](const auto&) { return createSwInstructionPrefetchRelStaticPass(std::string{}); }},
@@ -110,7 +118,7 @@ const std::vector<PassInfo> availablePasses = {
     //   profile — print the xcnt drain summary (per rule and drain site) to stderr
     {"Gfx1250HazardPass",
      [](const std::vector<std::string>& args) {
-         return createGfx1250HazardPass({}, hasPassArg(args, "profile"));
+         return createGfx1250HazardPass(hasPassArg(args, "profile"));
      }},
     // BuildUseDefChainPass accepts:
     //   includePseudo    — also build chains for pseudo registers (memtokens)
@@ -124,6 +132,10 @@ const std::vector<PassInfo> availablePasses = {
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
     {"DumpStinkyModulePass",
      [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
+    {"DumpMemTokenIRStructurePass",
+     [](const auto&) {
+         return createDumpMemTokenIRStructurePass({.path = "dump_memtoken_ir_structure.txt"});
+     }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
@@ -147,6 +159,7 @@ const std::vector<PassInfo> availablePasses = {
      [](const auto&) { return createInsertInitialUnclausedVmemPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
     {"InsertClusterBarrierPass", [](const auto&) { return createInsertClusterBarrierPass(); }},
+    {"TDMLoadWaveSyncPass", [](const auto&) { return createTDMLoadWaveSyncPass(); }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass",
      [](const std::vector<std::string>& args) {
