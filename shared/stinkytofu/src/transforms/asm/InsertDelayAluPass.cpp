@@ -32,6 +32,7 @@
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/RegisterKey.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -106,30 +107,21 @@ bool instructionWaitsForVALU(const StinkyInstruction& inst) {
 // Per-register delay info
 // ---------------------------------------------------------------------------
 struct DelayInfo {
-    // These stay here rather than moving to HWModel with the other per-arch
-    // hardware numbers. They are not timings the scheduler can be retuned against;
-    // they are the shape of the s_delay_alu encoding itself - how many DEP and
-    // SALU_CYCLE fields the instruction has - so they change only when the ISA
-    // encoding does, at which point this pass changes with it. They are also
-    // compile-time constants by necessity: they default-initialize the members
-    // below, and DelayInfo is the value type of RegKeyMap<DelayInfo> (see
-    // DelayState), which requires default construction.
-    static constexpr unsigned VALU_MAX = 5;         // scoreboard: 4 entries (DEP_1..4)
-    static constexpr unsigned TRANS_MAX = 4;        // scoreboard: 3 entries (DEP_1..3)
-    static constexpr unsigned SALU_CYCLES_MAX = 4;  // SALU_CYCLE_1..3
+    // "No dependency" default for the position counters (>= any arch depth).
+    static constexpr uint8_t kNoDep = 0xFF;
 
     uint8_t VALUCycles = 0;
-    uint8_t VALUNum = VALU_MAX;
+    uint8_t VALUNum = kNoDep;
 
     uint8_t TRANSCycles = 0;
-    uint8_t TRANSNum = TRANS_MAX;
-    uint8_t TRANSNumVALU = VALU_MAX;  // VALU count since TRANS (for encoding priority)
+    uint8_t TRANSNum = kNoDep;
+    uint8_t TRANSNumVALU = kNoDep;  // VALU count since TRANS (for encoding priority)
 
     uint8_t SALUCycles = 0;
 
     DelayInfo() = default;
 
-    DelayInfo(DelayType type, unsigned cycles) {
+    DelayInfo(DelayType type, unsigned cycles, const HWModel::DelayAlu& depth) {
         switch (type) {
             case VALU:
                 VALUCycles = cycles;
@@ -141,7 +133,7 @@ struct DelayInfo {
                 TRANSNumVALU = 0;
                 break;
             case SALU:
-                SALUCycles = std::min(cycles, SALU_CYCLES_MAX);
+                SALUCycles = std::min<unsigned>(cycles, depth.saluCycleMax);
                 break;
             default:
                 break;
@@ -159,12 +151,12 @@ struct DelayInfo {
     }
 
     // Advance after issuing an instruction. Returns true if entry can be erased.
-    bool advance(DelayType type, unsigned cycles) {
+    bool advance(DelayType type, unsigned cycles, const HWModel::DelayAlu& depth) {
         bool erase = true;
 
         VALUNum += (type == VALU);
-        if (VALUNum >= VALU_MAX || VALUCycles <= cycles) {
-            VALUNum = VALU_MAX;
+        if (VALUNum >= depth.valuDepth || VALUCycles <= cycles) {
+            VALUNum = kNoDep;
             VALUCycles = 0;
         } else {
             VALUCycles -= cycles;
@@ -173,9 +165,9 @@ struct DelayInfo {
 
         TRANSNum += (type == TRANS);
         TRANSNumVALU += (type == VALU);
-        if (TRANSNum >= TRANS_MAX || TRANSCycles <= cycles) {
-            TRANSNum = TRANS_MAX;
-            TRANSNumVALU = VALU_MAX;
+        if (TRANSNum >= depth.transDepth || TRANSCycles <= cycles) {
+            TRANSNum = kNoDep;
+            TRANSNumVALU = kNoDep;
             TRANSCycles = 0;
         } else {
             TRANSCycles -= cycles;
@@ -206,9 +198,9 @@ struct DelayState : RegKeyMap<DelayInfo> {
     }
 
     // Advance all entries after issuing an instruction. Erase expired entries.
-    void advance(DelayType type, unsigned cycles) {
+    void advance(DelayType type, unsigned cycles, const HWModel::DelayAlu& depth) {
         for (auto it = begin(); it != end();) {
-            if (it->second.advance(type, cycles))
+            if (it->second.advance(type, cycles, depth))
                 it = erase(it);
             else
                 ++it;
@@ -224,6 +216,8 @@ class InsertDelayAluPassImpl : public Pass {
     std::unordered_map<BasicBlock*, DelayState> blockExitState;
 
     int minWavesPerSimd_;
+
+    const HWModel::DelayAlu* depth_ = nullptr;
 
     // delay_alu only pays off when sibling waves exist to hide ALU latency.
     // Missing metadata => false (run the pass).
@@ -264,14 +258,14 @@ class InsertDelayAluPassImpl : public Pass {
         bool hasId1 = false;
 
         // TRANS dep -> first slot
-        if (delay.TRANSNum < DelayInfo::TRANS_MAX) {
+        if (delay.TRANSNum < depth_->transDepth) {
             id0Type = SDelayAluData::InstType::TRANS;
             id0Dist = static_cast<int8_t>(delay.TRANSNum);
         }
 
         // VALU dep -> first or second slot (first if no TRANS, second if TRANS present).
         // Only encode if VALU is more recent than any TRANS dep we're also waiting on.
-        if (delay.VALUNum < DelayInfo::VALU_MAX && delay.VALUNum <= delay.TRANSNumVALU) {
+        if (delay.VALUNum < depth_->valuDepth && delay.VALUNum <= delay.TRANSNumVALU) {
             if (id0Dist != 0) {
                 // TRANS already in id0 -> put VALU in id1
                 id1Type = SDelayAluData::InstType::VALU;
@@ -285,7 +279,7 @@ class InsertDelayAluPassImpl : public Pass {
 
         // SALU dep -> fills remaining slot. Skip the SALU_CYCLE_1 case.
         if (delay.SALUCycles > 1) {
-            assert(delay.SALUCycles < DelayInfo::SALU_CYCLES_MAX);
+            assert(delay.SALUCycles < depth_->saluCycleMax);
             if (hasId1) {
                 // Both slots used (TRANS + VALU), drop SALU
             } else if (id0Dist != 0) {
@@ -379,8 +373,8 @@ class InsertDelayAluPassImpl : public Pass {
                                  << delayTypeName(type) << " state_sz=" << state.size() << "\n");
             PASS_DEBUG(for (const auto& [key, info]
                             : state) {
-                if (info.SALUCycles > 0 || info.VALUNum < DelayInfo::VALU_MAX ||
-                    info.TRANSNum < DelayInfo::TRANS_MAX) {
+                if (info.SALUCycles > 0 || info.VALUNum < depth_->valuDepth ||
+                    info.TRANSNum < depth_->transDepth) {
                     std::cerr << "  state[" << (key.type == RegType::S ? "s" : "v") << key.idx
                               << "]" << " SALU=" << (int)info.SALUCycles
                               << " VALUNum=" << (int)info.VALUNum
@@ -413,8 +407,8 @@ class InsertDelayAluPassImpl : public Pass {
                     });
                 }
 
-                PASS_DEBUG(if (delay.SALUCycles > 0 || delay.VALUNum < DelayInfo::VALU_MAX ||
-                               delay.TRANSNum < DelayInfo::TRANS_MAX) {
+                PASS_DEBUG(if (delay.SALUCycles > 0 || delay.VALUNum < depth_->valuDepth ||
+                               delay.TRANSNum < depth_->transDepth) {
                     std::cerr << "[DelayAlu]   emit: SALU=" << (int)delay.SALUCycles
                               << " VALUNum=" << (int)delay.VALUNum
                               << " TRANSNum=" << (int)delay.TRANSNum << "\n";
@@ -447,7 +441,7 @@ class InsertDelayAluPassImpl : public Pass {
                         PASS_DEBUG(std::cerr << "[DelayAlu]     dest: "
                                              << (key.type == RegType::S ? "s" : "v") << key.idx
                                              << "\n");
-                        state[key] = DelayInfo(type, latency);
+                        state[key] = DelayInfo(type, latency, *depth_);
                     });
                 }
             }
@@ -455,7 +449,7 @@ class InsertDelayAluPassImpl : public Pass {
             // Advance all state entries by the number of wait states
             // (1 for most instructions, N+1 for s_nop).
             unsigned cycles = getNumWaitStates(*inst);
-            state.advance(type, cycles);
+            state.advance(type, cycles, *depth_);
         }
 
         // Save exit state for successors.
@@ -478,6 +472,8 @@ class InsertDelayAluPassImpl : public Pass {
         GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
 
         if (shouldSkipForLowOccupancy(func, archId)) return PreservedAnalyses::all();
+
+        depth_ = &passCtx.getHWModel().delayAlu;
 
         // Single RPO walk: each BB is visited once, after its forward
         // predecessors, so their exit states are ready to merge in. Delay state
