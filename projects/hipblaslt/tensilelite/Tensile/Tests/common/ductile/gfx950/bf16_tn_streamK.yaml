@@ -3,7 +3,6 @@ TestParameters:
 
 
 GlobalParameters:
-  CheckStreamKSync: True
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 50
   EnqueuesPerSync: 10
