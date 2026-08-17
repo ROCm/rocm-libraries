@@ -9,8 +9,8 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <vector>
 
@@ -59,7 +59,7 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     uint32_t           n = 16;
     std::vector<float> input(m * n, 0.f);
     std::vector<float> output(m * n, 0.f);
-    roc::host_validation::hipblaslt_adapter::initialize(
+    hipblaslt::host_validation::initialize(
         input.data(), input.size(), hipblaslt_initialization::rand_int);
     float* gpuInput{};
     float* gpuOutput{};
@@ -75,7 +75,7 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     ASSERT_EQ(err, hipSuccess);
 
     using namespace roc::host_validation;
-    using namespace roc::host_validation::hipblaslt_adapter;
+    using namespace hipblaslt::host_validation;
     Tensor expected(ScalarType::Float32, Shape{m, n});
     referenceSoftmax(
         SoftmaxProblem(tensorView(input.data(), input.size(), Layout::contiguous(Shape{m, n})),
@@ -104,11 +104,11 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     std::vector<float> gamma(n, 1.f);
     std::vector<float> beta(n, 0.f);
 
-    roc::host_validation::hipblaslt_adapter::initialize(
+    hipblaslt::host_validation::initialize(
         input.data(), input.size(), hipblaslt_initialization::hpl);
-    roc::host_validation::hipblaslt_adapter::initialize(
+    hipblaslt::host_validation::initialize(
         gamma.data(), gamma.size(), hipblaslt_initialization::hpl);
-    roc::host_validation::hipblaslt_adapter::initialize(
+    hipblaslt::host_validation::initialize(
         beta.data(), beta.size(), hipblaslt_initialization::hpl);
 
     float* gpuOutput{};
@@ -153,7 +153,7 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     std::vector<float> referenceInverseVariance(m, 0.0f);
 
     using namespace roc::host_validation;
-    using namespace roc::host_validation::hipblaslt_adapter;
+    using namespace hipblaslt::host_validation;
     const Layout            tensorLayout     = Layout::contiguous(Shape{m, n});
     const Layout            statisticsLayout = Layout::contiguous(Shape{m});
     const Layout            affineLayout     = Layout::contiguous(Shape{n});
@@ -225,7 +225,7 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     std::vector<Ti> cpuInput(m * n, 0.f);
     std::vector<To> refOutput(1, 0.f);
 
-    roc::host_validation::hipblaslt_adapter::initialize(
+    hipblaslt::host_validation::initialize(
         cpuInput.data(), cpuInput.size(), hipblaslt_initialization::hpl);
 
     hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes);
@@ -237,10 +237,11 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes);
 
     using namespace roc::host_validation;
-    referenceMaximumAbsolute(hipblaslt_adapter::tensorView(cpuInput.data(),
-                                                           cpuInput.size(),
-                                                           Layout::contiguous(Shape{numElements})),
-                             hipblaslt_adapter::mutableTensorView(
+    referenceMaximumAbsolute(hipblaslt::host_validation::tensorView(
+                                 cpuInput.data(),
+                                 cpuInput.size(),
+                                 Layout::contiguous(Shape{numElements})),
+                             hipblaslt::host_validation::mutableTensorView(
                                  refOutput.data(), refOutput.size(), Layout::contiguous(Shape{})),
                              ScalarType::Float32);
 

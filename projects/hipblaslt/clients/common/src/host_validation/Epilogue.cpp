@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_validation/adapters/hipblaslt/Epilogue.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Epilogue.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 
 #include <complex>
 #include <cstddef>
@@ -10,8 +10,10 @@
 #include <stdexcept>
 #include <string>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     namespace
     {
         std::span<const std::byte> constStorage(
@@ -127,4 +129,4 @@ namespace roc::host_validation::hipblaslt_adapter
         problem.activationParameter1  = arguments.activationParameter1;
         return roc::host_validation::referenceEpilogue(problem);
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

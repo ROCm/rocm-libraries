@@ -1,12 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
-#include <roc/host_validation/adapters/hipblaslt/MatrixTransformReference.hpp>
-#include <roc/host_validation/adapters/hipblaslt/hipblaslt_init.hpp>
+#include <hipblaslt/host_validation/GroupedGemmDataInitialization.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/HipblasltReferenceGemm.hpp>
+#include <hipblaslt/host_validation/HostComparison.hpp>
+#include <hipblaslt/host_validation/MatrixTransformReference.hpp>
+#include <hipblaslt/host_validation/hipblaslt_init.hpp>
 
 #include <gtest/gtest.h>
 
@@ -23,7 +23,7 @@
 TEST(HostValidationDataInitializationBridge, GeneratesComplexTrigonometricValues)
 {
     std::array<std::complex<float>, 4> values{};
-    roc::host_validation::hipblaslt_adapter::initialize(
+    hipblaslt::host_validation::initialize(
         std::span<std::complex<float>>(values),
         hipblaslt_initialization::trig_float,
         roc::host_validation::GenerationPattern::Sine);
@@ -42,7 +42,7 @@ TEST(HostValidationDataInitializationBridge, GroupedGemmUsesStableRoleStreams)
     std::vector<float> c(4);
     std::vector<float> bias(3);
 
-    roc::host_validation::hipblaslt_adapter::initializeGroupedGemm(
+    hipblaslt::host_validation::initializeGroupedGemm(
         a,
         static_cast<int64_t>(a.size()),
         b,
@@ -92,7 +92,7 @@ TEST(HostValidationMatrixTransformBridge, MapsLayoutsAndTransposes)
         }
     }
 
-    roc::host_validation::hipblaslt_adapter::MatrixTransformReferenceArguments arguments;
+    hipblaslt::host_validation::MatrixTransformReferenceArguments arguments;
     arguments.observed               = observed.data();
     arguments.observedStorageBytes   = sizeof(observed);
     arguments.a                      = a.data();
@@ -115,7 +115,7 @@ TEST(HostValidationMatrixTransformBridge, MapsLayoutsAndTransposes)
     arguments.beta                   = -1.0;
 
     const auto result
-        = roc::host_validation::hipblaslt_adapter::referenceMatrixTransform(arguments);
+        = hipblaslt::host_validation::referenceMatrixTransform(arguments);
     EXPECT_EQ(result.runInfo.elementsComputed, rows * columns * batches);
     EXPECT_TRUE(result.comparison.passed());
 }
@@ -124,7 +124,7 @@ TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
 {
     const std::array<float, 4> expected{1.0f, 2.0f, 3.0f, 4.0f};
     const std::array<float, 4> observed{1.0f, 2.00009f, 3.0f, 4.0f};
-    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    hipblaslt::host_validation::HostComparisonRequest request;
     request.rows                  = 2;
     request.columns               = 1;
     request.leadingDimension      = 2;
@@ -135,7 +135,7 @@ TEST(HostValidationComparisonBridge, FindsAllcloseToleranceAcrossBatches)
     request.type                  = HIP_R_32F;
     request.findAllCloseTolerance = true;
 
-    const auto report = roc::host_validation::hipblaslt_adapter::compareHost(request);
+    const auto report = hipblaslt::host_validation::compareHost(request);
     ASSERT_TRUE(report.allCloseTolerance);
     EXPECT_EQ(report.allCloseTolerance->absolute, 1e-6);
     EXPECT_EQ(report.allCloseTolerance->relative, 1e-4);
@@ -145,7 +145,7 @@ TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
 {
     std::array<double, 2>                                          expected{3.0, 4.0};
     std::array<double, 2>                                          observed{0.0, 4.0};
-    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    hipblaslt::host_validation::HostComparisonRequest request;
     request.rows                          = 2;
     request.columns                       = 1;
     request.leadingDimension              = 2;
@@ -156,7 +156,7 @@ TEST(HostValidationComparisonBridge, ComputesRelativeFrobeniusEvidence)
     request.type                          = HIP_R_64F;
     request.computeRelativeFrobeniusError = true;
     EXPECT_DOUBLE_EQ(
-        roc::host_validation::hipblaslt_adapter::compareHost(request).relativeFrobeniusError, 0.6);
+        hipblaslt::host_validation::compareHost(request).relativeFrobeniusError, 0.6);
 }
 
 TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
@@ -165,7 +165,7 @@ TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
     std::array<float, 2> expected{1.0f, std::numeric_limits<float>::infinity()};
     std::array<float, 2> observed{oneUlp, std::numeric_limits<float>::infinity()};
 
-    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    hipblaslt::host_validation::HostComparisonRequest request;
     request.rows             = 2;
     request.columns          = 1;
     request.leadingDimension = 2;
@@ -175,16 +175,16 @@ TEST(HostValidationComparisonBridge, UnitNearAndSpecialValuePolicies)
     request.observed         = observed.data();
     request.type             = HIP_R_32F;
 
-    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Unit;
-    EXPECT_TRUE(roc::host_validation::hipblaslt_adapter::compareHost(request).comparison.passed());
+    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Unit;
+    EXPECT_TRUE(hipblaslt::host_validation::compareHost(request).comparison.passed());
 
-    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Near;
+    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Near;
     request.absoluteTolerance = 1e-6;
-    EXPECT_TRUE(roc::host_validation::hipblaslt_adapter::compareHost(request).comparison.passed());
+    EXPECT_TRUE(hipblaslt::host_validation::compareHost(request).comparison.passed());
 
-    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Disabled;
+    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Disabled;
     request.requireSpecialValueConsistency = true;
-    EXPECT_EQ(roc::host_validation::hipblaslt_adapter::compareHost(request)
+    EXPECT_EQ(hipblaslt::host_validation::compareHost(request)
                   .comparison.nonFiniteMismatches,
               0);
 }
@@ -195,7 +195,7 @@ TEST(HostValidationComparisonBridge, RunsTheCombinedHostComparisonProgram)
     const std::array<float, 4> expected{1.0f, 2.0f, 3.0f, 4.0f};
     const std::array<float, 4> observed{oneUlp, 2.0f, 3.0f, 4.0f};
 
-    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    hipblaslt::host_validation::HostComparisonRequest request;
     request.rows             = 2;
     request.columns          = 1;
     request.leadingDimension = 2;
@@ -204,13 +204,13 @@ TEST(HostValidationComparisonBridge, RunsTheCombinedHostComparisonProgram)
     request.expected         = expected.data();
     request.observed         = observed.data();
     request.type             = HIP_R_32F;
-    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Unit;
+    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Unit;
     request.requireSpecialValueConsistency = true;
     request.computeRelativeFrobeniusError  = true;
     request.findAllCloseTolerance          = true;
     request.computeUnitsInLastPlace        = true;
 
-    const auto report = roc::host_validation::hipblaslt_adapter::compareHost(request);
+    const auto report = hipblaslt::host_validation::compareHost(request);
     EXPECT_TRUE(report.comparison.passed());
     EXPECT_EQ(report.comparison.nonFiniteMismatches, 0);
     EXPECT_DOUBLE_EQ(report.comparison.maximumUlp, 1.0);
@@ -227,7 +227,7 @@ TEST(HostValidationComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
 {
     const float nan = std::numeric_limits<float>::quiet_NaN();
 
-    roc::host_validation::hipblaslt_adapter::HostComparisonRequest request;
+    hipblaslt::host_validation::HostComparisonRequest request;
     request.rows             = 1;
     request.columns          = 1;
     request.leadingDimension = 1;
@@ -236,11 +236,11 @@ TEST(HostValidationComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
     request.expected         = &nan;
     request.observed         = &nan;
     request.type             = HIP_R_32F;
-    request.pointwise = roc::host_validation::hipblaslt_adapter::HostPointwiseComparison::Unit;
+    request.pointwise = hipblaslt::host_validation::HostPointwiseComparison::Unit;
     request.requireSpecialValueConsistency = true;
     request.computeUnitsInLastPlace        = true;
 
-    const auto report = roc::host_validation::hipblaslt_adapter::compareHost(request);
+    const auto report = hipblaslt::host_validation::compareHost(request);
     EXPECT_TRUE(report.comparison.passed());
     EXPECT_EQ(report.comparison.nonFiniteMismatches, 0);
     EXPECT_TRUE(std::isinf(report.unitsInLastPlaceComparison.maximumUlp));
@@ -248,7 +248,7 @@ TEST(HostValidationComparisonBridge, KeepsReportedUlpNonFinitePolicySeparate)
 
 TEST(HostValidationComparisonBridge, EmptyPointwiseRequestsStillValidateTheProductType)
 {
-    using namespace roc::host_validation::hipblaslt_adapter;
+    using namespace hipblaslt::host_validation;
 
     HostComparisonRequest request;
     request.type      = HIPBLASLT_DATATYPE_INVALID;
@@ -264,10 +264,10 @@ TEST(HostValidationDataInitializationBridge, CounterBasedGenerationIsRepeatable)
 {
     std::array<float, 16> first{};
     std::array<float, 16> second{};
-    roc::host_validation::hipblaslt_adapter::initialize(std::span<float>(first),
-                                                        hipblaslt_initialization::norm_dist);
-    roc::host_validation::hipblaslt_adapter::initialize(std::span<float>(second),
-                                                        hipblaslt_initialization::norm_dist);
+    hipblaslt::host_validation::initialize(std::span<float>(first),
+                                           hipblaslt_initialization::norm_dist);
+    hipblaslt::host_validation::initialize(std::span<float>(second),
+                                           hipblaslt_initialization::norm_dist);
     EXPECT_EQ(first, second);
 }
 
@@ -380,10 +380,27 @@ TEST(HostValidationDataInitializationBridge, LegacyRandomHelpersUseComponentReci
         EXPECT_TRUE(std::isnan(value));
 }
 
+TEST(HostValidationDataInitializationBridge, LegacyDispatchSupportsEveryFp8Encoding)
+{
+    constexpr std::array<hipDataType, 4> fp8Types{
+        HIP_R_8F_E4M3_FNUZ,
+        HIP_R_8F_E5M2_FNUZ,
+        HIP_R_8F_E4M3,
+        HIP_R_8F_E5M2,
+    };
+
+    for(const hipDataType type : fp8Types)
+    {
+        uint8_t value = 0xff;
+        hipblaslt_init_zero(static_cast<void*>(&value), 1, 1, 1, type);
+        EXPECT_EQ(value, 0) << "hipDataType=" << static_cast<int>(type);
+    }
+}
+
 TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
 {
     using namespace roc::host_validation;
-    using namespace roc::host_validation::hipblaslt_adapter;
+    using namespace hipblaslt::host_validation;
 
     MatrixStorageInitialization exact;
     exact.role             = MatrixRole::B;
@@ -465,7 +482,7 @@ TEST(HostValidationDataInitializationBridge, GeneratesProblemLevelMatrixRecipes)
 
 TEST(HostValidationDataInitializationBridge, HostSideDeviceFillCopiesComponentStorage)
 {
-    using namespace roc::host_validation::hipblaslt_adapter;
+    using namespace hipblaslt::host_validation;
 
     MatrixStorageInitialization initialization;
     initialization.role             = MatrixRole::B;

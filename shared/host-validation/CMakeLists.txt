@@ -7,6 +7,10 @@ project(ROCHostValidation VERSION 0.1.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
+set(HOST_VALIDATION_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/ROCHostValidation"
+)
+
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(HOST_VALIDATION_STANDALONE ON)
 else()
@@ -22,9 +26,6 @@ option(HOST_VALIDATION_BUILD_PYTHON
 option(HOST_VALIDATION_BUILD_BLAS_BACKEND
        "Build the optional host-validation CBLAS GEMM backend."
        OFF)
-option(HOST_VALIDATION_BUILD_MX_BACKEND
-       "Build the optional host-validation MX data-generation backend."
-       ${HOST_VALIDATION_STANDALONE})
 option(HOST_VALIDATION_BUILD_BENCHMARKS
        "Build host-validation development benchmarks."
        OFF)
@@ -34,6 +35,30 @@ option(HOST_VALIDATION_ENABLE_FETCH
 option(HOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP
        "Use OpenMP for large AMD GPU physical-layout transforms when available."
        ON)
+
+function(
+    roc_host_validation_install_component_target
+    target_name
+    export_name
+    export_file
+)
+    # cmake-lint: disable=E1122
+    install(TARGETS "${target_name}"
+        EXPORT "${export_name}"
+        ARCHIVE
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            COMPONENT devel
+        FILE_SET HEADERS
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+            COMPONENT devel
+    )
+    install(EXPORT "${export_name}"
+        FILE "${export_file}"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ROCHostValidation"
+        NAMESPACE roc::
+        COMPONENT devel
+    )
+endfunction()
 
 add_library(host-validation-core INTERFACE)
 add_library(roc::host-validation-core ALIAS host-validation-core)
@@ -213,15 +238,10 @@ function(roc_host_validation_enable_blas_backend)
             POSITION_INDEPENDENT_CODE ON
             VISIBILITY_INLINES_HIDDEN ON
     )
-    # cmake-lint: disable=E1122
-    install(TARGETS host-validation-blas
-        EXPORT host-validation-targets
-        ARCHIVE
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            COMPONENT devel
-        FILE_SET HEADERS
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-            COMPONENT devel
+    roc_host_validation_install_component_target(
+        host-validation-blas
+        host-validation-blas-targets
+        ROCHostValidationBLASTargets.cmake
     )
 endfunction()
 
@@ -229,7 +249,7 @@ if(HOST_VALIDATION_BUILD_BLAS_BACKEND)
     roc_host_validation_enable_blas_backend()
 endif()
 
-# Add the optional MX generation implementation to the current build.
+# Add the MX generation implementation to the current build.
 function(roc_host_validation_enable_mx_backend)
     if(TARGET host-validation-mx)
         return()
@@ -266,21 +286,17 @@ function(roc_host_validation_enable_mx_backend)
             POSITION_INDEPENDENT_CODE ON
             VISIBILITY_INLINES_HIDDEN ON
     )
-    # cmake-lint: disable=E1122
-    install(TARGETS host-validation-mx
-        EXPORT host-validation-targets
-        ARCHIVE
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            COMPONENT devel
-        FILE_SET HEADERS
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-            COMPONENT devel
+    roc_host_validation_install_component_target(
+        host-validation-mx
+        host-validation-mx-targets
+        ROCHostValidationMXTargets.cmake
     )
 endfunction()
 
-if(HOST_VALIDATION_BUILD_MX_BACKEND)
-    roc_host_validation_enable_mx_backend()
-endif()
+# MX scalar/layout types are part of Core, and the compiled MX generator has no
+# mandatory external dependency. Define it consistently in every source build
+# so MX support cannot become an untested configuration variant.
+roc_host_validation_enable_mx_backend()
 
 if(HOST_VALIDATION_BUILD_TESTING)
     enable_testing()
@@ -292,26 +308,49 @@ endif()
 
 if(HOST_VALIDATION_BUILD_TESTING)
     add_subdirectory(tests)
+    add_test(
+        NAME host-validation-package-components
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DCOMPONENT_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            "-DCOMPONENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DPACKAGE_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/package"
+            "-DPACKAGE_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/tests/package/component-package-test"
+            "-DTEST_GENERATOR=${CMAKE_GENERATOR}"
+            "-DTEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+            "-DTEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+            "-DTEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DTEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+            "-DTEST_CONFIG=$<CONFIG>"
+            "-DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package/run_package_component_tests.cmake"
+    )
+    set_tests_properties(
+        host-validation-package-components
+        PROPERTIES
+            RUN_SERIAL TRUE
+    )
 endif()
 
-# cmake-lint: disable=E1122
-install(
-    TARGETS
-        host-validation-core
-        host-validation-amd-gpu-layout
-        host-validation
-        host-validation-tiled
-    EXPORT host-validation-targets
-    ARCHIVE
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        COMPONENT devel
-    FILE_SET HEADERS
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT devel
+roc_host_validation_install_component_target(
+    host-validation-core
+    host-validation-core-targets
+    ROCHostValidationCoreTargets.cmake
 )
-
-set(HOST_VALIDATION_INSTALL_CMAKEDIR
-    "${CMAKE_INSTALL_LIBDIR}/cmake/ROCHostValidation"
+roc_host_validation_install_component_target(
+    host-validation
+    host-validation-operations-targets
+    ROCHostValidationOperationsTargets.cmake
+)
+roc_host_validation_install_component_target(
+    host-validation-tiled
+    host-validation-tiled-targets
+    ROCHostValidationTiledTargets.cmake
+)
+roc_host_validation_install_component_target(
+    host-validation-amd-gpu-layout
+    host-validation-amd-gpu-layout-targets
+    ROCHostValidationAMDGPULayoutTargets.cmake
 )
 
 set_property(
@@ -371,15 +410,24 @@ function(roc_host_validation_finalize_package)
     if(TARGET host-validation-blas)
         set(HOST_VALIDATION_PACKAGE_HAS_BLAS ON)
     endif()
-    set(HOST_VALIDATION_PACKAGE_HAS_OPENMP OFF)
+    if(NOT TARGET host-validation-mx)
+        message(FATAL_ERROR
+            "The required host-validation MX generation target is missing."
+        )
+    endif()
+    set(HOST_VALIDATION_PACKAGE_HAS_MX ON)
+
+    set(HOST_VALIDATION_PACKAGE_OPERATIONS_HAS_OPENMP OFF)
     get_target_property(
         _host_validation_uses_openmp
         host-validation
         ROC_HOST_VALIDATION_USES_OPENMP
     )
     if(_host_validation_uses_openmp)
-        set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
+        set(HOST_VALIDATION_PACKAGE_OPERATIONS_HAS_OPENMP ON)
     endif()
+
+    set(HOST_VALIDATION_PACKAGE_MX_HAS_OPENMP OFF)
     if(TARGET host-validation-mx)
         get_target_property(
             _host_validation_mx_uses_openmp
@@ -387,16 +435,18 @@ function(roc_host_validation_finalize_package)
             ROC_HOST_VALIDATION_USES_OPENMP
         )
         if(_host_validation_mx_uses_openmp)
-            set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
+            set(HOST_VALIDATION_PACKAGE_MX_HAS_OPENMP ON)
         endif()
     endif()
+
+    set(HOST_VALIDATION_PACKAGE_AMD_GPU_LAYOUT_HAS_OPENMP OFF)
     get_target_property(
         _host_validation_amd_gpu_layout_uses_openmp
         host-validation-amd-gpu-layout
         ROC_HOST_VALIDATION_USES_OPENMP
     )
     if(_host_validation_amd_gpu_layout_uses_openmp)
-        set(HOST_VALIDATION_PACKAGE_HAS_OPENMP ON)
+        set(HOST_VALIDATION_PACKAGE_AMD_GPU_LAYOUT_HAS_OPENMP ON)
     endif()
 
     foreach(generic_target
@@ -413,6 +463,11 @@ function(roc_host_validation_finalize_package)
         "${_host_validation_binary_dir}/ROCHostValidationConfig.cmake"
         INSTALL_DESTINATION "${_host_validation_install_cmakedir}"
     )
+    configure_file(
+        "${_host_validation_source_dir}/cmake/ROCHostValidationTargets.cmake.in"
+        "${_host_validation_binary_dir}/ROCHostValidationTargets.cmake"
+        @ONLY
+    )
     write_basic_package_version_file(
         "${_host_validation_binary_dir}/ROCHostValidationConfigVersion.cmake"
         VERSION "${_host_validation_version}"
@@ -425,16 +480,11 @@ cmake_language(
     CALL roc_host_validation_finalize_package
 )
 
-install(EXPORT host-validation-targets
-    FILE ROCHostValidationTargets.cmake
-    DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
-    NAMESPACE roc::
-    COMPONENT devel
-)
 install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationConfigVersion.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/ROCHostValidationTargets.cmake"
     DESTINATION "${HOST_VALIDATION_INSTALL_CMAKEDIR}"
     COMPONENT devel
 )

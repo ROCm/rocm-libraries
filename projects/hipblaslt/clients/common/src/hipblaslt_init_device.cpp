@@ -1178,8 +1178,8 @@ void hipblaslt_init_device(ABC_dims                 abc,
 {
     if(host_side_fill_kernel())
     {
-        using roc::host_validation::hipblaslt_adapter::MatrixRole;
-        using roc::host_validation::hipblaslt_adapter::MatrixStorageInitialization;
+        using hipblaslt::host_validation::MatrixRole;
+        using hipblaslt::host_validation::MatrixStorageInitialization;
         MatrixStorageInitialization initialization;
         initialization.role
             = abc == ABC_dims::A
@@ -1200,7 +1200,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                   || init == hipblaslt_initialization::trig_float);
 
         std::vector<std::byte> storage
-            = roc::host_validation::hipblaslt_adapter::generateMatrixStorage(
+            = hipblaslt::host_validation::generateMatrixStorage(
                 initialization);
         if(!storage.empty())
             CHECK_HIP_ERROR(hipMemcpy(A,

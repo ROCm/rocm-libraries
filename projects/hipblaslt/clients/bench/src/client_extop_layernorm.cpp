@@ -28,8 +28,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <iostream>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <string>
 #include <vector>
@@ -124,7 +124,7 @@ void reportComparison(const char* title, const roc::host_validation::ComparisonR
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    roc::host_validation::hipblaslt_adapter::initialize(data, numElements, initMethod);
+    hipblaslt::host_validation::initialize(data, numElements, initMethod);
 }
 
 int main(int argc, char** argv)
@@ -197,7 +197,7 @@ int main(int argc, char** argv)
     hipErr = hipMemcpyDtoH(cpuInvvar.data(), gpuInvvar, m * elementNumBytes);
 
     using namespace roc::host_validation;
-    using namespace roc::host_validation::hipblaslt_adapter;
+    using namespace hipblaslt::host_validation;
     const Layout            tensorLayout     = Layout::contiguous(Shape{m, n});
     const Layout            statisticsLayout = Layout::contiguous(Shape{m});
     const MutableTensorView referenceOutputView

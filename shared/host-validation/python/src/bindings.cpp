@@ -911,7 +911,8 @@ NB_MODULE(_roc_host_validation, module) {
                                           storage.size());
                      })
         .def_prop_ro("values", [](const TensorView& tensor) { return tensorValues(tensor); })
-        .def("to", &TensorView::to, "type"_a);
+        .def("to", static_cast<Tensor (TensorView::*)(ScalarType) const>(&TensorView::to),
+             "type"_a);
 
     nb::class_<Tensor>(module, "Tensor")
         .def(nb::init<ScalarType, Shape>())
@@ -954,7 +955,7 @@ NB_MODULE(_roc_host_validation, module) {
                      })
         .def_prop_ro("values", [](const Tensor& tensor) { return tensorValues(tensor); })
         .def("view", &Tensor::view, nb::keep_alive<0, 1>())
-        .def("to", &Tensor::to, "type"_a);
+        .def("to", static_cast<Tensor (Tensor::*)(ScalarType) const>(&Tensor::to), "type"_a);
 
     nb::class_<PythonVectorBinding>(
         module, "VectorBinding", "Owning row- or column-axis tensor binding used by GEMM requests.")

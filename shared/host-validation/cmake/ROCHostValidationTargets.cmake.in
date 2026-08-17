@@ -1,0 +1,15 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Compatibility loader for consumers that included the historical aggregate
+# target file after loading ROCHostValidationConfig.cmake. New consumers should
+# request explicit components from find_package(ROCHostValidation).
+
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationCoreTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationOperationsTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationTiledTargets.cmake")
+if(@HOST_VALIDATION_PACKAGE_HAS_BLAS@)
+    include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationBLASTargets.cmake")
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationMXTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ROCHostValidationAMDGPULayoutTargets.cmake")

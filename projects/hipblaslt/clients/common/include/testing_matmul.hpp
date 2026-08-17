@@ -37,10 +37,10 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
-#include <roc/host_validation/adapters/hipblaslt/Epilogue.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Reduction.hpp>
+#include <hipblaslt/host_validation/Epilogue.hpp>
+#include <hipblaslt/host_validation/HipblasltReferenceGemm.hpp>
+#include <hipblaslt/host_validation/HostComparison.hpp>
+#include <hipblaslt/host_validation/Reduction.hpp>
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include "mxDataGen.hpp"
 #endif
@@ -478,7 +478,7 @@ void check(hipStream_t                   stream,
             }
         }
 
-        using namespace roc::host_validation::hipblaslt_adapter;
+        using namespace hipblaslt::host_validation;
 
         const auto compareBuffer = [&](int64_t     rows,
                                        int64_t     columns,
@@ -4329,7 +4329,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                     + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
                     }
 
-                    roc::host_validation::hipblaslt_adapter::EpilogueArguments epilogue;
+                    hipblaslt::host_validation::EpilogueArguments epilogue;
                     epilogue.rows             = M[gemmIdx];
                     epilogue.columns          = N[gemmIdx];
                     epilogue.leadingDimension = ldd[gemmIdx];
@@ -4375,7 +4375,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   && epilogue.activation != roc::host_validation::Activation::None
                               ? roc::host_validation::ActivationApplication::Gradient
                               : roc::host_validation::ActivationApplication::Forward;
-                    roc::host_validation::hipblaslt_adapter::referenceEpilogue(epilogue);
+                    hipblaslt::host_validation::referenceEpilogue(epilogue);
 
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
                     {
@@ -4392,7 +4392,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                               int64_t     columns,
                                               int64_t     rowStride,
                                               int64_t     columnStride) {
-                            roc::host_validation::hipblaslt_adapter::ReductionArguments reduction;
+                            hipblaslt::host_validation::ReductionArguments reduction;
                             reduction.rows            = rows;
                             reduction.columns         = columns;
                             reduction.rowStride       = rowStride;
@@ -4402,7 +4402,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             reduction.output          = hBias_gold_buf;
                             reduction.outputType      = Tbias;
                             reduction.accumulatorType = HIP_R_32F;
-                            roc::host_validation::hipblaslt_adapter::referenceSum(reduction);
+                            hipblaslt::host_validation::referenceSum(reduction);
                         };
 
                         if(arg.bias_source == hipblaslt_bias_source::d)

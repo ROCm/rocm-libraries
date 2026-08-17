@@ -27,8 +27,8 @@
 // Product-private translation from hipBLASLt descriptors and host buffers to
 // product-independent host-validation operations.
 
-#include <roc/host_validation/adapters/hipblaslt/HipblasltReferenceGemm.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/HipblasltReferenceGemm.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/backends/blas.hpp>
 #include <roc/host_validation/validation.hpp>
 
@@ -47,7 +47,7 @@ namespace
     template <typename T>
     Scalar runtimeScalar(const T& value)
     {
-        const ScalarType type = hipblaslt_adapter::scalarType<T>();
+        const ScalarType type = hipblaslt::host_validation::scalarType<T>();
         return Scalar::fromStorage(type, std::as_bytes(std::span<const T>(&value, 1)));
     }
 
@@ -62,14 +62,14 @@ namespace
         else if constexpr(std::is_same_v<Tc, hipblasLtHalf>)
             return ScalarType::Float32;
         else
-            return roc::host_validation::hipblaslt_adapter::scalarType<Tc>();
+            return hipblaslt::host_validation::scalarType<Tc>();
     }
 
     ScalarType compatibilityComputeType(hipDataType type)
     {
         if(type == HIP_R_32I)
             return ScalarType::Float64;
-        return roc::host_validation::hipblaslt_adapter::scalarType(type);
+        return hipblaslt::host_validation::scalarType(type);
     }
 
     TensorView tensorView(const void* data, ScalarType type, Layout layout)
@@ -95,7 +95,7 @@ namespace
     TensorView scalarVector(const void* data, size_t elements)
     {
         const ScalarType type =
-            roc::host_validation::hipblaslt_adapter::scalarType<Tc>();
+            hipblaslt::host_validation::scalarType<Tc>();
         return tensorView(data, type, Layout::contiguous(Shape{elements}));
     }
 }
@@ -140,13 +140,13 @@ void hipblaslt_reference_gemm(hipblasOperation_t       transA,
     const size_t columns = static_cast<size_t>(n);
     const size_t reduction = static_cast<size_t>(k);
     const ScalarType typeA =
-        roc::host_validation::hipblaslt_adapter::scalarType(TiA);
+        hipblaslt::host_validation::scalarType(TiA);
     const ScalarType typeB =
-        roc::host_validation::hipblaslt_adapter::scalarType(TiB);
+        hipblaslt::host_validation::scalarType(TiB);
     const ScalarType typeC =
-        roc::host_validation::hipblaslt_adapter::scalarType(TiC);
+        hipblaslt::host_validation::scalarType(TiC);
     const ScalarType outputType =
-        roc::host_validation::hipblaslt_adapter::scalarType(To);
+        hipblaslt::host_validation::scalarType(To);
 
     const ptrdiff_t aRowStride = transA == HIPBLAS_OP_N ? 1 : lda;
     const ptrdiff_t aColumnStride = transA == HIPBLAS_OP_N ? lda : 1;

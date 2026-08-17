@@ -7,14 +7,16 @@
 
 #include <cstdint>
 #include <hipblaslt_datatype2string.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     template <typename InputA, typename InputB, typename Output>
     void initializeGroupedGemm(std::vector<InputA>&     a,
                                int64_t                  sizeA,
@@ -113,4 +115,4 @@ namespace roc::host_validation::hipblaslt_adapter
             fillValues(bias, sizeBias, {}, 3);
         }
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

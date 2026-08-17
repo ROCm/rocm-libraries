@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Product-private hipBLASLt type translation around the shared reference GEMM.
+// Product-private hipBLASLt reference GEMM adapter.
 
 #include "datatype_interface.hpp"
 
