@@ -48,8 +48,6 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(HIPDNN_ENABLE_KERNEL_INGESTOR "Enable the generic kernel ingestor" OFF)
-option(HIPKERNELPROVIDER_ENABLE_DESCRIPTOR_PACKAGING
-       "Build-time UKD/KMD/KDP -> kpack descriptor packaging" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -226,7 +224,7 @@ endif()
 
 add_subdirectory(src)
 
-if(HIPKERNELPROVIDER_ENABLE_DESCRIPTOR_PACKAGING)
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     add_subdirectory(descriptor-packaging)
 endif()
 
