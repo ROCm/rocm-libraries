@@ -161,7 +161,7 @@ public:
     /// @returns Engine entry snapshot, or nullptr if not found.
     std::shared_ptr<const EngineEntry> getEngine(int64_t engineId) const;
 
-    /// Get or create the adapter for a specific engine snapshot.
+    /// Get or create the adapter for a specific UHD config (role + arch).
     ///
     /// Prefer this over the by-ID overload inside a selection. Resolving by ID reaches
     /// back into the live map, so a re-registration landing mid-selection would pair a
@@ -169,24 +169,45 @@ public:
     /// two disagree on things like `objective` and `score.transform`.
     ///
     /// @param entry Snapshot from getEngine().
+    /// @param cfg UHD config (from resolveUhd).
+    /// @param role UHD role ("sort_kernel_catalog", etc.).
+    /// @param arch Architecture key ("gfx950", "default", etc.).
     /// @returns Adapter or nullptr if entry is null or adapter creation fails.
+    std::shared_ptr<IUhdAdapter>
+        getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry,
+                          const UhdConfig& cfg,
+                          const std::string& role,
+                          const std::string& arch) const;
+
+    /// Get or create the feature extractor for a specific UHD config (role + arch).
+    /// @param entry Snapshot from getEngine().
+    /// @param cfg UHD config (from resolveUhd).
+    /// @param role UHD role.
+    /// @param arch Architecture key.
+    /// @returns Extractor or nullptr if entry is null or its signature is empty.
+    std::shared_ptr<FeatureExtractor>
+        getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry,
+                            const UhdConfig& cfg,
+                            const std::string& role,
+                            const std::string& arch) const;
+
+    /// Legacy: Get or create the adapter for an engine's default UHD.
+    /// @param entry Snapshot from getEngine().
+    /// @returns Adapter or nullptr if entry is null or adapter creation fails.
+    /// @deprecated Use the (entry, cfg, role, arch) overload for multi-role support.
     std::shared_ptr<IUhdAdapter>
         getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const;
 
-    /// Get or create the feature extractor for a specific engine snapshot.
-    /// @param entry Snapshot from getEngine().
-    /// @returns Extractor or nullptr if entry is null or its signature is empty.
-    std::shared_ptr<FeatureExtractor>
-        getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry) const;
-
-    /// Get or create the adapter for an engine, resolved by ID against the live map.
+    /// Legacy: Get or create the adapter for an engine, resolved by ID against the live map.
     /// @param engineId Engine to get adapter for.
     /// @returns Adapter or nullptr if engine not found or adapter creation fails.
+    /// @deprecated Use the (entry, cfg, role, arch) overload for multi-role support.
     std::shared_ptr<IUhdAdapter> getOrCreateAdapter(int64_t engineId) const;
 
-    /// Get or create the feature extractor for an engine, resolved by ID.
+    /// Legacy: Get or create the feature extractor for an engine, resolved by ID.
     /// @param engineId Engine to get extractor for.
     /// @returns Extractor or nullptr if engine not found or signature is empty.
+    /// @deprecated Use the (entry, cfg, role, arch) overload for multi-role support.
     std::shared_ptr<FeatureExtractor> getOrCreateExtractor(int64_t engineId) const;
 
     /// Check if an engine is registered.
@@ -206,6 +227,12 @@ public:
 
 private:
     EngineRegistry() = default;
+
+    /// Build cache key for adapter/extractor storage: "role:arch"
+    static std::string makeCacheKey(const std::string& role, const std::string& arch)
+    {
+        return role + ":" + arch;
+    }
 
     /// Check a declared features_hash against its features_signature, and warn when a
     /// feature-bearing adapter ships without one.

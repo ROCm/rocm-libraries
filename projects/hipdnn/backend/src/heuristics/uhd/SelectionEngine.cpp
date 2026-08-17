@@ -103,13 +103,14 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         return fallback;
     };
 
-    // Get or create adapter
+    // Get or create adapter for this role+arch
     // Resolve from the snapshot, not by ID. Going back through the map would let a
     // re-registration landing mid-selection pair a new model with this snapshot's
     // config and candidates — and the mismatch is silent, since `objective` and
     // `score.transform` are read from the old config while the score comes from the
     // new model.
-    auto adapter = EngineRegistry::instance().getOrCreateAdapter(enginePtr);
+    auto adapter = EngineRegistry::instance().getOrCreateAdapter(enginePtr, cfg,
+                                                                   "sort_kernel_catalog", arch);
     if(adapter == nullptr)
     {
         HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId << "' adapter '"
@@ -145,8 +146,9 @@ SelectionResult SelectionEngine::select(int64_t engineId,
         }
     }
 
-    // Get cached feature extractor (or create on first use)
-    auto extractor = EngineRegistry::instance().getOrCreateExtractor(enginePtr);
+    // Get cached feature extractor for this role+arch (or create on first use)
+    auto extractor = EngineRegistry::instance().getOrCreateExtractor(enginePtr, cfg,
+                                                                       "sort_kernel_catalog", arch);
     if(extractor == nullptr)
     {
         HIPDNN_SDK_LOG_WARN("UHD: engine " << engineId << " uhd='" << cfg.uhdId

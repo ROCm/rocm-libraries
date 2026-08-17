@@ -261,7 +261,10 @@ std::shared_ptr<const EngineEntry> EngineRegistry::getEngine(int64_t engineId) c
 }
 
 std::shared_ptr<IUhdAdapter>
-    EngineRegistry::getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const
+    EngineRegistry::getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry,
+                                        const UhdConfig& cfg,
+                                        const std::string& role,
+                                        const std::string& arch) const
 {
     if(entry == nullptr)
     {
@@ -269,18 +272,20 @@ std::shared_ptr<IUhdAdapter>
     }
 
     // The cache members are `mutable`, so they can be filled through a const entry.
-    // The registry mutex still guards them: every read and write of cachedAdapter
-    // goes through this function or its by-ID overload.
+    // The registry mutex still guards them: every read and write of cachedAdapters
+    // goes through this function or its legacy overload.
     const std::lock_guard<std::mutex> lock(_mutex);
 
-    // Return cached adapter if available
-    if(entry->cachedAdapter != nullptr)
+    // Check cache by role:arch key
+    const std::string cacheKey = makeCacheKey(role, arch);
+    auto it = entry->cachedAdapters.find(cacheKey);
+    if(it != entry->cachedAdapters.end() && it->second != nullptr)
     {
-        return entry->cachedAdapter;
+        return it->second;
     }
 
     // Create adapter based on type
-    const auto& cfg = entry->uhdConfig;
+    std::shared_ptr<IUhdAdapter> adapter;
 
     // static_order never reaches here: SelectionEngine ranks it with the declared-order
     // comparator instead of building a scorer.
@@ -289,8 +294,7 @@ std::shared_ptr<IUhdAdapter>
         // TreeDataAdapter loads from model file
         if(!cfg.modelArtifactPath.empty())
         {
-            auto adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
-            entry->cachedAdapter = std::move(adapter);
+            adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
         }
     }
     else if(cfg.adapterType == "table")
@@ -298,8 +302,7 @@ std::shared_ptr<IUhdAdapter>
         // TableAdapter loads from model file
         if(!cfg.modelArtifactPath.empty())
         {
-            auto adapter = TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
-            entry->cachedAdapter = std::move(adapter);
+            adapter = TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
         }
     }
     else if(cfg.adapterType == "onnx")
@@ -307,8 +310,7 @@ std::shared_ptr<IUhdAdapter>
         // OnnxAdapter loads from .onnx file (dependency-gated, returns nullptr if unavailable)
         if(!cfg.modelArtifactPath.empty())
         {
-            auto adapter = OnnxAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
-            entry->cachedAdapter = std::move(adapter);
+            adapter = OnnxAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
         }
     }
     else if(cfg.adapterType == "custom_library")
@@ -316,15 +318,73 @@ std::shared_ptr<IUhdAdapter>
         // CustomLibraryAdapter loads from .so
         if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
         {
-            auto adapter = CustomLibraryAdapter::load(cfg.modelArtifactPath,
-                                                       cfg.customLibrarySymbol,
-                                                       cfg.featuresSignature.size(),
-                                                       cfg.featuresHash);
-            entry->cachedAdapter = std::move(adapter);
+            adapter = CustomLibraryAdapter::load(cfg.modelArtifactPath,
+                                                  cfg.customLibrarySymbol,
+                                                  cfg.featuresSignature.size(),
+                                                  cfg.featuresHash);
         }
     }
 
-    return entry->cachedAdapter;
+    // Cache and return
+    entry->cachedAdapters[cacheKey] = adapter;
+    return adapter;
+}
+
+std::shared_ptr<IUhdAdapter>
+    EngineRegistry::getOrCreateAdapter(const std::shared_ptr<const EngineEntry>& entry) const
+{
+    if(entry == nullptr)
+    {
+        return nullptr;
+    }
+
+    // Legacy path: uses entry->uhdConfig and entry->cachedAdapter
+    const std::lock_guard<std::mutex> lock(_mutex);
+
+    // Return cached adapter if available
+    if(entry->cachedAdapter != nullptr)
+    {
+        return entry->cachedAdapter;
+    }
+
+    // Create adapter from legacy uhdConfig
+    const auto& cfg = entry->uhdConfig;
+    std::shared_ptr<IUhdAdapter> adapter;
+
+    if(cfg.adapterType == "tree_data")
+    {
+        if(!cfg.modelArtifactPath.empty())
+        {
+            adapter = TreeDataAdapter::load(cfg.modelArtifactPath, cfg.featuresHash, cfg.modelHash);
+        }
+    }
+    else if(cfg.adapterType == "table")
+    {
+        if(!cfg.modelArtifactPath.empty())
+        {
+            adapter = TableAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
+        }
+    }
+    else if(cfg.adapterType == "onnx")
+    {
+        if(!cfg.modelArtifactPath.empty())
+        {
+            adapter = OnnxAdapter::load(cfg.modelArtifactPath, cfg.featuresHash);
+        }
+    }
+    else if(cfg.adapterType == "custom_library")
+    {
+        if(!cfg.modelArtifactPath.empty() && !cfg.customLibrarySymbol.empty())
+        {
+            adapter = CustomLibraryAdapter::load(cfg.modelArtifactPath,
+                                                  cfg.customLibrarySymbol,
+                                                  cfg.featuresSignature.size(),
+                                                  cfg.featuresHash);
+        }
+    }
+
+    entry->cachedAdapter = adapter;
+    return adapter;
 }
 
 std::shared_ptr<IUhdAdapter> EngineRegistry::getOrCreateAdapter(int64_t engineId) const
@@ -364,6 +424,39 @@ void EngineRegistry::clear()
 }
 
 std::shared_ptr<FeatureExtractor>
+    EngineRegistry::getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry,
+                                          const UhdConfig& cfg,
+                                          const std::string& role,
+                                          const std::string& arch) const
+{
+    if(entry == nullptr)
+    {
+        return nullptr;
+    }
+
+    const std::lock_guard<std::mutex> lock(_mutex);
+
+    // Check cache by role:arch key
+    const std::string cacheKey = makeCacheKey(role, arch);
+    auto it = entry->cachedExtractors.find(cacheKey);
+    if(it != entry->cachedExtractors.end() && it->second != nullptr)
+    {
+        return it->second;
+    }
+
+    // Create extractor from features signature if non-empty
+    std::shared_ptr<FeatureExtractor> extractor;
+    if(!cfg.featuresSignature.empty())
+    {
+        extractor = std::make_shared<FeatureExtractor>(cfg.featuresSignature, cfg.derived);
+    }
+
+    // Cache and return
+    entry->cachedExtractors[cacheKey] = extractor;
+    return extractor;
+}
+
+std::shared_ptr<FeatureExtractor>
     EngineRegistry::getOrCreateExtractor(const std::shared_ptr<const EngineEntry>& entry) const
 {
     if(entry == nullptr)
@@ -371,6 +464,7 @@ std::shared_ptr<FeatureExtractor>
         return nullptr;
     }
 
+    // Legacy path: uses entry->uhdConfig and entry->cachedExtractor
     const std::lock_guard<std::mutex> lock(_mutex);
 
     // Return cached extractor if available
