@@ -820,7 +820,7 @@ TEST(TestGpuReferenceGraphExecutorFp32, PointwiseBinaryExecutes)
     hipdnn_data_sdk::utilities::Tensor<float> input1Tensor(dims, strides);
     hipdnn_data_sdk::utilities::Tensor<float> outputTensor(dims, strides);
     input0Tensor.fillWithRandomValues(-1.0f, 1.0f);
-    input0Tensor.fillWithRandomValues(-1.0f, 1.0f);
+    input1Tensor.fillWithRandomValues(-1.0f, 1.0f);
     outputTensor.fillWithValue(0);
 
     std::unordered_map<int64_t, void*> variantPack;
