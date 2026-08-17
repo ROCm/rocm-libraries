@@ -1,11 +1,10 @@
 # MLA kernel family — design doc
 
-> **Status:** Design spike (no kernel code). DoD = this doc approved + GLM-5 geometry
-> confirmed. No implementation in scope, and **nothing here is measured**: the µs
-> figures in §4 and the WG/CU figures in §5 are analytical estimates, labelled as such
-> at each use.
+> **Status:** Design spike (no kernel code). DoD = this doc approved. No implementation
+> in scope, and **nothing here is measured**: the µs figures in §4 and the WG/CU figures
+> in §5 are analytical estimates, labelled as such at each use.
 
-Covers DeepSeek V2/V3/V3.1/R1, GLM-5, and Kimi-K2. The kernel family splits into
+Covers DeepSeek V2/V3/V3.1/R1 and Kimi-K2. The kernel family splits into
 two distinct kernels (prefill and decode-absorb) and a separate fp8 phase for
 gfx950+. All sections below are specifications; nothing is a tuning history.
 
@@ -29,11 +28,10 @@ gfx950+. All sections below are specifications; nothing is a tuning history.
   - [5.2 gfx950](#52-gfx950)
 - [6. Dtype plan](#6-dtype-plan)
 - [7. hipDNN exposure plan](#7-hipdnn-exposure-plan)
-  - [7.1 New op identifier](#71-new-op-identifier)
-  - [7.2 SdpaProblem extensions](#72-sdpaproblem-extensions)
-  - [7.3 AttentionRequest extensions](#73-attentionrequest-extensions)
-  - [7.4 AotInstance / SelectionConstraints](#74-aotinstance--selectionconstraints)
-  - [7.5 Open questions regarding hipDNN integration](#75-open-questions-regarding-hipdnn-integration)
+  - [7.1 Op identifiers](#71-op-identifiers)
+  - [7.2 AttentionRequest extensions](#72-attentionrequest-extensions)
+  - [7.3 Capability gating and candidate registration](#73-capability-gating-and-candidate-registration)
+  - [7.4 Open questions regarding hipDNN integration](#74-open-questions-regarding-hipdnn-integration)
 - [8. Test and bench plan](#8-test-and-bench-plan)
   - [8.1 Correctness reference](#81-correctness-reference)
   - [8.2 Benchmark shapes](#82-benchmark-shapes)
@@ -71,7 +69,7 @@ gfx950+. All sections below are specifications; nothing is a tuning history.
 | $d_V$ | 128 | value head dimension |
 | $r_{KV}$ | 512 | KV lora rank |
 | $r_Q$ | 1536 | query lora rank |
-| $H_q$ | 128 (DS/GLM-5), 64 (Kimi-K2) | query heads |
+| $H_q$ | 128 (DeepSeek), 64 (Kimi-K2) | query heads |
 | $H_k$ | 1 | KV heads (MLA always has Hk=1) |
 | `Bq`, `Bk` | tuning knobs (§5) | kernel query-tile and KV-**tile** sizes; `Bk` is independent of the paged-cache `block_size` — see the note in §5.2 |
 | `r_KV_tile` | 64–128 (§5) | $r_{KV}$ K-step for the latent expansion (prefill) and for `W_UV` streaming (decode epilogue) |
@@ -108,12 +106,22 @@ gfx950+. All sections below are specifications; nothing is a tuning history.
 | Model | $H_q$ | $d_{\text{nope}}$ | $d_{\text{rope}}$ | $d_V$ | $r_{KV}$ | $r_Q$ |
 |---|---|---|---|---|---|---|
 | DeepSeek V2/V3/V3.1/R1 | 128 | 128 | 64 | 128 | 512 | 1536 |
-| GLM-5 | **TBD — confirm-config** | 128 | 64 | 128 | 512 | 1536 |
 | Kimi-K2 | 64 | 128 | 64 | 128 | 512 | 1536 |
 
-> **Action:** Confirm GLM-5 $H_q$ with the model owner before closing this
-> spike. The design assumes 128 (same as DeepSeek); if Kimi-K2's 64 applies, update
-> the tiling tables accordingly. The kernel logic is unchanged for either.
+> **GLM-5 is out of scope for this kernel family**, despite being an obvious third
+> candidate alongside DeepSeek and Kimi-K2. Its published config
+> (`zai-org/GLM-5`, `config.json`) is `model_type: glm_moe_dsa` /
+> `GlmMoeDsaForCausalLM` with `index_n_heads: 32`, `index_head_dim: 128`,
+> `index_topk: 2048` — GLM-5 is **DeepSeek Sparse Attention**, so decode is a
+> lightning-indexer top-k gather over the latent cache, not the dense flash loop
+> specified here. No value of $H_q$ makes it servable by these kernels. Four of its six
+> MLA-geometry values also differ from the DeepSeek row
+> ($H_q$ 64 — which happens to match Kimi-K2 — $d_{\text{nope}}$ 192, $d_V$ 256,
+> $r_Q$ 2048; only $d_{\text{rope}}$ and $r_{KV}$ match both rows). The sparse decode
+> path, not the geometry, is the reason it is out of scope: a corrected-geometry GLM-5
+> row would still not be servable by these kernels. Sparse-attention support is tracked
+> as separate work; DeepSeek V2/V3/V3.1/R1 and Kimi-K2 are unaffected and the design
+> below stands for both.
 
 ---
 
@@ -288,9 +296,10 @@ the bulk of the performance gain (AITER reports 17× over non-absorbed naive MLA
 > `BLOCK_H` than the table suggests.
 >
 > **Which balance applies is unmeasured, and it changes the conclusion.** §4's estimate
-> assumes the KV working set is MALL-resident, so the redundant reads head-batching
-> removes cost MALL bandwidth (~17 TB/s), not HBM. Against MALL the kernel approaches
-> the knee near `BLOCK_H = 32`; against HBM it never does. Both columns are given
+> prices the *compulsory* first read of each token against HBM and the redundant
+> re-reads — the ones head-batching removes — against MALL (~17 TB/s), on the argument
+> that the KV working set is MALL-resident but exceeds one XCD's L2. Against MALL the
+> kernel approaches the knee near `BLOCK_H = 32`; against HBM it never does. Both columns are given
 > because there is no measurement to choose between them, and sizing `BLOCK_H` must
 > settle this first — the answer decides whether `BLOCK_H` is bounded by traffic (raise
 > it until the knee) or only by occupancy.
@@ -341,18 +350,26 @@ The materialization path (`c_KV · W_UK → K, V`, then standard `mla_prefill_fw
 expansion with attention but is
 memory-bandwidth-bound on W_UK at large tile counts. The dispatch heuristic
 must implement this threshold — it is not a kernel property but a launch-time
-decision in `library/dispatch/attention.py`.
+decision in `library/dispatch/attention/`.
 
 > **The materialize path does not "just reuse" the existing kernels.** MLA's
 > materialized form is asymmetric — `hdim_q = d_nope + d_rope = 192`,
 > `hdim_v = d_V = 128` — and the current rocKE attention stack supports neither.
-> `library/dispatch/attention.py` rejects the request outright (`hdim_q == hdim_v` is
-> required), `UnifiedAttentionProblem` carries a single `head_size`, and
-> `supports_tiled_2d` / `supports_tiled_3d` on both arches gate
-> `head_size in {64, 128, 256}`, which excludes 192. Reusing `UnifiedAttention` here
-> therefore needs (a) `head_size` split into `hdim_q` / `hdim_v` through the problem,
-> spec and descriptor layers and (b) a widened `head_size` gate — dual-engine work
-> (§9). The CK-FMHA `(192,128)` alternative in §3 sidesteps that gap for *measurement*
+> `AttentionRequest` already carries `hdim_q` and `hdim_v` separately, but everything
+> below it collapses or rejects them: `_request_errors` rejects `hdim_q != hdim_v`,
+> `_problem()` collapses them (`head_size=int(req.hdim_q)`) into a
+> `UnifiedAttentionProblem` that has a single `head_size`, `AttentionSpec` likewise
+> carries one `head_size` (and bakes it into `kernel_name()` as `hd{head_size}`),
+> `UNIFIED_HEAD_SIZES = (64, 128, 256)` excludes 192 by set membership, and — separately
+> from that constant — the per-arch admission gates (`supports_tiled_2d` /
+> `supports_tiled_3d` in `library/kernels/{gfx942,gfx950}/attention_tiled_{2d,3d}.py`)
+> re-check `head_size not in (64, 128, 256)` against a *hardcoded literal*, so widening
+> `UNIFIED_HEAD_SIZES` alone does not widen them
+> (`library/dispatch/attention/common.py`,
+> `library/kernels/common/attention_unified.py`). Reusing `UnifiedAttention` here
+> therefore needs the split carried through the problem, spec and descriptor layers and
+> a widened head-size gate in *both* places — dual-engine work (§9). The request layer is
+> already shaped for it; the layers underneath are not. The CK-FMHA `(192,128)` alternative in §3 sidesteps that gap for *measurement*
 > only — it yields no shippable rocKE instance — so that prototype should come first
 > but does not remove the dual-engine work.
 
@@ -405,16 +422,22 @@ The two kernels place that V expansion differently:
 #### Kernel structure
 
 ```
+# Pre-kernel (separate device kernel, once per prefill call — not in the flash loop),
+# batched over heads exactly as §4's decode pre-step:
+  2. apply W_UQ GEMM: q_latent [total_q, r_Q] × W_UQ[h] [r_Q, d_nope+d_rope]
+                      → q[h] [total_q, d_nope+d_rope]
+  3. split q[h] → q_nope[h] [total_q, d_nope], q_rope[h] [total_q, d_rope];
+     rotate q_rope[h] at `positions`   # `positions` is a pre-kernel input, not a
+                                       #   flash-kernel one
+
 grid:      (H_q / BLOCK_H, total_num_q_blocks, 1)   # H_k = 1, so dim0 carries HEAD blocks
 workgroup: (64 * num_warps, 1, 1)                   # BLOCK_H sized at implementation (§9)
 
 for each (head block, q_block):
-  1. load q_latent tile → LDS                    # [Bq, r_Q], shared by the block's heads
-  for each head h in the block:
-    2. apply W_UQ GEMM: q_latent [Bq, r_Q] × W_UQ[h] [r_Q, d_nope+d_rope]
-                        → q[h] [Bq, d_nope+d_rope]
-    3. split q[h] → q_nope[h] [Bq, d_nope], q_rope[h] [Bq, d_rope];
-       rotate q_rope[h] at `positions`
+  1. load q_nope/q_rope tile → LDS               # [Bq, BLOCK_H, d_nope+d_rope] — the
+                                                 #   pre-kernel's output. 6 KB per head at
+                                                 #   Bq = 16, NOT the 48 KB [Bq, r_Q]
+                                                 #   q_latent tile the fused form needed
   for each KV tile:
     4. load c_KV tile  [Bk, r_KV]  from paged cache   # shared by the block's heads
     5. load K_rope tile [Bk, d_rope] from paged cache # head-independent
@@ -429,9 +452,29 @@ for each (head block, q_block):
   11. normalize and write out [Bq, BLOCK_H, d_V]
 ```
 
-Step 2 (W\_UQ GEMM) is the main structural addition over standard flash attention.
-It can be fused as a pre-pass in LDS or as a separate small kernel depending on LDS
-pressure; see §5 (tiling/LDS budget).
+**Step 2 runs as a separate pre-kernel, not inside the flash loop.** The W\_UQ GEMM is
+the main structural addition over standard flash attention, and it is specified the same
+way as the decode pre-step (§4): a standalone GEMM
+(`[total_q, r_Q] × [r_Q, d_nope+d_rope]` per head) that reuses existing GEMM
+infrastructure and hands the flash kernel an expanded `q` directly. The op's inputs stay
+`q_latent` + `W_UQ` because the op spans both kernels; only the *internal* split is
+fixed here.
+
+> **The in-LDS fused alternative is rejected — on weight traffic, not on LDS.** LDS alone
+> does not settle it: the 48 KB `q_latent` tile (§5.1) is large, but it is live only
+> before the KV loop starts, so the smem pool's live-interval reuse hands its bytes to
+> the KV tile for free (§5.1), and §5.1's split-r variant fits inside the budget at
+> 26–52 KB per slice. The decisive term is `W_UQ` re-reads.
+> Fused, every query block re-streams `W_UQ` (72 MiB across all heads), so a prefill call
+> moves `(total_q / Bq) × 72 MiB` — ~36 GiB at `total_q = 8192, Bq = 16`. A pre-kernel
+> GEMM reads `W_UQ` once and amortizes it over all `total_q`: ~72 MiB. Nothing
+> recoverable in the LDS budget closes a ~500× gap.
+>
+> Steps 2–3 above are therefore the pre-kernel's body and steps 1 and 4–11 are the flash
+> kernel's. The numbering runs across both because the two kernels are one *op* (§7.1),
+> not because they are one dispatch — whether the graph sees one fused op or two is an
+> open question, and the same one §7.4 already raises for the decode pre-step. It must be
+> answered the same way for both.
 
 > **Prefill does not amortize over heads the way decode does.** The latent `c_KV` is
 > shared across heads, but its *expansion* is not: steps 6–7 apply a different
@@ -549,42 +592,72 @@ one-head-per-workgroup kernel, because the grid shape determines the spec. Its *
 > the redundant KV traffic head-batching removes, which shrinks as
 > $1/\texttt{BLOCK\_H}$.
 >
+> **This table is the single definition site for the decode-cost figures.** Every other
+> mention of 5.6 µs, 38 µs or the crossovers below refers back here; do not re-derive
+> them elsewhere.
+>
 > | config (`kv_len` 8192) | flash loop | `W_abs` pre-step | total |
 > |---|---|---|---|
-> | `BLOCK_H = 1`, `B = 1` | ~71 µs | ~38 µs | ~109 µs |
-> | `BLOCK_H = 16`, `B = 1` | ~4 µs | ~38 µs | ~42 µs |
-> | `BLOCK_H = 1`, `B = 32` | ~2270 µs | ~38 µs | ~2310 µs |
-> | `BLOCK_H = 16`, `B = 32` | ~142 µs | ~38 µs | ~180 µs |
+> | `BLOCK_H = 1`, `B = 1` | ~72 µs | ~38 µs | ~110 µs |
+> | `BLOCK_H = 16`, `B = 1` | **~5.6 µs** | ~38 µs | ~44 µs |
+> | `BLOCK_H = 1`, `B = 32` | ~2310 µs | ~38 µs | ~2350 µs |
+> | `BLOCK_H = 16`, `B = 32` | ~181 µs | ~38 µs | ~219 µs |
 >
-> ≈16× on the flash loop; 2.6× end-to-end at `B = 1`, ~13× at `B = 32`.
+> ≈13× on the flash loop; 2.5× end-to-end at `B = 1`, ~11× at `B = 32`.
 >
-> **What the model is.** Redundant-read bandwidth only:
-> `kv_len × 1152 B × (H_q / BLOCK_H) × B`, over 17 TB/s because the 9.4 MB KV working
-> set is MALL-resident but does not fit one XCD's L2. That follows from the CDNA3
-> hierarchy rather than being assumed: L2 is 4 MB **per XCD** and sits above a shared
-> 256 MB Infinity Cache, so head workgroups scattered across the 8 XCDs miss L2, hit
-> MALL, and do not re-read HBM. 17 TB/s is a theoretical peak (§2.4). The 16× is
-> therefore exactly `128 / 8`, the read-amplification ratio. **The M=1 MFMA lane waste
-> is not in these numbers**, nor is any latency, launch or occupancy term.
+> **What the model is.** KV read bandwidth only, at two tiers:
+> `kv_len × 1152 B × (H_q / BLOCK_H) × B`, of which the *compulsory* first read of each
+> token is a cold HBM read at 5.3 TB/s and the remaining `H_q / BLOCK_H − 1` re-reads hit
+> MALL at 17 TB/s. At `BLOCK_H = 16` that is `4.4 µs × (7/8 + (1/8)(17/5.3)) ≈ 5.6 µs`
+> against 4.4 µs if the whole stream were priced at MALL. The re-reads hit MALL because
+> the 9.4 MB KV working set (at `kv_len = 8192, B = 1`) does not fit one XCD's L2 —
+> a consequence of the CDNA3 hierarchy rather than an assumption: L2 is 4 MB **per XCD**
+> and sits above a shared 256 MB Infinity Cache, so head workgroups scattered across the
+> 8 XCDs miss L2, hit MALL, and do not re-read HBM. 17 TB/s is a theoretical peak (§2.4).
+>
+> Because the cold read does not shrink with `BLOCK_H`, the flash-loop ratio is **≈13×,
+> not the naive `128 / 8 = 16×`** read-amplification ratio — a pure-MALL model
+> overstates head-batching's benefit by about a quarter. One further simplification is
+> **not** folded in: the `B = 32` rows exceed the MALL they are priced against
+> (`32 × 9.4 MB = 301 MB` against a 256 MB Infinity Cache), so those rows are optimistic
+> by an unmodelled amount and the "~11×" is an upper bound. **The M=1 MFMA lane waste is
+> not in these numbers**, nor is any latency, launch or occupancy term.
 >
 > **Why the `B = 1` rows are the weakest.** A bandwidth limit is only reached if the
 > machine is busy. At `B = 1, BLOCK_H = 16` the grid is `8 × NUM_SEGMENTS` workgroups,
 > so filling 304 CUs needs `NUM_SEGMENTS ≳ 38` — about 13 KV tiles per segment at
 > `kv_len = 8192, Bk = 16`, feasible but not free, and unreachable at `kv_len = 512`
 > (32 tiles in total). Below that the `B = 1` figures are launch-bound rather than
-> bandwidth-bound and the 2.6× overstates the gain. `NUM_SEGMENTS` is therefore an input
+> bandwidth-bound and the 2.5× overstates the gain. `NUM_SEGMENTS` is therefore an input
 > to `BLOCK_H` sizing, not an independent knob.
 >
 > These are first-order estimates to justify the requirement, not performance targets.
 
-> **The pre-step and `BLOCK_H` are coupled.** The pre-step is batch-invariant while KV
-> work scales with batch, so which term dominates inverts with `B`. At `BLOCK_H = 16`
-> (≈4.4 µs per sequence) the flash loop overtakes a materialized `W_abs` (~38 µs) at
-> about `B = 9`, and a two-stage pre-step (~12.7 µs) at about `B = 3` — see the `W_abs`
-> open question below. Two consequences: head-batching is worth ~2–3× end-to-end at
-> `B = 1` and ~13× at `B = 32`, so the requirement holds at both but its *urgency* is a
-> batch-size argument; and the pre-step form should be fixed before `BLOCK_H` is swept,
-> since it sets how much of the step `BLOCK_H` can affect at all.
+> **The pre-step and `BLOCK_H` are coupled — and this is the definition site for the two
+> crossovers.** The pre-step is batch-invariant while KV work scales with batch, so which
+> term dominates inverts with `B`. At `BLOCK_H = 16` (~5.6 µs per sequence, the table
+> above) the flash loop overtakes a materialized `W_abs` (~38 µs) at about **`B = 7`**,
+> and a two-stage pre-step (~12.7 µs) at about **`B = 2.3`** — see the `W_abs` open
+> question below. §8.2's batch axis is chosen to bracket these two values.
+>
+> **Why the two terms are priced at different memory tiers.** The flash loop's re-reads
+> are priced over MALL and the pre-step's 38 µs over HBM, which needs justifying since
+> 192 MiB of `W_abs` would also fit a 256 MB Infinity Cache. The asymmetry is *reuse
+> distance*, not size: the KV re-reads head-batching removes all happen inside a single
+> kernel launch on one layer's cache, so they hit MALL. The weights do not — DeepSeek-V3
+> is 61 layers, so a decode step streams 61 × 192 MiB ≈ 11.4 GiB of `W_abs` through a
+> 256 MB cache — roughly **48×** the cache — so every layer's read is cold by the time
+> that layer runs again. Be explicit about what rides on this: priced at MALL the
+> pre-step is ~11.8 µs, against ~12.7 µs for the two-stage form at HBM. The two forms
+> would be **equal cost** and the two-stage argument would not merely weaken, it would
+> disappear. The whole 3× therefore rests on the 61-layer working set, which is a
+> capacity argument, not a measurement. It is falsifiable and cheap to falsify: a rocProf
+> `FETCH_SIZE` counter on one decode step tells you whether `W_abs` is coming from HBM.
+> Do that before the `W_abs` open question below is closed. Two consequences:
+> head-batching is worth ~2.5× end-to-end at `B = 1` and ~11× at `B = 32`, so the
+> requirement holds at both but its *urgency* is a batch-size argument; and the pre-step
+> form should be fixed before `BLOCK_H` is swept, since it sets how much of the step
+> `BLOCK_H` can affect at all.
 
 > **`attention_tiled_3d` cannot be reused as-is.** It validates
 > `1 <= num_queries_per_kv <= 16` and `16 % num_queries_per_kv == 0`
@@ -638,7 +711,7 @@ only in the pre-step GEMM, not streamed per KV tile.
 
 > **Open question — materialize `W_abs`, or apply it in two stages?**
 > "Too large for LDS" is not the constraint that matters: the materialized pre-step
-> reads all 192 MiB on **every decode step**, ~38 µs at 5.3 TB/s, against ~4.4 µs for
+> reads all 192 MiB on **every decode step**, ~38 µs at 5.3 TB/s, against ~5.6 µs for
 > the flash loop at `kv_len = 8192, BLOCK_H = 16, B = 1` (the estimate table above).
 > The two-stage alternative keeps $W_{UQ,\text{nope}}$ and $W_{UK,K}$ separate and
 > applies them in sequence ($q_{\text{nope}} = c_q \cdot W_{UQ,\text{nope}}^{(h)}$,
@@ -655,13 +728,13 @@ only in the pre-step GEMM, not streamed per KV tile.
 > which each form needs equally. SGLang issue #4615 (§10.6) is this exact trade-off.
 >
 > **What weighs the other way**, since the byte and MAC counts do not: the materialized
-> form is one GEMM rather than two, so it is a simpler graph-input contract for §7.5
+> form is one GEMM rather than two, so it is a simpler graph-input contract for §7.4
 > (`W_abs` is one tensor, not a pair with an intermediate) and a simpler thing to fuse
 > into the decode prologue; and because the pre-step is batch-invariant, its 3×
 > disadvantage shrinks at serving batch, where the flash loop dominates anyway.
 >
 > **Not resolved here.** §2.4 specifies the materialized form. This note states both
-> sides so the choice is explicit; it must be settled before §7.5 fixes the
+> sides so the choice is explicit; it must be settled before §7.4 fixes the
 > absorbed-weight graph-input contract, and §10.6's summary of what SGLang actually
 > stores should be verified against source at the same time.
 
@@ -742,21 +815,31 @@ what 2–4 WG/CU costs; each tiling below states the WG/CU it implies instead.
 
 #### Prefill — gfx942
 
-The dominant LDS pressure is the W_UQ pre-GEMM in step 2. With `Bq = 16` and
-$r_Q = 1536$: loading the full W_UQ row for one query block is $16 \times 1536 \times 2
-= 48$ KB — too large for a single LDS tile. Options:
+The dominant LDS pressure is the W_UQ pre-GEMM in step 2, and it is on the *activation*
+side, not the weight side. Staging the `q_latent` tile the GEMM consumes costs
+$\texttt{Bq} \times r_Q \times 2 = 16 \times 1536 \times 2 = 48$ KB at `Bq = 16` — three
+quarters of gfx942's LDS for one operand. (`W_UQ[h]` itself is `[r_Q, d_nope+d_rope]`
+= 576 KB per head and never fits whole either way; it has no `Bq` axis.) Options:
 
 | Strategy | Description | LDS cost |
 |---|---|---|
-| **Split-r Q-GEMM** | Stream W_UQ in $r$-slices of 64–128; accumulate q in registers | $\sim$ 2–4 KB per slice |
+| **Split-r Q-GEMM** | Stream W_UQ in $r$-slices of 64–128; accumulate q in registers | 26 KB / 52 KB per slice |
 | **Separate pre-kernel** | Launch a small GEMM (q\_latent → q) before the flash loop | 0 (separate kernel) |
 
-**Recommendation:** Separate pre-kernel for W_UQ application on gfx942.
-The pre-kernel is a standard GEMM (`[total_q, r_Q] × [r_Q, d_nope+d_rope]`) and
-can reuse existing GEMM infrastructure. The flash kernel then receives expanded `q`
-directly.
+The split-r cost is **both** operands, not just the activation: at `r_slice = 64` it is
+`q_latent_slice[16, 64]` = 2 KB **plus** `W_UQ_slice[64, 192]` = 24 KB, so 26 KB; at
+`r_slice = 128`, 4 + 48 = 52 KB. Only the 64-wide slice leaves room for anything else.
 
-Remaining LDS budget for the flash loop (single-kernel, separate pre-kernel assumed):
+**This is the budget behind §3's normative choice** of a separate pre-kernel for the
+W_UQ application — though the budget is not what decides it. Split-r fits at
+`r_slice = 64`, and even the 48 KB `q_latent` tile of the unsliced form gets its bytes
+recycled by the smem pool, because it is dead before the KV loop starts. §3 rejects the fused form on `W_UQ`
+re-read traffic instead; what this table shows is that no LDS saving recovers that
+gap. The pre-kernel is a standard GEMM
+(`[total_q, r_Q] × [r_Q, d_nope+d_rope]`) that can reuse existing GEMM infrastructure,
+and the flash kernel receives expanded `q` directly.
+
+Remaining LDS budget for the flash loop (pre-kernel already applied; `q` arrives expanded):
 
 | Buffer | Size (Bk=64, bf16) | Notes |
 |---|---|---|
@@ -779,14 +862,24 @@ latent expansion (steps 6–7) must be tiled in the $r_{KV}$ dimension:
   - `K_rope[16, 64]` = 2 KB
   - `K_nope_acc[16, 128]` = 4 KB (accumulator for latent expansion)
   - `V_acc[16, 128]` = 4 KB
-  - **Total ≈ 44 KB** — fits within 64 KB LDS with 1 WG/CU, or at reduced tile with 2 WG/CU
+  - `q[16, 192]` = 6 KB (the pre-kernel's expanded output — live for the whole KV loop)
+  - `o_acc[16, 128]` fp32 = 8 KB (live for the whole KV loop)
+  - **Total ≈ 58 KB** — `65536 / 59392 = 1.10`, i.e. **1 WG/CU** at 64 KB LDS
+
+The last two rows are the loop-invariant buffers the per-iteration list above omits.
+They are live across the whole KV loop, so the smem pool cannot recycle their bytes into
+the per-iteration buffers, and they are what takes this tiling from 44 KB to 58 KB.
+Reaching 2 WG/CU needs ≤ 32 KB — a 26 KB cut, which `W_UK_slice` (32 KB) dominates:
+halving it to `r_KV_tile = 32` gives 42 KB, still 1 WG/CU. **No `Bq = 16` variant of
+this tiling reaches 2 WG/CU on gfx942** without moving `o_acc` to registers or shrinking
+`Bq`; treat 1 WG/CU as the working assumption and both of those as levers to sweep.
 
 > **Open question:** Whether the W_UK weight tile fits LDS alongside
 > the c_KV slice determines whether the latent expansion can be fused into one kernel
 > or requires a two-pass approach. Both paths should be prototyped and measured for
 > occupancy; the design does not mandate one path.
 
-**Occupancy estimate gfx942 prefill:** 1–2 WG/CU at the proposed tile. This is below
+**Occupancy estimate gfx942 prefill:** 1 WG/CU at the proposed tile. This is well below
 the 4 WG/CU of standard attention; the W_UK streaming cost is the bottleneck. The
 3D split-KV path is not applicable to prefill (each workgroup already has Sq > 1).
 
@@ -806,7 +899,7 @@ loop itself operates like standard single-head-dim=576 MQA decode.
 > 2. the cross-wave reduction buffer that the accumulator's wave partition forces,
 >    `BLOCK_H × d_V` per wave in LDS;
 > 3. the epilogue's `W_UV` traffic — §4 step 7 applies a *different* `W_UV[h]` per head
->    row, so the 16 KB aliased slice below is a **per-head** figure. At `BLOCK_H` heads
+>    row, so the 16 KB pooled slice below is a **per-head** figure. At `BLOCK_H` heads
 >    the epilogue either serialises `BLOCK_H` slice streams (LDS unchanged, epilogue
 >    time × `BLOCK_H`) or holds more than one live (LDS × the number held). This is the
 >    term §4 flags as not amortizing over the head block.
@@ -819,7 +912,7 @@ LDS and register footprint of the flash loop and its epilogue:
 | Buffer | Size (at Bk = 16) | Notes |
 |---|---|---|
 | `kv_cache tile [Bk, 576]` | 16 × 576 × 2 = 18 KB | LDS. c_KV + K_rope concatenated; shared by every head in the workgroup (§4). The only in-loop LDS buffer **if `register_pv` eliminates `P_lds`** — see the recommendation below |
-| `W_UV slice [r_KV_tile, d_V]` | 16 KB, **epilogue only** | LDS, aliased onto the KV tile's allocation — see below |
+| `W_UV slice [r_KV_tile, d_V]` | 16 KB, **epilogue only** | LDS, sharing the KV tile's pool bytes via live-interval reuse — see below |
 | `q_abs + q_rope` per head | 576 × 2 = 1.125 KB | registers, **bf16** — an MFMA A-operand, so it matches the atom's input type; the pre-step's fp32 result is rounded once on the way in |
 | `acc` per head | 512 × 4 = 2 KB | registers, fp32 **latent-space** accumulator (§4); 4× the `d_V`-wide one it replaces |
 
@@ -828,25 +921,37 @@ note at the head of this subsection.
 
 `W_UV[h][r_KV=512, d_V=128]` = 128 KB **per head** — does not fit in LDS, and does not
 need to: per §4 it is applied once in the epilogue, streamed in `r_KV`-tiles of 64
-(`W_UV_slice[64, 128]` = 16 KB per slice) into LDS **aliased onto the KV tile's
-allocation**.
+(`W_UV_slice[64, 128]` = 16 KB per slice) into LDS **sharing the KV tile's bytes**.
 
-> **The epilogue slice must be an explicit LDS alias, not a second allocation.** LDS is
-> a single group segment sized statically by the compiler at dispatch and live for the
-> whole workgroup — it is never "released" mid-kernel. To get the 18 KB peak the
-> builder must hand the epilogue the *same* `smem_alloc` handle as the KV tile. The
-> source-level rocKE precedent is `Q_lds = K_lds` under `Q_ALIAS_K`
-> (`library/kernels/gfx942/attention_tiled_2d.py:1922-1927`) — one `smem_alloc`, two
-> names. `Acc_lds` is **not** that precedent: it is its own `smem_alloc` (same file,
-> line 1938) that the *backend* was observed to overlap with the loop-dead K/V region —
-> an empirical allocator result, not a contract. Do not plan around it: every
-> `tile.smem_alloc` lowers to a distinct module-level LDS global
-> (`platform/python/rocke/core/lower_llvm.py:1723`, `_op_tile_smem_alloc`), so the
-> source-level alias is the
-> only guaranteed way to reach the peak. Add an `s_barrier`
-> after the last `c_KV` read and a second `s_barrier` + `s_waitcnt lgkmcnt(0)` before
-> the epilogue reads. As two separate allocations the static segment is 18 + 16 = 34 KB
-> → 1 WG/CU, exactly the number this deferral is meant to beat.
+> **The sharing is the allocator's job, not the builder's — but the barriers are the
+> builder's.** rocKE does not emit one LDS global per allocation. `_compute_smem_layout`
+> (`platform/python/rocke/core/lower_llvm.py`) packs every `smem_alloc` into a single
+> `@smem_pool.<kernel>` global by greedy linear scan over live intervals, and a slot
+> freed by a dead allocation can host a *later, larger* one, expanding in place. An
+> epilogue `W_UV_slice` whose first use follows the KV tile's last use is exactly the
+> non-interfering case that analysis is built for, so the pool is
+> `max(18, 16) = 18 KB` **without** a source-level alias. What the design must guarantee
+> is therefore *liveness*, not aliasing:
+>
+> - The KV tile must be genuinely dead at the epilogue. A double-buffered or
+>   loop-carried KV tile whose last use the analysis places after the epilogue's first
+>   use interferes, and the pool becomes 18 + 16 = 34 KB → 1 WG/CU, exactly the number
+>   the deferral is meant to beat.
+> - Neither allocation may be `exclusive=True` (the cshuffle no-alias flag,
+>   `SmemType.exclusive` in `platform/python/rocke/core/ir.py`). An exclusive allocation
+>   is pinned to its own byte range with a sentinel live-interval and never shares.
+> - **Barriers are still required, and for a sharper reason than before:** sharing means
+>   the epilogue's `ds_write` lands on the bytes the loop's last `ds_read` is still
+>   consuming. Add an `s_barrier` after the last `c_KV` read and a second `s_barrier` +
+>   `s_waitcnt lgkmcnt(0)` before the epilogue reads. The allocator proves the *intervals*
+>   are disjoint in the IR; it does not insert the synchronisation that makes them
+>   disjoint in hardware.
+>
+> A source-level alias — one `smem_alloc` under two names, as `Q_lds = K_lds` does under
+> `Q_ALIAS_K` in `library/kernels/gfx942/attention_tiled_2d.py` — remains available and
+> forces the sharing unconditionally. Prefer it only if the liveness turns out not to be
+> provable from the IR; it is no longer the *only* way to reach the peak, and it costs
+> the readability of two distinctly-named buffers.
 
 Full KV tile loop:
 
@@ -864,7 +969,8 @@ for r_kv_slice in range(0, r_KV, 64):
   out_partial[d_V] += acc[r_kv_slice:+64] · W_UV_slice
 
 LDS peak = max(18 KB flash loop, 16 KB epilogue) = 18 KB single-buffered
-(36 KB with a double-buffered KV tile) — REQUIRES the two buffers to be aliased.
+(36 KB with a double-buffered KV tile) — REQUIRES the epilogue slice's live
+interval to start after the KV tile's ends, so the smem pool reuses the bytes.
 ```
 
 **Recommendation:** Evaluate the `register_pv` pattern (eliminating `P_lds`) — keeping
@@ -874,7 +980,7 @@ accumulator, which consumes P immediately against the resident `c_KV` tile. This
 a **priority**, not a nice-to-have.
 
 **Occupancy estimate gfx942 decode — LDS ceiling only, nothing measured.** LDS admits
-3 workgroups/CU at the 18 KB aliased peak (65536 / 18432 = 3.5), 1 if the KV tile is
+3 workgroups/CU at the 18 KB pooled peak (65536 / 18432 = 3.5), 1 if the KV tile is
 double-buffered (36 KB).
 
 > **Workgroups/CU is not occupancy — the workgroup size has to be stated with it.** At
@@ -890,22 +996,28 @@ double-buffered (36 KB).
 VGPRs are the more likely limiter once heads are batched, and must be sized per *wave*,
 not per head row. Two structural consequences hold regardless of the value chosen:
 
-- The `r_KV = 512` accumulator must be **split across the workgroup's waves**, never
+- The `BLOCK_H × r_KV` accumulator must be **split across the workgroup's waves**, never
   replicated — replication is an immediate occupancy wall. There are two axes to split
-  on and neither is free, because the score contracts *over* `r_KV` while the accumulate
-  *produces* it:
+  on, because the score contracts *over* `r_KV` while the accumulate *produces* it.
+  **Both cost the same registers**: either way each wave holds
+  `BLOCK_H × r_KV / num_warps` fp32 — 2048 per wave at `BLOCK_H = 16, num_warps = 4`,
+  i.e. 2048 VGPRs' worth per lane-set, well past the 512-per-lane file, so the
+  accumulator is an AGPR/spill question at that size regardless of axis. Registers
+  therefore do **not** discriminate between the two; the barrier does:
   - **Split on `r_KV`.** Each wave owns `512 / num_warps` latent columns and so holds
     only that slice of `q_abs`, making step 4 yield a *partial* score. Completing it
     needs a cross-wave reduction **inside the flash loop, once per KV tile**, with a
     barrier on the critical path of every iteration. This is the option that could
-    disqualify the design, and it must be costed before `BLOCK_H` is chosen, not after.
-  - **Split on the head axis.** The score stays wave-local, but every wave holds the
-    full `r_KV` accumulator for its head rows, so register cost per wave does not fall
-    with `num_warps` — this is the option that hits the occupancy wall first. It is
-    available only when `BLOCK_H >= num_warps`.
-- Either way the reduction needs a **cross-wave buffer in LDS plus a barrier**: per KV
-  tile under the `r_KV` split, or once before the segment workspace write under the head
-  split, where it is live alongside the epilogue's `W_UV` slice. Neither cost is in the
+    disqualify the design.
+  - **Split on the head axis.** Each wave owns `BLOCK_H / num_warps` head rows and their
+    full `r_KV` accumulators, so the score stays wave-local and no in-loop reduction is
+    needed at all. This is the **preferred** split. Its only precondition is
+    `BLOCK_H >= num_warps` — which is also a lower bound on `BLOCK_H` worth carrying into
+    the sizing exercise, since it makes `BLOCK_H = 4` the smallest value compatible with
+    the `num_warps = 4` assumed below.
+- The `r_KV` split additionally needs a **cross-wave buffer in LDS plus a barrier** on
+  every KV tile. The head split needs neither in the loop; it needs only the ordinary
+  epilogue synchronisation before the segment workspace write. Neither cost is in the
   table above.
 
 So the 18 KB peak above is a lower bound and the 3 WG/CU an upper bound — neither is the
@@ -920,10 +1032,13 @@ shipped configuration. Double-buffer-vs-occupancy is worth sweeping, but only af
 `mfma_f32_32x32x16_bf16` (combo, `ds_read_tr`-enabled). Reference:
 `library/kernels/gfx950/attention_tiled_2d.py`, `_fastkv_regp.py`.
 
-**LDS per CU:** 160 KB = 163840 B (CDNA4). Sources: `platform/cpp/core/arch/data.cpp`
-(`k_target_gfx950.lds_capacity_bytes = 163840`), `platform/dsl_docs/optimization/arch/gfx950.md`
-§21.2, and the compile-time gate in `library/kernels/common/attention_unified.py`
-("over gfx950's 163840 B cap"). At 2–4 WG/CU: **40–80 KB per WG**.
+**LDS per CU:** 160 KB = 163840 B (CDNA4). Sources: the arch catalog
+(`arches.gfx950.lds_capacity_bytes` in
+`platform/python/rocke/core/arch/data/arch_specs.json`, mirrored positionally in
+`k_target_gfx950` in `platform/cpp/core/arch/data.cpp`),
+`platform/dsl_docs/optimization/arch/gfx950.md` §21.2, and the compile-time gate in
+`library/kernels/common/attention_unified.py` ("over gfx950's 163840 B cap").
+At 2–4 WG/CU: **40–80 KB per WG**.
 
 #### Prefill — gfx950
 
@@ -955,19 +1070,31 @@ At `r_KV_tile = 64` (half):
 - `K_rope[32, 64]` = 4 KB
 - `K_nope_stage[32, 128]` = 8 KB
 - `V_stage[32, 128]` = 8 KB
-- **Total ≈ 56 KB** — `163840 / 57344 = 2.9`, i.e. **2 WG/CU** at 160 KB LDS
+- `q[32, 192]` = 12 KB — loop-invariant (the pre-kernel's expanded output)
+- `o_acc[32, 128]` fp32 = 16 KB — loop-invariant
+- **Total ≈ 84 KB** — `163840 / 86016 = 1.90`, i.e. **1 WG/CU** at 160 KB LDS
 
-(The `r_KV_tile = 128` variant totals ≈ 92 KB — `163840 / 94208 = 1.7`, i.e. 1 WG/CU.
-That is why 64 is the proposed value.)
+As on gfx942, the last two rows are live across the whole KV loop, so the smem pool
+cannot recycle them into the per-iteration buffers; they are what takes the per-iteration
+56 KB to 84 KB. 2 WG/CU needs ≤ 80 KB — only 4 KB away, so this config is genuinely on
+the boundary and worth a targeted cut (`Bq = 16` halves both loop-invariant rows and
+lands at 70 KB → 2 WG/CU, at half the M-tile).
+
+(The `r_KV_tile = 128` variant totals ≈ 120 KB — `163840 / 122880 = 1.33`, also 1 WG/CU.
+Both variants are 1 WG/CU at `Bq = 32`, so occupancy no longer separates them; 64 stays
+the proposal on the weaker ground that it leaves 76 KB of headroom for the cut above
+where 128 leaves 40 KB.)
 
 > **`K_nope_stage` / `V_stage` are bf16 staging buffers, not fp32 accumulators.** The
 > expansion runs over `r_KV / r_KV_tile = 8` slices; that reduction must stay in the
 > MFMA fp32 accumulator registers and be rounded to bf16 into LDS **once**, after the
 > last slice — bf16 because the next MFMA consumes them as B-operands, which the
 > hardware accepts only in bf16/fp16/fp8. Accumulating in LDS instead would make each
-> buffer fp32 (16 KB, not 8 KB), push the total to 72 KB, and drop this config to
-> 1 WG/CU. The same applies to `K_nope_acc` / `V_acc` in the gfx942 prefill tiling
-> above (4 KB each as bf16 staging; 8 KB each if made fp32, taking 44 KB → 52 KB).
+> buffer fp32 (16 KB, not 8 KB), pushing the total from 84 KB to 100 KB and putting
+> 2 WG/CU permanently out of reach rather than 4 KB away. The same applies to
+> `K_nope_acc` / `V_acc` in the gfx942 prefill tiling above (4 KB each as bf16 staging;
+> 8 KB each if made fp32, taking 58 KB → 66 KB, which no longer compiles inside the
+> 64 KB cap at all).
 
 > **`ds_read_tr` layout recommendation (gfx950 prefill):** Store `W_UK` in transposed-dimension
 > alignment (column-major in the `r_KV` axis) so that `ds_read_tr16_b64` can deliver
@@ -976,10 +1103,11 @@ That is why 64 is the proposed value.)
 > (see `platform/cpp/instances/gfx950/attention_tiled_2d_kv_body_pv_epilogue.cpp`).
 > This layout **must** be evaluated — it is a recommended direction, not optional.
 
-**Occupancy estimate gfx950 prefill:** 2 workgroups/CU at 56 KB (LDS-limited:
-`163840 / 57344 = 2.9`; a third needs ≤ 54 KB). At the specified `num_warps = 4` /
-256 threads that is 8 waves/CU = **2 waves/SIMD** — LDS is the binding limiter only if
-the kernel stays under 512/2 = 256 registers per lane, which a 32×128 fp32 output
+**Occupancy estimate gfx950 prefill:** 1 workgroup/CU at 84 KB (LDS-limited:
+`163840 / 86016 = 1.90`; a second needs ≤ 80 KB). At the specified `num_warps = 4` /
+256 threads that is 4 waves/CU = **1 wave/SIMD** — no latency hiding at all, which makes
+the 4 KB cut to 2 WG/CU the first thing to try. LDS is the binding limiter only if
+the kernel stays under 512 registers per lane, which a 32×128 fp32 output
 accumulator plus K/V staging will approach. gfx950 caps at 8 waves/SIMD; `waves_per_eu`
 cannot raise occupancy above whichever of LDS/VGPR/AGPR binds first, it only lets the
 compiler target a higher one at the cost of spills.
@@ -999,16 +1127,16 @@ a larger KV tile.
 - `Bk = 32` (KV tile = 2 paged blocks at `block_size = 16`; same decoupling note as prefill above)
 - `kv_cache tile [32, 576]` = 36 KB — the only in-loop LDS buffer, assuming `register_pv` eliminates `P_lds` (see below)
 - `W_UV` is applied **once in the epilogue** (§4), streamed in `r_KV`-tiles of 128
-  (`W_UV_slice[128, 128]` = 32 KB) into LDS **aliased onto the KV tile** — see below
+  (`W_UV_slice[128, 128]` = 32 KB) into LDS **sharing the KV tile's pool bytes** — see below
 - `LDS peak ≈ 36 KB` — 4 workgroups/CU at 160 KB LDS (163840 / 36864 = 4.4)
 
-> **The epilogue slice must be an explicit LDS alias here too** (same mechanism and
-> barriers as §5.1). Without the alias the static group segment is 36 + 32 = 68 KB →
-> `163840 / 69632 = 2.35`, i.e. **2 WG/CU** — the epilogue buffer would cost exactly as
-> much as staging `W_UV` per tile, and the deferral would buy nothing.
->
-> Staging `W_UV` per tile keeps both buffers live for the whole loop: 68 KB → 2 WG/CU.
-> Deferring per §4 **and** aliasing the epilogue slice is what takes this to 4 WG/CU.
+> **The same liveness obligation and the same barriers as §5.1 apply here.** The smem
+> pool reuses the KV tile's bytes for the 32 KB epilogue slice automatically *provided*
+> the KV tile is dead at the epilogue; if it is not, the group segment is
+> 36 + 32 = 68 KB → `163840 / 69632 = 2.35`, i.e. **2 WG/CU**, and the deferral buys
+> nothing over staging `W_UV` per tile (which keeps both live for the whole loop, also
+> 68 KB → 2 WG/CU). Deferring per §4 **and** getting the reuse is what takes this to
+> 4 WG/CU.
 
 **`ds_read_tr` (gfx950 decode) — an in-loop lever, not an epilogue one.** Deferring
 `W_UV` does not remove the transpose problem, it *relocates* it onto `c_KV`. The
@@ -1036,7 +1164,8 @@ XOR-swizzle it before measuring anything; per `platform/dsl_docs/optimization/ar
 §21.2 the house preference is padding on gfx950 (abundant LDS) and XOR on gfx942
 (capacity-constrained).
 
-**gfx942 has no transpose read at all** (`has_ds_read_tr = false` in the arch catalog),
+**gfx942 has no transpose read at all**
+(`arches.gfx942.memory.has_ds_read_tr = false` in `arch_specs.json`),
 so a fully conflict-free transposed layout is not reachable there without a second copy.
 The gfx942 options are (a) eat the strided read with padding, or (b) build a second
 `[576, Bk]`-oriented copy via the `perm_b32` register transpose the existing gfx942 V
@@ -1050,7 +1179,7 @@ technique (eliminate `P_lds` by keeping the softmax probability in registers,
 immediately against the resident `c_KV` tile, so removing `P_lds` is a **priority**.
 
 **Occupancy estimate gfx950 decode — LDS ceiling only, nothing measured.** LDS admits
-4 workgroups/CU at the 36 KB aliased peak (163840 / 36864 = 4.4). At `num_warps = 4`
+4 workgroups/CU at the 36 KB pooled peak (163840 / 36864 = 4.4). At `num_warps = 4`
 (256 threads) that is 16 waves/CU = **4 waves/SIMD**, against a gfx950 cap of
 8 waves/SIMD (32/CU) — but this is an LDS division, so it is a ceiling and not a
 prediction. As in §5.1 it omits the head-batched accumulator and the cross-wave
@@ -1068,7 +1197,8 @@ past whichever of LDS/VGPR/AGPR binds first.
 | 2 | fp8 e4m3 (KV cache) | gfx950+ only (fp8 prefill and fp8 decode-absorb) |
 
 **fp8 approach:** Follow the existing sync-dequant pattern from
-`library/kernels/common/fmha_fwd_fp8.py` and the gfx950 `ALGORITHM.md` §7.3:
+`library/kernels/common/fmha_fwd_fp8.py` and §7.3 of the gfx950 `ALGORITHM.md`
+(that document's numbering, not this one's):
 store `c_KV` and `K_rope` as fp8 e4m3 with per-block scale factors; dequant to
 bf16 in LDS before the MFMA. The W_UK and W_abs weights remain bf16: quantizing them
 adds accuracy risk, and the KV cache is what fp8 is being applied to here. Note this is
@@ -1082,69 +1212,129 @@ at ~192 MiB per decode step, which dominates at low batch.
 
 ## 7. hipDNN exposure plan
 
-> **Note:** The hipDNN heuristics/dispatch layer is still being stood up. This section
-> captures the proposed integration contract; the final field names and AotCatalog
-> packaging format must be confirmed with the hipDNN team before implementation starts.
+> **Note:** The hipDNN heuristics/dispatch layer is still being stood up, and rocKE's own
+> dispatch surface moved during this spike: `library/api/` (the C++ `SdpaProblem` /
+> `AotCatalog` / `SelectionConstraints` path this section was originally scoped
+> against) was **deleted**, and selection is now Python under
+> `library/dispatch/attention/`. This section is written against that path. Field names
+> and the eventual packaging format still need confirming with the hipDNN team.
 
-### 7.1 New op identifier
+### 7.1 Op identifiers
 
-MLA prefill and decode-absorb are distinct ops from `sdpa_fwd`. Proposed op strings:
+MLA prefill and decode-absorb are distinct ops. `AttentionRequest.op` currently defaults
+to `"attention"`, and the only comparison against it is in `_request_errors`
+(`library/dispatch/attention/common.py`), which rejects anything else. That one function
+is called by all seven unified candidate predicates (`generic`, `gfx942`, `gfx950`,
+`gfx1250`) and by `attention_sweep_space`, so it is the gate that keeps a new op string
+from reaching any candidate — but for exactly that reason it must **not** be widened in
+place. Widening it would drop the op guard from every existing candidate at once, and the
+only thing left rejecting an MLA request would be the `hdim_q != hdim_v` check that §7.2
+also proposes to relax. MLA candidates should instead get their own
+`_mla_request_errors` accepting only the MLA op strings, leaving `_request_errors` pinned
+to `op == "attention"`; that keeps the two sets mutually exclusive by construction. A
+second, non-gating hardcode needs fixing at the same time: `_kernel_id`
+(`library/dispatch/attention/__init__.py`) emits `op="attention"` unconditionally, so
+without a change there every MLA selection would be logged, hashed into
+`KernelId.selection_key`, and recorded in tuning data under the SDPA op name.
 
 | Op string | Kernel |
 |---|---|
-| `mla_prefill_fwd` | Prefill (compressed-KV + decoupled RoPE) |
+| `mla_prefill_fwd` | Prefill (compressed-KV + decoupled RoPE), pre-kernel + flash loop (§3) |
 | `mla_decode_absorb_fwd` | Decode-absorb (weight-absorbed, q=1) |
 
-### 7.2 SdpaProblem extensions
+### 7.2 AttentionRequest extensions
 
-New fields on `SdpaProblem` (see `library/api/src/dispatcher/SdpaProblem.hpp`):
-
-```cpp
-// MLA geometry (zero-default = standard SDPA, not MLA)
-std::int64_t kvLoraRank    = 0;   // r_KV (e.g. 512)
-std::int64_t qLoraRank     = 0;   // r_Q  (e.g. 1536; 0 = standard SDPA)
-std::int64_t qkNopeDim     = 0;   // d_nope (e.g. 128)
-std::int64_t qkRopeDim     = 0;   // d_rope (e.g. 64)
-std::string  mlaMode       = "none";  // "none" | "prefill" | "decode_absorb"
-```
-
-The `headSize` field retains its existing meaning (`d_nope + d_rope = 192` for
-DeepSeek) for backward compatibility with the existing catalog match logic;
-MLA-specific fields are additive.
-
-### 7.3 AttentionRequest extensions
-
-New fields on `AttentionRequest` in `library/dispatch/attention.py`:
+`AttentionRequest` (`library/dispatch/attention/common.py`) is the normalized request.
+MLA geometry is additive; zero-defaults keep every existing caller on the standard path:
 
 ```python
-kv_lora_rank : int = 0     # r_KV; 0 = standard SDPA
-q_lora_rank  : int = 0     # r_Q;  0 = standard SDPA
-qk_nope_dim  : int = 0     # d_nope
-qk_rope_dim  : int = 0     # d_rope
+kv_lora_rank : int = 0       # r_KV; 0 = standard SDPA, not MLA
+q_lora_rank  : int = 0       # r_Q
+qk_nope_dim  : int = 0       # d_nope
+qk_rope_dim  : int = 0       # d_rope
 mla_mode     : str = "none"  # "none" | "prefill" | "decode_absorb"
 ```
 
-### 7.4 AotInstance / SelectionConstraints
+**On `hdim_q` / `hdim_v`.** These are already *separate fields* on `AttentionRequest`, so
+MLA's asymmetry needs no new field — but five things downstream still collapse or reject
+it, and all five are in scope for the implementation stories:
 
-MLA instances in the AOT catalog use the new op strings.
-`RockeClientDispatcher::select()` already indexes candidates by
-`AotCatalog::candidatesFor(problem.op, problem.arch)` *before* running
-`SelectionConstraints::satisfies()`, and `satisfies()` never compares `problem.op` — so
-distinct op strings alone keep MLA and non-MLA instances (and prefill vs decode-absorb)
-from matching each other. **No `satisfies()` change is needed for that.**
+1. `_request_errors` rejects `hdim_q != hdim_v` outright ("only hdim_q == hdim_v is
+   supported").
+2. `_problem()` discards the distinction when it builds the kernel-side problem
+   (`head_size=int(req.hdim_q)`), and `UnifiedAttentionProblem` carries a single
+   `head_size`.
+3. `AttentionSpec` (`library/dispatch/attention/common.py`) also carries a single
+   `head_size` and composes it into `kernel_name()` as `hd{head_size}` — so an
+   asymmetric MLA spec needs its own spec type or a second field, or two distinct MLA
+   shapes would hash and name identically.
+4. `UNIFIED_HEAD_SIZES = (64, 128, 256)` (`library/kernels/common/attention_unified.py`)
+   excludes 192 by set membership, both in `supports_native_unified_attention` and via
+   the `_UNIFIED_CAPABILITY` `ShapeRange`.
+5. The per-arch admission gates `supports_tiled_2d` and `supports_tiled_3d`
+   (`library/kernels/{gfx942,gfx950}/attention_tiled_{2d,3d}.py`) independently reject
+   `head_size not in (64, 128, 256)` against a hardcoded literal, *not* against
+   `UNIFIED_HEAD_SIZES`. Widening the constant does not widen these; they are four
+   separate edits, and they are the layer an MLA kernel would have to re-implement
+   rather than widen.
 
-If a single shared op string is used instead, `mlaMode` must be made a real selection
-key one of two ways: a new `CompileSpec` member that `satisfies()` compares exactly
-(alongside `dtype` / `headSize` / `maskMode`), or a key published by
-`SdpaProblem::attributes()` and constrained through `AotInstance::attributeConstraints`.
-Simply adding the field to `SdpaProblem` has no effect — the free-form attribute map is
-only consulted via those constraints, so an unconstrained new key is inert.
+**Why 192 is the right value to admit**, stated on its merit rather than on compatibility
+with any prior catalog: 192 is `d_nope + d_rope`, the width of the *score-side* contraction
+(§2.2). It is the head dimension the QK product actually runs at, and it is unrelated to
+the output width `d_V = 128` or to the decode kernel's `r_KV + d_rope = 576` memory
+layout. Admitting it is widening a gate to a value the math requires, not a compatibility
+carve-out.
 
-The `AotCatalog.loadDefault()` currently returns empty (Phase 1 kpack TODO in
-`library/api/src/dispatcher/AotCatalog.cpp`). MLA kernels will slot into the same
-packaging mechanism once it is stood up; no special handling needed.
+### 7.3 Capability gating and candidate registration
 
-### 7.5 Open questions regarding hipDNN integration
+Selection is capability-driven, in two stages: `KernelCandidate.admits()` runs the
+declarative `Capability.check()` prefilter (arch, dtype, `ShapeRange`s over
+`request.dims()`, features) and only then the residual predicate passed as `_supports`,
+which returns `(bool, reason)`. `Capability` is contractually a *superset* of the
+predicate — a constraint it cannot express stays in the predicate. Registration is
+explicit, not an import side effect: an MLA module exposes `register(registry)` and is
+added to the module tuple in `library/dispatch/attention/__init__.py`.
+
+Two registration constraints are load-bearing. `CandidateRegistry.register` rejects a
+candidate whose `family` differs from the registry's, and `ATTENTION_REGISTRY` is built
+with `FAMILY == "attention_unified"` — MLA is not that family, so it wants its own
+registry and dim vocabulary. `register` also rejects a capability constraining a dim
+outside the registry's `dim_vocabulary`, and `Capability.check` reads values from
+`request.dims()`; so the §7.2 fields are inert as selection keys until added to **both**
+`AttentionRequest.dims()` and that vocabulary. A `ShapeRange("kv_lora_rank", ...)` added
+without this raises at import ("constrains unknown dims"); added to the vocabulary but
+not to `dims()`, it rejects every request ("dim not provided").
+
+An MLA candidate's `Capability` declares arches, dtypes,
+`ShapeRange`s and features. The existing unified capability is `_UNIFIED_CAPABILITY`
+(`library/dispatch/attention/generic.py:49-57`):
+
+```python
+Capability(
+    arches=known_arches(),
+    dtypes=UNIFIED_DTYPES,
+    shapes=(ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
+            ShapeRange("kv_block_size", allowed=UNIFIED_BLOCK_SIZES)),
+    supports_features=ATTENTION_FEATURES,
+)
+```
+
+MLA needs its **own** capability rather than a widened unified one, for the same reason
+the two ops are distinct: an `hdim_q` of 192 with `hdim_v` of 128 must not become
+selectable for standard SDPA requests as a side effect. A separate capability is
+necessary but **not sufficient**: `Capability` has no `op` field, so the op never
+participates in the declarative prefilter. Both directions of the exclusion are carried
+by the predicates — an MLA request is rejected by every unified candidate only because
+`_request_errors` rejects a non-`"attention"` op, and a standard request is rejected by
+MLA candidates only because the MLA predicate rejects `op == "attention"`. That is why
+§7.1 keeps `_request_errors` pinned and gives MLA its own request-errors function rather
+than widening the shared one. The shared *matching* logic (`Capability.check`, `admits`,
+`CandidateRegistry.select`) is genuinely untouched; the shared *predicate helper* is not,
+and that is the piece to keep separate. `ATTENTION_FEATURES` is
+`{"causal", "sliding_window", "sinks"}` — MLA prefill needs `causal`; the decoupled-RoPE
+and latent-KV behaviour is intrinsic to the op, not a feature flag.
+
+### 7.4 Open questions regarding hipDNN integration
 
 - [ ] Confirm preferred op string naming convention (`mla_prefill_fwd` vs
       `sdpa_fwd_mla_prefill` vs other).
@@ -1153,7 +1343,7 @@ packaging mechanism once it is stood up; no special handling needed.
       not per-request). They must be represented as persistent graph inputs in the
       hipDNN graph, not as AOT compilation constants — their values are known only
       after the model is loaded, not at kernel compilation time. Confirm how
-      `SdpaGraphAdapter` will expose them: as additional weight-type `IGraph` inputs,
+      the graph adapter will expose them: as additional weight-type `IGraph` inputs,
       as opaque constant handles, or another mechanism. This is a blocking question
       for the prefill and decode-absorb implementations.
 - [ ] Confirm whether the two-kernel decode structure (pre-step GEMM + flash loop)
@@ -1165,7 +1355,8 @@ packaging mechanism once it is stood up; no special handling needed.
       choosing between two ops.
 - [ ] Confirm whether chunked-prefill (`softmax_lse` output) is in scope for the
       initial integration target.
-- [ ] Confirm AotCatalog kpack timeline relative to implementation start.
+- [ ] Confirm the AOT packaging timeline relative to implementation start, and what
+      replaces the deleted `AotCatalog` path for shipping prebuilt MLA instances.
 
 ---
 
@@ -1186,13 +1377,25 @@ A Python reference in `library/builders/mla/ref_mla_attn.py` implementing the ex
 
 Weights are stored `[in, out]` (§0), so every up-projection below is a plain `@`
 with no `.T`; the only transposes are the score-forming contractions, which are
-written as `einsum` to keep the `H_q` axis explicit. `scale` is `1/sqrt(192)` for
-both functions — see the note in §0.
+written as `einsum` to keep the `H_q` axis explicit.
+
+`ref_mla_prefill` takes `q_latent` and `W_UQ` because it models the **whole op** —
+pre-kernel plus flash loop (§3) — not the flash kernel alone. It is a numerical
+reference, so it does not reproduce the kernel split; the parity gate compares the op's
+output. Where the reference *does* mirror kernel structure is the decode accumulation
+order, for the reason given below. Both functions take `scale` as an explicit argument,
+supplied by the caller from the same source the kernel gets it from — see the note in §0
+and the tolerance discussion below.
 
 ```python
-scale = (d_nope + d_rope) ** -0.5   # = 1/sqrt(192) — NOT 1/sqrt(576). See §0.
+# `scale` is a REQUIRED argument to both references, never a module default: the gate
+# below is only meaningful if the reference and the kernel receive the *same*
+# host-supplied value. A geometry-derived default would silently agree with a kernel
+# that derived it the same wrong way. (1/sqrt(192) is the value for the models in §1 —
+# NOT 1/sqrt(576), and not the right value at all under YaRN rope scaling. See §0.)
 
-def ref_mla_prefill(q_latent, c_kv, k_rope, W_UQ, W_UK, cu_seqlens, positions, causal=True):
+def ref_mla_prefill(q_latent, c_kv, k_rope, W_UQ, W_UK, cu_seqlens, positions, scale,
+                    causal=True):
     # q_latent [total_q, r_Q] (no head axis); W_UQ [H_q, r_Q, d_nope + d_rope]
     q = torch.einsum("tr,hro->tho", q_latent, W_UQ)       # [total_q, H_q, d_nope+d_rope]
     q_nope, q_rope = q.split([d_nope, d_rope], dim=-1)    # [t,h,128], [t,h,64]
@@ -1206,7 +1409,7 @@ def ref_mla_prefill(q_latent, c_kv, k_rope, W_UQ, W_UK, cu_seqlens, positions, c
     p = softmax(causal_mask(scores, cu_seqlens) if causal else scores, dim=-1)
     return torch.einsum("ths,shv->thv", p, V)             # [total_q, H_q, d_V]
 
-def ref_mla_decode_absorb(c_q, c_kv, k_rope, W_abs, W_rope_proj, W_UV, positions):
+def ref_mla_decode_absorb(c_q, c_kv, k_rope, W_abs, W_rope_proj, W_UV, positions, scale):
     # c_q [B, r_Q] (no head axis); W_abs [H_q, r_Q, r_KV]; W_rope_proj [H_q, r_Q, d_rope];
     # W_UV [H_q, r_KV, d_V] — per head (§0)
     q_abs  = torch.einsum("br,hrk->bhk", c_q, W_abs)          # [B, H_q, r_KV]
@@ -1240,9 +1443,20 @@ the defence against it is that reference and kernel take the same host-supplied
 Four shape files: `mla_shapes.json` under
 `library/benchmarks/{gfx942,gfx950}/attention/decode/` and `mla_prefill_shapes.json`
 under the matching `attention/prefill/` directories. Decode sweep (`seqlen_q=1`):
-kv_len in {512, 1024, 2048, 4096, 8192, 16384, 32768} for DeepSeek V3/R1, GLM-5
-(pending), Kimi-K2. Prefill sweep: seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096,
-8192}. All four files use
+kv_len in {512, 1024, 2048, 4096, 8192, 16384, 32768} at `batch = 1` for DeepSeek
+V3/R1 and Kimi-K2, plus `batch ∈ {4, 8, 32}` at `seqlen_k ∈ {2048, 8192}` to bracket the
+pre-step/flash-loop crossovers of §4 (`B ≈ 2.3` two-stage, `B ≈ 7` materialized).
+`B = 4` sits **between** the two crossovers — past the two-stage form's but not the
+materialized form's — which is where the two pre-step forms make their most divergent
+predictions and so the most informative single point. `B = 8` is just above both, and
+`B = 32` well above, together fixing the batch-dominated asymptote. `B = 1` brackets
+from below but is the weakest point of the four: §4 flags it as launch-bound rather than
+bandwidth-bound, so it does not test the model the other three test.
+Two `seqlen_k` values suffice on the length axis — the flash loop is linear in `kv_len`
+and the pre-step is invariant, so two points fix the line; but see §4 on the
+`B = 32, kv_len = 8192` KV working set exceeding MALL.
+
+Prefill sweep: `seqlen_q = seqlen_k ∈ {512, 1024, 2048, 4096, 8192}`. All four files use
 `block_size: 16` (the repo default for paged KV); the `Bk` values in §5 are kernel
 tile sizes covering 1–2 blocks each, not block sizes (see the note in §5.2).
 
@@ -1250,27 +1464,12 @@ tile sizes covering 1–2 blocks each, not block sizes (see the note in §5.2).
 Phase 1 (§6). The two gfx950 files additionally carry `dtype: "fp8_e4m3"` entries for
 Phase 2; they are **specification, not runnable input for Phase 1**:
 
-- The existing decode harness (`benchmarks/gfx*/attention/decode/benchmark_decode_live.py`)
-  maps dtype with `torch.bfloat16 if shape.dtype == "bf16" else torch.float16`, so any
-  non-`bf16` string — including `fp8_e4m3` — is **silently** benchmarked as fp16.
-- The prefill harnesses (`benchmark_prefill2d_live.py`, both arches) behave differently:
-  they never read a `dtype` string at all. They load ndjson `UAShape` records through
-  `_ua_shape_utils.load_shapes` and key dtype off the torch dtype strings `q_dtype` /
-  `k_dtype` — `filter_prefill_2d` matches `"torch.bfloat16"` / `"torch.float16"` and
-  **drops** everything else rather than defaulting it — with
-  `is_fp8 = "float8" in shape.k_dtype` on both arches (gfx942 then skips the shape,
-  since fp8 is unsupported there). A `dtype: "fp8_e4m3"` key in the prefill JSON is
-  therefore inert for those harnesses, not silently downgraded.
-- Independently, none of the four files is loadable by the current harnesses.
-  Decode: `load_decode_shapes` requires a `head_size` key per shape (no default), which
-  MLA does not have a single value for (`d_nope + d_rope = 192` for the score,
-  `r_KV + d_rope = 576` for the decode-absorb memory layout, `d_V = 128` for the
-  output). Prefill: the blocker is the file format — `_ua_shape_utils.load_shapes`
-  parses **ndjson** (one `UAShape` record per line, with `q_shape` / `k_shape` /
-  `block_table_shape` / `softmax_scale` / `q_dtype`) and silently skips lines it cannot
-  decode, so a nested-object `.json` yields zero shapes rather than an error. Wiring MLA
-  shapes into a runner is part of the kernel deliverable (§9), not a prerequisite of
-  this doc.
+- Each file carries `_dtype_note` and `_harness_note` fields recording, per file,
+  which harness silently mis-types a shape and which silently parses zero shapes. Those
+  notes are normative and travel with the data; they are not duplicated here. Net effect:
+  **none of the four files is loadable by a current harness**, and two of the four
+  failure modes are silent. Wiring MLA shapes into a runner is part of the kernel
+  deliverable (§9), not a prerequisite of this doc.
 
 Consequence: a Phase-1 bf16 run must select the `bf16` entries explicitly. Do not run
 the fp8 entries against a bf16/fp16 harness and read the result as an fp8 number. Both
@@ -1279,7 +1478,9 @@ they travel with the data.
 
 ### 8.3 Parity baselines
 
-The parity harness in `library/builders/mla/` follows the same three-table
+The parity harness lives under `builders/gfx942/attention/` and
+`builders/gfx950/attention/` next to its siblings, not under `mla/` (§8.1 layout note —
+only the arch-neutral reference goes there). It follows the same three-table
 methodology as `library/builders/gfx950/attention/README.md`: three apples-to-apples
 lanes — `auto` vs `auto`, `2d` vs `2d`, `3d` vs `3d` — each comparing the reference
 backend against the rocKE kernel *within* that lane, so a selector difference is never
@@ -1311,11 +1512,23 @@ that drive gfx942/gfx950 MLA decode performance.
 Each bf16 kernel delivers: kernel impl + parity gate + bench run against
 `mla_shapes.json`. The fp8 kernels additionally deliver the fp8 KV cache dequant path.
 
+**The pre-kernels are deliverables too.** Both ops now normatively span two device
+kernels (§3 step 2, §4 pre-step), and neither pre-kernel appears in the table above.
+Before implementation starts, resolve for each: does it reuse an existing rocKE GEMM
+instance — name it, and the byte-identity obligation is already discharged — or is it a
+new instance, in which case it is a seventh and eighth row here under the full
+dual-engine DoD below? The batched-over-`H_q` `[total_q, r_Q] × [r_Q, 192]` and
+`[B, r_Q] × [r_Q, 512]` shapes are not obviously covered by an existing universal-GEMM
+candidate; assume they are not until checked.
+
 **Dual-engine definition of done.** Every row above is a *new instance*, so none is
 complete on the Python side alone. Each kernel must land its Python builder under
 `library/kernels/<arch>/` **and** its C++ engine mirror under `platform/cpp/` in the
-same change, be wired into `ATTENTION_REGISTRY` and into the parity emit cases under
-`library/tests/parity/`, and turn the differential `.ll` gate green at both flavors:
+same change, be wired into the **MLA registry** (§7.3 — a separate `CandidateRegistry`
+with its own `family` and dim vocabulary, *not* `ATTENTION_REGISTRY`, which
+`CandidateRegistry.register` would reject on the family mismatch) and into the parity
+emit cases under `library/tests/parity/`, and turn the differential `.ll` gate green at
+both flavors:
 
 ```bash
 ROCKE_LLVM_FLAVOR=llvm20 python platform/tools/check_byte_identity.py
@@ -1324,7 +1537,7 @@ ROCKE_LLVM_FLAVOR=llvm22 python platform/tools/check_byte_identity.py
 
 Pin the flavor on **both** runs. An unset `ROCKE_LLVM_FLAVOR` is not llvm20: it
 auto-resolves comgr → `torch.version.hip` → `/opt/rocm/.info/version` → `llvm22`
-(`platform/python/rocke/core/lower_llvm.py:200`, `_detect_llvm_flavor`), so on a
+(`platform/python/rocke/core/lower_llvm.py`, `_detect_llvm_flavor`), so on a
 ROCm 7.2+ box an unset run
 and the `llvm22` run are the same run and the llvm20 intrinsic declares are never
 covered.
@@ -1368,15 +1581,6 @@ vLLM and SGLang as the AMD attention backend.
   (chunked-prefill regime).
 - `ROCM_AITER_TRITON_MLA`: uses Triton MHA path for prefill (standard flash with
   expanded head_dim=192 for nope+rope).
-
-**FlyDSL** (MLIR-based Python DSL, `github.com/ROCm/FlyDSL`):
-- Used in AITER for MoE and GEMM kernels (Kimi-K2.5 MoE fused kernel).
-- A `fused qk_norm_rope_quant` kernel for DeepSeek-V4 decode was delivered via
-  FlyDSL (Q2 2026 roadmap) — relevant to MLA prefill preprocessing.
-- No complete MLA attention kernel in FlyDSL yet; listed as future work.
-- Architecture: CuTe-style layout algebra, compiles to HSACO via MLIR Fly dialect.
-  Comparable to rocKE (Python DSL → GPU binary) but through a different compiler
-  stack (MLIR vs LLVM IR).
 
 ### 10.2 FlashMLA (DeepSeek)
 
@@ -1494,7 +1698,7 @@ deployed at scale in SGLang (PR #905, #1138). Key implementation details:
 - Prefill crossover threshold ~171–228 tokens (§2.5): below threshold → Triton
   absorbed decode; above → materialize K/V → standard flash prefill.
 - Open issue (#4615): avoid materializing `w_kc`/`w_vc` to save GPU memory — still
-  open, relevant to the hipDNN graph tensor representation question in §7.5.
+  open, relevant to the hipDNN graph tensor representation question in §7.4.
 
 ---
 
@@ -1504,10 +1708,10 @@ deployed at scale in SGLang (PR #905, #1138). Key implementation details:
 - `library/builders/gfx950/attention/ALGORITHM.md` — unified attention on gfx950; template for this doc's structure
 - `library/builders/gfx942/attention/ALGORITHM.md` — gfx942 narrow/flash math
 - `library/builders/gfx1250/attention/gfx1250_universal_attention_plan.md` — phased plan analog
-- `library/kernels/common/attention_unified.py` — `UnifiedAttentionProblem`, dispatch heuristics, flash building blocks
 - `library/kernels/common/fmha_fwd_fp8.py` — sync-dequant fp8 pattern (gfx950+ fp8 kernels)
-- `library/dispatch/attention.py` — `AttentionRequest`, `ATTENTION_REGISTRY` (Python dispatch layer to extend)
-- `library/api/src/dispatcher/SdpaProblem.hpp` — C++ normalized problem struct (to extend for hipDNN)
+- `library/dispatch/attention/` — `AttentionRequest`, `ATTENTION_REGISTRY`, the arch candidate modules (the dispatch layer to extend; `common.py` holds the request and its gates, `generic.py:49-57` the unified `Capability`)
+- `platform/python/rocke/dispatch/core.py` — `Capability`, `ShapeRange`, `KernelCandidate`, `CandidateRegistry` (the matching machinery §7.3 builds on; not re-exported through `dispatch.attention`)
+- `library/kernels/common/attention_unified.py` — `UnifiedAttentionProblem`, `UNIFIED_HEAD_SIZES`, flash building blocks
 - `library/kernels/gfx942/attention_tiled_2d.py`, `attention_tiled_3d.py` — arch baselines
 - `library/kernels/gfx950/attention_tiled_2d.py`, `attention_tiled_2d_fastkv_regp.py` — gfx950 baselines; `register_pv` and `ds_read_tr` patterns
 - `library/kernels/common/attention_arch.py` — arch gating (`_NARROW_TILED_2D_ARCHES`, `validate_tiled_attention_arch`)
@@ -1519,5 +1723,5 @@ deployed at scale in SGLang (PR #905, #1138). Key implementation details:
 - TileLang MLA on gfx942: `github.com/tile-ai/tilelang` / `tilelang.com/deeplearning_operators/deepseek_mla.html`
 - FlashInfer ROCm: `github.com/ROCm/flashinfer`
 - SGLang weight absorption: PR #905, #1138 at `github.com/sgl-project/sglang`
-- FlyDSL: `github.com/ROCm/FlyDSL`
+- FlyDSL: `github.com/ROCm/FlyDSL` — MLIR-based Python DSL used in AITER for MoE/GEMM; a rocKE-comparable Python→HSACO path through MLIR rather than LLVM IR. No MLA attention kernel, so it informs no decision in §2–§5
 - CK FMHA (192,128): `github.com/ROCm/composable_kernel` — commit `4399ad79029`; `include/ck_tile/ops/fmha/`, `dispatcher/codegen/fmha/fmha_arch_specs.json`, `tile_engine/ops/fmha/ck_fmha_testing_matrix.yaml`
