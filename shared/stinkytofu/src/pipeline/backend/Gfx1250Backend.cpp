@@ -65,9 +65,14 @@
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchAbsStaticPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelDynamicPass.hpp"
 #include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
+#include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 
 namespace stinkytofu {
 namespace {
+// Deliberately a literal triple rather than getArchTriple(GfxArchID::Gfx1250): this file is
+// compiled into every build, including a Gfx1250v0-only one where that enumerator does not
+// exist. Keying on {12,5,0} is also what gives v0 v1's pipeline, which is correct -- the two
+// steppings differ in instruction timing, not in which passes should run.
 constexpr std::array<int, 3> GFX1250_ARCH{12, 5, 0};
 
 /// Build the gfx1250 per-region optimization passes into a PassManager.
@@ -195,6 +200,17 @@ bool buildGfx1250Pipeline(ModulePassManager& mpm, StinkyAsmModule& module, const
         // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
         // inherit the loop's src C MSB).
         pm.addPass(createCFGBuilderPass());
+
+        // TDM load wave-sync barrier insertion (kernel scope). Must run after tensorcnt
+        // insertion (StinkyWaitCntInsertionPass, in the region adaptor above), so the
+        // s_wait_tensorcnt structure it keys on exists, and after this CFGBuilderPass,
+        // so predecessors are populated for the backward scan. Before RegionClone so
+        // cloned regions carry the barrier too. Inserts a workgroup barrier between an
+        // urgent and a deferrable tensor_load group. Off by default.
+        if (moduleOptions.TDMLoadWaveSync) {
+            pm.addPass(createTDMLoadWaveSyncPass());
+        }
+
         pm.addPass(createRegionClonePass(moduleOptions.CloneList));
         mpm.addPass(createMainOnlyAdaptor(std::move(pm)));
     }
