@@ -112,6 +112,15 @@ std::string datatype_to_string(data_type_t type) {
   }
 }
 
+std::string hybrid_mode_to_string(hybrid_mode_t mode) {
+  switch (mode) {
+    case hybrid_mode_t::static_: return "static";
+    case hybrid_mode_t::dynamic: return "dynamic";
+    case hybrid_mode_t::none: return "none";
+    default: return "Invalid";
+  }
+}
+
 data_type_t string_to_datatype(std::string s) {
   if (s == "f32") return data_type_t::Float;
   if (s == "c32") return data_type_t::ComplexFloat;
