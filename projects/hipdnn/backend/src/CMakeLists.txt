@@ -67,6 +67,7 @@ add_library(
     heuristics/uhd/JsonLogicEvaluator.cpp
     heuristics/uhd/FeatureExtractor.cpp
     heuristics/uhd/SelectionEngine.cpp
+    heuristics/uhd/Sha256.cpp
     heuristics/uhd/UhdBuiltIn.cpp
     heuristics/uhd/UhdLoader.cpp
     heuristics/uhd/adapters/TreeDataAdapter.cpp

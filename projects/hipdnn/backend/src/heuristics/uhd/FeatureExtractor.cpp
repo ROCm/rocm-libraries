@@ -161,7 +161,6 @@ FeatureExtractor::FeatureExtractor(const std::vector<std::string>& signature,
     // Parse and analyze derived values (RFC 0019 §6.4)
     _parsedDerived.reserve(derived.size());
     const std::string kernelPrefix = "$kernel.";
-    const std::string derivedPrefix = "$derived.";
 
     for(size_t i = 0; i < derived.size(); ++i)
     {
@@ -384,6 +383,7 @@ void FeatureExtractor::evaluateDerived(FeatureExtractionContext& ctx) const
 {
     // RFC 0019 §6.4: Evaluate derived values in order and bind to $derived.* namespace.
     // Each expression can reference $device.*, $kernel.*, $q.*, and earlier $derived.* entries.
+    // NOLINTNEXTLINE(modernize-loop-convert) - index reserved for future error reporting
     for(size_t i = 0; i < _parsedDerived.size(); ++i)
     {
         const auto& [name, expr] = _parsedDerived[i];

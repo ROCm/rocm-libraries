@@ -42,7 +42,6 @@ public:
     static std::optional<UhdConfig>
         loadFromBuffer(const void* buffer, size_t bufferSize, const std::filesystem::path& basePath = "");
 
-private:
     UhdLoader() = delete;
 };
 

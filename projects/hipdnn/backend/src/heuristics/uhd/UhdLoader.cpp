@@ -52,7 +52,7 @@ std::optional<UhdConfig>
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
-    if(!buffer || bufferSize == 0)
+    if(buffer == nullptr || bufferSize == 0)
     {
         HIPDNN_SDK_LOG_ERROR("UHD buffer is null or empty");
         return std::nullopt;
@@ -68,7 +68,7 @@ std::optional<UhdConfig>
 
     // Get root UHD table
     const auto* uhd = flatbuffers::GetRoot<UHD>(buffer);
-    if(!uhd)
+    if(uhd == nullptr)
     {
         HIPDNN_SDK_LOG_ERROR("Failed to get UHD root table");
         return std::nullopt;
@@ -78,7 +78,7 @@ std::optional<UhdConfig>
     UhdConfig config;
 
     // Required fields
-    if(!uhd->id() || !uhd->features_hash() || !uhd->objective())
+    if(uhd->id() == nullptr || uhd->features_hash() == nullptr || uhd->objective() == nullptr)
     {
         HIPDNN_SDK_LOG_ERROR("UHD missing required fields (id, features_hash, or objective)");
         return std::nullopt;
@@ -96,18 +96,18 @@ std::optional<UhdConfig>
     }
 
     // Optional fields
-    if(uhd->name())
+    if(uhd->name() != nullptr)
     {
         config.name = uhd->name()->str();
     }
 
     // Derived values (RFC 0019 §6.4)
-    if(uhd->derived())
+    if(uhd->derived() != nullptr)
     {
         config.derived.reserve(uhd->derived()->size());
         for(const auto* entry : *uhd->derived())
         {
-            if(entry && entry->name() && entry->expression())
+            if(entry != nullptr && entry->name() != nullptr && entry->expression() != nullptr)
             {
                 config.derived.emplace_back(entry->name()->str(), entry->expression()->str());
             }
@@ -115,12 +115,12 @@ std::optional<UhdConfig>
     }
 
     // Features signature
-    if(uhd->features_signature())
+    if(uhd->features_signature() != nullptr)
     {
         config.featuresSignature.reserve(uhd->features_signature()->size());
         for(const auto* feature : *uhd->features_signature())
         {
-            if(feature)
+            if(feature != nullptr)
             {
                 config.featuresSignature.push_back(feature->str());
             }
@@ -128,15 +128,15 @@ std::optional<UhdConfig>
     }
 
     // Score metadata
-    if(uhd->score())
+    if(uhd->score() != nullptr)
     {
         const auto* scoreMetadata = uhd->score();
-        if(scoreMetadata->units())
+        if(scoreMetadata->units() != nullptr)
         {
             config.scoreUnits = scoreMetadata->units()->str();
         }
         config.scoreCalibrated = scoreMetadata->calibrated();
-        if(scoreMetadata->transform())
+        if(scoreMetadata->transform() != nullptr)
         {
             config.scoreTransform = scoreMetadata->transform()->str();
         }
@@ -156,7 +156,7 @@ std::optional<UhdConfig>
     }(uhd->adapter());
 
     // Model artifact path (resolve relative to base path if provided)
-    if(uhd->model_artifact_path())
+    if(uhd->model_artifact_path() != nullptr)
     {
         std::filesystem::path artifactPath(uhd->model_artifact_path()->str());
         if(!basePath.empty() && artifactPath.is_relative())
@@ -167,19 +167,19 @@ std::optional<UhdConfig>
     }
 
     // Model hash for integrity validation
-    if(uhd->model_hash())
+    if(uhd->model_hash() != nullptr)
     {
         config.modelHash = uhd->model_hash()->str();
     }
 
     // Static order fields
-    if(uhd->static_order_fields())
+    if(uhd->static_order_fields() != nullptr)
     {
         config.staticOrderFields.clear();
         config.staticOrderFields.reserve(uhd->static_order_fields()->size());
         for(const auto* field : *uhd->static_order_fields())
         {
-            if(field)
+            if(field != nullptr)
             {
                 config.staticOrderFields.push_back(field->str());
             }

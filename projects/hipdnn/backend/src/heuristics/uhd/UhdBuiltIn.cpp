@@ -565,7 +565,7 @@ hipdnnPluginStatus_t policyGetTrace(hipdnnHeuristicPolicyDescriptor_t desc,
             UHD_LOG(HIPDNN_SEV_WARN,
                     "policyGetTrace: no trace available for engine %lld",
                     static_cast<long long>(engineId));
-            return HIPDNN_PLUGIN_STATUS_NOT_SUPPORTED;
+            return HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE;
         }
 
         const SelectionTrace& trace = traceIt->second;
