@@ -2664,7 +2664,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # package system (editable-installed) rather than a hardcoded path, then
         # load it under a private name with a fake ``aiter`` injected.
         module_path = importlib.util.find_spec(
-            "builders.gfx950.attention.parity_unified_attention"
+            "builders.gfx950.attention.prefill.parity_unified_attention"
         ).origin
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")
