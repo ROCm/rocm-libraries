@@ -185,3 +185,82 @@ TEST(TestBlockScaleQuantizeAttributes, SimplifiedSetScaleWithMove)
 
     EXPECT_NE(attrs.get_scale(), nullptr);
 }
+
+TEST(TestBlockScaleQuantizeAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::BlockScaleQuantizeAttributes attrA;
+    hipdnn_frontend::graph::BlockScaleQuantizeAttributes attrB;
+    hipdnn_frontend::graph::BlockScaleQuantizeAttributes attrC;
+    hipdnn_frontend::graph::BlockScaleQuantizeAttributes attrD;
+
+    // Baseline structural shared tensors
+    auto xShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    xShared->set_uid(100)
+        .set_name("input_tensor")
+        .set_dim({1, 256, 16, 16})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto yShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    yShared->set_uid(200)
+        .set_name("output_tensor")
+        .set_dim({1, 256, 16, 16})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto scaleShared = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scaleShared->set_uid(300)
+        .set_name("scale_tensor")
+        .set_dim({1, 256, 1, 1})
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    // Completely Identical Base configurations
+    attrA.set_x(xShared)
+        .set_y(yShared)
+        .set_scale(scaleShared)
+        .set_block_size(32)
+        .set_axis(1)
+        .set_transpose(false);
+    attrB.set_x(xShared)
+        .set_y(yShared)
+        .set_scale(scaleShared)
+        .set_block_size(32)
+        .set_axis(1)
+        .set_transpose(false);
+
+    EXPECT_TRUE(attrA.logicallyEquals(attrB));
+    EXPECT_TRUE(attrA == attrB);
+
+    // Metadata Divergence (Varying tracking variables but identical logical topology)
+    auto xMetaDiff = std::make_shared<hipdnn_frontend::graph::TensorAttributes>(*xShared);
+    xMetaDiff->set_uid(999).set_name("altered_tensor_name");
+
+    attrC.set_x(xMetaDiff)
+        .set_y(yShared)
+        .set_scale(scaleShared)
+        .set_block_size(32)
+        .set_axis(1)
+        .set_transpose(false);
+
+    EXPECT_TRUE(attrA.logicallyEquals(attrC));
+    EXPECT_FALSE(attrA == attrC);
+
+    // Functional Scalar Property Mismatches
+    // Variant 1: Block size variance
+    attrD.set_x(xShared)
+        .set_y(yShared)
+        .set_scale(scaleShared)
+        .set_block_size(16)
+        .set_axis(1)
+        .set_transpose(false);
+    EXPECT_FALSE(attrA.logicallyEquals(attrD));
+    EXPECT_FALSE(attrA == attrD);
+
+    // Variant 2: Axis variance
+    attrD.set_axis(0).set_block_size(32); // Reset block_size, mutate axis
+    EXPECT_FALSE(attrA.logicallyEquals(attrD));
+    EXPECT_FALSE(attrA == attrD);
+
+    // Variant 3: Transpose execution variance
+    attrD.set_axis(1).set_transpose(true); // Reset axis, mutate transpose
+    EXPECT_FALSE(attrA.logicallyEquals(attrD));
+    EXPECT_FALSE(attrA == attrD);
+}

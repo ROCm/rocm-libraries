@@ -325,7 +325,10 @@ int main(int argc, char* argv[])
     const auto opt_help = app.add_flag("-h, --help", "Produces this help message");
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
-    app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
+
+    const auto opt_nrand
+        = app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")
+              ->default_val(0);
     app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
         ->default_val(system_memory::singleton().get_total_gbytes());
     app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
@@ -422,7 +425,7 @@ int main(int argc, char* argv[])
             else
             {
                 // emulationtype == emulation_extended given CLI11's check above
-                assert(emulationtype == emulation_extended);
+                assert((emulationtype == emulation_extended));
                 emulation_prob = 1;
                 test_prob      = 0.02;
                 unittest_prob  = 0.02;
@@ -454,19 +457,18 @@ int main(int argc, char* argv[])
         ->needs("--mp_lib");
 
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
-        ->excludes("--emulation", "--test_prob", "--emulation_prob", "--unittest_prob", "--nrand")
+        ->excludes("--emulation", "--test_prob", "--emulation_prob", "--unittest_prob")
         ->each([&](const std::string&) {
             // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
             test_prob      = 0.0005;
             emulation_prob = 0.005;
             unittest_prob  = 0.2;
-            n_random_tests = 10;
-        });
 
-    app.add_flag(
-           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
-        ->default_val("none");
+            // Allow nrand to take precedence over this option:
+            if(!opt_nrand->count())
+                n_random_tests = 10;
+        });
 
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
         ->default_val(default_seed_dev());
@@ -549,6 +551,11 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
+
+    non_token->add_option("--callback", manual_params.run_callbacks, "Inject load/store callbacks.")
+        ->default_val("none")
+        ->check(CLI::IsMember({"none", "funcptr", "jit"}));
+
     app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
     app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);

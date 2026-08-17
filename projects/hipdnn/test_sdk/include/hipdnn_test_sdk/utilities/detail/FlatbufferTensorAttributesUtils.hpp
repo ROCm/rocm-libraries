@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
@@ -17,6 +19,32 @@ inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT unpackTensorAttri
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT tensorAttributesT;
     tensorAttributes.UnPackTo(&tensorAttributesT);
     return tensorAttributesT;
+}
+
+/// Folds the two mutually-exclusive SDPA scale sources into a single optional
+/// scalar operand: a real scale tensor if present, else a synthesized baked
+/// FLOAT scalar carrying attn_scale_value, else nullopt (default 1/sqrt(D)).
+/// The frontend (SdpaFwdNode/SdpaBwdNode) enforces that at most one source is
+/// set, so this never has to reconcile a conflict.
+inline std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT>
+    foldSdpaScale(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* scaleTensor,
+                  std::optional<float> attnScaleValue)
+{
+    if(scaleTensor != nullptr)
+    {
+        return unpackTensorAttributes(*scaleTensor);
+    }
+    if(attnScaleValue.has_value())
+    {
+        hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT baked;
+        baked.data_type = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+        baked.dims = {1};
+        baked.strides = {1};
+        baked.is_runtime_pass_by_value = false;
+        baked.value.Set(hipdnn_flatbuffers_sdk::data_objects::Float32Value(attnScaleValue.value()));
+        return baked;
+    }
+    return std::nullopt;
 }
 
 template <typename T>

@@ -166,23 +166,21 @@ def _build_region_hsaco(kernel, *, explicit_arch: Optional[str] = None) -> bytes
     Fusion regions are built to be launched immediately on the local device,
     so this targets the active device's gfx (via
     :func:`rocke.runtime.hip_module.get_device_arch`) instead of defaulting
-    to a fixed architecture. Falls back to ``gfx950`` when no device/arch can
-    be detected (e.g. IR-only/no-GPU contexts), preserving the historical
-    default. Pass ``explicit_arch`` to override (reproducible builds).
+    to a fixed architecture. Raises an error when no device/arch can
+    be detected (e.g. IR-only/no-GPU contexts). Pass ``explicit_arch`` to override (reproducible builds).
 
     The comgr ISA always matches the resolved arch; the LLVM lowering uses the
-    matching ISA backend when the arch is one rocke models, else the gfx950
-    backend (the device still gets a code object built for its own ISA).
+    matching ISA backend when the arch is one rocke models.
     """
-    from ..core.arch import known_arches
+    from ..core.arch import validate_arch
     from ..core.lower_llvm import lower_kernel_to_llvm
     from ..runtime.comgr import build_hsaco_from_llvm_ir
     from ..runtime.hip_module import get_device_arch
 
-    arch = explicit_arch or get_device_arch() or "gfx950"
+    arch = explicit_arch or get_device_arch()
+    validate_arch(arch)
     isa = f"amdgcn-amd-amdhsa--{arch}"
-    lower_arch = arch if arch in known_arches() else "gfx950"
-    ir = lower_kernel_to_llvm(kernel, arch=lower_arch)
+    ir = lower_kernel_to_llvm(kernel, arch=arch)
     hsaco, _ = build_hsaco_from_llvm_ir(ir, isa=isa)
     return hsaco
 
@@ -349,7 +347,7 @@ class GemmEpilogueLowerer:
         )
         from .fuse import dtype_to_ir
 
-        from ..core.arch import ArchTarget, known_arches
+        from ..core.arch import ArchTarget, validate_arch
         from ..instances.common.gemm_universal import is_valid_spec
         from ..runtime.hip_module import get_device_arch
 
@@ -371,9 +369,9 @@ class GemmEpilogueLowerer:
         # filtered through the arch-aware ``is_valid_spec`` so configs that don't
         # fit (e.g. an LDS tile too large for gfx942's 64 KB, or a non-WMMA-legal
         # tile/pipeline on gfx1151) are dropped instead of crashing comgr.
-        arch = get_device_arch() or "gfx950"
-        target_gfx = arch if arch in known_arches() else "gfx950"
-        target = ArchTarget.from_gfx(target_gfx)
+        arch = get_device_arch()
+        validate_arch(arch)
+        target = ArchTarget.from_gfx(arch)
         wmma = target.wave_size == 32
         family = "wmma" if wmma else "mma"
         wave_size = target.wave_size
@@ -433,7 +431,7 @@ class GemmEpilogueLowerer:
                 object.__setattr__(spec, "_fused_epilogue", epilogue)
                 object.__setattr__(spec, "_bias_arg", bias_name)
                 object.__setattr__(spec, "_residual_args", residual_names)
-                if not is_valid_spec(spec, arch=target_gfx)[0]:
+                if not is_valid_spec(spec, arch=arch)[0]:
                     continue
                 configs.append(
                     AutotuneConfig(
@@ -445,7 +443,7 @@ class GemmEpilogueLowerer:
         return configs
 
     def build(self, config: AutotuneConfig) -> BuiltRegion:
-        from ..core.arch import ArchTarget, known_arches
+        from ..core.arch import ArchTarget, known_arches, validate_arch
         from ..instances.common.gemm_universal import build_universal_gemm
         from ..runtime.hip_module import get_device_arch
         from ..runtime.launcher import KernelLauncher
@@ -463,15 +461,15 @@ class GemmEpilogueLowerer:
         # when it matches the spec's wave size (the common case); otherwise fall
         # back to the first known arch with the matching wave size so a wave32
         # WMMA candidate still builds on a wave64 host (and vice versa).
-        dev = get_device_arch() or "gfx950"
-        build_gfx = dev if dev in known_arches() else "gfx950"
-        if ArchTarget.from_gfx(build_gfx).wave_size != spec.wave_size:
+        arch = get_device_arch()
+        validate_arch(arch)
+        if ArchTarget.from_gfx(arch).wave_size != spec.wave_size:
             for cand in known_arches():
                 if ArchTarget.from_gfx(cand).wave_size == spec.wave_size:
-                    build_gfx = cand
+                    arch = cand
                     break
-        kernel = build_universal_gemm(spec, arch=build_gfx)
-        hsaco = _build_region_hsaco(kernel, explicit_arch=build_gfx)
+        kernel = build_universal_gemm(spec, arch=arch)
+        hsaco = _build_region_hsaco(kernel, explicit_arch=arch)
         ptr_ty = f"ptr<{ir_dtype.name}, global>"
         sig: List[Mapping[str, Any]] = [
             {"name": "A", "type": ptr_ty, "size_bytes": 8},

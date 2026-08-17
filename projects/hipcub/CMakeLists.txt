@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-cmake_policy(VERSION 3.18...3.25)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_policy(VERSION 3.19...3.25)
 
 # ROCm libraries root (for shared/ctest and other shared resources).
 # Only set the default when not already defined (e.g. by superproject /
@@ -84,6 +84,14 @@ option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
+
+# Fetch a legacy implementation of hipCUB and use that instead. This option
+# should REALLY not be used and must be removed as soon as possible.
+option(
+  HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING
+  "Swap to a legacy implementation of hipCUB. This should only be used as a last-resort. This option will be removed without warning. Using this option changes behavior that is not reflected by the version number."
+  OFF
+)
 
 # Check and test cuda compiler, defines 'CMAKE_HIP_COMPILER'
 check_language(HIP)
@@ -200,7 +208,45 @@ if(BUILD_OFFLOAD_COMPRESS)
 endif()
 
 # hipCUB library
-add_subdirectory(hipcub)
+
+if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
+  message(WARNING "Do not rely on HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING! It will be removed without warning!")
+
+  # 'GIT_PATH' is set by including 'cmake/Dependencies.cmake'.
+  if(NOT DEFINED GIT_PATH)
+    message(FATAL_ERROR "Git could not be found on the system!")
+  endif()
+
+  set(HIPCUB_LEGACY_REPO_DIR "${CMAKE_CURRENT_BINARY_DIR}/hipcub-legacy-src")
+  set(HIPCUB_LEGACY_TAG "therock-7.13")
+
+  find_path(FOUND_HIPCUB_LEGACY NAMES "." PATHS "${HIPCUB_LEGACY_REPO_DIR}" NO_CACHE NO_DEFAULT_PATH)
+  if(${FOUND_HIPCUB_LEGACY} STREQUAL "FOUND_HIPCUB_LEGACY-NOTFOUND")
+    # If not found, use a sparse checkout to download it.
+    # Any failure here is treated as fatal.
+    execute_process(COMMAND ${GIT_PATH} clone --branch ${HIPCUB_LEGACY_TAG} --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git "${HIPCUB_LEGACY_REPO_DIR}"
+                    COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${GIT_PATH} sparse-checkout init --cone
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}"
+                    COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND ${GIT_PATH} sparse-checkout set "projects/hipcub"
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}"
+                    COMMAND_ERROR_IS_FATAL ANY)
+  endif()
+  # Always ensure we checkout the right tag.
+  # This also ensures the repository is valid.
+  execute_process(COMMAND ${GIT_PATH} checkout ${HIPCUB_LEGACY_TAG}
+                  WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}"
+                  COMMAND_ERROR_IS_FATAL ANY)
+  set(HIPCUB_LEGACY_DIR "${HIPCUB_LEGACY_REPO_DIR}/projects/hipcub")
+
+  set(CMAKE_CURRENT_SOURCE_DIR_OLD ${CMAKE_CURRENT_SOURCE_DIR})
+  set(CMAKE_CURRENT_SOURCE_DIR ${HIPCUB_LEGACY_DIR})
+  add_subdirectory(${HIPCUB_LEGACY_DIR}/hipcub)
+  set(CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR_OLD})
+else()
+  add_subdirectory(hipcub)
+endif()
 
 if(BUILD_CODE_COVERAGE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
@@ -232,16 +278,20 @@ if(BUILD_TEST)
 
   enable_testing()
   rocm_package_setup_client_component(tests)
-  add_subdirectory(test)
+  if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
+    add_subdirectory(${HIPCUB_LEGACY_DIR}/test)
+  else()
+    add_subdirectory(test)
+  endif()
 endif()
 
 # Examples
-if(BUILD_EXAMPLE)
+if(BUILD_EXAMPLE AND NOT HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   add_subdirectory(examples)
 endif()
 
 # Benchmarks
-if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
+if(BUILD_BENCHMARK AND NOT ONLY_INSTALL AND NOT HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
 endif()

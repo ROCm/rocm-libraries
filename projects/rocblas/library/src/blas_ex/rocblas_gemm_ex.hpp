@@ -22,7 +22,7 @@
 
 #pragma once
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 #include "../blas3/Tensile/gemm_tensile.hpp"
 #endif
 

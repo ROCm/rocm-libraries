@@ -48,7 +48,6 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_HIP_DUMP)
 // This flag Paths are expected to be deprecated/modified
 // in upcoming MAJOR Releases.
 #define MIOPEN_CLANG_REL_PATH "llvm/bin/clang"
-#define MIOPEN_OCL_REL_PATH "bin/clang"
 #define MIOPEN_CPPCLANG_REL_PATH "llvm/bin/clang++"
 #define MIOPEN_OFFLOADBUNDLER_REL_PATH "llvm/bin/clang-offload-bundler"
 
@@ -78,13 +77,6 @@ static std::string generateCompilerPathValue(const char* relativePath)
 const char* getAMDGCNAssemblerPath()
 {
     static const std::string path = generateCompilerPathValue(MIOPEN_CLANG_REL_PATH);
-    return path.c_str();
-}
-
-// API to get MIOPEN OpenCL Compiler Path Values.
-const char* getOpenCLCompilerPath()
-{
-    static const std::string path = generateCompilerPathValue(MIOPEN_OCL_REL_PATH);
     return path.c_str();
 }
 

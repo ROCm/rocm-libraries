@@ -42,7 +42,7 @@ private:
     {
         int64_t id;
         std::function<std::unique_ptr<hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>>(
-            const compilation::IKernelCompiler&, const device::IDevicePropertyProvider&)>
+            const device::IDevicePropertyProvider&)>
             createEngine;
     };
 

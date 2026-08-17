@@ -1172,11 +1172,6 @@ protected:
     void run()
     {
 
-#if(MIOPEN_BACKEND_OPENCL == 1)
-        if(miopen_type<T>{} == miopenHalf)
-            GTEST_SKIP() << "FP16 not supported for MIOPEN_BACKEND_OPENCL == 1" << std::endl;
-#endif
-
         if(batchSeq.empty() || 0 == batchSeq[0])
         {
             std::cout << "Empty batch sequence. Filling uniformly with batch size: " << batchSize
@@ -1217,33 +1212,16 @@ protected:
 
         miopenRNNAlgo_t algoMode  = miopenRNNdefault;
         miopenHandle_t mio_handle = nullptr;
-#if MIOPEN_BACKEND_HIP
-        void* dropout_state_buf = nullptr;
-#elif MIOPEN_BACKEND_OPENCL
-        cl_mem dropout_state_buf = nullptr;
-#endif
+        void* dropout_state_buf   = nullptr;
         if(useDropout != 0)
         {
-// Workaround for issue #2335.
-// OpenCL error creating buffer: 0 Invalid Buffer Size
-#if MIOPEN_BACKEND_OPENCL
-            GTEST_SKIP() << "Skip test for Issue #2335: " << std::endl;
-#endif
             miopenCreateWithStream(&mio_handle, handle.GetStream());
 
             float dropout_rate              = 0.5;
             unsigned long long dropout_seed = 0ULL;
             miopenDropoutGetStatesSize(mio_handle, &statesSizeInBytes);
 
-#if MIOPEN_BACKEND_OPENCL
-            cl_context ctx;
-            clGetCommandQueueInfo(
-                handle.GetStream(), CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-            dropout_state_buf =
-                clCreateBuffer(ctx, CL_MEM_READ_WRITE, statesSizeInBytes, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
             (void)hipMalloc(static_cast<void**>(&dropout_state_buf), statesSizeInBytes);
-#endif
 
             miopenSetDropoutDescriptor(DropoutDesc,
                                        mio_handle,
@@ -1498,11 +1476,7 @@ protected:
 
         if(useDropout != 0)
         {
-#if MIOPEN_BACKEND_HIP
             (void)hipFree(dropout_state_buf);
-#elif MIOPEN_BACKEND_OPENCL
-            (void)clReleaseMemObject(dropout_state_buf);
-#endif
             miopenDestroy(mio_handle);
         }
     }

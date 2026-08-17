@@ -145,12 +145,12 @@ typedef enum rocfft_execution_mode_e
 } rocfft_execution_mode;
 #endif
 
-/*! @brief Library setup function, called once in program before start of
- * library use */
+/*! @brief Library setup function, called at least once in program before
+ * start of library use */
 ROCFFT_EXPORT rocfft_status rocfft_setup();
 
-/*! @brief Library cleanup function, called once in program after end of library
- * use */
+/*! @brief Library cleanup function, called exactly as many times as rocfft_setup
+ * in program after end of library use */
 ROCFFT_EXPORT rocfft_status rocfft_cleanup();
 
 /*! @brief Create an FFT plan

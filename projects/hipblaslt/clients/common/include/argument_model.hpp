@@ -67,33 +67,26 @@ public:
                   hipblaslt_internal_ostream& val_line,
                   const Arguments&            arg,
                   double                      gpu_us,
-                  double                      flush_us,
                   double                      gflops,
                   double                      gbytes,
                   double                      cpu_us,
                   double                      norm,
                   double                      atol,
-                  double                      rtol)
+                  double                      rtol,
+                  double                      max_ulp,
+                  double                      avg_ulp)
     {
         // requires enablement for frequency logging
         ArgumentModel_log_performance(name_line, val_line);
 
         constexpr bool has_batch_count = has(e_batch_count);
         int64_t        batch_count     = has_batch_count ? arg.batch_count : 1;
-        int64_t        hot_calls       = arg.iters < 1 ? 1 : arg.iters;
 
-        // gpu time is total cumulative over hot calls, cpu is not
-        if(hot_calls > 1)
-            gpu_us /= hot_calls;
-
-        if(flush_us > 0)
-        {
-            gpu_us -= flush_us;
-        }
-
-        // per/us to per/sec *10^6
-        double hipblaslt_gflops = gflops * batch_count / gpu_us * 1e6;
-        double hipblaslt_GBps   = gbytes / gpu_us * 1e6;
+        // both gpu_us and cpu_us are per-call time
+        double hipblaslt_gflops = hipblaslt_bench::rate_per_second(
+            gflops * batch_count, gpu_us, ArgumentLogging::NA_value);
+        double hipblaslt_GBps
+            = hipblaslt_bench::rate_per_second(gbytes, gpu_us, ArgumentLogging::NA_value);
 
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)
@@ -113,7 +106,7 @@ public:
         name_line << ",us";
         val_line << "," << gpu_us;
 
-        if(arg.unit_check || arg.norm_check || arg.allclose_check)
+        if(arg.unit_check || arg.norm_check || arg.allclose_check || arg.ulp_check)
         {
             if(cpu_us != ArgumentLogging::NA_value)
             {
@@ -156,6 +149,13 @@ public:
                         val_line << "," << rtol;
                 }
             }
+            if(arg.ulp_check)
+            {
+                name_line << ",max_ulp_error";
+                val_line << "," << max_ulp;
+                name_line << ",avg_ulp_error";
+                val_line << "," << avg_ulp;
+            }
         }
     }
 
@@ -171,13 +171,14 @@ public:
                   uint32_t                    splitK,
                   uint32_t                    wgm,
                   double                      gpu_us,
-                  double                      flush_us,
                   double                      gflops,
                   double                      gbytes = ArgumentLogging::NA_value,
                   double                      cpu_us = ArgumentLogging::NA_value,
-                  double                      norm   = ArgumentLogging::NA_value,
-                  double                      atol   = ArgumentLogging::NA_value,
-                  double                      rtol   = ArgumentLogging::NA_value,
+                  double                      norm    = ArgumentLogging::NA_value,
+                  double                      atol    = ArgumentLogging::NA_value,
+                  double                      rtol    = ArgumentLogging::NA_value,
+                  double                      max_ulp = 0.0,
+                  double                      avg_ulp = 0.0,
                   const hipblaslt_bench::TimingResult& timing = {})
     {
         hipblaslt_internal_ostream name_list;
@@ -278,13 +279,14 @@ public:
                      value_list,
                      arg,
                      gpu_us,
-                     flush_us,
                      gflops,
                      gbytes,
                      cpu_us,
                      norm,
                      atol,
-                     rtol);
+                     rtol,
+                     max_ulp,
+                     avg_ulp);
 
         // Adaptive-timing distribution columns ("us"/Gflops above are the median).
         // Emitted only when the adaptive path ran, so the fixed-count line carries

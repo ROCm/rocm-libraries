@@ -450,7 +450,7 @@ FusionPlanDescriptor::FusionPlanDescriptor(const miopenFusionDirection_t dir,
     : fusion_dir(dir),
       input_desc(inDesc),
       is_valid(false),
-      kernel_source_type(OpenclText),
+      kernel_source_type(KernelText),
       fp_contains_bn(false),
       data_type(inDesc.GetType())
 {

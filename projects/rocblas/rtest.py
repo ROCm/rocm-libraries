@@ -24,6 +24,7 @@ import os
 import sys
 import subprocess
 import shlex
+import shutil
 import argparse
 import pathlib
 import platform
@@ -48,7 +49,8 @@ def parse_args():
     Checks build arguments
     """)
     parser.add_argument(      '--ci_labels', type=str, required=False, default="",
-                    help='Semi-colon seperated list of labels that may modify test runs (optional, e.g. "gfx12;TestLevel1Only")')
+                    help='Semicolon-separated labels that may modify test runs (e.g. "gfx12;TestLevel1Only"). '
+                         'If omitted, the GITHUB_PR_LABELS environment variable is used when set (e.g. CI PR labels).')
     parser.add_argument(      '--ci_gfx', type=str, required=False, default="",
                     help='Semi-colon seperated list of gfx targets expected on test runs (optional, e.g. "gfx1030;gfx1201")')
     parser.add_argument('-e', '--emulation', type=str, required=False,
@@ -71,24 +73,36 @@ def arg_into_list(arg) -> list:
     arg = re.sub(r"['\"]|['\']",'', arg)
     return arg.split(';')
 
+def rocm_executable(exe_name: str) -> str:
+  if shutil.which(exe_name):
+    return exe_name
+  bin_dir = os.environ.get("ROCM_PATH") or os.environ.get("HIP_PATH")
+  if bin_dir:
+    candidate = pathlib.Path(bin_dir) / "bin" / exe_name
+    if candidate.exists():
+        return str(candidate)
+  return None
+
 def vram_detect():
     global OS_info
     OS_info["VRAM"] = 0
     if os.name == "nt":
-        cmd = "hipinfo.exe"
-        process = subprocess.run([cmd], stdout=subprocess.PIPE)
-        for line_in in process.stdout.decode().splitlines():
-            if 'totalGlobalMem' in line_in:
-                OS_info["VRAM"] = float(line_in.split()[1])
-                break
+        cmd = rocm_executable("hipinfo.exe")
+        if cmd is not None: 
+            process = subprocess.run([cmd], stdout=subprocess.PIPE)
+            for line_in in process.stdout.decode().splitlines():
+                if 'totalGlobalMem' in line_in:
+                    OS_info["VRAM"] = float(line_in.split()[1])
+                    break
     else:
-        cmd = "rocminfo"
-        process = subprocess.run([cmd], stdout=subprocess.PIPE)
-        for line_in in process.stdout.decode().splitlines():
-            match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
-            if match:
-                OS_info["VRAM"] = float(match.group(1))/(1024*1024)
-                break
+        cmd = rocm_executable("rocminfo")
+        if cmd is not None: 
+            process = subprocess.run([cmd], stdout=subprocess.PIPE)
+            for line_in in process.stdout.decode().splitlines():
+                match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
+                if match:
+                    OS_info["VRAM"] = float(match.group(1))/(1024*1024)
+                    break
 
 def os_detect():
     global OS_info
@@ -237,7 +251,9 @@ def run_cmd(cmd, test = False, time_limit = 0, path = "" ):
                 elif output:
                     outstring = output.strip()
                     print (outstring)
-                    error = error or re.search(r'error|fail', outstring, re.IGNORECASE)
+                    # skip output that is optional GTest summary
+                    if not re.search(r'\[ FAILED.*\]', outstring):
+                        error = error or re.search(r'error|fail', outstring, re.IGNORECASE)
             status = test_proc.poll()
             if time_limit > 0:
                 p.stop()
@@ -404,6 +420,13 @@ def main():
 
     os_detect()
     args = parse_args()
+
+    # PR / CI labels (e.g. GitHub Actions): semicolon-separated, same format as --ci_labels.
+    # When --ci_labels is omitted, use GITHUB_PR_LABELS from the environment (e.g. set by CI before ctest).
+    if not args.ci_labels:
+        env_labels = os.environ.get("GITHUB_PR_LABELS", "").strip()
+        if env_labels:
+            args.ci_labels = env_labels
 
     if args.emulation:
         args.test = f'emulation_{args.emulation}'

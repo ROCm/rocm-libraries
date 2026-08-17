@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/HipErrorHandler.hpp>
 #include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+#include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -21,8 +22,8 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
-#include "harness/golden/BundleRegistration.hpp"
-#include "harness/golden/UnverifiableBundleReport.hpp"
+#include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/UnverifiableBundleReport.hpp"
 
 namespace
 {
@@ -95,11 +96,11 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--allow-bundles")
             .default_value(false)
             .implicit_value(true)
-            .help("Enable golden reference bundle test registration. "
-                  "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
+            .help("Enable bundle test registration (default: false). "
+                  "Set --allow-bundles or HIPDNN_TEST_ALLOW_BUNDLES=1 env var to enable.");
         parser.add_argument("--gd", "--golden-data-dir")
             .help("Path to the integration test bundle data directory. "
-                  "Defaults to <exe>/../lib/integration_test_bundles/. "
+                  "Defaults to <exe>/../lib/integration-test-bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
         // --verification-mode governs BUNDLE tests (how the engine's output is
         // verified). It is independent of --reference-executor, which governs the
@@ -108,6 +109,9 @@ int main(int argc, char** argv) noexcept
             .help("How bundle engine output is verified: 'auto' (default; golden -> "
                   "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. "
                   "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--capture-bundles")
+            .help("Capture C++ graph tests as JSON bundles into the given directory. "
+                  "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -205,6 +209,13 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --capture-bundles argument
+        std::optional<std::filesystem::path> captureDir;
+        if(parser.is_used("--capture-bundles"))
+        {
+            captureDir = parser.get<std::string>("--capture-bundles");
+        }
+
         // Parse --test-article argument and load explicit plugin if provided
         std::optional<std::filesystem::path> articlePath;
         if(parser.is_used("--test-article"))
@@ -250,6 +261,7 @@ int main(int argc, char** argv) noexcept
         opts.allowBundles = allowBundles;
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
+        opts.captureDir = std::move(captureDir);
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -306,13 +318,28 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        hipdnn_integration_tests::golden::registerBundleTests();
+        hipdnn_integration_tests::bundle::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
         // Informational only — these SKIP, so they do not affect `result`.
-        hipdnn_integration_tests::golden::UnverifiableBundleReport::get().print();
+        hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
+
+        {
+            const auto* unit = ::testing::UnitTest::GetInstance();
+            const int total = unit->test_to_run_count();
+            const int passed = unit->successful_test_count();
+            const int skip = unit->skipped_test_count();
+            const int failed = unit->failed_test_count();
+            const double pct = total > 0 ? 100.0 * passed / total : 0.0;
+
+            std::cerr << "\n==== TEST COVERAGE SUMMARY ====\n"
+                      << "Passed:  " << passed << " / " << total << " (" << std::fixed
+                      << std::setprecision(1) << pct << "%)\n"
+                      << "Skipped: " << skip << "\n"
+                      << "Failed:  " << failed << "\n";
+        }
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())

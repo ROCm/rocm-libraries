@@ -1,0 +1,45 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+algorithm: GA
+pop_size: 512
+n_gen: 30
+soo: False
+period: 5 # 0 disables it
+tol: 0.0008
+div_thr: 0.5
+max_iters: 250
+seed: 0
+verbose: 1
+log_file: optimization.log
+weights: null
+weight_beta: 0.25 # Beta parameter for weight transformation: w = exp(-beta * (w - w.min()))
+n_elements_to_validate: 0
+survival:
+  name: fitness
+#  ratio: 1.0 # TODO
+selection:
+  name: tournament
+  tournament:
+    k: 2
+  truncation:
+    elite_ratio: 0.231579
+  beta:
+    a: 1
+    b: 2.5
+  common:
+    ratio: 0.5
+    elitism: 0.05
+    replacement: true
+crossover:
+  name: ux
+  common:
+    mode: random
+    prob: 0.9 # Should be in the (0.8, 1.0) range usually
+mutation:
+  prob: null # If set should be something small (e.g. 0.02~0.06), set to 1 / n_params by default
+#  weights:
+#    group_0: 2.1 # MatrixInstruction group is more important to explore/exploit, so we increase its mutation rate, this is just an example
+#    DepthU: 2.1
+# weights' role is to increase the mutation rate for certain parameters, the final prob will be prob * w
+
+

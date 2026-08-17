@@ -83,11 +83,15 @@ if __name__ == '__main__':
             data = open(existing_path, 'rb').read()
             if existing_path.endswith('.zlib'):
                 data = zlib.decompress(data)
-            org_content = msgpack.unpackb(data)
+            org_content = msgpack.unpackb(data, strict_map_key=False)
             lib_meta = {**org_content, **lib_meta}
         raw = msgpack.packb(lib_meta)
         with open(output_lib_gz_path, 'wb') as f:
             f.write(zlib.compress(raw, 9))
+        try:
+            os.unlink(output_lib_path)
+        except FileNotFoundError:
+            pass
     else:
         if os.path.exists(output_lib_path):
             update_open_foramt = 'r'

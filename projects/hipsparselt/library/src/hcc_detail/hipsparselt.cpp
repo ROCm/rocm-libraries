@@ -192,6 +192,10 @@ rocsparselt_matmul_descr_attribute_
         return rocsparselt_matmul_activation_tanh_beta;
     case HIPSPARSELT_MATMUL_BIAS_TYPE:
         return rocsparselt_matmul_bias_type;
+    case HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER:
+        return rocsparselt_matmul_gate_residual_mat_pointer;
+    case HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC:
+        return rocsparselt_matmul_gate_residual_desc;
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }

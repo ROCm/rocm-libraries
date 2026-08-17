@@ -118,6 +118,7 @@ class CommonTypeMappings:
         "fp8": "fp8_t",
         "bf8": "bf8_t",
         "int8": "int8_t",
+        "int32": "int32_t",
     }
 
     DTYPE_TO_CK_QUALIFIED = {
@@ -127,6 +128,7 @@ class CommonTypeMappings:
         "fp8": "ck_tile::fp8_t",
         "bf8": "ck_tile::bf8_t",
         "int8": "int8_t",
+        "int32": "int32_t",
     }
 
     DTYPE_TO_DISPATCHER = {
@@ -136,6 +138,7 @@ class CommonTypeMappings:
         "fp8": "DataType::FP8",
         "bf8": "DataType::BF8",
         "int8": "DataType::INT8",
+        "int32": "DataType::INT32",
     }
 
     # GEMM-specific layout mappings ("r"/"c" for row/column major).
@@ -202,8 +205,26 @@ class CommonTypeMappings:
 
     @staticmethod
     def get_output_dtype(dtype: str) -> str:
-        """Get output datatype (fp8/bf8 -> fp16)."""
-        return "fp16" if dtype in ("fp8", "bf8") else dtype
+        """Get output (C) datatype for an A/B element dtype.
+
+        Low-precision float inputs accumulate into and store as fp16
+        (fp8/bf8 -> fp16); int8 stores its int32 accumulator (int8 -> int32).
+        Everything else stores in its own dtype.
+        """
+        if dtype in ("fp8", "bf8"):
+            return "fp16"
+        if dtype == "int8":
+            return "int32"
+        return dtype
+
+    @staticmethod
+    def get_acc_dtype(dtype: str) -> str:
+        """Get accumulator datatype for an A/B element dtype.
+
+        Integer GEMM accumulates in int32; every float dtype accumulates in
+        fp32.
+        """
+        return "int32" if dtype == "int8" else "fp32"
 
 
 # ============================================================================
@@ -348,3 +369,229 @@ def needs_warp_expansion(config: dict) -> bool:
 def needs_pipeline_expansion(config: dict) -> bool:
     """True if pipeline is a wildcard (\"*\")."""
     return config.get("pipeline", "compv4") == "*"
+
+
+# ============================================================================
+# BQuant kernel name construction
+# ============================================================================
+
+
+def bquant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+    quant_group_n: int,
+) -> str:
+    """Return the epilogue tag that the codegen will actually emit for the given tile params.
+
+    Mirrors the TiledMMAPermuteN / use_permute_n_epilogue logic in
+    unified_grouped_gemm_bquant_codegen.py and run_gemm_quant_example.inc:
+      TiledMMAPermuteN = (N_Repeat % 2 == 0), N_Repeat = TileN / (WarpN * WarpTileN)
+      use_permute_n_epilogue = TiledMMAPermuteN and quant_group_n == 1
+
+    Returns "permute_n" when PermuteNEpilogue is selected, "cshuffle" otherwise.
+    """
+    n_repeat = tile_n // (warp_n * warp_tile_n)
+    use_permute_n = (n_repeat % 2 == 0) and (quant_group_n == 1)
+    return "permute_n" if use_permute_n else "cshuffle"
+
+
+def make_bquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — actual epilogue is computed from tile params via bquant_effective_epilogue
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    quant_group_m: int,
+    quant_group_n: int,
+    quant_group_k: int,
+    preshuffle_b: bool = False,
+    preshuffle_bquant: bool = False,
+) -> str:
+    """Return the canonical BQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Both BQuantKernelConfig (utils) and BQuantKernelSpec (codegen) delegate to this
+    function so the two sides are guaranteed to stay byte-exact.
+
+    The epilogue segment in the name reflects the epilogue the codegen actually emits
+    (computed via bquant_effective_epilogue from tile params) rather than the
+    user-specified epilogue string, so the name always matches the compiled kernel.
+    The ``epilogue`` parameter is accepted for call-site compatibility but not used.
+    """
+    effective_epilogue = bquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
+    parts = [
+        "grouped_gemm_bquant",
+        variant_key,
+        layout,
+        pipeline,
+        effective_epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",
+    ]
+    if preshuffle_b:
+        parts.append("preshuffleb")
+    if preshuffle_bquant:
+        parts.append("preshufflebq")
+    return "_".join(parts)
+
+
+# ============================================================================
+# BQuant-specific Type Mappings
+# ============================================================================
+
+# CK qualified type names for BQuant dtype fields (A, B, C, Q).
+# Used by unified_bquant_gemm_codegen.py. Kept here so future AQuant/ABQuant
+# codegens can reuse the same map without duplication.
+BQUANT_DTYPE_MAP = {
+    "fp8":     "ck_tile::fp8_t",
+    "bf8":     "ck_tile::bf8_t",
+    "pk_int4": "ck_tile::pk_int4_t",
+    "pk_fp4":  "ck_tile::pk_fp4_t",
+    "half":    "ck_tile::half_t",
+    "bf16":    "ck_tile::bf16_t",
+    "float":   "float",
+    "e8m0":    "ck_tile::e8m0_t",
+}
+
+
+# ============================================================================
+# AQuant kernel name construction
+# ============================================================================
+
+
+def aquant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+    quant_group_n: int,
+) -> str:
+    """Return the epilogue tag the codegen will emit for AQuant kernels.
+
+    Mirrors the same TiledMMAPermuteN / use_permute_n_epilogue logic as BQuant
+    (the PermuteN condition is driven by B-side tile geometry, regardless of
+    which side is quantised).  Returns "permute_n" when PermuteNEpilogue is
+    selected, "cshuffle" otherwise.
+    """
+    n_repeat = tile_n // (warp_n * warp_tile_n)
+    use_permute_n = (n_repeat % 2 == 0) and (quant_group_n == 1)
+    return "permute_n" if use_permute_n else "cshuffle"
+
+
+def make_aquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — actual epilogue is computed from tile params
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    quant_group_m: int,
+    quant_group_n: int,
+    quant_group_k: int,
+    preshuffle_aq: bool = False,
+) -> str:
+    """Return the canonical AQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Both AQuantKernelConfig (utils) and AQuantKernelSpec (codegen) delegate to
+    this function so the two sides are guaranteed to stay byte-exact.
+    """
+    effective_epilogue = aquant_effective_epilogue(tile_n, warp_n, warp_tile_n, quant_group_n)
+    parts = [
+        "grouped_gemm_aquant",
+        variant_key,
+        layout,
+        pipeline,
+        effective_epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        f"aqg{quant_group_m}x{quant_group_n}x{quant_group_k}",
+    ]
+    if preshuffle_aq:
+        parts.append("preshuffleaq")
+    return "_".join(parts)
+
+
+# ============================================================================
+# ABQuant kernel name construction
+# ============================================================================
+
+
+def abquant_effective_epilogue(
+    tile_n: int,
+    warp_n: int,
+    warp_tile_n: int,
+    bquant_group_n: int,
+    pipeline: str = "compv3",
+) -> str:
+    """Return the epilogue tag the codegen will emit for ABQuant kernels.
+
+    The PermuteN selection is governed by the B-side quant group N, matching
+    the same logic used by BQuant / AQuant. EightWaves and PreshuffleB use
+    TransposeC=true (transposed accumulator layout) which is incompatible with
+    PermuteNEpilogue — both must always use CShuffleEpilogue (TiledMMAPermuteN=false
+    in the C++ test fixtures for both GemmConfigEightWaves and GemmConfigPreshuffleB_ABQuant_Prefill).
+    """
+    if pipeline in ("eightwaves", "preshuffleb"):
+        return "cshuffle"
+    n_repeat = tile_n // (warp_n * warp_tile_n)
+    use_permute_n = (n_repeat % 2 == 0) and (bquant_group_n == 1)
+    return "permute_n" if use_permute_n else "cshuffle"
+
+
+def make_abquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,  # ignored — actual epilogue is computed from tile params
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    aquant_group_m: int,
+    aquant_group_n: int,
+    aquant_group_k: int,
+    bquant_group_m: int,
+    bquant_group_n: int,
+    bquant_group_k: int,
+    preshuffle_b: bool = False,
+    preshuffle_aq: bool = False,
+    preshuffle_bq: bool = False,
+    transpose_c: bool = False,
+) -> str:
+    """Return the canonical ABQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Both ABQuantKernelConfig (utils) and ABQuantKernelSpec (codegen) delegate
+    to this function so the two sides are guaranteed to stay byte-exact.
+    """
+    effective_epilogue = abquant_effective_epilogue(tile_n, warp_n, warp_tile_n, bquant_group_n, pipeline)
+    parts = [
+        "grouped_gemm_abquant",
+        variant_key,
+        layout,
+        pipeline,
+        effective_epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        f"aqg{aquant_group_m}x{aquant_group_n}x{aquant_group_k}",
+        f"bqg{bquant_group_m}x{bquant_group_n}x{bquant_group_k}",
+    ]
+    if preshuffle_b:
+        parts.append("preshuffleb")
+    if preshuffle_aq:
+        parts.append("preshuffleaq")
+    if preshuffle_bq:
+        parts.append("preshufflebq")
+    if transpose_c:
+        parts.append("transposec")
+    return "_".join(parts)

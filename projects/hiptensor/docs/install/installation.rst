@@ -196,6 +196,9 @@ Here are the available options to build the hipTensor library, with or without c
     *   -   ``HIPTENSOR_INLINE_UNARY_OPS``
         -   Inline all contraction unary ops for best runtime performance (slower compilation)
         -   ``OFF``
+    *   -   ``HIPTENSOR_DISABLE_DEVICE``
+        -   Build a host-only stub library without the device backend (see `Building a stub library`_). This is enabled automatically when ``GPU_TARGETS`` resolves to an empty target list.
+        -   ``OFF``
     *   -   ``CREATE_TEST_APP_LOCAL_DEPLOY``
         -   Copy ROCm runtime DLLs next to test binaries so they take precedence over System32 (Windows only)
         -   ``OFF``
@@ -516,6 +519,21 @@ The following table highlights the relationships between high-level grouped targ
 |                                   +---------------------------------------------------------------------------------+
 |                                   |``rank6_reduction_test``                                                         |
 +-----------------------------------+---------------------------------------------------------------------------------+
+
+Building a stub library
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When ``GPU_TARGETS`` resolves to an empty list, the Composable Kernel device backend cannot be
+built. In this case hipTensor builds a host-only stub ``libhiptensor`` that implements the full
+public API but returns ``HIPTENSOR_STATUS_NOT_SUPPORTED`` for every call, so the package,
+headers, and CMake config stay available for downstream consumers.
+
+The stub is selected automatically when ``GPU_TARGETS`` is empty, or explicitly with
+``-DHIPTENSOR_DISABLE_DEVICE=ON``:
+
+.. code-block:: bash
+
+   CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DGPU_TARGETS=""
 
 Building on Windows
 -------------------------------------------

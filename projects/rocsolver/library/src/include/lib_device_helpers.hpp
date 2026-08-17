@@ -194,30 +194,25 @@ __device__ void
 
 /** FIND_MAX_TRIDIAG finds the element with the largest magnitude in the
     tridiagonal matrix **/
-template <typename T>
-__device__ __host__ T find_max_tridiag(const rocblas_int start, const rocblas_int end, T* D, T* E)
+template <typename T, typename I>
+__device__ __host__ T find_max_tridiag(const I start, const I end, T* D, T* E)
 {
     T anorm = abs(D[end]);
-    for(int i = start; i < end; i++)
+    for(I i = start; i < end; i++)
         anorm = std::fmax(anorm, std::fmax(abs(D[i]), abs(E[i])));
     return anorm;
 }
 
 /** SCALE_TRIDIAG scales the elements of the tridiagonal matrix by a given
     scale factor **/
-template <typename T>
-__device__ __host__ void scale_tridiag(const rocblas_int start,
-                                       const rocblas_int end,
-                                       T* D,
-                                       T* E,
-                                       T scale,
-                                       const rocblas_int tid = 0,
-                                       const rocblas_int tid_inc = 1)
+template <typename T, typename I>
+__device__ __host__ void
+    scale_tridiag(const I start, const I end, T* D, T* E, T scale, const I tid = 0, const I tid_inc = 1)
 {
     if(tid == 0)
         D[end] *= scale;
 
-    for(int i = tid + start; i < end; i += tid_inc)
+    for(I i = tid + start; i < end; i += tid_inc)
     {
         D[i] *= scale;
         E[i] *= scale;
@@ -1443,6 +1438,218 @@ ROCSOLVER_KERNEL void swap_kernel(I const n, T* const x, I const incx, T* const 
             x[ix] = temp;
         }
     }
+}
+
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+// ---------------------------------------------------------------------------
+// DPP helpers -- AMDGCN GFX8+ only (register-to-register, no crossbar)
+// ---------------------------------------------------------------------------
+
+#ifndef ROCSOLVER_ENABLE_DPP
+#define ROCSOLVER_ENABLE_DPP 1
+#endif
+
+// Wraps __builtin_amdgcn_mov_dpp, AMD's DPP (Data-Parallel Primitives) intrinsic.
+// DPP modifiers let one VALU instruction read its operand from a different lane in the same wavefront.
+// Loops over 32-bit words so it works on any type whose size is a multiple of 4 bytes (e.g. float, double, vectors, small structs).
+//  - `dpp_ctrl` - encodes which lane each destination lane should read from (quad permutes, row shifts/rotates, row broadcasts, etc.).
+//  - `row_mask` (4 bits) - selects which of the 4 rows of 16 lanes participate (`0xf` = all rows).
+//  - `bank_mask` (4 bits) - selects which of the 4 banks of 4 lanes participate (`0xf` = all banks).
+//  - `bound_ctrl` - when `true`, out-of-bounds reads return `0`; when `false`, the destination lane is left unchanged.
+template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl, typename T>
+__device__ inline T move_dpp_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "move_dpp_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_mov_dpp(src[w], dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+    return out;
+}
+
+// Wraps __builtin_amdgcn_ds_swizzle, which uses the LDS (Local Data Share) crossbar to perform arbitrary intra-row lane permutations.
+// It is the fallback used on RDNA when certain DPP modes (like row_bcast) are not available.
+template <int swizzle_mask, typename T>
+__device__ inline T ds_swizzle_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "ds_swizzle_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_ds_swizzle(src[w], swizzle_mask);
+    return out;
+}
+
+// Word-wise __shfl broadcast -- works for any T whose size is a multiple of 4 bytes.
+// Performs a lane-broadcast shuffle: every lane in the wavefront reads the value of the specified source lane.
+// Used to broadcast the result from the last lane to lane 0.
+template <typename T>
+__device__ inline T shfl_bcast_T(T v, int src_lane)
+{
+    static_assert(sizeof(T) % 4 == 0, "shfl_bcast_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __shfl(src[w], src_lane);
+    return out;
+}
+
+#else // AMDGCN GFX8+
+
+// Override definition if DPP is unsupported.
+#ifdef ROCSOLVER_ENABLE_DPP
+#undef ROCSOLVER_ENABLE_DPP
+#endif
+#define ROCSOLVER_ENABLE_DPP 0
+
+#endif // AMDGCN GFX8+
+
+// ---------------------------------------------------------------------------
+// Reduction Methods -- AMDGCN GFX8+ use DPP, otherwise use SHFL
+// ---------------------------------------------------------------------------
+
+// Bitwise-AND reduction across the wavefront. val receives the AND of all lanes.
+// AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
+// Fallback: __shfl_down halving loop; result lands in lane 0.
+template <typename I>
+__device__ inline void reduce_wave_and(I& val)
+{
+#if ROCSOLVER_ENABLE_DPP
+    // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
+    // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
+
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val &= move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
+    val &= move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
+    val &= move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
+    val &= move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val &= move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
+    else
+        val &= ds_swizzle_T<0x1e0>(val); // RDNA equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val &= move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
+
+    // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
+    val = shfl_bcast_T(val, warpSize - 1);
+#else
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val &= shift_left(val, r);
+#endif
+}
+
+// NaN-propagating max reduction across the wavefront. val receives the max of all lanes.
+// AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
+// Fallback: __shfl_down halving loop; result lands in lane 0.
+template <typename T>
+__device__ inline void reduce_wave_max_nan(T& val)
+{
+#if ROCSOLVER_ENABLE_DPP
+    // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
+    // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
+
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val = rocblas_max_nan(val, move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val)); // quad_perm:[1,0,3,2]  shift 1
+    val = rocblas_max_nan(val, move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val)); // quad_perm:[2,3,0,1]  shift 2
+    val = rocblas_max_nan(val, move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val)); // row_ror:4            shift 4
+    val = rocblas_max_nan(val, move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val)); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val = rocblas_max_nan(val, move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val)); // row_bcast:15 (CDNA)
+    else
+        val = rocblas_max_nan(val, ds_swizzle_T<0x1e0>(val)); // RDNA equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val = rocblas_max_nan(val, move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val)); // row_bcast:31
+
+    // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
+    val = shfl_bcast_T(val, warpSize - 1);
+#else
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val = rocblas_max_nan(val, shift_left(val, r));
+#endif
+}
+
+// Sum reduction across the wavefront. val receives the sum of all lanes.
+// AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
+// Fallback: __shfl_down halving loop; result lands in lane 0.
+template <typename T>
+__device__ inline void reduce_wave_sum(T& val)
+{
+#if ROCSOLVER_ENABLE_DPP
+    // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
+    // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
+
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
+    val += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
+    val += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
+    val += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
+    else
+        val += ds_swizzle_T<0x1e0>(val); // RDNA equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
+
+    // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
+    val = shfl_bcast_T(val, warpSize - 1);
+
+#else
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val += shift_left(val, r);
+#endif
 }
 
 ROCSOLVER_END_NAMESPACE

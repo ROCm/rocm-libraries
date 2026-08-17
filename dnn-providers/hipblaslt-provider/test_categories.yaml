@@ -13,8 +13,14 @@
 #     in the quick tier automatically).
 #   - comprehensive/full: run everything (no extra exclusions).
 #
-# Unit tests in tests/ use TEST/TEST_F with class prefixes Test*; integration
-# tests in integration_tests/ use INSTANTIATE_TEST_SUITE_P(IntegrationGpuMatmul*, ...).
+# Unit tests in tests/ use TEST/TEST_F with class prefixes Test*; the
+# integration_tests/ binary now only builds
+# IntegrationGpuMxMatmulUnsupported.cpp (MX GEMM shape-rejection checks,
+# gated behind HIPBLASLTPROVIDER_ENABLE_MX_GEMM) since the plain
+# matmul/matmul-bias/matmul-activ/matmul-bias-activ and MX correctness
+# suites were ported to dnn-providers/integration-tests (see
+# test_categories_integration.yaml, applied when hipdnn_integration_tests is
+# run against this provider via the external-integration-check target).
 # The legacy test_hipblasltprovider.py has no TEST_TO_IGNORE map, so this
 # YAML carries no exclude_gpu block. Add one (with the OS-suffixed key shape
 # already supported by shared/ctest/parse_test_categories.py via the

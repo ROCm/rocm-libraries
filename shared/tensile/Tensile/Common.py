@@ -2538,10 +2538,16 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
 def setupRestoreClocks():
   import atexit
   def restoreClocks():
+    # Clocks are only pinned when amd-smi was located, so only restore if so.
     if globalParameters["PinClocks"]:
       asmi = globalParameters["AMDSMIPath"]
-      subprocess.call([asmi, "-d", "0", "--resetclocks"])
-      subprocess.call([asmi, "-d", "0", "--setfan", "50"])
+      if asmi is not None:
+        # amd-smi set/reset require elevated privileges, and it rejects
+        # --clocks and --fans in a single invocation.
+        prefix = ["sudo", "-n"] if hasattr(os, "geteuid") and os.geteuid() != 0 else []
+        for args in (["reset", "-g", "0", "--clocks"], ["reset", "-g", "0", "--fans"]):
+          subprocess.call(prefix + [asmi] + args,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
   atexit.register(restoreClocks)
 setupRestoreClocks()
 

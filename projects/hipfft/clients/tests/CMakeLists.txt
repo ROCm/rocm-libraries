@@ -38,6 +38,23 @@ find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
 include(ROCMInstallTargets)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
 
+# embed rocfft_complex.h so it can be used in hiprtc for callbacks
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
+set( callback_embed_command ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/embed-to-header-rtc.py )
+# generated source file
+set( callback_embed_cpp ${CMAKE_CURRENT_BINARY_DIR}/callback-embed.cpp )
+# files that need to be embedded into the test, to be able to generate callback code
+set( callback_embed_files
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocfft_complex.h
+)
+add_custom_command(
+  OUTPUT ${callback_embed_cpp}
+  COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
+  --embed ${callback_embed_files} --output ${callback_embed_cpp}
+  DEPENDS ${callback_embed_command} ${callback_embed_files}
+  VERBATIM
+)
+
 set( hipfft-test_source
   gtest_main.cpp
   hipfft_accuracy_test.cpp
@@ -46,15 +63,26 @@ set( hipfft-test_source
   accuracy_test_2D.cpp
   accuracy_test_3D.cpp
   accuracy_test_callback.cpp
+  accuracy_test_emulation.cpp
   hipfftw_test.cpp
+  hipfftxt_test.cpp
   multi_device_test.cpp
   multi_stream_test.cpp
   ../../shared/array_validator.cpp
   ../../shared/test_callbacks.cpp
   ../../shared/data_gen_device.cpp
+  ${callback_embed_cpp}
   )
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
+
+# Link to runtime compilation library
+if( BUILD_WITH_LIB STREQUAL CUDA)
+  set( HIPFFT_RTC_LIB CUDA::nvrtc )
+else()
+  find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
+  set( HIPFFT_RTC_LIB hiprtc::hiprtc )
+endif()
 
 set( TEST_TARGETS hipfft-test )
 
@@ -134,12 +162,19 @@ find_package( Threads REQUIRED )
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
-  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
+  add_executable( hipfft_mpi_worker
+    hipfft_mpi_worker.cpp
+    ../../shared/test_callbacks.cpp
+    ../../shared/data_gen_device.cpp
+    ../../shared/array_validator.cpp
+    ${callback_embed_cpp}
+    )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )
   target_include_directories( hipfft_mpi_worker
     PRIVATE
     ${MPI_C_INCLUDE_PATH}
   )
+  target_link_libraries( hipfft_mpi_worker PRIVATE ${HIPFFT_RTC_LIB} )
   add_compile_definitions( HIPFFT_MPI_ENABLE )
 endif()
 
@@ -150,6 +185,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     find_package( HIP REQUIRED )
   endif()
 endif()
+target_link_libraries( hipfft-test PRIVATE ${HIPFFT_RTC_LIB} )
 
 if( HIPFFT_BUILD_SCOPE )
   set( TESTS_OUT_DIR "/../staging" )
@@ -216,10 +252,16 @@ foreach( target ${TEST_TARGETS} )
       hip::host
       hip::device
     )
-    foreach( gpu_target ${GPU_TARGETS} )
-      target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
-    endforeach()
 
+    # On Linux, always include amdgcnspirv target so the clients work
+    # on an architecture that the runtime supports but was not
+    # specified a build time
+    # TODO: amdgcnspirv is not compatible with ASAN.
+    get_target_property(test_opts ${target} COMPILE_OPTIONS)
+    if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+      target_compile_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
+      target_link_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
+    endif()
   else()
     target_compile_definitions( ${target} PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories( ${target} PRIVATE ${HIP_INCLUDE_DIRS})
@@ -339,6 +381,12 @@ endif()
 # tests have callback functions, which need to be built as relocatable device code
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
+  # on CUDA, RTC callback code needs to be told where the CUDA includes are
+  list( GET CUDAToolkit_INCLUDE_DIRS 0 HIPFFT_CUDA_INCLUDE )
+  target_compile_definitions( hipfft-test PRIVATE HIPFFT_CUDA_INCLUDE=\"${HIPFFT_CUDA_INCLUDE}\" )
+  if( HIPFFT_MPI_ENABLE )
+    target_compile_definitions( hipfft_mpi_worker PRIVATE HIPFFT_CUDA_INCLUDE=\"${HIPFFT_CUDA_INCLUDE}\" )
+  endif()
 endif()
 
 if(FFTW_MULTITHREAD)

@@ -269,7 +269,8 @@ def build(
     if not no_python:
         cmake_opts.append(f"-DPython_EXECUTABLE={sys.executable}")
 
-    # Locate ROCmCMakeBuildTools for version TWEAK (git hash) support.
+    # Locate ROCmCMakeBuildTools (version TWEAK git hash) and the SDK cmake prefix
+    # so find_package(amd_comgr CONFIG) can locate the devel package's config.
     _rocm_sdk = shutil.which("rocm-sdk")
     if _rocm_sdk:
         try:
@@ -286,6 +287,33 @@ def build(
                     cmake_opts.append(
                         f"-DROCmCMakeBuildTools_DIR={_rocm_cmake_dir.as_posix()}"
                     )
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            _sdk_cmake = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake}")
+        except subprocess.CalledProcessError:
+            pass
+
+        # Point CMake's find_package(amd_comgr CONFIG) at the SDK's cmake configs
+        # (rocm-sdk pip installs don't populate ROCM_PATH/CMAKE_PREFIX_PATH themselves).
+        try:
+            _sdk_cmake_prefix = (
+                subprocess.check_output(
+                    ["rocm-sdk", "path", "--cmake"], stderr=subprocess.DEVNULL
+                )
+                .decode()
+                .strip()
+            )
+            if _sdk_cmake_prefix:
+                cmake_opts.append(f"-DCMAKE_PREFIX_PATH={_sdk_cmake_prefix}")
         except subprocess.CalledProcessError:
             pass
 
@@ -398,6 +426,27 @@ def tidy(c, build_dir=None):
         f'cmake -B "{bld.as_posix()}" -S "{ROOT_PATH.as_posix()}" -DENABLE_CLANG_TIDY=ON'
     )
     c.run(f'cmake --build "{bld.as_posix()}" --target tidy')
+
+
+@task(
+    help={
+        "build_dir": "Build directory to use (default: build/).",
+        "open_report": "Open the generated HTML docs in a browser when finished.",
+    }
+)
+def docs(c, build_dir=None, open_report=False):
+    """Build the Doxygen + Sphinx documentation site. Requires a prior 'invoke build'."""
+    bld = Path(build_dir).resolve() if build_dir else BUILD_DIR
+    if not bld.exists():
+        print("No build directory found. Run 'invoke build' first.")
+        sys.exit(1)
+    c.run(f'cmake --build "{bld.as_posix()}" --target sphinx_docs')
+    html_index = bld / "docs" / "html" / "index.html"
+    print(f"\nHTML docs: {html_index.as_posix()}")
+    if open_report:
+        import webbrowser
+
+        webbrowser.open(html_index.as_uri())
 
 
 @task(

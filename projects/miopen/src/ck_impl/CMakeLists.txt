@@ -64,6 +64,7 @@ set(CK_IMPL_SOURCES
     ck_fused_grp_activ_impl.cpp
     ck_fused_grp_bias_activ_impl.cpp
     ck_depthwise_fwd_impl.cpp
+    ck_depthwise_bwd_data_impl.cpp
 )
 
 # Collect plugin target names for the MIOpen_with_plugins proxy (see src/CMakeLists.txt).
@@ -107,12 +108,17 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     # Mark as building the DLL for dllexport on Windows
     target_compile_definitions(${lib_name} PRIVATE CK_IMPL_BUILDING_DLL)
 
-    # Per-target compile definitions
-    if(gpu_target MATCHES "gfx942" OR gpu_target MATCHES "gfx950")
-        target_compile_definitions(${lib_name} PRIVATE CK_ENABLE_TF32)
-    endif()
-    if(gpu_target MATCHES "gfx950")
-        target_compile_definitions(${lib_name} PRIVATE CK_USE_GFX95)
+    # Per-target CK compile definitions. Use the shared helper (passing this
+    # plugin's single GPU arch) so the plugin's CK macro set stays in sync with
+    # the main MIOpen target and with how CK itself was built.
+    miopen_apply_ck_compile_definitions(${lib_name} ${gpu_target})
+
+    # Select the wavefront-size-specialized depthwise instance set for this GPU.
+    # CDNA (gfx9xx) uses 64-lane wavefronts; RDNA (gfx10xx/gfx11xx/gfx12xx) uses 32.
+    if(arch_base MATCHES "^gfx9")
+        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_DEPTHWISE_WAVE_SIZE=64)
+    else()
+        target_compile_definitions(${lib_name} PRIVATE MIOPEN_CK_DEPTHWISE_WAVE_SIZE=32)
     endif()
 
     # Choose CK linkage mode:

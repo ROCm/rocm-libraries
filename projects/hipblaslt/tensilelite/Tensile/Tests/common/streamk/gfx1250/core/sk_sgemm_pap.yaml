@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   SyncsPerBenchmark: 0
+  Architecture: gfx1250
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
@@ -50,7 +51,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [3, 4]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
@@ -92,7 +93,7 @@ BenchmarkProblems:
         - PrefetchAcrossPersistent: [1]
         - PrefetchGlobalRead: [1, 2]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [0]
+        - ScheduleIterAlg: [0, 4]
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - TransposeLDS: [0]
@@ -109,3 +110,63 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [512, 512, 1, 256]
           - Exact: [520, 520, 1, 256]
+
+  #######################################
+  # SGEMM NT - StreamK PAP prefetch, non-empty epilogue (bias + activation)
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      Activation: True
+      ActivationType: all
+
+    - # TDM PAP prefetch
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - StreamK: [3]
+        - StreamKForceDPOnly: [0, 1]
+        - GlobalSplitU: [0]
+        - WavefrontSize: [32]
+        - DepthU: [64]
+        - 1LDSBuffer: [-1]
+        - TDMInst: [3]
+        - DirectToLds: [0]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 2]
+        - MIArchVgpr: [false]
+        - PrefetchAcrossPersistent: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [0, 4]
+        - SourceSwap: [True]
+        - StoreRemapVectorWidth: [0]
+        - TransposeLDS: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - WorkGroupMapping: [1, 8]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - StaggerU: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 256]
+          - Exact: [520, 520, 1, 256]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: relu]

@@ -1,0 +1,42 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipdnn-samples Test Categories Configuration.
+#
+# The samples register their tests as pre-registered CTest entries (via
+# add_hipdnn_sample_test()), not as a single GTest binary, so categorization
+# uses apply_ctest_category_labels() over the installed CTestTestfile.cmake.
+# `test_patterns` here are matched (as regex) against CTest test NAMES, not
+# GTest filters.
+#
+# The installed CTestTestfile.cmake (bin/hipdnn_samples/) contains one
+# add_test() per validation sample, e.g.:
+#   - hipdnn_sample_conv_fprop / conv_dgrad / conv_wgrad
+#   - hipdnn_sample_fused_conv_* (non-Windows)
+#   - hipdnn_sample_bn_* (batchnorm family)
+#   - hipdnn_sample_serialization_roundtrip
+#
+# The legacy test_hipdnn_samples.py ran `ctest` with no label filter, so
+# every installed sample test executed in all TEST_TYPEs. The `.*` pattern
+# in the quick tier reproduces that: every installed test is selected by
+# quick (which inherits standard -> comprehensive -> full).
+
+test_categories:
+  quick:
+    description: "hipDNN sample validation tests (run in all tiers)"
+    test_patterns:
+      - ".*"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours

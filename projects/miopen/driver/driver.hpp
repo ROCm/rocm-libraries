@@ -51,16 +51,8 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #include <numeric>
 #include <vector>
 
-#if MIOPEN_BACKEND_OPENCL
-#if defined(__APPLE__) || defined(__MACOSX)
-#include <OpenCL/cl.h>
-#else
-#include <CL/cl.h>
-#endif
-#elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
 #include <functional>
-#endif
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
 
@@ -84,34 +76,6 @@ struct GPUMem
         Front,
         Back,
     };
-
-#if MIOPEN_BACKEND_OPENCL
-    GPUMem() {};
-    GPUMem(cl_context& ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
-        : sz(psz), data_sz(pdata_sz)
-    {
-        buf = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_sz * sz, nullptr, nullptr);
-    }
-
-    int ToGPU(cl_command_queue& q, void* p) const
-    {
-        return clEnqueueWriteBuffer(q, buf, CL_TRUE, 0, data_sz * sz, p, 0, nullptr, nullptr);
-    }
-    int FromGPU(cl_command_queue& q, void* p) const
-    {
-        return clEnqueueReadBuffer(q, buf, CL_TRUE, 0, data_sz * sz, p, 0, nullptr, nullptr);
-    }
-
-    cl_mem GetMem() const { return buf; }
-    size_t GetSize() const { return sz * data_sz; }
-
-    ~GPUMem() { clReleaseMemObject(buf); }
-
-    cl_mem buf;
-    size_t sz;
-    size_t data_sz;
-
-#elif MIOPEN_BACKEND_HIP
 
     GPUMem() {};
     GPUMem(uint32_t ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
@@ -211,13 +175,12 @@ struct GPUMem
                               "hipFree " << size << " at " << buf << " Ok");
     }
 
-    hipStream_t _q; // Place holder for opencl context
+    hipStream_t _q;
     uint32_t _ctx;
     void* buf;
     size_t sz;
     size_t data_sz;
     Check check;
-#endif
 };
 
 template <typename Tgpu>
@@ -516,23 +479,13 @@ public:
     Driver()
     {
         data_type = miopenFloat;
-#if MIOPEN_BACKEND_OPENCL
-        miopenCreate(&handle);
-#elif MIOPEN_BACKEND_HIP
-        hipStream_t s;
-        (void)hipStreamCreate(&s);
-        miopenCreateWithStream(&handle, s);
-#endif
-
-        miopenGetStream(handle, &q);
+        (void)hipStreamCreate(&q);
+        miopenCreateWithStream(&handle, q);
     }
 
     miopenHandle_t GetHandle() { return handle; }
     miopenDataType_t GetDataType() { return data_type; }
 
-#if MIOPEN_BACKEND_OPENCL
-    cl_command_queue& GetStream() { return q; }
-#elif MIOPEN_BACKEND_HIP
     hipStream_t& GetStream() { return q; }
     using hipGraphFuncPtrType   = std::function<int()>;
     hipGraph_t hipGraph         = nullptr;
@@ -546,8 +499,11 @@ public:
     int ExecuteKernel();
     void FinalizeKernel();
     float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
-#endif
-    virtual ~Driver() { miopenDestroy(handle); }
+    virtual ~Driver()
+    {
+        miopenDestroy(handle);
+        (void)hipStreamDestroy(q);
+    }
 
     // TODO: add timing APIs
     virtual int AddCmdLineArgs()                         = 0;
@@ -571,11 +527,7 @@ protected:
     miopenHandle_t handle;
     miopenDataType_t data_type;
 
-#if MIOPEN_BACKEND_OPENCL
-    cl_command_queue q;
-#elif MIOPEN_BACKEND_HIP
     hipStream_t q;
-#endif
 };
 
 template <>

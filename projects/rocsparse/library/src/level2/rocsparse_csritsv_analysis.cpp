@@ -197,13 +197,24 @@ namespace rocsparse
             // Compute ptr_end.
             //
 
-            if((fill_mode == rocsparse_fill_mode_lower && diag_type == rocsparse_diag_type_unit)
-               || (fill_mode == rocsparse_fill_mode_upper
-                   && diag_type == rocsparse_diag_type_non_unit))
+            // Select which ptr_end kernel to launch based on the fill mode.
+            //   lower + unit     / upper + non_unit -> kernel_ptr_end_unit
+            //   lower + non_unit / upper + unit     -> kernel_ptr_end_non_unit
+            bool use_unit_kernel = false;
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
+                use_unit_kernel = (diag_type == rocsparse_diag_type_unit);
+                break;
+            case rocsparse_fill_mode_upper:
+                use_unit_kernel = (diag_type == rocsparse_diag_type_non_unit);
+                break;
+            }
 
-                dim3 blocks((m - 1) / BLOCKSIZE + 1);
-                dim3 threads(BLOCKSIZE);
+            dim3 blocks((m - 1) / BLOCKSIZE + 1);
+            dim3 threads(BLOCKSIZE);
+            if(use_unit_kernel)
+            {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::kernel_ptr_end_unit<1024, I, J>),
                                                    blocks,
                                                    threads,
@@ -215,14 +226,8 @@ namespace rocsparse
                                                    (I*)info->ptr_end,
                                                    descr->base);
             }
-            else if((fill_mode == rocsparse_fill_mode_lower
-                     && diag_type == rocsparse_diag_type_non_unit)
-                    || (fill_mode == rocsparse_fill_mode_upper
-                        && diag_type == rocsparse_diag_type_unit))
+            else
             {
-
-                dim3 blocks((m - 1) / BLOCKSIZE + 1);
-                dim3 threads(BLOCKSIZE);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::kernel_ptr_end_non_unit<1024, I, J>),
                                                    blocks,
                                                    threads,
@@ -291,8 +296,9 @@ namespace rocsparse
             {
                 dim3 blocks((m - 1) / BLOCKSIZE + 1);
                 dim3 threads(BLOCKSIZE);
-                if(fill_mode == rocsparse_fill_mode_lower)
+                switch(fill_mode)
                 {
+                case rocsparse_fill_mode_lower:
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::
                              kernel_count_missing_diagonal2<rocsparse_fill_mode_lower, 1024, I, J>),
@@ -306,9 +312,8 @@ namespace rocsparse
                         descr->base,
                         (J*)temp_buffer,
                         zero_pivot);
-                }
-                else
-                {
+                    break;
+                case rocsparse_fill_mode_upper:
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::
                              kernel_count_missing_diagonal2<rocsparse_fill_mode_upper, 1024, I, J>),
@@ -322,6 +327,7 @@ namespace rocsparse
                         descr->base,
                         (J*)temp_buffer,
                         zero_pivot);
+                    break;
                 }
             }
             J count_missing_diagonal;
@@ -357,8 +363,9 @@ namespace rocsparse
 
                         dim3 blocks((m - 1) / BLOCKSIZE + 1);
                         dim3 threads(BLOCKSIZE);
-                        if(fill_mode == rocsparse_fill_mode_lower)
+                        switch(fill_mode)
                         {
+                        case rocsparse_fill_mode_lower:
                             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                                 (rocsparse::kernel_count_diagonal_triangular<
                                     rocsparse_fill_mode_lower,
@@ -374,9 +381,8 @@ namespace rocsparse
                                 csr_col_ind,
                                 descr->base,
                                 (J*)temp_buffer);
-                        }
-                        else
-                        {
+                            break;
+                        case rocsparse_fill_mode_upper:
                             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                                 (rocsparse::kernel_count_diagonal_triangular<
                                     rocsparse_fill_mode_upper,
@@ -392,6 +398,7 @@ namespace rocsparse
                                 csr_col_ind,
                                 descr->base,
                                 (J*)temp_buffer);
+                            break;
                         }
 
                         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&count_diagonal,

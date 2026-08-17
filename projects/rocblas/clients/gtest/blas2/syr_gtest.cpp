@@ -91,7 +91,12 @@ namespace
                     name << '_' << arg.stride_a;
 
                 if(SYR_TYPE == SYR_STRIDED_BATCHED || SYR_TYPE == SYR_BATCHED)
+                {
                     name << '_' << arg.batch_count;
+
+                    if(arg.alpha_beta_stride)
+                        name << '_' << arg.stride_c;
+                }
             }
 
             if(arg.api & c_API_64)

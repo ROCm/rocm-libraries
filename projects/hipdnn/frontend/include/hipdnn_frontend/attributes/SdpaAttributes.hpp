@@ -17,6 +17,7 @@
 #include <hipdnn_frontend/Types.hpp>
 #include <memory>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -62,7 +63,7 @@ namespace hipdnn_frontend::graph
  *
  * @code{.cpp}
  * SdpaAttributes attr;
- * attr.set_attn_scale_value(1.0f / std::sqrt(static_cast<float>(d_k)))
+ * attr.set_attn_scale(1.0f / std::sqrt(static_cast<float>(d_k)))
  *     .set_causal_mask(true);
  *
  * auto [o, stats] = graph.sdpa(q, k, v, attr);
@@ -135,6 +136,10 @@ public:
     DiagonalAlignment diagonal_alignment = DiagonalAlignment::TOP_LEFT;
     DataType mma_core_mode = DataType::NOT_SET;
     AttentionImplementation implementation = AttentionImplementation::AUTO;
+
+    // Advisory cuDNN FMA-unfuse hint; hipDNN selects fusion internally, so it is
+    // recorded here and warned-and-ignored by Graph::sdpa.
+    bool unfuse_fma_hint = false;
     // NOLINTEND(readability-identifier-naming)
 
     // -- Input tensor getters --
@@ -396,22 +401,22 @@ public:
         return setInput(InputNames::Dropout_scale, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_k(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_paged_attention_k_table(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Page_table_K, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_k(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_paged_attention_k_table(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::Page_table_K, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_v(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_paged_attention_v_table(const std::shared_ptr<TensorAttributes>& value)
     {
         return setInput(InputNames::Page_table_V, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_page_table_v(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_paged_attention_v_table(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::Page_table_V, std::move(value));
     }
@@ -519,22 +524,22 @@ public:
         return setOutput(OutputNames::Stats, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_max(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_logit_max(const std::shared_ptr<TensorAttributes>& value)
     {
         return setOutput(OutputNames::Max, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_max(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_logit_max(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Max, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_sum_exp(const std::shared_ptr<TensorAttributes>& value)
+    SdpaAttributes& set_score_sum_exp(const std::shared_ptr<TensorAttributes>& value)
     {
         return setOutput(OutputNames::Sum_exp, value);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_sum_exp(std::shared_ptr<TensorAttributes>&& value)
+    SdpaAttributes& set_score_sum_exp(std::shared_ptr<TensorAttributes>&& value)
     {
         return setOutput(OutputNames::Sum_exp, std::move(value));
     }
@@ -617,8 +622,10 @@ public:
         dropout_probability = probability;
         return *this;
     }
+    // cuDNN spells the scalar attention-scale overload set_attn_scale(float);
+    // it joins the shared_ptr set_attn_scale overloads above.
     // NOLINTNEXTLINE(readability-identifier-naming)
-    SdpaAttributes& set_attn_scale_value(float value)
+    SdpaAttributes& set_attn_scale(float value)
     {
         attn_scale_value = value;
         return *this;
@@ -659,6 +666,59 @@ public:
     SdpaAttributes& set_implementation(AttentionImplementation value)
     {
         implementation = value;
+        return *this;
+    }
+
+    // -- cuDNN parity setters --
+    // Each accepts the cuDNN frontend spelling/overload/semantics that is more
+    // than a straight rename of a native setter (overload merge, semantic remap,
+    // one-to-many split, or a capability hipDNN lacks). The pure renames were
+    // folded into the native setters above.
+    // cuDNN [[deprecated]] set_is_inference(b) means "no stats": the inverse of
+    // generate_stats. PyTorch still emits it on CUDNN_FRONTEND_VERSION <= 11200.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    [[deprecated("use set_generate_stats(!value)")]] SdpaAttributes& set_is_inference(bool value)
+    {
+        return set_generate_stats(!value);
+    }
+    // cuDNN set_sliding_window_length(n) forwards to the left diagonal-band bound.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_sliding_window_length(int value)
+    {
+        return set_diagonal_band_left_bound(value);
+    }
+    // cuDNN spells the internal MMA core-mode override _set_mma_core_mode.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& _set_mma_core_mode(DataType value)
+    {
+        return set_mma_core_mode(value);
+    }
+    // cuDNN set_dropout(mask, scale) is one fused call; hipDNN sets both tensors.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_dropout(std::shared_ptr<TensorAttributes> mask,
+                                std::shared_ptr<TensorAttributes> scale)
+    {
+        set_dropout_mask(std::move(mask));
+        set_dropout_scale(std::move(scale));
+        return *this;
+    }
+    // cuDNN's programmable score modifier is a callback over the graph; hipDNN
+    // has no equivalent. Accepted for source compatibility, recorded as
+    // unsupported so the graph fails loudly at validate(). Templated to accept
+    // any callable without naming the cuDNN std::function type.
+    template <typename ScoreModifier>
+    SdpaAttributes& set_score_mod(ScoreModifier&& value) // NOLINT(readability-identifier-naming)
+    {
+        static_cast<void>(value);
+        return recordUnsupported("SDPA score modifier is unsupported by hipDNN");
+    }
+    // cuDNN FMA-unfuse perf hint; hipDNN selects fusion internally. Advisory and
+    // safe to drop: recorded so Graph::sdpa can warn-and-ignore (logging is not
+    // available in this standalone header).
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_unfuse_fma(bool value)
+    {
+        unfuse_fma_hint = value;
         return *this;
     }
 };

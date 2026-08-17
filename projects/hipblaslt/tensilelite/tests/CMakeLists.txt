@@ -21,10 +21,13 @@ target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CuCount_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataInit_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
@@ -34,6 +37,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/MXScalePadding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PciChipId_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Predicates_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
@@ -101,8 +105,9 @@ function(add_cpu_gemm_test TEST_NAME)
 endfunction()
 
 # Default test sizes. Non-tile-aligned to stress remainder handling.
-# f32 and f16/bf16 use different sizes to increase coverage diversity.
+# f32, f64, and f16/bf16 use different sizes to increase coverage diversity.
 set(F32_SIZES -M 133 -N 147 -K 165)
+set(F64_SIZES -M 137 -N 149 -K 163)
 set(F16_SIZES -M 131 -N 141 -K 151)
 set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
@@ -210,6 +215,12 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
+add_test(
+    NAME "CPUGemm.validation_InjectedFailure_Rejected"
+    COMMAND cpu-gemm-driver -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
+)
+set_tests_properties("CPUGemm.validation_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
+
 #################################################
 #        FP8 tests (fast & slow)                #
 #################################################
@@ -296,4 +307,246 @@ if(NOT WIN32)
             ARGS ${F16_SIZES} --typeA f16 --typeB f8 --computeInputA f8 --validate ${PATH_FLAGS}
         )
     endforeach()
+endif()
+
+#################################################
+#     F64 (double precision) tests              #
+#################################################
+# F64 uses double storage and accumulation.
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(${PATH}_f64_${TRANS}
+            ARGS ${F64_SIZES} ${TFLAGS} --type f64 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_f64_Beta
+        ARGS ${F64_SIZES} --type f64 --beta 1.0 --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_Bias
+        ARGS ${F64_SIZES} --type f64 --validate --bias ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_AllFeatures
+        ARGS ${F64_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_f64_TN_AllFeatures
+        ARGS ${F64_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(${PATH}_f64_ScaleAB_${MODE}
+            ARGS ${F64_SIZES} --type f64 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+        )
+    endforeach()
+endforeach()
+
+#################################################
+#     TF32 (XFloat32 math-op) tests             #
+#################################################
+# TF32 uses float storage with XFloat32 truncation on multiply.
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(${PATH}_tf32_${TRANS}
+            ARGS ${F32_SIZES} ${TFLAGS} --type tf32 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+    add_cpu_gemm_test(${PATH}_tf32_Beta
+        ARGS ${F32_SIZES} --type tf32 --beta 1.0 --validate ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_Bias
+        ARGS ${F32_SIZES} --type tf32 --validate --bias ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_AllFeatures
+        ARGS ${F32_SIZES} --type tf32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    add_cpu_gemm_test(${PATH}_tf32_TN_AllFeatures
+        ARGS ${F32_SIZES} --transA --type tf32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(${PATH}_tf32_ScaleAB_${MODE}
+            ARGS ${F32_SIZES} --type tf32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+        )
+    endforeach()
+endforeach()
+
+add_test(
+    NAME "CPUGemm.tf32_MixedA_Rejected"
+    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
+)
+set_tests_properties("CPUGemm.tf32_MixedA_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME "CPUGemm.tf32_MixedB_Rejected"
+    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
+)
+set_tests_properties("CPUGemm.tf32_MixedB_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+#################################################
+#        FP4 / MX Scale tests (fast & slow)     #
+#################################################
+if(NOT WIN32)
+    # M/N similar to f32 tests; K must be a multiple of mxBlock (32).
+    set(F4_SIZES_32 -M 133 -N 147 -K 160)
+    set(F4_SIZES_64 -M 133 -N 147 -K 192)
+
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+
+        # Basic F4 with MX scaling, all transpose combos
+        foreach(TRANS NN TN NT TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_f4_MX32_${TRANS}
+                ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+            )
+            add_cpu_gemm_test(${PATH}_f4_MX32_K192_${TRANS}
+                ARGS ${F4_SIZES_64} ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+            )
+        endforeach()
+
+        # F4 without MX (mxBlock=0, the default)
+        add_cpu_gemm_test(${PATH}_f4_NoMX_NN
+            ARGS -M 16 -N 16 -K 16 --type f4 --validate ${PATH_FLAGS}
+        )
+
+        # F4 + MX + epilogue features
+        add_cpu_gemm_test(${PATH}_f4_MX32_Bias
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --bias ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_Relu
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --activation relu ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_ScaleAlphaVec
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --scaleAlphaVec ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_AllFeatures
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_Beta
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --beta 1.0 --validate ${PATH_FLAGS}
+        )
+
+        # F4 + MX + ScaleAB
+        foreach(MODE Scalar Vector)
+            add_cpu_gemm_test(${PATH}_f4_MX32_ScaleAB_${MODE}
+                ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+            )
+        endforeach()
+    endforeach()
+
+    # Fast-path-only: mxBlock=16 (tests non-hardcoded mxBlock; 16 % BLOCK_K=8 == 0)
+    add_cpu_gemm_test(fast_f4_MX16_NN
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 16 --mxBlockB 16 --validate --tryFastPath
+    )
+
+    # Batched mxfp4 (batchCount > 1) — exercises strideBatchMxsa/strideBatchMxsb
+    # in the fast path's MX loop (the site of a previous .a / .b typo bug).
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+        foreach(TRANS NN TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_f4_MX32_Batched_${TRANS}
+                ARGS ${F4_SIZES_32} ${TFLAGS} --type f4 --mxBlockA 32 --mxBlockB 32 --validate --batchCount 2 ${PATH_FLAGS}
+            )
+        endforeach()
+    endforeach()
+
+    # Asymmetric MX (mxBlockA != mxBlockB). K must be a multiple of
+    # lcm(mxBlockA, mxBlockB) — here lcm(32, 64) = 64, which F4_SIZES_64
+    # already satisfies (K=192). Fast path only: the production slow path
+    # collapses the smaller side's per-segment scales (see driver rejection
+    # in runGemm).
+    add_cpu_gemm_test(fast_f4_MX_A32_B64_NN
+        ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
+    )
+    add_cpu_gemm_test(fast_f4_MX_A64_B32_NN
+        ARGS ${F4_SIZES_64} --type f4 --mxBlockA 64 --mxBlockB 32 --validate --tryFastPath
+    )
+
+    # Negative test: slow path must reject asymmetric MX.
+    add_test(
+        NAME "CPUGemm.slow_f4_MX_A32_B64_Rejected"
+        COMMAND cpu-gemm-driver ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX_A32_B64_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+    # Negative test: one-sided MX (only A or only B) must be rejected.
+    add_test(
+        NAME "CPUGemm.f4_MX_OneSided_Rejected"
+        COMMAND cpu-gemm-driver ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
+    )
+    set_tests_properties("CPUGemm.f4_MX_OneSided_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+    # Edge-size mxfp4 coverage: K equal to mxBlock (single MX block per row),
+    # M=1 / N=1 strips, and alpha=0 short-circuit. Both fast and slow paths.
+    foreach(PATH fast slow)
+        if("${PATH}" STREQUAL "fast")
+            set(PATH_FLAGS --tryFastPath)
+        else()
+            set(PATH_FLAGS "")
+        endif()
+        add_cpu_gemm_test(${PATH}_f4_MX32_K_eq_mxBlock
+            ARGS -M 16 -N 16 -K 32 --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_M1
+            ARGS -M 1 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_N1
+            ARGS -M 133 -N 1 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_f4_MX32_Alpha0
+            ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --mxBlockB 32 --alpha 0 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+
+    # F4 with odd dimensions (M*K is odd) to exercise ShadowBuffer edge cases
+    add_cpu_gemm_test(fast_f4_NoMX_OddDims
+        ARGS -M 3 -N 5 -K 7 --type f4 --validate --tryFastPath
+    )
+
+    # Negative tests: invalid K/mxBlock combos should fail with clear error
+    add_test(
+        NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_Unaligned" PROPERTIES WILL_FAIL TRUE)
+
+    add_test(
+        NAME "CPUGemm.slow_f4_MX32_BadK_TooSmall"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_TooSmall" PROPERTIES WILL_FAIL TRUE)
+
+    # Negative test: non-power-of-2 mxBlock should be rejected
+    add_test(
+        NAME "CPUGemm.slow_f4_MX6_BadPow2"
+        COMMAND cpu-gemm-driver -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f4_MX6_BadPow2" PROPERTIES WILL_FAIL TRUE)
+
+    # Negative test: mxBlock with non-FP4 types should be rejected
+    add_test(
+        NAME "CPUGemm.slow_f32_MX32_Rejected"
+        COMMAND cpu-gemm-driver -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
+    )
+    set_tests_properties("CPUGemm.slow_f32_MX32_Rejected" PROPERTIES WILL_FAIL TRUE)
 endif()

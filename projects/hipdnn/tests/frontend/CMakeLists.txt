@@ -47,14 +47,28 @@ add_executable(
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
+    IntegrationLayernormBackward.cpp
+    IntegrationLayernormBackwardDescriptorLowering.cpp
+    IntegrationLayernormBackwardDescriptorLifting.cpp
     IntegrationMalformedVersionPlugin.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLifting.cpp
     IntegrationMatmulDescriptorLowering.cpp
+    IntegrationMoeGroupedMatmul.cpp
+    IntegrationMoeGroupedMatmulBwd.cpp
+    IntegrationMoeGroupedMatmulBwdDescriptorLifting.cpp
+    IntegrationMoeGroupedMatmulBwdDescriptorLowering.cpp
+    IntegrationMoeGroupedMatmulDescriptorLifting.cpp
+    IntegrationMoeGroupedMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationRaggedTensorDescriptorLowering.cpp
+    IntegrationPassByValueVersionFilter.cpp
+    IntegrationPassByValueDelivery.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
+    IntegrationResampleBwdDescriptorLifting.cpp
+    IntegrationResampleBwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp
     IntegrationReductionDescriptorLowering.cpp
     IntegrationRMSNormDescriptorLifting.cpp
@@ -119,6 +133,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
                 TEST_SECOND_OVERRIDE_PLUGIN_NAME="${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}"
                 TEST_MALFORMED_VERSION_PLUGIN_NAME="${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}"
                 TEST_VERSION_ZERO_PLUGIN_NAME="${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}"
+                TEST_PASS_BY_VALUE_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}"
+                TEST_PASS_BY_VALUE_RECORDER_PLUGIN_NAME="${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}"
                 TEST_GOOD_HEURISTIC_PLUGIN_NAME="${TEST_GOOD_HEURISTIC_PLUGIN_NAME}"
                 TEST_AUTOTUNE_PLUGIN_NAME="${TEST_AUTOTUNE_PLUGIN_NAME}"
     )
@@ -143,6 +159,8 @@ function(configure_hipdnn_public_frontend_test_target TARGET_NAME)
         ${HIPDNN_TEST_SECOND_OVERRIDE_PLUGIN_TARGET}
         ${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET}
         ${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET}
+        ${HIPDNN_TEST_PASS_BY_VALUE_PLUGIN_TARGET}
+        ${HIPDNN_TEST_PASS_BY_VALUE_RECORDER_PLUGIN_TARGET}
         ${TEST_GOOD_HEURISTIC_PLUGIN_NAME}
         test_autotune_plugin
     )
@@ -151,7 +169,7 @@ endfunction()
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_tests)
 
 clang_tidy_check(hipdnn_public_frontend_tests)
-add_integration_test_target(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(
     hipdnn_public_frontend_dynamic_load_tests
@@ -176,4 +194,4 @@ configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_dynamic_load
 add_dependencies(hipdnn_public_frontend_dynamic_load_tests hipdnn_backend)
 
 clang_tidy_check(hipdnn_public_frontend_dynamic_load_tests)
-add_integration_test_target(hipdnn_public_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR})

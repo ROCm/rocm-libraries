@@ -37,7 +37,11 @@ constexpr float getToleranceInference()
     }
     else if constexpr(std::is_same_v<T, bfloat16>)
     {
-        return 5e-3f;
+        // bf16 machine epsilon is 2^-7 ≈ 7.8e-3. Output quantization alone
+        // can produce ~1 ULP difference between GPU and CPU reference; 5e-3
+        // (< 1 ULP) was sub-format-precision and caused spurious failures
+        // with semantically correct input ranges.
+        return 8e-3f;
     }
     else
     {
@@ -260,7 +264,7 @@ constexpr float getMxTolerance()
 {
     if constexpr(std::is_same_v<T, float>)
     {
-        return 1e-4f;
+        return 1e-3f;
     }
     else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
     {

@@ -207,7 +207,7 @@ What does work for multi-GPU usage of the DSL:
 
  This pattern is verified end-to-end by `dsl_docs/development/verify_dsl_docs.py` on the GPU available to this box; the per-device launcher constructed under `torch.cuda.device(d)` correctly launches on that device.
 
-- **Torch-stream-aware launches**: `runtime/torch_module.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
+- **Torch-stream-aware launches**: `runtime/torch_interop.py::resolve_stream(stream, device=None)` honors `torch.cuda.current_stream(device).cuda_stream`, so the standard pattern of allocating tensors and launching all under `torch.cuda.device(d):` interoperates with torch's caching allocator on the right device.
 
 - **Composing with `torch.distributed` (RCCL on ROCm)**: the user runs `torch.distributed.init_process_group(backend="nccl")` (PyTorch's "nccl" backend on ROCm is implemented by RCCL — `librccl.so`). DSL kernels then execute on each rank's local device; collectives (`torch.distributed.all_reduce`, `all_gather`, etc.) execute outside the DSL on a separate communication stream. The DSL never invokes RCCL itself.
 

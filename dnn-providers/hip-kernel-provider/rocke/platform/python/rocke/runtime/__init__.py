@@ -7,7 +7,17 @@
 in-process pipeline that turns AMDGPU LLVM IR text into a running
 kernel.
 
-Layered modules (bottom-up):
+Layered modules (bottom-up). The first five run torch-free -- the
+hip-only core; ``torch_interop`` and ``launcher`` are the torch-aware
+edge:
+
+  - ``runtime_coexistence`` : which ROCm runtime we bind to, and whose
+                      (torch-bundled vs a system ROCm install). Shared
+                      library resolution used by both ``comgr`` and
+                      ``hip_module``.
+
+  - ``_ctypes_bind``: the lazy ctypes function binder (`_LazyFn`) shared
+                      by ``comgr`` and ``hip_module``.
 
   - ``comgr``       : ctypes wrapper over `libamd_comgr.so`. Implements
                       `LLVM IR (text) -> BC -> relocatable ELF -> HSA
@@ -23,10 +33,14 @@ Layered modules (bottom-up):
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
 
-  - ``torch_module``: torch-tensor arg packing + `resolve_stream`
-                      (which collapses ``stream=0`` to torch's current
-                      stream so the caching allocator sees our
-                      launches).
+  - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
+                      `pack_args_kernelparams`) for the AMDGPU kernarg
+                      ABI. Used by both the numpy and torch paths.
+
+  - ``torch_interop``: torch-tensor launch glue -- `resolve_stream`
+                      (collapses ``stream=0`` to torch's current stream
+                      so the caching allocator sees our launches),
+                      `empty_workspace`, `launch_torch_kernel`.
 
   - ``launcher``    : long-lived launch abstractions (CK Tile / FlyDSL /
                       Triton inspired). The recommended entry point
@@ -84,11 +98,11 @@ from .launcher import (
     time_launches,
     wait_stream_and_release,
 )
-from .torch_module import (
+from .packing import pack_args
+from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
     launch_torch_kernel,
-    pack_args,
     resolve_stream,
 )
 

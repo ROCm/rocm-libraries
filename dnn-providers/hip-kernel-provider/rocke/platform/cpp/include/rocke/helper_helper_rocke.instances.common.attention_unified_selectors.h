@@ -37,6 +37,9 @@
 
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir.h"
+#include <stddef.h> /* size_t */
+/* rocke_attention_tiled_2d_spec_t (the shared tiled-2D spec mirror). */
+#include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,7 +79,7 @@ typedef struct rocke_unified_attn_problem
     bool use_alibi; /* default false */
     bool use_qq_bias; /* default false */
     bool use_fp8; /* default false */
-    int num_sms; /* default 120 */
+    int num_cus; /* default 120 */
     /* waves_per_eu / compile_backend are not read by the ported selectors. */
     int num_kv_blocks; /* default 0 ("unknown") */
 } rocke_unified_attn_problem_t;
@@ -119,6 +122,36 @@ const char* rocke_unified_attn_kv_storage_dtype(const rocke_unified_attn_problem
  */
 bool rocke_unified_attn_select_2d_waves_per_eu(const rocke_unified_attn_problem_t* p, int* out_wpe);
 
+/* ------------------------------------------------------- LDS-budget resolver *
+ * Selection-layer LDS accounting shared by the gfx942 admission gate and the
+ * gfx950 register-PV budget resolver (mirrors the Python helpers in
+ * rocke/instances/common/attention_unified.py). */
+
+/* Python: _tiled_2d_lds_bytes -- static LDS footprint (bytes) of a tiled-2D
+ * geometry. Single source of truth for the per-buffer tile arithmetic; callers
+ * pick which buffers are LDS-resident (K/V slots, Q/P_lds, the block_m<=2T Q
+ * alias, the OUT_STRIPE rule, the 16-bit Acc staging width). */
+int rocke_unified_attn_tiled_2d_lds_bytes(int tile_size,
+                                          int head_size,
+                                          int block_m,
+                                          int kv_elem_bytes,
+                                          int k_slots,
+                                          int v_slots,
+                                          bool include_q_lds,
+                                          bool include_p_lds,
+                                          int v_pad);
+
+/* Python: _resolve_lds_budget -- deterministically shrink an over-budget gfx950
+ * register-PV 2D spec (single-buffer K, then T=64) in place until it fits the
+ * arch LDS cap, using only compile-validated reductions. A strict no-op for
+ * already-fitting / non-register-PV / non-gfx950 specs (returns true, spec
+ * unchanged). Returns false when no validated reduction fits, filling ``reason``
+ * (up to ``reason_cap`` bytes) with a diagnostic. The provider's spec-assembly
+ * path calls this right after building a spec from the selectors above. */
+bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec,
+                                           char* reason,
+                                           size_t reason_cap);
+
 /* ------------------------------------------------ 2D feature-gate predicates *
  * Exposed mirrors of the Python _enable_* gates that _tiled_spec_from_problem
  * consults when it builds the per-shape UnifiedAttention2DTiledSpec. The
@@ -148,10 +181,27 @@ bool rocke_unified_attn_enable_transposed_subflags(const rocke_unified_attn_prob
  * (T=block_size + nw=2 -> 2 WG/CU). DEFAULT-ON for the gfx950 single-batch
  * d128 no-FP8 combo; HIPDNN_GFX950_D128_SMALL_TILE=0 force-disables. */
 bool rocke_unified_attn_enable_d128_small_tile(const rocke_unified_attn_problem_t* p);
+/* Python: _enable_softmax_mfma_interleave(problem) -- d128 softmax<->MFMA
+ * interleave (iglp_opt(1)) + nw=4. DEFAULT-ON for the gfx950 single-batch d128
+ * no-FP8 combo; HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0 force-disables. */
+bool rocke_unified_attn_enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p);
 /* Python: _enable_v_double_buffer(problem) -- short single-batch combo prefill. */
 bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_t* p);
 /* Python: _enable_early_v_schedule(problem) -- long single-batch combo prefill. */
 bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attn_problem_t* p);
+
+/* Python: _tiled_spec_from_problem(problem) -> rocke_attention_tiled_2d_spec_t.
+ * Assembles the full tiled-2D spec for gfx950 by running every selector and gate
+ * predicate exactly as attention_spec_builder._tiled_spec_from_problem does.
+ * Returns the filled spec; on a non-gfx950 arch or an unresolvable LDS budget the
+ * caller should check rocke_unified_attn_resolve_lds_budget separately.
+ *
+ * The ``arch`` string is passed to rocke_unified_attn_set_resolved_arch before
+ * selection so all gate predicates see the right arch (the caller's set_resolved_arch
+ * state is restored on return). Pass "gfx950" for the primary production path. */
+rocke_attention_tiled_2d_spec_t
+    rocke_unified_attn_tiled_spec_from_problem(const rocke_unified_attn_problem_t* p,
+                                               const char* arch);
 
 /* ----------------------------------------------------------- magic div */
 

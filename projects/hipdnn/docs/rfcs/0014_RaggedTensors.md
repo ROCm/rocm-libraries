@@ -258,9 +258,9 @@ corresponding CPU reference (e.g.
    not part of either type.
 3. **`ITensor`** gains two complementary polymorphic hooks: a
    `getIndexImpl` override point behind `getIndex` so ragged
-   *addressing* bases each batch at `ragged_offset[b]`, and an
-   index-strategy hook so ragged *iteration* can supply a
-   `RaggedCompositeIndex`.
+   *addressing* bases each batch at `ragged_offset[b]`, and a
+   `raggedIterationInfo()` data hook the iterator dispatches on so
+   ragged *iteration* can supply a `RaggedCompositeIndex`.
 4. **Plan layer** wraps the variant-pack pointer in a
    `ShallowRaggedTensor` per execute and passes it as
    `TensorBase<T>&`. CPU references and kernels that need
@@ -413,20 +413,31 @@ These apply to both `RaggedTensor<T>` and
      override makes direct addressing ragged-aware everywhere — at
      the cost of making `getIndex` a virtual call for all
      non-packed tensors (see [§5](#known-limitations) item 7).
-   - **Traversal (`makeIndex` / `RaggedCompositeIndex`).**
-     Introduce `virtual IndexType makeIndex(bool isEnd) const`
-     (`isEnd` selects the begin vs end position, mirroring the
-     existing `LinearIndex` / `CompositeIndex` pattern) and add a
-     `RaggedCompositeIndex` to the `IndexType` variant that walks
-     each batch's full `[ragged_offset[b], ragged_offset[b+1])`
-     range in turn. This is **required in addition to**
-     `getIndexImpl`: traversal bounds derive from `dims()` /
-     `elementCount()`, so a plain `CompositeIndex` would visit
-     `prod(paddedDims)` positions rather than the
-     `ragged_offset[B]` that `elementCount()` reports (item 6).
-     `RaggedCompositeIndex` emits `{b, within-batch…}` indices and
-     delegates the per-element offset back to `getIndex`, keeping
-     the offset math in one place.
+   - **Traversal (`raggedIterationInfo` / `RaggedCompositeIndex`).**
+     Add `virtual std::optional<RaggedIterationInfo> raggedIterationInfo() const`
+     to `ITensor` (default `std::nullopt`; ragged types return
+     `{rowOffsets, seqAxis, seqStride}`, where `rowOffsets` is the
+     B+1 offset table in element units widened to `int64_t`,
+     `seqAxis` is the caller-provided sequence axis, and `seqStride`
+     is `strides()[seqAxis]`) and a `RaggedCompositeIndex` to the
+     `IndexType` variant that walks each batch's full
+     `[ragged_offset[b], ragged_offset[b+1])` range. The iterator's
+     `makeIndex` dispatches on the hook, snapshotting the info once
+     at `begin()` / `end()` so traversal does no per-step aux reads.
+     This is **required in
+     addition to** `getIndexImpl`: a plain `CompositeIndex` derives
+     its bounds from `dims()` and would visit `prod(paddedDims)`
+     positions rather than the `ragged_offset[B]` that
+     `elementCount()` reports (item 6). `RaggedCompositeIndex`
+     emits `{b, within-batch…}` indices and delegates the
+     per-element offset back to `getIndex`.
+
+     A data hook is used rather than the earlier draft's literal
+     `virtual IndexType makeIndex(bool) const` because `IndexType`
+     is scoped *inside* `ITensorIterator<IsConst>` and differs for
+     the const/non-const iterators, so the non-templated `ITensor`
+     base cannot return it. Returning plain offset data keeps every
+     template-dependent index type iterator-internal.
 4. **Iteration walks `ragged_offset` ranges, not `seq_lens`-bounded
    ranges.** Each batch's full per-batch range is iterated as
    part of that batch. Padding never leaks into the wrong batch's
@@ -436,16 +447,57 @@ These apply to both `RaggedTensor<T>` and
    positions for ops that could in principle skip them. Ops that
    must skip padding query `seq_lens` directly from the variant
    pack.
-5. **Constructor-time structural validation** (enforced by both
-   types):
+
+   **Identifying the ragged (sequence) axis.** The sequence axis is
+   caller-provided at construction (`BSHD_SEQ_AXIS`), not inferred
+   from strides. Only BSHD-packed memory — dims `[B, S, H, D]` with
+   the sequence axis `S` the outermost non-batch axis — is
+   ragged-legal, so each batch occupies one contiguous run.
+   Heads-outermost (BHSD) packing splits a batch's sequence rows
+   across the buffer and is out of scope. With
+   `seqStride = strides()[seqAxis]`, a batch's per-batch sequence
+   extent is
+
+   ```
+   seqExtent(b) = (ragged_offset[b+1] - ragged_offset[b]) / seqStride
+   ```
+
+   `RaggedCompositeIndex` bounds the sequence axis by `seqExtent(b)`
+   and every other non-batch axis by its full `dims()`. The
+   **binding contract is the element count `ragged_offset[B]`** the
+   iterator visits, not the literal "`sq` ranging up to
+   `ragged_offset[b+1] - ragged_offset[b]`" prose of an earlier
+   draft (true only when `seqStride == 1`); the divisor form honors
+   the element-count contract for any within-batch packing.
+5. **Constructor-time validation** (enforced by both types), split
+   into a structural pass and a content pass. The structural pass
+   runs first so the type-erased `readOffset` helper from item 1
+   only ever encounters a supported element size.
+
+   *Structural* (`validateRaggedStructure`):
+   - `paddedDims` is non-empty.
    - `raggedOffset != nullptr`.
    - `raggedOffset->elementCount() == paddedDims[0] + 1`
      (i.e. `B + 1`).
    - `raggedOffset` has rank 4.
    - `raggedOffset->elementSize() == 4 || raggedOffset->elementSize() == 8`
-     (int32 or int64 element type — checked once at construction
-     so the type-erased `readOffset` helper from item 1 only ever
-     encounters supported sizes).
+     (int32 or int64 element type).
+
+   *Content* (`validateRaggedOffsets`, over the B+1 offset table
+   snapshotted at construction): these invariants — which the RFC
+   otherwise only states for the harness-supplied aux (§4.11.1) —
+   are enforced by the SDK types themselves and mirrored as debug
+   asserts in `RaggedCompositeIndex`:
+   - `ragged_offset[0] == 0`.
+   - offsets are monotonic non-decreasing
+     (`ragged_offset[b+1] >= ragged_offset[b]`).
+   - the sequence-axis stride is positive.
+   - each per-batch block is a whole number of sequence rows
+     (`(ragged_offset[b+1] - ragged_offset[b]) % seqStride == 0`,
+     see item 4).
+   - each per-batch sequence extent does not exceed `S_max`
+     (`(ragged_offset[b+1] - ragged_offset[b]) / seqStride <=
+     dims()[seqAxis]`).
 6. **Element-count reporting.** `elementCount()` reports
    `ragged_offset[B]` — the number of addressable elements across
    all batches' per-batch ranges, which is what the iterator
@@ -479,11 +531,60 @@ independent of `prod(dims)` and which holds a `shared_ptr` to its
 in the bundle, as the type for ragged graph intermediates, and as
 the user-facing type for samples.
 
+**Shared base `RaggedTensorBase<T>`.** Both ragged types derive
+from a non-CRTP abstract intermediate
+`RaggedTensorBase<T> : public TensorBase<T>` that carries
+everything they share — the type-erased `readOffset` /
+`raggedIterationInfo`, the `getIndexImpl` ragged-addressing override,
+geometry reporting, the caller-provided sequence axis, and all
+constructor-time structural and content validation (§4.5 item 5).
+The concrete types add only the memory carrier and the fill
+operations. No CRTP is needed because `memory()` is already virtual
+on `TensorBase<T>`. This realizes, at the shared-base level, the
+unification anticipated in [§7.1](#71-unify-raggedtensor-and-shallowraggedtensor-as-one-templated-class)
+(the two types are not collapsed into a single
+memory-carrier-parameterized class).
+
+```cpp
+template <typename T>
+class RaggedTensorBase : public TensorBase<T>
+{
+public:
+    RaggedTensorBase(std::vector<int64_t>     paddedDims,
+                     std::vector<int64_t>     strides,
+                     int                      seqAxis,   // BSHD_SEQ_AXIS
+                     std::shared_ptr<ITensor> raggedOffset,
+                     std::optional<size_t>    physicalElementCount);
+
+    const std::vector<int64_t>& dims() const override;        // paddedDims
+    const std::vector<int64_t>& strides() const override;     // strides
+    size_t elementCount() const override;                     // ragged_offset[B]
+    size_t elementSpace() const override;                     // physicalElementCount
+    bool   isPacked() const override { return false; }
+    std::optional<RaggedIterationInfo> raggedIterationInfo() const override; // B+1 snapshot + axis
+    const ITensor*       raggedOffset() const;
+
+protected:
+    int64_t getIndexImpl(const std::vector<int64_t>& idx) const override;
+    int64_t readOffset(size_t b) const;                       // §4.5 item 1
+    void    validateRaggedStructure() const;                  // §4.5 item 5 (structural)
+    void    validateRaggedOffsets(const std::vector<int64_t>&) const; // §4.5 item 5 (content)
+
+    std::vector<int64_t>     _paddedDims;
+    std::vector<int64_t>     _strides;
+    int                      _seqAxis;               // caller-provided (BSHD_SEQ_AXIS)
+    int64_t                  _seqStride;             // strides[_seqAxis]
+    size_t                   _iteratedElementCount;  // ragged_offset[B]
+    size_t                   _physicalElementCount;  // == ragged_offset[B]
+    std::shared_ptr<ITensor> _raggedOffset;          // non-null, never reseated
+};
+```
+
 ```cpp
 template <typename T,
           typename HostAlloc   = HostAllocator<T>,
           typename DeviceAlloc = DeviceAllocator<T>>
-class RaggedTensor : public TensorBase<T>
+class RaggedTensor : public RaggedTensorBase<T>
 {
 public:
     // physicalElementCount is optional: when omitted it is inferred
@@ -493,6 +594,7 @@ public:
     // in device memory).
     RaggedTensor(std::vector<int64_t>     paddedDims,
                  std::vector<int64_t>     strides,
+                 int                      seqAxis,   // BSHD_SEQ_AXIS
                  std::shared_ptr<ITensor> raggedOffset,
                  std::optional<size_t>    physicalElementCount = std::nullopt);
 
@@ -503,23 +605,19 @@ public:
     //   elementCount() -> ragged_offset[B]               (iterated elements)
     //   isPacked()     -> false
     //   getIndexImpl() -> readOffset(b) + sq*stride_1 + ...  (ragged addressing)
-    //   begin/end      -> RaggedCompositeIndex via makeIndex()
-    //                      (walks each batch's ragged_offset range)
+    //   begin/end      -> RaggedCompositeIndex (selected by the
+    //                      iterator from raggedIterationInfo(); walks
+    //                      each batch's ragged_offset range)
     //
     // Direct addressing (rawHostData / rawDeviceData) is supported.
 
     const ITensor* raggedOffset() const;
 
 private:
+    // _paddedDims, _strides, _physicalElementCount, _raggedOffset,
+    // readOffset(), getIndexImpl(), and the validation helpers all
+    // live on RaggedTensorBase<T> above.
     MigratableMemory<T, HostAlloc, DeviceAlloc> _memory;
-    std::vector<int64_t>                        _paddedDims;
-    std::vector<int64_t>                        _strides;
-    size_t                                      _physicalElementCount;
-    std::shared_ptr<ITensor>                    _raggedOffset;   // non-null
-
-    // Type-erased read helper from §4.5 item 1; reads
-    // ragged_offset[b] from _raggedOffset and widens to int64_t.
-    int64_t readOffset(size_t b) const;
 };
 ```
 
@@ -547,16 +645,18 @@ overrides `getIndexImpl` (the protected virtual from
 index `{b, sq, …}` translates to a physical offset using
 `readOffset(b)` (i.e. `ragged_offset[b]` widened to `int64_t`) as
 the per-batch base:
-`physical_offset = readOffset(b) + sq * stride_1 + …`. (The
-default implementation uses only the padded strides, indexing
+`physical_offset = readOffset(b) + inner_product({sq, …}, strides()[1:])`.
+(The default implementation uses only the padded strides, indexing
 into `b * stride_0 + …` regardless of where batch `b`'s range
-actually starts in the physical buffer.) Overriding `getIndexImpl`
-rather than the non-virtual `getHostValue` / `setHostValue` is
-what makes every addressing path ragged-aware at once (§4.5 item
-3). Callers may index into batch `b` with `sq` ranging up to that
-batch's per-batch extent (`readOffset(b+1) - readOffset(b)`);
-indices outside that range are out-of-bounds for that batch and
-behavior is unspecified.
+actually starts in the physical buffer.) A bare index `{b}` bases
+at `readOffset(b)`, and an empty index `{}` returns offset `0`.
+Overriding `getIndexImpl` rather than the non-virtual
+`getHostValue` / `setHostValue` is what makes every addressing
+path ragged-aware at once (§4.5 item 3). Callers may index into
+batch `b` with `sq` ranging up to that batch's per-batch sequence
+extent (`seqExtent(b)`, see §4.5 item 4); indices outside that
+range are out-of-bounds for that batch and behavior is
+unspecified.
 
 #### 4.6.1 User-side construction pattern
 
@@ -584,6 +684,7 @@ qRaggedOffset->fillFromHost(myOffsetsHost);   // user-supplied values
 auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
     qAttr->get_dim(),
     qAttr->get_stride(),
+    utilities::BSHD_SEQ_AXIS,
     qRaggedOffset);     // implicit upcast Tensor<int32_t> -> ITensor
 
 //    Form (b): pass physicalElementCount explicitly — the user
@@ -591,8 +692,8 @@ auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
 //    the aux read and any device->host sync it would imply:
 //
 //    auto qTensor = std::make_shared<utilities::RaggedTensor<float>>(
-//        qAttr->get_dim(), qAttr->get_stride(), qRaggedOffset,
-//        static_cast<size_t>(myOffsetsHost.back()));
+//        qAttr->get_dim(), qAttr->get_stride(), utilities::BSHD_SEQ_AXIS,
+//        qRaggedOffset, static_cast<size_t>(myOffsetsHost.back()));
 
 // 3. Wire into variantPack as today — one entry per primary, one
 //    entry per aux. Nothing about variantPack assembly changes
@@ -614,7 +715,7 @@ available.
 
 ```cpp
 template <typename T>
-class ShallowRaggedTensor : public TensorBase<T>
+class ShallowRaggedTensor : public RaggedTensorBase<T>
 {
 public:
     // As with RaggedTensor (§4.6), physicalElementCount is optional
@@ -623,29 +724,40 @@ public:
         void*                    data,
         std::vector<int64_t>     paddedDims,
         std::vector<int64_t>     strides,
+        int                      seqAxis,   // BSHD_SEQ_AXIS
         std::shared_ptr<ITensor> raggedOffset,
         std::optional<size_t>    physicalElementCount = std::nullopt);
 
-    // Same overrides as RaggedTensor:
+    // Same overrides as RaggedTensor, inherited from
+    // RaggedTensorBase<T>:
     //   dims()/strides() as provided
     //   elementSpace() -> physicalElementCount  (allocation size)
     //   elementCount() -> ragged_offset[B]      (iterated elements)
     //   isPacked()     -> false
-    //   begin/end      -> RaggedCompositeIndex via makeIndex()
+    //   begin/end      -> RaggedCompositeIndex (selected by the
+    //                     iterator from raggedIterationInfo())
     //
-    // rawHostData() / rawDeviceData() return the borrowed pointer.
+    // Host-only, matching ShallowTensor (backed by
+    // ShallowHostOnlyMigratableMemory<T>): rawHostData() returns
+    // the borrowed pointer; rawDeviceData() throws. Only
+    // fillWithValue() is supported — fillWithRandomValues() and
+    // fillWithData() throw. A device-capable shallow carrier is
+    // deferred to the ASM engine plan layer (workstream I4).
 
     const ITensor* raggedOffset() const;
 };
 ```
 
 `ShallowRaggedTensor` performs the same constructor-time
-structural validation listed in
+structural and content validation listed in
 [§4.5](#45-data-sdk-shared-elements), including the int32/int64
-element-size check on the aux. It shares its `getIndexImpl`
-override, its `RaggedCompositeIndex` implementation, and its
-type-erased `readOffset` helper with `RaggedTensor`; only memory
-ownership differs.
+element-size check on the aux. Its `getIndexImpl` override,
+`RaggedCompositeIndex` traversal, and type-erased `readOffset`
+helper are inherited from the shared `RaggedTensorBase<T>`
+([§4.6](#46-data-sdk-raggedtensort-owning-ragged-aware)); only the
+memory carrier and fill operations differ. It is host-only
+(`rawDeviceData()` throws), matching `ShallowTensor`; a
+device-capable shallow carrier is deferred to workstream I4.
 
 Unlike `RaggedTensor`, `ShallowRaggedTensor` does not carry an
 allocator template parameter — pinned-vs-pageable is determined
@@ -747,6 +859,7 @@ auto qView = std::make_shared<ShallowRaggedTensor<QType>>(
     variantPack.at(_params.qTensor.uid),
     _params.qTensor.dims,
     _params.qTensor.strides,
+    BSHD_SEQ_AXIS,
     qRaggedOffset);
 
 // If the op consumes seq_lens, fetch it as an ordinary input.
@@ -841,7 +954,7 @@ The new overload's contract:
      `shared_ptr<ITensor>` over the aux.
   4. Single-dispatches on the primary's `attribute.data_type()`
      and allocates
-     `make_unique<RaggedTensor<T>>(dims, strides, auxSharedPtr)`,
+     `make_unique<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS, auxSharedPtr)`,
      letting the ctor infer the buffer size as `ragged_offset[B]`
      from the aux. (`alignment` is not consulted — it does not
      affect buffer size; see
@@ -953,7 +1066,7 @@ For each `TensorAttributes`:
   bundle to obtain its `shared_ptr<ITensor>` — the strict check
   in [§4.11.1](#4111-pre-supplied-input-bundle) guarantees its
   presence — and allocate
-  `make_shared<RaggedTensor<T>>(dims, strides,
+  `make_shared<RaggedTensor<T>>(dims, strides, BSHD_SEQ_AXIS,
   raggedOffsetSharedPtr)`, letting the ctor infer the buffer size
   as `ragged_offset[B]`. The factory does not need to know the
   aux's element type statically — it is single-dispatched on the
@@ -1277,17 +1390,20 @@ question.
 ### 7.1 Unify `RaggedTensor` and `ShallowRaggedTensor` as one templated class
 
 The two types share their `RaggedCompositeIndex` implementation,
-their constructor-time structural validation, and (after the
-`seq_lens` decoupling) their entire surface. Only memory
-ownership differs. They could plausibly be expressed as one class
-template parameterized by the memory carrier (owning
-`MigratableMemory<T, …>` vs borrowed `void*`). The split kept here
-is the conservative choice that mirrors the existing
-`Tensor<T>` / `ShallowTensor<T>` split; unifying them is a
-mechanical refactor left as follow-up.
+their constructor-time structural and content validation, and
+(after the `seq_lens` decoupling) their entire surface apart from
+the memory carrier and fill operations. The initial implementation
+already factors that shared surface into a common abstract base,
+`RaggedTensorBase<T>` (see [§4.6](#46-data-sdk-raggedtensort-owning-ragged-aware)),
+so the two concrete types differ only by their memory carrier
+(owning `MigratableMemory<T, …>` vs borrowed `void*`) and their
+fill ops.
 
-Depending on the work involved, it may make sense for this
-to be included in the initial implementation.
+A further step could collapse them into a *single* class template
+parameterized on the memory carrier, eliminating the two concrete
+classes entirely. That remaining collapse is left as a mechanical
+follow-up; the two-concrete-types-over-a-shared-base split kept
+here mirrors the existing `Tensor<T>` / `ShallowTensor<T>` split.
 
 ### 7.2 Split `isPacked()` into orthogonal predicates
 

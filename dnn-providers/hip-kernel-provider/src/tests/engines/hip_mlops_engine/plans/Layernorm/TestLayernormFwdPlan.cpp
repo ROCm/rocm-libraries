@@ -48,7 +48,7 @@ TEST(TestLayernormFwdParams, HasCorrectTensorPointersForSingleNode)
     EXPECT_NE(params.scale(), nullptr);
     EXPECT_NE(params.bias(), nullptr);
     EXPECT_EQ(params.mean(), nullptr);
-    EXPECT_NE(params.epsilon(), nullptr);
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
     EXPECT_EQ(params.invVariance(), nullptr);
 }
 
@@ -68,7 +68,7 @@ TEST(TestLayernormFwdParams, TensorPointersMatchExpectedUids)
     EXPECT_EQ(params.y()->uid(), attrs->y_tensor_uid());
     EXPECT_EQ(params.scale()->uid(), attrs->scale_tensor_uid());
     EXPECT_EQ(params.bias()->uid(), attrs->bias_tensor_uid());
-    EXPECT_EQ(params.epsilon()->uid(), attrs->epsilon_tensor_uid());
+    EXPECT_NEAR(params.epsilonValue(nullptr, 0), 1e-5, 1e-10);
 }
 
 TEST(TestLayernormFwdParams, IsMoveConstructible)

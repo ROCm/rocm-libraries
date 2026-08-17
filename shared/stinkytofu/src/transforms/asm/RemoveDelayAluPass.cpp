@@ -23,7 +23,11 @@
 
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 
+#include <utility>
+#include <vector>
+
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -44,6 +48,12 @@ class RemoveDelayAluPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
+        removeInFunction(func, passCtx);
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    static void removeInFunction(Function& func, PassContext& passCtx) {
         for (BasicBlock& bb : func) {
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
@@ -56,7 +66,6 @@ class RemoveDelayAluPassImpl : public Pass {
                 }
             }
         }
-        return preserveCFGAnalyses();
     }
 };
 

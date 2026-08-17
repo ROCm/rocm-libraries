@@ -374,11 +374,26 @@ rocsparse_status rocsparse::csrmm(rocsparse_handle          handle,
                                   int64_t                   batch_count_C,
                                   int64_t                   batch_stride_C,
                                   rocsparse_order           order_C,
-                                  void*                     temp_buffer,
-                                  bool                      force_conj_A)
+                                  const rocsparse::spmm_default_alg_info* alg_info,
+                                  void*                                   temp_buffer,
+                                  bool                                    force_conj_A)
 {
 
     ROCSPARSE_ROUTINE_TRACE;
+
+    // Re-derive the same load-balanced choice made at analysis from the cached
+    // profile. Pure and launch-free, so the capture-sensitive compute stage stays
+    // free of kernels and synchronizations.
+    if(alg == rocsparse_csrmm_alg_default && alg_info != nullptr && alg_info->profile != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::csrmm_select_default_alg(trans_A,
+                                                alg_info->is_batched,
+                                                handle->properties.multiProcessorCount,
+                                                *alg_info->profile,
+                                                alg));
+    }
+
     rocsparse::csrmm_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_find(&f,
                                                     alpha_datatype,
