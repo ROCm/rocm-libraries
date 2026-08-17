@@ -1510,12 +1510,16 @@ def runDispatcherTests(String arch, String compiler) {
             -D GPU_TARGETS="${arch}" \
             -D CK_TILE_DISPATCHER=ON \
             -D BUILD_DISPATCHER_BINDINGS=ON \
-            -D DISPATCHER_RULE_SET=tests .. && \
+            -D DISPATCHER_RULE_SET=tests \
+            -D DISPATCHER_GEMM_BUDGET=500 .. && \
         ninja -j${nthreads()} dispatcher_gemm_lib && \
-        python3 ../dispatcher/examples/gemm/python/tile_engine_dispatcher_bridge.py \
-            --demo sweep \
+        python3 ../dispatcher/tests/run_gemm_search_space.py \
+            --arch ${arch} \
+            --dtypes fp16,bf16,fp8,bf8 \
+            --layouts rcr,rrr,crr,ccr \
+            --budget 500 \
             --size 1024 \
-            --arch ${arch}"""
+            --json dispatcher_gemm_results.json"""
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
 }
 
