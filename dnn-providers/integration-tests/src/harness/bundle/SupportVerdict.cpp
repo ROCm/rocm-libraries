@@ -203,11 +203,15 @@ SupportResult checkSupportClaim(hipdnn_frontend::ErrorCode errorCode,
                            queryMessage);
 }
 
-std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode errorCode,
-                                                 const std::vector<int64_t>& rankedIds,
-                                                 const SupportClaimLocator& locator,
-                                                 const std::vector<LoadedEngine>& loadedEngines,
-                                                 std::string_view queryMessage)
+namespace
+{
+
+std::vector<SupportResult> evaluateAllEngines(hipdnn_frontend::ErrorCode errorCode,
+                                              const std::vector<int64_t>& rankedIds,
+                                              const SupportClaimLocator& locator,
+                                              const std::vector<LoadedEngine>& loadedEngines,
+                                              std::string_view queryMessage,
+                                              bool filterNotEnforced)
 {
     if(locator.sidecarPath.empty() || !std::filesystem::exists(locator.sidecarPath))
     {
@@ -261,13 +265,35 @@ std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode erro
                                       platform,
                                       queryMessage);
 
-        if(result.verdict != SupportVerdict::NOT_ENFORCED)
+        if(!filterNotEnforced || result.verdict != SupportVerdict::NOT_ENFORCED)
         {
             results.push_back(std::move(result));
         }
     }
 
     return results;
+}
+
+} // namespace
+
+std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode errorCode,
+                                                 const std::vector<int64_t>& rankedIds,
+                                                 const SupportClaimLocator& locator,
+                                                 const std::vector<LoadedEngine>& loadedEngines,
+                                                 std::string_view queryMessage)
+{
+    return evaluateAllEngines(
+        errorCode, rankedIds, locator, loadedEngines, queryMessage, /*filterNotEnforced=*/true);
+}
+
+std::vector<SupportResult> observeAllSupport(hipdnn_frontend::ErrorCode errorCode,
+                                             const std::vector<int64_t>& rankedIds,
+                                             const SupportClaimLocator& locator,
+                                             const std::vector<LoadedEngine>& loadedEngines,
+                                             std::string_view queryMessage)
+{
+    return evaluateAllEngines(
+        errorCode, rankedIds, locator, loadedEngines, queryMessage, /*filterNotEnforced=*/false);
 }
 
 } // namespace hipdnn_integration_tests::bundle

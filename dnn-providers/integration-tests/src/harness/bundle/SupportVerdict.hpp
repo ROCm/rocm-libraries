@@ -159,4 +159,15 @@ std::vector<SupportResult> checkAllSupportClaims(hipdnn_frontend::ErrorCode erro
                                                  const std::vector<LoadedEngine>& loadedEngines,
                                                  std::string_view queryMessage = {});
 
+/// Unfiltered variant of checkAllSupportClaims: returns ALL verdicts including
+/// NOT_ENFORCED. Use this when the caller needs to know that the query ran
+/// (non-empty result) regardless of whether any engine was claimed — avoids a
+/// false positive on the empty-query guard when a sidecar exists but no loaded
+/// engine is claimed for the current arch/platform.
+std::vector<SupportResult> observeAllSupport(hipdnn_frontend::ErrorCode errorCode,
+                                             const std::vector<int64_t>& rankedIds,
+                                             const SupportClaimLocator& locator,
+                                             const std::vector<LoadedEngine>& loadedEngines,
+                                             std::string_view queryMessage = {});
+
 } // namespace hipdnn_integration_tests::bundle

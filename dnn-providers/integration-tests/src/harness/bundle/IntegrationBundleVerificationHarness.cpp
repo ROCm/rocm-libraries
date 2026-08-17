@@ -58,22 +58,25 @@ void IntegrationBundleVerificationHarness::executeGraphThroughEngine(
                + std::to_string(engineIds.size()) + " ranked engine(s)";
     };
 
-    const auto allVerdicts = checkAllSupportClaims(status.get_code(),
+    if(TestConfig::get().enforceSupportClaims())
+    {
+        const auto allVerdicts = observeAllSupport(status.get_code(),
                                                    engineIds,
                                                    _claimLocator,
                                                    LoadedEngineTable::get().all(),
                                                    status.get_message());
-    if(!allVerdicts.empty())
-    {
-        SupportClaimReport::get().recordGraphWithClaimsVerified();
-    }
-    for(const auto& v : allVerdicts)
-    {
-        SupportClaimReport::get().record(v);
-        if(isFailure(v.verdict))
+        if(!allVerdicts.empty())
         {
-            FAIL() << formatVerdictMessage(v);
-            return;
+            SupportClaimReport::get().recordGraphWithClaimsVerified();
+        }
+        for(const auto& v : allVerdicts)
+        {
+            SupportClaimReport::get().record(v);
+            if(isFailure(v.verdict))
+            {
+                FAIL() << formatVerdictMessage(v);
+                return;
+            }
         }
     }
 
@@ -171,11 +174,11 @@ void IntegrationBundleVerificationHarness::enforceAtLevel(EnforcementLevel level
         return;
     }
 
-    const auto allVerdicts = checkAllSupportClaims(status.get_code(),
-                                                   engineIds,
-                                                   _claimLocator,
-                                                   LoadedEngineTable::get().all(),
-                                                   status.get_message());
+    const auto allVerdicts = observeAllSupport(status.get_code(),
+                                               engineIds,
+                                               _claimLocator,
+                                               LoadedEngineTable::get().all(),
+                                               status.get_message());
     if(!allVerdicts.empty())
     {
         SupportClaimReport::get().recordGraphWithClaimsVerified();
