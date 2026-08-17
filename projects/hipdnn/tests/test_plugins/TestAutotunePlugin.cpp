@@ -38,68 +38,48 @@ constexpr size_t WORKSPACE_LARGE_COMPILED_SIZE = 8192;
 // margin.
 constexpr size_t TIMING_SCRATCH_SIZE = 4UL * 1024 * 1024;
 
-// Stream captured from hipdnnEnginePluginSetStream, which is the same stream the
-// autotune profiling events record on.
-// NOLINTNEXTLINE
-hipStream_t g_timingStream = nullptr;
-
-// RAII owner for a stream-ordered scratch allocation. The destructor enqueues a
-// stream-ordered free, so the buffer is released on every path, including when
-// a later HIP call throws during exception unwinding.
-class StreamScratch
+struct AutotunePluginHandle final : HipdnnEnginePluginHandle
 {
-public:
-    StreamScratch(size_t bytes, hipStream_t stream)
-        : _stream(stream)
+    ~AutotunePluginHandle() override
     {
-        const hipError_t err = hipMallocAsync(&_ptr, bytes, _stream);
-        if(err != hipSuccess || _ptr == nullptr)
+        if(timingScratch != nullptr)
         {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                std::string("AutotunePlugin: hipMallocAsync for timing scratch failed: ")
-                    + hipGetErrorString(err));
+            static_cast<void>(hipFree(timingScratch));
         }
     }
 
-    ~StreamScratch()
-    {
-        // Best-effort stream-ordered free; a failure here cannot be surfaced
-        // from a destructor and would only occur on an already-broken stream.
-        static_cast<void>(hipFreeAsync(_ptr, _stream));
-    }
-
-    StreamScratch(const StreamScratch&) = delete;
-    StreamScratch& operator=(const StreamScratch&) = delete;
-    StreamScratch(StreamScratch&&) = delete;
-    StreamScratch& operator=(StreamScratch&&) = delete;
-
-    void* get() const
-    {
-        return _ptr;
-    }
-
-private:
-    void* _ptr = nullptr;
-    hipStream_t _stream = nullptr;
+    void* timingScratch = nullptr;
+    hipStream_t stream = nullptr;
 };
 
-// Enqueue trivial-but-real device work on the profiling stream so the
-// benchmarked interval is non-empty. Allocation, memset, and free are all
-// stream-ordered, so the work is captured by the timing events and nothing
-// outlives the run. Throws HipdnnPluginException on HIP error; callers run it
-// inside hipdnn_plugin_sdk::tryCatch.
-void enqueueTimingWork()
+// Keep one scratch allocation per plugin handle. The first execution allocates
+// it outside any timed device work; later warmup and timed executions only
+// enqueue the memset bracketed by profiling events.
+void enqueueTimingWork(hipdnnEnginePluginHandle_t handle)
 {
-    const StreamScratch scratch(TIMING_SCRATCH_SIZE, g_timingStream);
-    const hipError_t memsetErr
-        = hipMemsetAsync(scratch.get(), 0, TIMING_SCRATCH_SIZE, g_timingStream);
-    if(memsetErr != hipSuccess)
+    hipdnn_plugin_sdk::throwIfNull(handle);
+    auto* pluginHandle = static_cast<AutotunePluginHandle*>(handle);
+
+    if(pluginHandle->timingScratch == nullptr)
     {
-        // scratch's destructor still enqueues the stream-ordered free.
+        const auto mallocStatus = hipMalloc(&pluginHandle->timingScratch, TIMING_SCRATCH_SIZE);
+        if(mallocStatus != hipSuccess || pluginHandle->timingScratch == nullptr)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                std::string("AutotunePlugin: timing scratch allocation failed: ")
+                    + hipGetErrorString(mallocStatus));
+        }
+    }
+
+    const auto memsetStatus
+        = hipMemsetAsync(pluginHandle->timingScratch, 0, TIMING_SCRATCH_SIZE, pluginHandle->stream);
+    if(memsetStatus != hipSuccess)
+    {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            std::string("AutotunePlugin: hipMemsetAsync failed: ") + hipGetErrorString(memsetErr));
+            std::string("AutotunePlugin: hipMemsetAsync failed: ")
+                + hipGetErrorString(memsetStatus));
     }
 }
 } // namespace
@@ -346,7 +326,7 @@ public:
         // Successful engines: enqueue real device work on the profiling stream so
         // the autotune timed interval measures a positive, above-resolution time
         // instead of an empty (possibly negative) hipEventElapsedTime window.
-        const auto timingStatus = hipdnn_plugin_sdk::tryCatch([]() { enqueueTimingWork(); });
+        const auto timingStatus = hipdnn_plugin_sdk::tryCatch([&]() { enqueueTimingWork(handle); });
         if(timingStatus != HIPDNN_PLUGIN_STATUS_SUCCESS)
         {
             return timingStatus;
@@ -574,7 +554,16 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
 {
-    return TestPluginBase::enginePluginCreate(handle);
+    LOG_API_ENTRY("handlePtr=" << static_cast<void*>(handle));
+
+    return hipdnn_plugin_sdk::tryCatch([&, apiName = __func__]() {
+        hipdnn_plugin_sdk::throwIfNull(handle);
+
+        auto pluginHandle = std::make_unique<AutotunePluginHandle>();
+        *handle = pluginHandle.release();
+
+        LOG_API_SUCCESS(apiName, "createdHandle=" << static_cast<void*>(*handle));
+    });
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
@@ -586,10 +575,12 @@ HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream)
 {
-    // Capture the stream so executeOpGraph enqueues its timing work on the same
-    // stream the autotune profiling events record on.
-    g_timingStream = stream;
-    return TestPluginBase::enginePluginSetStream(handle, stream);
+    const auto status = TestPluginBase::enginePluginSetStream(handle, stream);
+    if(status == HIPDNN_PLUGIN_STATUS_SUCCESS)
+    {
+        static_cast<AutotunePluginHandle*>(handle)->stream = stream;
+    }
+    return status;
 }
 
 HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
