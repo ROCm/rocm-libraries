@@ -2070,6 +2070,47 @@ class TestAttentionHelpers(unittest.TestCase):
                         spec = au._tiled_spec_from_problem(p)
                         self.assertIsInstance(spec, au._tiled_2d_impl(arch)[0])
 
+    def test_gfx950_fp16_d128_sw_routing(self):
+        """Regression for the fp16 D128 sliding-window routing fix + its
+        ``block_size == 16`` scoping.
+
+        fp16 D128 SW is admitted into the single-batch transposed-32x32 combo
+        only for ``block_size == 16``: at block_size in {32, 64} the combo also
+        enables the default-on ``_enable_d128_small_tile`` /
+        ``_enable_softmax_mfma_interleave`` levers, yielding
+        ``block_m=128 > tile_size=64`` with ``use_k_single_buffer`` -- an
+        uncaught ``ValueError`` in ``_tiled_spec_from_problem`` at launch. So
+        every block_size must build without raising, and only block_size==16
+        takes the transposed-32x32 (T=64) path; 32/64 stay on the narrow path.
+        """
+        import kernels.common.attention_unified as au
+        from kernels import supports_native_unified_attention_tiled
+
+        with _patch_resolved_arch("gfx950"):
+            for bs in (16, 32, 64):
+                with self.subTest(block_size=bs):
+                    p = _budget_problem(
+                        head_size=128,
+                        num_query_heads=32,
+                        num_kv_heads=8,
+                        dtype="fp16",
+                        seq=8192,
+                        block_size=bs,
+                        sliding_window=4096,
+                    )
+                    ok, reason = supports_native_unified_attention_tiled(p)
+                    self.assertTrue(ok, msg=reason)
+                    # Must not raise: block_size 32/64 previously hit an
+                    # uncaught ValueError building the combo spec here.
+                    spec = au._tiled_spec_from_problem(p)
+                    if bs == 16:
+                        # routed to the transposed-32x32 combo at T=64
+                        self.assertTrue(spec.use_mfma_32x32)
+                        self.assertEqual(spec.tile_size, 64)
+                    else:
+                        # block_size 32/64 stay on the narrow path
+                        self.assertFalse(spec.use_mfma_32x32)
+
     def test_tiled_3d_support_gate_rejects_unsupported(self):
         """Mirror of ``test_tiled_2d_support_gate_rejects_unsupported`` for the
         per-arch ``supports_tiled_3d`` gate. Both arches share the same
@@ -2623,7 +2664,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # package system (editable-installed) rather than a hardcoded path, then
         # load it under a private name with a fake ``aiter`` injected.
         module_path = importlib.util.find_spec(
-            "builders.gfx950.attention.parity_unified_attention"
+            "builders.gfx950.attention.prefill.parity_unified_attention"
         ).origin
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")
