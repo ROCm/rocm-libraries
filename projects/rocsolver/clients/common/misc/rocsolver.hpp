@@ -2204,6 +2204,62 @@ inline rocblas_status rocsolver_larft(rocblas_handle handle,
 {
     return rocsolver_zlarft(handle, direct, storev, n, k, V, ldv, tau, F, ldt);
 }
+
+inline rocblas_status rocsolver_larft(rocblas_handle handle,
+                                      rocblas_direct direct,
+                                      rocblas_storev storev,
+                                      int64_t n,
+                                      int64_t k,
+                                      float* V,
+                                      int64_t ldv,
+                                      float* tau,
+                                      float* F,
+                                      int64_t ldt)
+{
+    return rocsolver_slarft_64(handle, direct, storev, n, k, V, ldv, tau, F, ldt);
+}
+
+inline rocblas_status rocsolver_larft(rocblas_handle handle,
+                                      rocblas_direct direct,
+                                      rocblas_storev storev,
+                                      int64_t n,
+                                      int64_t k,
+                                      double* V,
+                                      int64_t ldv,
+                                      double* tau,
+                                      double* F,
+                                      int64_t ldt)
+{
+    return rocsolver_dlarft_64(handle, direct, storev, n, k, V, ldv, tau, F, ldt);
+}
+
+inline rocblas_status rocsolver_larft(rocblas_handle handle,
+                                      rocblas_direct direct,
+                                      rocblas_storev storev,
+                                      int64_t n,
+                                      int64_t k,
+                                      rocblas_float_complex* V,
+                                      int64_t ldv,
+                                      rocblas_float_complex* tau,
+                                      rocblas_float_complex* F,
+                                      int64_t ldt)
+{
+    return rocsolver_clarft_64(handle, direct, storev, n, k, V, ldv, tau, F, ldt);
+}
+
+inline rocblas_status rocsolver_larft(rocblas_handle handle,
+                                      rocblas_direct direct,
+                                      rocblas_storev storev,
+                                      int64_t n,
+                                      int64_t k,
+                                      rocblas_double_complex* V,
+                                      int64_t ldv,
+                                      rocblas_double_complex* tau,
+                                      rocblas_double_complex* F,
+                                      int64_t ldt)
+{
+    return rocsolver_zlarft_64(handle, direct, storev, n, k, V, ldv, tau, F, ldt);
+}
 /*****************************************************/
 
 /******************** LARFB ********************/

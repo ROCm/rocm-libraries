@@ -7,6 +7,9 @@ import pytest
 
 import hipdnn_frontend as hipdnn
 
+from .graph_builders import build_conv_fprop_graph
+from .helpers import build_all_plans
+
 
 @pytest.mark.gpu
 class TestHandle:
@@ -38,19 +41,23 @@ class TestHandle:
         set_stream(handle, 0)
         assert get_stream(handle) == 0
 
-    def test_get_engine_info_for_loaded_engine(self):
-        """The loaded MIOpen engine exposes all provider metadata."""
-        graph = hipdnn.Graph().set_preferred_engine_id_ext("MIOPEN_ENGINE")
-        engine_id = graph.get_preferred_engine_id_ext()
+    def test_get_engine_info_for_the_planned_engine(self):
+        """The engine backing a built plan exposes its metadata to Python.
 
-        info = hipdnn.create_handle().get_engine_info(engine_id)
+        Asserts the shape of the EngineInfo binding, not any one provider's
+        identity, so this holds for the test stub and a real engine alike.
+        """
+        graph, *_ = build_conv_fprop_graph()
+        handle = build_all_plans(graph)
+        engine_id = graph.get_execution_plan_engine_id()
+
+        info = handle.get_engine_info(engine_id)
 
         assert isinstance(info, hipdnn.EngineInfo)
         assert info.engine_id == engine_id
-        assert info.engine_name == "MIOPEN_ENGINE"
-        assert info.plugin_name == "miopen_provider_plugin"
-        assert info.version
-        assert info.type == "HIPDNN_PLUGIN_TYPE_ENGINE"
+        for field in ("engine_name", "plugin_name", "version", "type"):
+            value = getattr(info, field)
+            assert isinstance(value, str) and value, f"{field} is empty"
         with pytest.raises(AttributeError):
             info.version = "overridden"
 

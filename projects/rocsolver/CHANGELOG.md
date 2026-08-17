@@ -15,6 +15,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Hessenberg reduction routines
     * GEHD2
     * GEHRD
+* 64-bit APIs for existing functions:
+    - LARFT_64
 
 ### Changed
 ### Removed

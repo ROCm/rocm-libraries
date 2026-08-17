@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,8 @@ using ::testing::Values;
 using ::testing::ValuesIn;
 using namespace std;
 
-typedef std::tuple<vector<int>, vector<int>> larft_tuple;
+template <typename I>
+using larft_tuple = std::tuple<vector<I>, vector<I>>;
 
 // each order_size_range vector is {N,ldv,s}
 // if s = 0, then storev = 'C'
@@ -77,19 +78,49 @@ const vector<vector<int>> large_order_size_range
 const vector<vector<int>> large_reflector_size_range
     = {{15, 15, 0}, {25, 40, 1}, {45, 45, 0}, {60, 70, 1}, {75, 75, 0}, {85, 90, 1}};
 
-Arguments larft_setup_arguments(larft_tuple tup)
+const vector<vector<int64_t>> order_size_range_64 = {
+    // quick return
+    {0, 1, 0},
+    // invalid
+    {-1, 1, 0},
+    {10, 5, 0},
+    {10, 3, 1},
+    // normal (valid) samples
+    {75, 75, 0},
+    {60, 60, 1},
+    {95, 100, 0}};
+
+const vector<vector<int64_t>> reflector_size_range_64 = {
+    // invalid
+    {0, 1, 0},
+    {5, 1, 0},
+    // normal (valid) samples
+    {5, 5, 0},
+    {10, 20, 1},
+    {15, 15, 0},
+    {70, 70, 0},
+    {75, 80, 1}};
+
+const vector<vector<int64_t>> large_order_size_range_64
+    = {{192, 192, 0}, {640, 75, 1}, {1024, 1200, 0}, {2048, 100, 1}};
+
+const vector<vector<int64_t>> large_reflector_size_range_64
+    = {{15, 15, 0}, {25, 40, 1}, {45, 45, 0}, {60, 70, 1}, {75, 75, 0}, {85, 90, 1}};
+
+template <typename I>
+Arguments larft_setup_arguments(larft_tuple<I> tup)
 {
-    vector<int> order_size = std::get<0>(tup);
-    vector<int> reflector_size = std::get<1>(tup);
+    vector<I> order_size = std::get<0>(tup);
+    vector<I> reflector_size = std::get<1>(tup);
 
     Arguments arg;
 
-    arg.set<rocblas_int>("n", order_size[0]);
-    arg.set<rocblas_int>("ldv", order_size[1]);
+    arg.set<I>("n", order_size[0]);
+    arg.set<I>("ldv", order_size[1]);
     arg.set<char>("storev", order_size[2] == 1 ? 'R' : 'C');
 
-    arg.set<rocblas_int>("k", reflector_size[0]);
-    arg.set<rocblas_int>("ldt", reflector_size[1]);
+    arg.set<I>("k", reflector_size[0]);
+    arg.set<I>("ldt", reflector_size[1]);
     arg.set<char>("direct", reflector_size[2] == 1 ? 'B' : 'F');
 
     arg.timing = 0;
@@ -97,7 +128,8 @@ Arguments larft_setup_arguments(larft_tuple tup)
     return arg;
 }
 
-class LARFT : public ::TestWithParam<larft_tuple>
+template <typename I>
+class LARFT_BASE : public ::TestWithParam<larft_tuple<I>>
 {
 protected:
     void TearDown() override
@@ -108,13 +140,21 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = larft_setup_arguments(GetParam());
+        Arguments arg = larft_setup_arguments(this->GetParam());
 
-        if(arg.peek<rocblas_int>("n") == 0 && arg.peek<rocblas_int>("k") == 0)
-            testing_larft_bad_arg<T>();
+        if(arg.peek<I>("n") == 0 && arg.peek<I>("k") == 0)
+            testing_larft_bad_arg<T, I>();
 
-        testing_larft<T>(arg);
+        testing_larft<T, I>(arg);
     }
+};
+
+class LARFT : public LARFT_BASE<rocblas_int>
+{
+};
+
+class LARFT_64 : public LARFT_BASE<int64_t>
+{
 };
 
 // non-batch tests
@@ -139,6 +179,26 @@ TEST_P(LARFT, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(LARFT_64, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(LARFT_64, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(LARFT_64, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(LARFT_64, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          LARFT,
                          Combine(ValuesIn(large_order_size_range),
@@ -147,3 +207,12 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LARFT,
                          Combine(ValuesIn(order_size_range), ValuesIn(reflector_size_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         LARFT_64,
+                         Combine(ValuesIn(large_order_size_range_64),
+                                 ValuesIn(large_reflector_size_range_64)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         LARFT_64,
+                         Combine(ValuesIn(order_size_range_64), ValuesIn(reflector_size_range_64)));
