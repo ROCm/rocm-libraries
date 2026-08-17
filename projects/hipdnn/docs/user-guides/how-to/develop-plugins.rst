@@ -446,7 +446,6 @@ Integration tests
 Integration tests validate end-to-end functionality of your plugin. There are currently two categories of integration tests, internal and external.
 
 Internal integration tests are run as part of the plugin's own test suite:
- 
 
 - **Location**: ``<plugin_name>/src/integration_tests/``
 - **Purpose**: Validate correctness of graph execution and accuracy of results.
@@ -458,7 +457,7 @@ Internal integration tests are run as part of the plugin's own test suite:
   - Enable tests for all supported ASICs.
   - A GPU is typically required for meaningful validation. Use the ``SKIP_IF_NO_DEVICES()`` macro to automatically skip the test if no HIP devices are found.
   - Tests are divided into two categories designated by the prefix argument passed to ``INSTANTIATE_TEST_SUITE_P``.
-   
+
 The internal integration tests are typically simple tests to ensure that the plugin is able to properly load and run kernels on GPU hardware. Integrations tests for numerical accuracy are better handled using the external integration tests (below).
 
     - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).
