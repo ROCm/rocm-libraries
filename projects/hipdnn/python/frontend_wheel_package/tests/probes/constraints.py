@@ -20,6 +20,8 @@ for config in graph.get_engine_configs():
         entry = {
             "engine_id": config.engine_id,
             "knob_id": knob.knob_id,
+            "description": knob.description,
+            "is_deprecated": knob.is_deprecated,
             "value_type": knob.value_type.name,
             "constraint": type(constraint).__name__,
             "repr": repr(constraint),

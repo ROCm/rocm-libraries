@@ -934,6 +934,9 @@ def test_knob_constraints_describe_legal_values():
 
     for entry in knobs:
         assert entry["default_ok"], entry
+        # The engine's own description and deprecation flag reach Python.
+        assert entry["description"], entry
+        assert isinstance(entry["is_deprecated"], bool), entry
         assert entry["repr"].startswith(entry["constraint"]), entry
         if entry["constraint"] == "IntConstraint":
             assert entry["step"] >= 1, entry
