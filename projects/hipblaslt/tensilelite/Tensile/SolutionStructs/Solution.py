@@ -2824,6 +2824,7 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
+      state["ExpandPointerSwap"] = False
       if state.get("PrefetchAcrossPersistent", 0):
         if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
           reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")

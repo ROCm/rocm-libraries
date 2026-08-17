@@ -81,6 +81,9 @@ except ImportError:
 
 # Custom YAML loader that preserves int type for 0 and 1 (doesn't auto-convert to bool)
 # This allows type validation to catch int-vs-bool mismatches in YAML files.
+# It derives from CSafeLoader/SafeLoader and so is safe, but bandit's B506 check only
+# recognises those two names, hence the bare nosec marker at its call sites. Never spell
+# that marker out with its leading hash here, or bandit parses this comment too (SEC-00404).
 class StrictTypeLoader(yamlLoader):
     """YAML loader that does NOT auto-convert 0/1 to False/True.
 
@@ -366,7 +369,7 @@ def read(filename, customizedLoader=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, StrictTypeLoader)
+        data = yaml.load(f, StrictTypeLoader)  # nosec B506
     return data
 
 
