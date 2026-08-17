@@ -831,15 +831,25 @@ class TestAutotuneGpu:
         assert name_graph.deselect_engines([configs[0].engine_name]) is name_graph
 
 
-# Child-process probe (see _run_plugin_probe): real EXHAUSTIVE priming needs an
-# engine that exposes the benchmarking knob, which the session's stub does not.
-_PRIMING_PROBE = textwrap.dedent(
-    """
+# Child-process probes.
+#
+# The session's conftest pins test_good_plugin in ABSOLUTE mode, and that engine
+# declares no knobs and cannot prime, so knob and priming behaviour needs another
+# plugin. Loading one in-process would change the engine set every later test
+# sees, so each probe runs in its own interpreter and loads exactly one plugin
+# file in ABSOLUTE mode: the engine set is then fixed, and plugins added to the
+# test directory later cannot perturb these results.
+_PROBE_PREAMBLE = """
     import json
+    import os
 
     import numpy as np
 
     import hipdnn_frontend as hipdnn
+
+    hipdnn.set_engine_plugin_paths(
+        [os.environ["HIPDNN_TEST_PROBE_PLUGIN"]], hipdnn.PluginLoadingMode.ABSOLUTE
+    )
 
     WORKSPACE = 1 << 20
 
@@ -874,6 +884,65 @@ _PRIMING_PROBE = textwrap.dedent(
         return variant_pack, buffers
 
 
+    def quick_config():
+        config = hipdnn.AutotuneConfig()
+        config.strategy = hipdnn.AutotuneStrategy.FIXED_AVERAGE
+        config.warmup_iterations = 1
+        config.timed_iterations = 1
+        return config
+
+
+    def settings_of(result):
+        return sorted((s.knob_id, s.value) for s in result.knob_settings)
+"""
+
+
+def _run_plugin_probe(script, plugin, reason):
+    """Run `script` in a child process against exactly one test plugin.
+
+    `plugin` is the plugin file name; it is loaded in ABSOLUTE mode so the engine
+    set is exactly that plugin's. Returns the JSON report the child prints.
+    """
+    stub = helpers.stub_engine_path()
+    if stub is None:
+        pytest.skip("no test plugin directory known")
+    plugin_path = Path(stub).parent / plugin
+    if not plugin_path.is_file():
+        pytest.skip(f"{plugin_path} not installed; {reason}")
+
+    env = dict(os.environ)
+    env["HIPDNN_TEST_PROBE_PLUGIN"] = str(plugin_path)
+    env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
+    completed = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(_PROBE_PREAMBLE + script)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def _autotune_plugin():
+    return (
+        "test_autotune_plugin.dll" if os.name == "nt" else "libtest_autotune_plugin.so"
+    )
+
+
+def _knobs_plugin():
+    return "test_knobs_plugin.dll" if os.name == "nt" else "libtest_knobs_plugin.so"
+
+
+def _constraint_plugin():
+    return (
+        "test_knob_constraint_validation_plugin.dll"
+        if os.name == "nt"
+        else "libtest_knob_constraint_validation_plugin.so"
+    )
+
+
+_PRIMING_PROBE = """
     graph, handle, tensors = build()
     capable = [c.engine_id for c in graph.get_engine_configs() if c.supports_exhaustive]
     report = {"capable": capable, "runs": {}}
@@ -884,12 +953,9 @@ _PRIMING_PROBE = textwrap.dedent(
             break
         variant_pack, buffers = pack(tensors)
         workspace = hipdnn.DeviceBuffer(WORKSPACE)
-        config = hipdnn.AutotuneConfig()
+        config = quick_config()
         config.mode = hipdnn.TuneMode.EXHAUSTIVE
         config.priming_failure_policy = getattr(hipdnn.PrimingFailurePolicy, policy)
-        config.strategy = hipdnn.AutotuneStrategy.FIXED_AVERAGE
-        config.warmup_iterations = 1
-        config.timed_iterations = 1
         try:
             results = graph.autotune(
                 handle,
@@ -916,48 +982,17 @@ _PRIMING_PROBE = textwrap.dedent(
         }
 
     print(json.dumps(report))
-    """
-)
-
-
-def _run_plugin_probe(script, reason):
-    """Run `script` in a child process against the full test plugin directory.
-
-    The session's conftest pinned the good-plugin stub in ABSOLUTE mode, and that
-    engine exposes neither knobs nor exhaustive priming. Loading a second plugin
-    in-process would leak into every later test, so probes get their own
-    interpreter. Returns the JSON report the child prints.
-    """
-    stub = helpers.stub_engine_path()
-    if stub is None:
-        pytest.skip("no test plugin directory known")
-    plugin_dir = Path(stub).parent
-    plugin = plugin_dir / (
-        "test_autotune_plugin.dll" if os.name == "nt" else "libtest_autotune_plugin.so"
-    )
-    if not plugin.is_file():
-        pytest.skip(f"{plugin} not installed; {reason}")
-
-    env = dict(os.environ)
-    env["HIPDNN_PLUGIN_DIR"] = str(plugin_dir)
-    env.pop("HIPDNN_TEST_GOOD_PLUGIN_PATH", None)
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    return json.loads(completed.stdout.strip().splitlines()[-1])
+"""
 
 
 @pytest.mark.gpu
 def test_exhaustive_priming_policies():
     """EXHAUSTIVE priming runs, and the failure policy decides abort vs. unprimed."""
-    report = _run_plugin_probe(_PRIMING_PROBE, "no engine supports exhaustive priming")
+    report = _run_plugin_probe(
+        _PRIMING_PROBE, _autotune_plugin(), "no engine supports exhaustive priming"
+    )
 
-    assert report["capable"], "no loaded engine advertises the benchmarking knob"
+    assert report["capable"], "no engine of the plugin advertises the benchmarking knob"
     runs = report["runs"]
     assert set(runs) == {"ABORT_ON_PRIMING_FAILURE", "BENCHMARK_UNPRIMED"}
 
@@ -980,32 +1015,11 @@ def test_exhaustive_priming_policies():
         assert all(r["ran_exhaustive"] for r in abort["results"]), abort
 
 
-# Child-process probe (see _run_plugin_probe): the session's stub engine exposes
-# no knobs, so knob constraints need an engine that declares some.
-_CONSTRAINT_PROBE = textwrap.dedent(
-    """
-    import json
-
-    import hipdnn_frontend as hipdnn
-
-    graph = hipdnn.Graph()
-    graph.set_io_data_type(hipdnn.DataType.FLOAT)
-    graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
-    graph.set_compute_data_type(hipdnn.DataType.FLOAT)
-    x = hipdnn.Tensor.create([1, 2, 8, 8], hipdnn.DataType.FLOAT)
-    weight = hipdnn.Tensor.create([4, 2, 3, 3], hipdnn.DataType.FLOAT)
-    attrs = hipdnn.ConvFpropAttributes()
-    attrs.set_padding([1, 1])
-    attrs.set_stride([1, 1])
-    attrs.set_dilation([1, 1])
-    y = graph.conv_fprop(x, weight, attrs)
-    y.set_output(True)
-    assert graph.validate().is_good()
-    handle = hipdnn.create_handle()
-    assert graph.build_operation_graph(handle).is_good()
-
+_CONSTRAINT_PROBE = """
+    graph, handle, tensors = build()
     report = {"knobs": [], "sweep": None}
     sweep_source = None
+
     for config in graph.get_engine_configs():
         for knob in graph.get_knobs_for_engine(config.engine_id):
             constraint = knob.constraint
@@ -1015,61 +1029,71 @@ _CONSTRAINT_PROBE = textwrap.dedent(
                 "value_type": knob.value_type.name,
                 "constraint": type(constraint).__name__,
                 "repr": repr(constraint),
+                "default_ok": knob.validate(
+                    hipdnn.KnobSetting(knob.knob_id, knob.default_value)
+                ).is_good(),
             }
             if isinstance(constraint, hipdnn.IntConstraint):
                 entry["min_value"] = constraint.min_value
                 entry["max_value"] = constraint.max_value
                 entry["step"] = constraint.step
                 entry["valid_values"] = sorted(constraint.valid_values)
-                if sweep_source is None and constraint.valid_values:
-                    sweep_source = (config.engine_id, knob.knob_id, constraint)
-            elif isinstance(constraint, hipdnn.FloatConstraint):
-                entry["min_value"] = constraint.min_value
-                entry["max_value"] = constraint.max_value
-            elif isinstance(constraint, hipdnn.StringConstraint):
-                entry["max_length"] = constraint.max_length
-                entry["valid_values"] = sorted(constraint.valid_values)
-            # A constraint must accept the knob's own default and, for a bounded
-            # integer knob, reject a value past its maximum.
-            entry["default_ok"] = knob.validate(
-                hipdnn.KnobSetting(knob.knob_id, knob.default_value)
-            ).is_good()
-            if isinstance(constraint, hipdnn.IntConstraint):
                 entry["over_max_ok"] = knob.validate(
                     hipdnn.KnobSetting(knob.knob_id, constraint.max_value + 1000)
                 ).is_good()
+                if sweep_source is None:
+                    values = sorted(constraint.valid_values) or list(
+                        range(
+                            constraint.min_value,
+                            constraint.max_value + 1,
+                            constraint.step,
+                        )
+                    )
+                    sweep_source = (config.engine_id, knob.knob_id, values[:3])
+            elif isinstance(constraint, hipdnn.FloatConstraint):
+                entry["min_value"] = constraint.min_value
+                entry["max_value"] = constraint.max_value
+                entry["over_max_ok"] = knob.validate(
+                    hipdnn.KnobSetting(knob.knob_id, constraint.max_value + 1.0)
+                ).is_good()
+            elif isinstance(constraint, hipdnn.StringConstraint):
+                entry["max_length"] = constraint.max_length
+                entry["valid_values"] = sorted(constraint.valid_values)
+                entry["unlisted_ok"] = knob.validate(
+                    hipdnn.KnobSetting(knob.knob_id, "no.such.value")
+                ).is_good()
             report["knobs"].append(entry)
 
-    # The payoff: a sweep axis built straight from a constraint is accepted.
+    # The payoff: an axis generated from a constraint is accepted as a sweep.
     if sweep_source is not None:
-        engine_id, knob_id, constraint = sweep_source
+        engine_id, knob_id, values = sweep_source
         axis = hipdnn.KnobSweepAxis()
         axis.knob_id = knob_id
-        axis.values = sorted(constraint.valid_values)
+        axis.values = values
         spec = hipdnn.EngineSweepSpec()
         spec.engine_id = engine_id
         spec.axes = [axis]
         error = graph.add_engine_sweep([spec])
         report["sweep"] = {
-            "engine_id": engine_id,
             "knob_id": knob_id,
-            "values": axis.values,
+            "values": values,
             "accepted": error.is_good(),
             "message": error.get_message(),
         }
 
     print(json.dumps(report))
-    """
-)
+"""
 
 
 @pytest.mark.gpu
 def test_knob_constraints_describe_legal_values():
     """Knob.constraint exposes the ranges a sweep axis can be generated from."""
-    report = _run_plugin_probe(_CONSTRAINT_PROBE, "no engine declares knobs")
+    report = _run_plugin_probe(
+        _CONSTRAINT_PROBE, _constraint_plugin(), "no engine declares constrained knobs"
+    )
 
     knobs = report["knobs"]
-    assert knobs, "no loaded engine declares a knob"
+    assert knobs, "the plugin declares no knob"
     kinds = {entry["constraint"] for entry in knobs}
     assert {"IntConstraint", "FloatConstraint", "StringConstraint"} <= kinds, kinds
 
@@ -1080,15 +1104,274 @@ def test_knob_constraints_describe_legal_values():
             assert entry["step"] >= 1, entry
             assert entry["max_value"] >= entry["min_value"], entry
             assert all(isinstance(v, int) for v in entry["valid_values"]), entry
-            # Either an explicit value list or a bounded range must reject this.
             assert entry["over_max_ok"] is False, entry
         elif entry["constraint"] == "FloatConstraint":
             assert entry["max_value"] >= entry["min_value"], entry
+            assert entry["over_max_ok"] is False, entry
         elif entry["constraint"] == "StringConstraint":
             assert entry["valid_values"] or entry["max_length"] > 0, entry
             assert all(isinstance(v, str) for v in entry["valid_values"]), entry
+            if entry["valid_values"]:
+                assert entry["unlisted_ok"] is False, entry
 
     sweep = report["sweep"]
-    assert sweep is not None, "no int knob published an explicit value list"
+    assert sweep is not None, "no integer knob to build an axis from"
     assert sweep["accepted"], sweep["message"]
     assert len(sweep["values"]) > 1
+
+
+_KNOB_SETTINGS_PROBE = """
+    graph, handle, tensors = build()
+    engines = {
+        c.engine_id: [k.knob_id for k in graph.get_knobs_for_engine(c.engine_id)]
+        for c in graph.get_engine_configs()
+    }
+    # Pick an engine with an integer knob that publishes an explicit value list.
+    target = None
+    for engine_id in sorted(engines):
+        for knob in graph.get_knobs_for_engine(engine_id):
+            constraint = knob.constraint
+            if isinstance(constraint, hipdnn.IntConstraint) and constraint.valid_values:
+                target = (engine_id, knob.knob_id, sorted(constraint.valid_values))
+                break
+        if target is not None:
+            break
+
+    report = {"engines": engines, "target": target}
+    if target is None:
+        print(json.dumps(report))
+        raise SystemExit(0)
+
+    engine_id, knob_id, values = target
+    chosen, other = values[0], values[-1]
+
+    accepted = graph.add_engine(engine_id, [hipdnn.KnobSetting(knob_id, chosen)])
+    report["accepted"] = {"ok": accepted.is_good(), "message": accepted.get_message()}
+
+    rejected = graph.add_engine(
+        engine_id, [hipdnn.KnobSetting(knob_id, max(values) + 1000)]
+    )
+    report["rejected"] = {"ok": rejected.is_good(), "message": rejected.get_message()}
+
+    wrong_type = graph.add_engine(engine_id, [hipdnn.KnobSetting(knob_id, "text")])
+    report["wrong_type"] = {"ok": wrong_type.is_good(), "message": wrong_type.get_message()}
+
+    # Two variants of the same engine differing only in the knob value: the
+    # results must echo back exactly what was asked for.
+    variants = []
+    for value in (chosen, other):
+        variant = hipdnn.EngineVariant()
+        variant.engine_id = engine_id
+        variant.knob_settings = {knob_id: value}
+        variants.append(variant)
+
+    tuned, tuned_handle, tuned_tensors = build()
+    added = tuned.add_engine_variants(variants)
+    report["variants_added"] = {"ok": added.is_good(), "message": added.get_message()}
+    variant_pack, buffers = pack(tuned_tensors)
+    workspace = hipdnn.DeviceBuffer(WORKSPACE)
+    results = tuned.autotune(
+        tuned_handle,
+        variant_pack,
+        workspace.ptr(),
+        workspace_size=WORKSPACE,
+        config=quick_config(),
+    )
+    report["variant_results"] = [
+        {
+            "engine_id": r.engine_id,
+            "succeeded": r.succeeded,
+            "settings": settings_of(r),
+            "error": r.error_message,
+        }
+        for r in results
+    ]
+
+    # The same settings drive a hard-selected plan end to end.
+    planned, planned_handle, planned_tensors = build()
+    created = planned.create_execution_plan_ext(
+        engine_id, [hipdnn.KnobSetting(knob_id, other)]
+    )
+    report["plan_created"] = {"ok": created.is_good(), "message": created.get_message()}
+    built_plans = planned.build_plans()
+    report["plan_built"] = {"ok": built_plans.is_good(), "message": built_plans.get_message()}
+    planned_pack, planned_buffers = pack(planned_tensors)
+    plan_workspace_size = planned.get_workspace_size()
+    plan_workspace = (
+        hipdnn.DeviceBuffer(plan_workspace_size) if plan_workspace_size > 0 else None
+    )
+    executed = planned.execute(
+        planned_handle,
+        planned_pack,
+        plan_workspace.ptr() if plan_workspace is not None else 0,
+    )
+    report["plan_executed"] = {"ok": executed.is_good(), "message": executed.get_message()}
+    report["plan_engine_id"] = planned.get_execution_plan_engine_id()
+    report["plan_name"] = planned.get_plan_name()
+
+    print(json.dumps(report))
+"""
+
+
+@pytest.mark.gpu
+def test_knob_settings_end_to_end():
+    """Knob settings reach the engine: accepted, rejected, echoed and executed."""
+    report = _run_plugin_probe(
+        _KNOB_SETTINGS_PROBE, _knobs_plugin(), "no engine declares knobs"
+    )
+
+    target = report["target"]
+    assert target is not None, report["engines"]
+    engine_id, knob_id, values = target
+    chosen, other = values[0], values[-1]
+
+    assert report["accepted"]["ok"], report["accepted"]["message"]
+
+    # Out-of-range and wrong-typed values are refused, naming the knob.
+    for key in ("rejected", "wrong_type"):
+        assert report[key]["ok"] is False, report[key]
+        assert knob_id in report[key]["message"], report[key]
+
+    assert report["variants_added"]["ok"], report["variants_added"]["message"]
+    results = report["variant_results"]
+    assert len(results) == 2, results
+    assert all(r["succeeded"] for r in results), results
+    assert all(r["engine_id"] == engine_id for r in results), results
+    assert sorted(r["settings"] for r in results) == sorted(
+        [[[knob_id, chosen]], [[knob_id, other]]]
+    ), results
+
+    assert report["plan_created"]["ok"], report["plan_created"]["message"]
+    assert report["plan_built"]["ok"], report["plan_built"]["message"]
+    assert report["plan_executed"]["ok"], report["plan_executed"]["message"]
+    assert report["plan_engine_id"] == engine_id
+    assert report["plan_name"]
+
+
+_SWEEP_PROBE = """
+    graph, handle, tensors = build()
+
+    # Find an engine with two constrained knobs to cross: an integer axis and a
+    # string axis, so the product is more than a relabelled single axis.
+    target = None
+    for config in graph.get_engine_configs():
+        int_axis = None
+        string_axis = None
+        for knob in graph.get_knobs_for_engine(config.engine_id):
+            constraint = knob.constraint
+            if int_axis is None and isinstance(constraint, hipdnn.IntConstraint):
+                values = sorted(constraint.valid_values) or list(
+                    range(constraint.min_value, constraint.max_value + 1, constraint.step)
+                )
+                if len(values) > 1:
+                    int_axis = (knob.knob_id, values[:4])
+            elif string_axis is None and isinstance(constraint, hipdnn.StringConstraint):
+                values = sorted(constraint.valid_values)
+                if len(values) > 1:
+                    string_axis = (knob.knob_id, values[:3])
+        if int_axis is not None and string_axis is not None:
+            target = (config.engine_id, int_axis, string_axis)
+            break
+
+    report = {"target": target}
+    if target is None:
+        print(json.dumps(report))
+        raise SystemExit(0)
+
+    engine_id, (int_knob, int_values), (string_knob, string_values) = target
+
+    axis_a = hipdnn.KnobSweepAxis()
+    axis_a.knob_id = int_knob
+    axis_a.values = int_values
+    axis_b = hipdnn.KnobSweepAxis()
+    axis_b.knob_id = string_knob
+    axis_b.values = string_values
+    spec = hipdnn.EngineSweepSpec()
+    spec.engine_id = engine_id
+    spec.axes = [axis_a, axis_b]
+
+    added = graph.add_engine_sweep([spec])
+    report["added"] = {"ok": added.is_good(), "message": added.get_message()}
+    variant_pack, buffers = pack(tensors)
+    workspace = hipdnn.DeviceBuffer(WORKSPACE)
+    results = graph.autotune(
+        handle,
+        variant_pack,
+        workspace.ptr(),
+        workspace_size=WORKSPACE,
+        config=quick_config(),
+    )
+    report["results"] = [
+        {
+            "engine_id": r.engine_id,
+            "succeeded": r.succeeded,
+            "settings": settings_of(r),
+            "error": r.error_message,
+        }
+        for r in results
+    ]
+
+    # A second sweep pins one knob through fixed_settings instead of sweeping it.
+    fixed_graph, fixed_handle, fixed_tensors = build()
+    single = hipdnn.KnobSweepAxis()
+    single.knob_id = int_knob
+    single.values = int_values
+    fixed_spec = hipdnn.EngineSweepSpec()
+    fixed_spec.engine_id = engine_id
+    fixed_spec.axes = [single]
+    fixed_spec.fixed_settings = {string_knob: string_values[0]}
+    fixed_added = fixed_graph.add_engine_sweep([fixed_spec])
+    report["fixed_added"] = {
+        "ok": fixed_added.is_good(),
+        "message": fixed_added.get_message(),
+    }
+    fixed_pack, fixed_buffers = pack(fixed_tensors)
+    fixed_results = fixed_graph.autotune(
+        fixed_handle,
+        fixed_pack,
+        workspace.ptr(),
+        workspace_size=WORKSPACE,
+        config=quick_config(),
+    )
+    report["fixed_results"] = [
+        {"succeeded": r.succeeded, "settings": settings_of(r)} for r in fixed_results
+    ]
+
+    print(json.dumps(report))
+"""
+
+
+@pytest.mark.gpu
+def test_engine_sweep_expands_cartesian_product():
+    """add_engine_sweep() benchmarks every combination of its knob axes."""
+    report = _run_plugin_probe(
+        _SWEEP_PROBE, _knobs_plugin(), "no engine declares two constrained knobs"
+    )
+
+    target = report["target"]
+    assert target is not None, "no engine exposes an integer and a string knob"
+    engine_id, (int_knob, int_values), (string_knob, string_values) = target
+    assert len(int_values) > 1 and len(string_values) > 1
+
+    assert report["added"]["ok"], report["added"]["message"]
+    results = report["results"]
+
+    expected = sorted(
+        sorted([[int_knob, i], [string_knob, s]])
+        for i in int_values
+        for s in string_values
+    )
+    assert len(results) == len(int_values) * len(string_values), results
+    assert sorted(r["settings"] for r in results) == expected
+    assert all(r["engine_id"] == engine_id for r in results), results
+    assert all(r["succeeded"] for r in results), [
+        r for r in results if not r["succeeded"]
+    ]
+
+    # fixed_settings pins a knob for every combination instead of crossing it.
+    assert report["fixed_added"]["ok"], report["fixed_added"]["message"]
+    fixed = report["fixed_results"]
+    assert len(fixed) == len(int_values), fixed
+    assert sorted(r["settings"] for r in fixed) == sorted(
+        sorted([[int_knob, i], [string_knob, string_values[0]]]) for i in int_values
+    )
