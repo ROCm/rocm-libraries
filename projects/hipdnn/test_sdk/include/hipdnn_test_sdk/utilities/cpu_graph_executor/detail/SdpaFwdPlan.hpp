@@ -4,6 +4,8 @@
 #pragma once
 
 #include <optional>
+#include <stdexcept>
+#include <vector>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
@@ -214,11 +216,23 @@ public:
             return false;
         }
 
-        // Unsupported: max/sum_exp stats outputs (LSE is supported)
+        // Unsupported: max / running-sum softmax stats outputs (the reference does not
+        // produce these). The log-sum-exp stats tensor IS supported and handled below.
         if(nodeAttributes->max_tensor_uid().has_value()
            || nodeAttributes->sum_exp_tensor_uid().has_value())
         {
             return false;
+        }
+
+        // Supported: log-sum-exp output via the stats tensor. It must exist in the map and
+        // be FLOAT (LSE is always float). The rank reconciliation to [B, H, Sq] is enforced
+        // in execute().
+        if(nodeAttributes->stats_tensor_uid().has_value())
+        {
+            CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->stats_tensor_uid().value());
+            CHECK_TENSOR_TYPE(tensorMap,
+                              nodeAttributes->stats_tensor_uid().value(),
+                              hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
         }
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
