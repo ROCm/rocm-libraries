@@ -561,8 +561,15 @@ class TensorDataMoverLoad(TensorDataMover):
             return False
         if ldsBlockSizePerPad > TensorDataMoverLoad.MAX_NON_ITERATE_LBSPP_BYTES:
             return True
+<<<<<<< HEAD
         full_vw_bytes = int(depth_u * bpe * 8)
         if full_vw_bytes <= 0:
             return False
         full_vw_lbspp = ((full_vw_bytes + 255) // 256) * 256
+=======
+        bytes_per_row = int(round(depth_u * bpe))
+        if bytes_per_row <= 0:
+            return False
+        full_vw_lbspp = ((bytes_per_row * 8 + 255) // 256) * 256
+>>>>>>> 94e0404307 (Removing unnecessary condition)
         return full_vw_lbspp > TensorDataMoverLoad.MAX_NON_ITERATE_LBSPP_BYTES
