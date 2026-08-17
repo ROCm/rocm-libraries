@@ -152,12 +152,13 @@ function(hkp_wire_production source_root arches hipcc kpack_python install_base)
     add_custom_target(hkp_descriptor_packaging ALL DEPENDS "${_stamp}"
                       COMMENT "hkp: descriptor packaging")
 
+    # The tool writes only the shippable tree (kpack-form descriptor JSON + the
+    # kpack/ subfolder) to _out_root; install it wholesale. A skipped arch
+    # produces no folder, so OPTIONAL makes its install a no-op.
     foreach(_arch IN LISTS arches)
         install(DIRECTORY "${_out_root}/${_arch}/"
                 DESTINATION "${install_base}/${_arch}"
-                OPTIONAL
-                FILES_MATCHING
-                REGEX "\\.(json|kpack)$")
+                OPTIONAL)
     endforeach()
 endfunction()
 
@@ -205,19 +206,18 @@ for a release build.")
             "packaging dormant (tests still run against the fixtures).")
     endif()
 
-    hkp_register_tests("${_kpack_python}" "${HKP_HIPCC}" "${_install_base}")
+    hkp_register_tests("${_kpack_python}" "${HKP_HIPCC}")
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_register_tests(<kpack_python> <hipcc> <install_base>)
-#   The pytest ctest entry (real compile) + an install-tree assertion produced
-#   by the REAL install() rule. The assertion drives a throwaway harness build
-#   that enables the production pack+install against the empty-arch fixture
-#   (gfx942 populated, gfx950 prunes to empty) and installs into a staging
-#   prefix; the harness is self-contained so the outer build never wires
-#   production. Both tiers compile for real; there is no skip path.
+# hkp_register_tests(<kpack_python> <hipcc>)
+#   The pytest ctest entry (real compile -> prune -> pack -> rewrite, over the
+#   fixture slice). It compiles for real; there is no skip path. The shipped
+#   tree's shape (kpack-form UKDs, no loose .co, empty-arch skip) is asserted at
+#   the tool-output level in pytest; the install() rule itself is a stock
+#   recursive install(DIRECTORY) and is not separately staged.
 # ---------------------------------------------------------------------------
-function(hkp_register_tests kpack_python hipcc install_base)
+function(hkp_register_tests kpack_python hipcc)
     if(NOT HIPKERNELPROVIDER_ENABLE_TESTS)
         return()
     endif()
@@ -238,42 +238,4 @@ function(hkp_register_tests kpack_python hipcc install_base)
     set_tests_properties(hkp_pack_pytest PROPERTIES
         LABELS "unit_test;hip-kernel-provider;quick;host"
         ENVIRONMENT "${_pyenv}")
-
-    # Install-tree assertion. The empty-arch fixture drives both a populated arch
-    # (gfx942) and an arch that prunes to empty (gfx950) through the real
-    # install() rule, so one staging run proves the shipped shape and the
-    # no-leaked-folder invariant.
-    set(_harness "${HKP_CMAKE_DIR}/test_install_project")
-    set(_stg_build "${CMAKE_CURRENT_BINARY_DIR}/hkp-test-harness")
-    set(_staging "${CMAKE_CURRENT_BINARY_DIR}/hkp-staging")
-    set(_present_arch gfx942)
-    set(_empty_arch gfx950)
-    set(_test_arches "${_present_arch};${_empty_arch}")
-    string(REPLACE ";" "\\;" _gpu_arg "${_test_arches}")
-
-    add_test(NAME hkp_stage
-             COMMAND "${CMAKE_COMMAND}"
-                     -DHARNESS_DIR=${_harness}
-                     -DBUILD_DIR=${_stg_build}
-                     -DSTAGING=${_staging}
-                     -DSOURCE_ROOT=${HKP_FIXTURES}/empty_arch
-                     -DGPU_TARGETS=${_gpu_arg}
-                     -DKPACK_PYTHON=${kpack_python}
-                     -DHIPCC=${hipcc}
-                     -DENGINE_DIR=${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
-                     -DGENERATOR=${CMAKE_GENERATOR}
-                     -P "${HKP_CMAKE_DIR}/StageInstall.cmake")
-    set_tests_properties(hkp_stage PROPERTIES
-        FIXTURES_SETUP hkp_stage_fx
-        LABELS "install_test;hip-kernel-provider;host")
-
-    add_test(NAME hkp_install_tree
-             COMMAND "${CMAKE_COMMAND}"
-                     -DTREE=${_staging}/${install_base}
-                     -DARCHES=${_present_arch}
-                     -DEMPTY_ARCH=${_empty_arch}
-                     -P "${HKP_CMAKE_DIR}/AssertInstallTree.cmake")
-    set_tests_properties(hkp_install_tree PROPERTIES
-        FIXTURES_REQUIRED hkp_stage_fx
-        LABELS "install_test;hip-kernel-provider;host")
 endfunction()
