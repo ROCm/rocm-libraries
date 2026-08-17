@@ -71,6 +71,7 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
                                        kBlockScale;
+    static constexpr bool kVScaleOnOacc    = kQuantized && !kBlockScale;
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
@@ -90,16 +91,6 @@ struct BlockFmhaPipelineQRKSVSTdm
     static_assert(!kHwGemm1Scale || (kKVScaleAlign % kGemm1KPerByte == 0 &&
                                      kKVScaleAlign % kGemm0KVPerNIter == 0),
                   "qr_tdm pipeline: the two KV scale resolutions must nest");
-
-    // Packed4Scale's variadic constructor assigns its *last* argument to byte 0,
-    // so it cannot be used to replicate one code across all four sub-block slots.
-    CK_TILE_HOST_DEVICE static int32_t to_e8m0_scale_broadcast(e8m0_t d)
-    {
-        Packed4Scale_E8M0 packed;
-        packed.data() = 0;
-        static_for<0, kScaleBytes, 1>{}([&](auto i) { packed.pack_scale(d, i); });
-        return static_cast<int32_t>(packed.data());
-    }
 
     // Neutral scale operand. A zeroed one is *not* neutral: E8M0 0x00 decodes
     // to 2^-127.
@@ -127,9 +118,13 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_for<0, kScaleBytes, 1>{}([&](auto i) {
             // Sub-blocks past the end of the sequence still load, so clamp the index.
             const index_t kv = min(kv_base + i * kGemm1KPerByte, kv_last);
-            packed.pack_scale(e8m0_t(cast_pointer_to_constant_address_space(
-                                  v_descale_ptr)[kv / block_scale_size_kv]),
-                              i);
+            const float v_descale =
+                cast_pointer_to_constant_address_space(v_descale_ptr)[kv / block_scale_size_kv];
+            packed.pack_scale(e8m0_t(v_descale), i);
+            // e8m0 keeps only the exponent, so a v_descale that is not a power of two is
+            // changed here, silently. Validate it outside this loop: keeping the operands
+            // live for the check below measured 331 -> 367 VGPR, one wave, reporting aside.
+            // if(bit_cast<uint32_t>(packed.unpack_to_float(i)) != bit_cast<uint32_t>(v_descale))
         });
         return pin_to_vgpr(static_cast<int32_t>(packed.data()));
     }
@@ -301,7 +296,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        e8m0_t v_descale) const
+        float v_descale) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -570,9 +565,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
-
-        [[maybe_unused]] const int32_t const_v_scale =
-            kHwGemm1Scale ? to_e8m0_scale_broadcast(v_descale) : e8m0_one();
 
         block_sync_lds();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
@@ -880,7 +872,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 else
                 {
                     ignore = i_k1;
-                    return make_gemm1_scale<decltype(gemm_1)>(const_v_scale);
+                    return make_gemm1_scale<decltype(gemm_1)>(e8m0_one());
                 }
             };
 
@@ -956,6 +948,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                 else
                     return 1 / l[i_idx];
             }();
+            if constexpr(kVScaleOnOacc)
+            {
+                tmp *= v_descale;
+            }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
                 o_acc(i_j_idx) *= tmp;
@@ -989,7 +985,7 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        e8m0_t v_descale) const
+        float v_descale) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -1244,8 +1240,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
 
-        [[maybe_unused]] const int32_t const_v_scale =
-            kHwGemm1Scale ? to_e8m0_scale_broadcast(v_descale) : e8m0_one();
         block_sync_lds<0>();
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
         load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
@@ -1566,7 +1560,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 else
                 {
                     ignore = i_k1;
-                    return make_gemm1_scale<decltype(gemm_1)>(const_v_scale);
+                    return make_gemm1_scale<decltype(gemm_1)>(e8m0_one());
                 }
             };
 
@@ -1674,6 +1668,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                 else
                     return 1 / l[i_idx];
             }();
+            if constexpr(kVScaleOnOacc)
+            {
+                tmp *= v_descale;
+            }
             sweep_tile_span(o_spans[I1], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
                 o_acc(i_j_idx) *= tmp;
@@ -1714,7 +1712,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                    nullptr,
                    nullptr,
                    1,
-                   e8m0_t(1.0f));
+                   1.0f);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -1736,7 +1734,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         const float* k_descale_ptr,
                                         const float* v_descale_ptr,
                                         index_t block_scale_size_kv,
-                                        e8m0_t v_descale) const
+                                        float v_descale) const
     {
         static_assert(kQuantized,
                       "qr_tdm pipeline: this granularity ignores the descale arguments");
@@ -1793,7 +1791,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                    nullptr,
                    nullptr,
                    1,
-                   e8m0_t(1.0f));
+                   1.0f);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -1818,7 +1816,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         const float* k_descale_ptr,
                                         const float* v_descale_ptr,
                                         index_t block_scale_size_kv,
-                                        e8m0_t v_descale) const
+                                        float v_descale) const
     {
         static_assert(kQuantized,
                       "qr_tdm pipeline: this granularity ignores the descale arguments");

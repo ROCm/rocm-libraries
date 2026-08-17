@@ -10,12 +10,14 @@
 #include "utils.hpp"
 #include "ck_tile/utility/json_dump.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <cmath>
 #include <numeric>
+#include <stdexcept>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -982,9 +984,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
         q_descale_host(0) = qkv_max / q_dtype_max;
         k_descale_host(0) = qkv_max / k_dtype_max;
-        // v_descale lands in an E8M0 MMA scale operand; round-trip to the value
-        // the hardware will actually use.
-        v_descale_host(0) = ck_tile::type_convert<float>(ck_tile::e8m0_t(qkv_max / v_dtype_max));
+        v_descale_host(0) = qkv_max / v_dtype_max;
     }
     else if(qscale.type == quant_scale_enum::blockscale)
     {
@@ -1014,14 +1014,17 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
-        // Powers of two because v_descale ends up in an E8M0 scale operand.
         // Neighbouring entries differ so a wrong head index changes the answer.
+        // Mantissa is never a power of two so a truncated V scale fails loudly; the
+        // exponent span stays narrow to avoid peaked-softmax P-quantization drift.
         constexpr int kCycle = 8;
         auto fill_perhead    = [](auto& t, int phase) {
             const auto lens = t.get_lengths();
             t.ForEach([&](auto& self, auto i) {
-                const int flat = static_cast<int>(i[0] * lens[1] + i[1]);
-                self(i)        = std::ldexp(1.f, (flat + phase) % kCycle - kCycle / 2);
+                const int flat   = static_cast<int>(i[0] * lens[1] + i[1]);
+                const int step   = (flat + phase) % kCycle;
+                const float mant = 1.f + static_cast<float>(2 * step + 1) / 16.f;
+                self(i)          = std::ldexp(mant, step % 2 - 1);
             });
         };
 
@@ -1099,6 +1102,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
     bias_buf.ToDevice(bias_host.data());
     q_descale_buf.ToDevice(q_descale_host.data());
     k_descale_buf.ToDevice(k_descale_host.data());
+    if(qscale.type == quant_scale_enum::blockscale)
+    {
+        // v_descale rides an E8M0 operand, which truncates towards zero.
+        const bool v_descale_is_pow2 =
+            std::all_of(v_descale_host.begin(), v_descale_host.end(), [](auto v) {
+                const float f = ck_tile::type_convert<float>(v);
+                const float r =
+                    ck_tile::type_convert<float>(ck_tile::type_convert<ck_tile::e8m0_t>(f));
+                return ck_tile::bit_cast<uint32_t>(f) == ck_tile::bit_cast<uint32_t>(r);
+            });
+        if(!v_descale_is_pow2)
+        {
+            throw std::runtime_error("v_descale must be a power of two with -qscale=bs");
+        }
+    }
     v_descale_buf.ToDevice(v_descale_host.data());
     block_scale_seqstart_q_buf.ToDevice(block_scale_seqstart_q_host.data());
     block_scale_seqstart_k_buf.ToDevice(block_scale_seqstart_k_host.data());
@@ -2473,6 +2491,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         s_host_ref, p_host_ref, p_compute_element_func);
                 }
             }
+            // P is already normalized here, while the device quantizes it before the row sum
+            // exists. Both round the scale up to a power of two, and the row sum is not one, so
+            // the two fp8 grids differ by up to half an ulp. Test scales are kept small enough
+            // that this stays under atol.
             quantize_p_ref(p_host_ref);
             if(lse)
             {

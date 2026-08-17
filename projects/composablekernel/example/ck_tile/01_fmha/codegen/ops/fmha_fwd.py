@@ -78,6 +78,7 @@ FMHA_FWD_KERNEL_HEADER_QR_HPAD = """// SPDX-License-Identifier: MIT
 
 FMHA_FWD_KERNEL_BODY_TEMPLATE = """
 #include <iostream>
+#include <stdexcept>
 
 #if !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 
@@ -150,6 +151,10 @@ float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_a
     if(s.log_level_ > 0)
         std::cout << ", {F_kname}" << std::flush;
     auto [kargs, grids] = {F_kargs_creator}<k_>(a);
+    if(!k_::IsSupportedArgument(kargs))
+    {{
+        throw std::runtime_error("Wrong! Arguments not supported! Skipping fmha_fwd!");
+    }}
     const dim3 blocks                      = k_::BlockSize();
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
     return ck_tile::launch_kernel(s, ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs));

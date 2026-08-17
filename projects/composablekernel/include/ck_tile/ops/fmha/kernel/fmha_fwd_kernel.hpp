@@ -616,20 +616,6 @@ struct FmhaFwdKernel
             kargs.batch_stride_k_descale = batch_stride_k_descale;
             kargs.batch_stride_v_descale = batch_stride_v_descale;
 
-            assert(block_scale_size_q % FmhaPipeline::kM0 == 0 &&
-                   "BLOCKSCALE: block_scale_size_q must be a multiple of the M tile size");
-            if constexpr(kPipelineName == "qr_tdm")
-            {
-                assert(block_scale_size_kv % FmhaPipeline::kKVScaleAlign == 0 &&
-                       "BLOCKSCALE: block_scale_size_kv must be a multiple of the MMA scale "
-                       "operand's KV resolution");
-            }
-            else
-            {
-                assert(block_scale_size_kv % FmhaPipeline::kN0 == 0 &&
-                       "BLOCKSCALE: block_scale_size_kv must be a multiple of the N tile size");
-            }
-
             kargs.block_scale_size_q  = block_scale_size_q;
             kargs.block_scale_size_kv = block_scale_size_kv;
         }
@@ -1094,20 +1080,6 @@ struct FmhaFwdKernel
             kargs.nhead_stride_k_descale = nhead_stride_k_descale;
             kargs.nhead_stride_v_descale = nhead_stride_v_descale;
 
-            assert(block_scale_size_q % FmhaPipeline::kM0 == 0 &&
-                   "BLOCKSCALE: block_scale_size_q must be a multiple of the M tile size");
-            if constexpr(kPipelineName == "qr_tdm")
-            {
-                assert(block_scale_size_kv % FmhaPipeline::kKVScaleAlign == 0 &&
-                       "BLOCKSCALE: block_scale_size_kv must be a multiple of the MMA scale "
-                       "operand's KV resolution");
-            }
-            else
-            {
-                assert(block_scale_size_kv % FmhaPipeline::kN0 == 0 &&
-                       "BLOCKSCALE: block_scale_size_kv must be a multiple of the N tile size");
-            }
-
             kargs.block_scale_size_q  = block_scale_size_q;
             kargs.block_scale_size_kv = block_scale_size_kv;
 
@@ -1416,6 +1388,55 @@ struct FmhaFwdKernel
             sink_ptr,
             num_head_q_total,
             head_start);
+    }
+
+    CK_TILE_HOST static bool IsSupportedArgument([[maybe_unused]] const Kargs& kargs)
+    {
+        if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
+        {
+            const bool log = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
+
+            if(kargs.block_scale_size_q % FmhaPipeline::kM0 != 0)
+            {
+                if(log)
+                    CK_TILE_ERROR("FMHA fwd BLOCKSCALE: block_scale_size_q (",
+                                  kargs.block_scale_size_q,
+                                  ") must be a multiple of the M tile size (",
+                                  FmhaPipeline::kM0,
+                                  ").");
+                return false;
+            }
+
+            if constexpr(kPipelineName == "qr_tdm")
+            {
+                if(kargs.block_scale_size_kv % FmhaPipeline::kKVScaleAlign != 0)
+                {
+                    if(log)
+                        CK_TILE_ERROR("FMHA fwd BLOCKSCALE: block_scale_size_kv (",
+                                      kargs.block_scale_size_kv,
+                                      ") must be a multiple of the MMA scale operand's KV "
+                                      "resolution (",
+                                      FmhaPipeline::kKVScaleAlign,
+                                      ").");
+                    return false;
+                }
+            }
+            else
+            {
+                if(kargs.block_scale_size_kv % FmhaPipeline::kN0 != 0)
+                {
+                    if(log)
+                        CK_TILE_ERROR("FMHA fwd BLOCKSCALE: block_scale_size_kv (",
+                                      kargs.block_scale_size_kv,
+                                      ") must be a multiple of the N tile size (",
+                                      FmhaPipeline::kN0,
+                                      ").");
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     CK_TILE_HOST static constexpr auto GridSize(ck_tile::index_t batch_size_,
@@ -3169,12 +3190,11 @@ struct FmhaFwdKernel
 
             constexpr bool kFoldedQScale =
                 QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR || kPerHeadQScale;
-            const e8m0_t v_descale = [&] {
+            const float v_descale = [&] {
                 if constexpr(kFoldedQScale)
-                    return e8m0_t(
-                        reinterpret_cast<const float*>(kargs.v_descale_ptr)[descale_offset_v]);
+                    return reinterpret_cast<const float*>(kargs.v_descale_ptr)[descale_offset_v];
                 else
-                    return e8m0_t(1.0f);
+                    return 1.0f;
             }();
             const float scale_s = [&] {
                 if constexpr(kFoldedQScale)
