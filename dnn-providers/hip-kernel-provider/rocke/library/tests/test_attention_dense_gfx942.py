@@ -583,7 +583,10 @@ _CONTRACT_GRID = [
     (dict(dtype="bf16", head_size=128), dict(use_cfvst=True)),  # REJECTED: spills
     # --- tuning: use_exp2_fast (no rejected region -- see the comment above) ---
     (dict(), dict(use_exp2_fast=False)),
-    (dict(), dict(use_exp2_fast=True)),  # forced ON at bf16 D128, the spilling arm
+    (
+        dict(),
+        dict(use_exp2_fast=True),
+    ),  # accepted: exp2_fast has no rejected region (default True everywhere)
     # --- tuning: waves_per_eu ---
     (dict(), dict(waves_per_eu=4)),  # accepted
     (dict(), dict(waves_per_eu=0)),  # REJECTED: must resolve positive
@@ -849,18 +852,22 @@ def _walk_op_names(op):
         (64, "fp16", True),
         (128, "fp16", True),
         (64, "bf16", True),  # fused rescale gave the headroom (P2)
-        (128, "bf16", False),  # spills on the .1k schedule even post-fused-rescale
+        (
+            128,
+            "bf16",
+            True,
+        ),  # lazy-rescale: 0 scratch, VGPR-neutral -> last holdout enabled
     ],
 )
 def test_exp2_fast_gate_matches_the_spill_measured_matrix(head_size, dtype, expected):
-    """The exp2_fast decision is a spill fact, not a preference.
-
-    exp2_fast is numerically safe for every config (both softmax args <= 0), so the
-    gate exists ONLY to keep occupancy: its sooner-available result raises register
-    pressure, and bf16 D128's `.1k` MFMA schedule spills over the waves-per-eu=2 cap
-    (measured 175->256 VGPR / 22 spill) even after the P2 fused rescale freed ~28
-    VGPR. Every other config has the headroom. This pins the exact enabled set so a
-    future edit that flips one arm has to update this matrix on purpose.
+    """exp2_fast is enabled for EVERY config. It is numerically safe everywhere (both
+    softmax args -- alpha's m_i - m_new and p's s - m_new -- are <= 0, exactly
+    exp2_fast's precondition, independent of head_size/dtype) and a strict VALU win.
+    bf16 D128 was the last holdout under the earlier fused-rescale schedule (spilled
+    175->256 VGPR over the waves-per-eu=2 cap); the current lazy-rescale schedule does
+    not spill (rocprofv3: 0 scratch, VGPR-neutral vs plain exp2, numerically identical),
+    so the holdout is removed. This pins the enabled set (now all configs) so a future
+    edit that re-introduces a rejected arm has to update this matrix on purpose.
     """
     assert _use_exp2_fast(head_size, dtype) is expected
 

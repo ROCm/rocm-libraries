@@ -141,7 +141,7 @@ magnitudes live outside the repo per `AGENTS.md`.
 |---|---|---|---|
 | 32×32×8 atom + K-loop doubling | all | CDNA3 has no 32×32×16 fp16/bf16 atom; C-layout is identical so softmax/epilogue port unchanged | **shipped** — enablement |
 | Conflict-free V (`perm_b32` store transpose) | **D128 fp16** | V stored transposed → PV A-operand read is one contiguous `ds_read_b64` instead of 4 element-wise `ds_read_u16` | **shipped** — large; identity-preserving |
-| `exp2_fast` | all except **bf16 D128** | softmax args are provably ≤ 0, so `llvm.exp2`'s guarded range reduction is dead work | **shipped** — dominant on the VALU-bound path; bit-identical |
+| `exp2_fast` | all | softmax args are provably ≤ 0, so `llvm.exp2`'s guarded range reduction is dead work; bf16 D128 (the last holdout) re-enabled on the lazy-rescale schedule — 0 scratch, VGPR-neutral, numerically identical | **shipped** — dominant on the VALU-bound path; bit-identical |
 | Fused softmax rescale | all | exp2 → accumulate → cast → pack in one pass instead of materializing a full f32 `p_vals` matrix | **shipped** — pure live-range relief, bit-identical |
 | Per-config `waves_per_eu` | **bf16 D64** → 4 | forces the allocator low enough that a second workgroup co-resides (1 → 2 WG/CU) | **shipped** — large at long sequences |
 | D64 K-bank-conflict pad | **D64 both dtypes** | 2-row-group boundary pad takes the `do_qk` K reads from 32-way to 4-way | **shipped** — large, cross-part confirmed |
@@ -153,7 +153,6 @@ magnitudes live outside the repo per `AGENTS.md`.
 |---|---|
 | Conflict-free V at **D64** | D64 is VGPR-bound; the register round-trip costs more than the LDS-instruction saving |
 | Conflict-free V at **bf16 D128** | spills over the `waves_per_eu=2` cap on the `.1k` MFMA schedule |
-| `exp2_fast` at **bf16 D128** | same — spills even after the fused rescale freed headroom |
 | `waves_per_eu=3` at **fp16 D64** | reaches 2 WG/CU but loses more ILP than the second workgroup buys |
 | Drop K/V LDS pads to reach 2 WG/CU at D128 | D128 stays 1 WG/CU even unpadded (register floor co-limits), so it only reintroduces bank conflicts — **catastrophic** |
 | `block_n=32` (all configs) | halving the KV tile doubles the tile/grid count; the extra loop and barrier overhead outweighs the LDS relief. Marginally positive on **bf16 D128** but **part-dependent**, so not wired — it would need a CU-count-aware policy |
