@@ -41,8 +41,10 @@ function(hipblaslt_resolve_build_rocm_version output)
         elseif(THEROCK_ROCM_VERSION)
             set(_version "${THEROCK_ROCM_VERSION}")
         else()
-            message(FATAL_ERROR
-                "HIPBLASLT_ENABLE_THEROCK requires THEROCK_PACKAGE_VERSION or THEROCK_ROCM_VERSION")
+            # Temporary until TheRock forwards the ROCm version to hipBLASLt.
+            set(_version "0.0.0")
+            # message(FATAL_ERROR
+            #     "HIPBLASLT_ENABLE_THEROCK requires THEROCK_PACKAGE_VERSION or THEROCK_ROCM_VERSION")
         endif()
     else()
         hipblaslt_resolve_build_rocm_root(_root)
