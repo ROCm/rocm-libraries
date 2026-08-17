@@ -100,7 +100,7 @@ from rocisa.instruction import ReadWriteInstruction as _RWInstruction, \
   SBarrierSignalIsFirst as _SBarrierSignalIsFirst, TensorLoadToLds as _TensorLoadToLds, \
   VCmpInstruction as _VCmpInstruction, VCmpXInstruction as _VCmpXInstruction
 
-# PostLoopStoreInNll store-init weave (B1): type-based instruction classifiers,
+# PostLoopStoreInNll store-init weave: type-based instruction classifiers,
 # replacing the fragile type(i).__name__.lower() substring matching in
 # _splitHoistableStoreInit. Using rocisa base classes / concrete types means a
 # codegen class rename fails LOUDLY here (ImportError / AttributeError at import)
@@ -8609,7 +8609,7 @@ class KernelWriterAssembly(KernelWriter):
       self.argLoader.setOffset(argOffset) # Restore offset
 
     # define the rest sgprs
-    # PostLoopStoreInNll (Step 4b) early-reserves SrdD in the common allocator
+    # PostLoopStoreInNll early-reserves SrdD in the common allocator
     # (defineVariableSgprs) before the main loop so the FUSED NLL can compute the
     # store SRD and so SrdD never overlaps the parked SrdWS; skip re-defining SrdD
     # here when already present. SrdC is always defined here (it is never reserved
@@ -13925,7 +13925,7 @@ class KernelWriterAssembly(KernelWriter):
     # computeStoreSrdStart offsets Srd*, never Address*), so running it twice at
     # runtime recomputes SrdC/SrdD identically.
     #
-    # channels (Step 4b-2): None emits the historical full C+D store-SRD init,
+    # channels: None emits the historical full C+D store-SRD init,
     # byte-identical to the pre-PostLoopStoreInNll path. PostLoopStoreInNll splits
     # it by channel to hoist SrdD's value before the main loop for the FUSED NLL
     # while leaving SrdC (and the PLAIN fallback arm) post-loop:
@@ -14389,7 +14389,7 @@ class KernelWriterAssembly(KernelWriter):
     return module, definedNames
 
   def buildSubtileFusedStore(self, kernel, tPA, tPB):
-    """4d-3a (Option B): emit the beta0/NonEdge D store INSIDE the FUSED NLL.
+    """Emit the beta0/NonEdge D store INSIDE the FUSED NLL.
 
     Mirrors the restricted OptNLL store (see the NLL prefetch path ~L9860):
     globalWriteElements is called with noGSUBranch=True, applyAlpha=True,
@@ -14400,13 +14400,13 @@ class KernelWriterAssembly(KernelWriter):
     globalWriteElements so the later PLAIN post-loop store is unaffected. That
     is exactly the store the front guard already guarantees at runtime
     (PostLoopHasTail==0 && beta==0 && NonEdge), so SrdC is never referenced (only
-    SrdD is hoisted, 4b-2) and no undefined-symbol / SGPR-overflow problem arises.
+    SrdD is hoisted) and no undefined-symbol / SGPR-overflow problem arises.
 
     endSummation has NOT run at the NLL emit point, so this re-establishes the
     store prerequisites it normally provides — serializedStore, codes.accVgprRead
     (mapAcctoArchRegs), and a c.startVgprValu ValuC base — from the in-NLL register
     pool (drain-era holes; the serialized subtile store uses a small rotating
-    window, see 4c). Every writer field touched is saved and restored so the
+    window). Every writer field touched is saved and restored so the
     post-loop PLAIN store path stays byte-identical.
     """
     from .KernelWriterModules import mapAcctoArchRegs
@@ -14714,7 +14714,7 @@ class KernelWriterAssembly(KernelWriter):
                         comment="PostLoopStoreInNll: drain NLL DS/global traffic before fused store"))
 
     # --- write indices (coord0/1, coutRowPtrD) + restricted beta0/NonEdge store ---
-    # Stage 2 init-hoist: if the owner's PostLoopInitInNGLL arm already computed the
+    # Init-hoist: if the owner's PostLoopInitInNGLL arm already computed the
     # write indices, reuse those VGPRs instead of
     # recomputing here — the coord VALU then overlapped the NLL terminal MFMAs
     # (latency hidden). Restore self.vgprs.* from the stash so the store body and
@@ -14762,7 +14762,7 @@ class KernelWriterAssembly(KernelWriter):
     else:
       module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
-    # 4d-3b weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
+    # Weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
     # the up-front batch block, so terminal MFMAs can later be interleaved between
     # Phase1/Phase2 to hide the ds_bpermute latency (see GlobalWriteBatch weave path).
     savedWeave = self.states.subtileFusedWeave
@@ -15943,7 +15943,7 @@ class KernelWriterAssembly(KernelWriter):
     return bool(self.states.postLoopStoreInNll) and kernel["ProblemType"]["ComputeDataType"].isSingle()
 
   def _plsinCanBypassEndSummation(self, kernel):
-    """PostLoopStoreInNll Phase 3: may a fused full-tile owner branch its NLL exit
+    """PostLoopStoreInNll: may a fused full-tile owner branch its NLL exit
     STRAIGHT past endSummation + the post-loop dedup guard (to the post-loop store's
     SkipPostLoopStore join), instead of routing through SkipToEnd -> endSummation ->
     re-evaluate the dedup guard?
@@ -17929,7 +17929,7 @@ class KernelWriterAssembly(KernelWriter):
         actTempSgpr = tmpSgpr # Get sgpr start address, should always be the same
         elementSgprs = tmpSgpr + ss.cfg.numTempSgprPerBatch
         codeAccVgprRead = deepcopy(self.codes.accVgprRead) if self.states.serializedStore else None
-        # PostLoopStoreInNll 4d-3b weave: when ActivationType=all, this activation
+        # PostLoopStoreInNll weave: when ActivationType=all, this activation
         # loop duplicates the entire fused-store body once per activation type. The
         # terminal-MFMA weave groups are consumed exactly once (tracked by
         # subtileWeaveEmitted, whose instruction objects get a module parent when

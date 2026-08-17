@@ -46,7 +46,7 @@ from ...Common.GlobalParameters import globalParameters
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
 
-# PostLoopStoreInNll store-init weave unit kinds (B2): the split-unit contract
+# PostLoopStoreInNll store-init weave unit kinds: the split-unit contract
 # between the producer KernelWriterAssembly._splitHoistableStoreInit and the
 # consumer _weaveStoreInitIntoLoop (below). Each hoistable unit is a 2-tuple:
 #   (WEAVE_UNIT_ALU,   inst)      one scatterable pure-ALU / RegSet instruction,
@@ -3563,11 +3563,11 @@ class LogicalScheduler:
         can never disagree about which WG is the fused owner.
 
         Gating:
-          * non-fused kernels, or the env flag TENSILE_NGLL_INIT_HOIST unset -> return
-            the stock single _emitLoop (byte-identical to today's NGLL);
-          * enabled -> emit the guard + dual arms. STAGE 1: the two arms are identical
-            (no prologue woven yet) -- this only establishes and exercises the branch/
-            label/guard plumbing so it is validated before any init actually moves.
+          * non-PLSIN kernels (postLoopStoreInNll False) -> return the stock single
+            _emitLoop (byte-identical to the plain NGLL);
+          * PLSIN kernels -> emit the front guard + dual arms and weave the store's
+            data-independent coord prologue into the owner's PostLoopInitInNGLL arm
+            (see the init-hoist below); non-owner WGs fall through to plainNGLL.
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import SBranch
@@ -3586,7 +3586,7 @@ class LogicalScheduler:
         module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
         module.addComment0(f"{label}_PostLoopInitInNGLL")
         initEmitted = copy.deepcopy(emitted_3d)
-        # Stage 2 (init-hoist): compute the fused store's write indices (coord0/1,
+        # Init-hoist: compute the fused store's write indices (coord0/1,
         # cinRowPtr, coutRowPtrD) in the owner's PostLoopInitInNGLL arm. This is pure
         # data-independent VALU (reads Serial / WorkGroup0/1 / strides only — see
         # ComputeStoreVgprsMFMA), so it can be INTERLEAVED into the NGLL MFMA stream:
@@ -3648,18 +3648,15 @@ class LogicalScheduler:
     def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d, fusedExitLabel=None):
         """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
 
-        Non-fused kernels: byte-identical to the stock single-NLL emission (early
+        Non-PLSIN kernels: byte-identical to the stock single-NLL emission (early
         return of the plain `_emitLoop`).
 
-        Fused kernels: emit a runtime front guard, then the FUSED copy, then the
-        PLAIN copy. The guard (Step 4d-2) selects FUSED only when the NLL is terminal
-        (no tail) and beta==0; every other case falls through to PLAIN. In Step 4d-2
-        the FUSED copy is still identical to PLAIN (no stores injected yet) and both
-        arms fall through to the unchanged post-loop store, so GPU output is correct
-        regardless of which arm runs — this just makes the FUSED block reachable so it
-        is actually exercised. Step 4d-3a relocates the store into the FUSED copy and
-        adds the NonEdge condition + stored_flag dedup. FUSED/guard labels carry the
-        site suffix so the two per-unroll emit sites never collide.
+        PLSIN kernels: emit a runtime front guard, then the FUSED copy, then the
+        PLAIN copy. The guard selects FUSED only when the NLL is terminal (no tail)
+        and beta==0 and this WG owns a full tile; every other case falls through to
+        PLAIN. The FUSED copy relocates the beta0/NonEdge D store into the NLL and
+        dedups it against the post-loop store. FUSED/guard labels carry the site
+        suffix so the two per-unroll emit sites never collide.
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import SBranch
@@ -3673,11 +3670,11 @@ class LogicalScheduler:
         plainLabel = Label(f"{label}_PlainNLL", "")
         # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
         module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
-        # 4d-3b weave: pull the terminal-subIterK (last K) MFMAs OUT of the FUSED loop
+        # Weave: pull the terminal-subIterK (last K) MFMAs OUT of the FUSED loop
         # and stash them grouped by store-pair (accBase//8) so the fused store can
         # interleave each pair's 2 MFMAs across its ds_bpermute window. If extraction
         # is not well-formed (unexpected acc layout), groups is None -> store falls
-        # back to emitting all MFMAs up front (monolithic 4d-3a, still correct).
+        # back to emitting all MFMAs up front (monolithic, still correct).
         # LA = how many store-pairs ahead a pair's terminal MFMAs are issued (the
         # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
         # the loop (natural large distance); pairs >= LA are woven.
@@ -3742,9 +3739,9 @@ class LogicalScheduler:
         writer.states.subtileWeavePairCounter = 0
         writer.states.subtileWeaveEmitted = set()
         fusedLoopModule = self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted)
-        # 4d-3a/3b: the beta0/NonEdge D store at the end of the FUSED NLL. With
+        # The beta0/NonEdge D store at the end of the FUSED NLL. With
         # subtileWeaveMfmaGroups set, the store interleaves the terminal MFMAs
-        # (4d-3b latency hiding); otherwise it is monolithic (4d-3a).
+        # (latency hiding); otherwise it is monolithic.
         writer.states.subtileHoistedStoreInit = None
         storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
         # Step 4 store-init hoist: buildSubtileFusedStore stashed the branch/memory-free
@@ -3776,7 +3773,7 @@ class LogicalScheduler:
         # kept as the PLAIN arm's fall-through join (it just no longer has an incoming
         # branch from the FUSED arm). Persistence is preserved: the fused arm still lands
         # at the join -> closePersistentLoop back-edge, unchanged.
-        # Phase 3: the caller (emitMainAndExitLoops) chooses fusedExitLabel = SkipToEnd
+        # Fused-exit selection: the caller (emitMainAndExitLoops) chooses fusedExitLabel = SkipToEnd
         # (endSummation runs, then the dedup guard skips the redundant store) OR, when
         # _plsinCanBypassEndSummation, SkipPostLoopStore -- branching the fused owner past
         # endSummation and the dedup guard entirely (all skipped work is comptime or dead
@@ -3799,7 +3796,7 @@ class LogicalScheduler:
         return module
 
     def _extractTerminalMfmaGroups(self, emitted_3d, keepInLoop=0):
-        """4d-3b: remove the terminal-subIterK (last K) MFMA instructions from the
+        """Remove the terminal-subIterK (last K) MFMA instructions from the
         FUSED loop and return them grouped by store-pair index.
 
         emitted_3d: [partition][subIterK][EmittedModule]  (instructions already
@@ -4083,7 +4080,7 @@ class LogicalScheduler:
         #   K<DepthU          : skip the prefetch GR to initC, then jump to tail
         endLabel = Label("SkipToEnd", "")
 
-        # PostLoopStoreInNll Phase 3: pick the FUSED arm's exit target. A fused
+        # PostLoopStoreInNll: pick the FUSED arm's exit target. A fused
         # full-tile owner has already stored D and (when the bypass is safe) needs
         # none of endSummation's runtime work, so branch it STRAIGHT to the post-loop
         # store's SkipPostLoopStore join -- past endSummation AND the redundant dedup

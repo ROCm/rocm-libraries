@@ -408,7 +408,7 @@ class StateValues:
   # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
   subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
   subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
-  subtileWeaveLookahead: int             = 4       # store-pairs ahead a pair's MFMAs are issued
+  subtileWeaveLookahead: int             = 2       # store-pairs ahead a pair's MFMAs are issued (always set to weaveLA before use)
   subtileWeavePairCounter: int           = 0       # next store-pair index being emitted
   subtileMBlockSize: int                 = 0       # OOB-guard M block size (MatrixInstM)
   subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
@@ -5328,7 +5328,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
 
 
-      # 4d-3a dedup (flag-free): re-evaluate the SAME fused-store guard. A WG whose
+      # Fused-store dedup (flag-free): re-evaluate the SAME fused-store guard. A WG whose
       # FUSED NLL already stored D re-passes the guard here and branches over the
       # whole post-loop store; any WG that took the PLAIN arm / K<DepthU SkipToEnd
       # fast-exit fails the guard (has-tail, or non-full-tile, or beta!=0) and falls
@@ -7247,8 +7247,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # into the NLL. This is an internal, subtile-owned decision derived here from
     # the already-present solution/problem parameters (no public solution knob, not
     # part of the kernel name). computeSubtilePlsin runs before every consumer in
-    # this init pass (StreamK-constants-to-VGPR at 9354+/9909, defineSgpr at 9648)
-    # and before the schedule-time consumers in LogicalScheduler / KernelWriterAssembly.
+    # this init pass (the StreamK-constants-to-VGPR park set and the SrdD/SrdC
+    # defineSgpr reservation) and before the schedule-time consumers in
+    # LogicalScheduler / KernelWriterAssembly.
     self.states.postLoopStoreInNll = computeSubtilePlsin(kernel)
     hasMx = kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]
     usesTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
