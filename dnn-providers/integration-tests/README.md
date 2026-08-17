@@ -56,8 +56,7 @@ There are two mechanisms for testing that a graph runs correctly on an engine.
 
 - **Execution.** Bundle registration is on by default. `--no-bundles` (or
   `HIPDNN_TEST_ALLOW_BUNDLES=0`) is the opt-out, leaving only the C++ tests
-  compiled into the binary. `--allow-bundles` / `HIPDNN_TEST_ALLOW_BUNDLES=1`
-  still exist and are now redundant; the env var overrides the flags either way.
+  compiled into the binary.
 - **Build.** The C++ graph tests under `src/integration-tests/` no longer build
   by default: they are gated behind `-DBUILD_CPP_GRAPH_TESTS=ON`, which is
   `OFF` unless a developer opts in on their branch. So the provider CI checks
