@@ -24,8 +24,12 @@
 #
 ################################################################################
 
+# -Werror belongs to development builds only. A packaging build (ROCm component
+# build scripts, distro builds) compiles this tree with whatever compiler the
+# release toolchain ships; promoting every diagnostic to an error there turns a
+# compiler-version difference into a release blocker. BUILD_DEV is defined in the
+# top-level CMakeLists and defaults OFF.
 set(__cxx_compile_options
-    -Werror
     -Wall
     -Wextra
     # Additional warnings not included in -Wall/-Wextra
@@ -54,6 +58,10 @@ set(__cxx_compile_options
     -Wno-deprecated-copy-with-dtor           # SolverBase needs Rule-of-5 refactoring
     -Wno-deprecated-copy-with-user-provided-dtor  # TuningIterationScopedLimiter needs refactoring
 )
+
+if(BUILD_DEV)
+    list(PREPEND __cxx_compile_options -Werror)
+endif()
 
 set(__clang_cxx_compile_options
     -Wno-unused-command-line-argument
