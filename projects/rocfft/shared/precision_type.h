@@ -57,8 +57,9 @@ static const char* precision_name(rocfft_precision precision)
 
 static size_t element_size(rocfft_precision precision, rocfft_array_type array_type)
 {
-    return array_type_is_complex(array_type) ? complex_type_size(precision)
-                                             : real_type_size(precision);
+    return array_type_is_complex(array_type) && array_type_is_interleaved(array_type)
+               ? complex_type_size(precision)
+               : real_type_size(precision);
 }
 
 // offset a pointer by a number of elements, given the elements'

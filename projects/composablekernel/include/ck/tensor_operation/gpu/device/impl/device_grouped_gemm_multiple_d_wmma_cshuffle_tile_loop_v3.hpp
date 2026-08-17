@@ -17,6 +17,7 @@
 #include "ck/tensor_operation/gpu/device/device_grouped_gemm_tile_loop.hpp"
 #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
 #include <ck/tensor_operation/gpu/grid/block_to_ctile_map.hpp>
+#include "ck/tensor_operation/gpu/grid/epilogue_type.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_wmma_cshuffle_v3.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_pipeline_selector.hpp"
 
@@ -66,12 +67,14 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                         const CDEElementwiseOperation cde_element_op)
 {
 #if(defined(__gfx11__) || defined(__gfx12__))
-    using EpilogueType = typename std::conditional<GridwiseGemm::IsBWaveTransferApplicable &&
-                                                       GridwiseGemm::UseDirectStore,
-                                                   typename GridwiseGemm::EpilogueDirectStore,
-                                                   typename GridwiseGemm::EpilogueCShuffle>::type;
+    constexpr auto epilogue_type =
+        GridwiseGemm::IsBWaveTransferApplicable && GridwiseGemm::UseDirectStore
+            ? EpilogueType::DirectStore
+            : EpilogueType::CShuffle;
+    using SelectedEpilogue = get_epilogue_t<epilogue_type, GridwiseGemm>;
 
-    constexpr index_t LDS_size = GridwiseGemm::template GetSharedMemoryNumberOfByte<EpilogueType>();
+    constexpr index_t LDS_size =
+        GridwiseGemm::template GetSharedMemoryNumberOfByte<SelectedEpilogue>();
     __shared__ uint8_t p_shared[LDS_size];
 
     const auto gemm_desc_ptr =
@@ -154,7 +157,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
                                gemm_desc_ptr[group_id].StrideE,
                                1);
 
-        auto epilogue_args           = EpilogueType{};
+        auto epilogue_args           = SelectedEpilogue{};
         constexpr TailNumber TailNum = TailNumber::Full;
 
         if(has_main_k_block_loop)
@@ -197,6 +200,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 
         tile_id += get_grid_size();
         tile_offset += get_grid_size();
+        block_sync_lds();
 
     } while(group_id < group_count);
 #else
@@ -503,6 +507,29 @@ struct DeviceGroupedGemmMultipleD_Wmma_CShuffle_TileLoop_V3
         bool supported = true;
         for(index_t i = 0; i < arg.group_count_; ++i)
         {
+
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityAWaveTransfer(
+                                               arg.gemm_descs_[i].M_, arg.gemm_descs_[i].K_))
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Wave Transfer not applicable for matrix A" << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+
+            if(ck::is_gfx12_supported() && !GridwiseGemm::CheckValidityBWaveTransfer(
+                                               arg.gemm_descs_[i].N_, arg.gemm_descs_[i].K_))
+            {
+                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                {
+                    std::cout << "Wave Transfer not applicable for matrix B" << __FILE__ << ":"
+                              << __LINE__ << ", in function: " << __func__ << std::endl;
+                }
+                return false;
+            }
+
             std::array<const void*, NumDTensor> placeholder_p_ds_grid{};
             std::array<index_t, NumDTensor> stride_Ds;
             std::copy_n(arg.gemm_descs_[i].stride_Ds_.begin(), NumDTensor, stride_Ds.begin());

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2026 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -62,6 +39,9 @@ namespace rocRoller
 
             bool operator()(int a, int b) const
             {
+                if(a == b)
+                    return false;
+
                 return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
                        == ControlGraph::NodeOrdering::LeftFirst;
             }
@@ -400,12 +380,6 @@ namespace rocRoller
         std::vector<int> findIndexAssignmentCandidates(KernelGraph const& kgraph, int start);
 
         /**
-         * Removes all CommandArgruments found within an expression
-         * with the appropriate AssemblyKernel Argument.
-         */
-        Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr, AssemblyKernelPtr);
-
-        /**
          * @brief Get ForLoop and increment (Linear) dimensions
          * assciated with ForLoopOp.
          */
@@ -563,7 +537,8 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isGlobalToLDS = false);
+                                bool                             isGlobalToLDS = false,
+                                bool                             ldsSwizzle    = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -575,7 +550,7 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess,
+                                  bool                               rightmostFastest,
                                   bool                               isGlobalToLDS = false);
 
         /**
@@ -611,12 +586,27 @@ namespace rocRoller
          *
          * @return Tuple of: row MacroTileNumber, row MacroTileIndex,
          * column MacroTileNumber, column MacroTileIndex.
+         *
+         * @param updatePreTiledSubDimStrides When `sdim` has four elements (pre-tiled
+         * load path), whether to rewrite outer SubDimension strides/sizes before adding
+         * CTs. Default true; callers that duplicate an existing pre-tiled graph (e.g.
+         * swizzle scale) should pass false.
+         *
+         * Note that when pretiling is enabled:
+         *
+         * - The client/user creates a 2D tensor (with the usual strides etc).
+         * - LowerFromCommand creates 4 SubDimension nodes; but does
+         *   not update the strides of the first two dimensions.
+         * - When `updatePreTiledSubDimStrides` is true, the first two
+         *   SubDimensions are update and made consistent with a 4D
+         *   tensor.
          */
         std::tuple<int, int, int, int>
             addLoadMacroTileCT(KernelGraph&                     graph,
                                std::vector<DeferredConnection>& connections,
                                int                              macTileTag,
-                               std::vector<int> const&          sdim);
+                               std::vector<int> const&          sdim,
+                               bool                             updatePreTiledSubDimStrides = true);
 
         /**
          * @brief Add coordinate-transforms for tiling the X
@@ -656,7 +646,7 @@ namespace rocRoller
          *   - The row index of a thread tile is fast wrt the VGPR
          *     index.
          *
-         * When `useSwappedAccess` is true, both of these orders are
+         * When `rightmostFastest` is true, both of these orders are
          * reversed.
          *
          * Required (deferred) connections are appended to
@@ -669,8 +659,10 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess,
-                                 bool                               isGlobalToLDS = false);
+                                 bool                               rightmostFastest,
+                                 bool                               isGlobalToLDS     = false,
+                                 bool                               ldsSwizzle        = false,
+                                 unsigned int                       columnsPerBankRow = 0u);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.
@@ -813,26 +805,30 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
-         * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * Yields all nodes that contain `control` via a non-Sequence edge, in order from
+         * the immediate parent up to the root of the graph, paired with the containing edge
+         * connecting the parent to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, KernelGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, KernelGraph const& graph);
 
         /**
-         * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * Yields all nodes that contain `control` via a non-Sequence edge, in order from
+         * the immediate parent up to the root of the graph, paired with the containing edge
+         * connecting the parent to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, ControlGraph::ControlGraph const& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph, including `control` itself.
+         * Returns all nodes that contain `control` via a non-Sequence edge, in order
+         * from the root of the graph down to `control` itself.
          */
         std::deque<int> controlStack(int control, KernelGraph const& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph, including `control` itself.
+         * Returns all nodes that contain `control` via a non-Sequence edge, in order
+         * from the root of the graph down to `control` itself.
          */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
@@ -877,6 +873,24 @@ namespace rocRoller
          */
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg);
+
+        /**
+         * @brief Return true if the layout of the given element number is swapped.
+         *
+         * In LowerTile, swapped layout means when X & Y dimensions for a particular tile are swapped
+         * to improve the use of long dword instructions. This function determines whether the layout
+         * was swapped for a given element number, which affects how tile elements should be accessed.
+         */
+        bool isSwappedLayout(KernelGraph const&                    graph,
+                             int                                   elementNumberTag,
+                             CoordinateGraph::ElementNumber const& elementNumber);
+
+        /**
+         * @brief Get the size of the VGPRBlockSet dimension for a given tag.
+         *
+         * @return The VGPRBlockSet size, or std::nullopt if no VGPRBlockSet dimension exists.
+         */
+        std::optional<uint> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag);
     }
 }
 

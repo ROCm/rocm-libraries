@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@
 #include "rocsparse_sellmv.hpp"
 #include "rocsparse_spmv.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
 {
@@ -56,9 +57,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
         CASE(rocsparse_spmv_alg_sell);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -74,10 +73,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmv_stage value_)
         CASE(rocsparse_spmv_stage_compute);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_stage value_)
@@ -272,6 +270,11 @@ rocsparse_status rocsparse::spmv_alg2csrmv_alg(rocsparse_spmv_alg    spmv_alg,
     }
 
     case rocsparse_spmv_alg_default:
+    {
+        target = rocsparse::csrmv_alg_default;
+        return rocsparse_status_success;
+    }
+
     case rocsparse_spmv_alg_csr_adaptive:
     {
         target = rocsparse::csrmv_alg_adaptive;
@@ -419,7 +422,11 @@ namespace rocsparse
             }
             case rocsparse_spmv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                // Run the analysis only if it has not been performed yet,
+                // detected via the cached coomv info object, instead of relying
+                // on the descriptor-wide mat->analysed flag.
+                rocsparse_coomv_info coomv_info = mat->info->get_coomv_info();
+                if(coomv_info == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::coomv_analysis(handle,
                                                                          trans,
@@ -433,8 +440,9 @@ namespace rocsparse
                                                                          mat->row_type,
                                                                          mat->const_row_data,
                                                                          mat->col_type,
-                                                                         mat->const_col_data)));
-                    mat->analysed = true;
+                                                                         mat->const_col_data,
+                                                                         &coomv_info)));
+                    mat->info->set_coomv_info(coomv_info);
                 }
                 return rocsparse_status_success;
             }
@@ -455,6 +463,7 @@ namespace rocsparse
                                                             mat->const_row_data,
                                                             mat->col_type,
                                                             mat->const_col_data,
+                                                            mat->info->get_coomv_info(),
                                                             x->data_type,
                                                             x->const_values,
                                                             beta_type,
@@ -522,9 +531,12 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                // Run the analysis only if it has not been performed yet,
+                // detected via the cached info object, instead of relying on the
+                // descriptor-wide mat->analysed flag.
+                rocsparse_bsrmv_info bsrmv_info = mat->info->get_bsrmv_info();
+                if(bsrmv_info == nullptr)
                 {
-                    rocsparse_bsrmv_info bsrmv_info;
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrmv_analysis(handle,
                                                                          mat->block_dir,
                                                                          trans,
@@ -541,7 +553,6 @@ namespace rocsparse
                                                                          mat->block_dim,
                                                                          &bsrmv_info)));
                     mat->info->set_bsrmv_info(bsrmv_info);
-                    mat->analysed = true;
                 }
 
                 return rocsparse_status_success;
@@ -595,9 +606,12 @@ namespace rocsparse
                 //
                 // If algorithm 1 or default is selected and analysis step is required
                 //
-                if(mat->analysed == false)
+                // Run the analysis only if it has not been performed yet,
+                // detected via the cached info object, instead of relying on the
+                // descriptor-wide mat->analysed flag.
+                rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
+                if(csrmv_info == nullptr)
                 {
-                    rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
@@ -613,7 +627,6 @@ namespace rocsparse
                                                                          mat->const_col_data,
                                                                          &csrmv_info)));
                     mat->info->set_csrmv_info(csrmv_info);
-                    mat->analysed = true;
                 }
 
                 return rocsparse_status_success;
@@ -671,9 +684,13 @@ namespace rocsparse
 
             case rocsparse_spmv_stage_preprocess:
             {
-                if(mat->analysed == false)
+                // Run the analysis only if it has not been performed yet,
+                // detected via the cached info object (CSC reuses the csrmv_info
+                // slot), instead of relying on the descriptor-wide mat->analysed
+                // flag.
+                rocsparse_csrmv_info csrmv_info = mat->info->get_csrmv_info();
+                if(csrmv_info == nullptr)
                 {
-                    rocsparse_csrmv_info csrmv_info{};
                     RETURN_IF_ROCSPARSE_ERROR((rocsparse::cscmv_analysis(handle,
                                                                          trans,
                                                                          alg_csrmv,
@@ -689,7 +706,6 @@ namespace rocsparse
                                                                          mat->const_row_data,
                                                                          &csrmv_info)));
                     mat->info->set_csrmv_info(csrmv_info);
-                    mat->analysed = true;
                 }
                 return rocsparse_status_success;
             }

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,14 +34,14 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
                                                  void*                 buffer)
 {
 
-    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908
+    const bool sleep = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908
                         && handle->asic_rev < 2);
 
     auto trm_info = csric0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
     rocsparse::csric0_kernel_launch_t launch{};
 
-    if(sleep || (trm_info->get_max_nnz() > 1024))
+    if(sleep || (trm_info->get_max_nnz() > 512))
     {
         launch = rocsparse::find_csric0_kernel_binsearch_launch(handle, csric0_info, A);
     }
@@ -51,10 +51,10 @@ rocsparse_status rocsparse::csric0_kernel_launch(rocsparse_handle      handle,
         launch = rocsparse::find_csric0_kernel_hash_launch(handle, csric0_info, A);
     }
 
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
-                                       0,
-                                       sizeof(int32_t) * A->rows * A->batch_count,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(reinterpret_cast<char*>(buffer) + 256,
+                                                 0,
+                                                 sizeof(int32_t) * A->rows * A->batch_count,
+                                                 handle->stream));
 
     RETURN_IF_ROCSPARSE_ERROR(launch(handle, csric0_info, A, buffer_size, buffer));
 

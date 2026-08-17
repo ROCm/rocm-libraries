@@ -90,7 +90,7 @@ class MAC_F32_Plain(MAC):
                     if macIdx == kernel["PerformanceWaitLocation"]:
                         kStr += "s_waitcnt lgkmcnt({PerformanceWaitCount}) // extra wait for performance{endLine}".format_map(vars)
                     if macIdx == kernel["PerformanceSyncLocation"]:
-                        kStr += "s_barrier // extra barrier for performance{endLine}".format_map(vars)
+                        kStr += writer.syncStr + " // extra barrier for performance{endLine}".format_map(vars)
                     macIdx += 1
 
         kStr += priority(writer, 0, "Reset priority after macs")

@@ -31,6 +31,10 @@
 #include <cstddef>
 #include <string>
 
+#ifndef TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+#define TENSILELITE_CLIENT_ENABLE_ROCPROFSDK 0
+#endif
+
 namespace TensileLite
 {
     namespace Client
@@ -96,6 +100,7 @@ namespace TensileLite
             const std::string SpeedGFlopsPerCu = "gflops-per-cu";
             const std::string EnqueueTime      = "enqueue-time";
             const std::string FastestGFlops    = "fastest-gflops";
+            const std::string GbpsBW           = "gbps-bandwidth";
 
             // Performance estimation and granularity
             const std::string Tile0Granularity = "tile0-gran";
@@ -129,6 +134,11 @@ namespace TensileLite
             const std::string FanSpeedRPMs        = "fan-rpm";
             const std::string HardwareSampleCount = "hardware-samples";
             const std::string GfxFrequency        = "gfx-frequency(maximum)"; // GPU freq in Mhz
+
+#if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
+            // rocprof
+            const std::string RocProfCounter      = "rocprof-counters";
+#endif
         }; // namespace ResultKey
 
         class ResultReporter : public RunListener

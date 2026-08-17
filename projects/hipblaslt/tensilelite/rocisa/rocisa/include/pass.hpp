@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #pragma once
 #include "code.hpp"
+#include <memory>
 
 namespace rocisa
 {
@@ -42,7 +43,12 @@ namespace rocisa
 
     struct rocIsaPassResult
     {
-        int cycles = -1;
+        int cycles  = -1;
+        // Highest VGPR index referenced by any instruction after the pass
+        // (i.e. max_vgpr_index + 1), derived from the register graph the pass
+        // already builds.  -1 means the pass did not compute it (e.g. when
+        // doOpt() is false); in that case Python skips the occupancy update.
+        int maxVgpr = -1;
     };
 
     std::string getActFuncModuleName(int gwvw, int sgpr, int tmpVgpr, int tmpSgpr);
@@ -57,6 +63,8 @@ namespace rocisa
         std::vector<std::vector<std::shared_ptr<Item>>> vgpr;
         std::vector<std::vector<std::shared_ptr<Item>>> sgpr;
         std::vector<std::vector<std::shared_ptr<Item>>> mgpr;
+        // Highest VGPR index referenced by any instruction; -1 = none seen.
+        int maxVgprSeen = -1;
 
         std::vector<std::vector<std::shared_ptr<Item>>>& getGprRef(const std::string& gpr)
         {
@@ -91,14 +99,13 @@ namespace rocisa
 
     void insertDelayAlu(std::shared_ptr<Module> module);
     void removeDuplicatedFunction(std::shared_ptr<Module> module);
+    void macroToInstruction(std::shared_ptr<Module>& module);
     void compositeToInstruction(std::shared_ptr<Module>& module);
-    std::unordered_map<std::string, int>
-          getAssignmentDict(const std::shared_ptr<Module>& module); // Return value is std::move()d
+    void convertTextVariablesToRegisters(std::shared_ptr<Module> module);
     Graph buildGraph(
         std::shared_ptr<Module>               module,
         int                                   vgprMax,
-        int                                   sgprMax,
-        std::unordered_map<std::string, int>& assignmentDict); // Return value is std::move()d
+        int                                   sgprMax); // Return value is std::move()d
     void removeDuplicateAssignment(Graph& graph);
 
     int getCycles(std::shared_ptr<Module> module, int numWaves);

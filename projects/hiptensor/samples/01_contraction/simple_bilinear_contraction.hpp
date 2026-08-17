@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,12 +55,12 @@ int bilinearContractionSample(void* alpha, void* beta)
 
     std::unordered_map<int, int64_t> extent;
 
-    extent['m'] = 4;
-    extent['n'] = 3;
-    extent['u'] = 4;
-    extent['v'] = 3;
-    extent['h'] = 6;
-    extent['k'] = 5;
+    extent['m'] = 128;
+    extent['n'] = 32;
+    extent['u'] = 48;
+    extent['v'] = 32;
+    extent['h'] = 64;
+    extent['k'] = 56;
 
     std::vector<int64_t> c_ms_ns_lengths;
     for(auto mode : modeC)
@@ -145,7 +145,7 @@ int bilinearContractionSample(void* alpha, void* beta)
         }
         else
         {
-            C[i] = (BDataType)(float(i) / 100);
+            C[i] = (CDataType)(float(i) / 100);
         }
     }
 
@@ -218,11 +218,12 @@ int bilinearContractionSample(void* alpha, void* beta)
                                                      typeCompute));
 
     hiptensorDataType_t scalarType;
-    CHECK_HIPTENSOR_ERROR(hiptensorOperationDescriptorGetAttribute(handle,
-                desc,
-                HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
-                (void*)&scalarType,
-                sizeof(scalarType)));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorOperationDescriptorGetAttribute(handle,
+                                                 desc,
+                                                 HIPTENSOR_OPERATION_DESCRIPTOR_SCALAR_TYPE,
+                                                 (void*)&scalarType,
+                                                 sizeof(scalarType)));
     assert(scalarType == *hiptensor::convertToHipTensorDataType(typeCompute));
 
     /***************************
@@ -230,7 +231,7 @@ int bilinearContractionSample(void* alpha, void* beta)
      ***************************/
     hiptensorPlanPreference_t planPref;
     CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
-        handle, &planPref, HIPTENSOR_ALGO_ACTOR_CRITIC, HIPTENSOR_JIT_MODE_NONE));
+        handle, &planPref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE));
 
     /**********************
      * Query workspace

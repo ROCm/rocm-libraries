@@ -31,6 +31,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Allows passing values that are not yet known at launch time as parameters to device algorithms.
 /// \note It is the users responsibility to ensure that value is available when the algorithm executes.
 /// This can be guaranteed with stream dependencies or explicit external synchronization.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/types/example_future_value.cpp).
 /// \code
 /// int* intermediate_result = nullptr;
 /// hipMalloc(reinterpret_cast<void**>(&intermediate_result), sizeof(intermediate_result));

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
  * ************************************************************************ */
 
 #include "app.hpp"
+#include "rocsparse_clients_float16.hpp"
 #include "rocsparseio.h"
 #include <algorithm>
 #include <chrono>
@@ -165,12 +166,6 @@ namespace rocsparseio
 inline std::ostream& operator<<(std::ostream& os, const rocsparseio::file_format_t& that_)
 {
     os << that_.to_string();
-    return os;
-}
-
-inline std::ostream& operator<<(std::ostream& os, const _Float16& that_)
-{
-    os << (float)that_;
     return os;
 }
 

@@ -159,6 +159,17 @@ These wrappers are supported in rocSOLVER, but are provided by equivalent functi
 that use different algorithmic approaches or by functionality that is not fully exposed in the public API.
 For these reasons, the corresponding wrappers are not provided in the regular hipSOLVER API.
 
+Linear-system solvers
+------------------------------
+
+The following linear-system solvers are implemented in rocSOLVER, but 64-bit functions have not yet been added to hipSOLVER's regular API.
+
+.. csv-table:: Linear-system solvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXsytrs_bufferSize <dense_sytrs_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXsytrs <dense_sytrs>`, x, x, x, x
+
 Partial SVD functions
 ------------------------------
 
@@ -169,6 +180,17 @@ Partial SVD has been implemented in rocSOLVER, but it does not use an approximat
 
     :ref:`hipsolverDnXgesvdaStridedBatched_bufferSize <dense_gesvda_strided_batched_bufferSize>`, x, x, x, x
     :ref:`hipsolverDnXgesvdaStridedBatched <dense_gesvda_strided_batched>`, x, x, x, x
+
+General eigensolvers
+------------------------------
+
+General eigensolvers are not yet implemented in rocSOLVER. The rocSOLVER backend will instead call into a CPU implementation of LAPACK.
+
+.. csv-table:: General eigensolvers
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`hipsolverDnXgeev_bufferSize <dense_geev_bufferSize>`, x, x, x, x
+    :ref:`hipsolverDnXgeev <dense_geev>`, x, x, x, x
 
 Sparse matrix routines
 ------------------------------

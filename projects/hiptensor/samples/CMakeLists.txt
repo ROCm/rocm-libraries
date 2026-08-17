@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -24,11 +24,8 @@
  #
  ###############################################################################
 
-#Prevent CMake to add building path to RUNPATH
-set(CMAKE_SKIP_RPATH  TRUE)
-
 # Check whether building within hiptensor context
-if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
+if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
     # Target that will trigger build of all samples
     add_custom_target(hiptensor_samples)
 
@@ -49,13 +46,23 @@ if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
 
         # Sample must propagate the build interface includes to make sure
         # hiptensor includes are captured at runtime.
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
-                              "-fno-rtlib-add-rpath")
+        if(WIN32)
+            target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor "-L${HIPTENSOR_CLANG_ROOT}/lib")
+        else()
+            target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor "-L${HIPTENSOR_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
+        endif()
         target_include_directories(${BINARY_NAME} PRIVATE
                                 ${CMAKE_CURRENT_SOURCE_DIR}
                                 ${PROJECT_SOURCE_DIR}/samples
                                 ${PROJECT_SOURCE_DIR}/library/src/include/
-                                ${PROJECT_SOURCE_DIR}/library/include)
+                                ${PROJECT_SOURCE_DIR}/library/include
+                                ${PROJECT_BINARY_DIR}/include/hiptensor
+                                ${PROJECT_BINARY_DIR}/include)
+
+        # -Wno-ignored-attributes to avoid warning: __declspec attribute 'dllimport' is not supported [-Wignored-attributes] which is used by msvc compiler
+        if(WIN32 AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_compile_options(${BINARY_NAME} PRIVATE -Wno-ignored-attributes)
+        endif()
 
         # Build this sample under custom target
         add_dependencies(hiptensor_samples ${BINARY_NAME})
@@ -76,7 +83,7 @@ else()
 
     cmake_minimum_required(VERSION 3.14)
     project(hiptensor_app)
-    add_compile_options(-std=c++17)
+    add_compile_options(-std=c++20)
 
     # Requires linking installed composable kernel and hipTensor library
     find_package(hiptensor 0.2.0 REQUIRED PATHS /opt/rocm /opt/rocm/hiptensor $ENV{HIPTENSOR_DIR}/lib/cmake COMPONENTS hiptensor)

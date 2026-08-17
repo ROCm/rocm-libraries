@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,8 @@
 #pragma once
 
 #include <functional>
+#include <string>
 #include <vector>
-#include <iostream>
 
 namespace hiptensor
 {
@@ -48,6 +48,19 @@ namespace hiptensor
         }
 
     private:
+        // Platform-stable hash for strings: FNV-1a produces identical results on all compilers,
+        // unlike std::hash<std::string> which is implementation-defined.
+        void operator()(std::size_t& seed, std::string const& s) const
+        {
+            std::size_t h = 14695981039346656037ULL; // FNV-1a offset basis
+            for(unsigned char c : s)
+            {
+                h ^= c;
+                h *= 1099511628211ULL; // FNV-1a prime
+            }
+            seed ^= h + 0x9e3779b9 + (seed * 64) + (seed / 4);
+        }
+
         template <typename T, typename... Ts>
         void operator()(std::size_t& seed, T const& t, Ts const&... ts) const
         {
@@ -66,19 +79,6 @@ namespace hiptensor
                 operator()(seed, element);
             }
         }
-
-        template <typename T, typename... Ts>
-        void printArgs(T const& t, Ts const&... ts) const
-        {
-            std::cout << t << ", ";
-            printArgs(ts...);
-        }
-        template <typename T>
-        void printArgs(T const& t) const
-        {
-            std::cout << t << std::endl;
-        }
     };
 
 } // namespace hiptensor
-

@@ -2,10 +2,6 @@
 # Copyright 2020-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
-if (WIN32)
-  set(DLLS_COPIED OFF)
-endif()
-
 function(add_thrust_example EXAMPLE)
     set(EXAMPLE_SOURCE "${EXAMPLE}.cu")
     set(EXAMPLE_TARGET "example_thrust_${EXAMPLE}")

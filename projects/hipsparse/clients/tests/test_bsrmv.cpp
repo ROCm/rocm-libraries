@@ -34,4 +34,5 @@ TEST_ROUTINE(bsrmv,
              arg.beta,
              arg.betai,
              arg.dirA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);

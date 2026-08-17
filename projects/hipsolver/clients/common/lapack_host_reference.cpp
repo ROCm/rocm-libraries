@@ -916,6 +916,45 @@ void zpotrs_(char*                   uplo,
              int*                    ldb,
              int*                    info);
 
+void ssyev_(char*  evect,
+            char*  uplo,
+            int*   n,
+            float* A,
+            int*   lda,
+            float* W,
+            float* work,
+            int*   lwork,
+            int*   info);
+void dsyev_(char*   evect,
+            char*   uplo,
+            int*    n,
+            double* A,
+            int*    lda,
+            double* W,
+            double* work,
+            int*    lwork,
+            int*    info);
+void cheev_(char*             evect,
+            char*             uplo,
+            int*              n,
+            hipsolverComplex* A,
+            int*              lda,
+            float*            W,
+            hipsolverComplex* work,
+            int*              lwork,
+            float*            rwork,
+            int*              info);
+void zheev_(char*                   evect,
+            char*                   uplo,
+            int*                    n,
+            hipsolverDoubleComplex* A,
+            int*                    lda,
+            double*                 W,
+            hipsolverDoubleComplex* work,
+            int*                    lwork,
+            double*                 rwork,
+            int*                    info);
+
 void ssyevd_(char*  evect,
              char*  uplo,
              int*   n,
@@ -1263,6 +1302,29 @@ void zsytrf_(char*                   uplo,
              int*                    ipiv,
              hipsolverDoubleComplex* work,
              int*                    lwork,
+             int*                    info);
+
+void ssytrs_(
+    char* uplo, int* n, int* nrhs, float* A, int* lda, int* ipiv, float* B, int* ldb, int* info);
+void dsytrs_(
+    char* uplo, int* n, int* nrhs, double* A, int* lda, int* ipiv, double* B, int* ldb, int* info);
+void csytrs_(char*             uplo,
+             int*              n,
+             int*              nrhs,
+             hipsolverComplex* A,
+             int*              lda,
+             int*              ipiv,
+             hipsolverComplex* B,
+             int*              ldb,
+             int*              info);
+void zsytrs_(char*                   uplo,
+             int*                    n,
+             int*                    nrhs,
+             hipsolverDoubleComplex* A,
+             int*                    lda,
+             int*                    ipiv,
+             hipsolverDoubleComplex* B,
+             int*                    ldb,
              int*                    info);
 
 #ifdef __cplusplus
@@ -2956,6 +3018,75 @@ void cpu_potrs(hipsolverFillMode_t     uplo,
     zpotrs_(&uploC, &n, &nrhs, A, &lda, B, &ldb, info);
 }
 
+// syev & heev
+template <>
+void cpu_syev_heev<float, float>(hipsolverEigMode_t  evect,
+                                 hipsolverFillMode_t uplo,
+                                 int                 n,
+                                 float*              A,
+                                 int                 lda,
+                                 float*              W,
+                                 float*              work,
+                                 int                 lwork,
+                                 float*              rwork,
+                                 int*                info)
+{
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    ssyev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, info);
+}
+
+template <>
+void cpu_syev_heev<double, double>(hipsolverEigMode_t  evect,
+                                   hipsolverFillMode_t uplo,
+                                   int                 n,
+                                   double*             A,
+                                   int                 lda,
+                                   double*             W,
+                                   double*             work,
+                                   int                 lwork,
+                                   double*             rwork,
+                                   int*                info)
+{
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    dsyev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, info);
+}
+
+template <>
+void cpu_syev_heev<hipsolverComplex, float>(hipsolverEigMode_t  evect,
+                                            hipsolverFillMode_t uplo,
+                                            int                 n,
+                                            hipsolverComplex*   A,
+                                            int                 lda,
+                                            float*              W,
+                                            hipsolverComplex*   work,
+                                            int                 lwork,
+                                            float*              rwork,
+                                            int*                info)
+{
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    cheev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, rwork, info);
+}
+
+template <>
+void cpu_syev_heev<hipsolverDoubleComplex, double>(hipsolverEigMode_t      evect,
+                                                   hipsolverFillMode_t     uplo,
+                                                   int                     n,
+                                                   hipsolverDoubleComplex* A,
+                                                   int                     lda,
+                                                   double*                 W,
+                                                   hipsolverDoubleComplex* work,
+                                                   int                     lwork,
+                                                   double*                 rwork,
+                                                   int*                    info)
+{
+    char evectC = hipsolver2char_evect(evect);
+    char uploC  = hipsolver2char_fill(uplo);
+    zheev_(&evectC, &uploC, &n, A, &lda, W, work, &lwork, rwork, info);
+}
+
 // syevd & heevd
 template <>
 void cpu_syevd_heevd<float, float>(hipsolverEigMode_t  evect,
@@ -3704,4 +3835,65 @@ void cpu_sytrf<hipsolverDoubleComplex>(hipsolverFillMode_t     uplo,
 {
     char uploC = hipsolver2char_fill(uplo);
     zsytrf_(&uploC, &n, A, &lda, ipiv, work, &lwork, info);
+}
+
+// sytrs
+template <>
+void cpu_sytrs<float>(hipsolverFillMode_t uplo,
+                      int                 n,
+                      int                 nrhs,
+                      float*              A,
+                      int                 lda,
+                      int*                ipiv,
+                      float*              B,
+                      int                 ldb,
+                      int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    ssytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+template <>
+void cpu_sytrs<double>(hipsolverFillMode_t uplo,
+                       int                 n,
+                       int                 nrhs,
+                       double*             A,
+                       int                 lda,
+                       int*                ipiv,
+                       double*             B,
+                       int                 ldb,
+                       int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    dsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+template <>
+void cpu_sytrs<hipsolverComplex>(hipsolverFillMode_t uplo,
+                                 int                 n,
+                                 int                 nrhs,
+                                 hipsolverComplex*   A,
+                                 int                 lda,
+                                 int*                ipiv,
+                                 hipsolverComplex*   B,
+                                 int                 ldb,
+                                 int*                info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    csytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
+}
+
+template <>
+void cpu_sytrs<hipsolverDoubleComplex>(hipsolverFillMode_t     uplo,
+                                       int                     n,
+                                       int                     nrhs,
+                                       hipsolverDoubleComplex* A,
+                                       int                     lda,
+                                       int*                    ipiv,
+                                       hipsolverDoubleComplex* B,
+                                       int                     ldb,
+                                       int*                    info)
+{
+    char uploC = hipsolver2char_fill(uplo);
+    zsytrs_(&uploC, &n, &nrhs, A, &lda, ipiv, B, &ldb, info);
 }

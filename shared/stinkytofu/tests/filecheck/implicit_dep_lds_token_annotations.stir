@@ -1,0 +1,40 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --print-output
+#
+# Minimal repro for an IRParser bug: a multi-element integer array inside a
+# modifier dict (e.g. mod.memtoken = { tokens = [1, 2] }) is re-stringified
+# WITHOUT its separating commas, so `[1, 2]` arrives at downstream consumers
+# as the single-element vector `{12}`.
+#
+# Root cause: IRParser::parseAttributeValue() in
+#   shared/stinkytofu/src/serialization/asm/IRParser.cpp   (~lines 831-869)
+# On the `[...]` branch the loop consumes the separating comma token but
+# never writes a comma back to the `result` string. Elements are just
+# concatenated:
+#     `[`, `1`, `2`, `]`  ->  "[12]"
+#
+# Downstream is blameless and behaves exactly as coded:
+#   ModifierSerializer::getIntVector("[12]")  ->  std::vector<int>{12}
+#   StinkyBuildImplicitDependencyPass         ->  attaches a single LDS12
+#   AsmPrinter                                ->  prints `tokens = [12]`
+#
+# Expected (what a correct parser should produce):
+#   LDS1, LDS2 = "st.s_barrier_signal"(-1, LDS1, LDS2)
+#                { ..., mod.memtoken = { tokens = [1,2] } }
+#
+# Actual (current parser, with the bug):
+#   LDS12 = "st.s_barrier_signal"(-1, LDS12)
+#           { ..., mod.memtoken = { tokens = [1,2] } }
+#
+# The CHECK lines below assert the CORRECT behavior, so this test is
+# intentionally FAILING today and will pass once the parser bug is fixed.
+#
+# CHECK-LABEL: @memtoken_multi_repro
+# CHECK: s_barrier_signal
+# CHECK-SAME: LDS1
+# CHECK-SAME: LDS2
+# CHECK-SAME: tokens = [1,2]
+
+st.func @memtoken_multi_repro() {
+^entry:
+  "st.s_barrier_signal"(-1) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1, 2] } }
+}

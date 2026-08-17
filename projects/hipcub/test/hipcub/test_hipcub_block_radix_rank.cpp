@@ -2,7 +2,7 @@
 /******************************************************************************
 * Copyright (c) 2011, Duane Merrill.  All rights reserved.
 * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -472,6 +472,7 @@ void test_radix_rank()
                            d_ranks_output,
                            start_bit,
                            radix_bits);
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         std::vector<int> ranks_output(expected.size());
@@ -762,6 +763,7 @@ void test_radix_rank_with_prefix_sum_output()
                                d_ranks_output,
                                d_prefix_sum_output,
                                start_bit);
+            HIP_CHECK(hipGetLastError());
 
             // Getting results to host
             std::vector<int> ranks_output(expected.size());
@@ -788,6 +790,7 @@ void test_radix_rank_with_prefix_sum_output()
 
             HIP_CHECK(hipFree(d_keys_input));
             HIP_CHECK(hipFree(d_ranks_output));
+            HIP_CHECK(hipFree(d_prefix_sum_output));
         }
     }
 }

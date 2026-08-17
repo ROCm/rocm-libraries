@@ -1,0 +1,8 @@
+{
+  "label": "t16x64x32_w1x2_a16x16x32_mem",
+  "max_abs_diff": 0.0,
+  "bad": 0,
+  "total": 8192,
+  "ref_max": 2736.0,
+  "status": "PASS"
+}

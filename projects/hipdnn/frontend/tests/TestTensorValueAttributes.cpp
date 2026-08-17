@@ -1,257 +1,238 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
-#include <limits>
-#include <vector>
+#include <optional>
+#include <variant>
 
-// using namespace hipdnn_frontend::graph;
-using namespace hipdnn_data_sdk::data_objects;
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
+using hipdnn_frontend::graph::Graph;
+using hipdnn_frontend::graph::ScalarType;
+using hipdnn_frontend::graph::TensorAttributes;
 
-constexpr float PI_FLOAT = 3.14159265358979323846f;
-constexpr double PI_DOUBLE = 3.14159265358979323846;
-
-TEST(TestTensorValueAttributes, SetGetClearFloat)
+namespace
 {
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    EXPECT_FALSE(tensor.get_pass_by_value());
+constexpr float PI_FLOAT = 3.14159265358979323846F;
 
-    constexpr float TEST_VALUE = PI_FLOAT;
-    tensor.set_value(TEST_VALUE);
-    EXPECT_TRUE(tensor.get_pass_by_value());
+// Assert the full RFC-0016 §4.2 getter matrix for a float-valued tensor.
+// The primary variant getters (std::optional<pass_by_values_t>) must mirror the
+// typed convenience wrappers: a value is visible through get_pass_by_value() iff
+// it is visible through get_pass_by_value<T>(), and likewise for the
+// compile-time-constant getter.
+void expectFloatState(const TensorAttributes& tensor,
+                      const bool isPassByValue,
+                      const std::optional<float> passByValue,
+                      const std::optional<float> compileTimeConstant,
+                      const bool hasCompileTimeConstant,
+                      const bool isRuntimePassByValue)
+{
+    EXPECT_EQ(tensor.get_is_pass_by_value(), isPassByValue);
+    EXPECT_EQ(tensor.get_is_runtime_pass_by_value(), isRuntimePassByValue);
+    EXPECT_EQ(tensor.get_has_compile_time_constant(), hasCompileTimeConstant);
 
-    auto opt = tensor.get_pass_by_value<float>();
+    const std::optional<float> pbv = tensor.get_pass_by_value<float>();
+    EXPECT_EQ(pbv.has_value(), passByValue.has_value());
+    if(passByValue.has_value() && pbv.has_value())
+    {
+        EXPECT_FLOAT_EQ(pbv.value(), passByValue.value());
+    }
+
+    const std::optional<float> ctc = tensor.get_compile_time_constant<float>();
+    EXPECT_EQ(ctc.has_value(), compileTimeConstant.has_value());
+    if(compileTimeConstant.has_value() && ctc.has_value())
+    {
+        EXPECT_FLOAT_EQ(ctc.value(), compileTimeConstant.value());
+    }
+
+    const std::optional<TensorAttributes::pass_by_values_t> pbvVar = tensor.get_pass_by_value();
+    EXPECT_EQ(pbvVar.has_value(), passByValue.has_value());
+
+    const std::optional<TensorAttributes::pass_by_values_t> ctcVar
+        = tensor.get_compile_time_constant();
+    EXPECT_EQ(ctcVar.has_value(), compileTimeConstant.has_value());
+}
+
+// Round-trip a runtime-with-default scalar of an arbitrary supported type.
+template <typename T>
+void expectRuntimeRoundTrip(const T value)
+{
+    const TensorAttributes tensor(value, ScalarType::RUNTIME_PARAM);
+    EXPECT_TRUE(tensor.get_is_pass_by_value());
+    EXPECT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_FALSE(tensor.get_has_compile_time_constant());
+
+    const std::optional<T> opt = tensor.get_pass_by_value<T>();
     ASSERT_TRUE(opt.has_value());
-    EXPECT_FLOAT_EQ(opt.value(), TEST_VALUE);
+    EXPECT_EQ(opt.value(), value);
 
+    // A runtime tensor never answers the compile-time getter, even for the right type.
+    EXPECT_FALSE(tensor.get_compile_time_constant<T>().has_value());
+}
+} // namespace
+
+// --- Compile-time-constant default paths (plain ctor / set_value; flag false) ---
+// Per RFC-0016 §4.3, the plain constructor and set_value bake a baseline-1.0.0
+// compile-time constant (runtime flag clear); use the (scalar,
+// ScalarType::RUNTIME_PARAM) constructor or set_as_runtime_parameter() for a
+// runtime-with-default scalar.
+
+TEST(TestTensorValueAttributes, PlainConstructorIsCompileTimeConstant)
+{
+    const TensorAttributes tensor(PI_FLOAT);
+    expectFloatState(tensor,
+                     /*isPassByValue*/ true,
+                     /*passByValue*/ std::nullopt,
+                     /*compileTimeConstant*/ PI_FLOAT,
+                     /*hasCompileTimeConstant*/ true,
+                     /*isRuntimePassByValue*/ false);
+}
+
+TEST(TestTensorValueAttributes, SetValueIsCompileTimeConstant)
+{
+    TensorAttributes tensor;
+    tensor.set_value(PI_FLOAT);
+    expectFloatState(tensor, true, std::nullopt, PI_FLOAT, true, false);
+}
+
+// --- Compile-time-constant creation paths (flag false, value present) --------
+
+TEST(TestTensorValueAttributes, SetCompileTimeConstantIsCompileTimeConstant)
+{
+    TensorAttributes tensor;
+    tensor.set_compile_time_constant(PI_FLOAT);
+    expectFloatState(tensor, true, std::nullopt, PI_FLOAT, true, false);
+}
+
+TEST(TestTensorValueAttributes, ConstructorCompileTimeConstMode)
+{
+    const TensorAttributes tensor(PI_FLOAT, ScalarType::COMPILE_TIME_CONST);
+    expectFloatState(tensor, true, std::nullopt, PI_FLOAT, true, false);
+}
+
+TEST(TestTensorValueAttributes, GraphTensorCompileTimeConstMode)
+{
+    const std::shared_ptr<TensorAttributes> tensor
+        = Graph::tensor(PI_FLOAT, ScalarType::COMPILE_TIME_CONST);
+    ASSERT_NE(tensor, nullptr);
+    expectFloatState(*tensor, true, std::nullopt, PI_FLOAT, true, false);
+}
+
+// --- Runtime-with-default creation paths (flag true, value present) ----------
+
+TEST(TestTensorValueAttributes, ConstructorRuntimeParamMode)
+{
+    const TensorAttributes tensor(PI_FLOAT, ScalarType::RUNTIME_PARAM);
+    expectFloatState(tensor, true, PI_FLOAT, std::nullopt, false, true);
+}
+
+TEST(TestTensorValueAttributes, GraphTensorRuntimeParamMode)
+{
+    const std::shared_ptr<TensorAttributes> tensor
+        = Graph::tensor(PI_FLOAT, ScalarType::RUNTIME_PARAM);
+    ASSERT_NE(tensor, nullptr);
+    expectFloatState(*tensor, true, PI_FLOAT, std::nullopt, false, true);
+}
+
+TEST(TestTensorValueAttributes, SetIsPassByValueFlipsCompileTimeConstantToRuntimeWithDefault)
+{
+    TensorAttributes tensor;
+    tensor.set_compile_time_constant(PI_FLOAT); // flag false, value present
+    tensor.set_is_pass_by_value(true); // flip only the flag; value must survive
+    // Compile-time constant becomes runtime-with-default: value retained as a default.
+    expectFloatState(tensor, true, PI_FLOAT, std::nullopt, false, true);
+}
+
+// --- Runtime user-supplied creation path (flag true, value cleared) ----------
+
+TEST(TestTensorValueAttributes, SetAsRuntimeParameterClearsValue)
+{
+    TensorAttributes tensor(PI_FLOAT, ScalarType::RUNTIME_PARAM); // start as runtime-with-default
+    tensor.set_as_runtime_parameter();
+    expectFloatState(tensor, true, std::nullopt, std::nullopt, false, true);
+}
+
+TEST(TestTensorValueAttributes, ClearValueOnRuntimeDefaultBecomesUserSupplied)
+{
+    TensorAttributes tensor(PI_FLOAT, ScalarType::RUNTIME_PARAM);
     tensor.clear_value();
-    EXPECT_FALSE(tensor.get_pass_by_value());
+    // Flag stays true, value gone: this is the pure user-supplied state.
+    expectFloatState(tensor, true, std::nullopt, std::nullopt, false, true);
+}
+
+// --- set_value always bakes a compile-time constant, regardless of prior flag state ---
+
+TEST(TestTensorValueAttributes, SetValueAfterSetIsPassByValueIsCompileTimeConstant)
+{
+    TensorAttributes tensor;
+    tensor.set_is_pass_by_value(true);
+    tensor.set_value(PI_FLOAT); // set_value bakes a compile-time constant, clearing the flag
+    expectFloatState(tensor, true, std::nullopt, PI_FLOAT, true, false);
+}
+
+// --- Ordinary (not by-value) -------------------------------------------------
+
+TEST(TestTensorValueAttributes, DefaultConstructedIsOrdinary)
+{
+    const TensorAttributes tensor;
+    expectFloatState(tensor, false, std::nullopt, std::nullopt, false, false);
+}
+
+// --- Type dispatch: wrong-type queries return nullopt ------------------------
+
+TEST(TestTensorValueAttributes, WrongTypeCompileTimeConstantReturnsNullopt)
+{
+    TensorAttributes tensor;
+    tensor.set_compile_time_constant(42.0F); // compile-time constant float
+
+    const std::optional<float> match = tensor.get_compile_time_constant<float>();
+    ASSERT_TRUE(match.has_value());
+    EXPECT_FLOAT_EQ(match.value(), 42.0F);
+
+    EXPECT_FALSE(tensor.get_compile_time_constant<half>().has_value());
+    EXPECT_FALSE(tensor.get_compile_time_constant<bfloat16>().has_value());
+    EXPECT_FALSE(tensor.get_compile_time_constant<uint8_t>().has_value());
+    EXPECT_FALSE(tensor.get_compile_time_constant<int32_t>().has_value());
+    EXPECT_FALSE(tensor.get_compile_time_constant<int64_t>().has_value());
+    EXPECT_FALSE(tensor.get_compile_time_constant<double>().has_value());
+    EXPECT_FALSE(tensor.get_compile_time_constant<bool>().has_value());
+
+    // Compile-time constant never answers the runtime getter, not even for float.
     EXPECT_FALSE(tensor.get_pass_by_value<float>().has_value());
 }
 
-TEST(TestTensorValueAttributes, ConstructorValues)
+TEST(TestTensorValueAttributes, WrongTypeRuntimeWithDefaultReturnsNullopt)
 {
-    constexpr float TEST_VALUE = 42.0f;
-    hipdnn_frontend::graph::TensorAttributes tensor(TEST_VALUE);
+    const TensorAttributes tensor(int32_t{123}, ScalarType::RUNTIME_PARAM);
 
-    auto opt = tensor.get_pass_by_value<float>();
-    ASSERT_TRUE(opt.has_value());
-    EXPECT_EQ(opt.value(), TEST_VALUE);
-}
+    const std::optional<int32_t> match = tensor.get_pass_by_value<int32_t>();
+    ASSERT_TRUE(match.has_value());
+    EXPECT_EQ(match.value(), 123);
 
-TEST(TestTensorValueAttributes, PackUnpackFloatValue)
-{
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    tensor.set_uid(7)
-        .set_name("value_tensor")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_stride({1, 2})
-        .set_dim({3, 4})
-        .set_is_virtual(false)
-        .set_value(PI_FLOAT);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto fbOffset = tensor.pack_attributes(builder);
-    builder.Finish(fbOffset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
-
-    EXPECT_EQ(fbTensor->uid(), 7);
-    EXPECT_STREQ(fbTensor->name()->c_str(), "value_tensor");
-    EXPECT_EQ(fbTensor->data_type(), DataType::FLOAT);
-    EXPECT_EQ(fbTensor->strides()->size(), 1u);
-    EXPECT_EQ(fbTensor->dims()->size(), 1u);
-    EXPECT_FALSE(fbTensor->virtual_());
-
-    EXPECT_EQ(fbTensor->value_type(), TensorValue::Float32Value);
-    auto fval = fbTensor->value_as_Float32Value();
-    ASSERT_NE(fval, nullptr);
-    EXPECT_FLOAT_EQ(fval->value(), PI_FLOAT);
-
-    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
-    EXPECT_EQ(unpacked->uid, 7);
-    EXPECT_EQ(unpacked->name, "value_tensor");
-    EXPECT_EQ(unpacked->data_type, DataType::FLOAT);
-
-    std::vector<int64_t> expectedStrides = {1};
-    std::vector<int64_t> expectedDims = {1};
-    EXPECT_EQ(unpacked->strides, expectedStrides);
-    EXPECT_EQ(unpacked->dims, expectedDims);
-
-    EXPECT_FALSE(unpacked->virtual_);
-
-    ASSERT_EQ(unpacked->value.type, TensorValue::Float32Value);
-    auto* floatVal = unpacked->value.AsFloat32Value();
-    ASSERT_NE(floatVal, nullptr);
-    EXPECT_FLOAT_EQ(floatVal->value(), PI_FLOAT);
-}
-
-TEST(TestTensorValueAttributes, PackUnpackHalfValue)
-{
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    tensor.set_uid(8)
-        .set_name("half_tensor")
-        .set_data_type(hipdnn_frontend::DataType::HALF)
-        .set_is_virtual(false)
-        .set_value(1.0_h);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto fbOffset = tensor.pack_attributes(builder);
-    builder.Finish(fbOffset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
-
-    EXPECT_EQ(fbTensor->value_type(), TensorValue::Float16Value);
-    auto hval = fbTensor->value_as_Float16Value();
-    ASSERT_NE(hval, nullptr);
-    EXPECT_EQ(half(hval->value()), 1.0_h);
-
-    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
-    ASSERT_EQ(unpacked->value.type, TensorValue::Float16Value);
-    auto* halfVal = unpacked->value.AsFloat16Value();
-    ASSERT_NE(halfVal, nullptr);
-    EXPECT_EQ(half(halfVal->value()), 1.0_h);
-}
-
-TEST(TestTensorValueAttributes, PackUnpackBFloat1Value)
-{
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    tensor.set_uid(8)
-        .set_name("half_tensor")
-        .set_data_type(hipdnn_frontend::DataType::BFLOAT16)
-        .set_is_virtual(false)
-        .set_value(1.0_bf);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto fbOffset = tensor.pack_attributes(builder);
-    builder.Finish(fbOffset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
-
-    EXPECT_EQ(fbTensor->value_type(), TensorValue::BFloat16Value);
-    auto hval = fbTensor->value_as_BFloat16Value();
-    ASSERT_NE(hval, nullptr);
-    EXPECT_EQ(hval->value(), 1.0_bf);
-
-    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
-    ASSERT_EQ(unpacked->value.type, TensorValue::BFloat16Value);
-    auto* halfVal = unpacked->value.AsBFloat16Value();
-    ASSERT_NE(halfVal, nullptr);
-    EXPECT_EQ(halfVal->value(), 1.0_bf);
-}
-
-TEST(TestTensorValueAttributes, PackUnpackDoubleValue)
-{
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    tensor.set_uid(9)
-        .set_name("double_tensor")
-        .set_data_type(hipdnn_frontend::DataType::DOUBLE)
-        .set_is_virtual(false)
-        .set_value(PI_DOUBLE);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto fbOffset = tensor.pack_attributes(builder);
-    builder.Finish(fbOffset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
-
-    EXPECT_EQ(fbTensor->value_type(), TensorValue::Float64Value);
-    auto dval = fbTensor->value_as_Float64Value();
-    ASSERT_NE(dval, nullptr);
-    EXPECT_DOUBLE_EQ(dval->value(), PI_DOUBLE);
-
-    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
-    ASSERT_EQ(unpacked->value.type, TensorValue::Float64Value);
-    auto* doubleVal = unpacked->value.AsFloat64Value();
-    ASSERT_NE(doubleVal, nullptr);
-    EXPECT_DOUBLE_EQ(doubleVal->value(), PI_DOUBLE);
-}
-
-TEST(TestTensorValueAttributes, PackUnpackEmptyValue)
-{
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    tensor.set_uid(10)
-        .set_name("empty_tensor")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_stride({1, 2})
-        .set_dim({3, 4})
-        .set_is_virtual(true);
-
-    EXPECT_FALSE(tensor.get_pass_by_value());
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto fbOffset = tensor.pack_attributes(builder);
-    builder.Finish(fbOffset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
-
-    EXPECT_EQ(fbTensor->value_type(), TensorValue::NONE);
-
-    auto unpacked = std::unique_ptr<TensorAttributesT>(fbTensor->UnPack());
-    EXPECT_EQ(unpacked->value.type, TensorValue::NONE);
-}
-
-TEST(TestTensorValueAttributes, TypeSafety)
-{
-    hipdnn_frontend::graph::TensorAttributes tensor;
-    tensor.set_value(42.0f);
-
-    auto floatOpt = tensor.get_pass_by_value<float>();
-    ASSERT_TRUE(floatOpt.has_value());
-    EXPECT_FLOAT_EQ(floatOpt.value(), 42.0f);
-
-    EXPECT_FALSE(tensor.get_pass_by_value<half>().has_value());
-    EXPECT_FALSE(tensor.get_pass_by_value<hip_bfloat16>().has_value());
-    EXPECT_FALSE(tensor.get_pass_by_value<uint8_t>().has_value());
-    EXPECT_FALSE(tensor.get_pass_by_value<int32_t>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<float>().has_value());
     EXPECT_FALSE(tensor.get_pass_by_value<double>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<half>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<bfloat16>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<uint8_t>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<int64_t>().has_value());
+    EXPECT_FALSE(tensor.get_pass_by_value<bool>().has_value());
 
-    tensor.set_value(int32_t{123});
-
-    EXPECT_FALSE(tensor.get_pass_by_value<float>().has_value());
-
-    auto intOpt = tensor.get_pass_by_value<int32_t>();
-    ASSERT_TRUE(intOpt.has_value());
-    EXPECT_EQ(intOpt.value(), 123);
+    // Runtime tensor never answers the compile-time getter, not even for int32.
+    EXPECT_FALSE(tensor.get_compile_time_constant<int32_t>().has_value());
 }
 
-TEST(TestTensorValueAttributes, NumericLimits)
+TEST(TestTensorValueAttributes, RuntimeWithDefaultRoundTripsAllTypes)
 {
-    hipdnn_frontend::graph::TensorAttributes tensor;
-
-    tensor.set_value(std::numeric_limits<float>::max());
-    auto floatOpt = tensor.get_pass_by_value<float>();
-    ASSERT_TRUE(floatOpt.has_value());
-    EXPECT_FLOAT_EQ(floatOpt.value(), std::numeric_limits<float>::max());
-
-    tensor.set_value(std::numeric_limits<int32_t>::min());
-    auto intOpt = tensor.get_pass_by_value<int32_t>();
-    ASSERT_TRUE(intOpt.has_value());
-    EXPECT_EQ(intOpt.value(), std::numeric_limits<int32_t>::min());
-
-    tensor.set_value(std::numeric_limits<uint8_t>::max());
-    auto uint8Opt = tensor.get_pass_by_value<uint8_t>();
-    ASSERT_TRUE(uint8Opt.has_value());
-    EXPECT_EQ(uint8Opt.value(), std::numeric_limits<uint8_t>::max());
-
-    tensor.set_value(std::numeric_limits<double>::infinity());
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto fbOffset = tensor.pack_attributes(builder);
-    builder.Finish(fbOffset);
-
-    auto bufferPointer = builder.GetBufferPointer();
-    auto fbTensor = flatbuffers::GetRoot<TensorAttributes>(bufferPointer);
-
-    auto dval = fbTensor->value_as_Float64Value();
-    ASSERT_NE(dval, nullptr);
-    EXPECT_TRUE(std::isinf(dval->value()));
+    expectRuntimeRoundTrip<float>(PI_FLOAT);
+    expectRuntimeRoundTrip<double>(2.718281828459045);
+    // half/bfloat16 use an exactly-representable value so the round-trip is bit-exact.
+    expectRuntimeRoundTrip<half>(half(1.5F));
+    expectRuntimeRoundTrip<bfloat16>(bfloat16(1.5F));
+    expectRuntimeRoundTrip<uint8_t>(200);
+    expectRuntimeRoundTrip<int32_t>(-12345);
+    expectRuntimeRoundTrip<int64_t>(456789012345LL);
+    expectRuntimeRoundTrip<bool>(true);
+    expectRuntimeRoundTrip<bool>(false);
 }

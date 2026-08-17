@@ -1,34 +1,11 @@
 #!/usr/bin/env python3
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 import argparse
 import re
 import string
-from typing import Dict, List, Tuple
 
 import dash
 import dash_bootstrap_components as dbc
@@ -101,12 +78,12 @@ class RegisterCollection:
     """
 
     def __init__(self) -> None:
-        self._data: List[RegisterState] = []
+        self._data: list[RegisterState] = []
 
     def append(self, entry: RegisterState) -> None:
         self._data.append(entry)
 
-    def get_liveness_sum(self, instruction: str) -> List:
+    def get_liveness_sum(self, instruction: str) -> list:
         return [
             sum([int(x.is_live()) for x in self._data]),
             sum([int(x.is_allocated()) for x in self._data]),
@@ -128,7 +105,7 @@ class RegisterCollection:
         return len("".join([x.symbol for x in self._data]).rstrip())
 
     @staticmethod
-    def get_liveness_columns() -> List[str]:
+    def get_liveness_columns() -> list[str]:
         """
         Pandas-style column names
         """
@@ -143,19 +120,19 @@ class RegisterCollection:
 
 class RegisterHistory:
     def __init__(self) -> None:
-        self._data: List[RegisterCollection] = []
+        self._data: list[RegisterCollection] = []
 
     def append(self, entry: RegisterCollection) -> None:
         self._data.append(entry)
 
     def get_liveness_df(
         self,
-        instructions: List[List[Instruction]],
-        line_numbers: List[int],
+        instructions: list[list[Instruction]],
+        line_numbers: list[int],
         filter_comments: bool = True,
     ) -> pd.DataFrame:
-        inst_results: List[str] = []
-        exclusions: List[int] = []
+        inst_results: list[str] = []
+        exclusions: list[int] = []
         for i, line in enumerate(instructions):
             if filter_comments:
                 line = list(
@@ -184,12 +161,12 @@ class RegisterHistory:
 
 def read_liveness(
     filename: str,
-) -> Tuple[Dict[str, RegisterHistory], List[List[Instruction]], List[int]]:
+) -> tuple[dict[str, RegisterHistory], list[list[Instruction]], list[int]]:
     accvgprs = RegisterHistory()
     vgprs = RegisterHistory()
     sgprs = RegisterHistory()
-    instructions: List[List[Instruction]] = []
-    line_numbers: List[int] = []
+    instructions: list[list[Instruction]] = []
+    line_numbers: list[int] = []
 
     with open(filename, "r") as f:
         for i, line in enumerate(f):
@@ -219,7 +196,7 @@ def read_liveness(
                     .lstrip(string.digits + string.whitespace + ".")
                     .split(";")
                 )
-                instruction_entries: List[Instruction] = []
+                instruction_entries: list[Instruction] = []
                 for inst in inst_info:
                     instruction_entries.append(Instruction(inst))
                 instructions.append(instruction_entries)
@@ -305,11 +282,9 @@ if __name__ == "__main__":
         className="p-5",
         children=[
             html.H1(children="Register Liveliness"),
-            html.Div(
-                children="""
+            html.Div(children="""
             A RocRoller tool
-        """
-            ),
+        """),
             dcc.Graph(id="v reg", figure=fig_vgpr, style={"height": "75vh"}),
             html.Div(
                 [

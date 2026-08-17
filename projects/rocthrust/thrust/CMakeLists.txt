@@ -20,7 +20,7 @@ target_include_directories(rocthrust
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
   target_link_libraries(rocthrust
     INTERFACE
     roc::rocprim_hip
@@ -60,7 +60,7 @@ rocm_install(
 
 include(ROCMExportTargetsHeaderOnly)
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
   # Export targets
   rocm_export_targets_header_only(
     TARGETS roc::rocthrust

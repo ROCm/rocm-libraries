@@ -1,9 +1,10 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -42,9 +43,9 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16,16,32,1, 1, 8,8, 2,2]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
+        - ClusterLocalRead: [1]
         - DepthU: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [8]
         # - LdsBlockSizePerPadA: [-1]
@@ -111,9 +112,9 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16,16,32,1, 1, 8,8, 2,2]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
+        - ClusterLocalRead: [1]
         - DepthU: [32]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [8]
         # - LdsBlockSizePerPadA: [-1]
@@ -175,9 +176,9 @@ BenchmarkProblems:
         - WorkGroup:
           - [4,4,4]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
+        - ClusterLocalRead: [1]
         - DepthU: [256]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [8]
         # - LdsBlockSizePerPadA: [-1]
@@ -239,9 +240,9 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16,16,4,1, 1, 4,4, 2,2]
         - 1LDSBuffer: [-1]
-        - ClusterLocalRead: [True]
+        - ClusterLocalRead: [1]
         - DepthU: [16]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - GlobalReadVectorWidthA: [4]
         - GlobalReadVectorWidthB: [4]
         # - LdsBlockSizePerPadA: [-1]
@@ -294,7 +295,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         # - 1LDSBuffer: [1]
         - 1LDSBuffer: [0]
@@ -307,7 +308,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 16, 1, 1, 8,6, 2,2]
           # - [16, 16, 16, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]

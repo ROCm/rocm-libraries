@@ -1,7 +1,8 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
@@ -13,7 +14,6 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   BoundsCheck: 2
-  #MaxFileName: 256
   #KeepBuildTmp: True
 
 BenchmarkProblems:
@@ -27,8 +27,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -58,16 +58,16 @@ BenchmarkProblems:
         - DepthU: [16,32]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -77,10 +77,9 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - LocalReadVectorWidth: [4]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 2,  2,2 ]
@@ -115,8 +114,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -146,16 +145,16 @@ BenchmarkProblems:
         - DepthU: [16,32]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -165,10 +164,9 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 2,  2,2 ]
@@ -203,8 +201,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -234,16 +232,16 @@ BenchmarkProblems:
         - DepthU: [16,32]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -253,10 +251,9 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 2,  2,2 ]
@@ -290,8 +287,8 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -321,16 +318,16 @@ BenchmarkProblems:
         - DepthU: [16,32,64]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -340,10 +337,9 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         #- LocalReadVectorWidth: [4,8]
         - DirectToLds: [1]
-        #- StreamK: [0,3]
         - AssertSummationElementMultiple: [1, 2]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 2,  2,2 ]
@@ -377,8 +373,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -403,17 +399,17 @@ BenchmarkProblems:
         - DepthU: [8,16]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [0]
         #- StaggerUStride: [256]
         - StaggerUMapping: [2]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -422,9 +418,8 @@ BenchmarkProblems:
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  2,2 ]
@@ -457,8 +452,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -483,17 +478,17 @@ BenchmarkProblems:
         - DepthU: [8,16]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - StaggerUMapping: [2]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -502,10 +497,9 @@ BenchmarkProblems:
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - LocalReadVectorWidth: [1]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  2,2 ]
@@ -538,8 +532,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -564,17 +558,17 @@ BenchmarkProblems:
         - DepthU: [16]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0,1]
+        - MIArchVgpr: [false, true]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - StaggerUMapping: [2]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -583,10 +577,9 @@ BenchmarkProblems:
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - LocalReadVectorWidth: [1]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  2,2 ]
@@ -618,8 +611,8 @@ BenchmarkProblems:
       DataType: s
       DestDataType: s
       ComputeDataType: s
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: True
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -644,17 +637,17 @@ BenchmarkProblems:
         - DepthU: [16]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
         - StaggerUMapping: [2]
         - WorkGroupMapping: [1]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0,1]
+        - ExpandPointerSwap: [false, true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -663,10 +656,9 @@ BenchmarkProblems:
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
         #- SourceSwap: [0, 1]
         - DirectToLds: [1]
-        #- StreamK: [0,1]
         - LocalReadVectorWidth: [1]
-        - DirectToVgprA: [0,1]
-        - DirectToVgprB: [0,1]
+        - DirectToVgprA: [false, true]
+        - DirectToVgprB: [false, true]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   2, 1,  2,2 ]
@@ -700,8 +692,8 @@ BenchmarkProblems:
       DestDataType: f8n
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -723,7 +715,7 @@ BenchmarkProblems:
         - DepthU: [64,128]
         - VectorWidthA: [-1]
         - VectorWidthB: [-1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - LocalWritePerMfma: [-1]
         - StaggerU: [4]
         - StaggerUStride: [256]
@@ -733,7 +725,7 @@ BenchmarkProblems:
         #- ExpandPointerSwap: [0,1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
         - VectorStore: [-1]
         - StoreSyncOpt: [0]
         - LdsPadA: [-1]
@@ -741,7 +733,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [0]
         #- GlobalSplitU: [1,2]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - SourceSwap: [1]#[0, 1]
+        - SourceSwap: [true]#[0, 1]
         - LocalReadVectorWidth: [8]
         - DirectToLds: [1]
         - AssertSummationElementMultiple: [1, 4]

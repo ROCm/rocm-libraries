@@ -76,6 +76,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the examples radix sort is performed on a block of 256 threads, each thread provides
 /// eight \p int value, results are returned using the same array as for input.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_radix_sort.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

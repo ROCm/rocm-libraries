@@ -1,0 +1,41 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+// Auto-generated from kernel_sources.cpp.in by EmbedKernelSources.cmake - DO NOT EDIT
+//
+// Defines the embedded kernel source string literals and the filename-to-source
+// lookup map. See kernel_sources.hpp.in for the full embedding overview.
+
+#include "kernel_sources.hpp"
+#include <cstddef>
+#include <unordered_map>
+#include <stdexcept>
+
+// Kernel definitions generation begin
+@KERNEL_DEFINITIONS@
+// Kernel definitions generation end
+
+namespace example_provider {
+
+static const std::unordered_map<std::string_view, std::string_view>& getKernelMap()
+{
+    static const std::unordered_map<std::string_view, std::string_view> s_kernelMap{
+        // Kernel map entries generation begin
+@KERNEL_MAP_ENTRIES@
+        // Kernel map entries generation end
+    };
+    return s_kernelMap;
+}
+
+std::string_view getKernelSrc(const char* name)
+{
+    const auto& map = getKernelMap();
+    auto it = map.find(name);
+    if(it == map.end())
+    {
+        throw std::runtime_error(std::string("Failed to load kernel source: ") + name);
+    }
+    return it->second;
+}
+
+} // namespace example_provider

@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -91,6 +91,19 @@ else()
   target_compile_definitions( hipfftw PRIVATE hipfft_EXPORTS )
 endif()
 
+if( WIN32 )
+  # configure an input file twice to produce separate rc files for hipFFT and hipFFTW
+  set( HIPFFT_RC_NAME "hipFFT" )
+  set( HIPFFT_RC_FILE "hipfft.dll" )
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/hipfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/hipfft.rc )
+  target_sources( hipfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipfft.rc )
+
+  set( HIPFFT_RC_NAME "hipFFTW" )
+  set( HIPFFT_RC_FILE "hipfftw.dll" )
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/hipfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/hipfftw.rc )
+  target_sources( hipfftw PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/hipfftw.rc )
+endif()
+
 set(static_depends)
 
 # Target compile definitions
@@ -145,7 +158,9 @@ foreach( lib ${HIPFFT_LIBRARY_TARGETS} )
 endforeach()
 
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
-  target_include_directories( hipfft PUBLIC $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}> )
+  foreach( include_dir ${CUDAToolkit_INCLUDE_DIRS} )
+    target_include_directories( hipfft PUBLIC $<BUILD_INTERFACE:${include_dir}> )
+  endforeach()
 endif()
 
 if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
@@ -165,7 +180,7 @@ endif()
 if (NOT BUILD_WITH_COMPILER STREQUAL "HIP-NVCC")
   rocm_set_soversion(hipfft ${hipfft_SOVERSION})
   get_target_property(aliased_hipfftw_name hipfftw ALIASED_TARGET)
-  if (aliased_hipfftw_name STREQUAL "")
+  if (NOT aliased_hipfftw_name)
     # hipfftw is not an alias
     rocm_set_soversion(hipfftw ${hipfftw_SOVERSION})
   endif()

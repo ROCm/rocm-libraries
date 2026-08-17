@@ -65,7 +65,8 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
 
         static const ck_tile::index_t M_Warp_Tile = 16;
         static const ck_tile::index_t N_Warp_Tile = 16;
-        static const ck_tile::index_t K_Warp_Tile = 16;
+        static const ck_tile::index_t K_Warp_Tile =
+            ck_tile::get_k_warp_tile<ADataType, M_Warp_Tile>();
     };
 
     using grouped_gemm_kargs = ck_tile::QuantGroupedGemmHostArgs;
@@ -111,6 +112,7 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
         using GemmUniversalTraits = ck_tile::TileGemmQuantTraits<GroupedGemKernelParam::kPadM,
                                                                  GroupedGemKernelParam::kPadN,
                                                                  GroupedGemKernelParam::kPadK,
+                                                                 false,
                                                                  false,
                                                                  PreshuffleB,
                                                                  ALayout,
@@ -288,6 +290,7 @@ class TestCkTileGroupedGemmQuant : public ::testing::Test
         using GemmUniversalTraits      = ck_tile::TileGemmQuantTraits<GroupedGemKernelParam::kPadM,
                                                                       GroupedGemKernelParam::kPadN,
                                                                       GroupedGemKernelParam::kPadK,
+                                                                      false,
                                                                       false,
                                                                       PreshuffleB,
                                                                       ALayout,

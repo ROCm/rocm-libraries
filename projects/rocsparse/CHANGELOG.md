@@ -3,16 +3,108 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.1.0
 
-## (Unreleased) rocSPARSE 4.3.0
+### Added
+* Added the `rocsparse_spmat_scale` generic routine for sparse matrix scaling (`C = alpha * A`). It writes to `C` `alpha` times the values of `A` and does not copy the sparsity pattern (`C` is assumed to already have the same sparsity pattern as `A`). `alpha` is passed as a self-describing scalar dense vector descriptor that can reside in host or device memory, so no temporary storage buffer is required.  In-place operation (`C == A`) is supported.  COO, COO AoS, CSR, CSC, BSR, ELL, Blocked ELL, and SELL formats are supported.
+* Added the `rocsparse_dnvec_descr_create_scalar` auxiliary routine, which creates a size-one dense vector descriptor for a host or device scalar.
+* Added batched support to the SpMM algorithm `rocsparse_spmm_alg_csr_nnz_split` and `rocsparse_spmm_alg_csr_merge_path`.
+* Added `rocsparse_sddmm` batched support to CSR, CSC, COO, COO AoS, and ELL formats.
+
+### Optimized
+* Optimized architecture-aware launch configurations for RDNA (wave32) and CDNA (wave64) GPUs, improving performance and performance portability for several sparse level 2 and level 3 routines without algorithmic or numerical changes. Affected routines include `rocsparse_spmv` for the CSR adaptive, nnz-split, and LRB algorithms, the COO (SoA and AoS) formats, and the ELL format (`rocsparse_Xellmv`); `rocsparse_Xbsrmv`; `rocsparse_Xbsrxmv`; `rocsparse_Xgemvi`; `rocsparse_Xgemmi`; and `rocsparse_spmm` with the blocked-ELL format.
+
+### Resolved issues
+* Fixed an integer overflow in `rocsparse_prune_dense2csr_by_percentage` and `rocsparse_prune_csr2csr_by_percentage`, which computed the matrix element count in 32-bit arithmetic. For matrices with more than `INT32_MAX` (~2.1 billion) elements the count overflowed to a negative value, resulting in out-of-bounds pointer construction and an invalid kernel launch grid. The element count is now computed in 64-bit arithmetic.
+* Fixed `rocsparse_spmm` with the segmented COO, atomic COO, segmented-atomic COO, and row-split CSR algorithms, which failed with `hipErrorInvalidConfiguration` for batch counts exceeding 65535 because the batch dimension of the kernel launch grid exceeded the maximum supported grid dimension.
+* Fixed an issue with `rocsparse_spmm` when using the nnz-split algorithm with the CSR or CSC format. The operation produced incorrect results because the segmented-block-reduction helper had shared-memory pointer parameters marked `__restrict__`, while threads in the block must read values written by other threads. The `__restrict__` attribute has now been removed.
+
+## rocSPARSE 5.0.0 for ROCm 10.0
+
+### Added
+* Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
+* Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
+* Added CSC format support to `rocsparse_spsm` and `rocsparse_sptrsm`.
+* Added `rocsparse_handle_create` to create a handle associated with a user-provided stream. All internal device memory allocation and initialization are stream-ordered on that stream, so handle creation never blocks the calling thread or other GPU streams.
+* Added `rocsparse_handle_destroy` to destroy a handle created by `rocsparse_handle_create`, with an optional error descriptor argument.
+
+### Changed
+* `rocsparse_spmm` with CSR/CSC and the default algorithm (`rocsparse_spmm_alg_default` or `rocsparse_spmm_alg_csr`) now automatically selects a load-balanced (nnz-split) kernel for strongly skewed matrices (those containing a single very long row for CSR, or column for transposed CSC). Behavior is unchanged for non-skewed matrices and for explicit algorithm choices (`rocsparse_spmm_alg_csr_row_split`, `rocsparse_spmm_alg_csr_nnz_split`, `rocsparse_spmm_alg_csr_merge_path`).
+
+### Resolved issues
+* Fixed an issue with `rocsparse_spmm`, which produced incorrect results for the Blocked ELL sparse format.
+
+### Removed
+* The deprecated `rocsparse_indextype_u16` enum.
+
+### Upcoming changes
+* Deprecated the `rocsparse_spildlt0_input_diag` enum value. It was used to dump the diagonal `D` of the ILDLT(0) factorization, which is now stored in-place on the diagonal entries of the `L` factor. It will be removed in a future release.
+
+## rocSPARSE 4.7.0 for ROCm 7.14
+
+### Added
+* Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
+
+### Known issues
+* The HIP graph capture/launch path for the factorization routines `bsric0`, `bsrilu0`, `csric0` and `csrilu0` can fail with `hipErrorOutOfMemory` at `hipGraphLaunch` on memory-constrained GPUs such as the gfx110X family. The corresponding `graph_test` cases are marked `known_bug` and excluded from the standard test suites until the fix lands.
+
+### Upcoming changes
+* Deprecated the `rocsparse_indextype_u16` index type. It will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
+
+## rocSPARSE 4.6.0 for ROCm 7.13.0
+
+### Added
+* Added the `rocsparse_create_const_bsr_descr` routine for creating a const sparse BSR matrix descriptor.
+* Added the `rocsparse_spic0` and `rocsparse_spilu0` routines for incomplete factorizations, with strided batched computations enabled.
+* Added the `rocsparse_sptrsv_descr_create` and the `rocsparse_sptrsv_descr_destroy` routines.
+* Added the `rocsparse_singularity` enumeration.
+* Added the `rocsparse_sptrsv_output_singularity` and the `rocsparse_sptrsv_output_singularity_position` in `rocsparse_sptrsv_output`.
+* Added the strided batched computations for `rocsparse_sptrsv`.
+
+### Optimized
+* Significant performance improvement for `rocsparse_Xgtsv_no_pivot_strided_batch`.
+* Significant performance improvement for `rocsparse_Xgtsv_no_pivot`.
+
+### Resolved issues
+* Fixed incorrect usage of `__syncthreads` in `bsrmm`, `csrmm` (row_split), and `csritilu0x`
+* Fixed incorrect usage of `__syncthreads` in `csx2dense`, `dense2csx`, `prune_dense2csr`, `csrcolor`, and `csrmm` (nnz_split)
+* Fixed `rocsparse_[s|d|c|z]csric0` where `rocsparse_status_invalid_value` was being returned when the maximum number of non-zeros in any row is between 513 and 1024.
+* Fixed compilation when using `--rocsparse_ILP64`
+* Fixed off-by-one heap-buffer-overflow in temporary buffer allocation for `rocsparse_csrsort`, `rocsparse_check_matrix_csr`, and `rocsparse_check_matrix_gebsr` (and their delegating routines `rocsparse_cscsort`, `rocsparse_coosort`, `rocsparse_check_matrix_csc`, and `rocsparse_check_matrix_gebsc`) where the `shift_offsets_kernel` temp buffer was sized for `m` elements instead of `m+1`.
+* Fixed incorrect usage of `rocsparse_conj` in `bsric0` for complex matrices
+* Fixed double-free and use-after-free in `rocsparse_copy_mat_info` for `csritsv` info, where the owned `ptr_end` device buffer was copied shallowly and the pivot/position metadata was copied using the destination's (invalid) index type instead of the source's.
+* Fixed the `--memstat` build, where tracked allocation call sites passing typed `T**` pointers (for example `csrmv` `wg_flags` and the HYB index buffers) failed to compile against the `void**` allocation entry points.
+
+### Removed
+* The deprecated C++14 support, which is no longer supported by the rocPRIM dependency.
+
+## rocSPARSE 4.5.0 for ROCm 7.12.0
+
+### Added
+* Added `--show-skipped` and `--hide-skipped` command-line options to `rocsparse-test` to control whether skipped test output is displayed.
+* For sparse matrix vector product (`rocsparse_spmv`), when using `rocsparse_spmv_alg_default`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
+
+### Changed
+* Use `std::hypot` in `rocsparse_complex_num<T>::abs` function.
+* Non-YAML tests (bfloat16, complex_types, atomic_add) are now automatically skipped when running `rocsparse-test` with the `--yaml` filter, and skipped test output is hidden by default in this mode.
+
+### Resolved issues
+* Fix issue in `rocsparse_[s|d|c|z]gebsrmv` routine where incorrect results could sometimes be returned.
+* Fix issue in `rocsparse_[s|d|c|z]bsrxmv` routine where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
+
+## rocSPARSE 4.4.0 for ROCm 7.11.0
+
+### Added
+* Added brain half float mixed precision to `rocsparse_spmv` where A, X, and Y use bfloat16 and the compute type use float.
+* Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
+* Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
+* gfx1150, gfx1152 and gfx1153 enabled.
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+
+## rocSPARSE 4.3.0 for ROCm 7.10.0
 
 ### Added
 * Added `rocsparse_spmv_set_extra` and `rocsparse_spmv_clear_extra` functions to enable residual computation within SpMV operations. These functions allow setting additional gamma scalars and z vectors for fused computations of the form `y = alpha * op(A) * x + beta * y + sum(gamma_i * z_i)`, enabling efficient residual calculations like `r = b - A * x`.
-* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
-* gfx1150, gfx1152 and gfx1153 enabled.
-* Added brain half float mixed precision to `rocsparse_spmv` where A, X, and Y use bfloat16 and the compute type use float.
-* Added half float mixed precision to `rocsparse_spmv` where A, X, and Y use float16 and the compute type use float.
-* Added float16 and bfloat16 output support for level 3 functions (`rocsparse_spmm`, `rocsparse_csrmm`, `rocsparse_coomm`, `rocsparse_spgemm`). This enables mixed precision workflows where the output matrix C can use float16 or bfloat16 types.
 
 ## rocSPARSE 4.2.0 for ROCm 7.2.0
 
@@ -167,7 +259,7 @@ Documentation for rocSPARSE is available at
 * Fixed a race condition in `bsrgemm` that could on rare occasions cause incorrect results.
 * Fixed an issue in `hyb2csr` where the CSR row pointer array was not being properly filled when `n=0`, `coo_nnz=0`, or `ell_nnz=0`.
 * Fixed scaling in `rocsparse_Xhybmv` when only performing `y=beta*y`, for example, where `alpha==0` in `y=alpha*Ax+beta*y`.
-* Fixed `rocsparse_Xgemmi` failures when the y grid dimension is too large. This occured when n >= 65536.
+* Fixed `rocsparse_Xgemmi` failures when the y grid dimension is too large. This occurred when n >= 65536.
 
 ## rocSPARSE 3.2.0 for ROCm 6.2.0
 

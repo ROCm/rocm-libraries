@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 #pragma once
 
 #include "rocsparse-auxiliary.h"
-#include "rocsparse-version.h"
+#include "rocsparse-config.h"
 
 #include "rocsparse_adaptive_info.hpp"
 #include "rocsparse_blas.hpp"
@@ -58,7 +58,16 @@
 struct _rocsparse_handle
 {
     // constructor
+    // Default construction (used by rocsparse_create_handle): synchronous
+    // initialization on an internally-managed stream.
     _rocsparse_handle();
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+    // A user-defined stream must be provided so that all stream-ordered setup
+    // work during construction runs on that stream instead of the default
+    // (NULL) stream, which would otherwise implicitly synchronize with all
+    // other streams on the device.
+    explicit _rocsparse_handle(hipStream_t stream);
+#endif
     // destructor
     ~_rocsparse_handle();
 
@@ -99,7 +108,7 @@ struct _rocsparse_handle
     void* done{};
 
     // blas handle
-    rocsparse::blas_handle blas_handle;
+    rocsparse::blas_handle blas_handle{};
 
     // Temporary storage for spmv descriptor during csrmv calls
     // This allows template functions to access pre-extracted arrays
@@ -121,7 +130,7 @@ namespace rocsparse
     //
     std::string handle_get_arch_name(rocsparse_handle handle);
 
-    struct rocpsarse_arch_names
+    struct rocsparse_arch_names
     {
         static constexpr const char* gfx908 = "gfx908";
     };
@@ -130,4 +139,10 @@ namespace rocsparse
     // Get xnack mode.
     //
     std::string handle_get_xnack_mode(rocsparse_handle handle);
+
+    //
+    // Get pointer mode.
+    //
+    rocsparse_pointer_mode get_pointer_mode(const void* data);
+
 }

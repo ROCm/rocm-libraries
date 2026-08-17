@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,17 +28,25 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <memory>
 #include <string>
 
+#include <hiptensor/hiptensor.h>
+
 #include "hiptensor_ostream.hpp"
-#include "singleton.hpp"
 
 namespace hiptensor
 {
-    struct HiptensorOptions : public LazySingleton<HiptensorOptions>
+    struct HIPTENSOR_EXPORT HiptensorOptions
     {
         // For static initialization
         friend std::unique_ptr<HiptensorOptions> std::make_unique<HiptensorOptions>();
+
+        // Defined in hiptensor_options.cpp (not a template) so that exactly one static instance exists
+        // across all modules. A template function (e.g. via LazySingleton<HiptensorOptions>) would produce
+        // a separate static per module on Windows, giving distinct HiptensorOptions objects in the DLL and
+        // in any binary that includes this header directly.
+        static std::unique_ptr<HiptensorOptions> const& instance();
 
     private: // No public instantiation except make_unique.
              // No copy
@@ -93,4 +101,3 @@ namespace hiptensor
     };
 
 } // namespace hiptensor
-

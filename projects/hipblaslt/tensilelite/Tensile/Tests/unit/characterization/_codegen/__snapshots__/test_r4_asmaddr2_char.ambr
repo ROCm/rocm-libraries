@@ -1,0 +1,17 @@
+# serializer version: 1
+# name: test_r4_asmaddr2_bf16_srvw_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_Bias_UserArgs_MT128x128x16W8G94FM9hWcB98Fvu9oORCssIXk-E6T4w-bL_ENR8AA=',
+      'err': 0,
+    }),
+  ])
+# ---
+# name: test_r4_asmaddr2_fp32_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bjlk_S_B_UserArgs_MT64x256x16_MI16x16xI9tGiPcGgIVzZVMdKu8ETl6C1jRYQUQOGU5yRw6GFNw=',
+      'err': 0,
+    }),
+  ])
+# ---

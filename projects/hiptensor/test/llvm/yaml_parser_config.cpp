@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,8 @@
 #include <vector>
 
 #include <llvm/ObjectYAML/YAML.h>
+#include <llvm/Support/ManagedStatic.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <hiptensor/hiptensor.h>
 
@@ -543,4 +545,11 @@ namespace hiptensor
     template struct YamlConfigLoader<ContractionTestParams>;
     template struct YamlConfigLoader<PermutationTestParams>;
     template struct YamlConfigLoader<ReductionTestParams>;
+
+    void llvmShutdown()
+    {
+        llvm::outs().flush();
+        llvm::errs().flush();
+        llvm::llvm_shutdown();
+    }
 }

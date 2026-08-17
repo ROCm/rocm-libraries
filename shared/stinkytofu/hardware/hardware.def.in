@@ -1,0 +1,8 @@
+
+#ifndef STINKYTOFU_ARCH
+#error Please define macro `STINKYTOFU_ARCH`
+#endif
+
+@STINKYTOFU_ENUM_ARCHS@
+
+#undef STINKYTOFU_ARCH

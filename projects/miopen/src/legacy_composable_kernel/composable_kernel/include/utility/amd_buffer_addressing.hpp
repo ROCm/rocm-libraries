@@ -24,12 +24,24 @@ __device__ int32x4_t make_wave_buffer_resource(T* p_wave, index_t element_space_
 {
     BufferResource<T> wave_buffer_resource;
 
+#if defined(CK_AMD_GPU_GFX1250)
+    // gfx1250 changed the buffer resource descriptor layout
+    // - address is 57-bit (not 64-bit)
+    // - num_records is 45-bit, split across dword1[31:25] and dword2[31:0]
+    // Layout matches CK's amd_buffer_addressing_builtins.hpp for __gfx125__.
+    wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
+    uint64_t num_records = static_cast<uint64_t>(element_space_size) * sizeof(T);
+    wave_buffer_resource.range(Number<1>{}) |= static_cast<int32_t>((num_records & 0x7f) << 25);
+    wave_buffer_resource.range(Number<2>{})  = static_cast<int32_t>(num_records >> 7);
+    wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
+#else
     // wavewise base address (64 bit)
     wave_buffer_resource.address(Number<0>{}) = const_cast<remove_cv_t<T>*>(p_wave);
     // wavewise range (32 bit)
     wave_buffer_resource.range(Number<2>{}) = element_space_size * sizeof(T);
     // wavewise setting (32 bit)
     wave_buffer_resource.config(Number<3>{}) = CK_BUFFER_RESOURCE_3RD_DWORD;
+#endif
 
     return wave_buffer_resource.content;
 }

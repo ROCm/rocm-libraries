@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -71,6 +71,11 @@ template <typename T>
 void cpu_syr(rocblas_fill uplo, rocblas_int n, T alpha, T *x,
                rocblas_int incx, T *A, rocblas_int lda);
 */
+template <typename T>
+void cpu_lacpy(char uplo, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, T* B, rocblas_int ldb);
+
+template <typename T>
+void cpu_laset(char norm, rocblas_int m, rocblas_int n, T alpha, T beta, T* A, rocblas_int lda);
 
 template <typename T, typename S>
 S cpu_lange(char norm, rocblas_int m, rocblas_int n, T* A, rocblas_int lda, S* work);
@@ -216,6 +221,35 @@ void cpu_getrs(rocblas_operation trans,
                rocblas_int ldb);
 
 template <typename T>
+void cpu_sytrs2(rocblas_fill uplo,
+                rocblas_int n,
+                rocblas_int nrhs,
+                T* A,
+                rocblas_int lda,
+                rocblas_int* ipiv,
+                T* B,
+                rocblas_int ldb);
+
+template <typename T>
+void cpu_sytrs(rocblas_fill uplo,
+               rocblas_int n,
+               rocblas_int nrhs,
+               T* A,
+               rocblas_int lda,
+               rocblas_int* ipiv,
+               T* B,
+               rocblas_int ldb);
+
+template <typename T>
+void cpu_getrs_npvt(rocblas_operation trans,
+                    rocblas_int n,
+                    rocblas_int nrhs,
+                    T* A,
+                    rocblas_int lda,
+                    T* B,
+                    rocblas_int ldb);
+
+template <typename T>
 void cpu_gesv(rocblas_int n,
               rocblas_int nrhs,
               T* A,
@@ -331,6 +365,18 @@ void cpu_labrd(rocblas_int m,
                T* taup,
                T* X,
                rocblas_int ldx,
+               T* Y,
+               rocblas_int ldy);
+
+template <typename T>
+void cpu_lahr2(rocblas_int n,
+               rocblas_int k,
+               rocblas_int nb,
+               T* A,
+               rocblas_int lda,
+               T* tau,
+               T* T_,
+               rocblas_int ldt,
                T* Y,
                rocblas_int ldy);
 

@@ -270,7 +270,15 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
-#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT) ASSERT_EQ(STATUS, EXPECT)
+#define EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)                                                 \
+    do                                                                                           \
+    {                                                                                            \
+        hipsparseStatus_t expect_hipsparse_status_status_ = (STATUS);                            \
+        hipsparseStatus_t expect_hipsparse_status_expect_ = (EXPECT);                            \
+        ASSERT_EQ(expect_hipsparse_status_status_, expect_hipsparse_status_expect_)              \
+            << "received " << hipsparseStatusToString(expect_hipsparse_status_status_)           \
+            << ", expected " << hipsparseStatusToString(expect_hipsparse_status_expect_) << "."; \
+    } while(0)
 #else
 #define EXPECT_HIPSPARSE_STATUS2(status, expect)                                            \
     if(status != expect)                                                                    \
@@ -427,6 +435,87 @@ inline T make_DataType(double real, double imag = 0.0)
 }
 
 /* ============================================================================================ */
+/*! \brief testing_cast<T>(U) — convert a scalar of type \p U to compute type \p T.
+ *
+ * For most numeric type pairs this is just a static_cast. The specializations
+ * below handle the cases needed by the SpMV mixed-regular real and
+ * mixed-regular complex precisions:
+ *   - real (float / double) promoted to complex with imaginary part zero
+ *   - hipComplex promoted to hipDoubleComplex
+ *   - hipDoubleComplex narrowed to hipComplex
+ * which the HIP_vector_type-based complex types do not support natively via
+ * static_cast (a real-to-complex static_cast would broadcast (v, v)).
+ */
+template <typename T, typename U>
+struct testing_cast_impl
+{
+    static inline T apply(const U& v)
+    {
+        return static_cast<T>(v);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipComplex, float>
+{
+    static inline hipComplex apply(float v)
+    {
+        return make_hipFloatComplex(v, 0.0f);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipComplex, double>
+{
+    static inline hipComplex apply(double v)
+    {
+        return make_hipFloatComplex(static_cast<float>(v), 0.0f);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipDoubleComplex, float>
+{
+    static inline hipDoubleComplex apply(float v)
+    {
+        return make_hipDoubleComplex(static_cast<double>(v), 0.0);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipDoubleComplex, double>
+{
+    static inline hipDoubleComplex apply(double v)
+    {
+        return make_hipDoubleComplex(v, 0.0);
+    }
+};
+
+template <>
+struct testing_cast_impl<hipDoubleComplex, hipComplex>
+{
+    static inline hipDoubleComplex apply(hipComplex v)
+    {
+        return make_hipDoubleComplex(static_cast<double>(v.x), static_cast<double>(v.y));
+    }
+};
+
+template <>
+struct testing_cast_impl<hipComplex, hipDoubleComplex>
+{
+    static inline hipComplex apply(hipDoubleComplex v)
+    {
+        return make_hipFloatComplex(static_cast<float>(v.x), static_cast<float>(v.y));
+    }
+};
+
+template <typename T, typename U>
+inline T testing_cast(const U& v)
+{
+    return testing_cast_impl<T, U>::apply(v);
+}
+
+/* ============================================================================================ */
 /*! \brief mult */
 template <typename T>
 inline T testing_mult(T p, T q)
@@ -445,7 +534,6 @@ inline hipDoubleComplex testing_mult(hipDoubleComplex p, hipDoubleComplex q)
 {
     return hipCmul(p, q);
 }
-
 /* ============================================================================================ */
 /*! \brief div */
 template <typename T>
@@ -477,13 +565,17 @@ inline T testing_fma(T p, T q, T r)
 template <>
 inline hipComplex testing_fma(hipComplex p, hipComplex q, hipComplex r)
 {
-    return hipCfmaf(p, q, r);
+    float re = std::fmaf(-p.y, q.y, std::fmaf(p.x, q.x, r.x));
+    float im = std::fmaf(p.x, q.y, std::fmaf(p.y, q.x, r.y));
+    return make_hipComplex(re, im);
 }
 
 template <>
 inline hipDoubleComplex testing_fma(hipDoubleComplex p, hipDoubleComplex q, hipDoubleComplex r)
 {
-    return hipCfma(p, q, r);
+    double re = std::fma(-p.y, q.y, std::fma(p.x, q.x, r.x));
+    double im = std::fma(p.x, q.y, std::fma(p.y, q.x, r.y));
+    return make_hipDoubleComplex(re, im);
 }
 
 /* ============================================================================================ */
@@ -510,6 +602,26 @@ static inline double testing_abs(hipDoubleComplex x)
 
 /* ============================================================================================ */
 /*! \brief conj */
+static inline int8_t testing_conj(int8_t x)
+{
+    return x;
+}
+
+static inline int32_t testing_conj(int32_t x)
+{
+    return x;
+}
+
+static inline hipsparseFloat16 testing_conj(hipsparseFloat16 x)
+{
+    return x;
+}
+
+static inline hipsparseBfloat16 testing_conj(hipsparseBfloat16 x)
+{
+    return x;
+}
+
 static inline float testing_conj(float x)
 {
     return x;
@@ -565,9 +677,9 @@ static inline double testing_real(hipDoubleComplex x)
 template <typename T>
 inline T random_generator()
 {
-    // return rand()/( (T)RAND_MAX + 1);
-    return make_DataType<T>(rand() % 10 + 1,
-                            rand() % 10 + 1); // generate a integer number between [1, 10]
+    const auto re = rand() % 10 + 1;
+    const auto im = rand() % 10 + 1;
+    return make_DataType<T>(re, im);
 };
 
 /* ============================================================================================ */
@@ -589,21 +701,42 @@ void hipsparseInit(std::vector<T>& A, int M, int N)
 /* ============================================================================================ */
 /*! \brief  vector initialization: */
 // initialize sparse index vector with nnz entries ranging from start to end
+// Uses Fisher-Yates shuffle for efficiency
 template <typename I>
 void hipsparseInitIndex(I* x, int nnz, int start, int end)
 {
-    std::vector<bool> check(end - start, false);
-    int               num = 0;
-    while(num < nnz)
+    int range = end - start;
+
+    if(nnz >= range)
     {
-        int val = start + rand() % (end - start);
-        if(!check[val - start])
+        for(int i = 0; i < nnz; ++i)
         {
-            x[num]             = val;
-            check[val - start] = true;
-            ++num;
+            x[i] = start + i;
         }
+
+        return;
     }
+
+    // Create sequential array and shuffle first nnz elements
+    std::vector<int> indices(range);
+    for(int i = 0; i < range; ++i)
+    {
+        indices[i] = start + i;
+    }
+
+    // Partial Fisher-Yates shuffle - only need first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        int j = i + rand() % (range - i);
+        std::swap(indices[i], indices[j]);
+    }
+
+    // Copy first nnz elements
+    for(int i = 0; i < nnz; ++i)
+    {
+        x[i] = indices[i];
+    }
+
     std::sort(x, x + nnz);
 };
 
@@ -865,6 +998,22 @@ template <typename I>
 static void read_mtx_value(std::istringstream& is, I& row, I& col, double& val)
 {
     is >> row >> col >> val;
+}
+
+template <typename I>
+static void read_mtx_value(std::istringstream& is, I& row, I& col, hipsparseFloat16& val)
+{
+    float v;
+    is >> row >> col >> v;
+    val = hipsparseFloat16(v);
+}
+
+template <typename I>
+static void read_mtx_value(std::istringstream& is, I& row, I& col, hipsparseBfloat16& val)
+{
+    float v;
+    is >> row >> col >> v;
+    val = hipsparseBfloat16(v);
 }
 
 template <typename I>
@@ -1314,6 +1463,92 @@ bool generate_csr_matrix(const std::string    filename,
 }
 
 /* ============================================================================================ */
+/*! \brief  Generate Blocked ELL matrix from file or randomly. File can be either mtx or bin. If filename
+ *  is empty a random CSR matrix is generated and converted to Blocked ELL format. Otherwise the matrix is
+ *  loaded in CSR format from the file and then converted to Blocked ELL format. The ELL width is computed
+ *  as the maximum number of non-zeros across all rows. Entries in the ELL arrays that lie beyond a
+ *  row's actual non-zero count are padded with column index -1 and value 0. */
+template <typename I, typename T>
+bool generate_bell_matrix(const std::string    filename,
+                          I&                   mb,
+                          I&                   nb,
+                          I&                   ellCols,
+                          I                    ellBlockSize,
+                          std::vector<I>&      ellColInd,
+                          std::vector<T>&      ellVal,
+                          hipsparseIndexBase_t idxBase)
+{
+    // Generate or load the matrix in CSR format first.
+    I              nnz;
+    std::vector<I> csrRowPtr;
+    std::vector<I> csrColInd;
+    std::vector<T> csrVal;
+
+    if(!generate_csr_matrix(filename, mb, nb, nnz, csrRowPtr, csrColInd, csrVal, idxBase))
+    {
+        return false;
+    }
+
+    // Compute the ELL block width: maximum number of non-zero blocks in any block row.
+    I ellBlockWidth = 0;
+    for(I i = 0; i < mb; ++i)
+    {
+        I rowNnz      = csrRowPtr[i + 1] - csrRowPtr[i];
+        ellBlockWidth = std::max(ellBlockWidth, rowNnz);
+    }
+
+    ellCols = ellBlockWidth * ellBlockSize;
+
+    ellColInd.resize(static_cast<size_t>(ellBlockWidth) * mb);
+    ellVal.resize(static_cast<size_t>(mb) * ellBlockSize * ellCols);
+
+    // Convert CSR (block level) to Blocked-ELL, padding short rows with -1 / zeros.
+    for(I i = 0; i < mb; ++i)
+    {
+        I p        = 0;
+        I rowStart = csrRowPtr[i] - idxBase;
+        I rowEnd   = csrRowPtr[i + 1] - idxBase;
+
+        for(I j = rowStart; j < rowEnd; ++j)
+        {
+            // Column index stored in row-major [mb][ell_block_width] layout.
+            ellColInd[static_cast<size_t>(i) * ellBlockWidth + p] = csrColInd[j];
+
+            // Values in cuSPARSE row-major layout:
+            //   val[(blockRow * ellBlockSize + r) * nEllCols + ellBlockCol * ellBlockSize + c]
+            for(I r = 0; r < ellBlockSize; r++)
+            {
+                for(I c = 0; c < ellBlockSize; c++)
+                {
+                    ellVal[(static_cast<size_t>(i) * ellBlockSize + r) * ellCols
+                           + static_cast<size_t>(p) * ellBlockSize + c]
+                        = random_generator<T>();
+                }
+            }
+            ++p;
+        }
+
+        // Pad remaining ELL slots with sentinel column index -1 and zero values.
+        for(I j = p; j < ellBlockWidth; ++j)
+        {
+            ellColInd[static_cast<size_t>(i) * ellBlockWidth + j] = static_cast<I>(-1);
+
+            for(I r = 0; r < ellBlockSize; r++)
+            {
+                for(I c = 0; c < ellBlockSize; c++)
+                {
+                    ellVal[(static_cast<size_t>(i) * ellBlockSize + r) * ellCols
+                           + static_cast<size_t>(j) * ellBlockSize + c]
+                        = make_DataType<T>(0.0);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+/* ============================================================================================ */
 /*! \brief  Generate COO matrix from file. File can be either mtx or bin. If filename is empty, a random matrix is generated*/
 template <typename I, typename T>
 bool generate_coo_matrix(const std::string    filename,
@@ -1703,8 +1938,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 count++;
             }
@@ -1745,8 +1979,7 @@ inline void host_csr_to_csr_compress(int                     M,
 
         for(int j = start; j < end; j++)
         {
-            if(testing_abs(csr_val_A[j]) > testing_real(tol)
-               && testing_abs(csr_val_A[j]) > (std::numeric_limits<float>::min)())
+            if(testing_abs(csr_val_A[j]) > testing_real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
@@ -1923,23 +2156,23 @@ inline void host_csr_to_csc(J        M,
     csc_col_ptr[0] = base;
 }
 
-template <typename T>
-inline void host_csr_to_bsr(hipsparseDirection_t    direction,
-                            int                     M,
-                            int                     N,
-                            int                     block_dim,
-                            int&                    nnzb,
-                            hipsparseIndexBase_t    csr_base,
-                            const std::vector<int>& csr_row_ptr,
-                            const std::vector<int>& csr_col_ind,
-                            const std::vector<T>&   csr_val,
-                            hipsparseIndexBase_t    bsr_base,
-                            std::vector<int>&       bsr_row_ptr,
-                            std::vector<int>&       bsr_col_ind,
-                            std::vector<T>&         bsr_val)
+template <typename I, typename J, typename T>
+inline void host_csr_to_bsr(hipsparseDirection_t  direction,
+                            J                     M,
+                            J                     N,
+                            J                     block_dim,
+                            I&                    nnzb,
+                            hipsparseIndexBase_t  csr_base,
+                            const std::vector<I>& csr_row_ptr,
+                            const std::vector<J>& csr_col_ind,
+                            const std::vector<T>& csr_val,
+                            hipsparseIndexBase_t  bsr_base,
+                            std::vector<I>&       bsr_row_ptr,
+                            std::vector<J>&       bsr_col_ind,
+                            std::vector<T>&       bsr_val)
 {
-    int mb = (M + block_dim - 1) / block_dim;
-    int nb = (N + block_dim - 1) / block_dim;
+    J mb = (M + block_dim - 1) / block_dim;
+    J nb = (N + block_dim - 1) / block_dim;
 
     // quick return if block_dim == 1
     if(block_dim == 1)
@@ -1983,19 +2216,19 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(int i = 0; i < mb; i++)
+    for(J i = 0; i < mb; i++)
     {
-        int start = csr_row_ptr[i * block_dim] - csr_base;
-        int end   = csr_row_ptr[std::min(M, block_dim * i + block_dim)] - csr_base;
+        I start = csr_row_ptr[i * block_dim] - csr_base;
+        I end   = csr_row_ptr[std::min(M, block_dim * i + block_dim)] - csr_base;
 
-        std::vector<int> temp(nb, 0);
-        for(int j = start; j < end; j++)
+        std::vector<J> temp(nb, 0);
+        for(I j = start; j < end; j++)
         {
-            int blockCol   = (csr_col_ind[j] - csr_base) / block_dim;
+            J blockCol     = (csr_col_ind[j] - csr_base) / block_dim;
             temp[blockCol] = 1;
         }
 
-        int sum = 0;
+        I sum = 0;
         for(size_t j = 0; j < temp.size(); j++)
         {
             sum += temp[j];
@@ -2004,7 +2237,7 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
         bsr_row_ptr[i + 1] = sum;
     }
 
-    for(int i = 0; i < mb; i++)
+    for(J i = 0; i < mb; i++)
     {
         bsr_row_ptr[i + 1] += bsr_row_ptr[i];
     }
@@ -2015,22 +2248,22 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
     bsr_col_ind.resize(nnzb, 0);
     bsr_val.resize(nnzb * block_dim * block_dim, make_DataType<T>(0));
 
-    int colIndex = 0;
+    J colIndex = 0;
 
-    for(int i = 0; i < mb; i++)
+    for(J i = 0; i < mb; i++)
     {
-        int start = csr_row_ptr[i * block_dim] - csr_base;
-        int end   = csr_row_ptr[std::min(M, block_dim * i + block_dim)] - csr_base;
+        I start = csr_row_ptr[i * block_dim] - csr_base;
+        I end   = csr_row_ptr[std::min(M, block_dim * i + block_dim)] - csr_base;
 
-        std::vector<int> temp(nb, 0);
+        std::vector<J> temp(nb, 0);
 
-        for(int j = start; j < end; j++)
+        for(I j = start; j < end; j++)
         {
-            int blockCol   = (csr_col_ind[j] - csr_base) / block_dim;
+            J blockCol     = (csr_col_ind[j] - csr_base) / block_dim;
             temp[blockCol] = 1;
         }
 
-        for(int j = 0; j < nb; j++)
+        for(J j = 0; j < nb; j++)
         {
             if(temp[j] == 1)
             {
@@ -2041,19 +2274,19 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
     }
 
     // find bsr values array
-    for(int i = 0; i < M; i++)
+    for(J i = 0; i < M; i++)
     {
-        int blockRow = i / block_dim;
+        J blockRow = i / block_dim;
 
-        int start = csr_row_ptr[i] - csr_base;
-        int end   = csr_row_ptr[i + 1] - csr_base;
+        I start = csr_row_ptr[i] - csr_base;
+        I end   = csr_row_ptr[i + 1] - csr_base;
 
-        for(int j = start; j < end; j++)
+        for(I j = start; j < end; j++)
         {
-            int blockCol = (csr_col_ind[j] - csr_base) / block_dim;
+            J blockCol = (csr_col_ind[j] - csr_base) / block_dim;
 
             colIndex = -1;
-            for(int k = bsr_row_ptr[blockRow] - bsr_base; k < bsr_row_ptr[blockRow + 1] - bsr_base;
+            for(I k = bsr_row_ptr[blockRow] - bsr_base; k < bsr_row_ptr[blockRow + 1] - bsr_base;
                 k++)
             {
                 if(bsr_col_ind[k] - bsr_base == blockCol)
@@ -2065,7 +2298,7 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
 
             assert(colIndex != -1);
 
-            int blockIndex = 0;
+            J blockIndex = 0;
             if(direction == HIPSPARSE_DIRECTION_ROW)
             {
                 blockIndex = (csr_col_ind[j] - csr_base) % block_dim + (i % block_dim) * block_dim;
@@ -2076,8 +2309,8 @@ inline void host_csr_to_bsr(hipsparseDirection_t    direction,
                     = ((csr_col_ind[j] - csr_base) % block_dim) * block_dim + (i % block_dim);
             }
 
-            int index = (bsr_row_ptr[blockRow] - bsr_base) * block_dim * block_dim
-                        + colIndex * block_dim * block_dim + blockIndex;
+            I index = (bsr_row_ptr[blockRow] - bsr_base) * block_dim * block_dim
+                      + colIndex * block_dim * block_dim + blockIndex;
 
             bsr_val[index] = csr_val[j];
         }
@@ -2664,20 +2897,21 @@ inline void host_bsr_to_csr(hipsparseDirection_t    direction,
     }
 }
 
-template <typename T>
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
 inline void host_bsrmv(hipsparseDirection_t dir,
                        hipsparseOperation_t trans,
-                       int                  mb,
-                       int                  nb,
-                       int                  nnzb,
+                       J                    mb,
+                       J                    nb,
+                       I                    nnzb,
                        T                    alpha,
-                       const int*           bsr_row_ptr,
-                       const int*           bsr_col_ind,
-                       const T*             bsr_val,
-                       int                  bsr_dim,
-                       const T*             x,
+                       const I*             bsr_row_ptr,
+                       const I*             bsr_end_ptr,
+                       const J*             bsr_col_ind,
+                       const A*             bsr_val,
+                       J                    bsr_dim,
+                       const X*             x,
                        T                    beta,
-                       T*                   y,
+                       Y*                   y,
                        hipsparseIndexBase_t base)
 {
     // Quick return
@@ -2685,20 +2919,20 @@ inline void host_bsrmv(hipsparseDirection_t dir,
     {
         if(beta != make_DataType<T>(1))
         {
-            for(int i = 0; i < mb * bsr_dim; ++i)
+            for(J i = 0; i < mb * bsr_dim; ++i)
             {
-                y[i] = testing_mult(beta, y[i]);
+                y[i] = static_cast<Y>(testing_mult(beta, static_cast<T>(y[i])));
             }
         }
 
         return;
     }
 
-    int WFSIZE;
+    uint32_t WFSIZE;
 
     if(bsr_dim == 2)
     {
-        int blocks_per_row = nnzb / mb;
+        I blocks_per_row = nnzb / mb;
 
         if(blocks_per_row < 8)
         {
@@ -2737,10 +2971,284 @@ inline void host_bsrmv(hipsparseDirection_t dir,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(int row = 0; row < mb; ++row)
+    for(J row = 0; row < mb; ++row)
     {
+        I row_begin = bsr_row_ptr[row] - base;
+        I row_end   = bsr_end_ptr[row] - base;
+
+        if(bsr_dim == 2)
+        {
+            std::vector<T> sum0(WFSIZE, make_DataType<T>(0));
+            std::vector<T> sum1(WFSIZE, make_DataType<T>(0));
+
+            for(I j = row_begin; j < row_end; j += WFSIZE)
+            {
+                for(uint32_t k = 0; k < WFSIZE; ++k)
+                {
+                    if(j + static_cast<I>(k) < row_end)
+                    {
+                        J col = bsr_col_ind[j + k] - base;
+
+                        if(dir == HIPSPARSE_DIRECTION_COLUMN)
+                        {
+                            sum0[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 0]),
+                                static_cast<T>(x[col * bsr_dim + 0]),
+                                sum0[k]);
+                            sum1[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 1]),
+                                static_cast<T>(x[col * bsr_dim + 0]),
+                                sum1[k]);
+                            sum0[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 2]),
+                                static_cast<T>(x[col * bsr_dim + 1]),
+                                sum0[k]);
+                            sum1[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 3]),
+                                static_cast<T>(x[col * bsr_dim + 1]),
+                                sum1[k]);
+                        }
+                        else
+                        {
+                            sum0[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 0]),
+                                static_cast<T>(x[col * bsr_dim + 0]),
+                                sum0[k]);
+                            sum0[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 1]),
+                                static_cast<T>(x[col * bsr_dim + 1]),
+                                sum0[k]);
+                            sum1[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 2]),
+                                static_cast<T>(x[col * bsr_dim + 0]),
+                                sum1[k]);
+                            sum1[k] = testing_fma(
+                                testing_cast<T>(bsr_val[bsr_dim * bsr_dim * (j + k) + 3]),
+                                static_cast<T>(x[col * bsr_dim + 1]),
+                                sum1[k]);
+                        }
+                    }
+                }
+            }
+
+            for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+            {
+                for(uint32_t k = 0; k < WFSIZE - j; ++k)
+                {
+                    sum0[k] = sum0[k] + sum0[k + j];
+                    sum1[k] = sum1[k] + sum1[k + j];
+                }
+            }
+
+            if(beta != make_DataType<T>(0))
+            {
+                y[row * bsr_dim + 0] = static_cast<Y>(testing_fma(
+                    beta, static_cast<T>(y[row * bsr_dim + 0]), testing_mult(alpha, sum0[0])));
+                y[row * bsr_dim + 1] = static_cast<Y>(testing_fma(
+                    beta, static_cast<T>(y[row * bsr_dim + 1]), testing_mult(alpha, sum1[0])));
+            }
+            else
+            {
+                y[row * bsr_dim + 0] = static_cast<Y>(testing_mult(alpha, sum0[0]));
+                y[row * bsr_dim + 1] = static_cast<Y>(testing_mult(alpha, sum1[0]));
+            }
+        }
+        else
+        {
+            for(J bi = 0; bi < bsr_dim; ++bi)
+            {
+                std::vector<T> sum(WFSIZE, make_DataType<T>(0));
+
+                for(I j = row_begin; j < row_end; ++j)
+                {
+                    J col = bsr_col_ind[j] - base;
+
+                    for(J bj = 0; bj < bsr_dim; bj += WFSIZE)
+                    {
+                        for(uint32_t k = 0; k < WFSIZE; ++k)
+                        {
+                            if(bj + static_cast<J>(k) < bsr_dim)
+                            {
+                                if(dir == HIPSPARSE_DIRECTION_COLUMN)
+                                {
+                                    sum[k] = testing_fma(
+                                        testing_cast<T>(bsr_val[bsr_dim * bsr_dim * j
+                                                                + bsr_dim * (bj + k) + bi]),
+                                        static_cast<T>(x[bsr_dim * col + (bj + k)]),
+                                        sum[k]);
+                                }
+                                else
+                                {
+                                    sum[k] = testing_fma(
+                                        testing_cast<T>(bsr_val[bsr_dim * bsr_dim * j + bsr_dim * bi
+                                                                + (bj + k)]),
+                                        static_cast<T>(x[bsr_dim * col + (bj + k)]),
+                                        sum[k]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for(uint32_t j = 1; j < WFSIZE; j <<= 1)
+                {
+                    for(uint32_t k = 0; k < WFSIZE - j; ++k)
+                    {
+                        sum[k] = sum[k] + sum[k + j];
+                    }
+                }
+
+                if(beta != make_DataType<T>(0))
+                {
+                    y[row * bsr_dim + bi] = static_cast<Y>(testing_fma(
+                        beta, static_cast<T>(y[row * bsr_dim + bi]), testing_mult(alpha, sum[0])));
+                }
+                else
+                {
+                    y[row * bsr_dim + bi] = static_cast<Y>(testing_mult(alpha, sum[0]));
+                }
+            }
+        }
+    }
+}
+
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
+inline void host_bsrmv(hipsparseDirection_t dir,
+                       hipsparseOperation_t trans,
+                       J                    mb,
+                       J                    nb,
+                       I                    nnzb,
+                       T                    alpha,
+                       const I*             bsr_row_ptr,
+                       const J*             bsr_col_ind,
+                       const A*             bsr_val,
+                       J                    bsr_dim,
+                       const X*             x,
+                       T                    beta,
+                       Y*                   y,
+                       hipsparseIndexBase_t base)
+{
+    return host_bsrmv(dir,
+                      trans,
+                      mb,
+                      nb,
+                      nnzb,
+                      alpha,
+                      bsr_row_ptr,
+                      bsr_row_ptr + 1,
+                      bsr_col_ind,
+                      bsr_val,
+                      bsr_dim,
+                      x,
+                      beta,
+                      y,
+                      base);
+}
+
+template <typename T>
+void host_bsrxmv(hipsparseDirection_t dir,
+                 hipsparseOperation_t trans,
+                 int                  size_of_mask,
+                 int                  mb,
+                 int                  nb,
+                 int                  nnzb,
+                 T                    alpha,
+                 const int*           bsr_mask_ptr,
+                 const int*           bsr_row_ptr,
+                 const int*           bsr_end_ptr,
+                 const int*           bsr_col_ind,
+                 const T*             bsr_val,
+                 int                  bsr_dim,
+                 const T*             x,
+                 T                    beta,
+                 T*                   y,
+                 hipsparseIndexBase_t base)
+{
+    if(bsr_mask_ptr == nullptr)
+    {
+        return host_bsrmv(dir,
+                          trans,
+                          mb,
+                          nb,
+                          nnzb,
+                          alpha,
+                          bsr_row_ptr,
+                          bsr_end_ptr,
+                          bsr_col_ind,
+                          bsr_val,
+                          bsr_dim,
+                          x,
+                          beta,
+                          y,
+                          base);
+    }
+
+    // Quick return
+    if(alpha == make_DataType<T>(0))
+    {
+        if(beta != make_DataType<T>(1))
+        {
+            for(int i = 0; i < size_of_mask; ++i)
+            {
+                int shift = (bsr_mask_ptr[i] - base) * bsr_dim;
+                for(int j = 0; j < bsr_dim; ++j)
+                {
+                    y[shift + j] = testing_mult(beta, y[shift + j]);
+                }
+            }
+        }
+
+        return;
+    }
+
+    uint32_t WFSIZE;
+
+    if(bsr_dim == 2)
+    {
+        int blocks_per_row = (mb != 0) ? (nnzb / mb) : 0;
+
+        if(blocks_per_row < 8)
+        {
+            WFSIZE = 4;
+        }
+        else if(blocks_per_row < 16)
+        {
+            WFSIZE = 8;
+        }
+        else if(blocks_per_row < 32)
+        {
+            WFSIZE = 16;
+        }
+        else if(blocks_per_row < 64)
+        {
+            WFSIZE = 32;
+        }
+        else
+        {
+            WFSIZE = 64;
+        }
+    }
+    else if(bsr_dim <= 8)
+    {
+        WFSIZE = 8;
+    }
+    else if(bsr_dim <= 16)
+    {
+        WFSIZE = 16;
+    }
+    else
+    {
+        WFSIZE = 32;
+    }
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(int mask_idx = 0; mask_idx < size_of_mask; ++mask_idx)
+    {
+        int row       = bsr_mask_ptr[mask_idx] - base;
         int row_begin = bsr_row_ptr[row] - base;
-        int row_end   = bsr_row_ptr[row + 1] - base;
+        int row_end   = bsr_end_ptr[row] - base;
 
         if(bsr_dim == 2)
         {
@@ -2749,9 +3257,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
 
             for(int j = row_begin; j < row_end; j += WFSIZE)
             {
-                for(int k = 0; k < WFSIZE; ++k)
+                for(uint32_t k = 0; k < WFSIZE; ++k)
                 {
-                    if(j + k < row_end)
+                    if(j + static_cast<int>(k) < row_end)
                     {
                         int col = bsr_col_ind[j + k] - base;
 
@@ -2789,9 +3297,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                 }
             }
 
-            for(int j = 1; j < WFSIZE; j <<= 1)
+            for(uint32_t j = 1; j < WFSIZE; j <<= 1)
             {
-                for(int k = 0; k < WFSIZE - j; ++k)
+                for(uint32_t k = 0; k < WFSIZE - j; ++k)
                 {
                     sum0[k] = sum0[k] + sum0[k + j];
                     sum1[k] = sum1[k] + sum1[k + j];
@@ -2823,9 +3331,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
 
                     for(int bj = 0; bj < bsr_dim; bj += WFSIZE)
                     {
-                        for(int k = 0; k < WFSIZE; ++k)
+                        for(uint32_t k = 0; k < WFSIZE; ++k)
                         {
-                            if(bj + k < bsr_dim)
+                            if(bj + static_cast<int>(k) < bsr_dim)
                             {
                                 if(dir == HIPSPARSE_DIRECTION_COLUMN)
                                 {
@@ -2846,9 +3354,9 @@ inline void host_bsrmv(hipsparseDirection_t dir,
                     }
                 }
 
-                for(int j = 1; j < WFSIZE; j <<= 1)
+                for(uint32_t j = 1; j < WFSIZE; j <<= 1)
                 {
-                    for(int k = 0; k < WFSIZE - j; ++k)
+                    for(uint32_t k = 0; k < WFSIZE - j; ++k)
                     {
                         sum[k] = sum[k] + sum[k + j];
                     }
@@ -2868,7 +3376,7 @@ inline void host_bsrmv(hipsparseDirection_t dir,
     }
 }
 
-template <typename T, typename I, typename J>
+template <typename T, typename I, typename J, typename A, typename X, typename Y = T>
 inline void host_sellmv(hipsparseOperation_t trans,
                         J                    M,
                         J                    N,
@@ -2878,10 +3386,10 @@ inline void host_sellmv(hipsparseOperation_t trans,
                         T                    alpha,
                         const I*             sell_slice_offsets,
                         const J*             sell_col_ind,
-                        const T*             sell_val,
-                        const T*             x,
+                        const A*             sell_val,
+                        const X*             x,
                         T                    beta,
-                        T*                   y,
+                        Y*                   y,
                         hipsparseIndexBase_t base)
 {
     bool conj = (trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
@@ -2902,7 +3410,8 @@ inline void host_sellmv(hipsparseOperation_t trans,
                 J col       = sell_col_ind[j] - base;
                 if(col >= 0)
                 {
-                    sums[local_row] = testing_fma(sell_val[j], x[col], sums[local_row]);
+                    sums[local_row] = testing_fma(
+                        testing_cast<T>(sell_val[j]), static_cast<T>(x[col]), sums[local_row]);
                 }
             }
 
@@ -2914,11 +3423,13 @@ inline void host_sellmv(hipsparseOperation_t trans,
                 {
                     if(beta != make_DataType<T>(0))
                     {
-                        y[row] = testing_fma(beta, y[row], testing_mult(alpha, sums[local_row]));
+                        T yr   = static_cast<T>(y[row]);
+                        yr     = testing_fma(beta, yr, testing_mult(alpha, sums[local_row]));
+                        y[row] = static_cast<Y>(yr);
                     }
                     else
                     {
-                        y[row] = testing_mult(alpha, sums[local_row]);
+                        y[row] = static_cast<Y>(testing_mult(alpha, sums[local_row]));
                     }
                 }
             }
@@ -2929,7 +3440,9 @@ inline void host_sellmv(hipsparseOperation_t trans,
         // Scale y with beta
         for(J i = 0; i < N; ++i)
         {
-            y[i] = testing_mult(y[i], beta);
+            T yi = static_cast<T>(y[i]);
+            yi   = testing_mult(yi, beta);
+            y[i] = static_cast<Y>(yi);
         }
 
         // Transposed SpMV
@@ -2942,17 +3455,20 @@ inline void host_sellmv(hipsparseOperation_t trans,
             {
                 J row = slice_size * slice + j % slice_size;
                 J col = sell_col_ind[j] - base;
-                T val = testing_conj(sell_val[j], conj);
+                T val = conj ? testing_cast<T>(testing_conj(sell_val[j]))
+                             : testing_cast<T>(sell_val[j]);
                 if(col >= 0)
                 {
-                    y[col] = testing_fma(testing_mult(alpha, val), x[row], y[col]);
+                    T yc   = static_cast<T>(y[col]);
+                    yc     = testing_fma(testing_mult(alpha, val), static_cast<T>(x[row]), yc);
+                    y[col] = static_cast<Y>(yc);
                 }
             }
         }
     }
 }
 
-template <typename I, typename J, typename T>
+template <typename I, typename J, typename A, typename X, typename Y, typename T>
 inline void host_csrmv(hipsparseOperation_t trans,
                        J                    M,
                        J                    N,
@@ -2960,17 +3476,17 @@ inline void host_csrmv(hipsparseOperation_t trans,
                        T                    alpha,
                        const I*             csr_row_ptr,
                        const J*             csr_col_ind,
-                       const T*             csr_val,
-                       const T*             x,
+                       const A*             csr_val,
+                       const X*             x,
                        T                    beta,
-                       T*                   y,
+                       Y*                   y,
                        hipsparseIndexBase_t base)
 {
     if(trans == HIPSPARSE_OPERATION_NON_TRANSPOSE)
     {
         // Get device properties
         int             dev;
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
 
         std::ignore = hipGetDevice(&dev);
         std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -2996,17 +3512,17 @@ inline void host_csrmv(hipsparseOperation_t trans,
             I row_begin = csr_row_ptr[i] - base;
             I row_end   = csr_row_ptr[i + 1] - base;
 
-            std::vector<T> sum(WF_SIZE, static_cast<T>(0));
+            std::vector<T> sum(WF_SIZE, make_DataType<T>(0));
 
             for(I j = row_begin; j < row_end; j += WF_SIZE)
             {
                 for(int k = 0; k < WF_SIZE; ++k)
                 {
-                    if(j + k < row_end)
+                    if(j + static_cast<I>(k) < row_end)
                     {
-                        sum[k] = testing_fma(testing_mult(alpha, csr_val[j + k]),
-                                             x[csr_col_ind[j + k] - base],
-                                             sum[k]);
+                        const T av = testing_cast<T>(csr_val[j + k]);
+                        const T xv = static_cast<T>(x[csr_col_ind[j + k] - base]);
+                        sum[k]     = testing_fma(testing_mult(alpha, av), xv, sum[k]);
                     }
                 }
             }
@@ -3021,20 +3537,35 @@ inline void host_csrmv(hipsparseOperation_t trans,
 
             if(beta == make_DataType<T>(0.0))
             {
-                y[i] = sum[0];
+                y[i] = static_cast<Y>(sum[0]);
             }
             else
             {
-                y[i] = testing_fma(beta, y[i], sum[0]);
+                T yi = static_cast<T>(y[i]);
+                yi   = testing_fma(beta, yi, sum[0]);
+                y[i] = static_cast<Y>(yi);
             }
         }
     }
     else
     {
-        // Scale y with beta
-        for(J i = 0; i < N; ++i)
+        // First apply beta to y
+        if(beta == make_DataType<T>(0.0))
         {
-            y[i] = testing_mult(y[i], beta);
+            for(J i = 0; i < N; ++i)
+            {
+                y[i] = static_cast<Y>(make_DataType<T>(0.0));
+            }
+        }
+        else
+        {
+            // Scale y with beta
+            for(J i = 0; i < N; ++i)
+            {
+                T yi = static_cast<T>(y[i]);
+                yi   = testing_mult(beta, yi);
+                y[i] = static_cast<Y>(yi);
+            }
         }
 
         // Transposed SpMV
@@ -3042,39 +3573,41 @@ inline void host_csrmv(hipsparseOperation_t trans,
         {
             I row_begin = csr_row_ptr[i] - base;
             I row_end   = csr_row_ptr[i + 1] - base;
-            T row_val   = testing_mult(alpha, x[i]);
+            T row_val   = testing_mult(alpha, static_cast<T>(x[i]));
 
             for(I j = row_begin; j < row_end; ++j)
             {
                 J col = csr_col_ind[j] - base;
                 T val = (trans == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE)
-                            ? testing_conj(csr_val[j])
-                            : csr_val[j];
+                            ? testing_cast<T>(testing_conj(csr_val[j]))
+                            : testing_cast<T>(csr_val[j]);
 
-                y[col] = testing_fma(val, row_val, y[col]);
+                T yc   = static_cast<T>(y[col]);
+                yc     = testing_fma(val, row_val, yc);
+                y[col] = static_cast<Y>(yc);
             }
         }
     }
 }
 
-template <typename T>
-inline void host_bsrmm(int                     Mb,
-                       int                     N,
-                       int                     Kb,
-                       int                     block_dim,
-                       hipsparseDirection_t    dir,
-                       hipsparseOperation_t    transA,
-                       hipsparseOperation_t    transB,
-                       T                       alpha,
-                       const std::vector<int>& bsr_row_ptr_A,
-                       const std::vector<int>& bsr_col_ind_A,
-                       const std::vector<T>&   bsr_val_A,
-                       const std::vector<T>&   B,
-                       int                     ldb,
-                       T                       beta,
-                       std::vector<T>&         C,
-                       int                     ldc,
-                       hipsparseIndexBase_t    base)
+template <typename I, typename J, typename T>
+inline void host_bsrmm(J                     Mb,
+                       J                     N,
+                       J                     Kb,
+                       J                     block_dim,
+                       hipsparseDirection_t  dir,
+                       hipsparseOperation_t  transA,
+                       hipsparseOperation_t  transB,
+                       T                     alpha,
+                       const std::vector<I>& bsr_row_ptr_A,
+                       const std::vector<J>& bsr_col_ind_A,
+                       const std::vector<T>& bsr_val_A,
+                       const std::vector<T>& B,
+                       int64_t               ldb,
+                       T                     beta,
+                       std::vector<T>&       C,
+                       int64_t               ldc,
+                       hipsparseIndexBase_t  base)
 {
     if(transA != HIPSPARSE_OPERATION_NON_TRANSPOSE)
     {
@@ -3086,34 +3619,34 @@ inline void host_bsrmm(int                     Mb,
         return;
     }
 
-    int M = Mb * block_dim;
+    J M = Mb * block_dim;
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(int i = 0; i < M; i++)
+    for(J i = 0; i < M; i++)
     {
-        int local_row = i % block_dim;
+        J local_row = i % block_dim;
 
-        int row_begin = bsr_row_ptr_A[i / block_dim] - base;
-        int row_end   = bsr_row_ptr_A[i / block_dim + 1] - base;
+        I row_begin = bsr_row_ptr_A[i / block_dim] - base;
+        I row_end   = bsr_row_ptr_A[i / block_dim + 1] - base;
 
-        for(int j = 0; j < N; j++)
+        for(J j = 0; j < N; j++)
         {
-            int idx_C = i + j * ldc;
+            int64_t idx_C = i + j * ldc;
 
             T sum = make_DataType<T>(0.0);
 
-            for(int s = row_begin; s < row_end; s++)
+            for(I s = row_begin; s < row_end; s++)
             {
-                for(int t = 0; t < block_dim; t++)
+                for(J t = 0; t < block_dim; t++)
                 {
-                    int idx_A = (dir == HIPSPARSE_DIRECTION_ROW)
-                                    ? block_dim * block_dim * s + block_dim * local_row + t
-                                    : block_dim * block_dim * s + block_dim * t + local_row;
-                    int idx_B = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE)
-                                    ? j * ldb + block_dim * (bsr_col_ind_A[s] - base) + t
-                                    : (block_dim * (bsr_col_ind_A[s] - base) + t) * ldb + j;
+                    int64_t idx_A = (dir == HIPSPARSE_DIRECTION_ROW)
+                                        ? block_dim * block_dim * s + block_dim * local_row + t
+                                        : block_dim * block_dim * s + block_dim * t + local_row;
+                    int64_t idx_B = (transB == HIPSPARSE_OPERATION_NON_TRANSPOSE)
+                                        ? j * ldb + block_dim * (bsr_col_ind_A[s] - base) + t
+                                        : (block_dim * (bsr_col_ind_A[s] - base) + t) * ldb + j;
 
                     sum = sum + testing_mult(alpha, testing_mult(bsr_val_A[idx_A], B[idx_B]));
                 }
@@ -3126,6 +3659,112 @@ inline void host_bsrmm(int                     Mb,
             else
             {
                 C[idx_C] = sum + testing_mult(beta, C[idx_C]);
+            }
+        }
+    }
+}
+
+template <typename I, typename T>
+inline void host_bellmm(I                     Mb,
+                        I                     N,
+                        I                     Kb,
+                        I                     ellCols,
+                        I                     ellBlockSize,
+                        hipsparseOperation_t  transA,
+                        hipsparseOperation_t  transB,
+                        T                     alpha,
+                        const std::vector<I>& bellColIndA,
+                        const std::vector<T>& bellValA,
+                        const std::vector<T>& B,
+                        int64_t               ldb,
+                        hipsparseOrder_t      orderB,
+                        T                     beta,
+                        std::vector<T>&       C,
+                        int64_t               ldc,
+                        hipsparseOrder_t      orderC,
+                        hipsparseIndexBase_t  base)
+{
+    if(transA != HIPSPARSE_OPERATION_NON_TRANSPOSE)
+    {
+        return;
+    }
+
+    bool conj_A    = (transA == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
+    bool conj_B    = (transB == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE);
+    bool do_transB = (transB != HIPSPARSE_OPERATION_NON_TRANSPOSE);
+
+    const I m = Mb * ellBlockSize;
+
+    // Scale C by beta (or zero it out)
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I i = 0; i < m; i++)
+    {
+        for(I j = 0; j < N; j++)
+        {
+            int64_t idx_C
+                = (orderC == HIPSPARSE_ORDER_COL) ? i + (int64_t)j * ldc : (int64_t)i * ldc + j;
+            if(beta == make_DataType<T>(0))
+                C[idx_C] = make_DataType<T>(0);
+            else
+                C[idx_C] = testing_mult(beta, C[idx_C]);
+        }
+    }
+
+    // Accumulate alpha * op(A) * op(B) into C.
+    // ellCols is nEllCols = ell_block_width * ellBlockSize (cuSPARSE convention).
+    // The number of ELL block columns per block row is ellCols / ellBlockSize.
+    // ell_col_ind layout : row-major [Mb][ell_block_width], index = br * (ellCols/ellBlockSize) + ei.
+    // ell_val layout     : row-major m × nEllCols,
+    //   index = (br * ellBlockSize + r) * ellCols + ei * ellBlockSize + c
+    const I ellBlockWidth = ellCols / ellBlockSize;
+
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I br = 0; br < Mb; br++)
+    {
+        for(I ei = 0; ei < ellBlockWidth; ei++)
+        {
+            const I bc = bellColIndA[static_cast<size_t>(br) * ellBlockWidth + ei] - base;
+            if(bc < 0)
+                break;
+
+            // Access A_block[r, c] from the row-major value array.
+            auto a_val = [&](I r, I c) -> T {
+                int64_t idx
+                    = ((int64_t)br * ellBlockSize + r) * ellCols + (int64_t)ei * ellBlockSize + c;
+                return testing_conj(bellValA[idx], conj_A);
+            };
+
+            // Access B element at logical position (b_row, n)
+            auto b_val = [&](I b_row, I n) -> T {
+                int64_t idx;
+                if(!do_transB)
+                    idx = (orderB == HIPSPARSE_ORDER_COL) ? b_row + (int64_t)n * ldb
+                                                          : (int64_t)b_row * ldb + n;
+                else
+                    idx = (orderB == HIPSPARSE_ORDER_COL) ? n + (int64_t)b_row * ldb
+                                                          : (int64_t)n * ldb + b_row;
+                return testing_conj(B[idx], conj_B);
+            };
+
+            // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
+            for(I r = 0; r < ellBlockSize; r++)
+            {
+                I C_row = br * ellBlockSize + r;
+                for(I n = 0; n < N; n++)
+                {
+                    int64_t idx_C = (orderC == HIPSPARSE_ORDER_COL) ? C_row + (int64_t)n * ldc
+                                                                    : (int64_t)C_row * ldc + n;
+                    T       sum   = make_DataType<T>(0);
+                    for(I c = 0; c < ellBlockSize; c++)
+                    {
+                        sum = testing_fma(a_val(r, c), b_val(bc * ellBlockSize + c, n), sum);
+                    }
+                    C[idx_C] = C[idx_C] + testing_mult(alpha, sum);
+                }
             }
         }
     }
@@ -4489,7 +5128,7 @@ static inline void host_lssolve(J                     M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -4631,7 +5270,7 @@ static inline void host_ussolve(J                     M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -4904,7 +5543,7 @@ void host_csr_lsolve(J                    M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5011,7 +5650,7 @@ void host_csr_usolve(J                    M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -7019,12 +7658,770 @@ hipsparseIndexType_t getIndexType()
 template <typename T>
 hipDataType getDataType()
 {
-    return (typeid(T) == typeid(int8_t)) ? HIP_R_8I
-           : (typeid(T) == typeid(float))
-               ? HIP_R_32F
-               : ((typeid(T) == typeid(double))
-                      ? HIP_R_64F
-                      : ((typeid(T) == typeid(hipComplex) ? HIP_C_32F : HIP_C_64F)));
+    if(typeid(T) == typeid(int8_t))
+        return HIP_R_8I;
+    if(typeid(T) == typeid(int32_t))
+        return HIP_R_32I;
+    if(typeid(T) == typeid(hipsparseFloat16))
+        return HIP_R_16F;
+    if(typeid(T) == typeid(hipsparseBfloat16))
+        return HIP_R_16BF;
+    if(typeid(T) == typeid(float))
+        return HIP_R_32F;
+    if(typeid(T) == typeid(double))
+        return HIP_R_64F;
+    if(typeid(T) == typeid(hipComplex))
+        return HIP_C_32F;
+    return HIP_C_64F;
+}
+
+/* ============================================================================================ */
+/*! \brief  Host hybmv (hybrid ELL+COO matrix-vector multiplication) */
+#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
+#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
+#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
+
+template <typename T>
+void host_hybmv(int                  m,
+                int                  n,
+                T                    alpha,
+                int                  ell_nnz,
+                int                  ell_width,
+                const int*           ell_col_ind,
+                const T*             ell_val,
+                int                  coo_nnz,
+                const int*           coo_row_ind,
+                const int*           coo_col_ind,
+                const T*             coo_val,
+                const T*             x,
+                T                    beta,
+                T*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+    T zero = make_DataType<T>(0.0);
+    T one  = make_DataType<T>(1.0);
+
+    // ELL part
+    if(ell_nnz > 0)
+    {
+        for(int i = 0; i < m; ++i)
+        {
+            T sum = zero;
+            for(int p = 0; p < ell_width; ++p)
+            {
+                int idx = ELL_IND(i, p, m, ell_width);
+                int col = ell_col_ind[idx] - idx_base;
+
+                if(col >= 0 && col < n)
+                {
+                    sum = testing_fma(ell_val[idx], x[col], sum);
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            if(beta != zero)
+            {
+                y[i] = testing_fma(beta, y[i], testing_mult(alpha, sum));
+            }
+            else
+            {
+                y[i] = testing_mult(alpha, sum);
+            }
+        }
+    }
+
+    // COO part
+    if(coo_nnz >= 0)
+    {
+        T coo_beta = (ell_nnz > 0) ? one : beta;
+
+        for(int i = 0; i < m; ++i)
+        {
+            y[i] = testing_mult(y[i], coo_beta);
+        }
+
+        int i = 0;
+        while(i < coo_nnz)
+        {
+            const int row     = coo_row_ind[i] - idx_base;
+            T         row_sum = zero;
+
+            while(i < coo_nnz && (coo_row_ind[i] - idx_base) == row)
+            {
+                const int col = coo_col_ind[i] - idx_base;
+                row_sum       = row_sum + testing_mult(coo_val[i], x[col]);
+                ++i;
+            }
+
+            y[row] = testing_fma(alpha, row_sum, y[row]);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host coomv (COO matrix-vector multiplication) */
+template <typename I, typename A, typename X, typename Y, typename T>
+void host_coomv(I                    m,
+                I                    nnz,
+                T                    alpha,
+                const I*             coo_row_ind,
+                const I*             coo_col_ind,
+                const A*             coo_val,
+                const X*             x,
+                T                    beta,
+                Y*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I i = 0; i < m; ++i)
+    {
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
+    }
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        const I row = coo_row_ind[i] - idx_base;
+        const I col = coo_col_ind[i] - idx_base;
+        T       yi  = static_cast<T>(y[row]);
+        yi          = testing_fma(
+            testing_mult(alpha, testing_cast<T>(coo_val[i])), static_cast<T>(x[col]), yi);
+        y[row] = static_cast<Y>(yi);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host coomv_aos (COO AoS matrix-vector multiplication) */
+template <typename I, typename A, typename X, typename Y, typename T>
+void host_coomv_aos(I                    m,
+                    I                    nnz,
+                    T                    alpha,
+                    const I*             coo_ind,
+                    const A*             coo_val,
+                    const X*             x,
+                    T                    beta,
+                    Y*                   y,
+                    hipsparseIndexBase_t idx_base)
+{
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic, 1024)
+#endif
+    for(I i = 0; i < m; ++i)
+    {
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
+    }
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        const I row = coo_ind[2 * i] - idx_base;
+        const I col = coo_ind[2 * i + 1] - idx_base;
+        T       yi  = static_cast<T>(y[row]);
+        yi          = testing_fma(
+            testing_mult(alpha, testing_cast<T>(coo_val[i])), static_cast<T>(x[col]), yi);
+        y[row] = static_cast<Y>(yi);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host spvv (sparse vector-vector dot product) */
+template <typename I, typename X, typename Y, typename T>
+void host_spvv(I                    nnz,
+               const X*             x_val,
+               const I*             x_ind,
+               const Y*             y,
+               T*                   result,
+               hipsparseOperation_t op,
+               hipsparseIndexBase_t idx_base)
+{
+    *result = make_DataType<T>(0);
+
+    if(op == HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE)
+    {
+        for(I i = 0; i < nnz; ++i)
+        {
+            *result = *result
+                      + testing_mult(static_cast<T>(testing_conj(x_val[i])),
+                                     static_cast<T>(y[x_ind[i] - idx_base]));
+        }
+    }
+    else
+    {
+        for(I i = 0; i < nnz; ++i)
+        {
+            *result
+                = *result
+                  + testing_mult(static_cast<T>(x_val[i]), static_cast<T>(y[x_ind[i] - idx_base]));
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_csr (sampled dense-dense matrix multiplication - CSR format) */
+template <typename I, typename J, typename T>
+void host_sddmm_csr(J                    C_m,
+                    J                    C_n,
+                    J                    k,
+                    I                    nnz,
+                    T                    alpha,
+                    const T*             A,
+                    int64_t              lda,
+                    hipsparseOrder_t     orderA,
+                    hipsparseOperation_t transA,
+                    const T*             B,
+                    int64_t              ldb,
+                    hipsparseOrder_t     orderB,
+                    hipsparseOperation_t transB,
+                    T                    beta,
+                    T*                   csr_val,
+                    const I*             csr_row_ptr,
+                    const J*             csr_col_ind,
+                    hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(J r = 0; r < C_m; r++)
+    {
+        I start = csr_row_ptr[r] - idx_base;
+        I end   = csr_row_ptr[r + 1] - idx_base;
+
+        for(I j = start; j < end; j++)
+        {
+            J c = csr_col_ind[j] - idx_base;
+
+            const T* Aptr
+                = (orderA == HIPSPARSE_ORDER_COL)
+                      ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                      : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+            const T* Bptr
+                = (orderB == HIPSPARSE_ORDER_COL)
+                      ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                      : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+            T sum = make_DataType<T>(0);
+            for(J s = 0; s < k; ++s)
+            {
+                sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
+            }
+            csr_val[j] = testing_mult(csr_val[j], beta) + testing_mult(alpha, sum);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_csc (sampled dense-dense matrix multiplication - CSC format) */
+template <typename I, typename J, typename T>
+void host_sddmm_csc(J                    C_m,
+                    J                    C_n,
+                    J                    k,
+                    I                    nnz,
+                    T                    alpha,
+                    const T*             A,
+                    int64_t              lda,
+                    hipsparseOrder_t     orderA,
+                    hipsparseOperation_t transA,
+                    const T*             B,
+                    int64_t              ldb,
+                    hipsparseOrder_t     orderB,
+                    hipsparseOperation_t transB,
+                    T                    beta,
+                    T*                   csc_val,
+                    const I*             csc_col_ptr,
+                    const J*             csc_row_ind,
+                    hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(J c = 0; c < C_n; c++)
+    {
+        I start = csc_col_ptr[c] - idx_base;
+        I end   = csc_col_ptr[c + 1] - idx_base;
+
+        for(I j = start; j < end; j++)
+        {
+            J r = csc_row_ind[j] - idx_base;
+
+            const T* Aptr
+                = (orderA == HIPSPARSE_ORDER_COL)
+                      ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                      : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+            const T* Bptr
+                = (orderB == HIPSPARSE_ORDER_COL)
+                      ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                      : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+            T sum = make_DataType<T>(0);
+            for(J s = 0; s < k; ++s)
+            {
+                sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
+            }
+            csc_val[j] = testing_mult(csc_val[j], beta) + testing_mult(alpha, sum);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_coo (sampled dense-dense matrix multiplication - COO format) */
+template <typename I, typename T>
+void host_sddmm_coo(I                    C_m,
+                    I                    C_n,
+                    I                    k,
+                    I                    nnz,
+                    T                    alpha,
+                    const T*             A,
+                    int64_t              lda,
+                    hipsparseOrder_t     orderA,
+                    hipsparseOperation_t transA,
+                    const T*             B,
+                    int64_t              ldb,
+                    hipsparseOrder_t     orderB,
+                    hipsparseOperation_t transB,
+                    T                    beta,
+                    T*                   coo_val,
+                    const I*             coo_row_ind,
+                    const I*             coo_col_ind,
+                    hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        const I r = coo_row_ind[i] - idx_base;
+        const I c = coo_col_ind[i] - idx_base;
+
+        const T* Aptr = (orderA == HIPSPARSE_ORDER_COL)
+                            ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                            : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+        const T* Bptr = (orderB == HIPSPARSE_ORDER_COL)
+                            ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                            : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+        T sum = make_DataType<T>(0);
+        for(I j = 0; j < k; ++j)
+        {
+            sum = testing_fma(Aptr[incA * j], Bptr[incB * j], sum);
+        }
+        coo_val[i] = testing_mult(coo_val[i], beta) + testing_mult(alpha, sum);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sddmm_coo_aos (sampled dense-dense matrix multiplication - COO AoS format) */
+template <typename I, typename T>
+void host_sddmm_coo_aos(I                    C_m,
+                        I                    C_n,
+                        I                    k,
+                        I                    nnz,
+                        T                    alpha,
+                        const T*             A,
+                        int64_t              lda,
+                        hipsparseOrder_t     orderA,
+                        hipsparseOperation_t transA,
+                        const T*             B,
+                        int64_t              ldb,
+                        hipsparseOrder_t     orderB,
+                        hipsparseOperation_t transB,
+                        T                    beta,
+                        T*                   coo_val,
+                        const I*             coo_ind,
+                        hipsparseIndexBase_t idx_base)
+{
+    const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
+                             ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
+                             : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
+    const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
+                             ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
+                             : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        const I r = coo_ind[2 * i] - idx_base;
+        const I c = coo_ind[2 * i + 1] - idx_base;
+
+        const T* Aptr = (orderA == HIPSPARSE_ORDER_COL)
+                            ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[r] : &A[lda * r])
+                            : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &A[lda * r] : &A[r]);
+
+        const T* Bptr = (orderB == HIPSPARSE_ORDER_COL)
+                            ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[ldb * c] : &B[c])
+                            : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &B[c] : &B[ldb * c]);
+
+        T sum = make_DataType<T>(0);
+        for(I j = 0; j < k; ++j)
+        {
+            sum = testing_fma(Aptr[incA * j], Bptr[incB * j], sum);
+        }
+        coo_val[i] = testing_mult(coo_val[i], beta) + testing_mult(alpha, sum);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host axpby (y = alpha * x + beta * y for sparse vectors) */
+template <typename I, typename X, typename Y, typename T>
+void host_axpby(I                    size,
+                I                    nnz,
+                T                    alpha,
+                const X*             x_val,
+                const I*             x_ind,
+                T                    beta,
+                Y*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < size; ++i)
+    {
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
+    }
+
+    for(I i = 0; i < nnz; ++i)
+    {
+        I       idx = x_ind[i] - idx_base;
+        T       yi  = static_cast<T>(y[idx]);
+        const T xi  = static_cast<T>(x_val[i]);
+        yi          = testing_fma(alpha, xi, yi);
+        y[idx]      = static_cast<Y>(yi);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host axpyi (y = y + alpha * x for sparse vectors) */
+template <typename I, typename T>
+void host_axpyi(I nnz, T alpha, const T* x_val, const I* x_ind, T* y, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[x_ind[i] - idx_base] = testing_fma(alpha, x_val[i], y[x_ind[i] - idx_base]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host doti (dot product of sparse and dense vectors) */
+template <typename I, typename T>
+void host_doti(
+    I nnz, const T* x_val, const I* x_ind, const T* y, T* result, hipsparseIndexBase_t idx_base)
+{
+    *result = make_DataType<T>(0.0);
+    for(I i = 0; i < nnz; ++i)
+    {
+        *result = *result + testing_mult(y[x_ind[i] - idx_base], x_val[i]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host dotci (conjugate dot product of sparse and dense vectors) */
+template <typename I, typename T>
+void host_dotci(
+    I nnz, const T* x_val, const I* x_ind, const T* y, T* result, hipsparseIndexBase_t idx_base)
+{
+    *result = make_DataType<T>(0.0);
+    for(I i = 0; i < nnz; ++i)
+    {
+        *result = *result + testing_mult(testing_conj(x_val[i]), y[x_ind[i] - idx_base]);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gthr (gather: x_val[i] = y[x_ind[i]]) */
+template <typename I, typename T>
+void host_gthr(I nnz, const T* y, T* x_val, const I* x_ind, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        x_val[i] = y[x_ind[i] - idx_base];
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gthrz (gather and zero: x_val[i] = y[x_ind[i]], y[x_ind[i]] = 0) */
+template <typename I, typename T>
+void host_gthrz(I nnz, T* y, T* x_val, const I* x_ind, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        x_val[i]               = y[x_ind[i] - idx_base];
+        y[x_ind[i] - idx_base] = make_DataType<T>(0.0);
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host sctr (scatter: y[x_ind[i]] = x_val[i]) */
+template <typename I, typename T>
+void host_sctr(I nnz, const T* x_val, const I* x_ind, T* y, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        y[x_ind[i] - idx_base] = x_val[i];
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host roti (Givens rotation for sparse vectors) */
+template <typename I, typename T>
+void host_roti(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        I idx = x_ind[i] - idx_base;
+
+        T x    = x_val[i];
+        T yval = y[idx];
+
+        x_val[i] = testing_fma(c, x, testing_mult(s, yval));
+        y[idx]   = testing_fma(c, yval, testing_mult(-s, x));
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host rot (Givens rotation for sparse vectors - generic API) */
+template <typename I, typename T>
+void host_rot(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < nnz; ++i)
+    {
+        I idx = x_ind[i] - idx_base;
+
+        T x    = x_val[i];
+        T yval = y[idx];
+
+        x_val[i] = testing_fma(c, x, testing_mult(s, yval));
+        y[idx]   = testing_fma(c, yval, testing_mult(-s, x));
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host coo2csr (convert COO row indices to CSR row pointers) */
+template <typename I>
+void host_coo2csr(I m, I nnz, const I* coo_row_ind, I* csr_row_ptr, hipsparseIndexBase_t idx_base)
+{
+    // Initialize row pointers to zero
+    for(I i = 0; i <= m; ++i)
+    {
+        csr_row_ptr[i] = 0;
+    }
+
+    // Count nnz per row
+    for(I i = 0; i < nnz; ++i)
+    {
+        ++csr_row_ptr[coo_row_ind[i] + 1 - idx_base];
+    }
+
+    // Compute row pointers (prefix sum)
+    csr_row_ptr[0] = idx_base;
+    for(I i = 0; i < m; ++i)
+    {
+        csr_row_ptr[i + 1] += csr_row_ptr[i];
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host csr2coo (convert CSR row pointers to COO row indices) */
+template <typename I>
+void host_csr2coo(I m, I nnz, const I* csr_row_ptr, I* coo_row_ind, hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < m; ++i)
+    {
+        I row_begin = csr_row_ptr[i] - idx_base;
+        I row_end   = csr_row_ptr[i + 1] - idx_base;
+
+        for(I j = row_begin; j < row_end; ++j)
+        {
+            coo_row_ind[j] = i + idx_base;
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host csr2csc (convert CSR to CSC format) */
+template <typename I, typename T>
+void host_csr2csc(I                    m,
+                  I                    n,
+                  I                    nnz,
+                  const I*             csr_row_ptr,
+                  const I*             csr_col_ind,
+                  const T*             csr_val,
+                  I*                   csc_col_ptr,
+                  I*                   csc_row_ind,
+                  T*                   csc_val,
+                  hipsparseIndexBase_t idx_base)
+{
+    // Initialize column pointers to zero
+    for(I i = 0; i <= n; ++i)
+    {
+        csc_col_ptr[i] = 0;
+    }
+
+    // Determine nnz per column
+    for(I i = 0; i < nnz; ++i)
+    {
+        ++csc_col_ptr[csr_col_ind[i] + 1 - idx_base];
+    }
+
+    // Scan (prefix sum)
+    for(I i = 0; i < n; ++i)
+    {
+        csc_col_ptr[i + 1] += csc_col_ptr[i];
+    }
+
+    // Fill row indices and values
+    for(I i = 0; i < m; ++i)
+    {
+        for(I j = csr_row_ptr[i]; j < csr_row_ptr[i + 1]; ++j)
+        {
+            I col = csr_col_ind[j - idx_base] - idx_base;
+            I idx = csc_col_ptr[col];
+
+            csc_row_ind[idx] = i + idx_base;
+            csc_val[idx]     = csr_val[j - idx_base];
+
+            ++csc_col_ptr[col];
+        }
+    }
+
+    // Shift column pointer array
+    for(I i = n; i > 0; --i)
+    {
+        csc_col_ptr[i] = csc_col_ptr[i - 1] + idx_base;
+    }
+
+    csc_col_ptr[0] = idx_base;
+}
+
+/* ============================================================================================ */
+/*! \brief  Host csr2hyb (convert CSR to HYB format) */
+template <typename I, typename T>
+void host_csr2hyb(I                    m,
+                  I                    nnz,
+                  const I*             csr_row_ptr,
+                  const I*             csr_col_ind,
+                  const T*             csr_val,
+                  I                    ell_width,
+                  I*                   ell_col_ind,
+                  T*                   ell_val,
+                  I*                   coo_row_ind,
+                  I*                   coo_col_ind,
+                  T*                   coo_val,
+                  hipsparseIndexBase_t idx_base)
+{
+    I coo_idx = 0;
+    for(I i = 0; i < m; ++i)
+    {
+        I p = 0;
+        for(I j = csr_row_ptr[i] - idx_base; j < csr_row_ptr[i + 1] - idx_base; ++j)
+        {
+            if(p < ell_width)
+            {
+                I idx            = ELL_IND(i, p++, m, ell_width);
+                ell_col_ind[idx] = csr_col_ind[j];
+                ell_val[idx]     = csr_val[j];
+            }
+            else
+            {
+                coo_row_ind[coo_idx] = i + idx_base;
+                coo_col_ind[coo_idx] = csr_col_ind[j];
+                coo_val[coo_idx]     = csr_val[j];
+                ++coo_idx;
+            }
+        }
+        for(I j = csr_row_ptr[i + 1] - csr_row_ptr[i]; j < ell_width; ++j)
+        {
+            I idx            = ELL_IND(i, p++, m, ell_width);
+            ell_col_ind[idx] = -1;
+            ell_val[idx]     = make_DataType<T>(0.0);
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gemmi (dense matrix * sparse matrix in CSC format) */
+template <typename I, typename T>
+void host_gemmi(I        m,
+                I        n,
+                I        k,
+                T        alpha,
+                const T* A,
+                I        lda,
+                const I* csc_col_ptr,
+                const I* csc_row_ind,
+                const T* csc_val,
+                T        beta,
+                T*       C,
+                I        ldc)
+{
+    for(I i = 0; i < m; ++i)
+    {
+        for(I j = 0; j < n; ++j)
+        {
+            T sum = make_DataType<T>(0);
+
+            I col_begin = csc_col_ptr[j];
+            I col_end   = csc_col_ptr[j + 1];
+
+            for(I p = col_begin; p < col_end; ++p)
+            {
+                I row_B = csc_row_ind[p];
+                T val_B = csc_val[p];
+                T val_A = A[row_B * lda + i];
+
+                sum = testing_fma(val_A, val_B, sum);
+            }
+
+            C[j * ldc + i] = testing_fma(beta, C[j * ldc + i], testing_mult(alpha, sum));
+        }
+    }
+}
+
+/* ============================================================================================ */
+/*! \brief  Host gemvi (dense matrix * sparse vector) */
+template <typename I, typename T>
+void host_gemvi(I                    m,
+                I                    n,
+                I                    nnz,
+                T                    alpha,
+                const T*             A,
+                I                    lda,
+                const T*             x_val,
+                const I*             x_ind,
+                T                    beta,
+                T*                   y,
+                hipsparseIndexBase_t idx_base)
+{
+    for(I i = 0; i < m; ++i)
+    {
+        T sum = make_DataType<T>(0);
+
+        for(I j = 0; j < nnz; ++j)
+        {
+            sum = testing_fma(x_val[j], A[(x_ind[j] - idx_base) * lda + i], sum);
+        }
+
+        y[i] = testing_fma(alpha, sum, testing_mult(beta, y[i]));
+    }
 }
 
 #endif // TESTING_UTILITY_HPP

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
+
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -106,8 +108,10 @@ namespace TensileLite
                                         rhs.d(),
                                         lhs.e(),
                                         rhs.e(),
-                                        lhs.computeInputType(),
-                                        rhs.computeInputType(),
+                                        lhs.computeInputTypeA(),
+                                        rhs.computeInputTypeA(),
+                                        lhs.computeInputTypeB(),
+                                        rhs.computeInputTypeB(),
                                         lhs.workspaceSize(),
                                         rhs.workspaceSize(),
                                         lhs.stridedBatched(),
@@ -130,6 +134,8 @@ namespace TensileLite
                                         rhs.biasSrc(),
                                         lhs.useE(),
                                         rhs.useE(),
+                                        lhs.useGateResidual(),
+                                        rhs.useGateResidual(),
                                         lhs.useScaleAB(),
                                         rhs.useScaleAB(),
                                         lhs.useScaleCD(),
@@ -143,7 +149,19 @@ namespace TensileLite
                                         lhs.swizzleTensorA(),
                                         rhs.swizzleTensorA(),
                                         lhs.swizzleTensorB(),
-                                        rhs.swizzleTensorB());
+                                        rhs.swizzleTensorB(),
+                                        lhs.mxBlockA(),
+                                        rhs.mxBlockA(),
+                                        lhs.mxBlockB(),
+                                        rhs.mxBlockB(),
+                                        lhs.mxTypeA(),
+                                        rhs.mxTypeA(),
+                                        lhs.mxTypeB(),
+                                        rhs.mxTypeB(),
+                                        lhs.getParams().smCountTarget(),
+                                        rhs.getParams().smCountTarget(),
+                                        lhs.getParams().streamKTileSchedulingMode(),
+                                        rhs.getParams().streamKTileSchedulingMode());
         }
     };
 } // namespace TensileLite
@@ -161,7 +179,8 @@ namespace std
                                              problem.c(),
                                              problem.d(),
                                              problem.e(),
-                                             problem.computeInputType(),
+                                             problem.computeInputTypeA(),
+                                             problem.computeInputTypeB(),
                                              problem.highPrecisionAccumulate(),
                                              problem.kernelLanguage(),
                                              problem.deterministicMode(),
@@ -176,13 +195,20 @@ namespace std
                                              problem.useBias(),
                                              problem.biasSrc(),
                                              problem.useE(),
+                                             problem.useGateResidual(),
                                              problem.useScaleAB(),
                                              problem.useScaleCD(),
                                              problem.useScaleAlphaVec(),
                                              problem.outputAmaxD(),
                                              problem.f32XdlMathOp(),
                                              problem.swizzleTensorA(),
-                                             problem.swizzleTensorB());
+                                             problem.swizzleTensorB(),
+                                             problem.mxBlockA(),
+                                             problem.mxBlockB(),
+                                             problem.mxTypeA(),
+                                             problem.mxTypeB(),
+                                             problem.getParams().smCountTarget(),
+                                             problem.getParams().streamKTileSchedulingMode());
         }
     };
 
@@ -202,7 +228,8 @@ namespace std
                                                   problem.c(),
                                                   problem.d(),
                                                   problem.e(),
-                                                  problem.computeInputType(),
+                                                  problem.computeInputTypeA(),
+                                                  problem.computeInputTypeB(),
                                                   problem.highPrecisionAccumulate(),
                                                   problem.kernelLanguage(),
                                                   problem.deterministicMode(),
@@ -217,16 +244,22 @@ namespace std
                                                   problem.useBias(),
                                                   problem.biasSrc(),
                                                   problem.useE(),
+                                                  problem.useGateResidual(),
                                                   problem.useScaleAB(),
                                                   problem.useScaleCD(),
                                                   problem.useScaleAlphaVec(),
                                                   problem.outputAmaxD(),
                                                   problem.f32XdlMathOp(),
                                                   problem.swizzleTensorA(),
-                                                  problem.swizzleTensorB());
+                                                  problem.swizzleTensorB(),
+                                                  problem.mxBlockA(),
+                                                  problem.mxBlockB(),
+                                                  problem.mxTypeA(),
+                                                  problem.mxTypeB());
             }
             return hash;
         }
     };
 
 } // namespace std
+

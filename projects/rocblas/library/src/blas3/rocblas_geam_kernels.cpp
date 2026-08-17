@@ -42,10 +42,8 @@ rocblas_geam_zero_matrix_device(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         if(tx < m && ty < n)
         {
@@ -53,10 +51,7 @@ rocblas_geam_zero_matrix_device(rocblas_int    m,
             size_t c_index = tx + ldc * ty;
             C[c_index]     = 0.0;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // general case for any alpha, beta, lda, ldb, ldc
@@ -90,10 +85,8 @@ rocblas_geam_device(rocblas_operation transA,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < m && ty < n)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -134,10 +127,7 @@ rocblas_geam_device(rocblas_operation transA,
 
             C[c_index] = beta * b_val + alpha * a_val;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 //  special case:
@@ -166,10 +156,8 @@ rocblas_geam_2matrix_device(rocblas_operation transA,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < m && ty < n)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -202,10 +190,83 @@ rocblas_geam_2matrix_device(rocblas_operation transA,
                 C[c_index] = alpha * a_val;
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
+}
+
+// Tiled transpose with padded shared memory for coalesced reads/writes and no bank conflicts.
+// C = alpha * op(A); tile is TILE_SIZE x (TILE_SIZE + PAD) to avoid shared-memory bank conflicts.
+template <int TILE_SIZE, int TY_SIZE, typename T, typename TScal, typename TConstPtr, typename TPtr>
+ROCBLAS_KERNEL(TILE_SIZE* TILE_SIZE)
+rocblas_geam_transpose_tiled_device(rocblas_operation transA,
+                                    rocblas_int       m,
+                                    rocblas_int       n,
+                                    TScal             alpha_device_host,
+                                    TConstPtr         Aa,
+                                    rocblas_stride    offset_a,
+                                    int64_t           lda,
+                                    rocblas_stride    stride_a,
+                                    TPtr              Ca,
+                                    rocblas_stride    offset_c,
+                                    int64_t           ldc,
+                                    rocblas_stride    stride_c,
+                                    rocblas_int       batch_count)
+{
+
+    // only used for transpose so input_rows is n
+    // alpha zero is handled in other kernel as just setting all to zero
+
+    int input_rows  = n; // transA == rocblas_operation_none ? m : n;
+    int num_blocksx = (input_rows - 1) / TILE_SIZE + 1; // input has transpose args
+    int blkx        = blockIdx.x % num_blocksx;
+    int blky        = blockIdx.x / num_blocksx;
+
+    const int bx = blkx * TILE_SIZE;
+    const int by = blky * TILE_SIZE;
+    const int tx = bx + threadIdx.x;
+    const int ty = by + threadIdx.y;
+
+    __shared__ T tile[TILE_SIZE][TILE_SIZE + 1];
+
+    uint32_t batch = blockIdx.z;
+
+    for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
+    {
+
+#define rows n
+#define cols m
+
+        T     alpha = load_scalar(alpha_device_host); // alpha is non zero and on host
+        auto* A     = load_ptr_batch(Aa, batch, offset_a, stride_a);
+        auto* C     = load_ptr_batch(Ca, batch, offset_c, stride_c);
+
+        for(int j = 0; j < TILE_SIZE; j += TY_SIZE)
+        {
+            auto a_val = (ty + j >= cols || tx >= rows) ? T(0) : A[tx + (ty + j) * lda];
+
+            if(transA == rocblas_operation_conjugate_transpose)
+                a_val = conj(a_val);
+            tile[threadIdx.y + j][threadIdx.x] = alpha * a_val;
+        }
+
+        __syncthreads();
+
+        int dstcol = bx + threadIdx.y; // transpose block offset
+        int dstrow = by + threadIdx.x;
+
+        if(dstrow < m)
+        {
+            for(int j = 0; j < TILE_SIZE; j += TY_SIZE)
+            {
+                if(dstcol + j < n)
+                {
+                    C[dstrow + (dstcol + j) * ldc] = tile[threadIdx.x][threadIdx.y + j];
+                }
+            }
+        }
+
+#undef rows
+#undef cols
+    }
 }
 
 // special cases where: lda=ldb=ldc=m && transA==transB=none so matrices
@@ -231,10 +292,8 @@ rocblas_geam_1D_device(size_t         size,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < size)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -254,10 +313,7 @@ rocblas_geam_1D_device(size_t         size,
                 C[tx] = (beta ? beta * B[tx] : 0) + (alpha ? alpha * A[tx] : 0);
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // special cases where: lda=ldb=ldc=m && transA==transB=none so matrices
@@ -280,10 +336,8 @@ rocblas_geam_1D_2matrix_device(size_t         size,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < size)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -300,10 +354,7 @@ rocblas_geam_1D_2matrix_device(size_t         size,
                 C[tx]   = alpha * A[tx];
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // special cases where: A == C && lda == ldc && transA == none
@@ -333,10 +384,8 @@ rocblas_geam_inplace_device(rocblas_operation transB,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         if(tx < m && ty < n)
         {
             auto alpha = load_scalar(alpha_device_host);
@@ -378,10 +427,7 @@ rocblas_geam_inplace_device(rocblas_operation transB,
                 }
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /*
@@ -464,7 +510,41 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
         dim3 geam_grid(blocksX, 1, batches);
         dim3 geam_threads(GEAM_DIM_X, GEAM_DIM_Y);
 
-        if(pointer_mode == rocblas_pointer_mode_host)
+        if(pointer_mode == rocblas_pointer_mode_host && !*alpha && transB != rocblas_operation_none)
+        {
+            // alpha == 0
+            // Pure transpose C = beta * op(B).
+            static constexpr int TILE_SIZE = 32;
+            static constexpr int TY_SIZE   = 8; // 4 iterations per tile
+
+            rocblas_int num_blocksx = (m - 1) / TILE_SIZE + 1;
+            rocblas_int num_blocksy = (n - 1) / TILE_SIZE + 1;
+            rocblas_int blocks      = num_blocksx * num_blocksy;
+
+            dim3 tiled_grid(blocks, 1, batches);
+            dim3 tiled_threads(TILE_SIZE, TY_SIZE);
+
+            using T_elt = std::remove_cv_t<std::remove_pointer_t<TScal>>;
+            ROCBLAS_LAUNCH_KERNEL((rocblas_geam_transpose_tiled_device<TILE_SIZE, TY_SIZE, T_elt>),
+                                  tiled_grid,
+                                  tiled_threads,
+                                  0,
+                                  rocblas_stream,
+                                  transB,
+                                  m,
+                                  n,
+                                  *beta,
+                                  B,
+                                  offset_b,
+                                  ldb,
+                                  stride_b,
+                                  C,
+                                  offset_c,
+                                  ldc,
+                                  stride_c,
+                                  batch_count);
+        }
+        else if(pointer_mode == rocblas_pointer_mode_host)
         {
             ROCBLAS_LAUNCH_KERNEL((rocblas_geam_inplace_device<GEAM_DIM_X, GEAM_DIM_Y>),
                                   geam_grid,
@@ -522,7 +602,41 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
         dim3 geam_grid(blocksX, 1, batches);
         dim3 geam_threads(GEAM_DIM_X, GEAM_DIM_Y);
 
-        if(pointer_mode == rocblas_pointer_mode_host)
+        if(pointer_mode == rocblas_pointer_mode_host && !*beta && transA != rocblas_operation_none)
+        {
+            // beta == 0
+            // Pure transpose C = alpha * op(A).
+            static constexpr int TILE_SIZE = 32;
+            static constexpr int TY_SIZE   = 8; // 4 iterations per tile
+
+            rocblas_int num_blocksx = (m - 1) / TILE_SIZE + 1;
+            rocblas_int num_blocksy = (n - 1) / TILE_SIZE + 1;
+            rocblas_int blocks      = num_blocksx * num_blocksy;
+
+            dim3 tiled_grid(blocks, 1, batches);
+            dim3 tiled_threads(TILE_SIZE, TY_SIZE);
+
+            using T_elt = std::remove_cv_t<std::remove_pointer_t<TScal>>;
+            ROCBLAS_LAUNCH_KERNEL((rocblas_geam_transpose_tiled_device<TILE_SIZE, TY_SIZE, T_elt>),
+                                  tiled_grid,
+                                  tiled_threads,
+                                  0,
+                                  rocblas_stream,
+                                  transA,
+                                  m,
+                                  n,
+                                  *alpha,
+                                  A,
+                                  offset_a,
+                                  lda,
+                                  stride_a,
+                                  C,
+                                  offset_c,
+                                  ldc,
+                                  stride_c,
+                                  batch_count);
+        }
+        else if(pointer_mode == rocblas_pointer_mode_host)
         {
             ROCBLAS_LAUNCH_KERNEL((rocblas_geam_inplace_device<GEAM_DIM_X, GEAM_DIM_Y>),
                                   geam_grid,
@@ -569,7 +683,7 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
     }
     else if(pointer_mode == rocblas_pointer_mode_host && !*beta)
     {
-        if(m == lda && transA == rocblas_operation_none && m == ldc)
+        if(transA == rocblas_operation_none && m == lda && m == ldc)
         {
             // beta == 0
             // special case: A, C are processed as vectors because
@@ -593,6 +707,40 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
                                   stride_a,
                                   C,
                                   offset_c,
+                                  stride_c,
+                                  batch_count);
+        }
+        else if(transA != rocblas_operation_none)
+        {
+            // beta == 0
+            // Pure transpose C = alpha * op(A).
+            static constexpr int TILE_SIZE = 32;
+            static constexpr int TY_SIZE   = 8; // 4 iterations per tile
+
+            rocblas_int num_blocksx = (m - 1) / TILE_SIZE + 1;
+            rocblas_int num_blocksy = (n - 1) / TILE_SIZE + 1;
+            rocblas_int blocks      = num_blocksx * num_blocksy;
+
+            dim3 geam_grid(blocks, 1, batches);
+            dim3 geam_threads(TILE_SIZE, TY_SIZE);
+
+            using T_elt = std::remove_cv_t<std::remove_pointer_t<TScal>>;
+            ROCBLAS_LAUNCH_KERNEL((rocblas_geam_transpose_tiled_device<TILE_SIZE, TY_SIZE, T_elt>),
+                                  geam_grid,
+                                  geam_threads,
+                                  0,
+                                  rocblas_stream,
+                                  transA,
+                                  m,
+                                  n,
+                                  *alpha,
+                                  A,
+                                  offset_a,
+                                  lda,
+                                  stride_a,
+                                  C,
+                                  offset_c,
+                                  ldc,
                                   stride_c,
                                   batch_count);
         }
@@ -631,7 +779,7 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
     }
     else if(rocblas_pointer_mode_host == pointer_mode && !*alpha)
     {
-        if(m == ldb && transB == rocblas_operation_none && m == ldc)
+        if(transB == rocblas_operation_none && m == ldb && m == ldc)
         {
             // alpha == 0
             // special case: B, C are processed as vectors because
@@ -655,6 +803,40 @@ rocblas_status rocblas_geam_launcher(rocblas_handle    handle,
                                   stride_b,
                                   C,
                                   offset_c,
+                                  stride_c,
+                                  batch_count);
+        }
+        else if(transB != rocblas_operation_none)
+        {
+            // alpha == 0
+            // Pure transpose C = beta * op(B).
+            static constexpr int TILE_SIZE = 32;
+            static constexpr int TY_SIZE   = 8; // 4 iterations per tile
+
+            rocblas_int num_blocksx = (m - 1) / TILE_SIZE + 1;
+            rocblas_int num_blocksy = (n - 1) / TILE_SIZE + 1;
+            rocblas_int blocks      = num_blocksx * num_blocksy;
+
+            dim3 geam_grid(blocks, 1, batches);
+            dim3 geam_threads(TILE_SIZE, TY_SIZE);
+
+            using T_elt = std::remove_cv_t<std::remove_pointer_t<TScal>>;
+            ROCBLAS_LAUNCH_KERNEL((rocblas_geam_transpose_tiled_device<TILE_SIZE, TY_SIZE, T_elt>),
+                                  geam_grid,
+                                  geam_threads,
+                                  0,
+                                  rocblas_stream,
+                                  transB,
+                                  m,
+                                  n,
+                                  *beta,
+                                  B,
+                                  offset_b,
+                                  ldb,
+                                  stride_b,
+                                  C,
+                                  offset_c,
+                                  ldc,
                                   stride_c,
                                   batch_count);
         }

@@ -25,6 +25,15 @@
 #include "testing_csrmv.hpp"
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 11000)
-TEST_ROUTINE(
-    csrmv, level2, arg.M, arg.N, arg.alpha, arg.alphai, arg.beta, arg.betai, arg.transA, arg.baseA);
+TEST_ROUTINE(csrmv,
+             level2,
+             arg.M,
+             arg.N,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.transA,
+             arg.baseA,
+             arg.graph_test);
 #endif

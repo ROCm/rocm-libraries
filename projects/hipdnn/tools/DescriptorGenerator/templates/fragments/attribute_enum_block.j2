@@ -1,0 +1,17 @@
+// {{ op.name }} operation attributes
+// Insert into backend/include/HipdnnBackendAttributeName.h
+// Assign values in the next available range (e.g., 1600+)
+{% for tf in op.tensor_fields %}
+    {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }} = PLACEHOLDER_VALUE,
+{% endfor %}
+{% for df in op.data_fields %}
+{% if not df.shared %}
+    {{ df.attr_name }} = PLACEHOLDER_VALUE,
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type and not op.compute_data_type_shared %}
+    {{ op.compute_data_type_attr }} = PLACEHOLDER_VALUE,
+{% endif %}
+{% for taf in op.tensor_array_fields %}
+    {{ taf.attr_name }} = PLACEHOLDER_VALUE,
+{% endfor %}

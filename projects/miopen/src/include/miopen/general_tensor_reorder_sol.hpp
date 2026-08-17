@@ -26,6 +26,7 @@
 #ifndef GUARD_GENERAL_MIOPEN_TENSOR_REORDER_SOL_HPP
 #define GUARD_GENERAL_MIOPEN_TENSOR_REORDER_SOL_HPP
 
+#include <miopen/config.hpp>
 #include <miopen/kernel_info.hpp>
 #include <miopen/op_kernel_args.hpp>
 #include <miopen/execution_context.hpp>

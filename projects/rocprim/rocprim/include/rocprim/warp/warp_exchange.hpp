@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \parblock
 /// In the example an exchange operation is performed on a warp of 8 threads, using type
 /// \p int with 4 items per thread.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_exchange.cpp).
 ///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
@@ -502,19 +504,18 @@ private:
         U                  work_array[ItemsPerThread];
 
         ROCPRIM_UNROLL
-        for(unsigned int dst_idx = 0; dst_idx < ItemsPerThread; dst_idx++)
+        for(unsigned int i = 0; i < ItemsPerThread * ItemsPerThread; i++)
         {
-            ROCPRIM_UNROLL
-            for(unsigned int src_idx = 0; src_idx < ItemsPerThread; src_idx++)
+            const unsigned int dst_idx = i / ItemsPerThread;
+            const unsigned int src_idx = i % ItemsPerThread;
+
+            const auto value = ::rocprim::warp_shuffle(
+                input[src_idx],
+                flat_id / ItemsPerThread + dst_idx * (VirtualWaveSize / ItemsPerThread),
+                VirtualWaveSize);
+            if(src_idx == flat_id % ItemsPerThread)
             {
-                const auto value = ::rocprim::warp_shuffle(
-                    input[src_idx],
-                    flat_id / ItemsPerThread + dst_idx * (VirtualWaveSize / ItemsPerThread),
-                    VirtualWaveSize);
-                if(src_idx == flat_id % ItemsPerThread)
-                {
-                    work_array[dst_idx] = value;
-                }
+                work_array[dst_idx] = value;
             }
         }
 
@@ -715,19 +716,18 @@ private:
         U                  work_array[ItemsPerThread];
 
         ROCPRIM_UNROLL
-        for(unsigned int dst_idx = 0; dst_idx < ItemsPerThread; dst_idx++)
+        for(unsigned int i = 0; i < ItemsPerThread * ItemsPerThread; i++)
         {
-            ROCPRIM_UNROLL
-            for(unsigned int src_idx = 0; src_idx < ItemsPerThread; src_idx++)
+            const unsigned int dst_idx = i / ItemsPerThread;
+            const unsigned int src_idx = i % ItemsPerThread;
+
+            const auto value
+                = ::rocprim::warp_shuffle(input[src_idx],
+                                          (ItemsPerThread * flat_id + dst_idx) % VirtualWaveSize,
+                                          VirtualWaveSize);
+            if((flat_id / (VirtualWaveSize / ItemsPerThread)) == src_idx)
             {
-                const auto value = ::rocprim::warp_shuffle(input[src_idx],
-                                                           (ItemsPerThread * flat_id + dst_idx)
-                                                               % VirtualWaveSize,
-                                                           VirtualWaveSize);
-                if(flat_id / (VirtualWaveSize / ItemsPerThread) == src_idx)
-                {
-                    work_array[dst_idx] = value;
-                }
+                work_array[dst_idx] = value;
             }
         }
 

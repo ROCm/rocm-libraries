@@ -104,7 +104,7 @@ class SYEVDX_HEEVDX : public ::TestWithParam<syevdx_heevdx_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>
@@ -136,7 +136,7 @@ class SYEVDX_HEEVDX_INPLACE : public ::TestWithParam<syevdx_heevdx_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <bool BATCHED, bool STRIDED, typename T>

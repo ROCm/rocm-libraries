@@ -20,10 +20,9 @@ hipDNN operations are implemented through plugins. Each plugin provides its own 
   - Batchnorm operations (Training, Backward, Inference)
   - Fused operation graphs
 
-- **[Fusilli IREE Plugin](https://github.com/iree-org/fusilli)** - IREE backed plugin for JIT compiling ML operations (with fusions) for AMD GPUs, supporting efficient codegenerated kernels
-  - Convolution (Forward, Dgrad, Wgrad)
-  - GEMM
-  - Batchnorm (Training, Inference)
+- **[hipBLASLt Provider Plugin](../../../dnn-providers/hipblaslt-provider/docs/OperationSupport.md)** - Integration with AMD's hipBLASLt library that provides optimized GEMM operations.
+  - Stand-alone Matmul (FP32/FP16/BF16 inputs and outputs, with optional fused bias and activation)
+  - MX BlockScaleDequantize + GEMM (FP8 OCP and OCP MX FP4 inputs, including mixed pairs; gfx950/gfx1250 only)
 
 ### Reference Implementation
 

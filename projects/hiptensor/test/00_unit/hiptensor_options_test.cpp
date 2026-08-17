@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <cstdio>
 #include <gtest/gtest.h>
 #include <iostream>
 
@@ -32,8 +33,9 @@
 
 TEST(HiptensorOptionsTest, UtilTest)
 {
-    auto& options = hiptensor::HiptensorOptions::instance();
-    options->setOstream("path");
+    auto&             options     = hiptensor::HiptensorOptions::instance();
+    const char* const ostreamFile = "path";
+    options->setOstream(ostreamFile);
     options->setOmits(0xF);
     EXPECT_EQ(options->omitSkipped(), true);
     EXPECT_EQ(options->omitFailed(), true);
@@ -43,4 +45,6 @@ TEST(HiptensorOptionsTest, UtilTest)
     EXPECT_EQ(options->performValidation(), true);
     options->setValidation("OFF");
     EXPECT_EQ(options->performValidation(), false);
+    options->ostream().fstream().close();
+    std::remove(ostreamFile);
 }

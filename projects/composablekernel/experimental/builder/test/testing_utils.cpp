@@ -21,7 +21,7 @@ namespace ck_tile::test {
 // Wagner-Fischer Algorithm for Computing Edit Distance and Inline Diff
 //
 // OUTPUT FORMAT: [expected|actual] for differences, plain text for matches
-// Example: "hello world" vs "hello earth" → "hello [world|earth]"
+// Example: "hello world" vs "hello earth" -> "hello [world|earth]"
 //
 // This function implements the Wagner-Fischer algorithm (1974), which is the classic
 // dynamic programming solution for computing the minimum edit distance (Levenshtein distance)
@@ -337,6 +337,24 @@ void HipStatusMatcher::DescribeNegationTo(std::ostream* os) const
 ::testing::Matcher<hipError_t> HipError(hipError_t error)
 {
     return ::testing::MakeMatcher(new HipStatusMatcher(error));
+}
+
+bool RunResultMatcher::MatchAndExplain(builder::test::RunResult actual,
+                                       ::testing::MatchResultListener* listener) const
+{
+    if(actual.error.has_value() && listener)
+        *listener << "run failed: " << actual.error.value();
+
+    return actual.is_supported();
+}
+
+void RunResultMatcher::DescribeTo(std::ostream* os) const { *os << "successful run"; }
+
+void RunResultMatcher::DescribeNegationTo(std::ostream* os) const { *os << "unsuccessful run"; }
+
+::testing::Matcher<builder::test::RunResult> SuccessfulRun()
+{
+    return ::testing::MakeMatcher(new RunResultMatcher());
 }
 
 } // namespace ck_tile::test

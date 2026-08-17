@@ -30,7 +30,7 @@ extern "C" {
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
- *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix
+ *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix.
  *
  *  \details
  *  \p hipsparseXpruneCsr2csrByPercentage_bufferSize returns the size of the temporary buffer that
@@ -38,7 +38,7 @@ extern "C" {
  *  The temporary storage buffer must be allocated by the user.
  *
  *  @param[in]
- *  handle              handle to the hipsparse library context queue.
+ *  handle              handle to the hipSPARSE library context queue.
  *  @param[in]
  *  m                   number of rows in the sparse CSR matrix.
  *  @param[in]
@@ -118,7 +118,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSize(hipsparseHandle_
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
- *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix
+ *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix.
  *
  *  \details
  *  \p hipsparseXpruneCsr2csrByPercentage_bufferSizeExt returns the size of the temporary buffer that
@@ -126,7 +126,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSize(hipsparseHandle_
  *  The temporary storage buffer must be allocated by the user.
  *
  *  @param[in]
- *  handle              handle to the hipsparse library context queue.
+ *  handle              handle to the hipSPARSE library context queue.
  *  @param[in]
  *  m                   number of rows in the sparse CSR matrix.
  *  @param[in]
@@ -207,17 +207,17 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
- *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix
+ *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix.
  *
  *  \details
- *  \p hipsparseXpruneCsr2csrNnzByPercentage computes the number of nonzero elements per row and the total
- *  number of nonzero elements in a sparse CSR matrix once elements less than the threshold are
+ *  \p hipsparseXpruneCsr2csrNnzByPercentage computes the number of non-zero elements per row and the total
+ *  number of non-zero elements in a sparse CSR matrix after elements less than the threshold are
  *  pruned from the matrix.
  *
- *  \note The routine does support asynchronous execution if the pointer mode is set to device.
+ *  \note The routine supports asynchronous execution if the pointer mode is set to device.
  *
  *  @param[in]
- *  handle             handle to the hipsparse library context queue.
+ *  handle             handle to the hipSPARSE library context queue.
  *  @param[in]
  *  m                  number of rows in the sparse CSR matrix.
  *  @param[in]
@@ -243,7 +243,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
  *  csrRowPtrC         array of \p m+1 elements that point to the start of every row of the
  *                     sparse CSR matrix C.
  *  @param[out]
- *  nnzTotalDevHostPtr total number of nonzero elements in device or host memory.
+ *  nnzTotalDevHostPtr total number of non-zero elements in device or host memory.
  *  @param[in]
  *  info               prune info structure.
  *  @param[out]
@@ -252,7 +252,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrByPercentage_bufferSizeExt(hipsparseHand
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC,
- *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr or \p buffer
+ *              \p info, \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrRowPtrC, \p nnzTotalDevHostPtr, or \p buffer
  *              pointer is invalid.
  */
 /**@{*/
@@ -294,22 +294,22 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnzByPercentage(hipsparseHandle_t       
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup conv_module
- *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix
+ *  \brief Convert and prune by percentage a sparse CSR matrix into a sparse CSR matrix.
  *
  *  \details
  *  This function converts the sparse CSR matrix A into a sparse CSR matrix C by pruning values in A
- *  that are less than the threshold. All the parameters are assumed to have been pre-allocated by the user.
+ *  that are less than the threshold. All the parameters are assumed to have been preallocated by the user.
  *  The user first calls \ref hipsparseSpruneCsr2csr_bufferSize "hipsparseXpruneCsr2csr_bufferSize()" to
  *  determine the size of the buffer used by \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" and
- *  \p hipsparseXpruneCsr2csr() which the user then allocates. The user then allocates \p csrRowPtrC to have
+ *  \p hipsparseXpruneCsr2csr(), which the user then allocates. The user then allocates \p csrRowPtrC to have
  *  \p m+1 elements and then calls \ref hipsparseSpruneCsr2csrNnz "hipsparseXpruneCsr2csrNnz()" which fills
- *  in the \p csrRowPtrC array stores then number of elements that are larger than the pruning \p threshold
- *  in \p nnzTotalDevHostPtr. The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. It
- *  is executed asynchronously with respect to the host and may return control to the application on the host
+ *  in the \p csrRowPtrC array and stores the number of elements that are larger than the pruning \p threshold
+ *  in \p nnzTotalDevHostPtr. The user then calls \p hipsparseXpruneCsr2csr() to complete the conversion. The function
+ *  is executed asynchronously with respect to the host and can return control to the application on the host
  *  before the entire result is ready.
  *
  *  @param[in]
- *  handle        handle to the hipsparse library context queue.
+ *  handle        handle to the hipSPARSE library context queue.
  *  @param[in]
  *  m             number of rows in the sparse CSR matrix.
  *  @param[in]
@@ -346,7 +346,7 @@ hipsparseStatus_t hipsparseDpruneCsr2csrNnzByPercentage(hipsparseHandle_t       
  *
  *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p percentage, \p descrA, \p descrC, \p info,
- *              \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC or \p buffer pointer is
+ *              \p csrValA, \p csrRowPtrA, \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC, or \p buffer pointer is
  *              invalid.
  */
 /**@{*/

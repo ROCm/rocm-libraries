@@ -47,11 +47,17 @@ concept BlockGemmPipelineDescriptor = requires(T t) {
 // Concept for parameters that describe a gridwise WMMA GEMM problem.
 template <typename T>
 concept GridwiseWmmaGemmDescriptor = requires(T t) {
-    { t.k1 } -> SizeType;
-    { t.m_per_wmma } -> SizeType;
-    { t.n_per_wmma } -> SizeType;
-    { t.m_wmma_per_wave } -> SizeType;
-    { t.n_wmma_per_wave } -> SizeType;
+    (
+    requires { { T::k1 } -> SizeType; } ||
+    (requires { { T::ak1 } -> SizeType; } &&
+     requires { { T::bk1 } -> SizeType; })
+) &&
+requires {
+    { T::m_per_wmma } -> SizeType;
+    { T::n_per_wmma } -> SizeType;
+    { T::m_wmma_per_wave } -> SizeType;
+    { T::n_wmma_per_wave } -> SizeType;
+};
 };
 
 // Concept for vectorized data transfer for convolution input tensors.
@@ -98,7 +104,7 @@ concept LdsTransferDescriptor = requires(T t) {
 template <typename T>
 concept EpilogueDescriptor = requires(T t) {
     { t.m_xdl_per_wave_per_shuffle } -> SizeType;
-    { t.n_per_wave_per_shuffle } -> SizeType;
+    { t.n_xdl_per_wave_per_shuffle } -> SizeType;
     { t.scalar_per_vector } -> SizeType;
 };
 
@@ -149,6 +155,31 @@ concept TileOptimizationsDescriptor = requires(T t) {
     { t.num_groups_to_merge } -> std::convertible_to<int>;
     { t.split_image } -> std::convertible_to<bool>;
     { t.explicit_gemm } -> std::convertible_to<bool>;
+    { t.two_stage } -> std::convertible_to<bool>;
+    { t.streamk.enabled } -> std::convertible_to<bool>;
+    { t.streamk.reduction_strategy } -> std::convertible_to<StreamKReductionStrategy>;
+    { t.streamk.persistent } -> std::convertible_to<bool>;
+};
+
+// Concept to check if struct specifies depthwise convolution tile parameters.
+template <typename T>
+concept DepthwiseConvParamsDescriptor = requires(T t) {
+    { t.block_size } -> std::convertible_to<int>;
+    { t.tile_h } -> std::convertible_to<int>;
+    { t.tile_w } -> std::convertible_to<int>;
+    { t.filter_h } -> std::convertible_to<int>;
+    { t.filter_w } -> std::convertible_to<int>;
+    { t.stride_h } -> std::convertible_to<int>;
+    { t.stride_w } -> std::convertible_to<int>;
+    { t.dilation_h } -> std::convertible_to<int>;
+    { t.dilation_w } -> std::convertible_to<int>;
+    { t.pad_h } -> std::convertible_to<int>;
+    { t.pad_w } -> std::convertible_to<int>;
+    { t.nbatch } -> std::convertible_to<int>;
+    { t.subtile_h } -> std::convertible_to<int>;
+    { t.subtile_w } -> std::convertible_to<int>;
+    { t.in_vec } -> std::convertible_to<int>;
+    { t.out_vec } -> std::convertible_to<int>;
 };
 
 // Base requirement for all ConvAlgorithm concepts, i.e., all conv algorithm concepts must meet this
@@ -189,6 +220,14 @@ concept GridwiseBwdXdlGemmDescriptor = requires(T t) {
 
 // Concept to check if a struct specifies gridwise XDL GEMM info.
 template <typename T>
+concept GridwiseBwdDataXdlGemmDescriptor = requires(T t) {
+    { t.ak1 } -> SizeType;
+    { t.bk1 } -> SizeType;
+    { t.xdl_params } -> GridwiseXdlGemmDescriptor;
+};
+
+// Concept to check if a struct specifies gridwise XDL GEMM info.
+template <typename T>
 concept SpecifiesGridwiseFwdXdlGemm = requires(T t) {
     { t.gridwise_gemm } -> GridwiseFwdXdlGemmDescriptor;
 };
@@ -197,6 +236,12 @@ concept SpecifiesGridwiseFwdXdlGemm = requires(T t) {
 template <typename T>
 concept SpecifiesGridwiseBwdXdlGemm = requires(T t) {
     { t.gridwise_gemm } -> GridwiseBwdXdlGemmDescriptor;
+};
+
+// Concept to check if a struct specifies gridwise XDL GEMM info.
+template <typename T>
+concept SpecifiesGridwiseBwdDataXdlGemm = requires(T t) {
+    { t.gridwise_gemm } -> GridwiseBwdDataXdlGemmDescriptor;
 };
 
 // Concept to check if a struct specifies gridwise WMMA GEMM info.
@@ -269,12 +314,39 @@ concept SpecifiesTileBlockGemm = requires {
     { T::block_gemm.scheduler } -> std::convertible_to<PipelineScheduler>;
 };
 
-// Concept to check if struct specifies block GEMM (CK Tile).
+// Concept to check if struct specifies optimizations (CK Tile).
 template <typename T>
 concept SpecifiesTileOptimizations = requires {
     { T::optimizations.num_groups_to_merge } -> std::convertible_to<int>;
     { T::optimizations.split_image } -> std::convertible_to<bool>;
     { T::optimizations.explicit_gemm } -> std::convertible_to<bool>;
+    { T::optimizations.two_stage } -> std::convertible_to<bool>;
+    { T::optimizations.streamk.enabled } -> std::convertible_to<bool>;
+    {
+        T::optimizations.streamk.reduction_strategy
+    } -> std::convertible_to<StreamKReductionStrategy>;
+    { T::optimizations.streamk.persistent } -> std::convertible_to<bool>;
+};
+
+// Concept to check if struct specifies depthwise convolution tile parameters.
+template <typename T>
+concept SpecifiesDepthwiseConvParams = requires {
+    { T::depthwise_params.block_size } -> std::convertible_to<int>;
+    { T::depthwise_params.tile_h } -> std::convertible_to<int>;
+    { T::depthwise_params.tile_w } -> std::convertible_to<int>;
+    { T::depthwise_params.filter_h } -> std::convertible_to<int>;
+    { T::depthwise_params.filter_w } -> std::convertible_to<int>;
+    { T::depthwise_params.stride_h } -> std::convertible_to<int>;
+    { T::depthwise_params.stride_w } -> std::convertible_to<int>;
+    { T::depthwise_params.dilation_h } -> std::convertible_to<int>;
+    { T::depthwise_params.dilation_w } -> std::convertible_to<int>;
+    { T::depthwise_params.pad_h } -> std::convertible_to<int>;
+    { T::depthwise_params.pad_w } -> std::convertible_to<int>;
+    { T::depthwise_params.nbatch } -> std::convertible_to<int>;
+    { T::depthwise_params.subtile_h } -> std::convertible_to<int>;
+    { T::depthwise_params.subtile_w } -> std::convertible_to<int>;
+    { T::depthwise_params.in_vec } -> std::convertible_to<int>;
+    { T::depthwise_params.out_vec } -> std::convertible_to<int>;
 };
 
 template <typename T>
@@ -290,6 +362,11 @@ concept SpecifiesFwdConvSpecialization = requires {
 template <typename T>
 concept SpecifiesBwdWeightConvSpecialization = requires {
     { T::bwd_weight_specialization } -> std::convertible_to<ConvSpecialization>;
+};
+
+template <typename T>
+concept SpecifiesBwdDataConvSpecialization = requires {
+    { T::bwd_data_specialization } -> std::convertible_to<ConvSpecialization>;
 };
 
 template <typename T>
@@ -441,6 +518,19 @@ concept SpecifiesDlBwdBlockTransfer = requires {
 template <typename T>
 concept SpecifiesDlEpilogue = requires {
     { T::transfer.c } -> DlEpilogueDescriptor;
+};
+
+// Concept to detect StreamK configuration in a tile algorithm descriptor.
+template <typename T>
+concept StreamKDescriptor = requires(T t) {
+    { t.reduction_strategy } -> std::convertible_to<StreamKReductionStrategy>;
+    { t.persistent } -> std::convertible_to<bool>;
+};
+
+// Concept to check if a tile algorithm specifies StreamK work distribution.
+template <typename T>
+concept SpecifiesStreamK = requires {
+    { T::streamk } -> StreamKDescriptor;
 };
 
 } // namespace ck_tile::builder

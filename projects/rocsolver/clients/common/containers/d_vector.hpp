@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,6 +47,10 @@ class d_vector
 private:
     size_t size, bytes;
 
+protected:
+    // Memory allocation status
+    hipError_t mem_status;
+
 public:
     inline size_t nmemb() const noexcept
     {
@@ -62,7 +66,9 @@ public:
     T* device_vector_setup()
     {
         T* d = nullptr;
-        if((hipMalloc)(&d, bytes) != hipSuccess)
+
+        mem_status = (hipMalloc)(&d, bytes);
+        if(mem_status != hipSuccess)
         {
             fmt::print(stderr, "Error allocating {} bytes ({} GB)\n", bytes, bytes >> 30);
             d = nullptr;

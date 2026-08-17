@@ -77,9 +77,9 @@ protected:
                 EXPECT_TRUE(fs::remove(log_filepath));
         }
 
-        EXPECT_EQ(hipFree(dA), hipSuccess);
-        EXPECT_EQ(hipFree(dP), hipSuccess);
-        EXPECT_EQ(hipFree(dinfo), hipSuccess);
+        ASSERT_EQ(hipFree(dA), hipSuccess);
+        ASSERT_EQ(hipFree(dP), hipSuccess);
+        ASSERT_EQ(hipFree(dinfo), hipSuccess);
     }
 
     unsigned int nondeterministic_value()

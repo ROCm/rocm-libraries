@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -45,28 +45,8 @@ Tests:
   category: quick
   function: cscsort
   precision: *single_precision
-  M: [10, 500]
+  M: [10, 300]
   N: [33, 242]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  algo: [0, 1]
-
-- name: cscsort
-  category: pre_checkin
-  function: cscsort
-  precision: *single_precision
-  M: [0, 3872, 10000]
-  N: [0, 1623, 10000]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  algo: [0, 1]
-
-- name: cscsort
-  category: nightly
-  function: cscsort
-  precision: *single_precision
-  M: [29593, 159382, 738249]
-  N: [9173, 82940, 538192]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   algo: [0, 1]
@@ -80,14 +60,23 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   algo: [0, 1]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit,
-             Chevron2,
-             mplate,
-             qc2534]
+             nos7]
+
+- name: cscsort
+  category: pre_checkin
+  function: cscsort
+  precision: *single_precision
+  M: [8, 2000]
+  N: [8, 1623]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  algo: [0, 1]
 
 - name: cscsort_file
   category: pre_checkin
@@ -98,13 +87,21 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   algo: [0, 1]
-  filename: [rma10,
+  filename: [bmwcra_1,
+             amazon0312,
+             rma10,
              mc2depi,
-             ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
+             ASIC_320k]
+
+- name: cscsort
+  category: nightly
+  function: cscsort
+  precision: *single_precision
+  M: [5000]
+  N: [4586, 5000]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  algo: [0, 1]
 
 - name: cscsort_file
   category: nightly
@@ -116,8 +113,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   algo: [0, 1]
   filename: [bibd_22_8,
-             bmwcra_1,
-             amazon0312,
              Chebyshev4,
              sme3Dc,
              webbase-1M,

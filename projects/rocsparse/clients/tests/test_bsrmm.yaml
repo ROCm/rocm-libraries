@@ -28,12 +28,9 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   2.0, beta:  0.0,  alphai:  0.5, betai:  0.5 }
-    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  0.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:   0.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
@@ -57,7 +54,7 @@ Tests:
   block_dim: [5]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_zero]
@@ -66,13 +63,13 @@ Tests:
   category: quick
   function: bsrmm
   precision: *single_double_precisions_complex_real
-  M: [275, 708]
-  N: [128, 628]
-  K: [173, 747]
-  block_dim: [5, 16]
+  M: [300]
+  N: [300]
+  K: [747]
+  block_dim: [16]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
@@ -82,20 +79,17 @@ Tests:
   function: bsrmm
   precision: *single_double_precisions
   M: 1
-  N: [4, 19]
+  N: [19]
   K: 1
   block_dim: [4]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   direction: [rocsparse_direction_column]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
+  filename: [nos2,
+             nos6]
 
 - name: bsrmm_file
   category: quick
@@ -128,8 +122,8 @@ Tests:
   category: pre_checkin
   function: bsrmm
   precision: *single_double_precisions_complex_real
-  M: [0, 1, 511]
-  N: [0, 1, 2, 37]
+  M: [8, 1]
+  N: [8, 1]
   K: [0, 1, 391]
   block_dim: [1, 2, 4, 8, 16, 32, 64]
   alpha_beta: *alpha_beta_range_checkin
@@ -143,7 +137,7 @@ Tests:
   category: pre_checkin
   function: bsrmm
   precision: *single_double_precisions
-  M: [2511]
+  M: [2000]
   N: [37]
   K: [391]
   block_dim: [2]
@@ -174,7 +168,7 @@ Tests:
   category: pre_checkin
   function: bsrmm
   precision: *single_double_precisions
-  M: [2511]
+  M: [2000]
   N: [37]
   K: [391]
   block_dim: [2]

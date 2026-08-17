@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #pragma once
 
 #include "rocsparse_adaptive_info.hpp"
+#include "rocsparse_indextype_utils.hpp"
 #include "rocsparse_lrb_info.hpp"
 #include "rocsparse_mat_descr.hpp"
 #include "rocsparse_nnzsplit_info.hpp"
@@ -49,8 +50,8 @@ typedef struct _rocsparse_csrmv_info
     const void*                 csr_row_ptr{};
     const void*                 csr_col_ind{};
 
-    rocsparse_indextype index_type_I = rocsparse_indextype_u16;
-    rocsparse_indextype index_type_J = rocsparse_indextype_u16;
+    rocsparse_indextype index_type_I = deprecated_rocsparse_indextype_u16;
+    rocsparse_indextype index_type_J = deprecated_rocsparse_indextype_u16;
 
     _rocsparse_csrmv_info() {}
 
@@ -63,6 +64,7 @@ typedef struct _rocsparse_csrmv_info
     {
         this->adaptive.clear();
         this->lrb.clear();
+        this->nnzsplit.clear();
         this->trans        = rocsparse_operation_none;
         this->m            = 0;
         this->n            = 0;
@@ -71,8 +73,8 @@ typedef struct _rocsparse_csrmv_info
         this->descr        = nullptr;
         this->csr_row_ptr  = nullptr;
         this->csr_col_ind  = nullptr;
-        this->index_type_I = rocsparse_indextype_u16;
-        this->index_type_J = rocsparse_indextype_u16;
+        this->index_type_I = deprecated_rocsparse_indextype_u16;
+        this->index_type_J = deprecated_rocsparse_indextype_u16;
     }
 
 } * rocsparse_csrmv_info, *rocsparse_cscmv_info;

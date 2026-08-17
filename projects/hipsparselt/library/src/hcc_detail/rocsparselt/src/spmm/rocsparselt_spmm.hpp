@@ -33,11 +33,7 @@
 #include "handle.h"
 #include "hipsparselt_ostream.hpp"
 #include "utility.hpp"
-#if BUILD_WITH_TENSILE
 #include "tensile_host.hpp"
-#else
-#include "kernel_launcher.hpp"
-#endif
 
 template <typename Ti, typename To = Ti, typename Tc = To>
 rocsparselt_status spmm_typecasting(const char*                     caller,
@@ -138,10 +134,20 @@ inline rocsparselt_status rocsparselt_spmm_template(const char*                 
         return spmm_typecasting<int8_t, __half, float>(EX_TYPECASTING_PARM);
     case MATMUL_DATATYPE_I8_B_S:
         return spmm_typecasting<int8_t, hip_bfloat16, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_I8_I_S:
+        return spmm_typecasting<int8_t, int, float>(EX_TYPECASTING_PARM);        
+#if HIP_FP8_TYPE_OCP
     case MATMUL_DATATYPE_E4M3_S_S:
         return spmm_typecasting<__hip_fp8_e4m3, float, float>(EX_TYPECASTING_PARM);
     case MATMUL_DATATYPE_E5M2_S_S:
         return spmm_typecasting<__hip_fp8_e5m2, float, float>(EX_TYPECASTING_PARM);
+#endif
+#if HIP_FP8_TYPE_FNUZ
+    case MATMUL_DATATYPE_E4M3_FNUZ_S_S:
+        return spmm_typecasting<__hip_fp8_e4m3_fnuz, float, float>(EX_TYPECASTING_PARM);
+    case MATMUL_DATATYPE_E5M2_FNUZ_S_S:
+        return spmm_typecasting<__hip_fp8_e5m2_fnuz, float, float>(EX_TYPECASTING_PARM);
+#endif
     default:
         return rocsparselt_status_not_implemented;
     }

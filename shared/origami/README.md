@@ -5,15 +5,31 @@
 ## Documentation
 
 - [Quick Start Guide](#quick-start-guide)
+  - [Prerequisites](#prerequisites)
+  - [Install](#install)
 - [API Example](#api-example)
+  - [Python API](#python-api)
+  - [C++ API](#c-api)
 - [Supported GPUs](#supported-gpus)
 - [Build and Install](#build-and-install)
-  - [C++](#build-and-install-origami-c)
   - [Python](#build-and-install-origami-python)
+  - [C++](#build-and-install-origami-c)
+  - [CMake Options](#cmake-options)
   - [Origami Tests](#origami-tests)
+- [Debug Logging](#debug-logging)
+  - [Text Log](#text-log)
+  - [CSV Log](#csv-log)
+  - [Environment Variables](#environment-variables)
 - [Contribute](#contribute)
+- [How to Cite](#how-to-cite)
 
 ## Quick Start Guide
+
+### Prerequisites
+
+**ROCm/HIP**: This package requires ROCm/HIP to be installed on your system. ROCm cannot be installed via pip and must be installed separately. See the [ROCm Quick Start Guide](https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html) for installation instructions. Ensure `CMAKE_PREFIX_PATH` includes your ROCm install (default: `/opt/rocm`).
+
+### Install
 
 ```bash
 pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
@@ -132,9 +148,14 @@ int main() {
 |-------------|------|------------|-----------|
 | gfx942 | MI325X, MI300X, MI300A | ✔️ | ✔️ |
 | gfx950 | MI355X, MI350X | ✔️ | ✔️ |
-| gfx1100 | Radeon RX 7900 XTX, Radeon RX 7900 XT, Radeon RX 7900 GRE, Radeon RX 7900 | ✔️ | |
-| gfx1151 | Radeon RX 8000 series | ✔️ | |
-| gfx1201 | Radeon RX 8900 XTX, Radeon RX 8900 XT, Radeon RX 8800 XT, Radeon RX 8800, Radeon RX 8700 XT, Radeon RX 8700, Radeon RX 8600 XT, Radeon RX 8600 | ✔️ | |
+| gfx1100 | Radeon RX 7900 XTX/XT/GRE, Radeon PRO W7900 (Dual Slot), Radeon PRO W7800 (48GB) | ✔️ | |
+| gfx1150 | Radeon 890M/880M iGPU | ✔️ | |
+| gfx1151 | Radeon 8060S/8050S/8040S iGPU | ✔️ | |
+| gfx1152 | Radeon 860M/840M iGPU | ✔️ | |
+| gfx1153 | TBA | ✔️ | |
+| gfx1200 | Radeon RX 9060 (XT) | ✔️ | |
+| gfx1201 | Radeon RX 9070 (XT/GRE), Radeon AI PRO R9700 (D/S) | ✔️ | |
+| gfx1250 | TBA | ✔️ | |
 
 For more information on GPU hardware specifications, check out [ROCm documentation](https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html).
 
@@ -142,13 +163,28 @@ For more information on GPU hardware specifications, check out [ROCm documentati
 
 ### Build and Install Origami (Python)
 
-Origami provides Python bindings that allow you to use Origami's functionality directly from Python. Install directly from the rocm-libraries repository without cloning:
+Origami provides Python bindings that allow you to use Origami's functionality directly from Python.
+
+#### Installation
+
+Install directly from the rocm-libraries repository (this could take some time due to the size of the rocm-libraries repo):
 
 ```bash
 pip install git+https://github.com/ROCm/rocm-libraries.git#subdirectory=shared/origami/python
 ```
 
-If you have cloned the repository:
+To efficiently install directly from the rocm-libraries repository use do the following:
+
+```bash
+TEMP_DIR=$(mktemp -d)
+git clone --no-checkout --filter=blob:none --sparse https://github.com/ROCm/rocm-libraries.git $TEMP_DIR
+git -C $TEMP_DIR sparse-checkout set shared/origami
+git -C $TEMP_DIR checkout develop
+pip install $TEMP_DIR/shared/origami/python -v
+rm -rf $TEMP_DIR
+```
+
+If you have already cloned the repository:
 
 ```bash
 cd shared/origami/python
@@ -158,6 +194,12 @@ pip install -e .
 The build system uses `pyproject.toml` with scikit-build-core, which integrates with CMake for building the Python bindings.
 
 #### CMake Build (Alternative)
+
+When building with CMake, you'll need to manually install the Python dependencies listed in `shared/origami/python/requirements.txt`:
+
+```bash
+pip install -r shared/origami/python/requirements.txt
+```
 
 Build Python bindings using CMake from the `shared/origami` directory:
 
@@ -211,11 +253,14 @@ cmake --install build/
 | `ORIGAMI_BUILD_SHARED_LIBS` | Build shared libraries | `ON` (standalone), `OFF` (as part of rocm-libraries) |
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
-| `ORIGAMI_ENABLE_INSTALL` | Configure origami installation | `ON` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
 
 
 ## Origami Tests
+
+### Build and Run All Tests
+
+Build with both C++ and Python tests enabled:
 
 ```bash
 cd shared/origami
@@ -223,17 +268,99 @@ cd shared/origami
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DCMAKE_INSTALL_PREFIX=/opt/rocm \
-  -DORIGAMI_BUILD_TESTING=ON
+  -DORIGAMI_BUILD_TESTING=ON \
+  -DORIGAMI_ENABLE_PYTHON=ON
 
 cmake --build build/ --parallel
 
-# Run tests
+cd build/
 ctest --output-on-failure
 ```
 
 > [!NOTE]
 > Python tests are automatically added when `ORIGAMI_BUILD_TESTING=ON` and `ORIGAMI_ENABLE_PYTHON=ON`.
+
+### Running Specific Tests
+
+Run only C++ tests:
+
+```bash
+./build/tests/origami-tests
+```
+
+Run a specific C++ test by name:
+
+```bash
+./build/tests/origami-tests "Origami: select_config_mnk unit test"
+```
+
+Run only Python tests (from `shared/origami/python`):
+
+```bash
+pip install -e .
+python -m pytest tests/ -v
+```
+
+Run Python tests excluding slow tests:
+
+```bash
+python -m pytest tests/ -m "not slow"
+```
+
+Run selector tests (requires torch):
+
+```bash
+python -m pytest tests/test_selector.py -v
+```
+
+## Debug Logging
+
+Origami includes built-in debug logging that exposes internal latency model values (cache hit rates, memory/compute latencies, tile parameters, etc.). Debug output requires the `ANALYTICAL_GEMM_DEBUG=1` environment variable to activate the debug code paths.
+
+### Text Log
+
+Write human-readable debug output to a file by setting `ORIGAMI_LOG_FILE`:
+
+```bash
+export ANALYTICAL_GEMM_DEBUG=1
+export ORIGAMI_LOG_FILE=/tmp/origami.log
+```
+
+Each GEMM evaluation produces a block of key-value lines in the log file, e.g.:
+
+```
+[DEBUG] gemm.cpp:99 - ======== Origami Debug Info ========
+[DEBUG] gemm.cpp:100 - M: 2048
+[DEBUG] gemm.cpp:101 - N: 2048
+...
+[DEBUG] gemm.cpp:116 - total_latency: 45678.9
+[DEBUG] gemm.cpp:117 - =================================
+```
+
+### CSV Log
+
+Write structured CSV output (one row per GEMM evaluation) by using a `.csv` file extension:
+
+```bash
+export ANALYTICAL_GEMM_DEBUG=1
+export ORIGAMI_LOG_FILE=/tmp/origami_debug.csv
+```
+
+The log format is inferred from the file extension: `.csv` selects CSV mode, anything else selects human-readable text mode.
+
+The CSV file contains columns for every value logged with `OLOG_DEBUG`, such as `M`, `N`, `K`, `L_mem`, `L_compute`, `H_mem_l2_A`, `total_latency`, etc. This is useful for bulk analysis of the latency model across many GEMM problems.
+
+Accumulated rows are flushed to disk in two situations:
+
+1. **At process exit** — the logger destructor writes any remaining rows.
+2. **On explicit flush or reconfiguration** — calling `Logger::flush()` writes buffered rows. Calling `Logger::update_from_env()` also flushes before applying the new configuration. Subsequent rows are appended incrementally.
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ANALYTICAL_GEMM_DEBUG` | Set to `1` to enable debug code paths in the latency model |
+| `ORIGAMI_LOG_FILE` | Path for log output; `.csv` extension selects CSV format, any other extension selects text |
 
 ## Contribute
 

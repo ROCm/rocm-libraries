@@ -21,7 +21,6 @@
 # SOFTWARE.
 #
 ################################################################################
-from copy import deepcopy
 from functools import lru_cache
 
 from Tensile.Common.Constants import MAX_FILENAME_LENGTH
@@ -30,23 +29,79 @@ from Tensile.Common.RequiredParameters import getRequiredParametersMin, getRequi
 from .Problem import ProblemType
 
 
-def getKeyNoInternalArgs(state, splitGSU: bool):
-  state_copy = deepcopy(state)
-  state_copy["ProblemType"]["GroupedGemm"] = False
+# Parameters that are "internal args" — runtime dispatch parameters that don't
+# affect the generated kernel assembly. Two kernels differing only in these
+# fields compile to identical code objects.
+_INTERNAL_ARGS = (
+    "WorkGroupMapping",
+    # "WorkGroupMappingXCC", # WGMXCC affects asm code gen
+    "WorkGroupMappingXCCGroup",
+    "StaggerU",
+    "StaggerUStride",
+    "StaggerUMapping",
+    "GlobalSplitUCoalesced",
+    "GlobalSplitUWorkGroupMappingRoundRobin",
+    "SFCWGM",
+)
+
+def getKeyNoInternalArgs(state, splitGSU: bool) -> str:
+  """Return a string key that identifies a kernel ignoring internal args.
+
+  Internal args (WorkGroupMapping, StaggerU, etc.) are runtime dispatch
+  parameters — they don't change the generated assembly. This function
+  produces a canonical key where those parameters are masked to "M" and
+  GroupedGemm is forced to False, so that kernels differing only in
+  internal args map to the same key. GroupedGemm masking is skipped when
+  SupportUserArgs is set, because the batch-offset codegen is gated on
+  GroupedGemm there and the assembly genuinely differs.
+
+  Used to:
+    - Deduplicate kernels before code generation (BenchmarkProblems.py,
+      Run.py:getUniqueKernels) — avoids compiling the same assembly twice.
+    - Identify invalid kernels after compilation and propagate failures
+      to all solutions sharing that kernel (Run.py:removeInvalidSolutionsAndKernels).
+    - Build kernel-to-solution mappings for post-processing
+      (Run.py:passPostKernelInfoToSolution).
+  """
+  # Work on the raw dict to avoid Solution.__setitem__ invalidating _name cache
+  s = state._state if hasattr(state, '_state') else state
+  pt = s["ProblemType"]
+
+  # Save originals
+  backups = {k: s[k] for k in _INTERNAL_ARGS}
+  gsu_backup = s["GlobalSplitU"]
+  gg_backup = pt["GroupedGemm"]
+
+  # Mask internal args. GroupedGemm normally does not change the generated
+  # assembly, so it is masked to dedup grouped/non-grouped kernels. But when
+  # SupportUserArgs is set, the batch-offset codegen (KernelWriterAssembly /
+  # Signature) is gated on GroupedGemm, so grouped and non-grouped kernels
+  # differ and must keep distinct keys -- preserve the real value in that case.
+  if "SupportUserArgs" not in pt or not pt["SupportUserArgs"]:
+    pt["GroupedGemm"] = False
   if splitGSU:
-    state_copy["GlobalSplitU"] = "M" if (state_copy["GlobalSplitU"] > 1 or state_copy["GlobalSplitU"] == -1) else state_copy["GlobalSplitU"]
-  elif state["GlobalSplitU"] != 0:
-    state_copy["GlobalSplitU"] = "M"
-  state_copy["WorkGroupMapping"] = "M"
-  state_copy["WorkGroupMappingXCC"] = "M"
-  state_copy["WorkGroupMappingXCCGroup"] = "M"
-  state_copy["StaggerU"] = "M"
-  state_copy["StaggerUStride"] = "M"
-  state_copy["StaggerUMapping"] = "M"
-  state_copy["GlobalSplitUCoalesced"] = "M"
-  state_copy["GlobalSplitUWorkGroupMappingRoundRobin"] = "M"
-  state_copy["SFCWGM"] = "M"
-  return state_copy
+    s["GlobalSplitU"] = "M" if (gsu_backup > 1 or gsu_backup == -1) else gsu_backup
+  elif gsu_backup != 0:
+    s["GlobalSplitU"] = "M"
+  for k in _INTERNAL_ARGS:
+    s[k] = "M"
+
+  # Compute string key (same as what str(deep_copied_solution) would produce)
+  key = _getName(s, getRequiredParametersFull(), splitGSU, False)
+
+  # Restore
+  pt["GroupedGemm"] = gg_backup
+  s["GlobalSplitU"] = gsu_backup
+  for k in _INTERNAL_ARGS:
+    s[k] = backups[k]
+
+  # Include codeObjectFile and DeviceNames in the key to prevent
+  # over-deduplication across different code object files / devices.
+  # The old code returned a Solution object whose __hash__ included these
+  # fields, so kernels targeting different .co files were kept separate.
+  cof = s.get("codeObjectFile", "")
+  dn = str(s.get("DeviceNames", ""))
+  return key + cof + dn
 
 
 @lru_cache(maxsize=None)
@@ -89,8 +144,6 @@ def getParameterValueAbbreviation(key, value):
     return '_'.join(getParameterValueAbbreviation(key, v) for v in value)
   elif isinstance(value, dict):
     return "_".join(f"{pos:d}{k:d}" for pos,k in value.items())
-  else:
-    raise Exception(f"Parameter {key}={value} is new object type ({type(value)})")
 
 
 def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInternalArgs):
@@ -100,9 +153,21 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
 
   gsuBackup = state["GlobalSplitU"]
   ggBackup = state["ProblemType"]["GroupedGemm"]
+  wgmxccBackup = state["WorkGroupMappingXCC"]
+
+  # Include WGMXCC in kernel name as either n1 for auto or 1 for set value
+  # Fixed values produce different assembly code
+  # If the key is missing from name, kernels are dropped as duplicates when they should be kept
+  if "WorkGroupMappingXCC" in state and state["WorkGroupMappingXCC"] != -1:
+    state["WorkGroupMappingXCC"] = 1
 
   if ignoreInternalArgs:
-    state["ProblemType"]["GroupedGemm"] = False
+    # GroupedGemm is masked so kernels differing only in GroupedGemm dedup to
+    # one key. When SupportUserArgs is set the batch-offset codegen depends on
+    # GroupedGemm, so grouped and non-grouped kernels are not identical and must
+    # keep distinct keys -- preserve the real value in that case.
+    if "SupportUserArgs" not in state["ProblemType"] or not state["ProblemType"]["SupportUserArgs"]:
+      state["ProblemType"]["GroupedGemm"] = False
     if splitGSU:
       state["GlobalSplitU"] = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
 
@@ -113,14 +178,18 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
       requiredParametersTemp.discard("GlobalSplitU")
   else:
     requiredParametersTemp = requiredParametersTemp.union(["WorkGroupMapping",
-                                                           "WorkGroupMappingXCC",
+                                                          #  "WorkGroupMappingXCC", # WGMXCC affects asm code gen
                                                            "WorkGroupMappingXCCGroup",
                                                            "StaggerU",
                                                            "StaggerUStride",
                                                            "StaggerUMapping",
                                                            "GlobalSplitUCoalesced",
                                                            "GlobalSplitUWorkGroupMappingRoundRobin"])
-  components = [f'{str(ProblemType(state["ProblemType"],printIndexAssignmentInfo=False))}']
+  pt = state["ProblemType"]
+  if isinstance(pt, ProblemType):
+    components = [str(pt)]
+  else:
+    components = [str(ProblemType(pt, printIndexAssignmentInfo=False))]
 
   if "MacroTile0" in state \
       and "MacroTile1" in state \
@@ -128,7 +197,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append(f'{getParameterNameAbbreviation("MacroTile")}{state["MacroTile0"]}x{state["MacroTile1"]}x{state["DepthU"]}')
 
   if "MatrixInstM" in state:
-    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{state["MatrixInstM"]}x{state["MatrixInstN"]}x{state["MatrixInstB"]}')
+    # Use the physical opcode dims (MIBlock) for the name, not the possibly-swapped
+    # effective MatrixInstM/N, so the kernel identity matches the user-specified MI.
+    _miName = state.get("MIBlock", [state["MatrixInstM"], state["MatrixInstN"]])
+    components.append(f'{getParameterNameAbbreviation("MatrixInstruction")}{_miName[0]}x{_miName[1]}x{state["MatrixInstB"]}')
     requiredParametersTemp.add("MIWaveTile")
   else:
     requiredParametersTemp.add("ThreadTile")
@@ -137,15 +209,24 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     components.append('CMS')
 
   components.append('SN')
-  for key in sorted(state.keys()):
-    # Skip SFA tag if using default wgm algo
-    if key == "SpaceFillingAlgo" and len(state[key]) == 0:
+
+  # Skip SFA tag if using default wgm algo
+  if "SpaceFillingAlgo" in requiredParametersTemp and len(state["SpaceFillingAlgo"]) == 0:
+    requiredParametersTemp.discard("SpaceFillingAlgo")
+
+  # Only name LDSSegmentInterleave when applied (==1), so the applied kernel is distinct from its
+  # baseline twin without tagging every other kernel. Same idiom as WorkGroupMappingXCC above.
+  if state.get("LDSSegmentInterleave") == 1:
+    requiredParametersTemp.add("LDSSegmentInterleave")
+
+  for key in sorted(requiredParametersTemp):
+    if key not in state or key == "CustomKernelName":
       continue
-    if key[0] != '_' and key != "CustomKernelName" and key in requiredParametersTemp:
-        components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
+    components.append(f'{getParameterNameAbbreviation(key)}{getParameterValueAbbreviation(key, state[key])}')
 
   state["GlobalSplitU"] = gsuBackup
   state["ProblemType"]["GroupedGemm"] = ggBackup
+  state["WorkGroupMappingXCC"] = wgmxccBackup
 
   return '_'.join(components)
 

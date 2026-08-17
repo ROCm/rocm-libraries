@@ -4,7 +4,12 @@
 #pragma once
 
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/mxfp_convert.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+
+#include <limits>
 
 namespace ck_tile {
 
@@ -37,7 +42,7 @@ struct e8m0_bexp_t
     {
     }
     CK_TILE_HOST_DEVICE constexpr operator type() const { return data; }
-    CK_TILE_HOST_DEVICE constexpr raw_type& get() { return data; }
+    CK_TILE_HOST_DEVICE constexpr raw_type& get() [[clang::lifetimebound]] { return data; }
     CK_TILE_HOST_DEVICE constexpr raw_type get() const { return data; }
     CK_TILE_HOST_DEVICE constexpr operator float() const;
 
@@ -48,6 +53,15 @@ struct e8m0_bexp_t
 
 using e8m0_t     = e8m0_bexp_t;
 using e8m0_raw_t = typename e8m0_t::raw_type;
+
+template <typename>
+struct native_t;
+
+template <>
+struct native_t<e8m0_t>
+{
+    using type = e8m0_t::type;
+};
 
 template <>
 struct numeric_traits<e8m0_t>

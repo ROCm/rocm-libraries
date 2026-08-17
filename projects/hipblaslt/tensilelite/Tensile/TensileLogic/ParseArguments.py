@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 ################################################################################
 
 from argparse import ArgumentParser
+from pathlib import Path
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
@@ -63,6 +64,14 @@ def parseArguments():
         default=ToolchainDefaults.CXX_COMPILER,
         help=f"default: {ToolchainDefaults.CXX_COMPILER}",
     )
+    argParser.add_argument(
+        "--architecture",
+        dest="Architecture",
+        action="store",
+        default="all",
+        help="semicolon-separated list of gfx architectures to validate "
+        "(e.g. 'gfx1151;gfx942'); 'all' validates every logic file",
+    )
 
     group = argParser.add_mutually_exclusive_group()
     group.add_argument(
@@ -73,6 +82,23 @@ def parseArguments():
         dest="CheckOnlyCustomKernels",
         action="store_true",
         help="run logic file checks only on custom kernels",
+    )
+    argParser.add_argument(
+        "--known-bugs",
+        dest="KnownBugs",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="YAML file listing (path, solution_name) pairs to skip validation for "
+        "(documented exceptions; paths relative to LogicPath). solution_name is the "
+        "solution's SolutionNameMin, which is stable across library re-tuning",
+    )
+    argParser.add_argument(
+        "--strict-known-bugs",
+        dest="StrictKnownBugs",
+        action="store_true",
+        help="exit non-zero when a known-bugs entry no longer fails validation "
+        "(a landed fix); use in CI to force removal of stale entries",
     )
     args = argParser.parse_args()
 

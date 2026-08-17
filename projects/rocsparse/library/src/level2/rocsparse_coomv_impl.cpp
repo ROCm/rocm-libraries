@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -157,7 +157,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                     const rocsparse_mat_descr descr,
                                                     const void*               coo_val_,
                                                     const void*               coo_row_ind_,
-                                                    const void*               coo_col_ind_)
+                                                    const void*               coo_col_ind_,
+                                                    rocsparse_coomv_info*     coomv_info)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -187,6 +188,13 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_ENUM(1, trans);
 
     ROCSPARSE_CHECKARG_ENUM(2, alg);
+
+    // Allocate the coomv info on first analysis so the computed max nnz-per-row
+    // can be cached for reuse by the compute stage.
+    if(coomv_info[0] == nullptr)
+    {
+        coomv_info[0] = new _rocsparse_coomv_info();
+    }
 
     switch(alg)
     {
@@ -231,7 +239,7 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&max_nnz, sizeof(I), handle->stream));
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(I) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coo2csr_template(
                 handle, coo_row_ind, (I)nnz, m, csr_row_ptr, descr->base));
@@ -245,12 +253,11 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                csr_row_ptr,
                                                max_nnz);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
-                                               max_nnz,
-                                               sizeof(I),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            I max_nnz_host = 0;
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                &max_nnz_host, max_nnz, sizeof(I), hipMemcpyDeviceToHost, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
+            coomv_info[0]->max_nnz_per_row = static_cast<int64_t>(max_nnz_host);
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
@@ -264,7 +271,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
 
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(int64_t) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::coo2csr_template(handle, coo_row_ind, nnz, m, csr_row_ptr, descr->base));
@@ -279,12 +287,12 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                 csr_row_ptr,
                 max_nnz);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
-                                               max_nnz,
-                                               sizeof(int64_t),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&coomv_info[0]->max_nnz_per_row,
+                                                         max_nnz,
+                                                         sizeof(int64_t),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
@@ -317,7 +325,8 @@ namespace rocsparse
                                                   const I*                  coo_col_ind,
                                                   const X*                  x,
                                                   const T*                  beta_device_host,
-                                                  Y*                        y)
+                                                  Y*                        y,
+                                                  int64_t                   max_nnz_per_row)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -334,7 +343,7 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-            if(descr->max_nnz_per_row <= 10 * 256)
+            if(max_nnz_per_row <= 10 * 256)
             {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                     (rocsparse::coomvn_atomic_loops<256, 1>),
@@ -401,6 +410,76 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+    // Launch the segmented (default) coomv-N path for a given workgroup size.
+    // Factored out so the workgroup size can be selected at runtime while still
+    // being a compile-time template parameter for the kernels.
+    template <uint32_t COOMVN_DIM, typename T, typename I, typename A, typename X, typename Y>
+    static rocsparse_status coomvn_segmented_launch(rocsparse_handle          handle,
+                                                    int64_t                   nnz,
+                                                    const T*                  alpha_device_host,
+                                                    const rocsparse_mat_descr descr,
+                                                    const A*                  coo_val,
+                                                    const I*                  coo_row_ind,
+                                                    const I*                  coo_col_ind,
+                                                    const X*                  x,
+                                                    Y*                        y)
+    {
+        hipStream_t stream = handle->stream;
+
+        int maxthreads = handle->properties.maxThreadsPerBlock;
+        int nprocs     = 2 * handle->properties.multiProcessorCount;
+        int maxblocks  = (nprocs * maxthreads - 1) / COOMVN_DIM + 1;
+
+        I minblocks = (nnz - 1) / COOMVN_DIM + 1;
+        I nblocks   = maxblocks < minblocks ? maxblocks : minblocks;
+        I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
+
+        // Buffer
+        char* ptr = reinterpret_cast<char*>(handle->buffer);
+        ptr += 256;
+
+        // row block reduction buffer
+        I* row_block_red = reinterpret_cast<I*>(ptr);
+        ptr += ((sizeof(I) * nblocks - 1) / 256 + 1) * 256;
+
+        // val block reduction buffer
+        T* val_block_red = reinterpret_cast<T*>(ptr);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::coomvn_segmented_loops<COOMVN_DIM>),
+            dim3(nblocks),
+            dim3(COOMVN_DIM),
+            0,
+            stream,
+            nnz,
+            nloops,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            coo_row_ind,
+            coo_col_ind,
+            coo_val,
+            x,
+            y,
+            row_block_red,
+            val_block_red,
+            descr->base,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
+            dim3(1),
+            dim3(COOMVN_DIM),
+            0,
+            stream,
+            nblocks,
+            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
+            row_block_red,
+            val_block_red,
+            y,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+
+        return rocsparse_status_success;
+    }
+
     template <typename T, typename I, typename A, typename X, typename Y>
     static rocsparse_status coomv_segmented_dispatch(rocsparse_handle          handle,
                                                      rocsparse_operation       trans,
@@ -417,8 +496,6 @@ namespace rocsparse
                                                      Y*                        y)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        // Stream
-        hipStream_t stream = handle->stream;
 
         I ysize = (trans == rocsparse_operation_none) ? m : n;
 
@@ -430,58 +507,69 @@ namespace rocsparse
         {
         case rocsparse_operation_none:
         {
-#define COOMVN_DIM 256
+            // Workgroup size selection for the segmented default path.
+            //
+            // The historical value is 256, which was tuned for wave64 GPUs.
+            // On wave32 hardware (RDNA, e.g. gfx1201) a 128-thread workgroup is
+            // faster for all but the smallest problems: it doubles the occupancy
+            // granularity (4 wavefronts per block instead of 8) and halves the
+            // partner distance of the block-wide segmented reduction. For small
+            // problems the extra block-reduction entries and kernel-launch
+            // overhead of the smaller workgroup slightly hurt, so 256 is kept
+            // there. The crossover is driven by total non-zeros (problem size),
+            // not by nnz/row density: matrices with the same density but larger
+            // nnz benefit while smaller ones do not.
+            //
+            // Performance portability:
+            //  - the tuned size is expressed in WAVEFRONTS (4 * wavefront_size ==
+            //    128 threads / 4 wavefronts on wave32) rather than a fixed thread
+            //    count;
+            //  - the crossover is scaled by the device's resident-thread capacity
+            //    (multiProcessorCount * maxThreadsPerMultiProcessor) instead of a
+            //    fixed nnz magic number, so it tracks wave32 GPUs of different
+            //    sizes. The ~52x-capacity knee reproduces the value measured on
+            //    gfx1201 (RX 9070; capacity 57344 -> ~3M nnz);
+            //  - it stays gated to wave32 because the crossover was only
+            //    characterized there, so wave64 keeps the historical 256-thread
+            //    workgroup unconditionally (no risk on an untuned architecture).
+            uint32_t coomvn_dim = 256;
+            if(handle->wavefront_size == 32)
+            {
+                const int64_t device_capacity
+                    = static_cast<int64_t>(handle->properties.multiProcessorCount)
+                      * static_cast<int64_t>(handle->properties.maxThreadsPerMultiProcessor);
+                if(device_capacity > 0 && nnz >= 52 * device_capacity)
+                {
+                    coomvn_dim = 4u * static_cast<uint32_t>(handle->wavefront_size);
+                }
+            }
 
-            int maxthreads = handle->properties.maxThreadsPerBlock;
-            int nprocs     = 2 * handle->properties.multiProcessorCount;
-            int maxblocks  = (nprocs * maxthreads - 1) / COOMVN_DIM + 1;
-
-            I minblocks = (nnz - 1) / COOMVN_DIM + 1;
-            I nblocks   = maxblocks < minblocks ? maxblocks : minblocks;
-            I nloops    = (nnz - 1) / (COOMVN_DIM * nblocks) + 1;
-
-            // Buffer
-            char* ptr = reinterpret_cast<char*>(handle->buffer);
-            ptr += 256;
-
-            // row block reduction buffer
-            I* row_block_red = reinterpret_cast<I*>(ptr);
-            ptr += ((sizeof(I) * nblocks - 1) / 256 + 1) * 256;
-
-            // val block reduction buffer
-            T* val_block_red = reinterpret_cast<T*>(ptr);
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_segmented_loops<COOMVN_DIM>),
-                dim3(nblocks),
-                dim3(COOMVN_DIM),
-                0,
-                stream,
-                nnz,
-                nloops,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                coo_row_ind,
-                coo_col_ind,
-                coo_val,
-                x,
-                y,
-                row_block_red,
-                val_block_red,
-                descr->base,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::coomvn_segmented_loops_reduce<COOMVN_DIM>),
-                dim3(1),
-                dim3(COOMVN_DIM),
-                0,
-                stream,
-                nblocks,
-                ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
-                row_block_red,
-                val_block_red,
-                y,
-                handle->pointer_mode == rocsparse_pointer_mode_host);
-#undef COOMVN_DIM
+            if(coomvn_dim == 128)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::coomvn_segmented_launch<128, T>(handle,
+                                                                nnz,
+                                                                alpha_device_host,
+                                                                descr,
+                                                                coo_val,
+                                                                coo_row_ind,
+                                                                coo_col_ind,
+                                                                x,
+                                                                y)));
+            }
+            else
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    (rocsparse::coomvn_segmented_launch<256, T>(handle,
+                                                                nnz,
+                                                                alpha_device_host,
+                                                                descr,
+                                                                coo_val,
+                                                                coo_row_ind,
+                                                                coo_col_ind,
+                                                                x,
+                                                                y)));
+            }
             break;
         }
         case rocsparse_operation_transpose:
@@ -525,7 +613,8 @@ namespace rocsparse
                                     const I*                  coo_col_ind,
                                     const X*                  x,
                                     const T*                  beta_device_host,
-                                    Y*                        y)
+                                    Y*                        y,
+                                    int64_t                   max_nnz_per_row)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -563,7 +652,8 @@ namespace rocsparse
                                                                        coo_col_ind,
                                                                        x,
                                                                        beta_device_host,
-                                                                       y));
+                                                                       y,
+                                                                       max_nnz_per_row));
             return rocsparse_status_success;
         }
         }
@@ -586,12 +676,17 @@ rocsparse_status rocsparse::coomv_template(rocsparse_handle          handle,
                                            const void*               coo_val_,
                                            const void*               coo_row_ind_,
                                            const void*               coo_col_ind_,
+                                           rocsparse_coomv_info      coomv_info,
                                            const void*               x_,
                                            const void*               beta_device_host_,
                                            void*                     y_,
                                            bool                      fallback_algorithm)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    // The atomic algorithm selects its kernel launch configuration from the
+    // max nnz-per-row computed during analysis; other algorithms ignore it.
+    const int64_t max_nnz_per_row = (coomv_info != nullptr) ? coomv_info->max_nnz_per_row : 0;
 
     const I  m                 = static_cast<I>(m_);
     const I  n                 = static_cast<I>(n_);
@@ -632,7 +727,8 @@ rocsparse_status rocsparse::coomv_template(rocsparse_handle          handle,
                                                            coo_col_ind,
                                                            x,
                                                            beta_device_host,
-                                                           y));
+                                                           y,
+                                                           max_nnz_per_row));
 
     return rocsparse_status_success;
 }
@@ -724,6 +820,7 @@ namespace rocsparse
                                                                   coo_val,
                                                                   coo_row_ind,
                                                                   coo_col_ind,
+                                                                  nullptr,
                                                                   x,
                                                                   beta_device_host,
                                                                   y,
@@ -742,7 +839,8 @@ namespace rocsparse
                                                                        const rocsparse_mat_descr, \
                                                                        const void*,               \
                                                                        const void*,               \
-                                                                       const void*);              \
+                                                                       const void*,               \
+                                                                       rocsparse_coomv_info*);    \
     template rocsparse_status rocsparse::coomv_template<T, I, T, T, T>(rocsparse_handle,          \
                                                                        rocsparse_operation,       \
                                                                        rocsparse_coomv_alg,       \
@@ -754,6 +852,7 @@ namespace rocsparse
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        const void*,               \
+                                                                       rocsparse_coomv_info,      \
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        void*,                     \
@@ -779,7 +878,8 @@ INSTANTIATE(rocsparse_double_complex, int64_t);
                                                                        const rocsparse_mat_descr, \
                                                                        const void*,               \
                                                                        const void*,               \
-                                                                       const void*)
+                                                                       const void*,               \
+                                                                       rocsparse_coomv_info*)
 
 INSTANTIATE_MIXED_ANALYSIS(int32_t, int8_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int8_t);
@@ -803,6 +903,7 @@ INSTANTIATE_MIXED_ANALYSIS(int64_t, rocsparse_bfloat16);
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        const void*,               \
+                                                                       rocsparse_coomv_info,      \
                                                                        const void*,               \
                                                                        const void*,               \
                                                                        void*,                     \

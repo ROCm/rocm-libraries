@@ -1,0 +1,43 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "results": [
+    {
+      "ms_best": 0.010483975410461427,
+      "ms_median": 0.010546175241470336,
+      "pct_hbm": 40.04587797688489,
+      "vs_rocblas": 1.008074558698214,
+      "max_abs": 0.0,
+      "label": "dtl_tk1024_mem_ALL",
+      "tile_k": 1024,
+      "pipe": "mem"
+    },
+    {
+      "ms_best": 0.01142762541770935,
+      "ms_median": 0.011485024690628051,
+      "pct_hbm": 36.73904110904576,
+      "vs_rocblas": 1.0988101363182068,
+      "max_abs": 0.0,
+      "label": "dtl_tk1024_compv4_ALL",
+      "tile_k": 1024,
+      "pipe": "compv4"
+    },
+    {
+      "ms_best": 0.012070025205612183,
+      "ms_median": 0.012094625234603883,
+      "pct_hbm": 34.78368875358998,
+      "vs_rocblas": 1.1605793466934793,
+      "max_abs": 0.0,
+      "label": "dtl_tk2048_mem_ALL",
+      "tile_k": 2048,
+      "pipe": "mem"
+    },
+    {
+      "label": "dtl_tk2048_compv4_ALL",
+      "error": "compile: invalid GEMM spec: LDS budget 262656 > 160 KiB cap (AB=262144, C=512)"
+    }
+  ]
+}

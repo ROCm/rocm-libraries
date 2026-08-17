@@ -28,19 +28,20 @@
 
 #include <Tensile/MasterSolutionLibrary.hpp>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <functional>
 #include <vector>
+#include <map>
+#include <queue>
 
 #include "RunListener.hpp"
+#include <origami/simulator/tensilelite/formocast_simulator.hpp>
 
 namespace TensileLite
 {
     namespace Client
     {
-        namespace po = boost::program_options;
-
         /**
  * Not an iterator by the traditional definition but I can't think of a better
  * name
@@ -126,7 +127,8 @@ namespace TensileLite
                              bool                      printWinnerOnly);
 
             virtual bool checkSolution(ContractionSolution&    solution,
-                                       ContractionProblemGemm& problem);
+                                       ContractionProblemGemm& problem,
+                                       bool                    isReportValid=true);
             virtual bool checkSolution(ContractionSolution& solution);
 
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> m_library;
@@ -149,6 +151,7 @@ namespace TensileLite
             AllSolutionsIterator(
                 std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                 std::shared_ptr<Hardware>                                      hardware,
+                double                                                         predictionThreshold,
                 int                                                            firstSolutionIdx,
                 int                                                            numSolutions,
                 bool                                                           printWinnerOnly,
@@ -165,10 +168,19 @@ namespace TensileLite
             virtual bool                                 runCurrentSolution() override;
 
         private:
+            std::vector<std::shared_ptr<ContractionSolution>> m_solutions;
+            std::queue<std::pair<int,double>>                 m_qSolutionIdx;
+            std::unordered_map<int,double>                    m_hitrate;
+            std::unordered_map<int,origami::Formocast::PredictedPerformance> m_predPerf;
+
+            double m_predictionThreshold;
+            double m_currentPrediction;
+
             int m_firstSolutionIdx;
             int m_lastSolutionIdx;
 
             int m_currentSolutionIdx;
+            int m_currentIdx;
 
             RunCriteria m_runCriteria;
         };
@@ -201,6 +213,7 @@ namespace TensileLite
             TopSolutionIterator(
                 std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                 std::shared_ptr<Hardware>                                      hardware,
+                double                                                         predictionThreshold,
                 int                                                            numSolutions,
                 bool                                                           printWinnerOnly);
 
@@ -215,8 +228,14 @@ namespace TensileLite
 
         private:
             std::vector<std::shared_ptr<ContractionSolution>> m_solutions;
+            std::queue<std::pair<int,double>>                 m_qSolutionIdx;
+            std::unordered_map<int,double>                    m_hitrate;
+            std::unordered_map<int,origami::Formocast::PredictedPerformance> m_predPerf;
+
             int                                               m_numSolutions       = 1;
             int                                               m_currentSolutionIdx = 0;
+            double                                            m_predictionThreshold;
+            double                                            m_currentPrediction;
         };
     } // namespace Client
 } // namespace TensileLite

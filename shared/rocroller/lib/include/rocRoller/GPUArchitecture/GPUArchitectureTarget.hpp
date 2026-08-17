@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -67,6 +44,7 @@ namespace rocRoller
         GFX1030,
         GFX1200,
         GFX1201,
+        GFX1250,
 
         Count,
     };
@@ -94,11 +72,19 @@ namespace rocRoller
     struct GPUArchitectureTarget
     {
     public:
-        GPUArchitectureGFX      gfx      = GPUArchitectureGFX::UNKNOWN;
-        GPUArchitectureFeatures features = {};
+        GPUArchitectureGFX      gfx            = GPUArchitectureGFX::UNKNOWN;
+        GPUArchitectureFeatures features       = {};
+        int                     asicRevisionId = -1;
 
-        static GPUArchitectureTarget fromString(std::string const& archStr);
-        std::string                  toString() const;
+        static GPUArchitectureTarget fromString(std::string const& archStr,
+                                                int                asicRevisionId = -1);
+        // Return a string representation of the architecture target.
+        // This includes the asic revision ID if it is non-negative so that
+        // targets with the same GFX ID but with different revisions can be differentiated.
+        std::string toString() const;
+        // Return a string that can be provided as input to the LLVM Assembler.
+        // It purposely omits the asic revision ID since LLVM does not use it.
+        std::string toAssemblerString() const;
 
         std::string name() const;
 
@@ -117,9 +103,14 @@ namespace rocRoller
             return gfx == GPUArchitectureGFX::GFX942;
         }
 
-        constexpr bool isCDNA35GPU() const
+        constexpr bool isCDNA4GPU() const
         {
             return gfx == GPUArchitectureGFX::GFX950;
+        }
+
+        constexpr bool isCDNA5GPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX1250;
         }
 
         constexpr bool isRDNA1GPU() const
@@ -149,12 +140,12 @@ namespace rocRoller
 
         constexpr bool isCDNAGPU() const
         {
-            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA35GPU();
+            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA4GPU() || isCDNA5GPU();
         }
 
         constexpr bool isGFX9GPU() const
         {
-            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU();
+            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA4GPU();
         }
 
         constexpr bool isGFX10GPU() const
@@ -164,7 +155,7 @@ namespace rocRoller
 
         constexpr bool isGFX12GPU() const
         {
-            return isRDNA4GPU();
+            return isRDNA4GPU() || isCDNA5GPU();
         }
 
         auto operator<=>(const GPUArchitectureTarget&) const = default;
@@ -203,23 +194,30 @@ namespace rocRoller
         return target.name();
     }
 
-    constexpr std::array<rocRoller::GPUArchitectureTarget, 16> SupportedArchitectures
-        = {GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.xnack = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.sramecc = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.xnack = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.sramecc = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX942},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX942, {.sramecc = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX950},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.xnack = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX1012},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX1012, {.xnack = true}},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX1030},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX1200},
-           GPUArchitectureTarget{GPUArchitectureGFX::GFX1201}};
+    constexpr GPUArchitectureTarget GPUArchTargetGFX1250Rev0{GPUArchitectureGFX::GFX1250, {}, 0};
+    constexpr GPUArchitectureTarget GPUArchTargetGFX1250Rev1{GPUArchitectureGFX::GFX1250, {}, 1};
+
+    constexpr std::array<rocRoller::GPUArchitectureTarget, 19> SupportedArchitectures = {
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.xnack = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.sramecc = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.xnack = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.sramecc = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX942},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX942, {.sramecc = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX950},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.xnack = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true, .xnack = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX1012},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX1012, {.xnack = true}},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX1030},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX1200},
+        GPUArchitectureTarget{GPUArchitectureGFX::GFX1201},
+        GPUArchTargetGFX1250Rev0,
+        GPUArchTargetGFX1250Rev1,
+    };
 }
 
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget_impl.hpp>

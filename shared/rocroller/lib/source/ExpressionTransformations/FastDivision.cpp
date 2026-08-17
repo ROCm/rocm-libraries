@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
@@ -45,8 +22,8 @@ namespace rocRoller
          * operations.
          */
 
-        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
-            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context)
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context)
         {
             auto multiple = launchTimeSubExpressions(magicMultiple(denominator), context);
 
@@ -57,7 +34,7 @@ namespace rocRoller
             {
                 auto shifts = launchTimeSubExpressions(magicShifts(denominator), context);
 
-                return {multiple, shifts, nullptr};
+                return {multiple, shifts, nullptr, (shifts & literal(1u << 31u))};
             }
 
             auto bitfield = launchTimeSubExpressions(magicShiftAndSign(denominator), context);
@@ -75,7 +52,7 @@ namespace rocRoller
             auto sign        = (convert(resultType, bitfield) << literal((endingBit - startingBit)))
                         >> literal(endingBit);
 
-            return {multiple, shifts, sign};
+            return {multiple, shifts, sign, nullptr};
         }
 
         void enableDivideBy(ExpressionPtr expr, ContextPtr context)
@@ -102,8 +79,8 @@ namespace rocRoller
 
             AssertFatal(exprTimes[EvaluationTime::KernelLaunch], ShowValue(exprTimes));
 
-            auto const& [magicExpr, numShiftsExpr, signExpr]
-                = getMagicMultipleShiftAndSign(expr, context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(expr, context);
 
             auto magicTimes = evaluationTimes(magicExpr);
             auto shiftTimes = evaluationTimes(numShiftsExpr);
@@ -118,6 +95,8 @@ namespace rocRoller
 
             if(isSigned)
             {
+                AssertFatal(numShiftsMSBExpr == nullptr,
+                            "Signed case does not need the MSB of magicShift");
                 AssertFatal(signExpr != nullptr);
                 auto signTimes = evaluationTimes(signExpr);
 
@@ -153,8 +132,8 @@ namespace rocRoller
 
             auto k = context->kernel();
 
-            auto const& [magicExpr, numShiftsExpr, signExpr]
-                = getMagicMultipleShiftAndSign(denominator, context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(denominator, context);
 
             {
                 EvaluationTimes evalTimes
@@ -183,7 +162,10 @@ namespace rocRoller
 
                 auto t = (arithmeticShiftR(numerator - q, one)) + q;
                 setComment(t, "Magic t (unsigned)");
-                result = arithmeticShiftR(t, numShiftsExpr);
+
+                result = conditional(
+                    numShiftsMSBExpr == literal(0u), arithmeticShiftR(t, numShiftsExpr), numerator);
+
                 setComment(result, "Magic result (unsigned)");
             }
             else

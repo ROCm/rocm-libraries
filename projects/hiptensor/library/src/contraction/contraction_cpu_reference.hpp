@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,28 +31,31 @@
 
 #include <hiptensor/hiptensor.h>
 
-hiptensorStatus_t hiptensorContractionReference(const hiptensorPlan_t       plan,
-                                                void const*                 alpha,
-                                                void const*                 A,
-                                                void const*                 B,
-                                                void const*                 beta,
-                                                void const*                 C,
-                                                void*                       D,
-                                                std::vector<size_t> const&  a_ms_ks_lengths,
-                                                std::vector<size_t> const&  a_ms_ks_strides,
-                                                std::vector<int32_t> const& a_ms_ks_modes,
-                                                std::vector<size_t> const&  b_ks_ns_lengths,
-                                                std::vector<size_t> const&  b_ks_ns_strides,
-                                                std::vector<int32_t> const& b_ks_ns_modes,
-                                                std::vector<size_t> const&  c_ms_ns_lengths,
-                                                std::vector<size_t> const&  c_ms_ns_strides,
-                                                std::vector<int32_t> const& c_ms_ns_modes,
-                                                std::vector<size_t> const&  d_ms_ns_lengths,
-                                                std::vector<size_t> const&  d_ms_ns_strides,
-                                                std::vector<int32_t> const& d_ms_ns_modes,
-                                                hiptensorDataType_t         typeA,
-                                                hiptensorDataType_t         typeB,
-                                                hiptensorDataType_t         typeC,
-                                                hiptensorDataType_t         typeD,
-                                                void*                       workspace);
+#include "contraction_solution.hpp"
 
+HIPTENSOR_EXPORT hiptensorStatus_t
+    hiptensorContractionReference(const hiptensorPlan_t                 plan,
+                                  void const*                           alpha,
+                                  void const*                           A,
+                                  void const*                           B,
+                                  void const*                           beta,
+                                  void const*                           C,
+                                  void*                                 D,
+                                  std::vector<size_t> const&            a_ms_ks_lengths,
+                                  std::vector<size_t> const&            a_ms_ks_strides,
+                                  std::vector<int32_t> const&           a_ms_ks_modes,
+                                  std::vector<size_t> const&            b_ks_ns_lengths,
+                                  std::vector<size_t> const&            b_ks_ns_strides,
+                                  std::vector<int32_t> const&           b_ks_ns_modes,
+                                  std::vector<size_t> const&            c_ms_ns_lengths,
+                                  std::vector<size_t> const&            c_ms_ns_strides,
+                                  std::vector<int32_t> const&           c_ms_ns_modes,
+                                  std::vector<size_t> const&            d_ms_ns_lengths,
+                                  std::vector<size_t> const&            d_ms_ns_strides,
+                                  std::vector<int32_t> const&           d_ms_ns_modes,
+                                  hiptensorDataType_t                   typeA,
+                                  hiptensorDataType_t                   typeB,
+                                  hiptensorDataType_t                   typeC,
+                                  hiptensorDataType_t                   typeD,
+                                  hiptensor::ContractionUnaryOps const& unaryOps,
+                                  void*                                 workspace);

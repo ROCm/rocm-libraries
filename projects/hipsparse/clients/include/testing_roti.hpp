@@ -91,8 +91,8 @@ void testing_roti(Arguments argus)
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
     int                  N        = argus.N;
     int                  nnz      = argus.nnz;
-    T                    c        = argus.get_alpha<T>();
-    T                    s        = argus.get_beta<T>();
+    T                    c        = make_DataType<T>(argus.c);
+    T                    s        = make_DataType<T>(argus.s);
     hipsparseIndexBase_t idx_base = argus.baseA;
 
     hipsparseLocalHandle_t handle(argus);
@@ -166,16 +166,7 @@ void testing_roti(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * N, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int i = 0; i < nnz; ++i)
-        {
-            int idx = hx_ind[i] - idx_base;
-
-            T x = hx_val_gold[i];
-            T y = hy_gold[idx];
-
-            hx_val_gold[i] = testing_fma(c, x, testing_mult(s, y));
-            hy_gold[idx]   = testing_fma(c, y, testing_mult(-s, x));
-        }
+        host_roti(nnz, hx_val_gold.data(), hx_ind.data(), hy_gold.data(), c, s, idx_base);
 
         // enable unit check, notice unit check is not invasive, but norm check is,
         // unit check and norm check can not be interchanged their order

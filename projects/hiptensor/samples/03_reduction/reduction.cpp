@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,9 +50,9 @@ int main()
     typedef float floatTypeC;
     typedef float floatTypeCompute;
 
-    hiptensorDataType_t          typeA       = HIPTENSOR_R_32F;
-    hiptensorDataType_t          typeC       = HIPTENSOR_R_32F;
-    hiptensorComputeDescriptor_t typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
+    hiptensorDataType_t                typeA       = HIPTENSOR_R_32F;
+    hiptensorDataType_t                typeC       = HIPTENSOR_R_32F;
+    hiptensorComputeDescriptor_t       typeCompute = HIPTENSOR_COMPUTE_DESC_32F;
     const hiptensorComputeDescriptor_t descCompute = HIPTENSOR_COMPUTE_DESC_32F;
 
     floatTypeCompute alpha = (floatTypeCompute)1.1f;
@@ -145,12 +145,18 @@ int main()
      *******************************/
 
     hiptensorOperationDescriptor_t desc;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateReduction(
-                          handle, &desc,
-                          descA, modeA.data(), HIPTENSOR_OP_IDENTITY,
-                          descC, modeC.data(), HIPTENSOR_OP_IDENTITY,
-                          descC, modeC.data(),
-                          opReduce, descCompute));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateReduction(handle,
+                                                   &desc,
+                                                   descA,
+                                                   modeA.data(),
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   descC,
+                                                   modeC.data(),
+                                                   HIPTENSOR_OP_IDENTITY,
+                                                   descC,
+                                                   modeC.data(),
+                                                   opReduce,
+                                                   descCompute));
 
     /**************************
     * Set the algorithm to use
@@ -159,23 +165,17 @@ int main()
     const hiptensorAlgo_t algo = HIPTENSOR_ALGO_DEFAULT;
 
     hiptensorPlanPreference_t planPref;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(
-                               handle,
-                               &planPref,
-                               algo,
-                               HIPTENSOR_JIT_MODE_NONE));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorCreatePlanPreference(handle, &planPref, algo, HIPTENSOR_JIT_MODE_NONE));
 
     /**********************
      * Query workspace estimate
      **********************/
 
-    uint64_t worksize = 0;
+    uint64_t                            worksize      = 0;
     const hiptensorWorksizePreference_t workspacePref = HIPTENSOR_WORKSPACE_DEFAULT;
-    CHECK_HIPTENSOR_ERROR(hiptensorEstimateWorkspaceSize(handle,
-                                          desc,
-                                          planPref,
-                                          workspacePref,
-                                          &worksize));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorEstimateWorkspaceSize(handle, desc, planPref, workspacePref, &worksize));
     void* work = nullptr;
     if(worksize > 0)
     {
@@ -191,20 +191,14 @@ int main()
      **************************/
 
     hiptensorPlan_t plan;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle,
-                 &plan,
-                 desc,
-                 planPref,
-                 worksize));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle, &plan, desc, planPref, worksize));
 
     /**********************
      * Run
      **********************/
 
-    CHECK_HIPTENSOR_ERROR(hiptensorReduce(handle, plan,
-            (const void*)&alpha, A_d,
-            (const void*)&beta,  C_d,
-                                 C_d, work, worksize, 0));
+    CHECK_HIPTENSOR_ERROR(hiptensorReduce(
+        handle, plan, (const void*)&alpha, A_d, (const void*)&beta, C_d, C_d, work, worksize, 0));
 
 #if !NDEBUG
     bool printElements = true;

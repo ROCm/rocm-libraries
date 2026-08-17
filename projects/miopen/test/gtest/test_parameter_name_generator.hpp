@@ -39,17 +39,11 @@ namespace {
 
 // Concept for printable objets which support the << operator.
 template <typename T>
-concept Printable = requires(std::ostream& os, T t)
-{
-    os << t;
-};
+concept Printable = requires(std::ostream& os, T t) { os << t; };
 
 // Concept for printable containers, elements of which support the << operator.
 template <typename T>
-concept PrintableElement = requires(std::ostream& os, T t)
-{
-    os << t[0];
-};
+concept PrintableElement = requires(std::ostream& os, T t) { os << t[0]; };
 
 // Concept for iterable containers.
 template <typename T>
@@ -63,7 +57,7 @@ concept NotContainer = !Container<T>;
 // It defines the << operator as required by GTest, and the cast operator that returns the wrapped
 // parameter. If you need to wrap a container, use the 'NamedContainer' template wrapper.
 template <typename T>
-requires Printable<T> && std::is_move_constructible_v<T>
+    requires Printable<T> && std::is_move_constructible_v<T>
 struct NamedParameter
 {
     NamedParameter(std::string parameterName, T parameterValue) noexcept
@@ -91,7 +85,7 @@ struct NamedParameter
 // container. If you need to wrap a parameter which is not a container, use the 'NamedParameter'
 // template wrapper.
 template <typename T>
-requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
 struct NamedContainer
 {
     NamedContainer(std::string containerName,
@@ -145,7 +139,7 @@ struct NamedContainer
 //      );
 //
 template <typename... T>
-static auto MakeNamedParameterValues(const std::string& name, T... values)
+[[maybe_unused]] auto MakeNamedParameterValues(const std::string& name, T... values)
 {
     return testing::Values(NamedParameter<T>{name, values}...);
 }
@@ -167,10 +161,10 @@ static auto MakeNamedParameterValues(const std::string& name, T... values)
 // NamedContainer<std::vector<int>>, and then fed into 'testing::Combine()'.
 //
 template <typename T>
-requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
-static auto MakeNamedParameterCollectionValues(const std::string& name,
-                                               const std::ranges::range auto& collection,
-                                               const std::string& separator = " ")
+    requires Container<T> && PrintableElement<T> && std::is_move_constructible_v<T>
+[[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
+                                                         const std::ranges::range auto& collection,
+                                                         const std::string& separator = " ")
 {
     std::vector<NamedContainer<T>> v;
 
@@ -185,9 +179,9 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 }
 
 template <typename T>
-requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
-static auto MakeNamedParameterCollectionValues(const std::string& name,
-                                               const std::ranges::range auto& collection)
+    requires NotContainer<T> && Printable<T> && std::is_move_constructible_v<T>
+[[maybe_unused]] auto MakeNamedParameterCollectionValues(const std::string& name,
+                                                         const std::ranges::range auto& collection)
 {
     std::vector<NamedParameter<T>> v;
 
@@ -211,8 +205,8 @@ static auto MakeNamedParameterCollectionValues(const std::string& name,
 //      GetRangeAsString(std::vector<int>{1, 2, 3, 4}, "x") returns "1x2x3x4"
 //      GetRangeAsString(std::vector<float>{1.1, 2.2, 3.3, 4.4}, ",") returns "1p1_2p2_3p3_4p4"
 //
-static std::string GetRangeAsString(const std::ranges::range auto& r,
-                                    std::string_view separator = " ")
+[[maybe_unused]] static std::string GetRangeAsString(const std::ranges::range auto& r,
+                                                     std::string_view separator = " ")
 {
     std::string str;
 

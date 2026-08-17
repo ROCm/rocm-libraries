@@ -1,4 +1,3 @@
-
 /* ************************************************************************
  * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -24,13 +23,17 @@
 #pragma once
 
 #include <vector>
+#include <memory>
+
 class EfficiencyMonitor
 {
 public:
-    virtual bool enabled()        = 0;
-    virtual bool detailedReport() = 0;
+    virtual ~EfficiencyMonitor()    = default;
+    virtual bool enabled()          = 0;
+    virtual bool detailedReport()   = 0;
+    virtual bool efficiencyReport() = 0;
 
-    virtual void set_device_id(int deviceId) = 0;
+    virtual void setDeviceId(int deviceId) = 0;
 
     virtual void start() = 0;
     virtual void stop()  = 0;
@@ -52,7 +55,6 @@ public:
     virtual size_t              getMemReadBytes()          = 0;
     virtual uint16_t            getCuCount()               = 0;
     virtual std::string         getDeviceString()          = 0;
-};
 
-EfficiencyMonitor& getEfficiencyMonitor();
-void                freeEfficiencyMonitor();
+    static std::shared_ptr<EfficiencyMonitor> create();
+};

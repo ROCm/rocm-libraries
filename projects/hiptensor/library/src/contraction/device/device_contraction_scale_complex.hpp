@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -193,10 +193,11 @@ namespace ck
                 using DecompCompute = ComputeDataType;
 
                 // For complex types, we need to make sure that all of the types are the same
-                static_assert(std::is_same_v<DecompA, DecompB> && std::is_same_v<DecompB, DecompE>
-                                  && std::is_same_v<DecompE, CShuffleDataType>
-                                  && std::is_same_v<DecompE, DecompCompute>,
-                              "Complex operations must have the same data type");
+                static_assert(
+                    std::is_same_v<
+                        DecompA,
+                        DecompB> && std::is_same_v<DecompB, DecompE> && std::is_same_v<DecompE, CShuffleDataType> && std::is_same_v<DecompE, DecompCompute>,
+                    "Complex operations must have the same data type");
 
                 static_assert(std::is_same_v<DecompA, float> || std::is_same_v<DecompA, double>,
                               "Complex operations only supported with single or double precision");
@@ -307,7 +308,7 @@ namespace ck
 
                     Argument(Argument&& other)
                         : mScaleArgs(
-                              {std::move(other.mScaleArgs[0]), std::move(other.mScaleArgs[1])})
+                            {std::move(other.mScaleArgs[0]), std::move(other.mScaleArgs[1])})
                         , mBilinearArgs({std::move(other.mBilinearArgs[0]),
                                          std::move(other.mBilinearArgs[1])})
                     {
@@ -685,10 +686,16 @@ namespace ck
             << MPerBlock << ", "
             << NPerBlock << ", "
             << KPerBlock << ", "
+            << MPerXDL   << ", "
+            << NPerXDL   << ", "
             << AK1 << ", "
             << BK1 << ", "
             << ABlockTransferSrcVectorDim << ", "
-            << BBlockTransferSrcVectorDim
+            << BBlockTransferSrcVectorDim << ", "
+            << ABlockTransferSrcScalarPerVector << ", "
+            << BBlockTransferSrcScalarPerVector << ", "
+            << ABlockLdsExtraM << ", "
+            << BBlockLdsExtraN
             << ">";
                     // clang-format on
 
@@ -699,4 +706,3 @@ namespace ck
         } // namespace device
     } // namespace tensor_operation
 } // namespace ck
-

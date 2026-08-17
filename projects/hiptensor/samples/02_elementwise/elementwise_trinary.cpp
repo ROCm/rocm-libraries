@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,6 @@
 
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/internal/hiptensor_utility.hpp>
-#include <hiptensor_options.hpp>
 
 #include "common.hpp"
 
@@ -52,17 +51,16 @@ int main()
     typedef float floatTypeD;
     typedef float floatTypeCompute;
 
-    hiptensorDataType_t typeA       = HIPTENSOR_R_32F;
-    hiptensorDataType_t typeB       = HIPTENSOR_R_32F;
-    hiptensorDataType_t typeC       = HIPTENSOR_R_32F;
-    hiptensorDataType_t typeD       = HIPTENSOR_R_32F;
+    hiptensorDataType_t typeA = HIPTENSOR_R_32F;
+    hiptensorDataType_t typeB = HIPTENSOR_R_32F;
+    hiptensorDataType_t typeC = HIPTENSOR_R_32F;
+    hiptensorDataType_t typeD = HIPTENSOR_R_32F;
 
     hiptensorComputeDescriptor_t const descCompute = HIPTENSOR_COMPUTE_DESC_32F;
 
     floatTypeCompute alpha = (floatTypeCompute)1.0f;
     floatTypeCompute beta  = (floatTypeCompute)1.0f;
     floatTypeCompute gamma = (floatTypeCompute)2.0f;
-
 
     /**********************
 	  \f[ D_{\Pi^C(i_0,i_1,...,i_n)} = \Phi_{ABC}(\Phi_{AB}(\alpha \Psi_A(A_{\Pi^A(i_0,i_1,...,i_n)}), \beta \Psi_B(B_{\Pi^B(i_0,i_1,...,i_n)})), \gamma \Psi_C(C_{\Pi^C(i_0,i_1,...,i_n)})) \f]
@@ -180,15 +178,23 @@ int main()
      *******************************/
 
     hiptensorOperationDescriptor_t desc;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateElementwiseTrinary(handle, 
-                                                  &desc,
-                                                  descA, modeA.data(), /* unary operator A */ HIPTENSOR_OP_IDENTITY,
-                                                  descB, modeB.data(), /* unary operator B */ HIPTENSOR_OP_IDENTITY,
-                                                  descC, modeC.data(), /* unary operator C */ HIPTENSOR_OP_IDENTITY,
-                                                  descD, modeD.data(),
-                                                  /* binary operator AC  */ HIPTENSOR_OP_ADD,
-                                                  /* binary operator ABC */ HIPTENSOR_OP_ADD,
-                                                  descCompute));
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorCreateElementwiseTrinary(handle,
+                                          &desc,
+                                          descA,
+                                          modeA.data(),
+                                          /* unary operator A */ HIPTENSOR_OP_IDENTITY,
+                                          descB,
+                                          modeB.data(),
+                                          /* unary operator B */ HIPTENSOR_OP_IDENTITY,
+                                          descC,
+                                          modeC.data(),
+                                          /* unary operator C */ HIPTENSOR_OP_IDENTITY,
+                                          descD,
+                                          modeD.data(),
+                                          /* binary operator AC  */ HIPTENSOR_OP_ADD,
+                                          /* binary operator ABC */ HIPTENSOR_OP_ADD,
+                                          descCompute));
 
     /**************************
     * Set the algorithm to use
@@ -196,36 +202,23 @@ int main()
 
     const hiptensorAlgo_t algo = HIPTENSOR_ALGO_DEFAULT;
 
-    hiptensorPlanPreference_t  planPref;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreatePlanPreference(handle,
-                                              &planPref,
-                                              algo,
-                                              HIPTENSOR_JIT_MODE_NONE));
+    hiptensorPlanPreference_t planPref;
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorCreatePlanPreference(handle, &planPref, algo, HIPTENSOR_JIT_MODE_NONE));
 
     /**************************
      * Create Plan
      **************************/
 
-    hiptensorPlan_t  plan;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreatePlan(handle,
-                                    &plan,
-                                    desc,
-                                    planPref,
-                                    0 /*workspaceSizeEstimate*/));
+    hiptensorPlan_t plan;
+    CHECK_HIPTENSOR_ERROR(
+        hiptensorCreatePlan(handle, &plan, desc, planPref, 0 /*workspaceSizeEstimate*/));
 
     /**********************
      * Run
      **********************/
-    using hiptensor::HiptensorOptions;
-    auto& options = HiptensorOptions::instance();
-    options->setColdRuns(5);
-    options->setHotRuns(50);
-
-    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryExecute(handle, plan,
-                                            (void*)&alpha, A_d,
-                                            (void*)&beta , B_d,
-                                            (void*)&gamma, C_d,
-                                                           D_d, 0));
+    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseTrinaryExecute(
+        handle, plan, (void*)&alpha, A_d, (void*)&beta, B_d, (void*)&gamma, C_d, D_d, 0));
 
 #if !NDEBUG
     bool printElements = false;

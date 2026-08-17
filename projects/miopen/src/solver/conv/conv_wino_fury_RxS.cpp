@@ -38,6 +38,9 @@
 
 #define WORKAROUND_SWDEV_453577 1
 
+// Workaround for an HSA_STATUS_ERROR_INVALID_ISA error encountered on gfx1103
+#define WORKAROUND_ISSUE_3044 1
+
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2)
 
@@ -76,7 +79,7 @@ uint32_t GetNGroups(uint64_t cu_count)
 bool GpuHasReducedVGPRMem(const std::string& dev_name)
 {
     static constexpr std::array<std::string_view, 8> kFullVgprMemDevices{
-        "gfx1100", "gfx1101", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201"};
+        "gfx1100", "gfx1101", "gfx1151", "gfx1200", "gfx1201"};
     const std::string_view name{dev_name};
     return std::find(kFullVgprMemDevices.begin(), kFullVgprMemDevices.end(), name) ==
            kFullVgprMemDevices.end();
@@ -323,7 +326,7 @@ public:
         {
             return std::make_unique<ShaderModelV2>(args, cu_count, n_groups, reduced_vgpr_mem);
         }
-        else if(StartsWith(dev_name, "gfx12"))
+        else if(StartsWith(dev_name, "gfx120"))
         {
             return std::make_unique<ShaderModelV4>(args, cu_count, n_groups, reduced_vgpr_mem);
         }
@@ -386,9 +389,24 @@ bool ConvWinoFuryRxSCommon<Winodata, Winofilter>::IsApplicable(const ExecutionCo
         return false;
 
     const auto dev_name = ctx.GetStream().GetDeviceName();
-    // All gfx11/gfx12 ASICs are supported
-    if(!(StartsWith(dev_name, "gfx11") || StartsWith(dev_name, "gfx12")))
+    // All gfx11/gfx120x ASICs are supported
+    if(!(StartsWith(dev_name, "gfx11") || StartsWith(dev_name, "gfx120")))
         return false;
+#if WORKAROUND_ISSUE_3044
+    if(dev_name == "gfx1103")
+    {
+        if constexpr(IS2X3)
+        {
+            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3))
+                return false;
+        }
+        if constexpr(IS3X2)
+        {
+            if(!env::enabled(MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2))
+                return false;
+        }
+    }
+#endif
 
     if(!(problem.GetKernelStrideH() == 1 && problem.GetKernelStrideW() == 1))
         return false;
@@ -502,7 +520,7 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     std::string kernel_arch    = "_gfx11";
 
     const bool is_gfx11 = StartsWith(dev_name, "gfx11");
-    const bool is_gfx12 = StartsWith(dev_name, "gfx12");
+    const bool is_gfx12 = StartsWith(dev_name, "gfx120");
 
     if(!is_gfx11 && !is_gfx12)
         MIOPEN_THROW(miopenStatusInternalError);
@@ -542,7 +560,7 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     kernel.l_wk.push_back(1);
     kernel.l_wk.push_back(1);
 
-    kernel.g_wk.push_back(wg_size * n_groups);
+    kernel.g_wk.push_back(wg_size * n_groups * args.G);
     kernel.g_wk.push_back(1);
     kernel.g_wk.push_back(1);
 
@@ -559,6 +577,8 @@ ConvWinoFuryRxSCommon<Winodata, Winofilter>::GetSolution(const ExecutionContext&
     auto flags = WinoShaderFlagsV2::F_NKCHR_STRIDES | WinoShaderFlagsV2::F_TENSOR_OFFSETS |
                  WinoShaderFlagsV2::F_USE_ACTIVATION_MODE |
                  WinoShaderFlagsV2::F_USE_EXTENDED_FLAGS_64;
+    if(args.G != 1)
+        flags |= WinoShaderFlagsV2::F_GROUPED_CONVOLUTION;
     if(problem.IsDirectionBackwardData())
         flags |= WinoShaderFlagsV2::F_REVERSE_R | WinoShaderFlagsV2::F_REVERSE_S;
     if(do_bias)
@@ -621,6 +641,7 @@ ConvWinoFuryRxS<Winodata, Winofilter>::GetSolution(const ExecutionContext& ctx,
 
 template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<2, 3>;
 // template struct MIOPEN_INTERNALS_EXPORT ConvWinoFuryRxS<3, 2>;
+template struct MIOPEN_INTERNALS_EXPORT TransposedConvWinoFuryRxS<2, 3>;
 
 } // namespace conv
 
@@ -659,13 +680,13 @@ bool ConvWinoFuryRxSFused<Winodata, Winofilter>::IsApplicable(
     if(activ_idx != -1)
     {
         const auto& activ_op = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[activ_idx]);
-        switch(activ_op.activMode)
+
+        if(activ_op.activMode != miopenActivationPASTHRU &&
+           activ_op.activMode != miopenActivationLOGISTIC &&
+           activ_op.activMode != miopenActivationTANH &&
+           activ_op.activMode != miopenActivationLEAKYRELU)
         {
-        case miopenActivationPASTHRU:
-        case miopenActivationLOGISTIC:
-        case miopenActivationTANH:
-        case miopenActivationLEAKYRELU: break;
-        default: return false;
+            return false;
         }
     }
 

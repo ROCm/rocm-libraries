@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2021 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/pooling/solvers.hpp>
 
@@ -31,6 +8,7 @@
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/mlo_internal.hpp>
+#include <miopen/solver/implicitgemm_util.hpp>
 
 #define WORKAROUND_ISSUE_MIFIN_80 1 // https://github.com/ROCm/MIFin/issues/80
 
@@ -48,7 +26,8 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
     return problem.GetDirection() == miopen::pooling::Direction::Backward          //
            && problem.GetXDesc().GetType() == problem.GetYDesc().GetType()         //
            && (problem.GetXDesc().GetType() == miopenFloat                         //
-               || problem.GetXDesc().GetType() == miopenHalf)                      //
+               || problem.GetXDesc().GetType() == miopenHalf                       //
+               || problem.GetXDesc().GetType() == miopenBFloat16)                  //
            && (problem.GetPooling().GetMode() == miopenPoolingMax                  //
                || problem.GetPooling().GetMode() == miopenPoolingAverage           //
                || problem.GetPooling().GetMode() == miopenPoolingAverageInclusive) //
@@ -66,9 +45,9 @@ bool PoolingBackwardNd::IsApplicable(const ExecutionContext&,
                 && problem.GetPooling().GetWorkspaceIndexMode() == miopenPoolingWorkspaceIndexMask);
 }
 
-ConvSolution
-PoolingBackwardNd::GetSolution(const ExecutionContext&,
-                               const miopen::pooling::ProblemDescription& problem) const
+ConvSolution PoolingBackwardNd::GetSolution(const ExecutionContext&,
+                                            const miopen::pooling::ProblemDescription& problem,
+                                            const PerformanceConfigPoolingNdBackward& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
@@ -98,9 +77,9 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
                                           ? MLO_POOLING_OP_AVE
                                           : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-    int pix_w_per_work = 1;
-    int pix_h_per_work = 4;
-    int pix_d_per_work = 2;
+    int pix_w_per_work = config.pix_w_per_work;
+    int pix_h_per_work = config.pix_h_per_work;
+    int pix_d_per_work = config.pix_d_per_work;
 
     int batch = top.GetLengths()[0];
     int chal  = top.GetLengths()[1];
@@ -120,11 +99,12 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
     int activ_work         = std::min(total_work, max_activ_workitem);
 
 #if WORKAROUND_ISSUE_MIFIN_80
-    const std::size_t wavesize = 64;
+    const std::size_t lcl_work = config.local_size;
 #else
     const std::size_t wavesize = context.GetStream().GetWavefrontWidth();
+    const std::size_t lcl_work = wavesize;
 #endif
-    size_t grp_num = (activ_work + wavesize - 1) / wavesize;
+    size_t grp_num = (activ_work + lcl_work - 1) / lcl_work;
 
     auto strides = problem.GetPooling().strides;
     auto lens    = problem.GetPooling().lens;
@@ -150,7 +130,7 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
         KernelBuildParameters{
             {"MLO_POOLING_OP_ID", pooling_method},
             {"MAX_ACTIV_WORKITEM", max_activ_workitem},
-            {"MLO_POOLING_GROUP_SZ0", wavesize},
+            {"MLO_POOLING_GROUP_SZ0", lcl_work},
             {"MLO_POOLING_GROUP_SZ1", 1},
             {"MLO_POOLING_GROUP_SZ2", 1},
             {"PIX_W_PER_WORK", pix_w_per_work},
@@ -170,8 +150,8 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
 
     kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
-    kernel.l_wk = {wavesize, 1, 1};
-    kernel.g_wk = {wavesize * grp_num, 1, 1};
+    kernel.l_wk = {lcl_work, 1, 1};
+    kernel.g_wk = {lcl_work * grp_num, 1, 1};
 
     result.construction_params.push_back(kernel);
 
@@ -179,13 +159,13 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
     const auto top_h = *(top.GetLengths().rbegin() + 1);
     const auto top_w = *(top.GetLengths().rbegin());
 
-    auto unpackStrides = [is2d](const auto& strides) {
-        return std::make_tuple(strides[0], // N stride
-                               strides[1], // C stride
-                               strides[2], // D stride. Same as H_stride in 3D converted from 2D.
-                               is2d        //
-                                   ? strides[2] // 2D H stride
-                                   : strides[3] // 3D H stride
+    auto unpackStrides = [is2d](const auto& strides_) {
+        return std::make_tuple(strides_[0], // N stride
+                               strides_[1], // C stride
+                               strides_[2], // D stride. Same as H_stride in 3D converted from 2D.
+                               is2d         //
+                                   ? strides_[2] // 2D H stride
+                                   : strides_[3] // 3D H stride
         );
     };
 
@@ -198,59 +178,59 @@ PoolingBackwardNd::GetSolution(const ExecutionContext&,
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-            decltype(auto) kernel = handle_.Run(kernels.front());
-            decltype(auto) params = raw_params.CastTo<miopen::pooling::BwdInvokeParams>();
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::pooling::BwdInvokeParams>();
 
             if(params.pooling.GetMode() == miopenPoolingMax)
             {
-                kernel(params.dy,
-                       params.dx,
-                       params.workspace,
-                       static_cast<unsigned>(pads[0]),
-                       static_cast<unsigned>(pads[1]),
-                       static_cast<unsigned>(pads[2]),
-                       static_cast<unsigned>(batch),
-                       static_cast<unsigned>(chal),
-                       static_cast<unsigned>(bot_d),
-                       static_cast<unsigned>(bot_h),
-                       static_cast<unsigned>(bot_w),
-                       static_cast<unsigned>(top_d),
-                       static_cast<unsigned>(top_h),
-                       static_cast<unsigned>(top_w),
-                       static_cast<unsigned>(bot_n_stride),
-                       static_cast<unsigned>(bot_c_stride),
-                       static_cast<unsigned>(bot_d_stride),
-                       static_cast<unsigned>(bot_h_stride),
-                       static_cast<unsigned>(top_n_stride),
-                       static_cast<unsigned>(top_c_stride),
-                       static_cast<unsigned>(top_d_stride),
-                       static_cast<unsigned>(top_h_stride),
-                       static_cast<unsigned>(total_work));
+                kernel_(params.dy,
+                        params.dx,
+                        params.workspace,
+                        static_cast<unsigned>(pads[0]),
+                        static_cast<unsigned>(pads[1]),
+                        static_cast<unsigned>(pads[2]),
+                        static_cast<unsigned>(batch),
+                        static_cast<unsigned>(chal),
+                        static_cast<unsigned>(bot_d),
+                        static_cast<unsigned>(bot_h),
+                        static_cast<unsigned>(bot_w),
+                        static_cast<unsigned>(top_d),
+                        static_cast<unsigned>(top_h),
+                        static_cast<unsigned>(top_w),
+                        static_cast<unsigned>(bot_n_stride),
+                        static_cast<unsigned>(bot_c_stride),
+                        static_cast<unsigned>(bot_d_stride),
+                        static_cast<unsigned>(bot_h_stride),
+                        static_cast<unsigned>(top_n_stride),
+                        static_cast<unsigned>(top_c_stride),
+                        static_cast<unsigned>(top_d_stride),
+                        static_cast<unsigned>(top_h_stride),
+                        static_cast<unsigned>(total_work));
             }
             else
             {
-                kernel(params.dy,
-                       params.dx,
-                       static_cast<unsigned>(pads[0]),
-                       static_cast<unsigned>(pads[1]),
-                       static_cast<unsigned>(pads[2]),
-                       static_cast<unsigned>(batch),
-                       static_cast<unsigned>(chal),
-                       static_cast<unsigned>(bot_d),
-                       static_cast<unsigned>(bot_h),
-                       static_cast<unsigned>(bot_w),
-                       static_cast<unsigned>(top_d),
-                       static_cast<unsigned>(top_h),
-                       static_cast<unsigned>(top_w),
-                       static_cast<unsigned>(bot_n_stride),
-                       static_cast<unsigned>(bot_c_stride),
-                       static_cast<unsigned>(bot_d_stride),
-                       static_cast<unsigned>(bot_h_stride),
-                       static_cast<unsigned>(top_n_stride),
-                       static_cast<unsigned>(top_c_stride),
-                       static_cast<unsigned>(top_d_stride),
-                       static_cast<unsigned>(top_h_stride),
-                       static_cast<unsigned>(total_work));
+                kernel_(params.dy,
+                        params.dx,
+                        static_cast<unsigned>(pads[0]),
+                        static_cast<unsigned>(pads[1]),
+                        static_cast<unsigned>(pads[2]),
+                        static_cast<unsigned>(batch),
+                        static_cast<unsigned>(chal),
+                        static_cast<unsigned>(bot_d),
+                        static_cast<unsigned>(bot_h),
+                        static_cast<unsigned>(bot_w),
+                        static_cast<unsigned>(top_d),
+                        static_cast<unsigned>(top_h),
+                        static_cast<unsigned>(top_w),
+                        static_cast<unsigned>(bot_n_stride),
+                        static_cast<unsigned>(bot_c_stride),
+                        static_cast<unsigned>(bot_d_stride),
+                        static_cast<unsigned>(bot_h_stride),
+                        static_cast<unsigned>(top_n_stride),
+                        static_cast<unsigned>(top_c_stride),
+                        static_cast<unsigned>(top_d_stride),
+                        static_cast<unsigned>(top_h_stride),
+                        static_cast<unsigned>(total_work));
             }
         };
     };
@@ -265,6 +245,62 @@ PoolingBackwardNd::GetWorkspaceSize(const ExecutionContext&,
     if(problem.GetPooling().GetMode() != miopenPoolingMax)
         return 0;
     return problem.GetYDesc().GetElementSize() * get_data_size(problem.GetPooling().GetIndexType());
+}
+
+bool PerformanceConfigPoolingNdBackward::SetNextValue(const miopen::pooling::ProblemDescription&)
+{
+#if !MIOPEN_BACKEND_HIP
+    return false;
+#else
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr std::size_t wavesize = 64;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return true;
+    if(!NextTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return true;
+    if(!NextTwoPower<1, wavesize>(local_size))
+        return true;
+    return false;
+#else
+    return false;
+#endif
+#endif
+}
+
+bool PerformanceConfigPoolingNdBackward::IsValidValue() const
+{
+#if WORKAROUND_ISSUE_MIFIN_80
+    constexpr std::size_t wavesize = 64;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_w_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_h_per_work))
+        return false;
+    if(!IsTwoPower<min_pix_per_work, max_pix_per_work>(pix_d_per_work))
+        return false;
+    if(!IsTwoPower<1, wavesize>(local_size))
+        return false;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool PoolingBackwardNd::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::pooling::ProblemDescription& problem,
+    const PerformanceConfigPoolingNdBackward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigPoolingNdBackward PoolingBackwardNd::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::pooling::ProblemDescription& problem) const
+{
+    PerformanceConfigPoolingNdBackward config;
+    config.HeuristicInit(problem);
+    return config;
 }
 
 } // namespace pooling

@@ -28,6 +28,8 @@ struct BaseGemmPipelineAgBgCrMem
 
     CK_TILE_HOST_DEVICE static constexpr auto TransposeC() { return Problem::TransposeC; }
 
+    static constexpr bool LargeTensors = Problem::LargeTensors;
+
     static constexpr index_t BlockSize = Problem::kBlockSize;
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
     static constexpr index_t NPerBlock = BlockGemmShape::kN;
@@ -93,9 +95,14 @@ struct BaseGemmPipelineAgBgCrMem
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
+        // Use amd_wave_read_first_lane to avoid higher resource usage.
+        // It forces to store these values in SGPR.
+        // Compiler cannot deduce if one path is used for all threads
+        const bool has_hot_loop_first_lane      = amd_wave_read_first_lane(has_hot_loop);
+        const TailNumber tail_number_first_lane = amd_wave_read_first_lane(tail_number);
         // Wrap the hot_loop dispatch first.
         auto tail_dispatch = [&](auto tail_num_constant) {
-            if(has_hot_loop)
+            if(has_hot_loop_first_lane)
             {
                 return run_func(bool_constant<true>{}, tail_num_constant);
             }
@@ -106,7 +113,7 @@ struct BaseGemmPipelineAgBgCrMem
         };
 
 #define CHECK_TAIL_NUMBER(TAIL_NUMBER, PREFETCH_VALUE)                                      \
-    else if(tail_number == TailNumber::TAIL_NUMBER)                                         \
+    else if(tail_number_first_lane == TailNumber::TAIL_NUMBER)                              \
     {                                                                                       \
         if constexpr(PrefetchStages > PREFETCH_VALUE)                                       \
         {                                                                                   \
@@ -114,11 +121,11 @@ struct BaseGemmPipelineAgBgCrMem
         }                                                                                   \
     }
         // Handle all the valid cases.
-        if(tail_number == TailNumber::One)
+        if(tail_number_first_lane == TailNumber::One)
         {
             return tail_dispatch(integral_constant<TailNumber, TailNumber::One>{});
         }
-        else if(tail_number == TailNumber::Full)
+        else if(tail_number_first_lane == TailNumber::Full)
         {
             return tail_dispatch(integral_constant<TailNumber, TailNumber::Full>{});
         }
@@ -178,6 +185,8 @@ struct GemmPipelineAgBgCrMem : public BaseGemmPipelineAgBgCrMem<Problem>
     static constexpr index_t MPerBlock = BlockGemmShape::kM;
     static constexpr index_t NPerBlock = BlockGemmShape::kN;
     static constexpr index_t KPerBlock = BlockGemmShape::kK;
+
+    static constexpr bool Async = false;
 
     template <bool IsWave32Host = false>
     static constexpr index_t GetVectorSizeA()
@@ -351,19 +360,19 @@ struct GemmPipelineAgBgCrMem : public BaseGemmPipelineAgBgCrMem<Problem>
 
             // prefetch
             // global read 0
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             a_block_tiles.at(I0{}) = load_tile_with_elementwise(a_copy_dram_window, a_element_func);
 
-            // Move each A — the enhanced function move_tile_window is executed, which takes a tuple
+            // Move each A - the enhanced function move_tile_window is executed, which takes a tuple
             // as input.
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
-            // Load tile — during value loading, an elementwise function is executed for each B0,
-            // B1, … BN. The values B0, B1, … BN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each B0,
+            // B1, ... BN. The values B0, B1, ... BN are read by the same thread.
             b_block_tiles.at(I0{}) = load_tile_with_elementwise(b_copy_dram_window, b_element_func);
 
-            // Move each B — the enhanced function move_tile_window is executed, which takes a tuple
+            // Move each B - the enhanced function move_tile_window is executed, which takes a tuple
             // as input.
             move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 
@@ -663,19 +672,19 @@ struct GemmPipelineAgBgCrMem : public BaseGemmPipelineAgBgCrMem<Problem>
             // prefetch
             // global read 0
 
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             a_block_tiles.at(I0{}) = load_tile_with_elementwise(a_copy_dram_window, a_element_func);
 
-            // Move each A — the enhanced function move_tile_window is executed, which takes a tuple
+            // Move each A - the enhanced function move_tile_window is executed, which takes a tuple
             // as input.
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
 
-            // Load tile — during value loading, an elementwise function is executed for each B0,
-            // B1, … BN. The values B0, B1, … BN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each B0,
+            // B1, ... BN. The values B0, B1, ... BN are read by the same thread.
             b_block_tiles.at(I0{}) = load_tile_with_elementwise(b_copy_dram_window, b_element_func);
 
-            // Move each B — the enhanced function move_tile_window is executed, which takes a tuple
+            // Move each B - the enhanced function move_tile_window is executed, which takes a tuple
             // as input.
             move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 

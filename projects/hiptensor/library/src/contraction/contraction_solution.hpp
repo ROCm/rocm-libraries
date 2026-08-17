@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,13 @@
 
 namespace hiptensor
 {
+    struct ContractionUnaryOps
+    {
+        hiptensorOperator_t opA = HIPTENSOR_OP_IDENTITY;
+        hiptensorOperator_t opB = HIPTENSOR_OP_IDENTITY;
+        hiptensorOperator_t opC = HIPTENSOR_OP_IDENTITY;
+    };
+
     class ContractionSolution
     {
     public:
@@ -64,48 +71,50 @@ namespace hiptensor
                             std::unique_ptr<ContractionSolutionParams>&&                  params);
 
         // Must specialize incoming arg handling
-        virtual bool initArgs(void const*              alpha,
-                              void const*              A,
-                              void const*              B,
-                              void const*              beta,
-                              void const*              D,
-                              void*                    E,
-                              std::vector<std::size_t> a_ms_ns_lengths,
-                              std::vector<std::size_t> a_ms_ks_strides,
-                              std::vector<int32_t>     a_ms_ks_modes,
-                              std::vector<std::size_t> b_ns_ks_lengths,
-                              std::vector<std::size_t> b_ns_ks_strides,
-                              std::vector<int32_t>     b_ns_ks_modes,
-                              std::vector<std::size_t> ds_ms_ns_lengths,
-                              std::vector<std::size_t> ds_ms_ns_strides,
-                              std::vector<int32_t>     ds_ms_ns_modes,
-                              std::vector<std::size_t> e_ms_ns_lengths,
-                              std::vector<std::size_t> e_ms_ns_strides,
-                              std::vector<int32_t>     e_ms_ns_modes,
-                              void*                    workspacePtr)
+        virtual bool initArgs(void const*                alpha,
+                              void const*                A,
+                              void const*                B,
+                              void const*                beta,
+                              void const*                D,
+                              void*                      E,
+                              std::vector<std::size_t>   a_ms_ns_lengths,
+                              std::vector<std::size_t>   a_ms_ks_strides,
+                              std::vector<int32_t>       a_ms_ks_modes,
+                              std::vector<std::size_t>   b_ns_ks_lengths,
+                              std::vector<std::size_t>   b_ns_ks_strides,
+                              std::vector<int32_t>       b_ns_ks_modes,
+                              std::vector<std::size_t>   ds_ms_ns_lengths,
+                              std::vector<std::size_t>   ds_ms_ns_strides,
+                              std::vector<int32_t>       ds_ms_ns_modes,
+                              std::vector<std::size_t>   e_ms_ns_lengths,
+                              std::vector<std::size_t>   e_ms_ns_strides,
+                              std::vector<int32_t>       e_ms_ns_modes,
+                              ContractionUnaryOps const& unaryOps,
+                              void*                      workspacePtr)
             = 0;
 
-        std::tuple<hiptensorStatus_t, float> operator()(void const*              alpha,
-                                                        void const*              A,
-                                                        void const*              B,
-                                                        void const*              beta,
-                                                        void const*              D,
-                                                        void*                    E,
-                                                        std::vector<std::size_t> a_ms_ns_lengths,
-                                                        std::vector<std::size_t> a_ms_ks_strides,
-                                                        std::vector<int32_t>     a_ms_ks_modes,
-                                                        std::vector<std::size_t> b_ns_ks_lengths,
-                                                        std::vector<std::size_t> b_ns_ks_strides,
-                                                        std::vector<int32_t>     b_ns_ks_modes,
-                                                        std::vector<std::size_t> ds_ms_ns_lengths,
-                                                        std::vector<std::size_t> ds_ms_ns_strides,
-                                                        std::vector<int32_t>     ds_ms_ns_modes,
-                                                        std::vector<std::size_t> e_ms_ns_lengths,
-                                                        std::vector<std::size_t> e_ms_ns_strides,
-                                                        std::vector<int32_t>     e_ms_ns_modes,
-                                                        void*                    workspacePtr,
-                                                        unsigned long            workspaceSize,
-                                                        StreamConfig const&      streamConfig
+        std::tuple<hiptensorStatus_t, float> operator()(void const*                alpha,
+                                                        void const*                A,
+                                                        void const*                B,
+                                                        void const*                beta,
+                                                        void const*                D,
+                                                        void*                      E,
+                                                        std::vector<std::size_t>   a_ms_ns_lengths,
+                                                        std::vector<std::size_t>   a_ms_ks_strides,
+                                                        std::vector<int32_t>       a_ms_ks_modes,
+                                                        std::vector<std::size_t>   b_ns_ks_lengths,
+                                                        std::vector<std::size_t>   b_ns_ks_strides,
+                                                        std::vector<int32_t>       b_ns_ks_modes,
+                                                        std::vector<std::size_t>   ds_ms_ns_lengths,
+                                                        std::vector<std::size_t>   ds_ms_ns_strides,
+                                                        std::vector<int32_t>       ds_ms_ns_modes,
+                                                        std::vector<std::size_t>   e_ms_ns_lengths,
+                                                        std::vector<std::size_t>   e_ms_ns_strides,
+                                                        std::vector<int32_t>       e_ms_ns_modes,
+                                                        ContractionUnaryOps const& unaryOps,
+                                                        void*                      workspacePtr,
+                                                        unsigned long              workspaceSize,
+                                                        StreamConfig const&        streamConfig
                                                         = StreamConfig{});
 
         /// Accessors
@@ -123,7 +132,7 @@ namespace hiptensor
         std::tuple<ck::index_t, ck::index_t, ck::index_t> problemDims() const;
 
         // Byte count
-        ck::index_t problemBytes() const;
+        std::size_t problemBytes() const;
 
         // Kernel's name encoding
         std::string kernelName() const;
@@ -139,7 +148,7 @@ namespace hiptensor
 
         // Derived runtime arguments
         ck::index_t mM, mN, mK;
-        ck::index_t mBytes;
+        std::size_t mBytes;
         bool        mValid;
 
         // Kernel Params

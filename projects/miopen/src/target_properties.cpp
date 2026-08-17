@@ -57,12 +57,12 @@ static std::string GetDeviceNameFromMap(const std::string& in)
     if(!dev_str.empty())
         return dev_str;
 
-    const auto name = in.substr(0, in.find(':')); // str.substr(0, npos) returns str.
+    std::string name = in.substr(0, in.find(':')); // str.substr(0, npos) returns str.
 
     auto match = device_name_map.find(name);
     if(match != device_name_map.end())
-        return match->second;
-    return name; // NOLINT (performance-no-automatic-move)
+        name = match->second;
+    return name;
 }
 
 // See https://github.com/llvm/llvm-project/commit/1ed4caff1d5cd49233c1ae7b9f6483a946ed5eea.

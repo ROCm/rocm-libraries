@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,11 +27,14 @@
 #pragma once
 
 #include <complex>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <map>
 #include <stdexcept>
 #include <string>
+
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -61,6 +64,7 @@ namespace TensileLite
         Sigmoid,
         Tanh,
         DGelu,
+        DRelu,
         Geluscaling,
         Silu,
         Swish,
@@ -71,9 +75,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(ActivationType d);
-    std::ostream& operator<<(std::ostream& stream, const ActivationType& t);
-    std::istream& operator>>(std::istream& stream, ActivationType& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(ActivationType d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const ActivationType& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ActivationType& t);
 
-    int getAdditionalArgNum(ActivationType d);
+    TENSILELITEHOST_EXPORT int getAdditionalArgNum(ActivationType d);
 }
+

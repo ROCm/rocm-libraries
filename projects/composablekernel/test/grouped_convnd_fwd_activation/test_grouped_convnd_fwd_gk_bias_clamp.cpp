@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include "profiler/profile_grouped_conv_fwd_bias_clamp_impl.hpp"
+#include "ck/host_utility/device_prop.hpp"
 
 #include "ck/tensor_operation/gpu/element/element_wise_operation.hpp"
 static ck::index_t param_mask     = 0xffffff;
@@ -25,14 +26,25 @@ class TestGroupedConvndFwd : public ::testing::Test
     using IndexType = ck::index_t;
 
     std::vector<ck::utils::conv::ConvParam> conv_params;
-
+#if defined(CK_TEST_DISABLE_GPU_VALIDATION)
+    static constexpr int verify_ = 1; // CPU reference
+#else
+    static constexpr int verify_ = 2; // GPU reference
+#endif
+    // On gfx1250, the naive GPU reference kernel can hang. Always use CPU reference.
+    int get_verify() const { return (ck::is_gfx125_supported() && verify_ == 2) ? 1 : verify_; }
     template <ck::index_t NDimSpatial>
     void Run()
     {
         EXPECT_FALSE(conv_params.empty());
         bool pass = true;
-        for(auto& param : conv_params)
+        for(size_t i = 0; i < conv_params.size(); i++)
         {
+            if((param_mask & (1 << i)) == 0)
+            {
+                continue;
+            }
+            auto& param = conv_params[i];
             pass = pass && ck::profiler::profile_grouped_conv_fwd_bias_clamp_impl<NDimSpatial,
                                                                                   InLayout,
                                                                                   WeiLayout,
@@ -44,10 +56,10 @@ class TestGroupedConvndFwd : public ::testing::Test
                                                                                   DataType,
                                                                                   IndexType,
                                                                                   true /*BiasGK*/>(
-                               true,  // do_verification
-                               1,     // init_method: integer value
-                               false, // do_log
-                               false, // time_kernel
+                               get_verify(), // do_verification
+                               1,            // init_method: integer value
+                               false,        // do_log
+                               false,        // time_kernel
                                param,
                                instance_index);
         }

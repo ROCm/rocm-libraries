@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -10,6 +11,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -24,26 +26,46 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto intermediateType = getDataTypeEnumFromType<IntermediateType>();
 
     std::cout << "Running batch normalization inference with variance graph " << inputType << " ["
-              << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
+              << layout << "]" << (config.cpuValidation ? " (with CPU validation)" : "")
+              << (config.useRuntimePassByValue ? " [runtime-pass-by-value]" : "") << "...\n";
 
-    int64_t n = 16; // BATCH SIZE
-    int64_t c = 16; // CHANNELS (FEATURES)
-    int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    // Input dimensions
+    const int64_t n = !config.dims.empty() ? config.dims[0] : 16; // BATCH SIZE
+    const int64_t c = config.dims.size() > 1 ? config.dims[1] : 16; // CHANNELS (FEATURES)
+    const int64_t h = config.dims.size() > 2 ? config.dims[2] : 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = config.dims.size() > 3 ? config.dims[3] : 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
+    setPreferredEngine(graph, config);
+
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
     auto bias = createTensor({1, c, 1, 1}, intermediateType);
     auto mean = createTensor({1, c, 1, 1}, intermediateType);
     auto variance = createTensor({1, c, 1, 1}, intermediateType);
-    // Epsilon is a pass-by-value scalar, not a buffer
+    // Epsilon is a pass-by-value scalar, not a device buffer.
+    // Compile-time constant: value is baked into the op-graph at build() and requires no
+    // variant-pack entry at execute(). Works with any plugin version.
+    // Runtime pass-by-value (--runtime-pass-by-value): value is supplied as a host pointer in the
+    // variant pack at execute(), allowing it to vary across executions without rebuilding the
+    // graph. Requires plugin SDK >= 1.2.0.
+    constexpr auto EPSILON = utilities::BATCHNORM_DEFAULT_EPSILON;
     auto epsilon = std::make_shared<graph::TensorAttributes>();
-    epsilon->set_value(utilities::BATCHNORM_DEFAULT_EPSILON);
+    epsilon->set_dim({1}).set_stride({1}).set_data_type(getDataTypeEnumFromType<double>());
+    if(config.useRuntimePassByValue)
+    {
+        // No baked value; the value is supplied as a host pointer in the variant pack at
+        // execute() instead.
+        epsilon->set_as_runtime_parameter();
+    }
+    else
+    {
+        epsilon->set_compile_time_constant(EPSILON);
+    }
 
     auto bnAttributes = graph::BatchnormInferenceAttributesVarianceExt();
     bnAttributes.set_name("bn_inference_variance_ext_node");
@@ -52,7 +74,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         x, mean, variance, scale, bias, epsilon, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
+
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> xTensor(x->get_dim(), layout);
@@ -80,35 +103,48 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     variantPack[variance->get_uid()] = varianceTensor.memory().deviceData();
     variantPack[y->get_uid()] = yTensor.memory().deviceData();
 
+    // Runtime pass-by-value tensors are supplied as host pointers in the variant pack.
+    // Compile-time constants are baked at build() and must NOT appear here.
+    // Using the same default here keeps output numerically identical to the compile-time path,
+    // so CPU validation passes regardless of which mode is active. In a real application this
+    // value could differ per execution without rebuilding the graph.
+    double epsilonVal = EPSILON;
+    if(config.useRuntimePassByValue)
+    {
+        variantPack[epsilon->get_uid()] = &epsilonVal;
+    }
+
     HIPDNN_FE_CHECK(graph->execute(handle, variantPack, nullptr));
 
     yTensor.memory().markDeviceModified();
+
     auto yHostPtr = yTensor.memory().hostData();
 
-    bool validationPassed = true;
-
-    if(config.cpuValidation)
-    {
+    auto runCpuValidation = [&]() -> bool {
         std::cout << "Running CPU reference validation...\n";
 
         utilities::Tensor<InputType> yRefTensor(y->get_dim(), layout);
 
         auto tolerance
             = hipdnn_test_sdk::utilities::batchnorm::getToleranceInferenceWithVariance<InputType>();
-        double epsilon = utilities::BATCHNORM_DEFAULT_EPSILON;
 
         hipdnn_test_sdk::utilities::CpuFpReferenceBatchnorm::fwdInferenceWithVariance(
-            xTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, yRefTensor, epsilon);
+            xTensor, scaleTensor, biasTensor, meanTensor, varianceTensor, yRefTensor, epsilonVal);
 
         auto validator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
 
-        bool yValid = validator.allClose(yRefTensor, yTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  y: " << (yValid ? "successful" : "failed") << "\n";
 
-        validationPassed = yValid;
+        return hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "y", validator, yRefTensor, yTensor, tolerance, tolerance);
+    };
+
+    bool validationPassed = true;
+
+    if(config.cpuValidation)
+    {
+        validationPassed = runCpuValidation();
     }
 
     std::cout << "First 10 y values: ";
@@ -117,35 +153,63 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         std::cout << static_cast<float>(yHostPtr[i]) << " ";
     }
 
+    // Demonstrate that the graph can be re-executed with a different scalar value without
+    // rebuilding. The variant pack already holds a pointer to epsilonVal, so updating the
+    // value in-place is all that is needed.
+    if(config.useRuntimePassByValue)
+    {
+        std::cout << "\nRe-executing with epsilon = 1.0 (no rebuild required)...\n";
+        epsilonVal = 1.0;
+        HIPDNN_FE_CHECK(graph->execute(handle, variantPack, nullptr));
+        yTensor.memory().markDeviceModified();
+        yHostPtr = yTensor.memory().hostData();
+
+        std::cout << "First 10 y values (epsilon = 1.0): ";
+        for(int i = 0; i < 10; ++i)
+        {
+            std::cout << static_cast<float>(yHostPtr[i]) << " ";
+        }
+
+        if(config.cpuValidation)
+        {
+            std::cout << "\nRe-validating against CPU reference with the updated scalar value...\n";
+            validationPassed = runCpuValidation() && validationPassed;
+        }
+    }
+
     std::cout << "\nBatch normalization inference with variance graph execution complete for "
               << inputType << ".\n\n";
+
     return validationPassed;
 }
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    initializeFrontendLogging();
-
-    auto backend = hipdnnBackend();
-    hipdnnHandle_t handle;
-    HIPDNN_CHECK(backend->create(&handle));
-
-    bool allPassed = run(SampleRunner{handle, config});
-
-    HIPDNN_CHECK(backend->destroy(handle));
-
-    if(allPassed)
+    try
     {
-        std::cout
-            << "All batch normalization inference with variance runs completed successfully.\n";
-        return 0;
-    }
-    else
-    {
+        RETURN_SUCCESS_IF_NO_DEVICE();
+
+        auto config = parseCommandLineArgs(argc, argv, SampleType::BN_WITH_PASS_BY_VALUE);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout
+                << "All batch normalization inference with variance runs completed successfully.\n";
+            return 0;
+        }
+
         std::cout
             << "One or more batch normalization inference with variance runs failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

@@ -26,6 +26,12 @@ LAPACK auxiliary functions
     :ref:`rocsolver_laswp <laswp>`, x, x, x, x
     :ref:`rocsolver_lauum <lauum>`, x, x, x, x
 
+.. csv-table:: Norms and condition number estimators
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`rocsolver_lange <lange>`, x, x, x, x
+    :ref:`rocsolver_gecon <gecon>`, x, x, x, x
+
 .. csv-table:: Householder reflections
     :header: "Function", "single", "double", "single complex", "double complex"
 
@@ -150,6 +156,7 @@ LAPACK main functions
     :ref:`rocsolver_potri <potri>`, x, x, x, x
     :ref:`rocsolver_potrs <potrs>`, x, x, x, x
     :ref:`rocsolver_posv <posv>`, x, x, x, x
+    :ref:`rocsolver_sytrs <sytrs>`, x, x, x, x
 
 .. csv-table:: Least-square solvers
     :header: "Function", "single", "double", "single complex", "double complex"
@@ -177,6 +184,7 @@ LAPACK main functions
 
     :ref:`rocsolver_gesvd <gesvd>`, x, x, x, x
     :ref:`rocsolver_gesvdx <gesvdx>`, x, x, x, x
+    :ref:`rocsolver_gesdd <gesdd>`, x, x, x, x
 
 LAPACK-like functions
 ----------------------------
@@ -187,6 +195,11 @@ LAPACK-like functions
     :ref:`rocsolver_getf2_npvt <getf2_npvt>`, x, x, x, x
     :ref:`rocsolver_getrf_npvt <getrf_npvt>`, x, x, x, x
     :ref:`rocsolver_geblttrf_npvt <geblttrf_npvt>`, x, x, x, x
+
+.. csv-table:: Orthogonal factorizations
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`rocsolver_cholqr <cholqr>`, x, x, x, x
 
 .. csv-table:: Linear-systems solvers
     :header: "Function", "single", "double", "single complex", "double complex"

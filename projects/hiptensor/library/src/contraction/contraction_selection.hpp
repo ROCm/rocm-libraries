@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,26 +34,27 @@ namespace hiptensor
     class ContractionSolution;
     struct PerfMetrics;
 
-    hiptensorStatus_t bruteForceModel(ContractionSolution**                    winner,
-                                      std::vector<ContractionSolution*>&       candidates,
-                                      hiptensorDataType_t                      typeA,
-                                      std::vector<std::size_t> const&          a_ms_ks_lengths,
-                                      std::vector<std::size_t> const&          a_ms_ks_strides,
-                                      std::vector<int32_t> const&              a_ms_ks_modes,
-                                      hiptensorDataType_t                      typeB,
-                                      std::vector<std::size_t> const&          b_ns_ks_lengths,
-                                      std::vector<std::size_t> const&          b_ns_ks_strides,
-                                      std::vector<int32_t> const&              b_ns_ks_modes,
-                                      hiptensorDataType_t                      typeD,
-                                      std::vector<std::size_t> const&          d_ms_ns_lengths,
-                                      std::vector<std::size_t> const&          d_ms_ns_strides,
-                                      std::vector<int32_t> const&              d_ms_ns_modes,
-                                      hiptensorDataType_t                      typeE,
-                                      std::vector<std::size_t> const&          e_ms_ns_lengths,
-                                      std::vector<std::size_t> const&          e_ms_ns_strides,
-                                      std::vector<int32_t> const&              e_ms_ns_modes,
-                                      hiptensorComputeDescriptor_t             computeType,
-                                      const uint64_t                           workspaceSize);
+    hiptensorStatus_t bruteForceModel(ContractionSolution**              winner,
+                                      std::vector<ContractionSolution*>& candidates,
+                                      hiptensorDataType_t                typeA,
+                                      std::vector<std::size_t> const&    a_ms_ks_lengths,
+                                      std::vector<std::size_t> const&    a_ms_ks_strides,
+                                      std::vector<int32_t> const&        a_ms_ks_modes,
+                                      hiptensorDataType_t                typeB,
+                                      std::vector<std::size_t> const&    b_ns_ks_lengths,
+                                      std::vector<std::size_t> const&    b_ns_ks_strides,
+                                      std::vector<int32_t> const&        b_ns_ks_modes,
+                                      hiptensorDataType_t                typeD,
+                                      std::vector<std::size_t> const&    d_ms_ns_lengths,
+                                      std::vector<std::size_t> const&    d_ms_ns_strides,
+                                      std::vector<int32_t> const&        d_ms_ns_modes,
+                                      hiptensorDataType_t                typeE,
+                                      std::vector<std::size_t> const&    e_ms_ns_lengths,
+                                      std::vector<std::size_t> const&    e_ms_ns_strides,
+                                      std::vector<int32_t> const&        e_ms_ns_modes,
+                                      hiptensorComputeDescriptor_t       computeType,
+                                      ContractionUnaryOps const&         unaryOps,
+                                      const uint64_t                     workspaceSize);
 
     template <typename A,
               typename B,
@@ -107,5 +108,56 @@ namespace hiptensor
                          hiptensorComputeDescriptor_t                            computeType,
                          const uint64_t                                          workspaceSize);
 
-} // namespace hiptensor
+    template <typename A,
+              typename B,
+              typename C,
+              typename D,
+              ContractionOpId_t ContractionOp,
+              typename ComputeType>
+    struct ActorCriticSelectionUnaryOps
+    {
+        static hiptensorStatus_t
+            selectWinner(ContractionSolution**                                   winner,
+                         std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         hiptensorDataType_t                                     typeA,
+                         std::vector<std::size_t> const&                         a_ms_ks_lengths,
+                         std::vector<std::size_t> const&                         a_ms_ks_strides,
+                         std::vector<int32_t> const&                             a_ms_ks_modes,
+                         hiptensorDataType_t                                     typeB,
+                         std::vector<std::size_t> const&                         b_ns_ks_lengths,
+                         std::vector<std::size_t> const&                         b_ns_ks_strides,
+                         std::vector<int32_t> const&                             b_ns_ks_modes,
+                         hiptensorDataType_t                                     typeD,
+                         std::vector<std::size_t> const&                         d_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         d_ms_ns_strides,
+                         std::vector<int32_t> const&                             d_ms_ns_modes,
+                         hiptensorDataType_t                                     typeE,
+                         std::vector<std::size_t> const&                         e_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         e_ms_ns_strides,
+                         std::vector<int32_t> const&                             e_ms_ns_modes,
+                         const uint64_t                                          workspaceSize);
+    };
 
+    hiptensorStatus_t
+        actorCriticModelUnaryOps(ContractionSolution**                           winner,
+                         std::unordered_map<size_t, ContractionSolution*> const& candidates,
+                         hiptensorDataType_t                                     typeA,
+                         std::vector<std::size_t> const&                         a_ms_ks_lengths,
+                         std::vector<std::size_t> const&                         a_ms_ks_strides,
+                         std::vector<int32_t> const&                             a_ms_ks_modes,
+                         hiptensorDataType_t                                     typeB,
+                         std::vector<std::size_t> const&                         b_ns_ks_lengths,
+                         std::vector<std::size_t> const&                         b_ns_ks_strides,
+                         std::vector<int32_t> const&                             b_ns_ks_modes,
+                         hiptensorDataType_t                                     typeD,
+                         std::vector<std::size_t> const&                         d_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         d_ms_ns_strides,
+                         std::vector<int32_t> const&                             d_ms_ns_modes,
+                         hiptensorDataType_t                                     typeE,
+                         std::vector<std::size_t> const&                         e_ms_ns_lengths,
+                         std::vector<std::size_t> const&                         e_ms_ns_strides,
+                         std::vector<int32_t> const&                             e_ms_ns_modes,
+                         hiptensorComputeDescriptor_t                            computeType,
+                         const uint64_t                                          workspaceSize);
+
+} // namespace hiptensor

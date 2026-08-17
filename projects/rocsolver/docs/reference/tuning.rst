@@ -308,17 +308,13 @@ and scales the corresponding row/column. The blocked routine POTRF factorizes a 
 at each step using the unblocked algorithm, provided the matrix is large enough, and updates the trailing matrix with BLAS Level 3
 operations (symmetric rank-k updates), which, in general, can give better performance on the GPU.
 
-POTRF_BLOCKSIZE
-------------------------
-.. doxygendefine:: POTRF_BLOCKSIZE
-
 POTRF_POTF2_SWITCHSIZE
 ------------------------
 .. doxygendefine:: POTRF_POTF2_SWITCHSIZE
 
 .. note::
 
-   These constants have not been tuned for any specific cases.
+   This constant has not been tuned for any specific cases.
 
 sytf2/sytrf and lasyf functions
 =================================

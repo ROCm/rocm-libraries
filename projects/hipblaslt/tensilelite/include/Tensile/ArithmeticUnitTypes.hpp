@@ -32,6 +32,8 @@
 #include <stdexcept>
 #include <string>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -145,3 +147,4 @@ namespace std
         }
     };
 } // namespace std
+

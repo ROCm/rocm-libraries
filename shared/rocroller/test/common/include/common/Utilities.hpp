@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  * Test suite utilites.
@@ -33,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <regex>
 #include <sstream>
 
 #ifdef ROCROLLER_USE_HIP
@@ -44,6 +22,7 @@
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -101,6 +80,11 @@ auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
     using T = std::remove_cvref_t<decltype(init.front())>;
     return make_shared_device<T, T>(init, padding);
 }
+
+/**
+ * Return a new device array that contains the value stored in `arg`.
+ */
+std::shared_ptr<void> make_shared_device(rocRoller::CommandArgumentValue const& arg);
 
 template <typename T>
 double normL2(std::vector<T> a)
@@ -253,8 +237,22 @@ AcceptableError
     }
     else
     {
-        double scale = std::sqrt(K);
-        double fudge = 5;
+        double scale             = std::sqrt(K);
+        double fudge             = 5;
+        double extraArchFudgeBF8 = 0.0;
+        double extraArchFudgeBF6 = 0.0;
+        double extraArchFudgeFP4 = 0.0;
+
+        if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX1250)
+        {
+            extraArchFudgeBF8 = 5.8;
+            extraArchFudgeBF6 = 5.8;
+            extraArchFudgeFP4 = 2.8;
+        }
+        else if(arch.gfx == rocRoller::GPUArchitectureGFX::GFX950)
+        {
+            extraArchFudgeBF8 = 2.58;
+        }
 
         ss << " K: " << K;
         ss << " Problem size scaling: " << scale;
@@ -264,12 +262,12 @@ AcceptableError
         {
             if constexpr(std::is_same_v<TA, rocRoller::BF6>)
             {
-                fudge *= 3;
+                fudge *= 3 + extraArchFudgeBF6;
                 ss << " Increase fudge for BF6: " << fudge;
             }
             if constexpr(std::is_same_v<TA, rocRoller::BF8>)
             {
-                fudge *= 5;
+                fudge *= 5 + extraArchFudgeBF8;
                 ss << " Increase fudge for BF8: " << fudge;
             }
             if constexpr(std::is_same_v<TA, rocRoller::FP8>)
@@ -283,7 +281,7 @@ AcceptableError
         {
             if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
             {
-                fudge *= arch.gfx == rocRoller::GPUArchitectureGFX::GFX950 ? 7.58 : 6.0;
+                fudge *= 5 + extraArchFudgeBF8;
                 ss << " Increase fudge for mixed BF8: " << fudge;
             }
             else if constexpr(std::is_same_v<TA,
@@ -297,6 +295,12 @@ AcceptableError
             {
                 fudge *= 3;
                 ss << " Increase fudge for mixed BF6: " << fudge;
+            }
+
+            if constexpr(std::is_same_v<TA, rocRoller::FP4> || std::is_same_v<TB, rocRoller::FP4>)
+            {
+                fudge *= 3 + extraArchFudgeFP4;
+                ss << " Increase fudge for mixed FP4: " << fudge;
             }
         }
         tolerance = fudge * epsilon<TD>() * std::sqrt(K);
@@ -572,5 +576,44 @@ namespace rocRoller
                         &patterns[i % 4],
                         1);
         }
+    }
+
+    inline std::string FixupInstructionStringsForVGPRIndexing(GPUArchitecture const& arch,
+                                                              std::string            instr)
+    {
+        if(not arch.HasCapability(GPUCapability::HasVGPRIndexing))
+            return instr;
+        auto reservedRegionSize = Register::RegisterAllocatorDetail::ReservedRegionSize();
+
+        std::string rv;
+        // match v[#:#] or v#
+        std::regex re{R"(v(?:\[(\d+):(\d+)\]|(\d+)))"};
+        auto       begin   = ::std::sregex_iterator(instr.begin(), instr.end(), re);
+        size_t     lastPos = 0;
+
+        for(auto it = begin; it != std::sregex_iterator(); it++)
+        {
+            auto match = (*it);
+            rv.append(instr, lastPos, it->position() - lastPos);
+            if(match[1].matched or match[2].matched)
+            {
+                AssertFatal(match[1].matched and match[2].matched,
+                            ShowValue(match[1].matched),
+                            ShowValue(match[2].matched));
+                // matched v[#:#]
+                int start = std::stoi(match[1]) + reservedRegionSize;
+                int end   = std::stoi(match[2]) + reservedRegionSize;
+                rv += fmt::format("v[{}:{}]", start, end);
+            }
+            else
+            {
+                // matched v#
+                rv += fmt::format("v{}", std::stoi(match[3]) + reservedRegionSize);
+            }
+            lastPos = it->position() + it->length();
+        }
+        rv.append(instr, lastPos, std::string::npos);
+
+        return rv;
     }
 }

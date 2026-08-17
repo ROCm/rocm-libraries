@@ -15,6 +15,7 @@ This document defines the canonical project-wide coding and test naming conventi
 - [8. Enums](#8-enums)
 - [9. Constants](#9-constants)
 - [10. Namespaces](#10-namespaces)
+  - [10.1 Detail Namespace](#101-detail-namespace)
 - [11. Test Naming Guidelines](#11-test-naming-guidelines)
   - [11.1 Keywords](#111-keywords)
   - [11.2 Unit Tests](#112-unit-tests)
@@ -127,6 +128,38 @@ If later you add invariants or non-trivial behavior, consider converting to a cl
   - `hipdnn_<component>`: (e.g. hipdnn_frontend) Contains all basic code required for the component
     - `utilities`: Contains code that can aid and assist in using component code
     - `test_utilities`: Contains code that can aid and assist in testing component code
+
+### 10.1 Detail Namespace
+
+The `detail` namespace is used to separate internal implementation code from the public API. Code in the `detail` namespace:
+
+- Is **not** part of the public API
+- Can be changed or removed at any time without a version bump
+- Should only be used by internal library code
+- Changes are considered patch-level (implementation details)
+
+**Pattern:**
+
+```cpp
+namespace hipdnn_frontend::detail
+{
+    // Internal implementation - not part of public API
+    void internalHelper();
+} // namespace hipdnn_frontend::detail
+```
+
+**Where detail namespaces exist:**
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| frontend | `hipdnn_frontend::detail` | Backend wrapper, validation helpers, descriptor management |
+| test_sdk | `hipdnn_test_sdk::detail` | Plan execution infrastructure, CPU reference utilities |
+| data_sdk | `hipdnn_data_sdk::utilities::detail` | Mutable state accessors, type conversion helpers |
+
+**Rules:**
+- Detail types may appear in private class members (transitive exposure is acceptable)
+- Detail types must **never** appear in public API signatures (function parameters, return types)
+- Public utility functions may wrap detail implementations
 
 ## 11. Test Naming Guidelines
 
@@ -265,6 +298,26 @@ The repository includes automated tooling to enforce coding standards and mainta
 The project uses clang-tidy to automatically enforce many of the coding style guidelines defined in this document. The configuration can be found in `.clang-tidy` at the repository root.
 
 The CI pipeline automatically runs clang-tidy on all pull requests to ensure compliance before merging.
+
+#### Common Clang-Tidy Pitfalls
+
+**Multilevel pointer conversions (`bugprone-multi-level-implicit-pointer-conversion`):**
+The backend C API uses `const void*` parameters in functions like `setAttribute`. When passing a pointer-to-pointer (e.g., `HipdnnBackendDescriptor**` or `hipdnnHandle_t*`), the implicit conversion to `const void*` is a multilevel pointer conversion that clang-tidy flags as an error.
+
+Always use an explicit `static_cast<const void*>(...)` in these cases:
+
+```cpp
+// Wrong — implicit multilevel pointer conversion
+desc->setAttribute(HIPDNN_ATTR_OPERATION_FOO_X, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, &xDesc);
+
+// Correct — explicit cast
+desc->setAttribute(HIPDNN_ATTR_OPERATION_FOO_X,
+                   HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                   1,
+                   static_cast<const void*>(&xDesc));
+```
+
+This applies whenever the address-of a pointer variable (e.g., `&xDesc` where `xDesc` is a `HipdnnBackendDescriptor*`) or a `.data()` call on a container of pointers (e.g., `ops.data()` where `ops` is `std::array<HipdnnBackendDescriptor*, N>`) is passed to a `const void*` parameter.
 
 ### 15.2 Test Naming Enforcement Tool
 

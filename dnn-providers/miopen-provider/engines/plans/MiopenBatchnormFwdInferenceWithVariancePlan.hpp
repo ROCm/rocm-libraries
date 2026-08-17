@@ -4,29 +4,33 @@
 #pragma once
 
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 #include "MiopenUtils.hpp"
-#include "PlanBuilderInterface.hpp"
-#include "PlanInterface.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 class BatchnormFwdInferenceWithVarianceParams
 {
 public:
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& attributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+            attributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceWithVarianceParams(
-        const hipdnn_data_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
+        const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt&
             inferenceAttributes,
-        const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
     BatchnormFwdInferenceWithVarianceParams(const BatchnormFwdInferenceWithVarianceParams&)
@@ -45,7 +49,8 @@ public:
     const MiopenTensor& bias() const;
     const MiopenTensor& estMean() const;
     const MiopenTensor& variance() const;
-    double epsilonValue() const;
+    double epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                        uint32_t numDeviceBuffers) const;
 
     const std::optional<MiopenActivationDescriptor>& optActivation() const;
     const std::optional<MiopenTensor>& activationOut() const;
@@ -57,17 +62,17 @@ private:
     MiopenTensor _bias;
     MiopenTensor _estMean;
     MiopenTensor _variance;
-    double _epsilonValue;
+    hipdnn_plugin_sdk::ScalarOperand _epsilon;
 
     std::optional<MiopenActivationDescriptor> _optActivation;
     std::optional<MiopenTensor> _activationOut;
 };
 
-class BatchnormFwdInferenceWithVariancePlan : public IPlan
+class BatchnormFwdInferenceWithVariancePlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
     BatchnormFwdInferenceWithVariancePlan(BatchnormFwdInferenceWithVarianceParams&& inferenceParams,
-                                          bool benchmarkingEnabled = false);
+                                          const HipdnnMiopenSettings& executionSettings);
 
     BatchnormFwdInferenceWithVariancePlan(const BatchnormFwdInferenceWithVariancePlan&) = delete;
     BatchnormFwdInferenceWithVariancePlan& operator=(const BatchnormFwdInferenceWithVariancePlan&)
@@ -77,16 +82,16 @@ public:
     BatchnormFwdInferenceWithVariancePlan& operator=(BatchnormFwdInferenceWithVariancePlan&&)
         = default;
 
-    size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
+    size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 
-    void execute(const HipdnnEnginePluginHandle& handle,
+    void execute(const HipdnnMiopenHandle& handle,
                  const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace = nullptr) const override;
 
 private:
     BatchnormFwdInferenceWithVarianceParams _inferenceParams;
-    bool _benchmarkingEnabled;
+    HipdnnMiopenSettings _executionSettings;
 };
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

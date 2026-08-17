@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,54 @@ endif( )
 find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
 include(ROCMInstallTargets)
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
+
+# embed rocfft_complex.h so it can be used in hiprtc for callbacks
+find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
+set( callback_embed_command ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/embed-to-header-rtc.py )
+# generated source file
+set( callback_embed_cpp ${CMAKE_CURRENT_BINARY_DIR}/callback-embed.cpp )
+# files that need to be embedded into the test, to be able to generate callback code
+set( callback_embed_files
+     ${CMAKE_CURRENT_SOURCE_DIR}/../../shared/rocfft_complex.h
+)
+add_custom_command(
+  OUTPUT ${callback_embed_cpp}
+  COMMAND ${Python3_EXECUTABLE} ${callback_embed_command}
+  --embed ${callback_embed_files} --output ${callback_embed_cpp}
+  DEPENDS ${callback_embed_command} ${callback_embed_files}
+  VERBATIM
+)
+
+set( hipfft-test_source
+  gtest_main.cpp
+  hipfft_accuracy_test.cpp
+  simple_test.cpp
+  accuracy_test_1D.cpp
+  accuracy_test_2D.cpp
+  accuracy_test_3D.cpp
+  accuracy_test_callback.cpp
+  accuracy_test_emulation.cpp
+  hipfftw_test.cpp
+  hipfftxt_test.cpp
+  multi_device_test.cpp
+  multi_stream_test.cpp
+  ../../shared/array_validator.cpp
+  ../../shared/test_callbacks.cpp
+  ../../shared/data_gen_device.cpp
+  ${callback_embed_cpp}
+  )
+
+add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
+
+# Link to runtime compilation library
+if( BUILD_WITH_LIB STREQUAL CUDA)
+  set( HIPFFT_RTC_LIB CUDA::nvrtc )
+else()
+  find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
+  set( HIPFFT_RTC_LIB hiprtc::hiprtc )
+endif()
+
+set( TEST_TARGETS hipfft-test )
 
 
 # This has to be initialized before the project() command appears
@@ -111,35 +159,22 @@ set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
 
-set( hipfft-test_source
-  gtest_main.cpp
-  hipfft_accuracy_test.cpp
-  simple_test.cpp
-  accuracy_test_1D.cpp
-  accuracy_test_2D.cpp
-  accuracy_test_3D.cpp
-  accuracy_test_callback.cpp
-  hipfftw_test.cpp
-  multi_device_test.cpp
-  multi_stream_test.cpp
-  ../../shared/array_validator.cpp
-  ../../shared/test_callbacks.cpp
-  ../../shared/data_gen_device.cpp
-  )
-
-add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
-
-set( TEST_TARGETS hipfft-test )
-
 # MPI worker for MPI tests
 if( HIPFFT_MPI_ENABLE )
   # build MPI worker to support the tests
-  add_executable( hipfft_mpi_worker hipfft_mpi_worker.cpp ../../shared/test_callbacks.cpp )
+  add_executable( hipfft_mpi_worker
+    hipfft_mpi_worker.cpp
+    ../../shared/test_callbacks.cpp
+    ../../shared/data_gen_device.cpp
+    ../../shared/array_validator.cpp
+    ${callback_embed_cpp}
+    )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )
   target_include_directories( hipfft_mpi_worker
     PRIVATE
     ${MPI_C_INCLUDE_PATH}
   )
+  target_link_libraries( hipfft_mpi_worker PRIVATE ${HIPFFT_RTC_LIB} )
   add_compile_definitions( HIPFFT_MPI_ENABLE )
 endif()
 
@@ -150,6 +185,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     find_package( HIP REQUIRED )
   endif()
 endif()
+target_link_libraries( hipfft-test PRIVATE ${HIPFFT_RTC_LIB} )
 
 if( HIPFFT_BUILD_SCOPE )
   set( TESTS_OUT_DIR "/../staging" )
@@ -216,10 +252,16 @@ foreach( target ${TEST_TARGETS} )
       hip::host
       hip::device
     )
-    foreach( gpu_target ${GPU_TARGETS} )
-      target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
-    endforeach()
 
+    # On Linux, always include amdgcnspirv target so the clients work
+    # on an architecture that the runtime supports but was not
+    # specified a build time
+    # TODO: amdgcnspirv is not compatible with ASAN.
+    get_target_property(test_opts ${target} COMPILE_OPTIONS)
+    if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+      target_compile_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
+      target_link_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
+    endif()
   else()
     target_compile_definitions( ${target} PRIVATE __HIP_PLATFORM_NVIDIA__)
     target_include_directories( ${target} PRIVATE ${HIP_INCLUDE_DIRS})
@@ -228,7 +270,7 @@ foreach( target ${TEST_TARGETS} )
       target_compile_options( ${target} PRIVATE -cuda -Xptxas=-w)
       target_link_options( ${target} PRIVATE -cuda)
     else()
-      target_compile_options( ${target} PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+      target_compile_options( ${target} PRIVATE -arch sm_100 -gencode=arch=compute_100,code=sm_100 -Xptxas=-w)
     endif()
     if( NVHPC_FOUND )
       target_link_libraries( ${target}  PRIVATE NVHPC::CUDART )
@@ -282,6 +324,48 @@ foreach( target ${TEST_TARGETS} )
   rocm_install(TARGETS ${target} COMPONENT tests)
 endforeach()
 
+#Ctest based Test Filter Standardization using test_categories.yaml
+
+set( _HIPFFT_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" )
+set( _HIPFFT_SHARED_CTEST          "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake" )
+
+if( EXISTS "${_HIPFFT_SHARED_CTEST}" AND EXISTS "${_HIPFFT_TEST_CATEGORIES_YAML}" )
+  include( "${_HIPFFT_SHARED_CTEST}" )
+  enable_testing()
+  message( STATUS "hipFFT: YAML-based CTest categorization enabled" )
+
+  set( HIPFFT_CTEST_INSTALL_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake" )
+  file( WRITE "${HIPFFT_CTEST_INSTALL_FILE}"
+[=[
+# This is a test file generated by hipFFT for install time.
+# Tests are defined with relative paths to work in the installed location.
+]=]
+  )
+
+  # Build-tree WORKING_DIRECTORY for CTest entries; the install-tree CTestTestfile
+  # uses relative paths (cd <install>/bin/hipfft) and ignores this value.
+  apply_test_category_labels(
+    hipfft-test
+    "${_HIPFFT_TEST_CATEGORIES_YAML}"
+    "${CMAKE_CURRENT_BINARY_DIR}"
+    "${HIPFFT_CTEST_INSTALL_FILE}"
+  )
+
+  rocm_install(
+    FILES       "${HIPFFT_CTEST_INSTALL_FILE}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/hipfft"
+    COMPONENT   tests
+    RENAME      "CTestTestfile.cmake"
+  )
+else()
+  if( NOT EXISTS "${_HIPFFT_SHARED_CTEST}" )
+    message( STATUS "hipFFT: shared/ctest not found at ${_HIPFFT_SHARED_CTEST}; skipping CTest categories" )
+  endif()
+  if( NOT EXISTS "${_HIPFFT_TEST_CATEGORIES_YAML}" )
+    message( STATUS "hipFFT: ${_HIPFFT_TEST_CATEGORIES_YAML} not found; skipping CTest categories" )
+  endif()
+endif()
+
 find_package( GTest 1.11.0 )
 
 if( GTest_FOUND )
@@ -297,11 +381,11 @@ endif()
 # tests have callback functions, which need to be built as relocatable device code
 if( BUILD_WITH_LIB STREQUAL "CUDA" )
   target_compile_options( hipfft-test PRIVATE -dc )
-else()
-  # -fgpu-rdc causes failure at link stage on Windows
-  if (NOT WIN32)
-    target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
-    target_link_options( hipfft-test PRIVATE -fgpu-rdc )
+  # on CUDA, RTC callback code needs to be told where the CUDA includes are
+  list( GET CUDAToolkit_INCLUDE_DIRS 0 HIPFFT_CUDA_INCLUDE )
+  target_compile_definitions( hipfft-test PRIVATE HIPFFT_CUDA_INCLUDE=\"${HIPFFT_CUDA_INCLUDE}\" )
+  if( HIPFFT_MPI_ENABLE )
+    target_compile_definitions( hipfft_mpi_worker PRIVATE HIPFFT_CUDA_INCLUDE=\"${HIPFFT_CUDA_INCLUDE}\" )
   endif()
 endif()
 

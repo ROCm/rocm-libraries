@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/hip/HipUtils.hpp>
@@ -34,20 +34,53 @@
 #include "ClientProblemFactory.hpp"
 #include "Rotating.hpp"
 
+#include <mxDataGen.hpp>
+
 #include <cstddef>
 #include <random>
 
 #include "RunListener.hpp"
 
-namespace po = boost::program_options;
-
 namespace TensileLite
 {
     namespace Client
     {
+        inline bool isMXFP4Tensor(const TensorDescriptor& tensor, size_t mxBlock)
+        {
+            return tensor.dataType() == rocisa::DataType::Float4 && mxBlock > 0;
+        }
+
+        inline bool isMXFP4Problem(const ContractionProblemGemm& problem)
+        {
+            return isMXFP4Tensor(problem.a(), problem.mxBlockA())
+                || isMXFP4Tensor(problem.b(), problem.mxBlockB());
+        }
+
+        inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
+        {
+            if(mxBlock == 0)
+                return false;
+            auto dt = tensor.dataType();
+            return dt == rocisa::DataType::Float4
+                || dt == rocisa::DataType::Float6
+                || dt == rocisa::DataType::BFloat6
+                || dt == rocisa::DataType::Float8
+                || dt == rocisa::DataType::BFloat8;
+        }
+
+        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        {
+            return isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB());
+        }
+
         // Problem-indept. from 0~7, and 16, and 23~26 (fixed values for every problem)
         // And problem-dept. from 8~15 (values depend on problem)
         // RandomNegPosLimited: integer -128~128. fp -1.0~1.0
+        // UniformLowPrecision (27): uniform random in [-maxVal, maxVal] where maxVal is
+        //   the maximum representable value of the target type. Only supported for
+        //   low-precision packed types (FP4, FP6, BF6). Produces significantly fewer
+        //   zeros than Random by covering the full representable range uniformly.
         enum class InitMode
         {
             Zero = 0, // 0
@@ -77,8 +110,16 @@ namespace TensileLite
             TrigIndCos, // 24
             TrigIndAbsSin, // 25
             TrigIndAbsCos, // 26
+            UniformLowPrecision, // 27
             Count
         };
+
+        static int getThreadLocalRandInt()
+        {
+            thread_local std::mt19937          generator(std::random_device{}());
+            std::uniform_int_distribution<int> distribution;
+            return distribution(generator);
+        }
 
         static bool IsProblemDependent(InitMode const& mode)
         {
@@ -270,6 +311,7 @@ namespace TensileLite
                                     problem.gemms[0],
                                     kind);
                     }
+                    return m_cachedGPUInputs;
                 }
                 else
                 {
@@ -293,7 +335,8 @@ namespace TensileLite
                 if(m_cpuPtrs.empty())
                     initializeConstantInputs(problem.gemms[0]);
 
-                return ConvertToProblemInputs(problem.gemms[0], true);
+                m_cachedGPUInputs = ConvertToProblemInputs(problem.gemms[0], true);
+                return m_cachedGPUInputs;
             }
 
             std::shared_ptr<ProblemInputs> prepareGPUInputs(ContractionProblemGemm const& problem)
@@ -305,6 +348,7 @@ namespace TensileLite
                 hipMemcpyKind kind;
 
                 bool needSwizzle = problem.swizzleTensorA() || problem.swizzleTensorB();
+                bool needMXSwizzle = (problem.mxBlockA() != 0) || (problem.mxBlockB() != 0);
 
                 if(m_keepPristineCopyOnGPU && !m_problemDependentData)
                 {
@@ -318,7 +362,7 @@ namespace TensileLite
                 }
 
                 if(m_gpuInit && m_curBoundsCheck == BoundsCheckMode::Disable
-                   && !m_problemDependentData && !needSwizzle)
+                   && !m_problemDependentData && !needSwizzle && !needMXSwizzle)
                 {
                     if(m_elementsToValidate)
                     {
@@ -329,6 +373,7 @@ namespace TensileLite
                                     problem,
                                     kind);
                     }
+                    return m_cachedGPUInputs;
                 }
                 else
                 {
@@ -337,7 +382,7 @@ namespace TensileLite
                         initializeCPUInputs(problem);
                     if(m_problemDependentData)
                         copyValidToGPUBuffer(problem);
-                    if(needSwizzle)
+                    if(needSwizzle || needMXSwizzle)
                         copySwizzledToGPUBuffer(problem);
 
                     // gpu to gpu
@@ -374,7 +419,8 @@ namespace TensileLite
                 if(m_cpuPtrs.empty())
                     initializeConstantInputs(problem);
 
-                return ConvertToProblemInputs(problem, true);
+                m_cachedGPUInputs = ConvertToProblemInputs(problem, true);
+                return m_cachedGPUInputs;
             }
 
             std::vector<std::shared_ptr<ProblemInputs>>
@@ -419,6 +465,29 @@ namespace TensileLite
                     initArray<BFloat8_fnuz>(
                         initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+                case rocisa::DataType::Float6:
+                    initArray<Float6x32>(initMode, static_cast<Float6x32*>(array), descriptor);
+                    break;
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+                case rocisa::DataType::BFloat6:
+                    initArray<BFloat6x32>(initMode, static_cast<BFloat6x32*>(array), descriptor);
+                    break;
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+                case rocisa::DataType::Float4:
+                    initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
+                    break;
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+                case rocisa::DataType::E8:
+                    initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
+                    break;
+                case rocisa::DataType::E5M3:
+                    initArray<E5M3>(initMode, static_cast<E5M3*>(array), descriptor);
+                    break;
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
@@ -432,7 +501,13 @@ namespace TensileLite
                 case rocisa::DataType::Float8BFloat8:
                 case rocisa::DataType::BFloat8Float8:
                 case rocisa::DataType::Float8BFloat8_fnuz:
-                case rocisa::DataType::BFloat8Float8_fnuz:;
+                case rocisa::DataType::BFloat8Float8_fnuz:
+#ifdef _WIN32
+                case rocisa::DataType::Float6:
+                case rocisa::DataType::BFloat6:
+                case rocisa::DataType::Float4:
+#endif // _WIN32
+                ;
                 }
             }
 
@@ -474,6 +549,8 @@ namespace TensileLite
                     return getValue<T, InitMode::RandomNegPosLimited>();
                 case InitMode::Free:
                     return convertDoubleTo<T>(value);
+                case InitMode::UniformLowPrecision:
+                    return getValue<T, InitMode::UniformLowPrecision>();
                 case InitMode::SerialIdx:
                 case InitMode::SerialDim0:
                 case InitMode::SerialDim1:
@@ -550,8 +627,12 @@ namespace TensileLite
                     break;
                 case InitMode::DenormMax:
                     initArray<T, InitMode::DenormMax>(array, elements);
+                    break;
                 case InitMode::RandomNegPosLimited:
                     initArray<T, InitMode::RandomNegPosLimited>(array, elements);
+                    break;
+                case InitMode::UniformLowPrecision:
+                    initArray<T, InitMode::UniformLowPrecision>(array, elements);
                     break;
                 case InitMode::SerialIdx:
                     initArrayConvert<T>(array, elements);
@@ -665,6 +746,9 @@ namespace TensileLite
                 case InitMode::RandomNegPosLimited:
                     initArray<T, InitMode::RandomNegPosLimited>(array, tensor);
                     break;
+                case InitMode::UniformLowPrecision:
+                    initArray<T, InitMode::UniformLowPrecision>(array, tensor);
+                    break;
                 case InitMode::Free:
                 case InitMode::Count:
                     throw std::runtime_error("Invalid InitMode.");
@@ -674,8 +758,9 @@ namespace TensileLite
             template <typename T, InitMode Mode>
             void initArray(T* array, size_t elements)
             {
+                size_t numPacks = elements / TypeInfo<T>::Packing;
 #pragma omp parallel for
-                for(size_t i = 0; i < elements; i++)
+                for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = getValue<T, Mode>();
                 }
@@ -684,8 +769,9 @@ namespace TensileLite
             template <typename T>
             void initArrayConvert(T* array, size_t elements)
             {
+                size_t numPacks = elements / TypeInfo<T>::Packing;
 #pragma omp parallel for
-                for(size_t i = 0; i < elements; i++)
+                for(size_t i = 0; i < numPacks; i++)
                 {
                     array[i] = ConvertTo<T>(i);
                 }
@@ -704,11 +790,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = static_cast<T>(idx);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = ConvertTo<T>(idx);
                 }
             }
 
@@ -718,11 +805,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = static_cast<T>(coord[dim]);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = ConvertTo<T>(coord[dim]);
                 }
             }
 
@@ -753,11 +841,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = static_cast<T>(coord[0] == coord[1] ? 1 : 0);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = ConvertTo<T>(coord[0] == coord[1] ? 1 : 0);
                 }
             }
 
@@ -767,11 +856,12 @@ namespace TensileLite
                 auto const& sizes = tensor.sizes();
                 auto        count = CoordCount(sizes.begin(), sizes.end());
 #pragma omp parallel for
-                for(size_t idx = 0; idx < count; idx++)
+                for(size_t idx = 0; idx < count; idx += TypeInfo<T>::Packing)
                 {
                     std::vector<size_t> coord(tensor.dimensions(), 0);
                     CoordNumbered(idx, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-                    array[tensor.index(coord)] = getTrigValue<T>(idx, useCos, useAbs);
+                    size_t tensorIndex = tensor.index(coord) / TypeInfo<T>::Packing;
+                    array[tensorIndex] = getTrigValue<T>(idx, useCos, useAbs);
                 }
             }
 
@@ -779,9 +869,9 @@ namespace TensileLite
             void initArrayTrig(T* array, size_t elements)
             {
 #pragma omp parallel for
-                for(size_t i = 0; i < elements; i++)
+                for(size_t i = 0; i < elements; i += TypeInfo<T>::Packing)
                 {
-                    array[i] = getTrigValue<T>(i, useCos, useAbs);
+                    array[i / TypeInfo<T>::Packing] = getTrigValue<T>(i, useCos, useAbs);
                 }
             }
 
@@ -801,10 +891,61 @@ namespace TensileLite
             }
             virtual void preBenchmarkRun() override {}
             virtual void postBenchmarkRun() override {}
-            virtual void preProblem(ContractionProblem* const problem) override {}
+            virtual void preProblem(ContractionProblem* const problem) override
+            {
+                m_currentGemmProblem
+                    = dynamic_cast<ContractionProblemGemm const*>(problem);
+                m_currentSolution = nullptr;
+            }
             virtual void postProblem() override {}
-            virtual void preSolution(ContractionSolution* const solution) override {}
-            virtual void postSolution() override {}
+            virtual void preSolution(ContractionSolution* const solution) override
+            {
+                m_currentSolution = solution;
+                // Re-init MX inputs for solution-dependent HostPreSwizzle.
+                if(m_currentSolution != nullptr
+                   && m_currentGemmProblem != nullptr
+                   && !m_gpuPtrs.empty()
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                         m_currentSolution))
+                {
+                    initializeMXData(*m_currentGemmProblem);
+                    copyValidToGPUBuffer(*m_currentGemmProblem);
+                    copyInputs(m_gpuPtrs,
+                               m_gpuBatchPtrs,
+                               m_maxElements,
+                               m_groupedOffsets,
+                               *m_currentGemmProblem,
+                               hipMemcpyDeviceToDevice);
+                    // Sync CPU current buffers so the reference matches GPU data.
+                    for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                  ContractionProblemGemm::TENSOR::B,
+                                  ContractionProblemGemm::TENSOR::MXSA,
+                                  ContractionProblemGemm::TENSOR::MXSB})
+                    {
+                        auto& desc = m_currentGemmProblem->tensors()[ti];
+                        auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                        if(it == m_vdata[ti].pristine.end())
+                            continue;
+                        auto& p = it->second;
+                        if(p.cpuInput.valid && p.cpuInput.current)
+                        {
+                            size_t bytes = multiplyElementSize(
+                                p.maxElements, desc.elementBytes());
+                            std::memcpy(p.cpuInput.current.get(),
+                                        p.cpuInput.valid.get(),
+                                        bytes);
+                        }
+                    }
+                }
+            }
+            virtual void postSolution() override
+            {
+                if(m_boundsCheck == BoundsCheckMode::GuardPageAll)
+                {
+                    m_numRunsInSolution = 0;
+                    m_curBoundsCheck    = BoundsCheckMode::GuardPageFront;
+                }
+            }
             virtual bool needMoreRunsInSolution() const override
             {
                 return m_numRunsInSolution < m_numRunsPerSolution;
@@ -812,6 +953,8 @@ namespace TensileLite
 
             virtual size_t numWarmupRuns() override
             {
+                if(m_numRunsInSolution < m_numRunsPerSolution)
+                    return 1;
                 return 0;
             };
             virtual void setNumWarmupRuns(size_t count) override {}
@@ -920,6 +1063,19 @@ namespace TensileLite
 
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
+            void initializeMXData(ContractionProblemGemm const& problem);
+
+            // True when swizzled MX scales depend on the solution.
+            bool needsSolutionDependentMXPreswizzle(
+                ContractionProblemGemm const& problem,
+                ContractionSolution const*    solution) const
+            {
+                return isMXProblem(problem) && m_mxScaleFormat > 0
+                       && m_mxScaleLayout == MXScaleLayout::GFX950
+                       && solution != nullptr
+                       && solution->problemType.mxScaleFormat == 1;
+            }
+
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
                             std::vector<size_t>&              maxElements,
@@ -956,6 +1112,7 @@ namespace TensileLite
                 ConvertToProblemInputs(ContractionProblemGemm const& problem, bool isGPU);
 
             std::vector<VectorDataInitProperties> m_vdata;
+            std::vector<std::shared_ptr<void>>    m_guardPages;
             std::vector<void*>                    m_cpuPtrs;
             std::vector<void*>                    m_gpuPtrs;
             std::vector<std::vector<size_t>>      m_groupedOffsets;
@@ -966,6 +1123,8 @@ namespace TensileLite
 
             bool m_cpuInit = false;
             bool m_gpuInit = false;
+
+            std::shared_ptr<ProblemInputs> m_cachedGPUInputs;
 
             size_t m_maxBatch;
 
@@ -1011,6 +1170,17 @@ namespace TensileLite
             int64_t                         m_rotatingBuffer = 0;
             std::shared_ptr<RotatingMemory> m_rm;
             int32_t                         m_rotatingMode = 0;
+
+            ContractionSolution const*  m_currentSolution   = nullptr;
+            ContractionProblemGemm const* m_currentGemmProblem = nullptr;
+
+            int m_mxScaleFormat = 0;
+            MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
+            // Set by initializeMXData when a preswizzled scale was uploaded
+            // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
+            // hand back gpuInput.valid as-is rather than re-swizzling).
+            bool m_mxPreswizzledA = false;
+            bool m_mxPreswizzledB = false;
         };
 
         template <>
@@ -1069,7 +1239,7 @@ namespace TensileLite
         template <>
         inline float DataInitialization::getValue<float, InitMode::Random>()
         {
-            return static_cast<float>((rand() % 201) - 100);
+            return static_cast<float>((getThreadLocalRandInt() % 201) - 100);
         }
 
         template <>
@@ -1139,7 +1309,7 @@ namespace TensileLite
         template <>
         inline double DataInitialization::getValue<double, InitMode::Random>()
         {
-            return static_cast<double>((rand() % 2001) - 1000);
+            return static_cast<double>((getThreadLocalRandInt() % 2001) - 1000);
         }
 
         template <>
@@ -1381,7 +1551,7 @@ namespace TensileLite
         template <>
         inline int32_t DataInitialization::getValue<int32_t, InitMode::Random>()
         {
-            return rand() % 7 - 3;
+            return getThreadLocalRandInt() % 7 - 3;
         }
 
         template <>
@@ -1444,10 +1614,10 @@ namespace TensileLite
         template <>
         inline Int8x4 DataInitialization::getValue<Int8x4, InitMode::Random>()
         {
-            return Int8x4{static_cast<int8_t>((rand() % 7) - 3),
-                          static_cast<int8_t>((rand() % 7) - 3),
-                          static_cast<int8_t>((rand() % 7) - 3),
-                          static_cast<int8_t>((rand() % 7) - 3)};
+            return Int8x4{static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3),
+                          static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3),
+                          static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3),
+                          static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3)};
         }
 
         template <>
@@ -1541,7 +1711,7 @@ namespace TensileLite
         template <>
         inline Half DataInitialization::getValue<Half, InitMode::Random>()
         {
-            return static_cast<Half>((rand() % 7) - 3);
+            return static_cast<Half>((getThreadLocalRandInt() % 7) - 3);
         }
 
         template <>
@@ -1608,7 +1778,7 @@ namespace TensileLite
         template <>
         inline BFloat16 DataInitialization::getValue<BFloat16, InitMode::Random>()
         {
-            return static_cast<BFloat16>((rand() % 7) - 3);
+            return static_cast<BFloat16>((getThreadLocalRandInt() % 7) - 3);
         }
 
         template <>
@@ -1716,7 +1886,7 @@ namespace TensileLite
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::Random>()
         {
-            return static_cast<Float8>((float)((rand() % 7) - 3));
+            return static_cast<Float8>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -1783,7 +1953,7 @@ namespace TensileLite
         template <>
         inline BFloat8 DataInitialization::getValue<BFloat8, InitMode::Random>()
         {
-            return static_cast<BFloat8>((float)((rand() % 7) - 3));
+            return static_cast<BFloat8>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -1927,7 +2097,7 @@ namespace TensileLite
         template <>
         inline Float8_fnuz DataInitialization::getValue<Float8_fnuz, InitMode::Random>()
         {
-            return static_cast<Float8_fnuz>((float)((rand() % 7) - 3));
+            return static_cast<Float8_fnuz>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -1994,7 +2164,7 @@ namespace TensileLite
         template <>
         inline BFloat8_fnuz DataInitialization::getValue<BFloat8_fnuz, InitMode::Random>()
         {
-            return static_cast<BFloat8_fnuz>((float)((rand() % 7) - 3));
+            return static_cast<BFloat8_fnuz>((float)((getThreadLocalRandInt() % 7) - 3));
         }
 
         template <>
@@ -2092,7 +2262,7 @@ namespace TensileLite
         template <>
         inline int8_t DataInitialization::getValue<int8_t, InitMode::Random>()
         {
-            return static_cast<int8_t>((rand() % 7) - 3);
+            return static_cast<int8_t>((getThreadLocalRandInt() % 7) - 3);
         }
 
         template <>
@@ -2104,6 +2274,458 @@ namespace TensileLite
         inline int8_t DataInitialization::getValue<int8_t, InitMode::BadOutput>()
         {
             return std::numeric_limits<int8_t>::min();
+        }
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Zero>()
+        {
+            return Float6x32(0.0f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::One>()
+        {
+            return Float6x32(1.0f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Two>()
+        {
+            return Float6x32(2.0f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::NegOne>()
+        {
+            return Float6x32(-1.0f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Max>()
+        {
+            return Float6x32(7.5f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::DenormMin>()
+        {
+            return Float6x32(0.125f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::DenormMax>()
+        {
+            return Float6x32(0.875f);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::NaN>()
+        {
+            throw std::runtime_error("NaN not available for float6.");
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for float6.");
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::Random>()
+        {
+            float v0  = static_cast<float>((rand() % 7) - 3);
+            float v1  = static_cast<float>((rand() % 7) - 3);
+            float v2  = static_cast<float>((rand() % 7) - 3);
+            float v3  = static_cast<float>((rand() % 7) - 3);
+            float v4  = static_cast<float>((rand() % 7) - 3);
+            float v5  = static_cast<float>((rand() % 7) - 3);
+            float v6  = static_cast<float>((rand() % 7) - 3);
+            float v7  = static_cast<float>((rand() % 7) - 3);
+            float v8  = static_cast<float>((rand() % 7) - 3);
+            float v9  = static_cast<float>((rand() % 7) - 3);
+            float v10 = static_cast<float>((rand() % 7) - 3);
+            float v11 = static_cast<float>((rand() % 7) - 3);
+            float v12 = static_cast<float>((rand() % 7) - 3);
+            float v13 = static_cast<float>((rand() % 7) - 3);
+            float v14 = static_cast<float>((rand() % 7) - 3);
+            float v15 = static_cast<float>((rand() % 7) - 3);
+            float v16 = static_cast<float>((rand() % 7) - 3);
+            float v17 = static_cast<float>((rand() % 7) - 3);
+            float v18 = static_cast<float>((rand() % 7) - 3);
+            float v19 = static_cast<float>((rand() % 7) - 3);
+            float v20 = static_cast<float>((rand() % 7) - 3);
+            float v21 = static_cast<float>((rand() % 7) - 3);
+            float v22 = static_cast<float>((rand() % 7) - 3);
+            float v23 = static_cast<float>((rand() % 7) - 3);
+            float v24 = static_cast<float>((rand() % 7) - 3);
+            float v25 = static_cast<float>((rand() % 7) - 3);
+            float v26 = static_cast<float>((rand() % 7) - 3);
+            float v27 = static_cast<float>((rand() % 7) - 3);
+            float v28 = static_cast<float>((rand() % 7) - 3);
+            float v29 = static_cast<float>((rand() % 7) - 3);
+            float v30 = static_cast<float>((rand() % 7) - 3);
+            float v31 = static_cast<float>((rand() % 7) - 3);
+
+            return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::BadInput>()
+        {
+            throw std::runtime_error("BadInput not available for float4.");
+        }
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::BadOutput>()
+        {
+            throw std::runtime_error("BadOutput not available for float4.");
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Zero>()
+        {
+            return BFloat6x32(0.0f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::One>()
+        {
+            return BFloat6x32(1.0f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Two>()
+        {
+            return BFloat6x32(2.0f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::NegOne>()
+        {
+            return BFloat6x32(-1.0f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Max>()
+        {
+            return BFloat6x32(7.5f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::DenormMin>()
+        {
+            return BFloat6x32(0.125f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::DenormMax>()
+        {
+            return BFloat6x32(0.875f);
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::NaN>()
+        {
+            throw std::runtime_error("NaN not available for float6.");
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for float6.");
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::Random>()
+        {
+            BFloat6x32 ret;
+
+            float v0  = static_cast<float>((rand() % 7) - 3);
+            float v1  = static_cast<float>((rand() % 7) - 3);
+            float v2  = static_cast<float>((rand() % 7) - 3);
+            float v3  = static_cast<float>((rand() % 7) - 3);
+            float v4  = static_cast<float>((rand() % 7) - 3);
+            float v5  = static_cast<float>((rand() % 7) - 3);
+            float v6  = static_cast<float>((rand() % 7) - 3);
+            float v7  = static_cast<float>((rand() % 7) - 3);
+            float v8  = static_cast<float>((rand() % 7) - 3);
+            float v9  = static_cast<float>((rand() % 7) - 3);
+            float v10 = static_cast<float>((rand() % 7) - 3);
+            float v11 = static_cast<float>((rand() % 7) - 3);
+            float v12 = static_cast<float>((rand() % 7) - 3);
+            float v13 = static_cast<float>((rand() % 7) - 3);
+            float v14 = static_cast<float>((rand() % 7) - 3);
+            float v15 = static_cast<float>((rand() % 7) - 3);
+            float v16 = static_cast<float>((rand() % 7) - 3);
+            float v17 = static_cast<float>((rand() % 7) - 3);
+            float v18 = static_cast<float>((rand() % 7) - 3);
+            float v19 = static_cast<float>((rand() % 7) - 3);
+            float v20 = static_cast<float>((rand() % 7) - 3);
+            float v21 = static_cast<float>((rand() % 7) - 3);
+            float v22 = static_cast<float>((rand() % 7) - 3);
+            float v23 = static_cast<float>((rand() % 7) - 3);
+            float v24 = static_cast<float>((rand() % 7) - 3);
+            float v25 = static_cast<float>((rand() % 7) - 3);
+            float v26 = static_cast<float>((rand() % 7) - 3);
+            float v27 = static_cast<float>((rand() % 7) - 3);
+            float v28 = static_cast<float>((rand() % 7) - 3);
+            float v29 = static_cast<float>((rand() % 7) - 3);
+            float v30 = static_cast<float>((rand() % 7) - 3);
+            float v31 = static_cast<float>((rand() % 7) - 3);
+
+            return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::BadInput>()
+        {
+            throw std::runtime_error("BadInput not available for float4.");
+        }
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::BadOutput>()
+        {
+            throw std::runtime_error("BadOutput not available for float4.");
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Zero>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x0;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::One>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x22;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Two>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x44;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::NegOne>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0xaa;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Max>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x77;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::DenormMin>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x11;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::DenormMax>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            x.bits = 0x11;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::NaN>()
+        {
+            throw std::runtime_error("NaN not available for float4.");
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for float4.");
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::Random>()
+        {
+            union
+            {
+                uint8_t bits;
+                Float4x2 value;
+            } x;
+
+            uint8_t val0 = static_cast<uint8_t>(rand() % 15);
+            uint8_t val1 = static_cast<uint8_t>(rand() % 15);
+            x.bits = (val1 << 4) | val0;
+            return x.value;
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::BadInput>()
+        {
+            throw std::runtime_error("BadInput not available for float4.");
+        }
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::BadOutput>()
+        {
+            throw std::runtime_error("BadOutput not available for float4.");
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Zero>()
+        {
+            throw std::runtime_error("Zero not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::One>()
+        {
+            return E8(1.0f);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Two>()
+        {
+            return E8(2.0f);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::NegOne>()
+        {
+            throw std::runtime_error("-1 not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Max>()
+        {
+            return E8(0xfe);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::DenormMin>()
+        {
+            throw std::runtime_error("DenormMin not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::DenormMax>()
+        {
+            throw std::runtime_error("DenormMax not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::NaN>()
+        {
+            return E8(0xff);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Random>()
+        {
+            return E8(static_cast<uint8_t>((rand() % 7) - 3 + 127));
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::BadInput>()
+        {
+            return E8(0xff);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::BadOutput>()
+        {
+            return E8(0xff);
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Zero>()
+        {
+            return 0;
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::One>()
+        {
+            return E5M3(1.0f);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Two>()
+        {
+            return E5M3(2.0f);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::NegOne>()
+        {
+            throw std::runtime_error("-1 not available for E5M3.");
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Max>()
+        {
+            uint8_t x = 0xfe;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::DenormMin>()
+        {
+            uint8_t x = 0x01;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::DenormMax>()
+        {
+            uint8_t x = 0x07;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::NaN>()
+        {
+            uint8_t x = 0xff;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for E5M3.");
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::Random>()
+        {
+            return E5M3((rand() % 7) - 3);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::BadInput>()
+        {
+            uint8_t x = 0xff;
+            return reinterpret_cast<E5M3&>(x);
+        }
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::BadOutput>()
+        {
+            uint8_t x = 0xff;
+            return reinterpret_cast<E5M3&>(x);
         }
 
         template <>
@@ -2184,6 +2806,44 @@ namespace TensileLite
             return value == DataInitialization::getValue<int8_t, InitMode::BadInput>();
         }
 
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline bool DataInitialization::isBadInput<Float6x32>(Float6x32 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline bool DataInitialization::isBadInput<BFloat6x32>(BFloat6x32 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline bool DataInitialization::isBadInput<Float4x2>(Float4x2 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline bool DataInitialization::isBadInput<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
+
+        template <>
+        inline bool DataInitialization::isBadInput<E5M3>(E5M3 value)
+        {
+            return value.data == 0xff;
+        }
+
         template <>
         inline bool DataInitialization::isBadOutput<float>(float value)
         {
@@ -2254,7 +2914,7 @@ namespace TensileLite
         template <>
         inline bool DataInitialization::isBadOutput<BFloat16>(BFloat16 value)
         {
-            return std::isinf(value);
+            return std::isinf(static_cast<float>(value));
         }
 
         template <>
@@ -2263,12 +2923,50 @@ namespace TensileLite
             return value == DataInitialization::getValue<int8_t, InitMode::BadOutput>();
         }
 
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline bool DataInitialization::isBadOutput<Float6x32>(Float6x32 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline bool DataInitialization::isBadOutput<BFloat6x32>(BFloat6x32 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline bool DataInitialization::isBadOutput<Float4x2>(Float4x2 value)
+        {
+            return false;
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline bool DataInitialization::isBadOutput<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
+
+        template <>
+        inline bool DataInitialization::isBadOutput<E5M3>(E5M3 value)
+        {
+            return value.data == 0xff;
+        }
+
         template <>
         inline float DataInitialization::getTrigValue<float>(int idx, bool useCos, bool useAbs)
         {
             float val = useCos ? cos(idx) : sin(idx);
             if(useAbs)
-                val = abs(val);
+                val = std::fabs(val);
             return val;
         }
 
@@ -2277,7 +2975,7 @@ namespace TensileLite
         {
             double val = useCos ? cos(idx) : sin(idx);
             if(useAbs)
-                val = abs(val);
+                val = std::fabs(val);
             return val;
         }
 
@@ -2338,6 +3036,112 @@ namespace TensileLite
             throw std::runtime_error("Trig not available for Int8.");
         }
 
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32 DataInitialization::getTrigValue<Float6x32>(int idx, bool useCos, bool useAbs)
+        {
+            float v0  = getTrigValue<float>(idx, useCos, useAbs);
+            float v1  = getTrigValue<float>(idx, useCos, useAbs);
+            float v2  = getTrigValue<float>(idx, useCos, useAbs);
+            float v3  = getTrigValue<float>(idx, useCos, useAbs);
+            float v4  = getTrigValue<float>(idx, useCos, useAbs);
+            float v5  = getTrigValue<float>(idx, useCos, useAbs);
+            float v6  = getTrigValue<float>(idx, useCos, useAbs);
+            float v7  = getTrigValue<float>(idx, useCos, useAbs);
+            float v8  = getTrigValue<float>(idx, useCos, useAbs);
+            float v9  = getTrigValue<float>(idx, useCos, useAbs);
+            float v10 = getTrigValue<float>(idx, useCos, useAbs);
+            float v11 = getTrigValue<float>(idx, useCos, useAbs);
+            float v12 = getTrigValue<float>(idx, useCos, useAbs);
+            float v13 = getTrigValue<float>(idx, useCos, useAbs);
+            float v14 = getTrigValue<float>(idx, useCos, useAbs);
+            float v15 = getTrigValue<float>(idx, useCos, useAbs);
+            float v16 = getTrigValue<float>(idx, useCos, useAbs);
+            float v17 = getTrigValue<float>(idx, useCos, useAbs);
+            float v18 = getTrigValue<float>(idx, useCos, useAbs);
+            float v19 = getTrigValue<float>(idx, useCos, useAbs);
+            float v20 = getTrigValue<float>(idx, useCos, useAbs);
+            float v21 = getTrigValue<float>(idx, useCos, useAbs);
+            float v22 = getTrigValue<float>(idx, useCos, useAbs);
+            float v23 = getTrigValue<float>(idx, useCos, useAbs);
+            float v24 = getTrigValue<float>(idx, useCos, useAbs);
+            float v25 = getTrigValue<float>(idx, useCos, useAbs);
+            float v26 = getTrigValue<float>(idx, useCos, useAbs);
+            float v27 = getTrigValue<float>(idx, useCos, useAbs);
+            float v28 = getTrigValue<float>(idx, useCos, useAbs);
+            float v29 = getTrigValue<float>(idx, useCos, useAbs);
+            float v30 = getTrigValue<float>(idx, useCos, useAbs);
+            float v31 = getTrigValue<float>(idx, useCos, useAbs);
+
+            return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32 DataInitialization::getTrigValue<BFloat6x32>(int idx, bool useCos, bool useAbs)
+        {
+            float v0  = getTrigValue<float>(idx, useCos, useAbs);
+            float v1  = getTrigValue<float>(idx, useCos, useAbs);
+            float v2  = getTrigValue<float>(idx, useCos, useAbs);
+            float v3  = getTrigValue<float>(idx, useCos, useAbs);
+            float v4  = getTrigValue<float>(idx, useCos, useAbs);
+            float v5  = getTrigValue<float>(idx, useCos, useAbs);
+            float v6  = getTrigValue<float>(idx, useCos, useAbs);
+            float v7  = getTrigValue<float>(idx, useCos, useAbs);
+            float v8  = getTrigValue<float>(idx, useCos, useAbs);
+            float v9  = getTrigValue<float>(idx, useCos, useAbs);
+            float v10 = getTrigValue<float>(idx, useCos, useAbs);
+            float v11 = getTrigValue<float>(idx, useCos, useAbs);
+            float v12 = getTrigValue<float>(idx, useCos, useAbs);
+            float v13 = getTrigValue<float>(idx, useCos, useAbs);
+            float v14 = getTrigValue<float>(idx, useCos, useAbs);
+            float v15 = getTrigValue<float>(idx, useCos, useAbs);
+            float v16 = getTrigValue<float>(idx, useCos, useAbs);
+            float v17 = getTrigValue<float>(idx, useCos, useAbs);
+            float v18 = getTrigValue<float>(idx, useCos, useAbs);
+            float v19 = getTrigValue<float>(idx, useCos, useAbs);
+            float v20 = getTrigValue<float>(idx, useCos, useAbs);
+            float v21 = getTrigValue<float>(idx, useCos, useAbs);
+            float v22 = getTrigValue<float>(idx, useCos, useAbs);
+            float v23 = getTrigValue<float>(idx, useCos, useAbs);
+            float v24 = getTrigValue<float>(idx, useCos, useAbs);
+            float v25 = getTrigValue<float>(idx, useCos, useAbs);
+            float v26 = getTrigValue<float>(idx, useCos, useAbs);
+            float v27 = getTrigValue<float>(idx, useCos, useAbs);
+            float v28 = getTrigValue<float>(idx, useCos, useAbs);
+            float v29 = getTrigValue<float>(idx, useCos, useAbs);
+            float v30 = getTrigValue<float>(idx, useCos, useAbs);
+            float v31 = getTrigValue<float>(idx, useCos, useAbs);
+
+            return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getTrigValue<Float4x2>(int idx, bool useCos, bool useAbs)
+        {
+            float val0 = getTrigValue<float>(idx, useCos, useAbs);
+            float val1 = getTrigValue<float>(idx, useCos, useAbs);
+            return Float4x2(val0, val1);
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::getTrigValue<E8>(int idx, bool useCos, bool useAbs)
+        {
+            return E8(getTrigValue<float>(idx, useCos, useAbs));
+        }
+
         template <>
         inline std::complex<float>
             DataInitialization::getTrigValue<std::complex<float>>(int idx, bool useCos, bool useAbs)
@@ -2352,6 +3156,12 @@ namespace TensileLite
         {
             return std::complex<double>(getTrigValue<double>(idx, useCos, useAbs),
                                         getTrigValue<double>(idx, useCos, useAbs));
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getTrigValue<E5M3>(int idx, bool useCos, bool useAbs)
+        {
+            return E5M3(getTrigValue<float>(idx, useCos, useAbs));
         }
 
         template <typename>
@@ -2418,6 +3228,22 @@ namespace TensileLite
         {
             using UINT_T                = uint8_t;
             static constexpr int NUMSIG = 2;
+            static constexpr int NUMEXP = 5;
+        };
+
+        template <>
+        struct FP_PARAM<E8>
+        {
+            using UINT_T                = uint8_t;
+            static constexpr int NUMSIG = 0;
+            static constexpr int NUMEXP = 8;
+        };
+
+        template <>
+        struct FP_PARAM<E5M3>
+        {
+            using UINT_T                = uint8_t;
+            static constexpr int NUMSIG = 3;
             static constexpr int NUMEXP = 5;
         };
 
@@ -2508,6 +3334,16 @@ namespace TensileLite
 
         template <>
         struct rocm_random_narrow_range<BFloat8_fnuz> : rocm_random<BFloat8_fnuz, -100, 0>
+        {
+        };
+
+        template <>
+        struct rocm_random_narrow_range<E8> : rocm_random<E8, -100, 0>
+        {
+        };
+
+        template <>
+        struct rocm_random_narrow_range<E5M3> : rocm_random<E5M3, -100, 0>
         {
         };
 
@@ -2605,18 +3441,128 @@ namespace TensileLite
             return getValue<int8_t, InitMode::Random>();
         }
 
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNarrow>()
+        {
+            float v0  = rocm_random_narrow_range<float>{}();
+            float v1  = rocm_random_narrow_range<float>{}();
+            float v2  = rocm_random_narrow_range<float>{}();
+            float v3  = rocm_random_narrow_range<float>{}();
+            float v4  = rocm_random_narrow_range<float>{}();
+            float v5  = rocm_random_narrow_range<float>{}();
+            float v6  = rocm_random_narrow_range<float>{}();
+            float v7  = rocm_random_narrow_range<float>{}();
+            float v8  = rocm_random_narrow_range<float>{}();
+            float v9  = rocm_random_narrow_range<float>{}();
+            float v10 = rocm_random_narrow_range<float>{}();
+            float v11 = rocm_random_narrow_range<float>{}();
+            float v12 = rocm_random_narrow_range<float>{}();
+            float v13 = rocm_random_narrow_range<float>{}();
+            float v14 = rocm_random_narrow_range<float>{}();
+            float v15 = rocm_random_narrow_range<float>{}();
+            float v16 = rocm_random_narrow_range<float>{}();
+            float v17 = rocm_random_narrow_range<float>{}();
+            float v18 = rocm_random_narrow_range<float>{}();
+            float v19 = rocm_random_narrow_range<float>{}();
+            float v20 = rocm_random_narrow_range<float>{}();
+            float v21 = rocm_random_narrow_range<float>{}();
+            float v22 = rocm_random_narrow_range<float>{}();
+            float v23 = rocm_random_narrow_range<float>{}();
+            float v24 = rocm_random_narrow_range<float>{}();
+            float v25 = rocm_random_narrow_range<float>{}();
+            float v26 = rocm_random_narrow_range<float>{}();
+            float v27 = rocm_random_narrow_range<float>{}();
+            float v28 = rocm_random_narrow_range<float>{}();
+            float v29 = rocm_random_narrow_range<float>{}();
+            float v30 = rocm_random_narrow_range<float>{}();
+            float v31 = rocm_random_narrow_range<float>{}();
+
+            return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::RandomNarrow>()
+        {
+            float v0  = rocm_random_narrow_range<float>{}();
+            float v1  = rocm_random_narrow_range<float>{}();
+            float v2  = rocm_random_narrow_range<float>{}();
+            float v3  = rocm_random_narrow_range<float>{}();
+            float v4  = rocm_random_narrow_range<float>{}();
+            float v5  = rocm_random_narrow_range<float>{}();
+            float v6  = rocm_random_narrow_range<float>{}();
+            float v7  = rocm_random_narrow_range<float>{}();
+            float v8  = rocm_random_narrow_range<float>{}();
+            float v9  = rocm_random_narrow_range<float>{}();
+            float v10 = rocm_random_narrow_range<float>{}();
+            float v11 = rocm_random_narrow_range<float>{}();
+            float v12 = rocm_random_narrow_range<float>{}();
+            float v13 = rocm_random_narrow_range<float>{}();
+            float v14 = rocm_random_narrow_range<float>{}();
+            float v15 = rocm_random_narrow_range<float>{}();
+            float v16 = rocm_random_narrow_range<float>{}();
+            float v17 = rocm_random_narrow_range<float>{}();
+            float v18 = rocm_random_narrow_range<float>{}();
+            float v19 = rocm_random_narrow_range<float>{}();
+            float v20 = rocm_random_narrow_range<float>{}();
+            float v21 = rocm_random_narrow_range<float>{}();
+            float v22 = rocm_random_narrow_range<float>{}();
+            float v23 = rocm_random_narrow_range<float>{}();
+            float v24 = rocm_random_narrow_range<float>{}();
+            float v25 = rocm_random_narrow_range<float>{}();
+            float v26 = rocm_random_narrow_range<float>{}();
+            float v27 = rocm_random_narrow_range<float>{}();
+            float v28 = rocm_random_narrow_range<float>{}();
+            float v29 = rocm_random_narrow_range<float>{}();
+            float v30 = rocm_random_narrow_range<float>{}();
+            float v31 = rocm_random_narrow_range<float>{}();
+
+            return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNarrow>()
+        {
+            return getValue<Float4x2, InitMode::Random>();
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::RandomNarrow>()
+        {
+            return getValue<E8, InitMode::Random>();
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::RandomNarrow>()
+        {
+            return getValue<E5M3, InitMode::Random>();
+        }
+
         template <typename T>
         inline T getValueWithUpperLowerBoundFP(double upper = 1.0, double lower = -1.0)
         {
             return static_cast<T>(lower
-                                  + static_cast<double>(rand())
+                                  + static_cast<double>(getThreadLocalRandInt())
                                         / static_cast<double>(RAND_MAX / (upper - lower)));
         }
 
         template <typename T>
         inline T getValueWithUpperLowerBoundInteger(int upper = 128, int lower = -128)
         {
-            return static_cast<T>(lower + rand() % (upper - lower + 1));
+            return static_cast<T>(lower + getThreadLocalRandInt() % (upper - lower + 1));
         }
 
         template <>
@@ -2710,6 +3656,222 @@ namespace TensileLite
             return getValueWithUpperLowerBoundInteger<int8_t>();
         }
 
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32 DataInitialization::getValue<Float6x32, InitMode::RandomNegPosLimited>()
+        {
+            float v0  = getValueWithUpperLowerBoundFP<float>();
+            float v1  = getValueWithUpperLowerBoundFP<float>();
+            float v2  = getValueWithUpperLowerBoundFP<float>();
+            float v3  = getValueWithUpperLowerBoundFP<float>();
+            float v4  = getValueWithUpperLowerBoundFP<float>();
+            float v5  = getValueWithUpperLowerBoundFP<float>();
+            float v6  = getValueWithUpperLowerBoundFP<float>();
+            float v7  = getValueWithUpperLowerBoundFP<float>();
+            float v8  = getValueWithUpperLowerBoundFP<float>();
+            float v9  = getValueWithUpperLowerBoundFP<float>();
+            float v10 = getValueWithUpperLowerBoundFP<float>();
+            float v11 = getValueWithUpperLowerBoundFP<float>();
+            float v12 = getValueWithUpperLowerBoundFP<float>();
+            float v13 = getValueWithUpperLowerBoundFP<float>();
+            float v14 = getValueWithUpperLowerBoundFP<float>();
+            float v15 = getValueWithUpperLowerBoundFP<float>();
+            float v16 = getValueWithUpperLowerBoundFP<float>();
+            float v17 = getValueWithUpperLowerBoundFP<float>();
+            float v18 = getValueWithUpperLowerBoundFP<float>();
+            float v19 = getValueWithUpperLowerBoundFP<float>();
+            float v20 = getValueWithUpperLowerBoundFP<float>();
+            float v21 = getValueWithUpperLowerBoundFP<float>();
+            float v22 = getValueWithUpperLowerBoundFP<float>();
+            float v23 = getValueWithUpperLowerBoundFP<float>();
+            float v24 = getValueWithUpperLowerBoundFP<float>();
+            float v25 = getValueWithUpperLowerBoundFP<float>();
+            float v26 = getValueWithUpperLowerBoundFP<float>();
+            float v27 = getValueWithUpperLowerBoundFP<float>();
+            float v28 = getValueWithUpperLowerBoundFP<float>();
+            float v29 = getValueWithUpperLowerBoundFP<float>();
+            float v30 = getValueWithUpperLowerBoundFP<float>();
+            float v31 = getValueWithUpperLowerBoundFP<float>();
+
+            return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32 DataInitialization::getValue<BFloat6x32, InitMode::RandomNegPosLimited>()
+        {
+            float v0  = getValueWithUpperLowerBoundFP<float>();
+            float v1  = getValueWithUpperLowerBoundFP<float>();
+            float v2  = getValueWithUpperLowerBoundFP<float>();
+            float v3  = getValueWithUpperLowerBoundFP<float>();
+            float v4  = getValueWithUpperLowerBoundFP<float>();
+            float v5  = getValueWithUpperLowerBoundFP<float>();
+            float v6  = getValueWithUpperLowerBoundFP<float>();
+            float v7  = getValueWithUpperLowerBoundFP<float>();
+            float v8  = getValueWithUpperLowerBoundFP<float>();
+            float v9  = getValueWithUpperLowerBoundFP<float>();
+            float v10 = getValueWithUpperLowerBoundFP<float>();
+            float v11 = getValueWithUpperLowerBoundFP<float>();
+            float v12 = getValueWithUpperLowerBoundFP<float>();
+            float v13 = getValueWithUpperLowerBoundFP<float>();
+            float v14 = getValueWithUpperLowerBoundFP<float>();
+            float v15 = getValueWithUpperLowerBoundFP<float>();
+            float v16 = getValueWithUpperLowerBoundFP<float>();
+            float v17 = getValueWithUpperLowerBoundFP<float>();
+            float v18 = getValueWithUpperLowerBoundFP<float>();
+            float v19 = getValueWithUpperLowerBoundFP<float>();
+            float v20 = getValueWithUpperLowerBoundFP<float>();
+            float v21 = getValueWithUpperLowerBoundFP<float>();
+            float v22 = getValueWithUpperLowerBoundFP<float>();
+            float v23 = getValueWithUpperLowerBoundFP<float>();
+            float v24 = getValueWithUpperLowerBoundFP<float>();
+            float v25 = getValueWithUpperLowerBoundFP<float>();
+            float v26 = getValueWithUpperLowerBoundFP<float>();
+            float v27 = getValueWithUpperLowerBoundFP<float>();
+            float v28 = getValueWithUpperLowerBoundFP<float>();
+            float v29 = getValueWithUpperLowerBoundFP<float>();
+            float v30 = getValueWithUpperLowerBoundFP<float>();
+            float v31 = getValueWithUpperLowerBoundFP<float>();
+
+            return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::getValue<Float4x2, InitMode::RandomNegPosLimited>()
+        {
+            return Float4x2(getValueWithUpperLowerBoundFP<float>(),
+                            getValueWithUpperLowerBoundFP<float>());
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::RandomNegPosLimited>()
+        {
+            return getValueWithUpperLowerBoundInteger<E8>();
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::RandomNegPosLimited>()
+        {
+            return getValueWithUpperLowerBoundInteger<E5M3>();
+        }
+
+        // ---- UniformLowPrecision: only supported for low-precision types (FP4, FP6, BF6) ----
+
+#define TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(T)                                        \
+        template <>                                                                         \
+        inline T DataInitialization::getValue<T, InitMode::UniformLowPrecision>()            \
+        {                                                                                   \
+            throw std::runtime_error(                                                       \
+                "UniformLowPrecision init mode is only supported for low-precision "         \
+                "data types (FP4, FP6, BF6).");                                             \
+        }
+
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(float)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(double)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(BFloat16)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Half)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Float8)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(BFloat8)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Float8_fnuz)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(BFloat8_fnuz)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(int32_t)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(Int8x4)
+        TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED(int8_t)
+
+        template <>
+        inline std::complex<float>
+            DataInitialization::getValue<std::complex<float>, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
+        template <>
+        inline std::complex<double>
+            DataInitialization::getValue<std::complex<double>, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
+#undef TENSILE_UNIFORM_LOW_PRECISION_UNSUPPORTED
+
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32
+            DataInitialization::getValue<Float6x32, InitMode::UniformLowPrecision>()
+        {
+            float maxVal = getValue<Float6x32, InitMode::Max>().getElement(0);
+            float v[32];
+            for(int i = 0; i < 32; i++)
+                v[i] = getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal);
+            return Float6x32(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                            v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15],
+                            v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
+                            v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32
+            DataInitialization::getValue<BFloat6x32, InitMode::UniformLowPrecision>()
+        {
+            float maxVal = getValue<BFloat6x32, InitMode::Max>().getElement(0);
+            float v[32];
+            for(int i = 0; i < 32; i++)
+                v[i] = getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal);
+            return BFloat6x32(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+                            v[8], v[9], v[10], v[11], v[12], v[13], v[14], v[15],
+                            v[16], v[17], v[18], v[19], v[20], v[21], v[22], v[23],
+                            v[24], v[25], v[26], v[27], v[28], v[29], v[30], v[31]);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2
+            DataInitialization::getValue<Float4x2, InitMode::UniformLowPrecision>()
+        {
+            float maxVal = getValue<Float4x2, InitMode::Max>().getElement(0);
+            return Float4x2(getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal),
+                            getValueWithUpperLowerBoundFP<float>(maxVal, -maxVal));
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
+        template <>
+        inline E5M3 DataInitialization::getValue<E5M3, InitMode::UniformLowPrecision>()
+        {
+            throw std::runtime_error(
+                "UniformLowPrecision init mode is only supported for low-precision "
+                "data types (FP4, FP6, BF6).");
+        }
+
         template <>
         inline float DataInitialization::ConvertTo<float>(size_t i)
         {
@@ -2791,6 +3953,116 @@ namespace TensileLite
             return static_cast<int8_t>(i);
         }
 
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32 DataInitialization::ConvertTo<Float6x32>(size_t i)
+        {
+            float v0  = float(i);
+            float v1  = float(i);
+            float v2  = float(i);
+            float v3  = float(i);
+            float v4  = float(i);
+            float v5  = float(i);
+            float v6  = float(i);
+            float v7  = float(i);
+            float v8  = float(i);
+            float v9  = float(i);
+            float v10 = float(i);
+            float v11 = float(i);
+            float v12 = float(i);
+            float v13 = float(i);
+            float v14 = float(i);
+            float v15 = float(i);
+            float v16 = float(i);
+            float v17 = float(i);
+            float v18 = float(i);
+            float v19 = float(i);
+            float v20 = float(i);
+            float v21 = float(i);
+            float v22 = float(i);
+            float v23 = float(i);
+            float v24 = float(i);
+            float v25 = float(i);
+            float v26 = float(i);
+            float v27 = float(i);
+            float v28 = float(i);
+            float v29 = float(i);
+            float v30 = float(i);
+            float v31 = float(i);
+
+            return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32 DataInitialization::ConvertTo<BFloat6x32>(size_t i)
+        {
+            float v0  = float(i);
+            float v1  = float(i);
+            float v2  = float(i);
+            float v3  = float(i);
+            float v4  = float(i);
+            float v5  = float(i);
+            float v6  = float(i);
+            float v7  = float(i);
+            float v8  = float(i);
+            float v9  = float(i);
+            float v10 = float(i);
+            float v11 = float(i);
+            float v12 = float(i);
+            float v13 = float(i);
+            float v14 = float(i);
+            float v15 = float(i);
+            float v16 = float(i);
+            float v17 = float(i);
+            float v18 = float(i);
+            float v19 = float(i);
+            float v20 = float(i);
+            float v21 = float(i);
+            float v22 = float(i);
+            float v23 = float(i);
+            float v24 = float(i);
+            float v25 = float(i);
+            float v26 = float(i);
+            float v27 = float(i);
+            float v28 = float(i);
+            float v29 = float(i);
+            float v30 = float(i);
+            float v31 = float(i);
+
+            return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::ConvertTo<Float4x2>(size_t i)
+        {
+            return Float4x2(float(i), float(i));
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::ConvertTo<E8>(size_t i)
+        {
+            return static_cast<E8>(static_cast<float>(i));
+        }
+
+        template <>
+        inline E5M3 DataInitialization::ConvertTo<E5M3>(size_t i)
+        {
+            return static_cast<E5M3>(static_cast<float>(i));
+        }
+
         template <>
         inline float DataInitialization::convertDoubleTo<float>(double value)
         {
@@ -2869,6 +4141,115 @@ namespace TensileLite
         inline BFloat8_fnuz DataInitialization::convertDoubleTo<BFloat8_fnuz>(double value)
         {
             return static_cast<BFloat8_fnuz>(value);
+        }
+#ifndef _WIN32
+#ifdef TENSILE_USE_FP6
+        template <>
+        inline Float6x32 DataInitialization::convertDoubleTo<Float6x32>(double value)
+        {
+            float v0  = float(value);
+            float v1  = float(value);
+            float v2  = float(value);
+            float v3  = float(value);
+            float v4  = float(value);
+            float v5  = float(value);
+            float v6  = float(value);
+            float v7  = float(value);
+            float v8  = float(value);
+            float v9  = float(value);
+            float v10 = float(value);
+            float v11 = float(value);
+            float v12 = float(value);
+            float v13 = float(value);
+            float v14 = float(value);
+            float v15 = float(value);
+            float v16 = float(value);
+            float v17 = float(value);
+            float v18 = float(value);
+            float v19 = float(value);
+            float v20 = float(value);
+            float v21 = float(value);
+            float v22 = float(value);
+            float v23 = float(value);
+            float v24 = float(value);
+            float v25 = float(value);
+            float v26 = float(value);
+            float v27 = float(value);
+            float v28 = float(value);
+            float v29 = float(value);
+            float v30 = float(value);
+            float v31 = float(value);
+
+            return Float6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_FP6
+
+#ifdef TENSILE_USE_BF6
+        template <>
+        inline BFloat6x32 DataInitialization::convertDoubleTo<BFloat6x32>(double value)
+        {
+            float v0  = float(value);
+            float v1  = float(value);
+            float v2  = float(value);
+            float v3  = float(value);
+            float v4  = float(value);
+            float v5  = float(value);
+            float v6  = float(value);
+            float v7  = float(value);
+            float v8  = float(value);
+            float v9  = float(value);
+            float v10 = float(value);
+            float v11 = float(value);
+            float v12 = float(value);
+            float v13 = float(value);
+            float v14 = float(value);
+            float v15 = float(value);
+            float v16 = float(value);
+            float v17 = float(value);
+            float v18 = float(value);
+            float v19 = float(value);
+            float v20 = float(value);
+            float v21 = float(value);
+            float v22 = float(value);
+            float v23 = float(value);
+            float v24 = float(value);
+            float v25 = float(value);
+            float v26 = float(value);
+            float v27 = float(value);
+            float v28 = float(value);
+            float v29 = float(value);
+            float v30 = float(value);
+            float v31 = float(value);
+
+            return BFloat6x32(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9,
+                            v10, v11, v12, v13, v14, v15, v16, v17, v18, v19,
+                            v20, v21, v22, v23, v24, v25, v26, v27, v28, v29,
+                            v30, v31);
+        }
+#endif // #ifdef TENSILE_USE_BF6
+
+#ifdef TENSILE_USE_FP4
+        template <>
+        inline Float4x2 DataInitialization::convertDoubleTo<Float4x2>(double value)
+        {
+            return Float4x2(float(value), float(value));
+        }
+#endif // #ifdef TENSILE_USE_FP4
+#endif // !_WIN32
+
+        template <>
+        inline E8 DataInitialization::convertDoubleTo<E8>(double value)
+        {
+            return static_cast<E8>(static_cast<float>(value));
+        }
+
+        template <>
+        inline E5M3 DataInitialization::convertDoubleTo<E5M3>(double value)
+        {
+            return static_cast<E5M3>(static_cast<float>(value));
         }
     } // namespace Client
 } // namespace TensileLite

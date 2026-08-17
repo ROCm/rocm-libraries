@@ -45,22 +45,22 @@ CK_TILE_DEVICE auto load_tile(const TileWindow_& tile_window,
  *
  * @note This function is a modification of the existing load function.
  *       It has been extended with two additional parameters: it takes a tuple as input
- *       and an elementwise function. For each A = A0, A1… AN, the elementwise function
+ *       and an elementwise function. For each A = A0, A1... AN, the elementwise function
  *       is additionally applied during a single read.
  */
-template <typename TileWindow_,
+template <typename... TileWindow_,
           typename ElementWise_,
           index_t i_access           = -1,
           bool oob_conditional_check = true>
-CK_TILE_DEVICE auto load_tile_with_elementwise(const TileWindow_& tile_window,
+CK_TILE_DEVICE auto load_tile_with_elementwise(const ck_tile::tuple<TileWindow_...>& tile_windows,
                                                ElementWise_ elementwise,
                                                number<i_access>                     = {},
                                                bool_constant<oob_conditional_check> = {})
 {
-    // TODO: Tile windows should works with unknow number of params
-    // Load element_wise API works only when the input typle is a tuple-tyupe
-    return tile_window[number<0>{}].load(
-        tile_window, elementwise, number<i_access>{}, bool_constant<oob_conditional_check>{});
+    // TODO: Tile windows should work with unknown number of params
+    // Load element_wise API works only when the input type is a tuple-type
+    return tile_windows[number<0>{}].load(
+        tile_windows, elementwise, number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
 // Per-lane read-offset tweaks allow swizzling patterns not representable by tile_distribution.
@@ -85,12 +85,12 @@ template <typename DistributedTensor_,
           typename TileWindow_,
           index_t i_access           = -1,
           bool oob_conditional_check = true>
-CK_TILE_DEVICE auto load_tile(DistributedTensor_& dst_tile,
+CK_TILE_DEVICE void load_tile(DistributedTensor_& dst_tile,
                               const TileWindow_& tile_window,
                               number<i_access>                     = {},
                               bool_constant<oob_conditional_check> = {})
 {
-    return tile_window.load(dst_tile, number<i_access>{}, bool_constant<oob_conditional_check>{});
+    tile_window.load(dst_tile, number<i_access>{}, bool_constant<oob_conditional_check>{});
 }
 
 /**
@@ -131,7 +131,7 @@ template <typename T,
           index_t i_access           = -1,
           bool oob_conditional_check = true,
           bool pre_nop               = false>
-CK_TILE_DEVICE auto load_tile_raw(T& tile,
+CK_TILE_DEVICE void load_tile_raw(T& tile,
                                   const tile_window_linear<BottomTensorView_,
                                                            WindowLengths_,
                                                            TileDistribution_,
@@ -174,6 +174,27 @@ CK_TILE_DEVICE void async_load_tile(LdsTileWindow_&& lds_tile,
                                     bool_constant<static_move_ys> smy        = {})
 {
     async_load_tile_with_offset(lds_tile, tile_window, 0, number<i_access>{}, occ, smy);
+}
+
+template <typename TDMConfig_,
+          typename LdsTileWindow_,
+          typename BottomTensorView_,
+          typename WindowLengths_,
+          typename TileDistribution_,
+          index_t NumCoord_,
+          typename GatherIndexView_ = null_tile_window<WindowLengths_>,
+          index_t i_access          = -1> // this i_access is used for gather mode
+CK_TILE_DEVICE auto
+load_tile_tdm(const TDMConfig_& tdm_config,
+              LdsTileWindow_&& lds_tile,
+              const tile_window_with_static_distribution<BottomTensorView_,
+                                                         WindowLengths_,
+                                                         TileDistribution_,
+                                                         NumCoord_>& tile_window,
+              const GatherIndexView_& gather_index_view = null_tile_window<WindowLengths_>{},
+              number<i_access>                          = {})
+{
+    return tile_window.tdm_load_to_lds(tdm_config, lds_tile, gather_index_view, number<i_access>{});
 }
 
 template <typename LdsTileWindow_,

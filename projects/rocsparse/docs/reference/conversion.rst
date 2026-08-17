@@ -233,6 +233,11 @@ rocsparse_create_identity_permutation()
 
 .. doxygenfunction:: rocsparse_create_identity_permutation
 
+rocsparse_set_identity_permutation()
+------------------------------------
+
+.. doxygenfunction:: rocsparse_set_identity_permutation
+
 rocsparse_csrsort_buffer_size()
 -------------------------------
 

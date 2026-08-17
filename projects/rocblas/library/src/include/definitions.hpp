@@ -24,12 +24,15 @@
 #pragma once
 
 #include "macros.hpp"
+#include <sstream>
+#include <stdexcept>
 
 /*******************************************************************************
  * Constants
  ******************************************************************************/
 const int c_rocblas_default_solution   = 0; // either backend -1 is equivalent
 const int c_rocblas_source_solution    = -2;
+const int c_rocblas_test_all_solutions = -3; // reserved for testing
 const int c_rocblas_solutions_reserved = 10;
 const int c_rocblas_bad_solution_index = 0x7fffffff; // maxint
 
@@ -64,6 +67,22 @@ const int c_rocblas_bad_solution_index = 0x7fffffff; // maxint
         {                                                                               \
             throw rocblas_internal_convert_hip_to_rocblas_status(TMP_STATUS_FOR_CHECK); \
         }                                                                               \
+    } while(0)
+
+#define THROW_IF_HIP_ERROR_MESSAGE(INPUT_STATUS_FOR_CHECK, MESSAGE)                               \
+    do                                                                                            \
+    {                                                                                             \
+        hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                               \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                                    \
+        {                                                                                         \
+            std::ostringstream TMP_MSG_FOR_CHECK;                                                 \
+            TMP_MSG_FOR_CHECK << "Error " << TMP_STATUS_FOR_CHECK << "("                          \
+                              << hipGetErrorName(TMP_STATUS_FOR_CHECK) << ") " << __FILE__ << ":" \
+                              << __LINE__ << ": " << hipGetErrorString(TMP_STATUS_FOR_CHECK)      \
+                              << std::endl                                                        \
+                              << (MESSAGE);                                                       \
+            throw std::runtime_error(TMP_MSG_FOR_CHECK.str());                                    \
+        }                                                                                         \
     } while(0)
 
 #define THROW_IF_ROCBLAS_ERROR(INPUT_STATUS_FOR_CHECK)                  \

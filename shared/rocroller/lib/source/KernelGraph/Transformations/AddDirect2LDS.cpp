@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -41,8 +18,6 @@ namespace rocRoller
                 using namespace ControlGraph;
                 using namespace CoordinateGraph;
 
-                std::vector<std::pair<int, int>> result;
-
                 auto isDirect2LDSLoadTiled = [&kgraph](int tag) {
                     bool rv = false;
                     if(kgraph.control.get<LoadTiled>(tag))
@@ -54,46 +29,7 @@ namespace rocRoller
                     return rv;
                 };
 
-                for(auto loadGlobal : kgraph.control.findElements(isDirect2LDSLoadTiled))
-                {
-                    const auto storeLDSTags{
-                        getAssociatedOps<LoadTiled, StoreLDSTile>(kgraph, loadGlobal)};
-
-                    if(storeLDSTags.size() == 1)
-                    {
-                        result.push_back({loadGlobal, storeLDSTags[0]});
-                    }
-                    else
-                    {
-                        AssertFatal(storeLDSTags.size() >= 2,
-                                    "AddDirect2LDS: At least 2 Assign operations required for "
-                                    "StoreLDSTile.",
-                                    ShowValue(loadGlobal),
-                                    ShowValue(storeLDSTags.size()));
-                        for(const auto& storeLDS : storeLDSTags)
-                        {
-                            auto maybeForLoopOfLoad
-                                = findContainingOperation<ForLoopOp>(loadGlobal, kgraph);
-                            auto maybeForLoopOfStore
-                                = findContainingOperation<ForLoopOp>(storeLDS, kgraph);
-
-                            const auto isLoadInLoop  = maybeForLoopOfLoad.has_value();
-                            const auto isStoreInLoop = maybeForLoopOfStore.has_value();
-
-                            const auto bothInSameLoop
-                                = isLoadInLoop && isStoreInLoop
-                                  && maybeForLoopOfLoad.value() == maybeForLoopOfStore.value();
-
-                            const auto bothNotInLoop = not isLoadInLoop && not isStoreInLoop;
-
-                            if(bothInSameLoop || bothNotInLoop)
-                            {
-                                result.push_back({loadGlobal, storeLDS});
-                            }
-                        }
-                    }
-                }
-                return result;
+                return getLoadTiledStoreLDSTilePairs(kgraph, isDirect2LDSLoadTiled);
             }
 
             void replaceLoadTiled(KernelGraph& kgraph,

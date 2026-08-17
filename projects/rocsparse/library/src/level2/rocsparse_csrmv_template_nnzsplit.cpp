@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,8 @@
 
 #include "csrmv_device_nnzsplit.h"
 #include "rocsparse_primitives.hpp"
+
+#include <vector>
 
 #define LAUNCH_CSRMV_ANALYSIS(BLOCKSIZE, NNZ_PER_THREAD) \
     csrmv_analysis_nnzsplit<BLOCKSIZE, NNZ_PER_THREAD>(  \
@@ -172,26 +174,173 @@
         descr->base,                                                     \
         handle->pointer_mode == rocsparse_pointer_mode_host);
 
-#define LAUNCH_HELPER(macro_to_launch)                                                       \
-    const int nprocs = 2 * handle->properties.multiProcessorCount;                           \
-    if(nnz / (nprocs * CSRMV_BLOCKSIZE * CSRMV_NNZ_PER_THREAD_1) < CSRMV_BLOCKS_PER_CU)      \
-    {                                                                                        \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                            \
-    }                                                                                        \
-    else if(nnz / (nprocs * CSRMV_BLOCKSIZE * CSRMV_NNZ_PER_THREAD_2) < CSRMV_BLOCKS_PER_CU) \
-    {                                                                                        \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_1);                            \
-    }                                                                                        \
-    else                                                                                     \
-    {                                                                                        \
-        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_2);                            \
-    }
-
-#define CSRMV_BLOCKSIZE 256
+// nnz-per-thread granularity tiers.
 #define CSRMV_NNZ_PER_THREAD_0 1
 #define CSRMV_NNZ_PER_THREAD_1 4
 #define CSRMV_NNZ_PER_THREAD_2 8
-#define CSRMV_BLOCKS_PER_CU 10
+
+// Average nnz/row density knees selecting the granularity. Sparse rows are
+// latency-bound and prefer high occupancy (NNZ_PER_THREAD=1); denser rows
+// amortize per-block overhead with more work per thread.
+#define CSRMV_NNZSPLIT_LOW_DENSITY 32
+#define CSRMV_NNZSPLIT_HIGH_DENSITY 96
+
+// Number of wavefronts per block. The block size is wavefront-relative
+// (4 wavefronts = 128 threads on wave32, 256 on wave64): a small block keeps
+// each block spanning fewer rows, which shortens the per-element dichotomic row
+// search and cuts atomic traffic at row/block boundaries, while wide-wavefront
+// parts keep the historical 256-thread block instead of a half-occupancy 128.
+#define CSRMV_NNZSPLIT_BLOCK_WAVES 4
+
+// Row-length skew guard: if the longest row exceeds this multiple of the mean
+// row length, avoid the finest granularity. On strongly skewed matrices the
+// 1 nnz/thread path spreads a single long row across many small blocks, which
+// serialises the row and generates heavy atomic contention at its boundaries;
+// the coarse granularity keeps such rows within far fewer blocks.
+#define CSRMV_NNZSPLIT_SKEW_FACTOR 64
+
+namespace rocsparse
+{
+    // nnzsplit block size, wavefront-relative (128 on wave32, 256 on wave64).
+    static inline uint32_t nnzsplit_block_size(rocsparse_handle handle)
+    {
+        return CSRMV_NNZSPLIT_BLOCK_WAVES * static_cast<uint32_t>(handle->wavefront_size);
+    }
+
+    // Number of thread-blocks the device can hold concurrently for a given block
+    // size, from real occupancy (maxThreadsPerMultiProcessor) rather than a fixed
+    // blocks-per-CU magic number.
+    static inline uint64_t nnzsplit_saturation_blocks(const hipDeviceProp_t& prop, uint32_t block)
+    {
+        uint32_t per_cu = 1u;
+        if(block > 0 && prop.maxThreadsPerMultiProcessor > 0)
+        {
+            per_cu = static_cast<uint32_t>(prop.maxThreadsPerMultiProcessor) / block;
+            if(per_cu < 1u)
+            {
+                per_cu = 1u;
+            }
+        }
+        return static_cast<uint64_t>(prop.multiProcessorCount) * static_cast<uint64_t>(per_cu);
+    }
+
+    // Choose the nnz-per-thread granularity. Precedence:
+    //   (1) skew guard  -> coarse  (long-tailed rows: cut atomic/dichotomy traffic)
+    //   (2) low volume  -> fine    (not enough work to fill the device: occupancy)
+    //   (3) density buckets (sparse -> fine, medium -> med, dense -> coarse)
+    static inline uint32_t nnzsplit_nnz_per_thread(
+        const hipDeviceProp_t& prop, uint32_t block, int64_t m, int64_t nnz, int64_t max_row_nnz)
+    {
+        const double avg = (m > 0) ? static_cast<double>(nnz) / static_cast<double>(m)
+                                   : static_cast<double>(nnz);
+
+        // (1) skew guard
+        if(m > 0 && max_row_nnz > 0)
+        {
+            const double mean = (avg > 1.0) ? avg : 1.0;
+            if(static_cast<double>(max_row_nnz) > CSRMV_NNZSPLIT_SKEW_FACTOR * mean)
+            {
+                return CSRMV_NNZ_PER_THREAD_2;
+            }
+        }
+
+        // (2) too little work to saturate the device -> finest granularity
+        const uint64_t nnz_per_block_med
+            = static_cast<uint64_t>(block) * static_cast<uint64_t>(CSRMV_NNZ_PER_THREAD_1);
+        const uint64_t blocks_med
+            = (static_cast<uint64_t>(nnz) + nnz_per_block_med - 1) / nnz_per_block_med;
+        if(blocks_med < nnzsplit_saturation_blocks(prop, block))
+        {
+            return CSRMV_NNZ_PER_THREAD_0;
+        }
+
+        // (3) density buckets
+        if(avg < static_cast<double>(CSRMV_NNZSPLIT_LOW_DENSITY))
+        {
+            return CSRMV_NNZ_PER_THREAD_0;
+        }
+        if(avg < static_cast<double>(CSRMV_NNZSPLIT_HIGH_DENSITY))
+        {
+            return CSRMV_NNZ_PER_THREAD_1;
+        }
+        return CSRMV_NNZ_PER_THREAD_2;
+    }
+
+    // Longest row length (max over row_ptr differences) - the row-skew signal.
+    // Computed once at analysis time (amortised over many SpMV calls) with a
+    // single host copy of row_ptr; the compute phase reads it from the info
+    // struct and never touches row_ptr for tuning.
+    template <typename I, typename J>
+    static rocsparse_status csrmv_nnzsplit_max_row_nnz(rocsparse_handle handle,
+                                                       J                m,
+                                                       const I*         csr_row_ptr,
+                                                       int64_t*         max_row_nnz)
+    {
+        *max_row_nnz = 0;
+        if(m <= 0 || csr_row_ptr == nullptr)
+        {
+            return rocsparse_status_success;
+        }
+
+        hipStream_t    stream = handle->stream;
+        std::vector<I> hptr(static_cast<size_t>(m) + 1);
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(hptr.data(),
+                                                     csr_row_ptr,
+                                                     sizeof(I) * (static_cast<size_t>(m) + 1),
+                                                     hipMemcpyDeviceToHost,
+                                                     stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+        int64_t mx = 0;
+        for(J i = 0; i < m; ++i)
+        {
+            const int64_t len = static_cast<int64_t>(hptr[i + 1] - hptr[i]);
+            if(len > mx)
+            {
+                mx = len;
+            }
+        }
+        *max_row_nnz = mx;
+        return rocsparse_status_success;
+    }
+}
+
+// Dispatch to the compile-time-templated launch macro for the (block, npt) pair
+// selected above. The block size is wavefront-relative (128 on wave32, 256 on
+// wave64) and npt is the nnz-per-thread granularity (1 / 4 / 8). Analysis records
+// the pair in the info struct and the compute phase replays it verbatim, so the
+// two phases never disagree on the block layout of starting_ids/starting_block_ids.
+#define DISPATCH_BLOCK_NPT(macro_to_launch, BLK, NPT) \
+    if((BLK) == 128u)                                 \
+    {                                                 \
+        if((NPT) == 1u)                               \
+        {                                             \
+            macro_to_launch(128, 1);                  \
+        }                                             \
+        else if((NPT) == 4u)                          \
+        {                                             \
+            macro_to_launch(128, 4);                  \
+        }                                             \
+        else                                          \
+        {                                             \
+            macro_to_launch(128, 8);                  \
+        }                                             \
+    }                                                 \
+    else                                              \
+    {                                                 \
+        if((NPT) == 1u)                               \
+        {                                             \
+            macro_to_launch(256, 1);                  \
+        }                                             \
+        else if((NPT) == 4u)                          \
+        {                                             \
+            macro_to_launch(256, 4);                  \
+        }                                             \
+        else                                          \
+        {                                             \
+            macro_to_launch(256, 8);                  \
+        }                                             \
+    }
 
 template <uint32_t BLOCKSIZE, uint32_t NNZ_PER_THREAD, typename I, typename J, typename A>
 rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
@@ -227,14 +376,14 @@ rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
             &csrmv_info->nnzsplit.starting_ids, sizeof(J) * (requiredBlocks + 1), stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             csrmv_info->nnzsplit.starting_ids, 0, sizeof(J) * (requiredBlocks + 1), stream));
     }
     else
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
             &csrmv_info->nnzsplit.starting_ids, sizeof(J) * (2 * requiredBlocks + 2), stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
             csrmv_info->nnzsplit.starting_ids, 0, sizeof(J) * (2 * requiredBlocks + 2), stream));
     }
     J* temp_buffer_j = reinterpret_cast<J*>(csrmv_info->nnzsplit.starting_ids);
@@ -317,7 +466,22 @@ rocsparse_status
     p_csrmv_info[0]                 = new _rocsparse_csrmv_info();
     rocsparse_csrmv_info csrmv_info = p_csrmv_info[0];
 
-    LAUNCH_HELPER(LAUNCH_CSRMV_ANALYSIS)
+    // Choose the launch tuning once, here, and record it so the compute phase
+    // replays the exact same (block, npt) - the block layout of the arrays
+    // allocated below depends on both. Block size is wavefront-relative; the
+    // nnz-per-thread granularity folds in the row-skew guard and real occupancy.
+    const uint32_t block       = rocsparse::nnzsplit_block_size(handle);
+    int64_t        max_row_nnz = 0;
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::csrmv_nnzsplit_max_row_nnz(handle, m, csr_row_ptr, &max_row_nnz));
+    const uint32_t npt = rocsparse::nnzsplit_nnz_per_thread(
+        handle->properties, block, static_cast<int64_t>(m), static_cast<int64_t>(nnz), max_row_nnz);
+
+    csrmv_info->nnzsplit.block_size     = block;
+    csrmv_info->nnzsplit.nnz_per_thread = npt;
+    csrmv_info->nnzsplit.max_row_nnz    = max_row_nnz;
+
+    DISPATCH_BLOCK_NPT(LAUNCH_CSRMV_ANALYSIS, block, npt)
 
     // Store some pointers to verify correct execution
     csrmv_info->trans = trans;
@@ -503,11 +667,26 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
     const bool skip_diag = (descr->type == rocsparse_matrix_type_symmetric);
     const bool conj      = (trans == rocsparse_operation_conjugate_transpose || force_conj);
 
+    // Replay the (block, npt) tuning chosen during analysis. If analysis did not
+    // populate it (defensive; the nnzsplit path always analyses first), recompute
+    // from the same rules using the stored skew signal.
+    uint32_t block = csrmv_info->nnzsplit.block_size;
+    uint32_t npt   = csrmv_info->nnzsplit.nnz_per_thread;
+    if(block == 0u)
+    {
+        block = rocsparse::nnzsplit_block_size(handle);
+        npt   = rocsparse::nnzsplit_nnz_per_thread(handle->properties,
+                                                 block,
+                                                 static_cast<int64_t>(m),
+                                                 static_cast<int64_t>(nnz),
+                                                 csrmv_info->nnzsplit.max_row_nnz);
+    }
+
     if(trans == rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_array_batched(
             handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
-        LAUNCH_HELPER(LAUNCH_CSRMV)
+        DISPATCH_BLOCK_NPT(LAUNCH_CSRMV, block, npt)
     }
 
     if(trans != rocsparse_operation_none || descr->type == rocsparse_matrix_type_symmetric)
@@ -518,7 +697,7 @@ rocsparse_status rocsparse::csrmv_nnzsplit_template_dispatch(rocsparse_handle   
                 handle, ysize, num_extra, gamma_device_array, z_array, beta_device_host, y));
         }
 
-        LAUNCH_HELPER(LAUNCH_CSRMVT)
+        DISPATCH_BLOCK_NPT(LAUNCH_CSRMVT, block, npt)
     }
 
     return rocsparse_status_success;

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,21 +43,18 @@ hipsparseStatus_t hipsparseSpruneDense2csrByPercentage_bufferSize(hipsparseHandl
                                                                   pruneInfo_t info,
                                                                   size_t*     pBufferSizeInBytes)
 {
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_sprune_dense2csr_by_percentage_buffer_size((rocsparse_handle)handle,
-                                                             m,
-                                                             n,
-                                                             A,
-                                                             lda,
-                                                             percentage,
-                                                             (const rocsparse_mat_descr)descr,
-                                                             csrVal,
-                                                             csrRowPtr,
-                                                             csrColInd,
-                                                             (rocsparse_mat_info)info,
-                                                             pBufferSizeInBytes));
-
-    return HIPSPARSE_STATUS_SUCCESS;
+    return hipsparseSpruneDense2csrByPercentage_bufferSizeExt(handle,
+                                                              m,
+                                                              n,
+                                                              A,
+                                                              lda,
+                                                              percentage,
+                                                              descr,
+                                                              csrVal,
+                                                              csrRowPtr,
+                                                              csrColInd,
+                                                              info,
+                                                              pBufferSizeInBytes);
 }
 
 hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandle_t handle,
@@ -73,21 +70,18 @@ hipsparseStatus_t hipsparseDpruneDense2csrByPercentage_bufferSize(hipsparseHandl
                                                                   pruneInfo_t info,
                                                                   size_t*     pBufferSizeInBytes)
 {
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse_dprune_dense2csr_by_percentage_buffer_size((rocsparse_handle)handle,
-                                                             m,
-                                                             n,
-                                                             A,
-                                                             lda,
-                                                             percentage,
-                                                             (const rocsparse_mat_descr)descr,
-                                                             csrVal,
-                                                             csrRowPtr,
-                                                             csrColInd,
-                                                             (rocsparse_mat_info)info,
-                                                             pBufferSizeInBytes));
-
-    return HIPSPARSE_STATUS_SUCCESS;
+    return hipsparseDpruneDense2csrByPercentage_bufferSizeExt(handle,
+                                                              m,
+                                                              n,
+                                                              A,
+                                                              lda,
+                                                              percentage,
+                                                              descr,
+                                                              csrVal,
+                                                              csrRowPtr,
+                                                              csrColInd,
+                                                              info,
+                                                              pBufferSizeInBytes);
 }
 
 hipsparseStatus_t

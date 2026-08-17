@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,16 @@
 * ************************************************************************ */
 #pragma once
 #include "rocsparse_arguments.hpp"
+#include <rocsparse/rocsparse-config.h>
 
 // clang-format off
+#ifdef ROCSPARSE_WITH_ILDLT0
+#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0    \
+ROCSPARSE_DO_ROUTINE(spildlt0)
+#else
+#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
+#endif
+
 #define ROCSPARSE_FOREACH_ROUTINE			\
 ROCSPARSE_DO_ROUTINE(axpyi)						\
 ROCSPARSE_DO_ROUTINE(bellmm)						\
@@ -74,10 +82,16 @@ ROCSPARSE_DO_ROUTINE(csrmm_batched)					\
 ROCSPARSE_DO_ROUTINE(cscmm)					\
 ROCSPARSE_DO_ROUTINE(cscmm_batched)					\
 ROCSPARSE_DO_ROUTINE(csrsm)					\
+ROCSPARSE_DO_ROUTINE(cscsm)					\
 ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
+ROCSPARSE_DO_ROUTINE(cscsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
+ROCSPARSE_DO_ROUTINE(spic0)				\
+ROCSPARSE_FOREACH_ROUTINE_ILDLT0			\
+ROCSPARSE_DO_ROUTINE(spilu0)				\
+ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\
 ROCSPARSE_DO_ROUTINE(csr2bsr)					\
 ROCSPARSE_DO_ROUTINE(csr2coo)					\
@@ -89,6 +103,7 @@ ROCSPARSE_DO_ROUTINE(csr2hyb)					\
 ROCSPARSE_DO_ROUTINE(dense2coo)					\
 ROCSPARSE_DO_ROUTINE(dense2csc)					\
 ROCSPARSE_DO_ROUTINE(dense2csr)					\
+ROCSPARSE_DO_ROUTINE(dense_to_sparse_bell)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_coo)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_csc)			\
 ROCSPARSE_DO_ROUTINE(dense_to_sparse_csr)			\
@@ -123,6 +138,11 @@ ROCSPARSE_DO_ROUTINE(prune_dense2csr_by_percentage)		\
 ROCSPARSE_DO_ROUTINE(roti)					\
 ROCSPARSE_DO_ROUTINE(sctr)					\
 ROCSPARSE_DO_ROUTINE(sddmm)					\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_ell)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_coo)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_coo_aos)			\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_csr)				\
+ROCSPARSE_DO_ROUTINE(sddmm_batched_csc)				\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_coo)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csc)			\
 ROCSPARSE_DO_ROUTINE(sparse_to_dense_csr)			\

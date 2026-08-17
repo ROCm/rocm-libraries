@@ -19,14 +19,14 @@
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  * SPDX-License-Identifier: MIT
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
-#include <boost/filesystem.hpp>
+#include <filesystem>
 
 #include <Tensile/ContractionLibrary.hpp>
 #ifdef TENSILE_YAML
@@ -61,14 +61,14 @@ struct RangeLibraryTest
         if(library == nullptr)
         {
             std::cout << libraryPath().native() << std::endl;
-            if(!boost::filesystem::is_regular_file(libraryPath()))
+            if(!std::filesystem::is_regular_file(libraryPath()))
                 GTEST_SKIP();
             else
                 ASSERT_NE(library, nullptr);
         }
     }
 
-    boost::filesystem::path libraryPath()
+    std::filesystem::path libraryPath()
     {
         return TestData::Instance().file(filename);
     }
@@ -91,7 +91,7 @@ struct RangeLibraryTest
     {
         auto path = libraryPath();
 
-        if(boost::filesystem::is_regular_file(path))
+        if(std::filesystem::is_regular_file(path))
             return LoadLibraryFile<ContractionProblemGemm>(path.native());
 
         return nullptr;
@@ -101,14 +101,13 @@ struct RangeLibraryTest
 std::map<std::string, std::shared_ptr<SolutionLibrary<ContractionProblemGemm>>>
     RangeLibraryTest::libraryCache;
 
-
 TEST_P(RangeLibraryTest, SpecificSizes)
 {
     // Solution in Range library should be picked for
     // transposeA: true, transposeB false, datatype BFloat16,
     // M in [128, 768], N in [1024, 1408], batch_count in [-1, -1], K in [49024, 49280]
 
-    std::vector<std::tuple<size_t, size_t, size_t, size_t, bool>> MNKB = 
+    std::vector<std::tuple<size_t, size_t, size_t, size_t, bool>> MNKB =
         {{128, 1024, 1,  49024, true},
          {768, 1024, 1,  49024, true},
          {128, 1408, 1,  49024, true},
@@ -119,7 +118,6 @@ TEST_P(RangeLibraryTest, SpecificSizes)
          {128, 1409, 1,  49024, false},
          {128, 1024, 1,  16,    false},
          {128, 1024, 1,  49285, false}};
-         
 
     for(auto [M, N, B, K, in_range] : MNKB)
     {
@@ -142,7 +140,8 @@ TEST_P(RangeLibraryTest, SpecificSizes)
                                                             M,    // ldd
                                                             M*N,  // strided
                                                             2.0); // beta
-        problem.setComputeInputType(rocisa::DataType::BFloat16);
+        problem.setComputeInputTypeA(rocisa::DataType::BFloat16);
+        problem.setComputeInputTypeB(rocisa::DataType::BFloat16);
         problem.setHighPrecisionAccumulate(true);
         problem.setWorkspaceSize(120324096);
 

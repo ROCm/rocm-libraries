@@ -2,13 +2,55 @@
 
 Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hiptensor](https://rocm.docs.amd.com/projects/hipTensor/en/latest/index.html).
 
-## (Unreleased) hipTensor 2.3.0
+## hipTensor 2.4.0
 
 ### Added
+* Added a host-only stub `libhiptensor`, built automatically when `GPU_TARGETS` resolves to an empty target list (or explicitly with `-DHIPTENSOR_DISABLE_DEVICE=ON`), so the package, headers, and CMake config remain available and every API call returns `HIPTENSOR_STATUS_NOT_SUPPORTED` instead of failing to link.
+* Added `ffm-quick` and `ffm-full` test categories for emulation tests.
 
+### Changed
+* Reorganized test configurations per tier and category.
+
+### Optimized
+* Reduced test execution duration.
+
+### Resolved issues
+* Enabled `-frtti` on Windows to fix RTTI-related build failures.
+
+## hipTensor 2.3.0 for ROCm 7.14
+
+### Added
+* Added Windows support.
+* Added contraction support with FP16 and BF16 data and compute types for gfx11 and gfx12 targets.
 * Added support for the following new GPU targets:
   * gfx11: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153.
-  * gfx12: gfx1200, gfx1201.
+  * gfx12: gfx1200, gfx1201, gfx1250.
+* Added unary element-wise operators to contraction, including the new `BilinearUnary` class, dedicated instances, samples, and tests.
+* Added Dockerfiles (prebuilt and full build) and documentation to streamline hipTensor build environment setup.
+* Added the `CREATE_TEST_APP_LOCAL_DEPLOY` CMake option to stage required ROCm DLLs on Windows, and updated the Windows build documentation accordingly.
+* Added YAML-driven CTest test filter standardization, applying `quick`/`standard`/`comprehensive`/`full` tier labels to the installed test tree so tests can be run by tier with `ctest -L <tier>`.
+* Added support for trinary contractions.
+* Added hipTensor to the TheRock build system, enabling source builds, artifact distribution, and CI testing on both Linux and Windows.
+* Added native Linux packages with HPC SDK metapackages: `amdrocm-hiptensor` (runtime), `amdrocm-hiptensor-devel` (headers and CMake config), and `amdrocm-hiptensor-test` (CTest binaries).
+
+### Changed
+* Replaced numeric UID-based actor-critic kernel lookup with platform-stable string-based kernel name comparison to enable cross-platform compatibility.
+* Adopted FNV-1a string hashing in place of `std::hash` to ensure plan cache files are portable across platforms.
+* Switched to ROCm-provided CMake install functions (`rocm_export_targets`) for consistency with other ROCm libraries.
+* Adapted hipTensor to CK namespace changes for `host_tensor` functions.
+* Cleaned up `rtest` script formatting and removed invalid run commands from `rtest.xml`.
+
+### Removed
+* Removed the legacy `.jenkins` folder since CI migration to rocJenkins.
+
+### Optimized
+* Improved column-major contraction performance by applying CK-style stride reordering for column-major inputs.
+* Achieved 2x–3x speedup in contraction TFLOPS/s by using switch-case dispatch in `HiptensorUnaryOp` instead of static table lookup.
+* Re-selected `HIPTENSOR_ALGO_ACTOR_CRITIC` winning kernels for all contraction type/rank/layout combinations to reflect current Composable Kernel tile parameters.
+
+### Resolved issues
+* Fixed use-after-free bug where `hiptensorCreatePlan` held dangling pointers to user-provided descriptors; the plan now deep-copies all descriptors.
+* Fixed incorrect BF16 results in contraction with unary ops caused by silent `bhalf_t`-to-float integer promotion in cross-type overloads.
 
 ## hipTensor 2.2.0 for ROCm 7.2.0
 

@@ -32,7 +32,8 @@ template <BlockGemmPipelineScheduler BlkGemmPipelineVer,
           index_t NPerXDL,
           index_t MRepeat,
           index_t NRepeat,
-          index_t KPacks>
+          index_t KPacks,
+          bool TransposeC = false>
 struct BlockwiseGemmXdlops_pipeline_v4
 {
 };
@@ -55,9 +56,8 @@ template <index_t BlockSize,
           index_t NPerXDL,
           index_t MRepeat,
           index_t NRepeat,
-          index_t KPack
-          // ,bool TransposeC //disable transposec right now...
-          >
+          index_t KPack,
+          bool TransposeC>
 struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                                        BlockSize,
                                        ADataType,
@@ -77,7 +77,8 @@ struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                                        NPerXDL,
                                        MRepeat,
                                        NRepeat,
-                                       KPack>
+                                       KPack,
+                                       TransposeC>
     : BlockwiseGemmXdlops_pipeline_base<BlockSize,
                                         ADataType,
                                         BDataType,
@@ -96,7 +97,8 @@ struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                                         NPerXDL,
                                         MRepeat,
                                         NRepeat,
-                                        KPack>
+                                        KPack,
+                                        TransposeC>
 
 {
     using Base = BlockwiseGemmXdlops_pipeline_base<BlockSize,
@@ -117,7 +119,8 @@ struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>;
+                                                   KPack,
+                                                   TransposeC>;
     using Base::I0;
     using Base::I1;
     using Base::KRepeat;
@@ -368,36 +371,43 @@ struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                     a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
                     b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
-                    static_for<0, KRepeat, 1>{}([&](auto k0) {
-                        static_for<0, MRepeat, 1>{}([&](auto m0) {
-                            static_for<0, NRepeat, 1>{}([&](auto n0) {
-                                vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                                vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+                    static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                        constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                        constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                        constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                                static_for<0, KPack, 1>{}([&](auto ik) {
-                                    a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                        a_thread_bufs[mfma_reg_buf]
-                                                     [Number<a_thread_desc_.CalculateOffset(
-                                                         make_tuple(m0, I0, k0, ik))>{}];
-                                    b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                        b_thread_bufs[mfma_reg_buf]
-                                                     [Number<b_thread_desc_.CalculateOffset(
-                                                         make_tuple(n0, I0, k0, ik))>{}];
-                                });
+                        auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                              decltype(a_thread_bufs[mfma_reg_buf]),
+                                                              decltype(a_thread_desc_),
+                                                              ComputeDataTypeBuf,
+                                                              decltype(m0),
+                                                              Number<0>,
+                                                              decltype(k0),
+                                                              index_expression::Ik>{
+                            a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                        auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                              decltype(b_thread_bufs[mfma_reg_buf]),
+                                                              decltype(b_thread_desc_),
+                                                              ComputeDataTypeBuf,
+                                                              decltype(n0),
+                                                              Number<0>,
+                                                              decltype(k0),
+                                                              index_expression::Ik>{
+                            b_thread_vec, b_thread_bufs[mfma_reg_buf]};
 
-                                using mfma_input_type =
-                                    typename vector_type<ComputeDataTypeBuf,
-                                                         xdlops_gemm.K1PerXdlops>::type;
+                        static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                                constexpr index_t c_offset =
-                                    c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+                        using mfma_input_type =
+                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
 
-                                xdlops_gemm.Run(
-                                    a_thread_vec.template AsType<mfma_input_type>(),
-                                    b_thread_vec.template AsType<mfma_input_type>(),
-                                    c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                            });
-                        });
+                        constexpr index_t c_offset =
+                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                        b_thread_vec.template AsType<mfma_input_type>(),
+                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                     });
 
                     HotLoopScheduler();
@@ -410,64 +420,73 @@ struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
             } while(i < (num_loop - PrefetchStages));
         }
 
-        auto ReadWriteCompFunc = [&](auto lds_read_buf,
-                                     auto lds_read_reg_buf,
-                                     auto lds_write_buf,
-                                     auto mfma_reg_buf) {
-            block_sync_lds();
+        auto ReadWriteCompFunc =
+            [&](auto lds_read_buf, auto lds_read_reg_buf, auto lds_write_buf, auto mfma_reg_buf) {
+                block_sync_lds();
 
-            static_for<0, KRepeat, 1>{}([&](auto k) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                       make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
-                                       a_block_buf.At(lds_read_buf),
-                                       a_thread_desc_,
-                                       make_tuple(m0, I0, k, I0),
-                                       a_thread_bufs(lds_read_reg_buf));
-                });
-                static_for<0, NRepeat, 1>{}([&](auto n0) {
-                    b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
-                                       make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
-                                       b_block_buf.At(lds_read_buf),
-                                       b_thread_desc_,
-                                       make_tuple(n0, I0, k, I0),
-                                       b_thread_bufs(lds_read_reg_buf));
-                });
-            });
-
-            a_blockwise_copy.RunWrite(a_block_desc, a_block_buf.At(lds_write_buf));
-            b_blockwise_copy.RunWrite(b_block_desc, b_block_buf.At(lds_write_buf));
-
-            static_for<0, KRepeat, 1>{}([&](auto k0) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
+                static_for<0, KRepeat, 1>{}([&](auto k) {
+                    static_for<0, MRepeat, 1>{}([&](auto m0) {
+                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
+                                           make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
+                                           a_block_buf.At(lds_read_buf),
+                                           a_thread_desc_,
+                                           make_tuple(m0, I0, k, I0),
+                                           a_thread_bufs(lds_read_reg_buf));
+                    });
                     static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
-
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_bufs[mfma_reg_buf][Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_bufs[mfma_reg_buf][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
-
-                        using mfma_input_type =
-                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
-
-                        constexpr index_t c_offset =
-                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-
-                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
-                                        b_thread_vec.template AsType<mfma_input_type>(),
-                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                        b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
+                                           make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
+                                           b_block_buf.At(lds_read_buf),
+                                           b_thread_desc_,
+                                           make_tuple(n0, I0, k, I0),
+                                           b_thread_bufs(lds_read_reg_buf));
                     });
                 });
-            });
 
-            HotLoopScheduler();
-        };
+                a_blockwise_copy.RunWrite(a_block_desc, a_block_buf.At(lds_write_buf));
+                b_blockwise_copy.RunWrite(b_block_desc, b_block_buf.At(lds_write_buf));
+
+                static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                    constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                    constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                    constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                    vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                    vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+
+                    auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                          decltype(a_thread_bufs[mfma_reg_buf]),
+                                                          decltype(a_thread_desc_),
+                                                          ComputeDataTypeBuf,
+                                                          decltype(m0),
+                                                          Number<0>,
+                                                          decltype(k0),
+                                                          index_expression::Ik>{
+                        a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                    auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                          decltype(b_thread_bufs[mfma_reg_buf]),
+                                                          decltype(b_thread_desc_),
+                                                          ComputeDataTypeBuf,
+                                                          decltype(n0),
+                                                          Number<0>,
+                                                          decltype(k0),
+                                                          index_expression::Ik>{
+                        b_thread_vec, b_thread_bufs[mfma_reg_buf]};
+
+                    static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
+
+                    using mfma_input_type =
+                        typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
+
+                    constexpr index_t c_offset =
+                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                    xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                    b_thread_vec.template AsType<mfma_input_type>(),
+                                    c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                });
+
+                HotLoopScheduler();
+            };
 
         auto ReadCompFunc = [&](auto lds_read_buf, auto lds_read_reg_buf, auto mfma_reg_buf) {
             block_sync_lds();
@@ -491,64 +510,84 @@ struct BlockwiseGemmXdlops_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                 });
             });
 
-            static_for<0, KRepeat, 1>{}([&](auto k0) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+            static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_bufs[mfma_reg_buf][Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_bufs[mfma_reg_buf][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
+                auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                      decltype(a_thread_bufs[mfma_reg_buf]),
+                                                      decltype(a_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(m0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                      decltype(b_thread_bufs[mfma_reg_buf]),
+                                                      decltype(b_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(n0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    b_thread_vec, b_thread_bufs[mfma_reg_buf]};
 
-                        using mfma_input_type =
-                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
+                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                        constexpr index_t c_offset =
-                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+                using mfma_input_type =
+                    typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
 
-                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
-                                        b_thread_vec.template AsType<mfma_input_type>(),
-                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                    });
-                });
+                constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                b_thread_vec.template AsType<mfma_input_type>(),
+                                c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
             });
 
             HotLoopScheduler();
         };
 
         auto CompFunc = [&](auto mfma_reg_buf) {
-            static_for<0, KRepeat, 1>{}([&](auto k0) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+            static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_bufs[mfma_reg_buf][Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_bufs[mfma_reg_buf][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
+                auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                      decltype(a_thread_bufs[mfma_reg_buf]),
+                                                      decltype(a_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(m0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                      decltype(b_thread_bufs[mfma_reg_buf]),
+                                                      decltype(b_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(n0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    b_thread_vec, b_thread_bufs[mfma_reg_buf]};
 
-                        using mfma_input_type =
-                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
+                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                        constexpr index_t c_offset =
-                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+                using mfma_input_type =
+                    typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
 
-                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
-                                        b_thread_vec.template AsType<mfma_input_type>(),
-                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                    });
-                });
+                constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                b_thread_vec.template AsType<mfma_input_type>(),
+                                c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
             });
         };
         // tail
@@ -599,7 +638,8 @@ template <BlockGemmPipelineScheduler BlkGemmPipelineVer,
           index_t NPerXDL,
           index_t MRepeat,
           index_t NRepeat,
-          index_t KPacks>
+          index_t KPacks,
+          bool TransposeC = false>
 struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4
 {
 };
@@ -622,9 +662,8 @@ template <index_t BlockSize,
           index_t NPerXDL,
           index_t MRepeat,
           index_t NRepeat,
-          index_t KPack
-          // ,bool TransposeC //disable transposec right now...
-          >
+          index_t KPack,
+          bool TransposeC>
 struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Intrawave,
                                                  BlockSize,
                                                  ADataType,
@@ -644,7 +683,8 @@ struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Int
                                                  NPerXDL,
                                                  MRepeat,
                                                  NRepeat,
-                                                 KPack>
+                                                 KPack,
+                                                 TransposeC>
     : BlockwiseGemmXdlops_pipeline_base<BlockSize,
                                         ADataType,
                                         BDataType,
@@ -663,7 +703,8 @@ struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Int
                                         NPerXDL,
                                         MRepeat,
                                         NRepeat,
-                                        KPack>
+                                        KPack,
+                                        TransposeC>
 
 {
     using Base = BlockwiseGemmXdlops_pipeline_base<BlockSize,
@@ -684,7 +725,8 @@ struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Int
                                                    NPerXDL,
                                                    MRepeat,
                                                    NRepeat,
-                                                   KPack>;
+                                                   KPack,
+                                                   TransposeC>;
     using Base::I0;
     using Base::I1;
     using Base::KRepeat;
@@ -918,36 +960,43 @@ struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Int
                     a_blockwise_copy.MoveSrcSliceWindow(a_grid_desc, a_block_copy_step);
                     b_blockwise_copy.MoveSrcSliceWindow(b_grid_desc, b_block_copy_step);
 
-                    static_for<0, KRepeat, 1>{}([&](auto k0) {
-                        static_for<0, MRepeat, 1>{}([&](auto m0) {
-                            static_for<0, NRepeat, 1>{}([&](auto n0) {
-                                vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                                vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+                    static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                        constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                        constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                        constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                                static_for<0, KPack, 1>{}([&](auto ik) {
-                                    a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                        a_thread_bufs[mfma_reg_buf]
-                                                     [Number<a_thread_desc_.CalculateOffset(
-                                                         make_tuple(m0, I0, k0, ik))>{}];
-                                    b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                        b_thread_bufs[mfma_reg_buf]
-                                                     [Number<b_thread_desc_.CalculateOffset(
-                                                         make_tuple(n0, I0, k0, ik))>{}];
-                                });
+                        auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                              decltype(a_thread_bufs[mfma_reg_buf]),
+                                                              decltype(a_thread_desc_),
+                                                              ComputeDataTypeBuf,
+                                                              decltype(m0),
+                                                              Number<0>,
+                                                              decltype(k0),
+                                                              index_expression::Ik>{
+                            a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                        auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                              decltype(b_thread_bufs[mfma_reg_buf]),
+                                                              decltype(b_thread_desc_),
+                                                              ComputeDataTypeBuf,
+                                                              decltype(n0),
+                                                              Number<0>,
+                                                              decltype(k0),
+                                                              index_expression::Ik>{
+                            b_thread_vec, b_thread_bufs[mfma_reg_buf]};
 
-                                using mfma_input_type =
-                                    typename vector_type<ComputeDataTypeBuf,
-                                                         xdlops_gemm.K1PerXdlops>::type;
+                        static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                                constexpr index_t c_offset =
-                                    c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+                        using mfma_input_type =
+                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
 
-                                xdlops_gemm.Run(
-                                    a_thread_vec.template AsType<mfma_input_type>(),
-                                    b_thread_vec.template AsType<mfma_input_type>(),
-                                    c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                            });
-                        });
+                        constexpr index_t c_offset =
+                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                        b_thread_vec.template AsType<mfma_input_type>(),
+                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
                     });
 
                     HotLoopScheduler();
@@ -960,66 +1009,75 @@ struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Int
             } while(i < (num_loop - PrefetchStages));
         }
 
-        auto ReadWriteCompFunc = [&](auto lds_read_buf,
-                                     auto lds_read_reg_buf,
-                                     auto lds_write_buf,
-                                     auto mfma_reg_buf) {
-            block_sync_lds_direct_load();
+        auto ReadWriteCompFunc =
+            [&](auto lds_read_buf, auto lds_read_reg_buf, auto lds_write_buf, auto mfma_reg_buf) {
+                block_sync_lds_direct_load();
 
-            static_for<0, KRepeat, 1>{}([&](auto k) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
-                                       make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
-                                       a_block_buf.At(lds_read_buf),
-                                       a_thread_desc_,
-                                       make_tuple(m0, I0, k, I0),
-                                       a_thread_bufs(lds_read_reg_buf));
-                });
-                static_for<0, NRepeat, 1>{}([&](auto n0) {
-                    b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
-                                       make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
-                                       b_block_buf.At(lds_read_buf),
-                                       b_thread_desc_,
-                                       make_tuple(n0, I0, k, I0),
-                                       b_thread_bufs(lds_read_reg_buf));
-                });
-            });
-
-            a_blockwise_copy.Run(
-                a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(lds_write_buf));
-            b_blockwise_copy.Run(
-                b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(lds_write_buf));
-
-            static_for<0, KRepeat, 1>{}([&](auto k0) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
+                static_for<0, KRepeat, 1>{}([&](auto k) {
+                    static_for<0, MRepeat, 1>{}([&](auto m0) {
+                        a_thread_copy_.Run(a_block_desc_m0_m1_m2_k,
+                                           make_tuple(m0, I0, I0, Number<k * AMmaKStride>{}),
+                                           a_block_buf.At(lds_read_buf),
+                                           a_thread_desc_,
+                                           make_tuple(m0, I0, k, I0),
+                                           a_thread_bufs(lds_read_reg_buf));
+                    });
                     static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
-
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_bufs[mfma_reg_buf][Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_bufs[mfma_reg_buf][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
-
-                        using mfma_input_type =
-                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
-
-                        constexpr index_t c_offset =
-                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
-
-                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
-                                        b_thread_vec.template AsType<mfma_input_type>(),
-                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                        b_thread_copy_.Run(b_block_desc_n0_n1_n2_k,
+                                           make_tuple(n0, I0, I0, Number<k * BMmaKStride>{}),
+                                           b_block_buf.At(lds_read_buf),
+                                           b_thread_desc_,
+                                           make_tuple(n0, I0, k, I0),
+                                           b_thread_bufs(lds_read_reg_buf));
                     });
                 });
-            });
 
-            HotLoopScheduler();
-        };
+                a_blockwise_copy.Run(
+                    a_grid_desc, a_grid_buf, a_block_desc, a_block_buf.At(lds_write_buf));
+                b_blockwise_copy.Run(
+                    b_grid_desc, b_grid_buf, b_block_desc, b_block_buf.At(lds_write_buf));
+
+                static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                    constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                    constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                    constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                    vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                    vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+
+                    auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                          decltype(a_thread_bufs[mfma_reg_buf]),
+                                                          decltype(a_thread_desc_),
+                                                          ComputeDataTypeBuf,
+                                                          decltype(m0),
+                                                          Number<0>,
+                                                          decltype(k0),
+                                                          index_expression::Ik>{
+                        a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                    auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                          decltype(b_thread_bufs[mfma_reg_buf]),
+                                                          decltype(b_thread_desc_),
+                                                          ComputeDataTypeBuf,
+                                                          decltype(n0),
+                                                          Number<0>,
+                                                          decltype(k0),
+                                                          index_expression::Ik>{
+                        b_thread_vec, b_thread_bufs[mfma_reg_buf]};
+
+                    static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
+
+                    using mfma_input_type =
+                        typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
+
+                    constexpr index_t c_offset =
+                        c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                    xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                    b_thread_vec.template AsType<mfma_input_type>(),
+                                    c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
+                });
+
+                HotLoopScheduler();
+            };
 
         auto ReadCompFunc = [&](auto lds_read_buf, auto lds_read_reg_buf, auto mfma_reg_buf) {
             block_sync_lds_direct_load();
@@ -1043,64 +1101,84 @@ struct BlockwiseGemmXdlopsDirectLoad_pipeline_v4<BlockGemmPipelineScheduler::Int
                 });
             });
 
-            static_for<0, KRepeat, 1>{}([&](auto k0) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+            static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_bufs[mfma_reg_buf][Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_bufs[mfma_reg_buf][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
+                auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                      decltype(a_thread_bufs[mfma_reg_buf]),
+                                                      decltype(a_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(m0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                      decltype(b_thread_bufs[mfma_reg_buf]),
+                                                      decltype(b_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(n0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    b_thread_vec, b_thread_bufs[mfma_reg_buf]};
 
-                        using mfma_input_type =
-                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
+                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                        constexpr index_t c_offset =
-                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+                using mfma_input_type =
+                    typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
 
-                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
-                                        b_thread_vec.template AsType<mfma_input_type>(),
-                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                    });
-                });
+                constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                b_thread_vec.template AsType<mfma_input_type>(),
+                                c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
             });
 
             HotLoopScheduler();
         };
 
         auto CompFunc = [&](auto mfma_reg_buf) {
-            static_for<0, KRepeat, 1>{}([&](auto k0) {
-                static_for<0, MRepeat, 1>{}([&](auto m0) {
-                    static_for<0, NRepeat, 1>{}([&](auto n0) {
-                        vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
-                        vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
+            static_ford<Sequence<KRepeat, MRepeat, NRepeat>>{}([&](auto kmn) {
+                constexpr auto k0 = Number<kmn[Number<0>{}]>{};
+                constexpr auto m0 = Number<kmn[Number<1>{}]>{};
+                constexpr auto n0 = Number<kmn[Number<2>{}]>{};
+                vector_type<ComputeDataTypeBuf, KPack> a_thread_vec;
+                vector_type<ComputeDataTypeBuf, KPack> b_thread_vec;
 
-                        static_for<0, KPack, 1>{}([&](auto ik) {
-                            a_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                a_thread_bufs[mfma_reg_buf][Number<a_thread_desc_.CalculateOffset(
-                                    make_tuple(m0, I0, k0, ik))>{}];
-                            b_thread_vec.template AsType<ComputeDataTypeBuf>()(ik) =
-                                b_thread_bufs[mfma_reg_buf][Number<b_thread_desc_.CalculateOffset(
-                                    make_tuple(n0, I0, k0, ik))>{}];
-                        });
+                auto loadA = thread_buf_to_vec_loader<decltype(a_thread_vec),
+                                                      decltype(a_thread_bufs[mfma_reg_buf]),
+                                                      decltype(a_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(m0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    a_thread_vec, a_thread_bufs[mfma_reg_buf]};
+                auto loadB = thread_buf_to_vec_loader<decltype(b_thread_vec),
+                                                      decltype(b_thread_bufs[mfma_reg_buf]),
+                                                      decltype(b_thread_desc_),
+                                                      ComputeDataTypeBuf,
+                                                      decltype(n0),
+                                                      Number<0>,
+                                                      decltype(k0),
+                                                      index_expression::Ik>{
+                    b_thread_vec, b_thread_bufs[mfma_reg_buf]};
 
-                        using mfma_input_type =
-                            typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
+                static_for<0, KPack, 1>{}(MakeFunctorInvoker(loadA, loadB));
 
-                        constexpr index_t c_offset =
-                            c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+                using mfma_input_type =
+                    typename vector_type<ComputeDataTypeBuf, xdlops_gemm.K1PerXdlops>::type;
 
-                        xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
-                                        b_thread_vec.template AsType<mfma_input_type>(),
-                                        c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
-                    });
-                });
+                constexpr index_t c_offset = c_thread_desc_.CalculateOffset(make_tuple(m0, n0, 0));
+
+                xdlops_gemm.Run(a_thread_vec.template AsType<mfma_input_type>(),
+                                b_thread_vec.template AsType<mfma_input_type>(),
+                                c_thread_buf.GetVectorTypeReference(Number<c_offset>{}));
             });
         };
         // tail

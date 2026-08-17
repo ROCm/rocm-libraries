@@ -3,29 +3,57 @@ name: TheRock CI Linux
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
+      docker_image:
+        type: string
+        required: true
+      rocm_package_version:
+        type: string
+        required: true
       cmake_options:
         type: string
-      project_to_test:
+      projects_to_test:
         type: string
       test_type:
         type: string
+      run_rocjitsu_race_check:
+        type: boolean
+        default: false
       amdgpu_families:
         type: string
       test_runs_on:
         type: string
+      build_runs_on:
+        type: string
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL:
+        required: false
+      HIPDNN_CI_WEBHOOK_URL:
+        required: false
 
 permissions:
   contents: read
 
+# Each Linux matrix row follows the MultiArch/MI455 pattern. One build job
+# provides artifacts to two consumers:
+#
+#   therock-build-linux
+#   - therock-test-linux: blocking package validation
+#   - rocjitsu-race-check-linux: advisory instrumentation
+#
+# Both consumers use artifacts from the build. The rocjitsu job uses
+# `continue-on-error`, so its failure stays visible without failing this Linux
+# workflow. ROCm/rocm-libraries#10072 verifies this behavior.
 jobs:
   therock-build-linux:
     name: Build (${{ inputs.amdgpu_families }})
-    runs-on: azure-linux-scale-rocm
+    runs-on: ${{ inputs.build_runs_on }}
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:4443d9d710b9471e8ef658d509358bd92602498e67161b9280474bce0bb0decd
-      options: -v /runner/config:/home/awsconfig/
+      image: ${{ inputs.docker_image }}
     strategy:
       fail-fast: true
     env:
@@ -33,25 +61,16 @@ jobs:
       CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       TEATIME_FORCE_INTERACTIVE: 0
-      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
       - name: "Checking out repository for rocm-libraries"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      # We only want to build MIOpen HEAD against CK HEAD, not applicable for other projects
-      - name: Checkout composable_kernel repository
-        if: ${{ contains(inputs.project_to_test, 'miopen') || contains(inputs.project_to_test, 'miopen_plugin') }}
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: "ROCm/composable_kernel"
-          path: "composable_kernel"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Checkout TheRock repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 6a91147f22b525b79b19e909ea832d4f21e71306 # 2026-01-14 commit
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -72,7 +91,7 @@ jobs:
       - name: Setup ccache
         run: |
           ./TheRock/build_tools/setup_ccache.py \
-            --config-preset "github-oss-presubmit" \
+            --config-preset "github-oss-dev" \
             --dir "$(dirname $CCACHE_CONFIGPATH)" \
             --local-path "$CACHE_DIR/ccache"
 
@@ -97,17 +116,14 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: ADHOCBUILD
+          package_version: ${{ inputs.rocm_package_version }}
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build TheRock/build --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build TheRock/build --target therock-archives
+      - name: Build therock-artifacts and therock-dist
+        run: cmake --build TheRock/build --target therock-artifacts therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -115,9 +131,6 @@ jobs:
           echo "Full SDK du:"
           echo "------------"
           du -h -d 1 TheRock/build/dist/rocm
-          echo "Artifact Archives:"
-          echo "------------------"
-          ls -lh TheRock/build/artifacts/*.tar.xz
           echo "Artifacts:"
           echo "----------"
           du -h -d 1 TheRock/build/artifacts
@@ -128,10 +141,17 @@ jobs:
 
       - name: Configure AWS Credentials for non-forked repos
         if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        uses: aws-actions/configure-aws-credentials@a03048d87541d1d9fcf2ecf528a4a65ba9bd7838 # v5.0.0
+        uses: aws-actions/configure-aws-credentials@99214aa6889fcddfa57764031d71add364327e59 # v6.1.3
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Push artifacts
+        run: |
+          python TheRock/build_tools/artifact_manager.py push \
+            --run-id ${{ github.run_id }} \
+            --build-dir TheRock/build \
+            --stage all
 
       - name: Post Build Upload
         if: always()
@@ -142,13 +162,50 @@ jobs:
             --build-dir TheRock/build \
             --upload
 
+      - name: Notify Teams Channel on Failure
+        if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MIOPEN_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+          HIPDNN_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+          COMPONENT_NAME: ${{ inputs.projects_to_test }}
+        run: |
+          python3 .github/scripts/notify_teams.py \
+            --failure-stage build \
+            --log-path TheRock/build/logs \
+            --webhook-urls "{\"miopen\":\"${MIOPEN_WEBHOOK_URL}\",\"hipdnn\":\"${HIPDNN_WEBHOOK_URL}\"}" \
+            --pr-number "${PR_NUMBER}" \
+            --pr-title "${PR_TITLE}" \
+            --component-name "${COMPONENT_NAME}"
+
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
+    # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
+    # TODO(mi450-pool): Remove gfx125X exclusion once mi450 test runners are provisioned
+    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' && inputs.amdgpu_families != 'gfx125X' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      project_to_test: ${{ inputs.project_to_test }}
+      therock_ref: ${{ inputs.therock_ref }}
+      projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
+    secrets:
+      MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
+      HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
+
+  rocjitsu-race-check-linux:
+    name: rocjitsu race check (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    # The matrix boolean records that projects/hipblaslt selected this row. The
+    # `tensilelite` token confirms that this is the hipBLASLt library row, not a
+    # provider row containing a name such as `hipblasltprovider`.
+    if: ${{ inputs.run_rocjitsu_race_check && inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950')) && contains(inputs.projects_to_test, 'tensilelite') }}
+    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      build_runs_on: ${{ inputs.build_runs_on }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}

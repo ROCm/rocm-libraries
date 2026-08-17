@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/elementwise/pipeline/elementwise_pipeline_problem.hpp"
 #include "ck_tile/ops/elementwise/pipeline/elementwise_pipeline_default_policy.hpp"
@@ -26,10 +27,13 @@ struct ElementWiseKernel
         return is_wave32() ? kBlockSize / 2 : kBlockSize;
     }
 
-    template <typename... XDataType, typename Dims>
-    CK_TILE_DEVICE void operator()(const Dims lens,
-                                   const Dims input_strides,
-                                   const Dims output_strides,
+    template <typename... XDataType,
+              typename DimsLens,
+              typename DimsInStrides,
+              typename DimsOutStrides>
+    CK_TILE_DEVICE void operator()(const DimsLens lens,
+                                   const DimsInStrides input_strides,
+                                   const DimsOutStrides output_strides,
                                    const tuple<XDataType...>& input_tensors,
                                    YDataType* p_y) const
     {
@@ -48,10 +52,11 @@ struct ElementWiseKernel
                     input_tensors.get(i), lens, input_strides, number<S::kVectorM>{}, number<1>{});
 
                 const auto transformed_tensor = pad_tensor_view(
-                    transform_tensor_view(tensor_view,
-                                          ck_tile::make_tuple(merge_transform),
-                                          ck_tile::make_tuple(make_index_sequence<Dims::size()>{}),
-                                          ck_tile::make_tuple(sequence<0>{})),
+                    transform_tensor_view(
+                        tensor_view,
+                        ck_tile::make_tuple(merge_transform),
+                        ck_tile::make_tuple(make_index_sequence<DimsLens::size()>{}),
+                        ck_tile::make_tuple(sequence<0>{})),
                     ck_tile::make_tuple(number<S::kBlockM>{}),
                     sequence<Problem::kPad>{});
 
@@ -85,13 +90,14 @@ struct ElementWiseKernel
         const auto y_m_n = make_naive_tensor_view<address_space_enum::global>(
             p_y, lens, output_strides, number<S::kVectorM>{});
 
-        const auto transformed_y_m_n = pad_tensor_view(
-            transform_tensor_view(y_m_n,
-                                  ck_tile::make_tuple(merge_transform),
-                                  ck_tile::make_tuple(make_index_sequence<Dims::size()>{}),
-                                  ck_tile::make_tuple(sequence<0>{})),
-            ck_tile::make_tuple(number<S::kBlockM>{}),
-            sequence<Problem::kPad>{});
+        const auto transformed_y_m_n =
+            pad_tensor_view(transform_tensor_view(
+                                y_m_n,
+                                ck_tile::make_tuple(merge_transform),
+                                ck_tile::make_tuple(make_index_sequence<DimsOutStrides::size()>{}),
+                                ck_tile::make_tuple(sequence<0>{})),
+                            ck_tile::make_tuple(number<S::kBlockM>{}),
+                            sequence<Problem::kPad>{});
 
         auto y_window = make_tile_window(transformed_y_m_n,
                                          make_tuple(number<S::kBlockM>{}),
@@ -108,6 +114,19 @@ struct ElementWiseKernel
         ignore = input_sizes;
         return true;
     }
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
+    {
+        // clang-format off
+        return concat('_', "elementwise_kernel", 
+            Problem::GetName(),
+            "policy",
+            Policy::GetName()
+        );
+        // clang-format on
+    }
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetTypeString() { return GetName(); }
 };
 
 } // namespace ck_tile

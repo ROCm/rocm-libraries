@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,9 @@
 ///
 /// Device level adjacent_difference parallel primitives
 
+/// \addtogroup devicemodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
@@ -79,13 +82,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 
     using Selector = adjacent_difference_config_selector<InPlace, larger_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(detail::host_target_arch(stream, target_arch));
-
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -172,9 +169,9 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        auto adjacent_difference_kernel = [=](auto arch_config)
+        auto adjacent_difference_kernel = [=](auto target_config)
         {
-            adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(
+            adjacent_difference_kernel_impl<decltype(target_config), InPlace, Right>(
                 input + offset,
                 output + offset,
                 size,
@@ -199,9 +196,6 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 } // namespace detail
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
-
-/// \addtogroup devicemodule
-/// @{
 
 /// \brief Parallel primitive for applying a binary operation across pairs of consecutive elements
 /// in device accessible memory. Writes the output to the position of the left item.
@@ -246,6 +240,8 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 /// \parblock
 /// In this example a device-level adjacent_difference operation is performed on integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_adjacent_difference.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp> //or <rocprim/device/device_adjacent_difference.hpp>
 ///
@@ -258,7 +254,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// std::size_t size; // e.g., 8
-/// int* input1; // e.g., [8, 7, 6, 5, 4, 3, 2, 1]
+/// int* input1; // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
 /// int* output; // empty array of 8 elements
 ///
 /// std::size_t temporary_storage_size_bytes;
@@ -277,7 +273,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, size, binary_op
 /// );
-/// // output: [8, 1, 1, 1, 1, 1, 1, 1]
+/// // output: [1, 1, 1, 1, 1, 1, 1, 1]
 /// \endcode
 /// \endparblock
 template<typename Config = default_config,
@@ -636,9 +632,9 @@ hipError_t adjacent_difference_right_inplace(void* const          temporary_stor
                                                                      debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_ADJACENT_DIFFERENCE_HPP_

@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,9 @@
 # Check whether building within hiptensor context
 if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
     add_hiptensor_sample(simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16 simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16.cpp)
+    add_hiptensor_sample(simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_f32 simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_f32.cpp)
     add_hiptensor_sample(simple_bilinear_contraction_f16_f16_f16_f16_compute_f16 simple_bilinear_contraction_f16_f16_f16_f16_compute_f16.cpp)
+    add_hiptensor_sample(simple_bilinear_contraction_f16_f16_f16_f16_compute_f32 simple_bilinear_contraction_f16_f16_f16_f16_compute_f32.cpp)
     add_hiptensor_sample(simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16 simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16.cpp)
     add_hiptensor_sample(simple_bilinear_contraction_f32_f32_f32_f32_compute_f16 simple_bilinear_contraction_f32_f32_f32_f32_compute_f16.cpp)
     add_hiptensor_sample(simple_bilinear_contraction_f32_f32_f32_f32_compute_f32 simple_bilinear_contraction_f32_f32_f32_f32_compute_f32.cpp)
@@ -35,7 +37,9 @@ if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
     add_hiptensor_sample(simple_bilinear_contraction_f64_f64_f64_f64_compute_f32 simple_bilinear_contraction_f64_f64_f64_f64_compute_f32.cpp)
     add_hiptensor_sample(simple_bilinear_contraction_f64_f64_f64_f64_compute_f64 simple_bilinear_contraction_f64_f64_f64_f64_compute_f64.cpp)
     add_hiptensor_sample(simple_scale_contraction_bf16_bf16_bf16_compute_bf16 simple_scale_contraction_bf16_bf16_bf16_compute_bf16.cpp)
+    add_hiptensor_sample(simple_scale_contraction_bf16_bf16_bf16_compute_f32 simple_scale_contraction_bf16_bf16_bf16_compute_f32.cpp)
     add_hiptensor_sample(simple_scale_contraction_f16_f16_f16_compute_f16 simple_scale_contraction_f16_f16_f16_compute_f16.cpp)
+    add_hiptensor_sample(simple_scale_contraction_f16_f16_f16_compute_f32 simple_scale_contraction_f16_f16_f16_compute_f32.cpp)
     add_hiptensor_sample(simple_scale_contraction_f32_f32_f32_compute_bf16 simple_scale_contraction_f32_f32_f32_compute_bf16.cpp)
     add_hiptensor_sample(simple_scale_contraction_f32_f32_f32_compute_f16 simple_scale_contraction_f32_f32_f32_compute_f16.cpp)
     add_hiptensor_sample(simple_scale_contraction_f32_f32_f32_compute_f32 simple_scale_contraction_f32_f32_f32_compute_f32.cpp)
@@ -44,14 +48,24 @@ if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
     add_hiptensor_sample(simple_scale_contraction_f64_f64_f64_compute_f64 simple_scale_contraction_f64_f64_f64_compute_f64.cpp)
     add_hiptensor_sample(simple_contraction_plan_cache simple_contraction_plan_cache.cpp)
     add_hiptensor_sample(simple_contraction_c simple_contraction_c.c)
+    add_hiptensor_sample(simple_bilinear_contraction_unary_ops simple_bilinear_contraction_unary_ops.cpp)
+    add_hiptensor_sample(simple_scale_contraction_unary_ops simple_scale_contraction_unary_ops.cpp)
+    add_hiptensor_sample(simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16.cpp)
+    add_hiptensor_sample(simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16.cpp)
 
 # If building hipTensor samples as a standalone Cmake project
 else()
     add_executable(simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16 simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16.cpp)
     target_link_libraries(simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_bf16 PRIVATE hiptensor::hiptensor)
 
+    add_executable(simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_f32 simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_f32.cpp)
+    target_link_libraries(simple_bilinear_contraction_bf16_bf16_bf16_bf16_compute_f32 PRIVATE hiptensor::hiptensor)
+
     add_executable(simple_bilinear_contraction_f16_f16_f16_f16_compute_f16 simple_bilinear_contraction_f16_f16_f16_f16_compute_f16.cpp)
     target_link_libraries(simple_bilinear_contraction_f16_f16_f16_f16_compute_f16 PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_bilinear_contraction_f16_f16_f16_f16_compute_f32 simple_bilinear_contraction_f16_f16_f16_f16_compute_f32.cpp)
+    target_link_libraries(simple_bilinear_contraction_f16_f16_f16_f16_compute_f32 PRIVATE hiptensor::hiptensor)
 
     add_executable(simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16 simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16.cpp)
     target_link_libraries(simple_bilinear_contraction_f32_f32_f32_f32_compute_bf16 PRIVATE hiptensor::hiptensor)
@@ -62,6 +76,9 @@ else()
     add_executable(simple_bilinear_contraction_f32_f32_f32_f32_compute_f32 simple_bilinear_contraction_f32_f32_f32_f32_compute_f32.cpp)
     target_link_libraries(simple_bilinear_contraction_f32_f32_f32_f32_compute_f32 PRIVATE hiptensor::hiptensor)
 
+    add_executable(simple_bilinear_contraction_cf32_cf32_cf32_cf32_compute_cf32 simple_bilinear_contraction_cf32_cf32_cf32_cf32_compute_cf32.cpp)
+    target_link_libraries(simple_bilinear_contraction_cf32_cf32_cf32_cf32_compute_cf32 PRIVATE hiptensor::hiptensor)
+
     add_executable(simple_bilinear_contraction_f64_f64_f64_f64_compute_f32 simple_bilinear_contraction_f64_f64_f64_f64_compute_f32.cpp)
     target_link_libraries(simple_bilinear_contraction_f64_f64_f64_f64_compute_f32 PRIVATE hiptensor::hiptensor)
 
@@ -71,8 +88,14 @@ else()
     add_executable(simple_scale_contraction_bf16_bf16_bf16_compute_bf16 simple_scale_contraction_bf16_bf16_bf16_compute_bf16.cpp)
     target_link_libraries(simple_scale_contraction_bf16_bf16_bf16_compute_bf16 PRIVATE hiptensor::hiptensor)
 
+    add_executable(simple_scale_contraction_bf16_bf16_bf16_compute_f32 simple_scale_contraction_bf16_bf16_bf16_compute_f32.cpp)
+    target_link_libraries(simple_scale_contraction_bf16_bf16_bf16_compute_f32 PRIVATE hiptensor::hiptensor)
+
     add_executable(simple_scale_contraction_f16_f16_f16_compute_f16 simple_scale_contraction_f16_f16_f16_compute_f16.cpp)
     target_link_libraries(simple_scale_contraction_f16_f16_f16_compute_f16 PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_scale_contraction_f16_f16_f16_compute_f32 simple_scale_contraction_f16_f16_f16_compute_f32.cpp)
+    target_link_libraries(simple_scale_contraction_f16_f16_f16_compute_f32 PRIVATE hiptensor::hiptensor)
 
     add_executable(simple_scale_contraction_f32_f32_f32_compute_bf16 simple_scale_contraction_f32_f32_f32_compute_bf16.cpp)
     target_link_libraries(simple_scale_contraction_f32_f32_f32_compute_bf16 PRIVATE hiptensor::hiptensor)
@@ -82,6 +105,9 @@ else()
 
     add_executable(simple_scale_contraction_f32_f32_f32_compute_f32 simple_scale_contraction_f32_f32_f32_compute_f32.cpp)
     target_link_libraries(simple_scale_contraction_f32_f32_f32_compute_f32 PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_scale_contraction_cf32_cf32_cf32_compute_cf32 simple_scale_contraction_cf32_cf32_cf32_compute_cf32.cpp)
+    target_link_libraries(simple_scale_contraction_cf32_cf32_cf32_compute_cf32 PRIVATE hiptensor::hiptensor)
 
     add_executable(simple_scale_contraction_f64_f64_f64_compute_f32 simple_scale_contraction_f64_f64_f64_compute_f32.cpp)
     target_link_libraries(simple_scale_contraction_f64_f64_f64_compute_f32 PRIVATE hiptensor::hiptensor)
@@ -94,4 +120,17 @@ else()
 
     add_executable(simple_contraction_c simple_contraction_c.c)
     target_link_libraries(simple_contraction_c PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_bilinear_contraction_unary_ops simple_bilinear_contraction_unary_ops.cpp)
+    target_link_libraries(simple_bilinear_contraction_unary_ops PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_scale_contraction_unary_ops simple_scale_contraction_unary_ops.cpp)
+    target_link_libraries(simple_scale_contraction_unary_ops PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16.cpp)
+    target_link_libraries(simple_trinary_bilinear_contraction_f32_f32_f32_f32_compute_f16 PRIVATE hiptensor::hiptensor)
+
+    add_executable(simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16 simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16.cpp)
+    target_link_libraries(simple_trinary_scale_contraction_f32_f32_f32_f32_compute_f16 PRIVATE hiptensor::hiptensor)
+
 endif()

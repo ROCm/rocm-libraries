@@ -38,10 +38,6 @@ void testing_axpby_bad_arg(const Arguments& arg)
 template <typename I, typename X, typename Y, typename T>
 void testing_axpby(const Arguments& arg)
 {
-    rocsparse_bfloat16 test = 1.0e-2f;
-
-    std::cout << "test: " << test << " test.data: " << test.data << std::endl;
-
     I size = arg.M;
     I nnz  = arg.nnz;
 

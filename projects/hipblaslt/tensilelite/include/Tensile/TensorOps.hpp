@@ -30,6 +30,8 @@
 #include <Tensile/TensorDescriptor_fwd.hpp>
 #include <Tensile/TensorOps_fwd.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -44,7 +46,7 @@ namespace TensileLite
  * For now can represent a complex conjugate but this could be where we
  * represent inline activation layers later.
  */
-    class TENSILE_API TensorOp
+    class TENSILELITEHOST_EXPORT TensorOp
     {
     public:
         enum class Type : int
@@ -104,16 +106,17 @@ namespace TensileLite
         static std::map<std::string, Type> typeNames;
     };
 
-    std::string ToString(TensorOp::Type t);
-    std::string Suffix(TensorOp::Type t);
+    TENSILELITEHOST_EXPORT std::string ToString(TensorOp::Type t);
+    TENSILELITEHOST_EXPORT std::string Suffix(TensorOp::Type t);
 
-    std::ostream& operator<<(std::ostream& stream, TensorOp const& t);
-    std::istream& operator>>(std::istream& stream, TensorOp& t);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, TensorOp const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, TensorOp& t);
 
-    std::ostream& operator<<(std::ostream& stream, TensorOp::Type const& t);
-    std::istream& operator>>(std::istream& stream, TensorOp::Type& t);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, TensorOp::Type const& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, TensorOp::Type& t);
 
     /**
  * @}
  */
 } // namespace TensileLite
+

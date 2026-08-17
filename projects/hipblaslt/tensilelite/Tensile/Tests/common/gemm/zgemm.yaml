@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 # benchmark assembly and source kernels
 GlobalParameters:
@@ -10,7 +10,7 @@ GlobalParameters:
   ForceRedoLibraryLogic: True
   ForceRedoLibraryClient: True
   EnqueuesPerSync: 1
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
@@ -20,14 +20,13 @@ GlobalParameters:
   # PrintTensorA: 0x3 #0x1
   # PrintTensorRef: 0x3
   # ShortNames: False
-  # MergeFiles: True
   DataInitTypeA: 3 #12 #3
   DataInitTypeB: 3 #13 #3
   DataInitTypeC: 3 #3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   KernelTime: True
-  PrintSolutionRejectionReason: True
+  # PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
 
@@ -51,34 +50,32 @@ BenchmarkProblems:
         # - EdgeType: ["ShiftPtr"]
         - KernelLanguage: ["Assembly"]
       ForkParameters:
-        # - StoreCInUnroll: [False]
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
-          # - [16, 16, 4, 1, 1, 8, 4, 2, 2] #256x128
-          # - [16, 16, 4, 4, 1, 2, 2, 4, 1] #128x128 not-working
-          # - [16, 16, 4, 4, 4, 4, 4, 1, 4] #256x256 not-working
-          # - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        # - StreamK: [3]
-        # - StreamKAtomic: [1]
-        # - StreamKXCCMapping: [0, 2]
-        # - StreamKFixupTreeReduction: [0, 1]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
         # - 1LDSBuffer: [-1,0,1]
         # - ThreadTile:
           ##- [ 3, 5 ]
           # - [ 2, 2 ]
           # - [ 8, 8 ]
-        # - WorkGroup:
-          # - [ 32,  4,  1 ]
-          # - [  4,  4,  2 ]
-        - DepthU: [8] #,16,32]
         # - VectorWidth: [-1]
       BenchmarkForkParameters:
       JoinParameters:
@@ -120,14 +117,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -161,14 +168,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -202,14 +219,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -243,14 +270,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -284,14 +321,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -325,14 +372,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -366,14 +423,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -407,14 +474,24 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1, 1, 1, 1] #16x16
           - [16, 16, 4, 1, 1, 4, 4, 2, 2] #128x128
-          - [16, 16, 4, 1, 1, 2, 2, 2, 2] #64x64
+          - [16, 16, 4, 1, 1, 2, 1, 2, 2] #64x32
+          - [16, 16, 4, 1, 1, 1, 2, 2, 2] #32x64
           - [16, 16, 4, 1, 1, 1, 1, 2, 2] #32x32
+          - [16, 16, 4, 1, 1, 2, 2, 2, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 1, 2]
         - ScheduleIterAlg: [1, 3]
+        - MIArchVgpr: [false, true]
+        - 1LDSBuffer: [0, 1]
         - GlobalSplitU: [1, 2, 4, 8]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - PrefetchLocalRead: [0, 1]
+        - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [0, 2]
-        - DepthU: [8]
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [4, 8, 16, 32]
+        - WorkGroup:
+          - [16, 4, 1]
+          - [16, 4, 2]
+          - [16, 4, 4]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

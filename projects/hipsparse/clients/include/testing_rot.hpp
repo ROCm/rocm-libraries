@@ -42,7 +42,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_rot_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
     int64_t size = 100;
     int64_t nnz  = 100;
 
@@ -91,7 +91,7 @@ void testing_rot_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_rot(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 13000))
+#if(!defined(CUDART_VERSION) || (CUDART_VERSION >= 11000 && CUDART_VERSION < 14000))
     I size = argus.N;
     I nnz  = argus.nnz;
 
@@ -183,16 +183,8 @@ void testing_rot(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hy_2.data(), dy_2, sizeof(T) * size, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            I idx = hx_ind[i] - idxBase;
-
-            T x = hx_val_gold[i];
-            T y = hy_gold[idx];
-
-            hx_val_gold[i] = testing_fma(hc_coeff, x, testing_mult(hs_coeff, y));
-            hy_gold[idx]   = testing_fma(hc_coeff, y, testing_mult(-hs_coeff, x));
-        }
+        host_rot(
+            nnz, hx_val_gold.data(), hx_ind.data(), hy_gold.data(), hc_coeff, hs_coeff, idxBase);
 
         // Verify results against host
         unit_check_general(1, nnz, 1, hx_val_gold.data(), hx_val_1.data());

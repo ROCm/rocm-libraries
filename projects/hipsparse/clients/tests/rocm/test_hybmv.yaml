@@ -47,7 +47,7 @@ Tests:
 - name: hybmv
   category: pre_checkin
   function: hybmv
-  precision: *single_double_precisions_complex_real
+  precision: *single_double_precisions
   M: 1
   N: 1
   ell_width: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -66,9 +66,23 @@ Tests:
              nos7]
 
 - name: hybmv
+  category: pre_checkin
+  function: hybmv
+  precision: *single_double_precisions_complex
+  M: [1000]
+  N: [1000]
+  ell_width: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  alpha: [1.0]
+  alphai: [-1.2]
+  beta: [1.2]
+  betai: [0.2]
+  part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_MAX, HIPSPARSE_HYB_PARTITION_USER]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+
+- name: hybmv
   category: nightly
   function: hybmv
-  precision: *double_only_precisions_complex_real
+  precision: *double_only_precisions
   M: 1
   N: 1
   ell_width: [1, 2, 4, 5, 7, 8]
@@ -84,5 +98,41 @@ Tests:
              rma10,
              mc2depi,
              ASIC_320k,
-             bibd_22_8,
-             webbase-1M]
+             bibd_22_8]
+
+- name: hybmv
+  category: nightly
+  function: hybmv
+  precision: *double_only_precisions_complex
+  M: 1
+  N: 1
+  ell_width: [1, 2, 4, 5, 7, 8]
+  alpha: [2.1]
+  alphai: [1.2]
+  beta: [-0.67]
+  betai: [1.2]
+  part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_USER]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [shipsec1,
+             bmwcra_1,
+             mc2depi,
+             ASIC_320k,
+             bibd_22_8]
+
+- name: hybmv
+  category: pre_checkin
+  function: hybmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  ell_width: [7]
+  alpha: [1.0]
+  alphai: [-1.2]
+  beta: [1.2]
+  betai: [0.2]
+  part: [HIPSPARSE_HYB_PARTITION_AUTO, HIPSPARSE_HYB_PARTITION_MAX, HIPSPARSE_HYB_PARTITION_USER]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [nos7,
+             bmwcra_1]
+  graph_test: [true]
+  

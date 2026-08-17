@@ -227,7 +227,9 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
                                                    const miopenConvolutionDescriptor_t convDesc,
                                                    size_t* buffer_size)
 {
-    MIOPEN_LOG_FUNCTION(alpha_beta_case, inputTensorDesc, outputTensorDesc, weightsTensorDesc);
+    {
+        MIOPEN_LOG_FUNCTION(alpha_beta_case, inputTensorDesc, outputTensorDesc, weightsTensorDesc);
+    }
 
     return miopen::try_([&] {
         miopenDataType_t data_type = miopen::deref(outputTensorDesc).GetType();
@@ -239,17 +241,17 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
         size_t C = std::get<1>(
             miopen::GetNCDHW(spatial_dims, miopen::deref(outputTensorDesc).GetLengths()));
 
-        auto CKWrwRequireWorkspace = [&](size_t G,
-                                         size_t C,
-                                         size_t K,
-                                         miopenDataType_t data_type,
-                                         miopenAlphaBetaCase_t alpha_beta_case) {
+        auto CKWrwRequireWorkspace = [&](size_t G_,
+                                         size_t C_,
+                                         size_t K_,
+                                         miopenDataType_t data_type_,
+                                         miopenAlphaBetaCase_t alpha_beta_case_) {
             auto is_odd        = [](int num) { return num % 2 != 0; };
-            size_t C_per_group = C / G;
-            size_t K_per_group = K / G;
+            size_t C_per_group = C_ / G_;
+            size_t K_per_group = K_ / G_;
 
-            return (alpha_beta_case == BILINEAR || alpha_beta_case == SCALE) ||
-                   ((data_type == miopenHalf || data_type == miopenBFloat16) &&
+            return (alpha_beta_case_ == BILINEAR || alpha_beta_case_ == SCALE) ||
+                   ((data_type_ == miopenHalf || data_type_ == miopenBFloat16) &&
                     (is_odd(C_per_group) || is_odd(K_per_group)));
         };
 
@@ -476,6 +478,27 @@ miopenConvolutionForwardGetWorkSpaceSize(miopenHandle_t handle,
         auto problem           = ProblemDescription{};
         std::tie(ctx, problem) = MakeFwdCtxAndProblem(handle, xDesc, wDesc, convDesc, yDesc);
         *workSpaceSize         = miopen::deref(convDesc).GetWorkSpaceSize(ctx, problem);
+    });
+}
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              const miopenTensorDescriptor_t wDesc,
+                                              const miopenTensorDescriptor_t xDesc,
+                                              const miopenConvolutionDescriptor_t convDesc,
+                                              const miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    MIOPEN_LOG_FUNCTION(handle, wDesc, xDesc, convDesc, yDesc);
+    return miopen::try_([&] {
+        auto ctx               = ExecutionContext{};
+        auto problem           = ProblemDescription{};
+        std::tie(ctx, problem) = MakeFwdCtxAndProblem(handle, xDesc, wDesc, convDesc, yDesc);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
     });
 }
 
@@ -1321,6 +1344,27 @@ miopenConvolutionBackwardDataGetWorkSpaceSize(miopenHandle_t handle,
 }
 
 MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   const miopenTensorDescriptor_t dyDesc,
+                                                   const miopenTensorDescriptor_t wDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   const miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    MIOPEN_LOG_FUNCTION(handle, dyDesc, wDesc, convDesc, dxDesc);
+    return miopen::try_([&] {
+        auto ctx               = ExecutionContext{};
+        auto problem           = ProblemDescription{};
+        std::tie(ctx, problem) = MakeBwdCtxAndProblem(handle, dyDesc, wDesc, convDesc, dxDesc);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
+    });
+}
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
 miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
                                                  const miopenTensorDescriptor_t dyDesc,
                                                  const miopenTensorDescriptor_t xDesc,
@@ -1334,6 +1378,27 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSize(miopenHandle_t handle,
         auto problem           = ProblemDescription{};
         std::tie(ctx, problem) = MakeWrWCtxAndProblem(handle, dyDesc, xDesc, convDesc, dwDesc);
         *workSpaceSize         = miopen::deref(convDesc).GetWorkSpaceSize(ctx, problem);
+    });
+}
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      const miopenTensorDescriptor_t dyDesc,
+                                                      const miopenTensorDescriptor_t xDesc,
+                                                      const miopenConvolutionDescriptor_t convDesc,
+                                                      const miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize)
+{
+    if(minWorkspaceSize == nullptr || maxWorkspaceSize == nullptr)
+        return miopenStatusBadParm;
+    MIOPEN_LOG_FUNCTION(handle, dyDesc, xDesc, convDesc, dwDesc);
+    return miopen::try_([&] {
+        auto ctx               = ExecutionContext{};
+        auto problem           = ProblemDescription{};
+        std::tie(ctx, problem) = MakeWrWCtxAndProblem(handle, dyDesc, xDesc, convDesc, dwDesc);
+        miopen::deref(convDesc).GetWorkSpaceSizeRange(
+            ctx, problem, minWorkspaceSize, maxWorkspaceSize);
     });
 }
 
@@ -1449,23 +1514,14 @@ extern "C" miopenStatus_t miopenConvolutionBackwardBias(miopenHandle_t handle,
                                                         const miopenTensorDescriptor_t dbDesc,
                                                         void* db)
 {
-    MIOPEN_LOG_FUNCTION(handle, alpha, dyDesc, dy, beta, dbDesc, db);
-    // bfloat16 not supported for bias operation
-    if(miopen::deref(dyDesc).GetType() == miopenBFloat16 ||
-       miopen::deref(dbDesc).GetType() == miopenBFloat16)
-    {
-        return miopenStatusNotImplemented;
-    }
-
-    return miopen::try_([&] {
-        ConvolutionBackwardBias(miopen::deref(handle),
-                                alpha,
-                                miopen::deref(dyDesc),
-                                DataCast(dy),
-                                beta,
-                                miopen::deref(dbDesc),
-                                DataCast(db));
-    });
+    std::ignore = handle;
+    std::ignore = alpha;
+    std::ignore = dyDesc;
+    std::ignore = dy;
+    std::ignore = beta;
+    std::ignore = dbDesc;
+    std::ignore = db;
+    return miopenStatusNotImplemented;
 }
 
 MIOPEN_EXPORT

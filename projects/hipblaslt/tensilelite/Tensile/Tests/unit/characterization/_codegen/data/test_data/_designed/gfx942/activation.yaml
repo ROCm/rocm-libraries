@@ -1,0 +1,84 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Activation-sweep characterization config for gfx942 (Gradient path).
+#
+# Goal: drive the uncovered branches in Tensile/Activation.py (methodology-A
+# missing ranges 489-617, 639-718, 727-836, 852-936) via the Gradient kernel
+# path which exercises getDGeluModule and getDReluModule with float32
+# ActivationComputeDataType (no SDWA/VOP3P — these are safe to call).
+#
+# Strategy:
+#   - Gradient: True  →  kernel uses GRADONLY export which includes dgelu+drelu
+#   - ActivationType: all + ActivationComputeDataType: s (float32)  →  the
+#     GRADONLY enum list for float32 = [dgelu, drelu]; both support Single only
+#   - getDGeluModule(Single) covers lines 798-815 (range 727-836) + 837-851 + 852
+#   - getDReluModule(Single) covers lines 856-864 (range 852-936)
+#   - Total target-range reachable: ≥ 34 lines (well above the ≥15 gate)
+#
+# DataType: h (half), DestDataType: h (half), ComputeDataType: s (float32).
+# ActivationComputeDataType: s (float32) is valid and avoids all SDWA/VOP3P
+# issues. The activation functions dgelu and drelu only use float32 compute
+# paths so no Half-path NameError occurs.
+#
+# Based on the validated fp16_gradient_bias.yaml pattern (Tests/common/gradient).
+# ForkParameters: single MI shape + GSU=1 → 1 kernel emitted.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # HHS (fp16 in / fp16 out / f32 compute) NN, Gradient + Bias + Activation
+  # Gradient: True causes GRADONLY activation export (dgelu + drelu for float32).
+  # ActivationComputeDataType: s (float32) avoids SDWA issues.
+  # dgelu covers Activation.py lines 798-815, 837-851, 852 (range 727-836, 852-936)
+  # drelu covers Activation.py lines 856-864 (range 852-936)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Gradient: True
+      UseE: True
+      Activation: True
+      ActivationType: all
+      ActivationComputeDataType: s
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [32, 32, 8, 1,  1,   2, 4,  2, 2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - ActivationFuncCall: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['s']
+        - ActivationArgs:
+          - [Enum: dgelu]

@@ -25,12 +25,23 @@
 
 namespace
 {
-    bool array_type_is_complex(rocfft_array_type type)
+    bool array_type_is_real(rocfft_array_type type)
+    {
+        return type == rocfft_array_type_real;
+    }
+    bool array_type_is_hermitian(rocfft_array_type type)
+    {
+        return type == rocfft_array_type_hermitian_interleaved
+               || type == rocfft_array_type_hermitian_planar;
+    }
+    bool array_type_is_complex_but_not_hermitian(rocfft_array_type type)
     {
         return type == rocfft_array_type_complex_interleaved
-               || type == rocfft_array_type_complex_planar
-               || type == rocfft_array_type_hermitian_interleaved
-               || type == rocfft_array_type_hermitian_planar;
+               || type == rocfft_array_type_complex_planar;
+    }
+    bool array_type_is_complex(rocfft_array_type type)
+    {
+        return array_type_is_complex_but_not_hermitian(type) || array_type_is_hermitian(type);
     }
     bool array_type_is_interleaved(rocfft_array_type type)
     {

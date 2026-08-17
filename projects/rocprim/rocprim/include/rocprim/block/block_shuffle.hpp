@@ -69,6 +69,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the examples shuffle operation is performed on block of 192 threads, each provides
 /// one \p int value, result is returned using the same variable as for input.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_shuffle.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -79,7 +81,7 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 ///     int value = ...;
 ///     // execute block shuffle
-///     block__shuffle_int().inclusive_up(
+///     block__shuffle_int().rotate(
 ///         value, // input
 ///         value, // output
 ///         storage

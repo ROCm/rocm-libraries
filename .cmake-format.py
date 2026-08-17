@@ -1,3 +1,5 @@
+import platform
+
 with section("parse"):
     additional_commands = {
         "rocm_create_package": {
@@ -20,4 +22,7 @@ with section("markup"):
     first_comment_is_literal = True
 
 with section("lint"):
+    # Disable line ending check (C0327) on Windows where CRLF is expected
     disabled_codes = ["C0103", "C0301", "W0106"]
+    if platform.system() == "Windows":
+        disabled_codes.append("C0327")

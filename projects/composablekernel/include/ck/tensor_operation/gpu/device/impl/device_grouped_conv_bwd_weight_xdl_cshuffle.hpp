@@ -29,6 +29,7 @@
 #include "ck_tile/builder/reflect/description.hpp"
 #include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_weight_xdl_cshuffle.hpp"
 #endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
 namespace ck {
 namespace tensor_operation {
@@ -117,7 +118,7 @@ template <typename GridwiseGemm,
           bool HasMainKBlockLoop>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 #endif
     kernel_batched_gemm_xdlops_bwd_weight(const FloatA* __restrict__ p_a_grid,
                                           const FloatB* __restrict__ p_b_grid,
@@ -139,7 +140,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 {
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || defined(__gfx11__) || \
     defined(__gfx12__)
-    if constexpr(GridwiseGemm::template IsValidCompilationParameter<>())
+    if constexpr(GridwiseGemm::IsValidCompilationParameter())
     {
         const index_t num_blocks_per_batch =
             __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
@@ -262,14 +263,30 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                                         ComputeTypeA,
                                         ComputeTypeB>
 {
-    using DeviceOp = DeviceGroupedConvBwdWeight_Xdl_CShuffle;
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-
-    using ADataType = OutDataType;
-    using BDataType = InDataType;
-    using CDataType = WeiDataType;
+    using DeviceOp                         = DeviceGroupedConvBwdWeight_Xdl_CShuffle;
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    using ADataType                        = OutDataType;
+    using BDataType                        = InDataType;
+    using CDataType                        = WeiDataType;
 
     // If NGCHW then ADataType must be equal to BDataType
     static_assert(!(is_NGCHW_NGKHW<InLayout, WeiLayout, OutLayout>() ||
@@ -466,7 +483,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                             I1,
                             I0>;
 
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_bwd_weight<
         BlockSize,
         ADataType,
@@ -483,11 +500,11 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
         MPerBlock,
         NPerBlock,
         K0PerBlock,
-        MPerXDL,
-        NPerXDL,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
         K1,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_K0_M_K1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -510,8 +527,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
         BBlockLdsN1PerBlock,
         BBlockLdsN0PerBlock,
         BBlockLdsN1Padding,
-        CShuffleMXdlPerWavePerShuffle,
-        CShuffleNXdlPerWavePerShuffle,
+        WarpTileConfig::At(4),
+        WarpTileConfig::At(5),
         CBlockTransferScalarPerVector_NWaveNPerXdl,
         CBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         true,
@@ -520,8 +537,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
         PipelineVersion::v1,
         ComputeTypeA,
         ComputeTypeB>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     // Argument
     using CGridDesc_MBlock_MPerBlock_NBlock_NPerBlock =
@@ -598,7 +615,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 ck::index_t split_k)
+                 ck::index_t split_k,
+                 bool stride_overflow_in = false)
             : p_a_grid_{p_out_grid},
               p_b_grid_{p_in_grid},
               p_c_grid_{p_wei_grid},
@@ -623,6 +641,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
               input_left_pads_{input_left_pads},
               input_right_pads_{input_right_pads}
         {
+            stride_overflow = stride_overflow_in;
             static ActiveWorkgroupsPerCU active_workgroups_per_cu;
 
             c_space_size_bytes =
@@ -651,7 +670,6 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                 conv_ngchw_to_nhwgc_transformer.TransposeWeiStrides(e_g_k_c_xs_lengths,
                                                                     e_g_k_c_xs_strides);
 
-#if !DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS
             if(split_k < 0)
             {
                 ck::index_t gemmM, gemmN;
@@ -662,12 +680,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                     calculate_mn_grid_size<MPerBlock, NPerBlock>(gemmM, gemmN) * Conv_G_;
                 k_batch_ = get_best_occupancy_k_batch_value(active_workgroups_per_cu.max_occupancy_,
                                                             grid_size);
+
+                // Cap k_batch_ to 128 to avoid accuracy issues
+                k_batch_ = std::min(k_batch_, 128);
             }
             else
-#endif
             {
                 k_batch_ = split_k;
             }
+            k_batch_ = clamp_gemm_k_batch(k_batch_);
 
             // Create descriptors first (with hack flags temporarily set to false)
             // so we can check if element space sizes are divisible by k_batch
@@ -870,6 +891,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
 
         bool split_k_offset_hack_;
         long_index_t split_k_stride_a_, split_k_stride_b_;
+        bool stride_overflow;
     };
 
     // Invoker
@@ -997,30 +1019,58 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                     hip_check_error(hipMemsetAsync(
                         p_e_grid, 0, arg.c_space_size_bytes, stream_config.stream_id_));
                 };
-
-                avg_time += launch_and_time_kernel_with_preprocess(
-                    stream_config,
-                    clear_workspace,
-                    kernel,
-                    dim3(grid_size),
-                    dim3(BlockSize),
-                    0,
-                    p_a_grid,
-                    p_b_grid,
-                    p_e_grid,
-                    arg.a_element_op_,
-                    arg.b_element_op_,
-                    arg.c_element_op_,
-                    arg.Conv_G_,
-                    arg.a_grid_desc_kbatch_k0_m_k1_,
-                    arg.b_grid_desc_kbatch_k0_n_k1_,
-                    c_grid_desc_mblock_mperblock_nblock_nperblock,
-                    arg.block_2_ctile_map_,
-                    arg.compute_ptr_offset_of_batch_,
-                    arg.split_k_stride_a_,
-                    arg.split_k_stride_b_,
-                    arg.split_k_offset_hack_,
-                    arg.k_batch_);
+                if(stream_config.flush_cache)
+                {
+                    avg_time += launch_and_time_kernel_with_preprocess_flush_cache(
+                        stream_config,
+                        clear_workspace,
+                        kernel,
+                        dim3(grid_size),
+                        dim3(BlockSize),
+                        0,
+                        p_a_grid,
+                        p_b_grid,
+                        p_e_grid,
+                        arg.a_element_op_,
+                        arg.b_element_op_,
+                        arg.c_element_op_,
+                        arg.Conv_G_,
+                        arg.a_grid_desc_kbatch_k0_m_k1_,
+                        arg.b_grid_desc_kbatch_k0_n_k1_,
+                        c_grid_desc_mblock_mperblock_nblock_nperblock,
+                        arg.block_2_ctile_map_,
+                        arg.compute_ptr_offset_of_batch_,
+                        arg.split_k_stride_a_,
+                        arg.split_k_stride_b_,
+                        arg.split_k_offset_hack_,
+                        arg.k_batch_);
+                }
+                else
+                {
+                    avg_time += launch_and_time_kernel_with_preprocess(
+                        stream_config,
+                        clear_workspace,
+                        kernel,
+                        dim3(grid_size),
+                        dim3(BlockSize),
+                        0,
+                        p_a_grid,
+                        p_b_grid,
+                        p_e_grid,
+                        arg.a_element_op_,
+                        arg.b_element_op_,
+                        arg.c_element_op_,
+                        arg.Conv_G_,
+                        arg.a_grid_desc_kbatch_k0_m_k1_,
+                        arg.b_grid_desc_kbatch_k0_n_k1_,
+                        c_grid_desc_mblock_mperblock_nblock_nperblock,
+                        arg.block_2_ctile_map_,
+                        arg.compute_ptr_offset_of_batch_,
+                        arg.split_k_stride_a_,
+                        arg.split_k_stride_b_,
+                        arg.split_k_offset_hack_,
+                        arg.k_batch_);
+                }
             };
 
             if(has_main_k0_block_loop)
@@ -1083,13 +1133,23 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-#if DISABLE_SPLIT_K_AUTODEDUCE_FOR_ONE_STAGE_KERNELS
-        if(arg.k_batch_ < 0)
+        if(arg.stride_overflow)
+            return false;
+
+        if(!ck::is_xdl_wmma_supported<ComputeTypeA,
+                                      ComputeTypeB,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
         {
             return false;
         }
-#endif
-        if(!ck::is_xdl_wmma_supported<ComputeTypeA, ComputeTypeB, MPerXDL, NPerXDL>())
+        if(!is_xdl_wmma_k_supported<ComputeTypeA, Number<K0PerBlock * K1>{}, K1>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<ComputeTypeB, Number<K0PerBlock * K1>{}, K1>())
         {
             return false;
         }
@@ -1288,6 +1348,69 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                         split_k};
     }
 
+    static auto MakeArgument(const InDataType* p_in_grid,
+                             WeiDataType* p_wei_grid,
+                             const OutDataType* p_out_grid,
+                             const std::array<long_index_t, NDimSpatial + 3>& b_g_n_c_wis_lengths,
+                             const std::array<long_index_t, NDimSpatial + 3>& b_g_n_c_wis_strides,
+                             const std::array<long_index_t, NDimSpatial + 3>& e_g_k_c_xs_lengths,
+                             const std::array<long_index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
+                             const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths,
+                             const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
+                             const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+                             const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+                             const std::array<long_index_t, NDimSpatial>& input_left_pads,
+                             const std::array<long_index_t, NDimSpatial>& input_right_pads,
+                             InElementwiseOperation in_element_op,
+                             WeiElementwiseOperation wei_element_op,
+                             OutElementwiseOperation out_element_op,
+                             const ck::index_t split_k)
+    {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
+        std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_strides_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+        array_convert(b_g_n_c_wis_lengths_i32, b_g_n_c_wis_lengths);
+        array_convert(b_g_n_c_wis_strides_i32, b_g_n_c_wis_strides);
+        array_convert(e_g_k_c_xs_lengths_i32, e_g_k_c_xs_lengths);
+        array_convert(e_g_k_c_xs_strides_i32, e_g_k_c_xs_strides);
+        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
+        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+        return Argument{p_in_grid,
+                        p_wei_grid,
+                        p_out_grid,
+                        b_g_n_c_wis_lengths_i32,
+                        b_g_n_c_wis_strides_i32,
+                        e_g_k_c_xs_lengths_i32,
+                        e_g_k_c_xs_strides_i32,
+                        a_g_n_k_wos_lengths_i32,
+                        a_g_n_k_wos_strides_i32,
+                        conv_filter_strides_i32,
+                        conv_filter_dilations_i32,
+                        input_left_pads_i32,
+                        input_right_pads_i32,
+                        1,
+                        1,
+                        in_element_op,
+                        wei_element_op,
+                        out_element_op,
+                        split_k,
+                        stride_ovf};
+    }
+
     static auto MakeInvoker() { return Invoker{}; }
 
     std::unique_ptr<BaseArgument>
@@ -1328,6 +1451,73 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                                           wei_element_op,
                                           out_element_op,
                                           split_k);
+    }
+
+    std::unique_ptr<BaseArgument>
+    MakeArgumentPointer(const void* p_in_grid,
+                        void* p_wei_grid,
+                        const void* p_out_grid,
+                        const std::array<long_index_t, NDimSpatial + 3>& b_g_n_c_wis_lengths,
+                        const std::array<long_index_t, NDimSpatial + 3>& b_g_n_c_wis_strides,
+                        const std::array<long_index_t, NDimSpatial + 3>& e_g_k_c_xs_lengths,
+                        const std::array<long_index_t, NDimSpatial + 3>& e_g_k_c_xs_strides,
+                        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_lengths,
+                        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_k_wos_strides,
+                        const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+                        const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+                        const std::array<long_index_t, NDimSpatial>& input_left_pads,
+                        const std::array<long_index_t, NDimSpatial>& input_right_pads,
+                        InElementwiseOperation in_element_op,
+                        WeiElementwiseOperation wei_element_op,
+                        OutElementwiseOperation out_element_op,
+                        ck::index_t split_k) override
+    {
+        const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
+
+        std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_k_c_xs_strides_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(b_g_n_c_wis_lengths_i32, b_g_n_c_wis_lengths);
+        array_convert(b_g_n_c_wis_strides_i32, b_g_n_c_wis_strides);
+        array_convert(e_g_k_c_xs_lengths_i32, e_g_k_c_xs_lengths);
+        array_convert(e_g_k_c_xs_strides_i32, e_g_k_c_xs_strides);
+        array_convert(a_g_n_k_wos_lengths_i32, a_g_n_k_wos_lengths);
+        array_convert(a_g_n_k_wos_strides_i32, a_g_n_k_wos_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
+                                          static_cast<WeiDataType*>(p_wei_grid),
+                                          static_cast<const OutDataType*>(p_out_grid),
+                                          b_g_n_c_wis_lengths_i32,
+                                          b_g_n_c_wis_strides_i32,
+                                          e_g_k_c_xs_lengths_i32,
+                                          e_g_k_c_xs_strides_i32,
+                                          a_g_n_k_wos_lengths_i32,
+                                          a_g_n_k_wos_strides_i32,
+                                          conv_filter_strides_i32,
+                                          conv_filter_dilations_i32,
+                                          input_left_pads_i32,
+                                          input_right_pads_i32,
+                                          1,
+                                          1,
+                                          in_element_op,
+                                          wei_element_op,
+                                          out_element_op,
+                                          split_k,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override
@@ -1379,7 +1569,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
                       "Specialization of instance_traits not found. Please check that a "
                       "specialization exists in file "
                       "ck_tile/builder/reflect/"
-                      "instance_traits_device_grouped_conv_bwd_weight_xdl_cshuffle.hpp "
+                      "reflect_device_grouped_conv_bwd_weight_xdl_cshuffle.inc "
                       "for the given template parameters.");
         return ck_tile::reflect::instance_string<DeviceOp>();
     }
@@ -1422,3 +1612,7 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffle
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/reflect_device_grouped_conv_bwd_weight_xdl_cshuffle.inc"
+#endif

@@ -33,6 +33,7 @@
     #include <sys/unistd.h>
 #endif
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +42,11 @@
 #include <memory>
 #include <stdexcept>
 #include <utility>
+
+#if __has_include(<malloc.h>)
+    #include <malloc.h>
+    #define __HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__
+#endif
 
 extern "C" {
     __attribute__((weak)) void __hipstdpar_hidden_free(void*);
@@ -165,7 +171,21 @@ extern "C" {
     inline __attribute__((used)) void* __hipstdpar_realloc(void* p,
                                                            std::size_t n)
     {
-        auto q = std::memcpy(__hipstdpar_malloc(n), p, n);
+        if (!p) return __hipstdpar_malloc(n);
+
+        if (n == 0) {
+            __hipstdpar_free(p);
+            return nullptr;
+        }
+
+        auto q = __hipstdpar_malloc(n);
+        if (!q) return nullptr;
+
+        std::size_t old = n;
+        #if defined(__HIPSTDPAR_HAS_MALLOC_USABLE_SIZE__)
+            old = malloc_usable_size(p);
+        #endif
+        std::memcpy(q, p, std::min(old, n));
         __hipstdpar_free(p);
 
         return q;

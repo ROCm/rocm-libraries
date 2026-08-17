@@ -1,0 +1,66 @@
+# serializer version: 1
+# name: test_handle_custom_mi_length_4
+  dict({
+    'is_custom': True,
+    'sol': dict({
+      'CustomKernelName': 'DummyKernel',
+      'MatrixInstruction': list([
+        16,
+        16,
+        16,
+        1,
+      ]),
+      'SolutionIndex': 0,
+      'WorkGroup': list([
+        16,
+        16,
+        1,
+      ]),
+    }),
+  })
+# ---
+# name: test_handle_custom_mi_wrong_length_runs_hint
+  dict({
+    'is_custom': True,
+    'matrix_instruction': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      2,
+      2,
+      2,
+      2,
+    ]),
+  })
+# ---
+# name: test_handle_non_custom_returns_false
+  dict({
+    'is_custom': False,
+    'sol': dict({
+      'SolutionIndex': 0,
+    }),
+  })
+# ---
+# name: test_has_custom_kernel_false_empty_name
+  False
+# ---
+# name: test_has_custom_kernel_false_no_line
+  False
+# ---
+# name: test_has_custom_kernel_true
+  True
+# ---
+# name: test_prepare_custom_kernel_config
+  '''
+  -   MatrixInstruction: [16, 16, 16, 1]
+  +   MIInputPerThread: 8
+  +   MIWaveGroup: [2, 2]
+  +   MIWaveTile: [4, 4]
+  +   MatrixInstB: 1
+  +   MatrixInstK: 16
+  +   MatrixInstM: 16
+  +   MatrixInstN: 16
+  '''
+# ---

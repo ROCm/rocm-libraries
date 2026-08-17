@@ -86,3 +86,20 @@ Tests:
              bmwcra_1, 
              scircuit, 
              shipsec1]
+
+- name: csrmm
+  category: pre_checkin
+  function: csrmm
+  precision: *single_only_precisions
+  M: 1
+  N: [10]
+  K: 1
+  alpha: [0.5]
+  alphai: [0.74]
+  beta: [-0.25]
+  betai: [0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  filename: [nos5]
+  graph_test: [true]

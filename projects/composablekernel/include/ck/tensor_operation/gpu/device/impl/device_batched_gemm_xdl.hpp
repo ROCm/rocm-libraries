@@ -16,6 +16,10 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -48,7 +52,7 @@ namespace device {
 template <typename DeviceOp, typename GridwiseGemm, bool HasMainKBlockLoop>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 #endif
     kernel_batched_gemm_xdlops_v2r3(const typename DeviceOp::Argument karg)
 {
@@ -67,7 +71,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const long_index_t c_batch_offset = __builtin_amdgcn_readfirstlane(
             static_cast<long_index_t>(karg.compute_ptr_offset_of_batch.GetCPtrOffset(g_idx)));
 
-        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         const auto a_grid_desc_k0_m_k1 =
             amd_wave_read_first_lane(GridwiseGemm::MakeAGridDescriptor_K0_M_K1(
@@ -139,13 +143,29 @@ struct DeviceBatchedGemmXdl : public DeviceBatchedGemm<ALayout,
                                                        BElementwiseOperation,
                                                        CElementwiseOperation>
 {
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-
-    static constexpr auto I0 = Number<0>{};
-    static constexpr auto I1 = Number<1>{};
-    static constexpr auto I2 = Number<2>{};
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               1,
+                                                               1,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               1,
+                                                               1,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    static constexpr auto I0               = Number<0>{};
+    static constexpr auto I1               = Number<1>{};
+    static constexpr auto I2               = Number<2>{};
 
     static constexpr auto K1Number = Number<K1>{};
 
@@ -180,7 +200,7 @@ struct DeviceBatchedGemmXdl : public DeviceBatchedGemm<ALayout,
     };
 
     // GridwiseGemm
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemm_k0mk1_k0nk1_mn_xdlops_v2r3_ext<
         BlockSize,
         ADataType, // TODO: distinguish A/B datatype
@@ -197,11 +217,11 @@ struct DeviceBatchedGemmXdl : public DeviceBatchedGemm<ALayout,
         MPerBlock,
         NPerBlock,
         K0PerBlock,
-        MPerXDL,
-        NPerXDL,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
         K1,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_K0_M_K1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -224,8 +244,8 @@ struct DeviceBatchedGemmXdl : public DeviceBatchedGemm<ALayout,
         NumGemmKPrefetchStage,
         LoopSched,
         PipelineVer>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     using Problem = typename GridwiseGemm64::Problem;
 
@@ -325,7 +345,12 @@ struct DeviceBatchedGemmXdl : public DeviceBatchedGemm<ALayout,
 
     static bool IsSupportedArgument(const Problem& problem)
     {
-        if(!ck::is_xdl_wmma_supported<ADataType, BDataType, MPerXDL, NPerXDL>())
+        if(!ck::is_xdl_wmma_supported<ADataType,
+                                      BDataType,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
         {
             return false;
         }
@@ -467,3 +492,7 @@ struct DeviceBatchedGemmXdl : public DeviceBatchedGemm<ALayout,
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

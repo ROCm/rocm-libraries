@@ -273,7 +273,7 @@ TEST(TestPointwiseAttributes, CreatePointwiseAttributesWithThreeInputs)
 
 TEST(TestPointwiseAttributes, OptionalParameterDefaults)
 {
-    PointwiseAttributes pointwiseAttributes;
+    const PointwiseAttributes pointwiseAttributes;
 
     EXPECT_FALSE(pointwiseAttributes.get_relu_lower_clip().has_value());
     EXPECT_FALSE(pointwiseAttributes.get_relu_upper_clip().has_value());

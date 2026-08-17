@@ -3,17 +3,28 @@
 
 #pragma once
 
+#include "ck_tile/core/algorithm/coordinate_transform.hpp"
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/container/array.hpp"
-#include "ck_tile/core/container/sequence.hpp"
-#include "ck_tile/core/container/tuple.hpp"
 #include "ck_tile/core/container/container_helper.hpp"
 #include "ck_tile/core/container/meta_data_buffer.hpp"
+#include "ck_tile/core/container/multi_index.hpp"
+#include "ck_tile/core/container/sequence.hpp"
+#include "ck_tile/core/container/tuple.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/integral_constant.hpp"
+#include "ck_tile/core/numeric/math.hpp"
 #include "ck_tile/core/tensor/tensor_adaptor.hpp"
+#include "ck_tile/core/tensor/tensor_adaptor_coordinate.hpp"
+#include "ck_tile/core/tensor/tensor_descriptor.hpp"
 #include "ck_tile/core/tensor/tile_distribution_encoding.hpp"
 #include "ck_tile/core/utility/functional.hpp"
+#include "ck_tile/core/utility/to_sequence.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+
+#include <stdio.h>
+#include <type_traits>
 
 namespace ck_tile {
 
@@ -64,8 +75,9 @@ CK_TILE_HOST_DEVICE constexpr auto make_tile_distributed_index(sequence<Is...>)
 template <typename PsYs2XsAdaptor_,
           typename Ys2DDescriptor_,
           typename StaticTileDistributionEncoding_,
-          typename TileDistributionDetail_> // FIXME: this is for hold ad-hoc but useful info,
+          typename TileDistributionDetail_, // FIXME: this is for hold ad-hoc but useful info,
                                             // should be more elegnat
+          bool IsWarpLevelParallelOnly_ = false>
 struct tile_distribution
 {
     using PsYs2XsAdaptor = remove_cvref_t<PsYs2XsAdaptor_>;
@@ -96,7 +108,16 @@ struct tile_distribution
 
         if constexpr(NDimP == 1)
         {
-            return array<index_t, 1>{get_lane_id()};
+            if constexpr(IsWarpLevelParallelOnly_)
+            {
+                constexpr auto p_len_over_h =
+                    DstrEncode::detail::get_uniformed_p_dim_lengths_over_h();
+                return array<index_t, 1>{get_warp_id() % p_len_over_h[0]};
+            }
+            else
+            {
+                return array<index_t, 1>{get_lane_id()};
+            }
         }
         else if constexpr(NDimP == 2)
         {
@@ -122,11 +143,16 @@ struct tile_distribution
     }
 
     CK_TILE_HOST_DEVICE constexpr const auto& get_ps_ys_to_xs_adaptor() const
+        [[clang::lifetimebound]]
     {
         return ps_ys_to_xs_;
     }
 
-    CK_TILE_HOST_DEVICE constexpr const auto& get_ys_to_d_descriptor() const { return ys_to_d_; }
+    CK_TILE_HOST_DEVICE constexpr const auto& get_ys_to_d_descriptor() const
+        [[clang::lifetimebound]]
+    {
+        return ys_to_d_;
+    }
 
     CK_TILE_HOST_DEVICE static constexpr auto get_static_tile_distribution_encoding()
     {
@@ -451,48 +477,11 @@ struct tile_distribution_detail
 
 } // namespace detail
 
-#if 0
-// this returns a constexpr tile_distribution
-template <typename StaticTileDistributionEncoding_>
-CK_TILE_HOST_DEVICE constexpr auto make_tile_distribution(StaticTileDistributionEncoding_)
-{
-    using DstrEncode = remove_cvref_t<StaticTileDistributionEncoding_>;
-
-    constexpr auto adaptor_impl =
-        detail::make_adaptor_encoding_for_tile_distribution(StaticTileDistributionEncoding_{});
-
-    constexpr auto ps_ys_to_xs_adaptor_impl          = adaptor_impl.template at<0>();
-    constexpr auto ys_to_d_adaptor_impl              = adaptor_impl.template at<1>();
-    constexpr index_t d_length                       = adaptor_impl.template at<2>();
-    constexpr auto rh_major_minor_to_hidden_ids_impl = adaptor_impl.template at<3>();
-
-    constexpr auto ps_ys_to_xs_adaptor =
-        CONSTRUCT_TENSOR_ADAPTOR_FROM_ENCODING(ps_ys_to_xs_adaptor_impl);
-
-    constexpr auto ys_to_d_adaptor = CONSTRUCT_TENSOR_ADAPTOR_FROM_ENCODING(ys_to_d_adaptor_impl);
-
-    constexpr auto ys_to_d_descriptor =
-        make_tensor_descriptor_from_adaptor(ys_to_d_adaptor, d_length);
-
-    //
-    constexpr index_t ndim_rh_major = DstrEncode::detail::ndim_rh_major_;
-    constexpr auto ndims_rhs_minor  = DstrEncode::detail::ndims_rhs_minor_;
-
-    constexpr auto rh_major_minor_to_hidden_ids =
-        TO_TUPLE_OF_SEQUENCE(rh_major_minor_to_hidden_ids_impl, ndim_rh_major, ndims_rhs_minor);
-
-    return tile_distribution<
-        remove_cvref_t<decltype(ps_ys_to_xs_adaptor)>,
-        remove_cvref_t<decltype(ys_to_d_descriptor)>,
-        remove_cvref_t<DstrEncode>,
-        detail::tile_distribution_detail<remove_cvref_t<decltype(rh_major_minor_to_hidden_ids)>>>{
-        ps_ys_to_xs_adaptor, ys_to_d_descriptor};
-}
-#endif
-
 // this returns a static tile_distribution
-template <typename StaticTileDistributionEncoding_>
-CK_TILE_HOST_DEVICE constexpr auto make_static_tile_distribution(StaticTileDistributionEncoding_)
+template <typename StaticTileDistributionEncoding_, bool IsWarpLevelParallelOnly_ = false>
+CK_TILE_HOST_DEVICE constexpr auto
+make_static_tile_distribution(StaticTileDistributionEncoding_,
+                              bool_constant<IsWarpLevelParallelOnly_> = {})
 {
     using DstrEncode = remove_cvref_t<StaticTileDistributionEncoding_>;
 
@@ -524,8 +513,8 @@ CK_TILE_HOST_DEVICE constexpr auto make_static_tile_distribution(StaticTileDistr
         remove_cvref_t<decltype(ps_ys_to_xs_adaptor)>,
         remove_cvref_t<decltype(ys_to_d_descriptor)>,
         remove_cvref_t<DstrEncode>,
-        detail::tile_distribution_detail<remove_cvref_t<decltype(rh_major_minor_to_hidden_ids)>>>{
-        ps_ys_to_xs_adaptor, ys_to_d_descriptor};
+        detail::tile_distribution_detail<remove_cvref_t<decltype(rh_major_minor_to_hidden_ids)>>,
+        IsWarpLevelParallelOnly_>{ps_ys_to_xs_adaptor, ys_to_d_descriptor};
 }
 
 //***********************************************************************************

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,9 @@
 
 // Ensure access to
 #include "device/hiptensor_contraction_bilinear_instances.hpp"
+#include "device/hiptensor_contraction_bilinear_unary_ops_instances.hpp"
 #include "device/hiptensor_contraction_scale_instances.hpp"
+#include "device/hiptensor_contraction_scale_unary_ops_instances.hpp"
 
 namespace hiptensor
 {
@@ -56,7 +58,44 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
+                                          ck::bhalf_t>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::bhalf_t,
+                                                        ck::bhalf_t,
+                                                        ck::Tuple<ck::bhalf_t>,
+                                                        ck::bhalf_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        ck::bhalf_t>());
+
+        registerSolutions(
+            enumerateContractionSolutions<6,
+                                          6,
+                                          6,
+                                          ck::bhalf_t,
+                                          ck::bhalf_t,
+                                          ck::Tuple<ck::bhalf_t>,
+                                          ck::bhalf_t,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::Bilinear,
                                           float>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::bhalf_t,
+                                                        ck::bhalf_t,
+                                                        ck::Tuple<ck::bhalf_t>,
+                                                        ck::bhalf_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        float>());
 
         // Bilinear f16
         registerSolutions(
@@ -70,7 +109,44 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
+                                          ck::half_t>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::half_t,
+                                                        ck::half_t,
+                                                        ck::Tuple<ck::half_t>,
+                                                        ck::half_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        ck::half_t>());
+
+        registerSolutions(
+            enumerateContractionSolutions<6,
+                                          6,
+                                          6,
+                                          ck::half_t,
+                                          ck::half_t,
+                                          ck::Tuple<ck::half_t>,
+                                          ck::half_t,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::Bilinear,
                                           float>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::half_t,
+                                                        ck::half_t,
+                                                        ck::Tuple<ck::half_t>,
+                                                        ck::half_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        float>());
 
         // Bilinear f32
         registerSolutions(
@@ -86,6 +162,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Bilinear,
                                           float>());
 
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        float,
+                                                        float,
+                                                        ck::Tuple<float>,
+                                                        float,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        float>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -99,6 +187,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Bilinear,
                                           ck::half_t>());
 
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        float,
+                                                        float,
+                                                        ck::Tuple<float>,
+                                                        float,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        ck::half_t>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -111,6 +211,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
                                           ck::bhalf_t>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        float,
+                                                        float,
+                                                        ck::Tuple<float>,
+                                                        float,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        ck::bhalf_t>());
 
         // Bilinear complex f32
         registerSolutions(
@@ -139,6 +251,19 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
                                           float>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        double,
+                                                        double,
+                                                        ck::Tuple<double>,
+                                                        double,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        float>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -151,6 +276,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Bilinear,
                                           double>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        double,
+                                                        double,
+                                                        ck::Tuple<double>,
+                                                        double,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        CkBilinearUnary,
+                                                        double>());
 
         // Bilinear complex f64
         registerSolutions(
@@ -178,7 +315,44 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Scale,
+                                          ck::bhalf_t>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::bhalf_t,
+                                                        ck::bhalf_t,
+                                                        ck::Tuple<>,
+                                                        ck::bhalf_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        ck::bhalf_t>());
+
+        registerSolutions(
+            enumerateContractionSolutions<6,
+                                          6,
+                                          6,
+                                          ck::bhalf_t,
+                                          ck::bhalf_t,
+                                          ck::Tuple<>,
+                                          ck::bhalf_t,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::Scale,
                                           float>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::bhalf_t,
+                                                        ck::bhalf_t,
+                                                        ck::Tuple<>,
+                                                        ck::bhalf_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        float>());
 
         // Scale f16
         registerSolutions(
@@ -192,7 +366,44 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Scale,
+                                          ck::half_t>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::half_t,
+                                                        ck::half_t,
+                                                        ck::Tuple<>,
+                                                        ck::half_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        ck::half_t>());
+
+        registerSolutions(
+            enumerateContractionSolutions<6,
+                                          6,
+                                          6,
+                                          ck::half_t,
+                                          ck::half_t,
+                                          ck::Tuple<>,
+                                          ck::half_t,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::PassThrough,
+                                          ck::tensor_operation::element_wise::Scale,
                                           float>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        ck::half_t,
+                                                        ck::half_t,
+                                                        ck::Tuple<>,
+                                                        ck::half_t,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        float>());
 
         // Scale f32
         registerSolutions(
@@ -208,6 +419,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Scale,
                                           float>());
 
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        float,
+                                                        float,
+                                                        ck::Tuple<>,
+                                                        float,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        float>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -221,6 +444,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Scale,
                                           ck::half_t>());
 
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        float,
+                                                        float,
+                                                        ck::Tuple<>,
+                                                        float,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        ck::half_t>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -233,6 +468,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Scale,
                                           ck::bhalf_t>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        float,
+                                                        float,
+                                                        ck::Tuple<>,
+                                                        float,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        ck::bhalf_t>());
 
         // scale complex f32
         registerSolutions(
@@ -262,6 +509,18 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::Scale,
                                           float>());
 
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        double,
+                                                        double,
+                                                        ck::Tuple<>,
+                                                        double,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        float>());
+
         registerSolutions(
             enumerateContractionSolutions<6,
                                           6,
@@ -274,6 +533,19 @@ namespace hiptensor
                                           ck::tensor_operation::element_wise::PassThrough,
                                           ck::tensor_operation::element_wise::Scale,
                                           double>());
+
+        registerSolutions(enumerateContractionSolutions<6,
+                                                        6,
+                                                        6,
+                                                        double,
+                                                        double,
+                                                        ck::Tuple<>,
+                                                        double,
+                                                        CkHiptensorUnaryOp,
+                                                        CkHiptensorUnaryOp,
+                                                        ck::tensor_operation::element_wise::Scale,
+                                                        double>());
+
         // scale complex f64
         registerSolutions(
             enumerateContractionSolutions<6,

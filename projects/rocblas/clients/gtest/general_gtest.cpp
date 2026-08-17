@@ -154,6 +154,15 @@ namespace
 
         result = 1.0 / T(1.0, 0.0);
         EXPECT_EQ(result, T(1.0, 0.0));
+
+        int exact_zeros = 0;
+        for(int i = 0; i < 10; i++)
+        {
+            T r = random_hpl_generator<T>();
+            if(r.real() == 0.0 || r.imag() == 0.0)
+                exact_zeros++;
+        }
+        EXPECT_LT(exact_zeros, 2);
     };
 
     // By default, arbitrary type combinations are invalid.

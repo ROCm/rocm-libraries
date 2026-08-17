@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/Arithmetic/Convert.hpp>
 
@@ -71,13 +48,17 @@ namespace rocRoller
             ConvertCase(Int64);
             ConvertCase(UInt32);
             ConvertCase(UInt64);
-            ConvertCase(E8M0x4);
             ConvertCase(FP8x4);
             ConvertCase(BF8x4);
             ConvertCase(FP6x16);
             ConvertCase(BF6x16);
             ConvertCase(FP4x8);
             ConvertCase(Double);
+        case DataType::E8M0x4:
+        case DataType::E5M3x4:
+        case DataType::E4M3x4:
+            co_yield generatePackedScales(dest, arg);
+            break;
 
         default:
             Throw<FatalError>("Generate - Unsupported datatype conversion: ",
@@ -269,25 +250,6 @@ namespace rocRoller
         }
     }
 
-    Generator<Instruction> ConvertGenerator::generateE8M0x4(Register::ValuePtr dest,
-                                                            Register::ValuePtr arg)
-    {
-        AssertFatal(arg != nullptr);
-
-        auto dataType = getArithDataType(arg);
-
-        AssertFatal(dataType == DataType::E8M0,
-                    "Unsupported datatype for convert to E8M0x4: ",
-                    ShowValue(dataType));
-
-        AssertFatal(arg->valueCount() == 4,
-                    "Conversion to E8M0x4 requires four elements",
-                    ShowValue(arg->valueCount()));
-        std::vector<Register::ValuePtr> values{
-            arg->element({0}), arg->element({1}), arg->element({2}), arg->element({3})};
-        co_yield m_context->copier()->pack(dest, values, "Pack into E8M0x4");
-    }
-
     Generator<Instruction> ConvertGenerator::generateFP8x4(Register::ValuePtr dest,
                                                            Register::ValuePtr arg)
     {
@@ -397,6 +359,46 @@ namespace rocRoller
         break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to bf8: ", ShowValue(dataType));
+        }
+    }
+
+    Generator<Instruction> ConvertGenerator::generatePackedScales(Register::ValuePtr dest,
+                                                                  Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        AssertFatal(isScaleType(dataType),
+                    "Only scale types are allowed to be packed via this convert op",
+                    ShowValue(dataType));
+
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasVGPRIndexing)
+           and dest->allocationState() == Register::AllocationState::Unallocated)
+        {
+            dest->setForceReservedRegion();
+        }
+
+        switch(dataType)
+        {
+        case DataType::E8M0:
+        case DataType::E5M3:
+        case DataType::E4M3:
+        {
+            const auto packedDataType = DataTypeInfo::Get(dataType).packedVariableType()->dataType;
+            AssertFatal(
+                arg->valueCount() == 4,
+                fmt::format("Conversion to {} requires four elements", toString(packedDataType)),
+                ShowValue(arg->valueCount()));
+            std::vector<Register::ValuePtr> values{
+                arg->element({0}), arg->element({1}), arg->element({2}), arg->element({3})};
+            co_yield m_context->copier()->pack(
+                dest, values, fmt::format("Pack into {}", toString(packedDataType)));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to a packed ScaleType: ",
+                              ShowValue(dataType));
         }
     }
 
@@ -516,11 +518,8 @@ namespace rocRoller
                 dest->subset({1}), Register::Value::Literal(0), "convert");
             co_yield m_context->copier()->copy(dest->subset({0}), arg, "convert");
             break;
-
-        case DataType::Int64:
-            co_yield m_context->copier()->copy(dest, arg, "convert");
-            break;
         case DataType::UInt64:
+        case DataType::Int64:
             co_yield m_context->copier()->copy(dest, arg, "convert");
             break;
 

@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+from unittest import SkipTest
+
 from Tensile.Common import tryAssembler
 
 def test_Simple(useGlobalParameters):
@@ -61,3 +63,18 @@ def test_Macro(useGlobalParameters):
 #        assert tryAssembler((10,1,0), thekernel.format(arch="gfx1010"), True, '-mllvm --amdhsa-code-object-version=4')
         assert tryAssembler((10,1,1), thekernel.format(arch="gfx1011"))
         assert not tryAssembler((8,0,3), thekernel.format(arch="gfx803"))
+
+def test_gfx12_wmma_probe_shape(useGlobalParameters):
+    isa = (12, 0, 1)
+    gfx12Probe = "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15], v[0:7]"
+    rocisaWave64Probe = "v_wmma_f32_16x16x16_f16 v[0:3], v[8:9], v[16:17], v[0:3]"
+
+    with useGlobalParameters():
+        if not tryAssembler(isa, ""):
+            raise SkipTest("gfx1201 assembler target is not available")
+
+        assert tryAssembler(isa, gfx12Probe, False, "-mno-wavefrontsize64")
+        assert tryAssembler(isa, gfx12Probe, False, "-mno-wavefrontsize64", "-mcumode")
+        assert tryAssembler(isa, gfx12Probe, False, "-mno-wavefrontsize64", "-mno-cumode")
+        assert not tryAssembler(isa, gfx12Probe, False, "-mwavefrontsize64")
+        assert not tryAssembler(isa, rocisaWave64Probe, False, "-mno-wavefrontsize64")

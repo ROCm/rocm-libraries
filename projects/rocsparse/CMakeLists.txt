@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,8 +21,7 @@
 #
 # ########################################################################
 
-# The ROCm platform requires at least Ubuntu 16.04 or Fedora 24, which have cmake 3.5
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -38,16 +37,16 @@ list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake)
 
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
-endif()
-
-# Honor per-config flags in try_compile() source-file signature. cmake v3.7 and up
-if(POLICY CMP0066)
-  cmake_policy(SET CMP0066 NEW)
 endif()
 
 # rocSPARSE project
@@ -68,10 +67,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Set CXX standard
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message( DEPRECATION "Builds using the C++14 standard will no longer be supported in the next major release" )
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+if(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++17 is supported")
 endif()
 
 # Build options
@@ -88,8 +85,16 @@ option(BUILD_ROCSPARSE_ILP64 "Build rocSPARSE with rocsparse_int equal to int64_
 option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
+option(ROCSPARSE_ENABLE_ILU0_BOOST_SIGN "Preserve the pivot sign/phase in the ILU0 numeric boost" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
+option(ROCSPARSE_ENABLE_HANDLE_CREATE "Build rocsparse_handle_create/destroy: non-blocking handle creation on a user-defined stream" ON)
+option(ROCSPARSE_ENABLE_SPMAT_SCALE "Build rocsparse_spmat_scale and its scalar dense vector descriptor helper rocsparse_dnvec_descr_create_scalar" ON)
+option(ROCSPARSE_ENABLE_SDDMM_BATCHED "Build batched SDDMM support for the CSR, CSC, COO, COO AoS, and ELL formats" ON)
+option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
+option(BUILD_WITH_U16_REMOVED "Build rocSPARSE with the deprecated rocsparse_indextype_u16 index type removed" ON)
+option(BUILD_WITH_CSC_TRSV "Enable CSC format support in rocsparse_spsv and rocsparse_sptrsv" ON)
+option(BUILD_WITH_CSC_TRSM "Enable CSC format support in rocsparse_spsm and rocsparse_sptrsm" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -109,12 +114,6 @@ if(BUILD_WITH_OFFLOAD_COMPRESS)
   endif()
 endif()
 
-#
-if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
-endif()
-
 if(BUILD_COMPRESSED_DBG)
   add_compile_options($<$<CONFIG:Debug>:-gz> $<$<CONFIG:RelWithDebInfo>:-gz>)
 endif()
@@ -128,6 +127,9 @@ if(BUILD_ADDRESS_SANITIZER)
   # C
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
   set(CMAKE_C_LINK_EXECUTABLE "${CMAKE_C_LINK_EXECUTABLE} -fuse-ld=lld")
+
+  # Define a macro visible to both host and device compilation
+  add_compile_definitions(ROCSPARSE_WITH_ASAN)
 
   # Fortran not supported, add_link_options below invalid for fortran linking
   set(BUILD_FORTRAN_CLIENTS OFF)
@@ -145,16 +147,6 @@ if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang
   string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
 
-# Detect compiler support for target ID
-# This section is deprecated. Please use rocm_check_target_ids for future use.
-if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+")
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-        OUTPUT_VARIABLE CXX_OUTPUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE)
-    string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-endif()
-
 #Set the GPU_TARGETS with backward compatibility
 if(COMMAND rocm_check_target_ids)
     if(BUILD_ADDRESS_SANITIZER)
@@ -162,12 +154,19 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+                  "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
+                  "gfx1030;gfx1100;gfx1101;gfx1102"
+                  "gfx1150;gfx1151;gfx1152;gfx1153"
+                  "gfx1200;gfx1201;gfx1250")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+                                "gfx1030;gfx1100;gfx1101;gfx1102"
+                                "gfx1150;gfx1151;gfx1152;gfx1153"
+                                "gfx1200;gfx1201;gfx1250")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -199,13 +198,25 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "4.3.0")
+set(VERSION_STRING "5.1.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 set(rocsparse_SOVERSION ${SOVERSION_STRING})
+
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP ROCSPARSE_COPYRIGHT_YEAR "%Y")
+    if(rocsparse_VERSION_TWEAK)
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR} (${rocsparse_VERSION_TWEAK})")
+    else()
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
 
 # Find rocprim package
 find_package(rocprim REQUIRED)
@@ -229,6 +240,9 @@ endif( )
 
 if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
+  if( BUILD_CLIENTS_TESTS )
+    enable_testing()
+  endif()
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
@@ -370,36 +384,101 @@ if(BUILD_CODE_COVERAGE)
   # Run coverage analysis
   #
   add_custom_target(coverage_analysis
+    COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/rocsparse-coverage_%m.profraw" ./clients/staging/rocsparse-test --gtest_filter=\"\${GTEST_FILTER}\"
+    # Also fold in the standalone unit-test binaries so their host-side coverage
+    # of librocsparse is counted. The %m module hash keeps profraw names distinct
+    # per binary; they match the rocsparse-coverage_*.profraw merge glob below.
+    # Wrapped in || true so a unit-test failure cannot abort the coverage upload.
+    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test || true"
+    COMMAND sh -c "LLVM_PROFILE_FILE=./coverage-report/profraw/rocsparse-coverage_%m.profraw ./clients/staging/rocsparse-unit-test-device || true"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
   add_dependencies(coverage_analysis rocsparse)
+  # Build the unit-test binaries as part of coverage (best-effort: only if the
+  # client tests are enabled in this configuration).
+  if(TARGET rocsparse-unit-test)
+    add_dependencies(coverage_analysis rocsparse-unit-test)
+  endif()
+  if(TARGET rocsparse-unit-test-device)
+    add_dependencies(coverage_analysis rocsparse-unit-test-device)
+  endif()
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  # Objects to attribute coverage to: the shared library plus any unit-test
+  # binaries. The unit tests compile private library sources in-tree (those
+  # symbols are hidden in librocsparse and cannot be linked), so their coverage
+  # is only visible when their binaries are passed to llvm-cov as objects. The
+  # non-library (clients/) sources they also pull in are dropped later by the
+  # exclusion filter so the report stays library-only.
+  set(COVERAGE_OBJECTS -object ./library/librocsparse.so)
+  if(TARGET rocsparse-unit-test)
+    list(APPEND COVERAGE_OBJECTS -object ./clients/staging/rocsparse-unit-test)
+  endif()
+  if(TARGET rocsparse-unit-test-device)
+    list(APPEND COVERAGE_OBJECTS -object ./clients/staging/rocsparse-unit-test-device)
+  endif()
+
+  # Python script to filter coverage exclusion markers (LCOV_EXCL_START/LCOV_EXCL_STOP)
+  # Note: lcov and gcovr don't work for LLVM coverage since they can't re-read sources
+  # when processing lcov format files. This script reads source files and filters excluded lines.
+  set(COVERAGE_FILTER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/filter_lcov_exclusions.py")
+  find_package(Python3 COMPONENTS Interpreter)
+  find_program(GENHTML genhtml)
+
+  if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+    message(STATUS "Found Python3 and filter script - coverage exclusion markers will be processed")
+    set(COVERAGE_FILTER_COMMAND
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_FILTER_SCRIPT} ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    )
+  else()
+    message(WARNING "Python3 or filter script not found. LCOV_EXCL_START/LCOV_EXCL_STOP markers will NOT be processed.")
+    set(COVERAGE_FILTER_COMMAND
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-raw.info ./coverage-report/coverage.info
+    )
+  endif()
+
+  # Generate HTML from filtered LCOV using genhtml (respects exclusion markers)
+  # or fallback to llvm-cov show (doesn't respect exclusion markers)
+  if(GENHTML AND Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
+    message(STATUS "Found genhtml - HTML will be generated from filtered LCOV")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${GENHTML} ./coverage-report/coverage.info --output-directory ./coverage-report --title rocsparse --legend --demangle-cpp --quiet
+    )
+  else()
+    message(STATUS "genhtml not found - using llvm-cov show (exclusion markers not reflected in HTML)")
+    set(COVERAGE_HTML_COMMAND
+      COMMAND ${LLVM_COV} show ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata -format=html -output-dir=coverage-report
+    )
+  endif()
+
+  add_custom_target(
+    coverage
     DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output)
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_*.profraw -o ./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata
+    COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
+    ${COVERAGE_FILTER_COMMAND}
+    ${COVERAGE_HTML_COMMAND}
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
 
   #
   # Coverage cleanup

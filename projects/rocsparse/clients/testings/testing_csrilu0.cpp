@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,9 @@ static void test_csrilu0_matrix(rocsparse_local_handle&    handle,
                                 const Arguments& arg,
                                 bool             need_display)
 {
+    hipStream_t stream{};
+    CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(handle, &stream));
+
     const rocsparse_analysis_policy apol = arg.apol;
     const rocsparse_solve_policy    spol = arg.spol;
     const rocsparse_index_base      base = arg.baseA;
@@ -123,7 +126,7 @@ static void test_csrilu0_matrix(rocsparse_local_handle&    handle,
                                                                   : rocsparse_status_success);
         }
         // Sync to force updated pivots
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
         // Pointer mode device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
@@ -143,7 +146,7 @@ static void test_csrilu0_matrix(rocsparse_local_handle&    handle,
                                                               : rocsparse_status_success);
 
         // Sync to force updated pivots
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
         // Perform solve step
 
@@ -166,7 +169,7 @@ static void test_csrilu0_matrix(rocsparse_local_handle&    handle,
         }
 
         // Sync to force updated pivots
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
         // Pointer mode device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
@@ -183,7 +186,7 @@ static void test_csrilu0_matrix(rocsparse_local_handle&    handle,
             EXPECT_ROCSPARSE_STATUS(st, rocsparse_status_success);
         }
         // Sync to force updated pivots
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream));
 
         // Copy output to host
         CHECK_HIP_ERROR(hipMemcpy(hcsr_val_1, dcsr_val_1, sizeof(T) * nnz, hipMemcpyDeviceToHost));

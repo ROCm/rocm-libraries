@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,7 @@ namespace hiptensor
             GFX1153          = 0x1153,
             GFX1200          = 0x1200,
             GFX1201          = 0x1201,
+            GFX1250          = 0x1250,
             UNSUPPORTED_ARCH = 0x0,
         };
 

@@ -337,7 +337,7 @@ namespace rocsparse
                                                 const I* __restrict__ bsr_row_ptr_C,
                                                 J* __restrict__ bsr_col_ind_C,
                                                 T* __restrict__ bsr_val_C,
-                                                I* __restrict__ workspace_B,
+                                                I*                   workspace_B,
                                                 rocsparse_index_base idx_base_A,
                                                 rocsparse_index_base idx_base_B,
                                                 rocsparse_index_base idx_base_C,
@@ -403,7 +403,7 @@ namespace rocsparse
                                          const I* __restrict__ bsr_row_ptr_C,
                                          J* __restrict__ bsr_col_ind_C,
                                          T* __restrict__ bsr_val_C,
-                                         I* __restrict__ workspace_B,
+                                         I*                   workspace_B,
                                          rocsparse_index_base idx_base_A,
                                          rocsparse_index_base idx_base_B,
                                          rocsparse_index_base idx_base_C,
@@ -2046,10 +2046,10 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
 
     J nnzb_max;
     RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&nnzb_max, workspace1, sizeof(J), hipMemcpyDeviceToHost, stream));
+        rocsparse_hipMemcpyAsync(&nnzb_max, workspace1, sizeof(J), hipMemcpyDeviceToHost, stream));
 
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Group offset buffer
     J* d_group_offset = reinterpret_cast<J*>(buffer);
@@ -2136,14 +2136,14 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
                                                                         rocprim_buffer));
 
         // Copy group sizes to host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&h_group_size,
-                                           d_group_size,
-                                           sizeof(J) * BSRGEMM_MAXGROUPS,
-                                           hipMemcpyDeviceToHost,
-                                           stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&h_group_size,
+                                                     d_group_size,
+                                                     sizeof(J) * BSRGEMM_MAXGROUPS,
+                                                     hipMemcpyDeviceToHost,
+                                                     stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         // Create identity permutation for group access
         RETURN_IF_ROCSPARSE_ERROR(
@@ -2174,7 +2174,7 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
     {
         // First group processes all rows
         h_group_size[0] = mb;
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
 
     I* workspace2 = reinterpret_cast<I*>(buffer);
@@ -2368,11 +2368,13 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
                                                                          d_perm,
                                                                          workspace2));
         return rocsparse_status_success;
+        // LCOV_EXCL_START
     }
     else
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
+    // LCOV_EXCL_STOP
 }
 
 #define INSTANTIATE(I, J, T)                                             \

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -27,8 +27,8 @@ set(rocsparse_source
 # Auxiliary
   src/auxiliary/rocsparse_auxiliary.cpp
   src/auxiliary/rocsparse_error.cpp
-
 # Common
+  src/common/rocsparse_singularity.cpp
   src/common/rocsparse_common.cpp
   src/common/rocsparse_valset.cpp
   src/common/rocsparse_conjugate.cpp
@@ -41,6 +41,8 @@ set(rocsparse_source
   src/common/rocsparse_pivot_info_t.cpp
   src/common/rocsparse_csric0_info.cpp
   src/common/rocsparse_csrilu0_info.cpp
+  src/common/rocsparse_bsric0_info.cpp
+  src/common/rocsparse_bsrilu0_info.cpp
   src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
@@ -58,6 +60,8 @@ set(rocsparse_source
   src/common/rocsparse_trm_data_t.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
+  src/common/rocsparse_numeric_boost.cpp
+  src/common/rocsparse_line_nnz_profile.cpp
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -123,6 +127,7 @@ set(rocsparse_source
   src/level2/rocsparse_csrmv_info.cpp
   src/level2/rocsparse_csrmv_adaptive_info.cpp
   src/level2/rocsparse_csrmv_lrb_info.cpp
+  src/level2/rocsparse_csrmv_nnzsplit_info.cpp
   src/level2/rocsparse_csrmv_analysis.cpp
   #
   src/level2/rocsparse_cscmv_impl.cpp
@@ -136,7 +141,6 @@ set(rocsparse_source
   src/level2/rocsparse_sellmv.cpp
   #
   src/level2/rocsparse_csrsv.cpp
-  src/level2/rocsparse_csrsv_zero_pivot.cpp
   src/level2/rocsparse_csrsv_buffer_size.cpp
   src/level2/rocsparse_xcsrsv_buffer_size.cpp
   src/level2/rocsparse_csrsv_analysis_kernels.cpp
@@ -380,6 +384,7 @@ set(rocsparse_source
   src/level3/rocsparse_csrmm_buffer_size.cpp
   src/level3/rocsparse_csrmm_analysis.cpp
   src/level3/rocsparse_csrmm.cpp
+  src/level3/rocsparse_csrmm_default_alg.cpp
   src/level3/rocsparse_cscmm_impl.cpp
   src/level3/rocsparse_cscmm_buffer_size.cpp
   src/level3/rocsparse_cscmm_analysis.cpp
@@ -481,6 +486,7 @@ set(rocsparse_source
   src/extra/rocsparse_bsrgemm.cpp
   src/extra/rocsparse_spgemm.cpp
   src/extra/rocsparse_spgeam.cpp
+  src/extra/rocsparse_spmat_scale.cpp
   #
   # Preconditioner
   #
@@ -574,6 +580,7 @@ set(rocsparse_source
   src/conversion/rocsparse_csxsldu_buffer_size.cpp
   src/conversion/rocsparse_csxsldu_preprocess.cpp
   src/conversion/rocsparse_csxsldu_compute.cpp
+  src/conversion/rocsparse_dense2bell.cpp
   src/conversion/rocsparse_dense2csr.cpp
   src/conversion/rocsparse_dense2coo.cpp
   src/conversion/rocsparse_prune_dense2csr.cpp
@@ -665,4 +672,41 @@ set(rocsparse_source
   src/util/rocsparse_check_matrix_ell_buffer_size.cpp
   src/util/rocsparse_check_matrix_hyb_buffer_size.cpp
   src/util/rocsparse_check_spmat.cpp
+
+# Generic
+  src/generic/spilu0/rocsparse_spilu0_descr.cpp
+  src/generic/spilu0/rocsparse_spilu0_set_input.cpp
+  src/generic/spilu0/rocsparse_spilu0_get_output.cpp
+  src/generic/spilu0/rocsparse_spilu0.cpp
+  src/generic/spilu0/rocsparse_spilu0_buffer_size.cpp
+  src/generic/spic0/rocsparse_spic0_descr.cpp
+  src/generic/spic0/rocsparse_spic0_set_input.cpp
+  src/generic/spic0/rocsparse_spic0_get_output.cpp
+  src/generic/spic0/rocsparse_spic0.cpp
+  src/generic/spic0/rocsparse_spic0_buffer_size.cpp
+
 )
+
+if(BUILD_ROCSPARSE_DEBUGGING)
+  list(APPEND rocsparse_source
+    src/hip/rocsparse_hip.cpp
+    src/hip/rocsparse_hip_debug.cpp
+    src/hip/rocsparse_hip_debug_t.cpp)
+endif()
+
+# Incomplete LDL^T (zero fill-in) sources, gated by BUILD_WITH_ILDLT0.
+if(BUILD_WITH_ILDLT0)
+  list(APPEND rocsparse_source
+    src/precond/csrildlt0/rocsparse_csrildlt0.cpp
+    src/precond/csrildlt0/rocsparse_csrildlt0_analysis.cpp
+    src/precond/csrildlt0/rocsparse_csrildlt0_buffer_size.cpp
+    src/precond/csrildlt0/rocsparse_csrildlt0_kernel_hash.cpp
+    src/precond/csrildlt0/rocsparse_csrildlt0_kernel_binsearch.cpp
+    src/precond/csrildlt0/rocsparse_csrildlt0_kernel_launch.cpp
+    src/generic/spildlt0/rocsparse_spildlt0_descr.cpp
+    src/generic/spildlt0/rocsparse_spildlt0_set_input.cpp
+    src/generic/spildlt0/rocsparse_spildlt0_get_output.cpp
+    src/generic/spildlt0/rocsparse_spildlt0.cpp
+    src/generic/spildlt0/rocsparse_spildlt0_buffer_size.cpp
+  )
+endif()

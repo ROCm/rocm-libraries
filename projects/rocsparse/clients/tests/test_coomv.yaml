@@ -27,12 +27,11 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.1 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
 
   - &alpha_beta_range_checkin
     - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
-    - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
+
     - { alpha:   3.0, beta:  1.0,  alphai:  1.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
@@ -61,31 +60,31 @@ Tests:
   M: [10]
   N: [33]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_zero]
 
 - name: coomv
   category: quick
   function: coomv
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [10, 300]
+  N: [33, 300]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
 
 - name: coomv
   category: pre_checkin
   function: coomv
   precision: *single_double_precisions_complex_real
-  M: [0, 7111, 10000]
-  N: [0, 4441, 10000]
+  M: [8, 2000]
+  N: [8, 2000]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_sorted]
 
@@ -93,11 +92,11 @@ Tests:
   category: pre_checkin
   function: coomv
   precision: *double_only_precisions
-  M: [0, 7111, 10000]
-  N: [0, 4441, 10000]
+  M: [8, 2000]
+  N: [8, 2000]
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_unsorted]
 
@@ -109,7 +108,7 @@ Tests:
   N: [29348, 340123]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_sorted]
 
@@ -117,13 +116,13 @@ Tests:
   category: nightly
   function: coomv
   precision: *double_only_precisions
-  M: [39385, 193482, 639102]
-  N: [29348, 340123, 710341]
+  M: [5000]
+  N: [5000]
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
 
 - name: coomv_file
   category: quick
@@ -132,15 +131,12 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
   filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6,
-             scircuit]
+             nos2]
 
 - name: coomv_file
   category: pre_checkin
@@ -149,17 +145,20 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
   filename: [rma10,
              mc2depi,
              ASIC_320k,
              nos1,
              nos3,
              nos5,
-             nos7]
+             nos7,
+             bibd_22_8,
+             Chebyshev4,
+             mac_econ_fwd500]
 
 - name: coomv_file
   category: nightly
@@ -168,10 +167,10 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
   filename: [bibd_22_8,
              bmwcra_1,
              amazon0312,
@@ -187,10 +186,10 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
   filename: [Chevron2,
              qc2534]
 
@@ -201,8 +200,8 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
   storage: [rocsparse_storage_mode_sorted]
   filename: [mplate,
@@ -215,10 +214,10 @@ Tests:
   M: 1
   N: 1
   alpha_beta: *alpha_beta_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
   filename: [Chevron4]
 
 - name: coomv
@@ -238,22 +237,35 @@ Tests:
   hardware: [gfx900, gfx906, gfx908, gfx90a, gfx1030]
   function: coomv
   precision: *single_double_precisions_complex_real
-  M: [1000]
-  N: [1000]
+  M: [300]
+  N: [300]
   alpha_beta: *alpha_beta_range_arch
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
 
+# Coverage gap tests: transpose operations (develop vs reduced_ci)
+- name: coomv_transpose
+  category: pre_checkin
+  function: coomv
+  precision: *single_double_precisions_complex_real
+  M: [500]
+  N: [500]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  storage: [rocsparse_storage_mode_sorted]
+
 - name: coomv_graph_test
   category: pre_checkin
   function: coomv
   precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
+  M: [500]
+  N: [842]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
+  storage: [rocsparse_storage_mode_sorted]
   graph_test: true

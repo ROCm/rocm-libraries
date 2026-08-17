@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,7 @@ if ( BUILD_WITH_LIB STREQUAL "CUDA" )
     target_compile_options( hipfft-bench PRIVATE -cuda -Xptxas=-w)
     target_link_options( hipfft-bench PRIVATE -cuda)
   else()
-    target_compile_options( hipfft-bench PRIVATE -arch sm_53 -gencode=arch=compute_53,code=sm_53 -Xptxas=-w)
+    target_compile_options( hipfft-bench PRIVATE -arch sm_100 -gencode=arch=compute_100,code=sm_100 -Xptxas=-w)
   endif()
   target_link_libraries( hipfft-bench PRIVATE ${CUDA_LIBRARIES} )
 else()
@@ -70,6 +70,16 @@ else()
   endif()
   if( USE_HIPRAND )
     target_link_libraries( hipfft-bench PRIVATE hip::hiprand )
+  endif()
+
+  # On Linux, always include amdgcnspirv target so the clients work
+  # on an architecture that the runtime supports but was not
+  # specified a build time
+  # TODO: amdgcnspirv is not compatible with ASAN.
+  get_target_property(bench_opts hipfft-bench COMPILE_OPTIONS)
+  if( NOT WIN32 AND NOT bench_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address"  )
+    target_compile_options( hipfft-bench PRIVATE --offload-arch=amdgcnspirv )
+    target_link_options( hipfft-bench PRIVATE --offload-arch=amdgcnspirv )
   endif()
 endif()
 

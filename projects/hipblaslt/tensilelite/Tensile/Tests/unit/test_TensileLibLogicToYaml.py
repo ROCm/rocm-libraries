@@ -27,7 +27,6 @@ from unittest.mock import mock_open, patch
 import sys
 import os
 import tempfile
-import subprocess
 import filecmp
 
 from Tensile import TensileLibLogicToYaml
@@ -307,14 +306,14 @@ VALID_LIBLOGIC_FILE_CONTENT = """
     ThreadTileA: 12
     ThreadTileB: 3
     TransposeLDS: 2
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 1
     UnrollMajorLDSB: 1
     UnrollMajorLDSMetadata: true
     Use64bShadowLimit: 1
-    UseCustomMainLoopSchedule: false
+    UseCustomMainLoopSchedule: 0
     UseDirect32XEmulation: false
     UseDot2F32XEmulation: false
     UseDotInstruction: false
@@ -379,9 +378,9 @@ VALID_CONFIG_FILE_CONTENT = """GlobalParameters:
   DataInitTypeB: 13
   DataInitTypeC: 12
   DataInitTypeD: 12
-  PreciseKernelTime: 0
+  PreciseKernelTime: false
   Device: 0
-  SkipSlowSolutionRatio: 0
+  SkipSlowSolutionRatio: 0.0
   KeepBuildTmp: false
 BenchmarkProblems:
 - - OperationType: GEMM
@@ -433,10 +432,12 @@ BenchmarkProblems:
     - StreamKXCCMapping: [8]
     - ThreadTile: [[1, 1]]
     - TransposeLDS: [2]
-    - UseCustomMainLoopSchedule: [false]
+    - TransposeLDSMetadata: [1]
+    - UseCustomMainLoopSchedule: [0]
     - UseSgprForGRO: [1]
     - VectorWidthA: [1]
     - VectorWidthB: [1]
+    - WavefrontSize: [64]
     - WorkGroupMapping: [1]
     - WorkGroupMappingXCC: [2]
     - Groups:
@@ -464,21 +465,8 @@ def mockLibLogicFile():
 
 
 def findAvailableArchs():
-    availableArchs = []
-    rocmpath = "/opt/rocm"
-    if "ROCM_PATH" in os.environ:
-        rocmpath = os.environ.get("ROCM_PATH")
-    if "TENSILE_ROCM_PATH" in os.environ:
-        rocmpath = os.environ.get("TENSILE_ROCM_PATH")
-    rocmAgentEnum = os.path.join(rocmpath, "bin/rocm_agent_enumerator")
-    output = subprocess.check_output([rocmAgentEnum, "-t", "GPU"])
-    lines = output.decode().splitlines()
-    for line in lines:
-        line = line.strip()
-        if (not line in availableArchs) and (not "gfx000" in line):
-            availableArchs.append(line)
-    return availableArchs
-
+    from Tensile.Tests.gpu_detection import get_available_archs
+    return get_available_archs()
 
 @pytest.mark.skipif(
     "gfx950" not in findAvailableArchs(), reason="Requires gfx950 architecture"

@@ -33,6 +33,8 @@
 
 #include <Tensile/Comparison.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -105,3 +107,4 @@ namespace TensileLite
  * @}
  */
 } // namespace TensileLite
+

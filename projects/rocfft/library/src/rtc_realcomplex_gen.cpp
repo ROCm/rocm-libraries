@@ -48,7 +48,7 @@ std::string realcomplex_rtc_kernel_name(const RealComplexSpecs& specs)
         throw std::runtime_error("invalid realcomplex rtc scheme");
     }
 
-    kernel_name += "_dim" + std::to_string(specs.dim);
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
@@ -141,7 +141,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     func.body += CommentLines{"per-dimension indexes"};
     func.body += Declaration{idx_0, global_idx % lengths0_divide};
     func.body += Assign{global_idx, global_idx / lengths0_divide};
-    if(specs.dim > 1)
+    if(specs.lensz > 1)
     {
         func.body += Declaration{idx_1, global_idx % lengths1};
         func.body += Assign{global_idx, global_idx / lengths1};
@@ -150,7 +150,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     {
         func.body += Declaration{idx_1, 0};
     }
-    if(specs.dim > 2)
+    if(specs.lensz > 2)
     {
         func.body += Declaration{idx_2, global_idx % lengths2};
         func.body += Assign{global_idx, global_idx / lengths2};
@@ -169,7 +169,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable input_offset{"input_offset", "auto"};
         func.body += Declaration{input_offset,
                                  idx_0 * stride_in0 + idx_1 * stride_in1 + idx_2 * stride_in2
-                                     + idx_batch * ("stride_in" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_in" + std::to_string(specs.lensz))};
 
         Variable outputs_offset{"outputs_offset", "auto"};
         Variable outputc_offset{"outputc_offset", "auto"};
@@ -187,15 +187,22 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable ic1{"ic1", "auto"};
         Variable ic2{"ic2", "auto"};
         func.body += Declaration{ic0, Ternary{is0 == 0, 0, lengths0 - is0}};
-        func.body += Declaration{ic1, Ternary{is1 == 0, 0, lengths1 - is1}};
-        func.body += Declaration{ic2, Ternary{is2 == 0, 0, lengths2 - is2}};
+        // length axes beyond specs.dim are actually batch axes
+        if(specs.dim > 1)
+            func.body += Declaration{ic1, Ternary{is1 == 0, 0, lengths1 - is1}};
+        else
+            func.body += Declaration{ic1, is1};
+        if(specs.dim > 2)
+            func.body += Declaration{ic2, Ternary{is2 == 0, 0, lengths2 - is2}};
+        else
+            func.body += Declaration{ic2, is2};
 
         func.body += Declaration{outputs_offset,
                                  is0 * stride_out0 + is1 * stride_out1 + is2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
         func.body += Declaration{outputc_offset,
                                  ic0 * stride_out0 + ic1 * stride_out1 + ic2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
 
         func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
         func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
@@ -232,10 +239,10 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable outputIdx{"outputIdx", "auto"};
         func.body += Declaration{inputIdx,
                                  idx_0 * stride_in0 + idx_1 * stride_in1 + idx_2 * stride_in2
-                                     + idx_batch * ("stride_in" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_in" + std::to_string(specs.lensz))};
         func.body += Declaration{outputIdx,
                                  idx_0 * stride_out0 + idx_1 * stride_out1 + idx_2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
 
         if(specs.scheme == CS_KERNEL_COPY_R_TO_CMPLX)
         {
@@ -334,7 +341,7 @@ std::string realcomplex_even_rtc_kernel_name(const RealComplexEvenSpecs& specs)
         kernel_name += "_Ndiv4";
     }
 
-    kernel_name += "_dim" + std::to_string(specs.dim);
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
@@ -388,7 +395,7 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     func.qualifier     = "extern \"C\" __global__";
     func.arguments.append(half_N);
     // add arguments for each length+stride
-    for(unsigned int i = 1; i < specs.dim; ++i)
+    for(unsigned int i = 1; i < specs.lensz; ++i)
     {
         std::string i_str = std::to_string(i);
         stride_in.emplace_back("stride_in" + i_str, "const unsigned int");
@@ -433,7 +440,7 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     Variable output_offset{"output_offset", "unsigned int"};
     func.body += Declaration{input_offset, "0"};
     func.body += Declaration{output_offset, "0"};
-    for(unsigned int i = 1; i < specs.dim; ++i)
+    for(unsigned int i = 1; i < specs.lensz; ++i)
     {
         func.body += Assign{index_along_d, remaining % length[i - 1]};
         func.body += Assign{remaining, remaining / length[i - 1]};
@@ -600,6 +607,7 @@ std::string realcomplex_even_transpose_rtc_kernel_name(const RealComplexEvenTran
         throw std::runtime_error("invalid realcomplex even transpose rtc scheme");
     }
 
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
     kernel_name += "_tile" + std::to_string(specs.TileX()) + "x" + std::to_string(specs.TileY());
 
     kernel_name += rtc_precision_name(specs.precision);
@@ -688,9 +696,6 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     func.arguments.append(gridY);
     func.arguments.append(gridZ);
 
-    func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
-                              "following variables to recover block indices in a 3-D fashion:"};
-
     Variable old_blockIdx_x{"old_blockIdx_x", "unsigned int"};
     Variable old_blockIdx_y{"old_blockIdx_y", "unsigned int"};
     Variable old_blockIdx_z{"old_blockIdx_z", "unsigned int"};
@@ -699,6 +704,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     // if a 1-D grid was provided because creating a natural 3-D grid exceeded allowed limits, then remap it to a 3-D grid.
     if(!specs.grid3D)
     {
+        func.body += CommentLines{"since gridDim is passed as {gridX, 1, 1}, use the",
+                                  "following variables to recover block indices in a 3-D fashion:"};
         func.body += Declaration{old_blockIdx_x, Literal{"blockIdx.x"} / (gridY * gridZ)};
         func.body += Declaration{remaining, Literal{"blockIdx.x"} % (gridY * gridZ)};
         func.body += Declaration{old_blockIdx_y, (remaining / gridZ)};
@@ -710,15 +717,32 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Variable input_batch_start{"input_batch_start", "size_t"};
     Variable output_batch_start{"output_batch_start", "size_t"};
 
-    if(specs.grid3D)
+    const auto kernel_bidx_z = specs.grid3D ? "blockIdx.z" : "old_blockIdx_z";
+    if(specs.lensz > specs.dim)
     {
-        func.body += Declaration{input_batch_start, idist * Literal{"blockIdx.z"}};
-        func.body += Declaration{output_batch_start, odist * Literal{"blockIdx.z"}};
+        Variable dim_batch_idx{"dim_batch_idx", "size_t"};
+        func.body += Declaration{dim_batch_idx, kernel_bidx_z};
+        func.body += Declaration{input_batch_start, 0};
+        func.body += Declaration{output_batch_start, 0};
+        Variable len_dim{"len_dim", "size_t"};
+        func.body += For{len_dim,
+                         Literal{specs.dim},
+                         len_dim < Literal{specs.lensz},
+                         1,
+                         {If{lengths[len_dim] > 1,
+                             {AddAssign(input_batch_start,
+                                        inStride[len_dim] * (dim_batch_idx % lengths[len_dim])),
+                              AddAssign(output_batch_start,
+                                        outStride[len_dim] * (dim_batch_idx % lengths[len_dim])),
+                              DivideAssign(dim_batch_idx, lengths[len_dim])}}}};
+
+        func.body += AddAssign(input_batch_start, idist * dim_batch_idx);
+        func.body += AddAssign(output_batch_start, odist * dim_batch_idx);
     }
     else
     {
-        func.body += Declaration{input_batch_start, idist * Literal{"old_blockIdx_z"}};
-        func.body += Declaration{output_batch_start, odist * Literal{"old_blockIdx_z"}};
+        func.body += Declaration{input_batch_start, idist * Literal{kernel_bidx_z}};
+        func.body += Declaration{output_batch_start, odist * Literal{kernel_bidx_z}};
     }
 
     Variable leftTile{"leftTile", "__shared__ scalar_type", false, false, tileX};
@@ -759,8 +783,8 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     Expression row_end_init{""};
     if(isR2C)
     {
-        func.body += CommentLines{
-            "take fastest dimension and partition it into lengths that will go into each tile"};
+        func.body += CommentLines{"take fastest dimension and partition it into lengths "
+                                  "that will go into each tile"};
         len_row_init   = lengths[0];
         tile_size_init = Ternary{(len_row - 1) / 2 < tileX, (len_row - 1) / 2, tileX};
         row_limit_init = Ternary{dim == 2, lengths[1], lengths[1] * lengths[2]};
@@ -780,9 +804,9 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
     }
     else
     {
-        func.body += CommentLines{
-            "take middle dimension and partition it into lengths that will go into each tile",
-            "note that last row effectively gets thrown away"};
+        func.body += CommentLines{"take middle dimension and partition it into lengths "
+                                  "that will go into each tile",
+                                  "note that last row effectively gets thrown away"};
         len_row_init   = Ternary{dim == 2, lengths[1] - 1, lengths[2] - 1};
         tile_size_init = Ternary{(len_row - 1) / 2 < tileY, (len_row - 1) / 2, tileY};
         row_limit_init = Ternary{dim == 2, lengths[0], lengths[0] * lengths[1]};

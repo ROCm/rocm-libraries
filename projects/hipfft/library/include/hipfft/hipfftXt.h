@@ -279,7 +279,7 @@ typedef enum hipfftXtSubFormat_t
 /*! @brief Allocate memory on multiple devices.
  *
  *  Allocate memory on multiple devices for the specified plan.
- *  Returns a \ref hipLibXtDesc_t descriptor which includes pointers
+ *  Returns a \ref hipLibXtDesc descriptor which includes pointers
  *  to the allocated memory, devices that memory resides on, and
  *  sizes allocated.
  *
@@ -298,13 +298,13 @@ HIPFFT_EXPORT hipfftResult hipfftXtMalloc(hipfftHandle      plan,
                                           hipLibXtDesc**    desc,
                                           hipfftXtSubFormat format);
 
-/*! @brief Copy data to/from \ref hipLibXtDesc_t descriptors.
+/*! @brief Copy data to/from \ref hipLibXtDesc descriptors.
  *
- *  Copy data according to the hipfftXtCopyType_t
+ *  Copy data according to the hipfftXtCopyType
  *
- *  - ::HIPFFT_COPY_HOST_TO_DEVICE: dest points to a \ref hipLibXtDesc_t structure that describes multi-device memory layout.  src points to a host memory buffer.
- *  - ::HIPFFT_COPY_DEVICE_TO_HOST: src points to a \ref hipLibXtDesc_t structure that describes multi-device memory layout.  dest points to a host memory buffer.
- *  - ::HIPFFT_COPY_DEVICE_TO_DEVICE: Both dest and src point to a \ref hipLibXtDesc_t structure that describes multi-device memory layout.  The two structures must describe memory with the same number of devices and memory sizes.
+ *  - ::HIPFFT_COPY_HOST_TO_DEVICE: dest points to a \ref hipLibXtDesc structure that describes multi-device memory layout.  src points to a host memory buffer.
+ *  - ::HIPFFT_COPY_DEVICE_TO_HOST: src points to a \ref hipLibXtDesc structure that describes multi-device memory layout.  dest points to a host memory buffer.
+ *  - ::HIPFFT_COPY_DEVICE_TO_DEVICE: Both dest and src point to a \ref hipLibXtDesc structure that describes multi-device memory layout.  The two structures must describe memory with the same number of devices and memory sizes.
  * 
  * @param[in] plan Plan which has the descriptor.
  * @param[out] dest Buffer that will be populated.
@@ -326,10 +326,10 @@ HIPFFT_EXPORT hipfftResult hipfftXtMemcpy(hipfftHandle     plan,
  */
 HIPFFT_EXPORT hipfftResult hipfftXtFree(hipLibXtDesc* desc);
 
-/** @defgroup hipfftXtExecDescriptor Execute FFTs using \ref hipLibXtDesc_t descriptors.
+/** @defgroup hipfftXtExecDescriptor Execute FFTs using hipLibXtDesc descriptors.
  *
- *  Execute FFTs using \ref hipLibXtDesc_t descriptors.  Inputs and
- *  outputs are pointers to \ref hipLibXtDesc_t descriptors.
+ *  Execute FFTs using hipLibXtDesc descriptors.  Inputs and
+ *  outputs are pointers to hipLibXtDesc descriptors.
  *  In-place transforms are performed by passing the same pointer for
  *  input and output.
  * 

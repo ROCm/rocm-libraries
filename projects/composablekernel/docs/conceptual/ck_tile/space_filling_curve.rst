@@ -190,44 +190,30 @@ Snake Pattern for Cache Optimization
 
 The snake pattern reverses traversal direction on alternate rows, minimizing the distance between consecutive accesses:
    
-.. 
-   Original mermaid diagram (edit here, then run update_diagrams.py)
-   
-      .. mermaid::
-      
-         graph LR
-             subgraph "Linear Pattern"
-                 L1["Row 0: →"]
-                 L2["Row 1: →"]
-                 L3["Jump back"]
-                 L4["Row 2: →"]
-             end
-             
-             subgraph "Snake Pattern"
-                 S1["Row 0: →"]
-                 S2["Row 1: ←"]
-                 S3["Continue"]
-                 S4["Row 2: →"]
-             end
-             
-             L1 --> L3
-             L3 --> L2
-             L2 --> L3
-             L3 --> L4
-             
-             S1 --> S2
-             S2 --> S4
-             
-             style L3 fill:#fee2e2,stroke:#ef4444,stroke-width:2px
-             style S3 fill:#d1fae5,stroke:#10b981,stroke-width:2px
-      
-      
-   
-   
+.. mermaid::
 
-.. image:: diagrams/space_filling_curve.svg
-   :alt: Diagram
-   :align: center
+   graph LR
+       subgraph "Linear Pattern"
+           L1["Row 0: →"]
+           L2["Row 1: →"]
+           L3["Jump back"]
+           L4["Row 2: →"]
+       end
+
+       subgraph "Snake Pattern"
+           S1["Row 0: →"]
+           S2["Row 1: ←"]
+           S3["Continue"]
+           S4["Row 2: →"]
+       end
+
+       L1 --> L3
+       L3 --> L2
+       L2 --> L3
+       L3 --> L4
+
+       S1 --> S2
+       S2 --> S4
 
 .. code-block:: cpp
 
@@ -254,7 +240,6 @@ For :ref:`matrix multiplication <ck_tile_gemm_optimization>`, optimal access pat
 
    // GEMM tile: 16x32 with vector-8 loads
    // Column-major for coalesced access in GEMM
-   // See :ref:`ck_tile_gemm_optimization` for complete example
    using GemmTileCurve = space_filling_curve<
        2,
        sequence<16, 32>,    // Tile size
@@ -336,7 +321,7 @@ Optimizing for Hardware
 
 .. code-block:: cpp
 
-   // Optimize for GPU memory coalescing (see :ref:`ck_tile_gpu_basics`)
+   // Optimize for GPU memory coalescing
    template <typename DataType, index_t WarpSize = 32>
    struct coalesced_access_pattern
    {
@@ -411,7 +396,6 @@ LoadStoreTraits Integration
    struct load_store_traits
    {
        // Create optimized space-filling curve
-       // See :ref:`ck_tile_tile_distribution` for Distribution details
        using sfc_type = space_filling_curve<
            Distribution::ndim_y,
            typename Distribution::y_lengths,
@@ -461,7 +445,6 @@ Best Practices
    .. code-block:: cpp
 
       // Match vector size to cache line for optimal bandwidth
-      // See :ref:`ck_tile_lds_bank_conflicts` for cache optimization
       constexpr index_t optimal_vector = min(
           tensor_length_fast_dim,
           cache_line_size / sizeof(DataType)

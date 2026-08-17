@@ -43,6 +43,13 @@ endif()
 add_library(hiprand ${hipRAND_SRCS})
 add_library(hip::hiprand ALIAS hiprand)
 
+if(WIN32)
+    configure_file("${PROJECT_SOURCE_DIR}/library/include/hiprand/hiprand_in.rc.in"
+                   "${PROJECT_BINARY_DIR}/library/include/hiprand/hiprand_in.rc"
+                   @ONLY)
+    target_sources(hiprand PRIVATE "${PROJECT_BINARY_DIR}/library/include/hiprand/hiprand_in.rc")
+endif()
+
 # Add interface include directory so that other CMake applications can maintain previous behaviour.
 # This will be removed with upcoming packaging changes.
 target_include_directories(hiprand INTERFACE $<INSTALL_INTERFACE:$<INSTALL_PREFIX>/include/hiprand>)

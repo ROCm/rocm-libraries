@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_gesvdx_notransv.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -64,6 +65,7 @@ rocblas_status rocsolver_gesvdx_notransv_strided_batched_impl(rocblas_handle han
                                                               const rocblas_stride strideF,
                                                               rocblas_int* info,
                                                               const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("gesvdx_notransv_strided_batched", "--left_svect", left_svect,
                         "--right_svect", right_svect, "--srange", srange, "-m", m, "-n", n, "--lda",
@@ -188,6 +190,10 @@ rocblas_status rocsolver_gesvdx_notransv_strided_batched_impl(rocblas_handle han
         WS_svdx5_brd4, (rocblas_int*)WS_svdx6, (rocblas_int*)WS_svdx7, (rocblas_int*)WS_svdx8,
         (rocblas_int*)WS_svdx9, WS_svdx10_mlqr1_mbr1, WS_svdx11_mlqr2_mbr2, WS_svdx12_mlqr3_mbr3,
         (TT*)tmpDE, (T*)tauqp, (TT*)tmpZ, (T*)tau, (T*)tmpT, (T**)workArr, (T**)size_workArr2);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

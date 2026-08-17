@@ -10,6 +10,10 @@
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck_tile {
 struct FlatmmProblem
 {
@@ -282,7 +286,7 @@ struct FlatmmKernel
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
-        return concat('_', "gemm", gemm_prec_str<ADataType, BDataType>, FlatmmPipeline::GetName());
+        return concat('_', "gemm", gemm_prec_str<ADataType, BDataType>(), FlatmmPipeline::GetName());
         // clang-format on
     }
 
@@ -301,7 +305,7 @@ struct FlatmmKernel
             hipDeviceProp_t prop;
             int deviceId = 0; // default device
 
-            constexpr int block_size = FlatmmKernel::BlockSize().x;
+            const int block_size     = FlatmmKernel::BlockSize().x;
             int dync_smem_size       = 0;
             int maxActiveBlocksPerCU = 0;
 
@@ -330,7 +334,17 @@ struct FlatmmKernel
         }
     }
 
-    CK_TILE_HOST static constexpr auto BlockSize() { return dim3(kBlockSize); }
+    CK_TILE_HOST static auto BlockSize()
+    {
+        if(ck_tile::is_wave32())
+        {
+            return dim3(kBlockSize / 2);
+        }
+        else
+        {
+            return dim3(kBlockSize);
+        }
+    }
 
     template <class ScaleM, class ScaleN>
     CK_TILE_HOST static constexpr FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>
@@ -352,13 +366,9 @@ struct FlatmmKernel
                 hostArgs.scale_n};
     }
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPingSize()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return max(FlatmmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
-    }
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPongSize()
-    {
-        return FlatmmPipeline::GetSmemSize();
     }
 
     struct SplitKBatchOffset
@@ -780,29 +790,31 @@ struct FlatmmKernel
                                                 const SplitKBatchOffset& splitk_batch_offset,
                                                 const index_t block_idx_m)
     {
-        constexpr int ScaleGranularityM  = decltype(kargs.scale_m_ptr)::GranularityMN;
-        constexpr int ScaleGranularityKA = decltype(kargs.scale_m_ptr)::GranularityK;
+        constexpr int GM = decltype(kargs.scale_m_ptr)::GranularityMN;
+        constexpr int GK = decltype(kargs.scale_m_ptr)::GranularityK;
 
-        auto scale_stride_m = ScaleGranularityM == 0 ? 0  // per-tensor scale
-                                                     : 1; // per-token scale
+        static_assert(GM != -1,
+                      "MakeScaleMWindow should only be instantiated when scale is enabled");
 
-        // Step 1: Create tensor view
+        // per-tensor (GM==0) -> Mdim = 1, stride 0
+        const index_t m_dim    = (GM == 0) ? 1 : (kargs.M / GM);
+        const index_t m_stride = (GM == 0) ? 0 : 1;
+
+        const index_t k_dim    = (GK == 0) ? 1 : (splitk_batch_offset.splitted_k / GK);
+        const index_t k_stride = 0; // your original code keeps K stride 0
+
         const auto scale_m_view = make_naive_tensor_view<address_space_enum::global>(
             kargs.scale_m_ptr.ptr,
-            make_tuple(kargs.M / ScaleGranularityM,
-                       ScaleGranularityKA == 0
-                           ? 1
-                           : (splitk_batch_offset.splitted_k / ScaleGranularityKA)),
-            make_tuple(scale_stride_m, 0),
-            number < ScaleGranularityM == 1 ? FlatmmPipeline::GetVectorSizeA() : 1 > {},
+            make_tuple(m_dim, k_dim),
+            make_tuple(m_stride, k_stride),
+            number < (GM == 1) ? FlatmmPipeline::GetVectorSizeA() : 1 > {},
             number<1>{});
 
-        // Step 2: Create tile window
+        // Window extents: if GM==0, we still just broadcast from [0,*]
         return make_tile_window(scale_m_view,
                                 make_tuple(number<TilePartitioner::MPerBlock>{},
-                                           number < ScaleGranularityKA == 0
-                                               ? TilePartitioner::NPerBlock
-                                               : TilePartitioner::KPerBlock > {}),
+                                           number < (GK == 0) ? TilePartitioner::NPerBlock
+                                                              : TilePartitioner::KPerBlock > {}),
                                 {block_idx_m, 0});
     }
 
@@ -811,27 +823,29 @@ struct FlatmmKernel
                                                 const SplitKBatchOffset& splitk_batch_offset,
                                                 const index_t block_idx_n)
     {
-        constexpr int ScaleGranularityN  = decltype(kargs.scale_n_ptr)::GranularityMN;
-        constexpr int ScaleGranularityKB = decltype(kargs.scale_n_ptr)::GranularityK;
+        constexpr int GN = decltype(kargs.scale_n_ptr)::GranularityMN;
+        constexpr int GK = decltype(kargs.scale_n_ptr)::GranularityK;
 
-        auto scale_stride_n = ScaleGranularityN == 0 ? 0  // per-tensor scale
-                                                     : 1; // per-channel scale
+        static_assert(GN != -1,
+                      "MakeScaleNWindow should only be instantiated when scale is enabled");
 
-        // Step 1: Create tensor view
+        // per-tensor (GN==0) -> Ndim = 1, stride 0
+        const index_t n_dim    = (GN == 0) ? 1 : (kargs.N / GN);
+        const index_t n_stride = (GN == 0) ? 0 : 1;
+
+        const index_t k_dim    = (GK == 0) ? 1 : (splitk_batch_offset.splitted_k / GK);
+        const index_t k_stride = 0;
+
         const auto scale_n_view = make_naive_tensor_view<address_space_enum::global>(
             kargs.scale_n_ptr.ptr,
-            make_tuple(
-                ScaleGranularityKB == 0 ? 1 : (splitk_batch_offset.splitted_k / ScaleGranularityKB),
-                kargs.N / ScaleGranularityN),
-            make_tuple(0, scale_stride_n),
-            number < ScaleGranularityN == 1 ? FlatmmPipeline::GetVectorSizeB() : 1 > {},
+            make_tuple(k_dim, n_dim),
+            make_tuple(k_stride, n_stride),
+            number < (GN == 1) ? FlatmmPipeline::GetVectorSizeB() : 1 > {},
             number<1>{});
 
-        // Step 2: Create tile window
         return make_tile_window(scale_n_view,
-                                make_tuple(number < ScaleGranularityKB == 0
-                                               ? TilePartitioner::MPerBlock
-                                               : TilePartitioner::KPerBlock > {},
+                                make_tuple(number < (GK == 0) ? TilePartitioner::MPerBlock
+                                                              : TilePartitioner::KPerBlock > {},
                                            number<TilePartitioner::NPerBlock>{}),
                                 {0, block_idx_n});
     }
@@ -842,8 +856,7 @@ struct FlatmmKernel
               const BDataType* b_flat_ptr,
               const std::array<const void*, NumDTensor>& ds_ptr,
               EDataType* e_ptr,
-              void* smem_ptr_ping,
-              void* smem_ptr_pong,
+              void* smem_ptr,
               const FlatmmKernelArgs<ScaleM, ScaleN, DsDataType::size()>& kargs,
               const SplitKBatchOffset& splitk_batch_offset,
               const index_t block_idx_m,
@@ -854,18 +867,18 @@ struct FlatmmKernel
             MakeABlockWindow(a_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_m);
         const auto& b_flat_block_window = MakeBFlatBlockWindow(b_flat_ptr, kargs, block_idx_n);
         const auto& ds_block_window = MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
-        const auto& scale_m_window  = MakeScaleMWindow(kargs, splitk_batch_offset, block_idx_m);
-        const auto& scale_n_window  = MakeScaleNWindow(kargs, splitk_batch_offset, block_idx_n);
 
         const index_t num_loop = TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k);
 
         // Run GEMM cooperatively by whole workgroup.
         const auto& c_block_tile = FlatmmPipeline{}.template operator()(
-            a_block_window, b_flat_block_window, num_loop, smem_ptr_ping, smem_ptr_pong);
+            a_block_window, b_flat_block_window, num_loop, smem_ptr);
 
         // Run Epilogue Pipeline with k_batch dispatching
         if constexpr(ScaleM::GranularityMN != -1 || ScaleN::GranularityMN != -1)
         {
+            const auto& scale_m_window = MakeScaleMWindow(kargs, splitk_batch_offset, block_idx_m);
+            const auto& scale_n_window = MakeScaleNWindow(kargs, splitk_batch_offset, block_idx_n);
             if(kargs.k_batch == 1)
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::set>(
@@ -876,10 +889,11 @@ struct FlatmmKernel
                                          decltype(ds_block_window)>(e_block_window,
                                                                     c_block_tile,
                                                                     ds_block_window,
-                                                                    smem_ptr_ping,
+                                                                    smem_ptr,
                                                                     scale_m_window,
                                                                     scale_n_window);
             }
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
             else
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::atomic_add>(
@@ -890,10 +904,11 @@ struct FlatmmKernel
                                          decltype(ds_block_window)>(e_block_window,
                                                                     c_block_tile,
                                                                     ds_block_window,
-                                                                    smem_ptr_ping,
+                                                                    smem_ptr,
                                                                     scale_m_window,
                                                                     scale_n_window);
             }
+#endif
         }
         else if(UseDefaultScheduler || (get_warp_id() == 0))
         {
@@ -905,8 +920,9 @@ struct FlatmmKernel
                     .template operator()<decltype(e_block_window),
                                          decltype(c_block_tile),
                                          decltype(ds_block_window)>(
-                        e_block_window, c_block_tile, ds_block_window, smem_ptr_ping);
+                        e_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
             else
             {
                 auto e_block_window = MakeEBlockWindow<memory_operation_enum::atomic_add>(
@@ -915,8 +931,9 @@ struct FlatmmKernel
                     .template operator()<decltype(e_block_window),
                                          decltype(c_block_tile),
                                          decltype(ds_block_window)>(
-                        e_block_window, c_block_tile, ds_block_window, smem_ptr_ping);
+                        e_block_window, c_block_tile, ds_block_window, smem_ptr);
             }
+#endif
         }
     }
 
@@ -942,8 +959,7 @@ struct FlatmmKernel
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
 
             // allocate LDS
-            __shared__ char smem_ptr_ping[GetSmemPingSize()];
-            __shared__ char smem_ptr_pong[GetSmemPongSize()];
+            __shared__ char smem_ptr[GetSmemSize()];
 
             if constexpr(!(EpiloguePipeline::GetVectorSizeC() % 2 != 0 &&
                            is_any_of<EDataType, fp16_t, bf16_t>::value))
@@ -953,8 +969,7 @@ struct FlatmmKernel
                                                           b_flat_ptr,
                                                           kargs.ds_ptr,
                                                           e_ptr,
-                                                          smem_ptr_ping,
-                                                          smem_ptr_pong,
+                                                          smem_ptr,
                                                           kargs,
                                                           splitk_batch_offset,
                                                           i_m,
@@ -966,3 +981,7 @@ struct FlatmmKernel
 };
 
 } // namespace ck_tile
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

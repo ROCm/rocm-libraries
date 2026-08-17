@@ -46,7 +46,7 @@ bool BnBwdTrainingPerActivation::IsApplicable(
     if(problem.GetDirection() != miopen::batchnorm::Direction::Backward &&
        problem.GetMode() != miopenBNPerActivation)
         return false;
-    if(!::miopen::batchnorm::IsOCLBwdTypeValid(problem))
+    if(!::miopen::batchnorm::IsBwdTypeValid(problem))
         return false;
     return true;
 }
@@ -97,7 +97,7 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
 
         auto kernel = KernelInfo{};
 
-        kernel.kernel_file = "MIOpenBatchNormBwdPerActHIP.cpp";
+        kernel.kernel_file = "MIOpenBatchNormBwdPerAct.cpp";
         kernel.kernel_name = "MIOpenBatchNormBwdPerActivation";
 
         if(problem.UseSaved())
@@ -119,8 +119,9 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GRP2", zlocalsize},
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
-            {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
+            {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
+            {"MIO_BN_GFX125X", (StartsWith(handle.GetDeviceName(), "gfx125") ? "1" : "0")},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});

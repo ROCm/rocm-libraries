@@ -270,7 +270,7 @@ struct StockhamKernelCR : public StockhamKernel
                                                   Expression{Parens(in_bound || pred)}),
                                         width,
                                         height,
-                                        ThreadGuardMode::GURAD_BY_FUNC_ARG,
+                                        ThreadGuardMode::GUARD_BY_FUNC_ARG,
                                         true);
 
             non_edge_stmts += add_work(

@@ -86,6 +86,8 @@ struct select_warp_reduce_impl
 /// one \p int value, result is returned using the same variable as for input. Hardware
 /// warp size is 64. Block (tile) size is 64.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_reduce.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -396,6 +398,52 @@ public:
         __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<class T, unsigned int VirtualWaveSize, bool UseAllReduce>
+class warp_reduce<T, VirtualWaveSize, UseAllReduce, ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using warp_reduce_wave32
+        = warp_reduce<T, VirtualWaveSize, UseAllReduce, ::rocprim::arch::wavefront::target::size32>;
+    using warp_reduce_wave64
+        = warp_reduce<T, VirtualWaveSize, UseAllReduce, ::rocprim::arch::wavefront::target::size64>;
+
+    using dispatch = detail::dispatch_wave_size<warp_reduce_wave32, warp_reduce_wave64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto reduce(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.reduce(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto tail_segmented_reduce(Args... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.tail_segmented_reduce(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto head_segmented_reduce(Args... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.tail_segmented_reduce(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+};
+
+#endif
 
 END_ROCPRIM_NAMESPACE
 

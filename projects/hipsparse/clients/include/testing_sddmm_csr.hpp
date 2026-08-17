@@ -187,12 +187,12 @@ void testing_sddmm_csr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_sddmm_csr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
-    T                    h_beta   = make_DataType<T>(argus.beta);
+    T                    h_alpha  = argus.get_alpha<T>();
+    T                    h_beta   = argus.get_beta<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderA   = argus.orderA;
@@ -342,40 +342,25 @@ void testing_sddmm_csr(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hval1.data(), dval1, sizeof(T) * nnz, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hval2.data(), dval2, sizeof(T) * nnz, hipMemcpyDeviceToHost));
 
-        const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
-                                 ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
-                                 : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
-        const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
-                                 ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
-                                 : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
-
-        for(J r = 0; r < C_m; r++)
-        {
-            I start = hcsr_row_ptr[r] - idx_base;
-            I end   = hcsr_row_ptr[r + 1] - idx_base;
-
-            for(I j = start; j < end; j++)
-            {
-                J c = hcsr_col_ind[j] - idx_base;
-
-                const T* Aptr
-                    = (orderA == HIPSPARSE_ORDER_COL)
-                          ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hA[r] : &hA[lda * r])
-                          : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hA[lda * r] : &hA[r]);
-
-                const T* Bptr
-                    = (orderB == HIPSPARSE_ORDER_COL)
-                          ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hB[ldb * c] : &hB[c])
-                          : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hB[c] : &hB[ldb * c]);
-
-                T sum = static_cast<T>(0);
-                for(I s = 0; s < k; ++s)
-                {
-                    sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
-                }
-                hcsr_val[j] = testing_mult(hcsr_val[j], h_beta) + testing_mult(h_alpha, sum);
-            }
-        }
+        // Host SDDMM CSR
+        host_sddmm_csr(C_m,
+                       C_n,
+                       k,
+                       nnz,
+                       h_alpha,
+                       hA.data(),
+                       lda,
+                       orderA,
+                       transA,
+                       hB.data(),
+                       ldb,
+                       orderB,
+                       transB,
+                       h_beta,
+                       hcsr_val.data(),
+                       hcsr_row_ptr.data(),
+                       hcsr_col_ind.data(),
+                       idx_base);
 
         unit_check_near(1, nnz, 1, hval1.data(), hcsr_val.data());
         unit_check_near(1, nnz, 1, hval2.data(), hcsr_val.data());

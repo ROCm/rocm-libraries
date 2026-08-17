@@ -1,11 +1,20 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#ifdef _WIN32
+// Must precede every include: <stdlib.h> only declares rand_s when this is already defined, and
+// any header that reaches it first silently leaves rand_s undeclared.
+#define _CRT_RAND_S
+#endif
+
 #include "PlatformUtils.hpp"
 
 #ifdef _WIN32
 
 #include "HipdnnException.hpp"
+#include <array>
+#include <cstdlib>
+#include <cstring>
 #include <spdlog/fmt/fmt.h>
 #include <winternl.h>
 
@@ -23,10 +32,9 @@ std::filesystem::path getCurrentModuleDirectory()
                           &moduleHandle)
        == TRUE)
     {
-        char* dst = new char[MAX_PATH];
-        DWORD len = GetModuleFileNameA(moduleHandle, dst, MAX_PATH);
-        std::string modulePathStr(dst);
-        delete[] dst;
+        std::array<char, MAX_PATH> dst{};
+        DWORD len = GetModuleFileNameA(moduleHandle, dst.data(), MAX_PATH);
+        std::string modulePathStr(dst.data());
 
         if(len > 0 && len < MAX_PATH)
         {
@@ -47,26 +55,24 @@ std::filesystem::path getCurrentModuleDirectory()
 
 PluginLibHandle openLibrary(const std::filesystem::path& libraryPath)
 {
-    PluginLibHandle handle = LoadLibraryW(libraryPath.wstring().c_str());
-    if(handle == nullptr)
+    try
     {
-        auto errorCode = GetLastError();
-        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
-                              "Failed to load library: " + libraryPath.string()
-                                  + " (Error Code: " + std::to_string(errorCode) + ")");
+        return hipdnn_data_sdk::utilities::openLibrary(libraryPath);
     }
-
-    return handle;
+    catch(const std::runtime_error& ex)
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, ex.what());
+    }
 }
 
 void closeLibrary(PluginLibHandle handle)
 {
-    FreeLibrary(handle);
+    hipdnn_data_sdk::utilities::closeLibrary(handle);
 }
 
 void* getSymbol(PluginLibHandle handle, const char* symbolName)
 {
-    void* symbol = reinterpret_cast<void*>(GetProcAddress(handle, symbolName));
+    void* symbol = hipdnn_data_sdk::utilities::getSymbol(handle, symbolName);
     if(symbol == nullptr)
     {
         auto errorCode = GetLastError();
@@ -82,9 +88,10 @@ std::string getSystemInfo()
 {
     // Get Windows version using RtlGetVersion (more reliable than deprecated GetVersionEx)
     typedef LONG(WINAPI * RtlGetVersionPtr)(PRTL_OSVERSIONINFOW);
-    RTL_OSVERSIONINFOW versionInfo;
+    RTL_OSVERSIONINFOW versionInfo = {};
     versionInfo.dwOSVersionInfoSize = sizeof(versionInfo);
 
+    bool versionInfoValid = false;
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if(ntdll != nullptr)
     {
@@ -92,7 +99,7 @@ std::string getSystemInfo()
             = reinterpret_cast<RtlGetVersionPtr>(GetProcAddress(ntdll, "RtlGetVersion"));
         if(rtlGetVersion != nullptr)
         {
-            rtlGetVersion(&versionInfo);
+            versionInfoValid = (rtlGetVersion(&versionInfo) == 0);
         }
     }
 
@@ -124,13 +131,42 @@ std::string getSystemInfo()
         architecture = "Unknown";
     }
 
-    return fmt::format("System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
-                       "Version: {}, Machine: {}}}",
-                       computerName.data(),
-                       versionInfo.dwMajorVersion,
-                       versionInfo.dwMinorVersion,
-                       versionInfo.dwBuildNumber,
-                       architecture);
+    if(versionInfoValid)
+    {
+        return fmt::format(
+            "System Information: {{System Name: Windows, Node Name: {}, Release: {}.{}, "
+            "Version: {}, Machine: {}}}",
+            computerName.data(),
+            versionInfo.dwMajorVersion,
+            versionInfo.dwMinorVersion,
+            versionInfo.dwBuildNumber,
+            architecture);
+    }
+
+    return fmt::format(
+        "System Information: {{System Name: Windows, Node Name: {}, Release: unknown, "
+        "Version: unknown, Machine: {}}}",
+        computerName.data(),
+        architecture);
+}
+
+std::array<uint8_t, 16> generateUuidV4()
+{
+    std::array<uint8_t, 16> bytes{};
+    for(size_t offset = 0; offset < bytes.size(); offset += sizeof(unsigned int))
+    {
+        unsigned int randomValue;
+        if(rand_s(&randomValue) != 0)
+        {
+            throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                                  "Failed to generate graph UUID using rand_s.");
+        }
+        std::memcpy(bytes.data() + offset, &randomValue, sizeof(randomValue));
+    }
+
+    bytes[6] = static_cast<uint8_t>((bytes[6] & 0x0fU) | 0x40U);
+    bytes[8] = static_cast<uint8_t>((bytes[8] & 0x3fU) | 0x80U);
+    return bytes;
 }
 
 }

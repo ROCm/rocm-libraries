@@ -24,4 +24,12 @@
 #include "test.hpp"
 #include "testing_bsr2csr.hpp"
 
-TEST_ROUTINE(bsr2csr, conversion, arg.M, arg.N, arg.block_dim, arg.baseA, arg.baseB, arg.dirA);
+TEST_ROUTINE(bsr2csr,
+             conversion,
+             arg.M,
+             arg.N,
+             arg.block_dim,
+             arg.baseA,
+             arg.baseB,
+             arg.dirA,
+             arg.graph_test);

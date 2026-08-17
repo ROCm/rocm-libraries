@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,28 +21,26 @@
  *
  * ************************************************************************ */
 
+#include "test.hpp"
 #include "testing_spmm_bell.hpp"
 
-#include <hipsparse.h>
-
-#if(!defined(CUDART_VERSION))
-TEST(spmm_bell_bad_arg, spmm_bell_float)
-{
-    testing_spmm_bell_bad_arg();
-}
-
-TEST(spmm_bell, spmm_bell_i32_float)
-{
-    testing_spmm_bell<int32_t, float>();
-}
-
-TEST(spmm_bell, spmm_bell_i64_double)
-{
-    testing_spmm_bell<int32_t, double>();
-}
-
-TEST(spmm_bell, spmm_bell_i64_hipComplex)
-{
-    testing_spmm_bell<int32_t, hipComplex>();
-}
-#endif
+TEST_ROUTINE_WITH_CONFIG(spmm_bell,
+                         generic,
+                         hipsparse_test_config_it,
+                         arg.M,
+                         arg.N,
+                         arg.K,
+                         arg.block_dim,
+                         arg.alpha,
+                         arg.alphai,
+                         arg.beta,
+                         arg.betai,
+                         arg.transA,
+                         arg.transB,
+                         arg.orderB,
+                         arg.orderC,
+                         arg.baseA,
+                         arg.dirA,
+                         arg.spmm_alg,
+                         arg.graph_test,
+                         arg.call_preprocess);

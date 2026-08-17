@@ -84,10 +84,7 @@ namespace rocsparse
         {
             if(tidy < level && tidy + level < THREADS_PER_ROW)
             {
-                if(tidy < level && tidy + level < THREADS_PER_ROW)
-                {
-                    shared[idx] = shared[idx] + shared[idx + sell_slice_size * level];
-                }
+                shared[idx] = shared[idx] + shared[idx + sell_slice_size * level];
             }
             __syncthreads();
         }

@@ -27,9 +27,9 @@ input for the ``find_exact.py`` script, as described below.
         DataTypeB: s
         DataTypeC: s
         DataTypeD: s
-        TransposeA: 0
-        TransposeB: 0
-        UseBias: False
+        TransposeA: false
+        TransposeB: false
+        UseBias: 0
     TestConfig:
         ColdIter: 20
         Iter: 100  # You can change this to a larger value for a more stable result, but the executing time also increases.
@@ -49,11 +49,11 @@ To run the tuning utility, use the ``find_exact.py`` script, which is found in t
 
 Follow these steps to run the tuning:
 
-#. Run the install script. See :ref:`installation` for more details.
+#. Build hipBLASLt. See :ref:`installation` for more details.
 
    .. code-block:: bash
 
-      ./install.sh
+      inv build
 
 #. Ensure the ``MatchTable.yaml`` file exists in the ``build/release/library`` directory.
 
@@ -75,7 +75,7 @@ Follow these steps to run the tuning:
    .. code-block:: bash
 
       Creating exact logic
-      --Reading matching table: <hipblaslt_root_folder>/build/release/library/MatchTable.yaml
+      --Reading matching table: <hipblaslt_root_folder>/build/release/device-library/MatchTable.yaml
       --Reading bench files
       --Found file <output folder>/0_Bench/result_NN_SSS_88x12x664.txt
       Writing logic yaml files: 100%|    | 1/1 [00:05<00:00,  5.69s/it]

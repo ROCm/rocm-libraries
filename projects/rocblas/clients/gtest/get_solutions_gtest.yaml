@@ -63,14 +63,16 @@ Tests:
     - gemm_ex_get_solutions: *real_precisions
     - gemm_batched_ex_get_solutions: *real_precisions
     - gemm_strided_batched_ex_get_solutions: *real_precisions
-  precision: *real_precisions
-  M: [1, 256, 1024]
-  N: [1, 256, 1024]
-  K: 256
-  lda: [1, 1024]
-  ldb: [1, 1024]
-  ldc: [1, 1024]
-  ldd: [1, 1024]
+  # gemv shapes (M or N of 1) with tight and padded leading dimensions, plus one
+  # square shape and one invalid-size case.
+  arguments:
+    - { M:    1, N:  256, K: 256, lda:  256, ldb:  256, ldc:    1, ldd:    1 }
+    - { M:    1, N:  256, K: 256, lda: 1024, ldb: 1024, ldc:    1, ldd:    1 }
+    - { M:    1, N:  256, K: 256, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M:  256, N:    1, K: 256, lda:  256, ldb:  256, ldc:  256, ldd:  256 }
+    - { M:  256, N:    1, K: 256, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M: 1024, N: 1024, K: 256, lda: 1024, ldb: 1024, ldc: 1024, ldd: 1024 }
+    - { M:    1, N:  256, K: 256, lda:    1, ldb:    1, ldc:    1, ldd:    1 }
   alpha_beta: { alpha: 1, beta: 1 }
   transA_transB: *transA_transB_range
   outofplace: [false, true]
@@ -78,27 +80,28 @@ Tests:
   gpu_arch: ['90a','942','12??']
 
 # special form of get_solutions testing via gemm_ex harness
-- name: gemm_ex_get_solutions_custom
-  category: pre_checkin
-  function:
-  - gemm_ex
-  - gemm_batched_ex
-  - gemm_strided_batched_ex
-  M: 16
-  N: 16
-  K: 1
-  lda: 16
-  ldb: 16
-  ldc: 16
-  ldd: 16
-  batch_count: 2
-  alpha_beta: { alpha:  1, beta:  1 }
-  transA: N
-  transB: T
-  precision : *real_precisions
-  solution_index: -2 # do get solutions and repeat for all
-  algo: 1
-  pointer_mode_device: false
-  gpu_arch: ['90a','942','950','12??']
+# TODO solution guarantees need additional work before re-adding this test
+# - name: gemm_ex_get_solutions_custom
+#   category: pre_checkin
+#   function:
+#   - gemm_ex
+#   - gemm_batched_ex
+#   - gemm_strided_batched_ex
+#   M: 16
+#   N: 16
+#   K: 1
+#   lda: 16
+#   ldb: 16
+#   ldc: 16
+#   ldd: 16
+#   batch_count: 2
+#   alpha_beta: { alpha:  1, beta:  1 }
+#   transA: N
+#   transB: T
+#   precision : *real_precisions
+#   solution_index: *c_gemm_test_all_solutions_returned
+#   algo: 1
+#   pointer_mode_device: false
+#   gpu_arch: ['90a','942','950','12??']
 
 ...

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -222,9 +199,22 @@ namespace rocRoller::KernelGraph
         m_dependenciesBuilt = true;
     }
 
+    std::vector<ControlFlowRWTracer::ReadWriteRecord> ControlFlowRWTracer::opReadWrite(int op) const
+    {
+        std::vector<ControlFlowRWTracer::ReadWriteRecord> rv;
+        std::copy_if(m_trace.begin(),
+                     m_trace.end(),
+                     std::back_inserter(rv),
+                     [op](ControlFlowRWTracer::ReadWriteRecord x) { return op == x.control; });
+        return rv;
+    }
+
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        AssertFatal(control > 0 && coordinate > 0);
+        AssertFatal(control > 0 && coordinate > 0,
+                    ShowValue(control),
+                    ShowValue(coordinate),
+                    ShowValue(rw));
 
         m_trace.push_back({control, coordinate, rw});
 
@@ -280,6 +270,16 @@ namespace rocRoller::KernelGraph
         for(auto const& c : m_graph.mapper.getConnections(control))
         {
             if(m_graph.coordinates.get<Buffer>(c.coordinate).has_value())
+                trackRegister(control, c.coordinate, rw);
+        }
+    }
+
+    void ControlFlowRWTracer::trackTDM(int control, ReadWrite rw)
+    {
+        AssertFatal(control > 0);
+        for(auto const& c : m_graph.mapper.getConnections(control))
+        {
+            if(m_graph.coordinates.get<TDM>(c.coordinate).has_value())
                 trackRegister(control, c.coordinate, rw);
         }
     }
@@ -608,6 +608,17 @@ namespace rocRoller::KernelGraph
         trackConnections(tag, {source, dst}, ReadWrite::READ);
         trackOffsetAndStride(tag, ReadWrite::READ);
         trackBuffer(tag, ReadWrite::READ);
+    }
+
+    void ControlFlowRWTracer::operator()(LoadTiledTDMToLDS const& op, int tag)
+    {
+        auto source = m_graph.mapper.get<MacroTile>(tag);
+        auto dst    = m_graph.mapper.get<LDS>(tag);
+        trackRegister(tag, source, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {source, dst}, ReadWrite::READ);
+        trackOffsetAndStride(tag, ReadWrite::READ);
+        trackTDM(tag, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)

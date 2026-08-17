@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a compressed sparse CSR matrix
+*  \brief Convert a sparse CSR matrix into a compressed sparse CSR matrix.
 *
 *  \details
 *  \p hipsparseXcsr2csr_compress converts a CSR matrix into a compressed CSR matrix by
@@ -40,21 +40,21 @@ extern "C" {
 *  \f]
 *
 *  The user must first call \ref hipsparseSnnz_compress "hipsparseXnnz_compress()" to determine the number
-*  of nonzeros per row as well as the total number of nonzeros that will exist in resulting compressed CSR
+*  of non-zeros per row as well as the total number of non-zeros that will exist in resulting compressed CSR
 *  matrix. The user then uses this information to allocate the column indices array \p csrColIndC and the
 *  values array \p csrValC. The user then calls \p hipsparseXcsr2csr_compress to complete the conversion.
 *
 *  \note
-*  In the case of complex matrices only the magnitude of the real part of \p tol is used.
+*  In the case of complex matrices, only the magnitude of the real part of \p tol is used.
 *
 *  @param[in]
-*  handle        handle to the hipsparse library context queue.
+*  handle        handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m             number of rows of the sparse CSR matrix.
 *  @param[in]
 *  n             number of columns of the sparse CSR matrix.
 *  @param[in]
-*  descrA        matrix descriptor for the CSR matrix
+*  descrA        matrix descriptor for the CSR matrix.
 *  @param[in]
 *  csrValA       array of \p nnzA elements of the sparse CSR matrix.
 *  @param[in]
@@ -78,13 +78,13 @@ extern "C" {
 *  csrColIndC    array of \p nnzC elements containing the row indices of the compressed
 *                sparse CSR matrix.
 *  @param[in]
-*  tol           the non-negative tolerance used for compression. If \p tol is complex then only the magnitude
+*  tol           the non-negative tolerance used for compression. If \p tol is complex, then only the magnitude
 *                of the real part is used. Entries in the input uncompressed CSR array that are below the tolerance
-*                are removed in output compressed CSR matrix.
+*                are removed in the output compressed CSR matrix.
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p n, \p nnzA, \p tol, \p csrValA, \p csrRowPtrA,
-*              \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC or \p nnzPerRow pointer is invalid.
+*              \p csrColIndA, \p csrValC, \p csrRowPtrC, \p csrColIndC, or \p nnzPerRow pointer is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/AddInstruction.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Modulo.hpp>
@@ -215,7 +192,7 @@ namespace rocRoller
                                 toString(Register::Type::Scalar),
                                 toString(DataType::Int64)));
 
-        // Generated using the assembly_to_instructions.py script with the following HIP code:
+        // Adapted from the following HIP code:
         //  extern "C"
         //  __global__ void hello_world(long int * ptr, long int value1, long int value2)
         //  {
@@ -542,9 +519,9 @@ namespace rocRoller
                                 toString(DataType::Int64)));
 
         auto VCC  = m_context->getVCC();
-        auto EXEC = m_context->getExec();
+        auto EXEC = m_context->getEXEC();
 
-        // Generated using the assembly_to_instructions.py script with the following HIP code:
+        // Adapted from the following HIP code:
         //  extern "C"
         //  __global__ void hello_world(long int * ptr, long int *value1, long int *value2)
         //  {

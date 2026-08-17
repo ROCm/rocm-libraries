@@ -36,10 +36,11 @@
 #include <algorithm>
 #include <exception>
 #include <mutex>
+#include <csignal>
 
 #pragma STDC CX_LIMITED_RANGE ON
 
-static std::mutex log_mutex;
+inline std::mutex log_mutex;
 
 inline bool isAligned(const void* pointer, size_t byte_count)
 {
@@ -119,6 +120,8 @@ const char* rocblaslt_matrix_layout_attributes_to_string(rocblaslt_matrix_layout
 const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_attributes type);
 
 const char* hipblasOperation_to_string(hipblasOperation_t op);
+
+const char* rocblaslt_scaling_format_to_string(RocblasltContractionProblem::ScalingFormat type);
 
 const char* rocblaslt_layer_mode2string(rocblaslt_layer_mode layer_mode);
 
@@ -255,7 +258,14 @@ void log_profile(const char* func, Ts&&... xs)
     static argument_profile<decltype(tup)> profile(get_logger_os());
 
     // Add at_quick_exit handler in case the program exits early
-    static int aqe = at_quick_exit([] { profile.~argument_profile(); });
+    static int aqe = at_quick_exit([] { profile.dump(); });
+
+    // Register signal handlers to flush profile on early termination
+    // Works on both Windows and Linux
+    static int sig = [] {
+        signal(SIGTERM, [](int) { profile.dump(); ::_exit(0); });
+        return 0;
+    }();
 
     // Profile the tuple
     profile(std::move(tup));
@@ -322,6 +332,8 @@ inline bool is_grad_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
+    case ROCBLASLT_EPILOGUE_DRELU:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         return true;
     default:
         return false;
@@ -339,10 +351,11 @@ inline bool is_e_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
-    case ROCBLASLT_EPILOGUE_SIGMOID:
     // backward pass:
     case ROCBLASLT_EPILOGUE_DGELU:
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
+    case ROCBLASLT_EPILOGUE_DRELU:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
         return true;
     default:
         return false;
@@ -361,6 +374,7 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_AUX_BIAS_EXT:
@@ -384,6 +398,8 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_GELU_AUX_BIAS:
     case ROCBLASLT_EPILOGUE_DGELU:
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
+    case ROCBLASLT_EPILOGUE_DRELU:
+    case ROCBLASLT_EPILOGUE_DRELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
     case ROCBLASLT_EPILOGUE_CLAMP_EXT:

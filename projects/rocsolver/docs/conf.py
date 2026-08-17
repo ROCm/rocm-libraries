@@ -8,8 +8,8 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    match = re.search(r'set\(VERSION_STRING \"?([0-9.]+)[^0-9.]+', f.read())
+with open("../CMakeLists.txt", encoding="utf-8") as f:
+    match = re.search(r"set\(VERSION_STRING \"?([0-9.]+)[^0-9.]+", f.read())
     if not match:
         raise ValueError("VERSION not found!")
     version_number = match[1]
@@ -23,6 +23,7 @@ version = version_number
 release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
+numfig = False
 
 docs_core = ROCmDocs(left_nav_title)
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
@@ -32,3 +33,5 @@ external_projects_current_project = "rocsolver"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+extensions = globals().get("extensions", []) + ["sphinxcontrib.datatemplates"]

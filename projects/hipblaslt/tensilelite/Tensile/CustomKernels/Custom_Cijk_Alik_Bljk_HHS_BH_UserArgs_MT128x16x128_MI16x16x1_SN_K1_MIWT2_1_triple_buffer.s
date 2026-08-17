@@ -67,7 +67,7 @@ custom.config:
    NonTemporalA: 4
    WorkGroupMapping: 1
    InternalSupportParams: {KernArgsVersion: 0, SupportCustomWGM: True, SupportUserGSU: True, SupportCustomStaggerU: True}
-   NoReject: 1
+   NoReject: True
 amdhsa.version:
   - 1
   - 1

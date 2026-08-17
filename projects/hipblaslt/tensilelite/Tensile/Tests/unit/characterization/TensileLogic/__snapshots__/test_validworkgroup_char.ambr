@@ -1,0 +1,19 @@
+# serializer version: 1
+# name: test_accept_valid_workgroup
+  dict({
+    'returned': True,
+    'valid': True,
+  })
+# ---
+# name: test_reject_invalid_workgroup_value
+  dict({
+    'returned': False,
+    'valid': True,
+  })
+# ---
+# name: test_reject_when_valid_flag_false
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---

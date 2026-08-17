@@ -5,6 +5,10 @@
 
 #include "ck_tile/core.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck_tile {
 
 // Common utilities for quantized GEMM block operations
@@ -96,9 +100,9 @@ struct AQPickerCommon : public BlockGemmQuantBase
         if constexpr(Traits::TransposeC) // transposed C
         {
             index_t reg_offset =
-                Traits::PreshuffleQuant ? mIter : mIter * Traits::AQPerBlock + kQScale;
+                Traits::APreshuffleQuant ? mIter : mIter * Traits::AQPerBlock + kQScale;
             auto scale_reg = aq_block_tensor.get_thread_buffer()[reg_offset];
-            if constexpr(Traits::PreshuffleQuant)
+            if constexpr(Traits::APreshuffleQuant)
             {
                 auto pull_from_lane =
                     (__lane_id() & (Traits::WarpGemm::kN - 1)) * Traits::AQPerBlock + kQScale;
@@ -121,7 +125,7 @@ struct AQPickerCommon : public BlockGemmQuantBase
         }
         else
         {
-            if constexpr(Traits::PreshuffleQuant)
+            if constexpr(Traits::APreshuffleQuant)
             {
                 // A view is created on top of the preshuffled AQ, where each row of
                 // the view is composed of a row from a warp tile within an AQ block
@@ -224,3 +228,6 @@ struct AQPickerCommon : public BlockGemmQuantBase
     float scale_reg_f = 0.0f;
 };
 } // namespace ck_tile
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

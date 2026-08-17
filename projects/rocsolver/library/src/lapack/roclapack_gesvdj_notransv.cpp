@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gesvdj_notransv.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -55,6 +56,7 @@ rocblas_status rocsolver_gesvdj_notransv_impl(rocblas_handle handle,
                                               T* V,
                                               const rocblas_int ldv,
                                               rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("gesvdj_notransv", "--left_svect", left_svect, "--right_svect", right_svect,
                         "-m", m, "-n", n, "--lda", lda, "--abstol", abstol, "--max_sweeps",
@@ -121,6 +123,10 @@ rocblas_status rocsolver_gesvdj_notransv_impl(rocblas_handle handle,
         handle, left_svect, right_svect, m, n, A, shiftA, lda, strideA, abstol, residual,
         max_sweeps, n_sweeps, S, strideS, U, ldu, strideU, V, ldv, strideV, info, batch_count,
         (T*)scalars, (T*)VUtmp, work1_UVtmp, work2, work3, work4, work5_ipiv, work6_workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

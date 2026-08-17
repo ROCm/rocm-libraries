@@ -71,7 +71,9 @@ template <index_t NDimSpatial,
           ck::BlockGemmPipelineVersion BlkGemmPipelineVer,
           typename AComputeDataType,
           typename BComputeDataType,
-          bool DirectLoad>
+          bool DirectLoad,
+          index_t NumGroupsToMerge,
+          bool LargeTensors>
 struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3;
 
 } // namespace ck::tensor_operation::device
@@ -132,7 +134,9 @@ template <ck::index_t NDimSpatial,
           ck::BlockGemmPipelineVersion BlkGemmPipelineVer,
           typename AComputeDataType_,
           typename BComputeDataType_,
-          bool DirectLoad>
+          bool DirectLoad,
+          index_t NumGroupsToMerge,
+          bool LargeTensors>
 struct InstanceTraits<ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<
     NDimSpatial,
     ALayout_,
@@ -182,7 +186,9 @@ struct InstanceTraits<ck::tensor_operation::device::DeviceGroupedConvFwdMultiple
     BlkGemmPipelineVer,
     AComputeDataType_,
     BComputeDataType_,
-    DirectLoad>>
+    DirectLoad,
+    NumGroupsToMerge,
+    LargeTensors>>
 {
     /// @brief Tag type identifying this device kernel variant
     using device_kernel_tag = DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3_Tag;
@@ -270,6 +276,10 @@ struct InstanceTraits<ck::tensor_operation::device::DeviceGroupedConvFwdMultiple
 
     static constexpr bool kDirectLoad = DirectLoad;
 
+    static constexpr int kNumGroupsToMerge = NumGroupsToMerge;
+
+    static constexpr bool kLargeTensors = LargeTensors;
+
     // Static member function to generate instance string
     static std::string instance_string()
     {
@@ -351,6 +361,8 @@ struct InstanceTraits<ck::tensor_operation::device::DeviceGroupedConvFwdMultiple
         oss << "," << detail::type_name<AComputeDataType>();               // 47. AComputeDataType
         oss << "," << detail::type_name<BComputeDataType>();               // 48. BComputeDataType
         oss << "," << (DirectLoad ? "true" : "false");                     // 49. DirectLoad
+        oss << "," << kNumGroupsToMerge;                                   // 50. NumGroupsToMerge
+        oss << "," << (kLargeTensors ? "true" : "false");                  // 51. LargeTensors
         oss << ">";
 
         return oss.str();

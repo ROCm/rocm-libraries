@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,47 +21,19 @@
  *
  * ************************************************************************ */
 
-#include "hipsparse_arguments.hpp"
+#include "test.hpp"
 #include "testing_bsrxmv.hpp"
 
-#include <hipsparse.h>
-
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
-TEST(bsrxmv_bad_arg, bsrxmv_bad_arg_float)
-{
-    testing_bsrxmv_bad_arg<float>();
-}
-
-TEST(bsrxmv_bad_arg, bsrxmv_bad_arg_double)
-{
-    testing_bsrxmv_bad_arg<double>();
-}
-
-TEST(bsrxmv_bad_arg, bsrxmv_bad_arg_float_complex)
-{
-    testing_bsrxmv_bad_arg<hipComplex>();
-}
-
-TEST(bsrxmv_bad_arg, bsrxmv_bad_arg_double_complex)
-{
-    testing_bsrxmv_bad_arg<hipDoubleComplex>();
-}
-
-TEST(bsrxmv, bsrxmv_float)
-{
-    Arguments arg;
-    testing_bsrxmv<float>(arg);
-}
-
-TEST(bsrxmv, bsrxmv_double)
-{
-    Arguments arg;
-    testing_bsrxmv<double>(arg);
-}
-
-TEST(bsrxmv, bsrxmv_hipComplex)
-{
-    Arguments arg;
-    testing_bsrxmv<hipComplex>(arg);
-}
+TEST_ROUTINE(bsrxmv,
+             level2,
+             arg.M,
+             arg.N,
+             arg.block_dim,
+             arg.alpha,
+             arg.alphai,
+             arg.beta,
+             arg.betai,
+             arg.dirA,
+             arg.baseA);
 #endif

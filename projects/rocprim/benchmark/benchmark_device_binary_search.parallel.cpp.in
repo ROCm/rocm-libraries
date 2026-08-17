@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_utils.hpp"
-#include "benchmark_device_binary_search.parallel.hpp"
+#include "primbench.hpp"
+#include "benchmark_device_binary_search.hpp"
 
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/types.hpp>
@@ -30,7 +30,7 @@
 
 namespace
 {
-auto unused = benchmark_utils::executor::queue_sorted_instance<device_binary_search_benchmark<
+auto unused = primbench::executor::queue<device_binary_search_benchmark<
     @SubAlgorithm@_subalgorithm,
     @ValueType@,
     @OutputType@,

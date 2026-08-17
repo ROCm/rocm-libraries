@@ -1,0 +1,9 @@
+# serializer version: 1
+# name: test_gfx942_db_golden
+  list([
+    dict({
+      'basename': 'Cijk_Ailk_Bljk_D_B_UserArgs_MT16x16x8_MI16x16x1_XG8QhMMTb6mPs456tc1ZFd6h71qz9l9c0R20zRz_FnU=',
+      'err': 0,
+    }),
+  ])
+# ---

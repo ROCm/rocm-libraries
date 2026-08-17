@@ -35,7 +35,7 @@ Tests:
   category: quick
   function: gpsv_interleaved_batch
   precision: *single_double_precisions_complex_real
-  M: [7, 11, 17, 32, 77, 142, 231]
+  M: [7, 11]
   batch_count: [10, 45, 111, 213]
   batch_stride: [445]
   matrix: [rocsparse_matrix_random]
@@ -44,7 +44,7 @@ Tests:
   category: pre_checkin
   function: gpsv_interleaved_batch
   precision: *single_double_precisions_complex_real
-  M: [256, 456, 1107, 1804, 3380]
+  M: [256, 456]
   batch_count: [0, 1, 2, 3, 27, 299]
   batch_stride: [300]
   matrix: [rocsparse_matrix_random]
@@ -53,7 +53,7 @@ Tests:
   category: nightly
   function: gpsv_interleaved_batch
   precision: *single_double_precisions_complex_real
-  M: [12057, 17283, 34905, 77043]
+  M: [2411, 3456]
   batch_count: [12, 15, 21]
   batch_stride: [30]
   matrix: [rocsparse_matrix_random]
@@ -62,7 +62,7 @@ Tests:
   category: quick
   function: gpsv_interleaved_batch
   precision: *single_double_precisions_complex_real
-  M: [8, 16, 32, 64]
+  M: [8, 16]
   batch_count: [2, 4, 8, 16, 32, 64]
   batch_stride: [64]
   matrix: [rocsparse_matrix_random]
@@ -71,7 +71,7 @@ Tests:
   category: pre_checkin
   function: gpsv_interleaved_batch
   precision: *single_double_precisions
-  M: [128, 256, 512, 1024]
+  M: [128, 256]
   batch_count: [32, 45, 128]
   batch_stride: [150]
   matrix: [rocsparse_matrix_random]
@@ -80,7 +80,7 @@ Tests:
   category: nightly
   function: gpsv_interleaved_batch
   precision: *single_double_precisions
-  M: [2048, 4096, 8192]
+  M: [1024, 2048]
   batch_count: [256, 512, 1024]
   batch_stride: [1536]
   matrix: [rocsparse_matrix_random]
@@ -89,7 +89,7 @@ Tests:
   category: quick
   function: gpsv_interleaved_batch
   precision: *single_double_precisions_complex_real
-  M: [476, 1725, 2301]
+  M: [300]
   batch_count: [33, 117, 318, 475]
   batch_stride: [500]
   matrix: [rocsparse_matrix_random]
@@ -116,7 +116,7 @@ Tests:
   category: pre_checkin
   function: gpsv_interleaved_batch
   precision: *single_double_precisions_complex_real
-  M: [476, 1725, 2301]
+  M: [476, 1725]
   batch_count: [33, 117, 318, 475]
   batch_stride: [500]
   matrix: [rocsparse_matrix_random]

@@ -127,6 +127,19 @@ miopenStatus_t CallGemm(const Handle& handle,
                         std::size_t c_offset,
                         GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
 
+// Overload with explicit C/D data type (e.g. bf16 A/B with fp32 C/D accumulation)
+MIOPEN_EXPORT
+miopenStatus_t CallGemm(const Handle& handle,
+                        GemmDescriptor gemm_desc,
+                        ConstData_t A,
+                        std::size_t a_offset,
+                        ConstData_t B,
+                        std::size_t b_offset,
+                        Data_t C,
+                        std::size_t c_offset,
+                        miopenDataType_t cType,
+                        GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
+
 MIOPEN_EXPORT
 miopenStatus_t CallGemmStridedBatched(const Handle& handle,
                                       GemmDescriptor gemm_desc,
@@ -136,6 +149,19 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
                                       std::size_t b_offset,
                                       Data_t C,
                                       std::size_t c_offset,
+                                      GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
+
+// Overload with explicit C/D data type (e.g. bf16 A/B with fp32 C/D accumulation)
+MIOPEN_EXPORT
+miopenStatus_t CallGemmStridedBatched(const Handle& handle,
+                                      GemmDescriptor gemm_desc,
+                                      ConstData_t A,
+                                      std::size_t a_offset,
+                                      ConstData_t B,
+                                      std::size_t b_offset,
+                                      Data_t C,
+                                      std::size_t c_offset,
+                                      miopenDataType_t cType,
                                       GemmBackend_t gemm_backend = GemmBackend_t::rocblas);
 
 miopenStatus_t

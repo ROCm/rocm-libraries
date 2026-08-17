@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_potf2.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -38,6 +39,7 @@ rocblas_status rocsolver_potf2_strided_batched_impl(rocblas_handle handle,
                                                     const rocblas_stride strideA,
                                                     I* info,
                                                     const I batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("potf2_strided_batched", "--uplo", uplo, "-n", n, "--lda", lda, "--strideA",
                         strideA, "--batch_count", batch_count);
@@ -81,6 +83,10 @@ rocblas_status rocsolver_potf2_strided_batched_impl(rocblas_handle handle,
     // execution
     return rocsolver_potf2_template<T>(handle, uplo, n, A, shiftA, lda, strideA, info, batch_count,
                                        (T*)scalars, (T*)work, (T*)pivots);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

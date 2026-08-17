@@ -774,8 +774,46 @@ class SrdUpperValue11XX(BitfieldUnion):
     return cls(fields=SrdUpperFields11XX.default())
 
 
+# gfx12 buffer-resource DWORD3 layout.
+# Mirrors SrdUpperFields12XX in rocisa (projects/hipblaslt/tensilelite/rocisa/rocisa/
+# include/code.hpp) which is the gfx12-aware code generator path. Differences vs.
+# gfx11: no LLC_noalloc field, _unusedB widens from 1 to 3 bits, and oob_select moves
+# from bits 27-28 to bits 28-29. With the gfx9 fallback (data_format=4) gfx1201 raw
+# buffer stores are silently dropped because oob_select reads as 0; we need oob_select=3
+# and format=32 for the RAW buffer mode used by all Tensile buffer load/store ops.
+class SrdUpperFields12XX(BitfieldStructure):
+  _fields_ = [("dst_sel_x",      ctypes.c_uint, 3),
+              ("dst_sel_y",      ctypes.c_uint, 3),
+              ("dst_sel_z",      ctypes.c_uint, 3),
+              ("dst_sel_w",      ctypes.c_uint, 3),
+              ("format",         ctypes.c_uint, 7),
+              ("_unusedA",       ctypes.c_uint, 2),
+              ("index_stride",   ctypes.c_uint, 2),
+              ("add_tid_enable", ctypes.c_uint, 1),
+              ("resource_level", ctypes.c_uint, 1),
+              ("_unusedB",       ctypes.c_uint, 3),
+              ("oob_select",     ctypes.c_uint, 2),
+              ("type",           ctypes.c_uint, 2)]
+
+
+  @classmethod
+  def default(cls):
+    return cls(format     = 32,
+               oob_select = 3)
+
+
+class SrdUpperValue12XX(BitfieldUnion):
+  _fields_ = [("fields", SrdUpperFields12XX), ("value", ctypes.c_uint32)]
+
+  @classmethod
+  def default(cls):
+    return cls(fields=SrdUpperFields12XX.default())
+
+
 def SrdUpperValue(isa):
-  if isa[0] == 11:
+  if isa[0] == 12:
+    return SrdUpperValue12XX.default()
+  elif isa[0] == 11:
     return SrdUpperValue11XX.default()
   elif isa[0] == 10:
     return SrdUpperValue10XX.default()

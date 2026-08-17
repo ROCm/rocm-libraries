@@ -1,29 +1,7 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 #include <rocRoller/KernelOptions_detail.hpp>
@@ -157,7 +135,7 @@ namespace rocRoller
                 m_barrierOpcode = hasBarrierSignal ? "s_barrier_signal" : "s_barrier";
             }
 
-            for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
+            for(int i = 0; i < static_cast<int>(GPUWaitQueue::Count); i++)
             {
                 GPUWaitQueue waitQueue         = static_cast<GPUWaitQueue>(i);
                 m_instructionQueues[waitQueue] = {};
@@ -213,7 +191,7 @@ namespace rocRoller
                 }
             }
 
-            for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
+            for(int i = 0; i < static_cast<int>(GPUWaitQueue::Count); i++)
             {
                 applyWaitToQueue(waiting.getCount(static_cast<GPUWaitQueue>(i)),
                                  static_cast<GPUWaitQueue>(i));
@@ -221,7 +199,7 @@ namespace rocRoller
 
             for(GPUWaitQueueType queueType : instWaitQueues)
             {
-                GPUWaitQueue waitQueue(queueType);
+                GPUWaitQueue waitQueue = fromWaitQueueType(queueType);
                 if(queueType != GPUWaitQueueType::None
                    && m_instructionQueues.find(waitQueue) != m_instructionQueues.end())
                 {
@@ -242,6 +220,11 @@ namespace rocRoller
                         {
                             WaitQueueRegisters queueRegisters;
                             append(queueRegisters, inst.getAllDsts());
+                            // track LDS access to avoid write-after-read races.
+                            auto isLDSReg = [](Register::ValuePtr const reg) -> bool {
+                                return reg->regType() == Register::Type::LocalData;
+                            };
+                            append(queueRegisters, filter(isLDSReg, inst.getAllSrcs()));
 
                             m_instructionQueues[waitQueue].push_back(std::move(queueRegisters));
                         }
@@ -254,7 +237,7 @@ namespace rocRoller
         std::string WaitcntObserver::getWaitQueueState() const
         {
             std::stringstream retval;
-            for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
+            for(int i = 0; i < static_cast<int>(GPUWaitQueue::Count); i++)
             {
                 GPUWaitQueue waitQueue = static_cast<GPUWaitQueue>(i);
 
@@ -267,10 +250,10 @@ namespace rocRoller
                     {
                         retval << "\nWait Queue State:";
                     }
-                    retval << "\n--Queue: " << waitQueue.toString();
+                    retval << "\n--Queue: " << waitQueue;
                     retval << "\n----Needs Wait Zero: "
                            << (m_needsWaitZero.at(waitQueue) ? "True" : "False");
-                    retval << "\n----Type In Queue  : " << m_typeInQueue.at(waitQueue).toString();
+                    retval << "\n----Type In Queue  : " << m_typeInQueue.at(waitQueue);
                     retval << "\n----Registers      : ";
 
                     for(int queue_i = 0; queue_i < m_instructionQueues.at(waitQueue).size();
@@ -291,20 +274,17 @@ namespace rocRoller
             return retval.str();
         }
 
-        WaitCount WaitcntObserver::computeImplicitWaitCount(Instruction const& inst,
-                                                            std::string*       explanation) const
+        WaitCount WaitcntObserver::computeZeroBarrierWaitCount(Instruction const& inst,
+                                                               std::string*       explanation) const
         {
-            auto        context      = m_context.lock();
-            const auto& architecture = context->targetArchitecture();
+            auto context = m_context.lock();
 
             WaitCount rv;
 
-            AssertFatal(architecture.HasCapability(GPUCapability::s_barrier)
-                            || architecture.HasCapability(GPUCapability::s_barrier_signal),
-                        "Either s_barrier or s_barrier_signal must be supported");
-            if(inst.getOpCode() == m_barrierOpcode)
+            if(context->kernelOptions()->alwaysWaitZeroBeforeBarrier)
             {
-                if(context->kernelOptions()->alwaysWaitZeroBeforeBarrier)
+                const auto& architecture = context->targetArchitecture();
+                if(inst.getOpCode() == m_barrierOpcode)
                 {
                     if(explanation != nullptr)
                     {
@@ -313,17 +293,63 @@ namespace rocRoller
                     rv.combine(WaitCount::Zero(architecture));
                 }
             }
+            return rv;
+        }
+
+        WaitCount WaitcntObserver::computeSyncQueueWaitCount(Instruction const& inst,
+                                                             std::string*       explanation) const
+        {
+            auto context = m_context.lock();
+
+            WaitCount rv;
+
+            auto queuesToSync = inst.getWaitCount().queuesToSync();
+
+            if(queuesToSync.any())
+            {
+                const auto& architecture = context->targetArchitecture();
+
+                for(int i = 0; i < static_cast<int>(GPUWaitQueueType::Count); i++)
+                {
+                    GPUWaitQueueType queueType = static_cast<GPUWaitQueueType>(i);
+                    GPUWaitQueue     queue     = fromWaitQueueType(queueType);
+
+                    if(queuesToSync[queueType])
+                    {
+                        if(!m_instructionQueues.at(queue).empty()
+                           && (m_typeInQueue.at(queue) == queueType || m_needsWaitZero.at(queue)))
+                        {
+                            rv.combine(WaitCount(architecture, queue, 0));
+
+                            if(explanation)
+                            {
+                                *explanation += fmt::format("Wait for Queue {} {}: empty: {}, "
+                                                            "needsWaitZero: {}, typeInQueue: {}",
+                                                            toString(queueType),
+                                                            queuesToSync[queueType],
+                                                            m_instructionQueues.at(queue).empty(),
+                                                            m_needsWaitZero.at(queue),
+                                                            toString(m_typeInQueue.at(queue)));
+                            }
+                        }
+                    }
+                }
+            }
 
             return rv;
         }
 
-        WaitCount WaitcntObserver::computeWaitCount(Instruction const& inst,
-                                                    std::string*       explanation) const
+        WaitCount WaitcntObserver::computeRegisterWaitCount(Instruction const& inst,
+                                                            std::string*       explanation) const
         {
             auto        context      = m_context.lock();
             const auto& architecture = context->targetArchitecture();
 
-            WaitCount retval = computeImplicitWaitCount(inst, explanation);
+            WaitCount retval;
+
+            // No wait required before LDS reads as the wait happens before LDS barriers
+            if(GPUInstructionInfo::isLDSRead(inst.getOpCode()))
+                return retval;
 
             if(inst.getOpCode().size() > 0 && inst.hasRegisters())
             {
@@ -341,7 +367,7 @@ namespace rocRoller
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
-                                                    + waitQueue.toString()
+                                                    + toString(waitQueue)
                                                     + "', which needs a wait zero.\n";
                                 }
                             }
@@ -353,7 +379,7 @@ namespace rocRoller
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
-                                                    + waitQueue.toString() + "', at "
+                                                    + toString(waitQueue) + "', at "
                                                     + std::to_string(queue_i)
                                                     + " and the queue size is "
                                                     + std::to_string(
@@ -367,6 +393,20 @@ namespace rocRoller
                     }
                 }
             }
+
+            return retval;
+        }
+
+        WaitCount WaitcntObserver::computeWaitCount(Instruction const& inst,
+                                                    std::string*       explanation) const
+        {
+            auto        context      = m_context.lock();
+            const auto& architecture = context->targetArchitecture();
+
+            WaitCount retval = computeZeroBarrierWaitCount(inst, explanation);
+            retval.combine(computeSyncQueueWaitCount(inst, explanation));
+            retval.combine(computeRegisterWaitCount(inst, explanation));
+
             return retval.getAsSaturatedWaitCount(architecture);
         }
     }

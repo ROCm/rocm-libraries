@@ -135,7 +135,7 @@ def ci_perf_job():
     yield from api_overhead()
     yield from matmul_set_1()
 
-def all():
+def all(problems_dir=None):
     """all routine benchmarks"""
 
     target_arch = SuiteProblemGenerator.target_arch_static
@@ -147,30 +147,58 @@ def all():
 
     print(f'Info: bench with --suite all with --targetArch {target_arch}')
 
-    # general suites for all arches
-    yield from api_overhead()
-    yield from amax_set_1()
+    # If custom problems directory is provided, discover and run all YAMLs
+    if problems_dir is not None:
+        print(f'Info: Using custom problems directory: {problems_dir}')
+        
+        # Import Path for directory operations
+        from pathlib import Path
+        
+        # Discover all YAML files in the custom directory
+        yaml_files = list(Path(problems_dir).glob("*.yaml"))
+        
+        if not yaml_files:
+            print(f'Warning: No YAML files found in {problems_dir}')
+            return
+        
+        print(f'Info: Found {len(yaml_files)} YAML files to process')
+        
+        # Create a problem set for each YAML file
+        for yaml_file in sorted(yaml_files):
+            problemlist = [Problem(args={
+                "--log_function_name": "",
+                "--yaml": yaml_file.name
+            })]
+            
+            yield ProblemSet(
+                benchType="matmul",
+                name=yaml_file.stem,  # filename without extension
+                problems=problemlist
+            )
+    else:
+        # general suites for all arches
+        yield from api_overhead()
+        yield from amax_set_1()
 
-    if "gfx942" in target_arch:
-        # Put focused tests set for gfx942
-        yield from matmul_set_1() # this problemset is an initial test example for gfx942
-        yield from matmul_set_2()
-        yield from matmul_set_3()
-        yield from matmul_set_4()
-        yield from matmul_set_5()
-        yield from matmul_set_6()
-    elif "gfx950" in target_arch:
-        # Put focused tests set for gfx950
-        yield from matmul_set_2()
-    elif "gfx90a" in target_arch:
-        # FIXME- please replace the examples with the real interested problems for gfx90a
-        yield from matmul_set_3()
-        yield from matmul_set_4()
-        yield from matmul_set_5()
-    elif "gfx110" in target_arch:
-        # FIXME- please replace the examples with the real interested problems for gfx110?
-        yield from matmul_set_3()
-    elif "gfx120" in target_arch:
-        # FIXME- please replace the examples with the real interested problems for gfx120?
-        yield from matmul_set_3()
-
+        if "gfx942" in target_arch:
+            # Put focused tests set for gfx942
+            yield from matmul_set_1() # this problemset is an initial test example for gfx942
+            yield from matmul_set_2()
+            yield from matmul_set_3()
+            yield from matmul_set_4()
+            yield from matmul_set_5()
+            yield from matmul_set_6()
+        elif "gfx950" in target_arch:
+            # Put focused tests set for gfx950
+            yield from matmul_set_2()
+        elif "gfx90a" in target_arch:
+            # FIXME- please replace the examples with the real interested problems for gfx90a
+            yield from matmul_set_3()
+            yield from matmul_set_4()
+            yield from matmul_set_5()
+        elif "gfx110" in target_arch:
+            # FIXME- please replace the examples with the real interested problems for gfx110?
+            yield from matmul_set_3()
+        elif "gfx120" in target_arch:
+            # FIXME- please replace the examples with the real interested problems for gfx120?
+            yield from matmul_set_3()

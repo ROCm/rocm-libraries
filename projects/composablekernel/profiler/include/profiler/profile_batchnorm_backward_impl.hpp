@@ -63,6 +63,27 @@ bool profile_batchnorm_backward_impl(bool do_verification,
         };
     }
 
+    using PassThroughOp = ck::tensor_operation::element_wise::PassThrough;
+
+    // add device batchnorm-backward instances
+    using DeviceOp = ck::tensor_operation::device::DeviceBatchNormBwd<XDataType,
+                                                                      DxDataType,
+                                                                      DxDataType,
+                                                                      AccDataType,
+                                                                      ScaleDataType,
+                                                                      DscaleDbiasDataType,
+                                                                      MeanVarDataType,
+                                                                      PassThroughOp,
+                                                                      Rank,
+                                                                      NumBatchNormReduceDim>;
+
+    // get device op instances
+    const auto instance_ptrs =
+        ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+            DeviceOp>::GetInstances();
+
+    std::cout << "found " << instance_ptrs.size() << " instances" << std::endl;
+
     // input data of the batchnorm backward algorithm
     Tensor<XDataType> x(inOutLengths);
     Tensor<DyDataType> dy(inOutLengths);
@@ -191,27 +212,6 @@ bool profile_batchnorm_backward_impl(bool do_verification,
 
     std::copy(reduceDims.begin(), reduceDims.end(), arrReduceDims.begin());
 
-    using PassThroughOp = ck::tensor_operation::element_wise::PassThrough;
-
-    // add device batchnorm-backward instances
-    using DeviceOp = ck::tensor_operation::device::DeviceBatchNormBwd<XDataType,
-                                                                      DxDataType,
-                                                                      DxDataType,
-                                                                      AccDataType,
-                                                                      ScaleDataType,
-                                                                      DscaleDbiasDataType,
-                                                                      MeanVarDataType,
-                                                                      PassThroughOp,
-                                                                      Rank,
-                                                                      NumBatchNormReduceDim>;
-
-    // get device op instances
-    const auto instance_ptrs =
-        ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-            DeviceOp>::GetInstances();
-
-    std::cout << "found " << instance_ptrs.size() << " instances" << std::endl;
-
     std::string best_instance_name;
     float best_avg_time   = std::numeric_limits<float>::max();
     float best_gb_per_sec = 0;
@@ -268,8 +268,14 @@ bool profile_batchnorm_backward_impl(bool do_verification,
     int num_kernel = 0;
     bool pass      = true;
 
-    for(auto& inst_ptr : instance_ptrs)
+    for(size_t i = 0; i < instance_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& inst_ptr    = instance_ptrs[i];
         auto argument_ptr = inst_ptr->MakeArgumentPointer(
             arrInOutLengths,
             arrInOutStrides,
@@ -294,11 +300,6 @@ bool profile_batchnorm_backward_impl(bool do_verification,
         if(inst_ptr->IsSupportedArgument(argument_ptr.get()))
         {
             num_kernel++;
-            if((instance_index != -1) && (instance_index + 1 != num_kernel))
-            {
-                // skip test if instance_index is specified
-                continue;
-            }
         }
         else
         {
@@ -383,15 +384,10 @@ bool profile_batchnorm_backward_impl(bool do_verification,
                   << best_instance_name << std::endl;
     }
 
-    if(num_kernel == 0)
+    if(num_kernel == 0 && instance_index == -1)
     {
         std::cout << "Error: No kernel is applicable" << std::endl;
         return false;
-    }
-    if (instance_index != -1)
-    {
-        std::cout << "batchnorm_backward_instance (" << instance_index << "/" << num_kernel
-            << "): Passed" << std::endl;
     }
     return pass;
 }

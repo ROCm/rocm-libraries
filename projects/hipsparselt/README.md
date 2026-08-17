@@ -195,6 +195,7 @@ Refer to the available build options using `./install.sh --help`
       * BFLOAT16 input/output, FP32 Matrix Core accumulate
       * INT8 input/output, INT32 Matrix Core accumulate
       * INT8 input, FP16 output, INT32 Matrix Core accumulate
+      * INT8 input, INT32 output, INT32 Matrix Core accumulate
       * FP8(E4M3) input, FP32 output, FP32 Matrix Core accumulate (LLVM target: gfx950)
       * BF8(E5M2) input, FP32 output, FP32 Matrix Core accumulate (LLVM target: gfx950)
     * Matrix pruning and compression functionalities

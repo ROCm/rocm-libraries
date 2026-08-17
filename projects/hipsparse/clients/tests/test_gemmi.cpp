@@ -24,4 +24,5 @@
 #include "test.hpp"
 #include "testing_gemmi.hpp"
 
-TEST_ROUTINE(gemmi, level3, arg.M, arg.N, arg.K, arg.alpha, arg.alphai, arg.beta, arg.betai);
+TEST_ROUTINE(
+    gemmi, level3, arg.M, arg.N, arg.K, arg.alpha, arg.alphai, arg.beta, arg.betai, arg.graph_test);

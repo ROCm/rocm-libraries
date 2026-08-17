@@ -3,6 +3,7 @@
 
 import yaml
 from pathlib import Path
+from typing import List
 
 try:
     DEFAULT_YAML_LOADER = yaml.CSafeLoader
@@ -58,9 +59,11 @@ def parse_scalar(loader: yaml.Loader):
     value: str = evt.value
     value_lower: str = value.lower()
 
-    if value_lower in ('true', 'yes',):
+    # Only accept true/false (case-insensitive), NOT yes/no or 0/1
+    # This matches StrictTypeLoader behavior to ensure type consistency
+    if value_lower == 'true':
         return True
-    elif value_lower in ('false', 'no',):
+    elif value_lower == 'false':
         return False
     elif value_lower in ('null', '', '~'):
         if not evt.style:
@@ -151,3 +154,11 @@ def load_logic_gfx_arch(yaml_path: Path, loader_type: yaml.Loader = DEFAULT_YAML
             return arch
     except RuntimeError as e:
         return load_yaml_dict_item(yaml_path, loader_type, 'ArchitectureName')
+
+def archMatch(arch: str, archs: List[str]) -> bool:
+    """Return True if a logic file's declared gfx `arch` belongs to `archs`.
+
+    An exact match, or a requested entry that starts with `arch` so a bare
+    header arch (e.g. "gfx942") matches a predicated request ("gfx942:xnack+").
+    """
+    return (arch in archs) or any(a.startswith(arch) for a in archs)

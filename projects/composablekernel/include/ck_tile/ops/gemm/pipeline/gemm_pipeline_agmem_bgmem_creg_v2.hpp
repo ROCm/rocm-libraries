@@ -65,11 +65,15 @@ struct GemmPipelineAGmemBGmemCRegV2 : public BaseGemmPipelineAGmemBGmemCRegV2<Pr
     static constexpr index_t BPackedSize =
         ck_tile::numeric_traits<remove_cvref_t<BDataType>>::PackedSize;
 
+    static constexpr bool LargeTensors = Problem::LargeTensors;
+
     static constexpr index_t BlockSize = Problem::kBlockSize;
 
     static constexpr index_t kMPerBlock = BlockGemmShape::kM;
     static constexpr index_t kNPerBlock = BlockGemmShape::kN;
     static constexpr index_t kKPerBlock = BlockGemmShape::kK;
+
+    static constexpr bool Async = false;
 
     template <bool IsWave32Host = false>
     static constexpr index_t GetVectorSizeA()
@@ -214,12 +218,12 @@ struct GemmPipelineAGmemBGmemCRegV2 : public BaseGemmPipelineAGmemBGmemCRegV2<Pr
 
             // prefetch
             // global read 0
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             auto elementwise_As_res =
                 load_tile_with_elementwise(as_copy_dram_window, a_element_func);
-            // Load tile — during value loading, an elementwise function is executed for each B0,
-            // B1, … BN. The values B0, B1, … BN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each B0,
+            // B1, ... BN. The values B0, B1, ... BN are read by the same thread.
             auto elementwise_Bs_res =
                 load_tile_with_elementwise(bs_copy_dram_window, b_element_func);
 

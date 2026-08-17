@@ -4,10 +4,10 @@
 #include "float_types.h"
 
 extern "C" __global__
-    __launch_bounds__(CK_PARAM_TUNABLE_BLOCK_SIZE, 2) void gridwise_convolution_implicit_gemm_v4r1_gnchw_gkcyx_gnkhw_lds_double_buffer(
-        const FLOAT* const __restrict__ p_in_global,
-        const FLOAT* const __restrict__ p_wei_global,
-        FLOAT* const __restrict__ p_out_global)
+__launch_bounds__(CK_PARAM_TUNABLE_BLOCK_SIZE, 2) void gridwise_convolution_implicit_gemm_v4r1_gnchw_gkcyx_gnkhw_lds_double_buffer(
+    const FLOAT* const __restrict__ p_in_global,
+    const FLOAT* const __restrict__ p_wei_global,
+    FLOAT* const __restrict__ p_out_global)
 {
     using namespace ck;
 
@@ -139,10 +139,10 @@ extern "C" __global__
     constexpr index_t GemmDataPerReadB = GemmNPerThreadSubC;
 
     using InBlockCopySubLengths_G_E_N1_B_N2     = Sequence<1,
-                                                       InBlockCopySubLengths_E,
-                                                       InBlockCopySubLengths_N1,
-                                                       InBlockCopySubLengths_B,
-                                                       InBlockCopySubLengths_N2>;
+                                                           InBlockCopySubLengths_E,
+                                                           InBlockCopySubLengths_N1,
+                                                           InBlockCopySubLengths_B,
+                                                           InBlockCopySubLengths_N2>;
     using InBlockCopyClusterLengths_G_E_N1_B_N2 = Sequence<1,
                                                            InBlockCopyClusterLengths_E,
                                                            InBlockCopyClusterLengths_N1,
@@ -176,11 +176,11 @@ extern "C" __global__
     constexpr index_t GemmDataPerReadB = 1;
 
     using InBlockCopySubLengths_G_E_N1_B_N2_EPack     = Sequence<1,
-                                                             InBlockCopySubLengths_E,
-                                                             InBlockCopySubLengths_N1,
-                                                             InBlockCopySubLengths_B,
-                                                             InBlockCopySubLengths_N2,
-                                                             EPACK>;
+                                                                 InBlockCopySubLengths_E,
+                                                                 InBlockCopySubLengths_N1,
+                                                                 InBlockCopySubLengths_B,
+                                                                 InBlockCopySubLengths_N2,
+                                                                 EPACK>;
     using InBlockCopyClusterLengths_G_E_N1_B_N2_EPack = Sequence<1,
                                                                  InBlockCopyClusterLengths_E,
                                                                  InBlockCopyClusterLengths_N1,

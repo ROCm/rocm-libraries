@@ -28,13 +28,18 @@
 
 #include <miopen/batchnorm/problem_description.hpp>
 
-#define WORKAROUND_SWDEV_253606 1
-
 namespace miopen {
 
 namespace solver {
 
 namespace batchnorm {
+
+// Maximum vector width supported by the batch-norm spatial kernels.
+// Matches the DEFINE_VECTOR_MAPPING entries in src/kernels/vector_types.hpp and
+// the static_assert allowlists in src/kernels/miopen_math.hpp.
+// Increment this constant (and add the corresponding DEFINE_VECTOR_MAPPING) when
+// adding a new vector width.
+inline constexpr size_t kMaxSupportedVectorSize = 8;
 
 // Compute workgroup size configuration given a problem (NHWC) and a vectorsize
 // It supports only 2D workgroups
@@ -81,6 +86,10 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
                                      size_t& xlocalsize,
                                      size_t& ylocalsize)
 {
+    // Initialize to safe defaults at the start of the function
+    xlocalsize = 1;
+    ylocalsize = 1;
+
     int n, c, h, w;
     std::tie(n, c, h, w)    = tien<4>(problem.GetXDesc().GetLengths());
     unsigned int in_cstride = h * w;
@@ -89,6 +98,7 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(c % vectorsize != 0)
         {
+            // xlocalsize and ylocalsize already initialized to 1
             return;
         }
         GetLocalConfigNHWC(problem, vectorsize, xlocalsize, ylocalsize);
@@ -97,9 +107,10 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
     {
         if(in_cstride % vectorsize != 0)
         {
+            // xlocalsize and ylocalsize already initialized to 1
             return;
         }
-        xlocalsize = 1;
+        // xlocalsize stays at 1
         ylocalsize = 1024;
         if(ylocalsize > in_cstride / vectorsize)
         {
@@ -166,7 +177,7 @@ inline int GetStashMethod(bool IsLayoutNHWC,
         (in_cstride) % ylocalsize == 0 ? ylocalsize : (in_cstride) % ylocalsize;
     unsigned int last_zlocalsize =
         n % (zlocalsize * nelements) == 0 ? (zlocalsize * nelements) : n % (zlocalsize * nelements);
-    if(last_ylocalsize < stash_values && last_zlocalsize >= (size_t)stash_values)
+    if(last_ylocalsize < stash_values && last_zlocalsize >= static_cast<size_t>(stash_values))
     {
         stash_method = 1;
     }
@@ -224,6 +235,10 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
     vectorsize = std::stoi(seglist[1]);
     if(variant != 2)
     {
+        // For variant 0, 1, 3 (spatial single), kernel_id only contains
+        // variant and vectorsize. The workgroup sizes (xlocalsize, ylocalsize,
+        // zlocalsize, nelements) are not stored in kernel_id and must be
+        // computed by the caller based on problem-size heuristics.
         return;
     }
     xlocalsize = std::stoi(seglist[2]);
@@ -313,43 +328,32 @@ inline void DefaultConfigSpatialSingle(const miopen::batchnorm::ProblemDescripti
         }
         else
         {
-#if(WORKAROUND_SWDEV_253606 == 0)
-            if(n < 3)
+            // clang-format off
+            if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
             {
-                valid_kernels.push_back(GetKernelIdFromVariant(4, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
                 valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
                 return;
             }
-            else
-#endif
-            {
-                // clang-format off
-                if(in_cstride > 512 && in_cstride <= 1024 && n < 32)
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(3, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
-                }
 
-                if( (in_nhw < 33554432 && in_cstride > 1024) ||
-                ((n >= 256) && (in_cstride > 60) && (bfpmixparm || bbfpmixparam)) ||
-                ((in_cstride > 512) && (bfpmixparm || bbfpmixparam)))
-                {
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    if(in_cstride <= 512)
-                    {
-                        valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                    }
-                    return;
-                }
-                else if(in_cstride <= 512)
+            if( (in_nhw < 33554432 && in_cstride > 1024) ||
+            ((n >= 256) && (in_cstride > 60) && (bfpmixparm || bbfpmixparam)) ||
+            ((in_cstride > 512) && (bfpmixparm || bbfpmixparam)))
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
+                if(in_cstride <= 512)
                 {
                     valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
-                    valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
-                    return;
                 }
-                // clang-format on
+                return;
             }
+            else if(in_cstride <= 512)
+            {
+                valid_kernels.push_back(GetKernelIdFromVariant(0, 1));
+                valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
+                return;
+            }
+            // clang-format on
         }
         valid_kernels.push_back(GetKernelIdFromVariant(1, 1));
     }
@@ -403,8 +407,9 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         //    be large enough
         //  - if C is not multiple of 2, intermediate results are stored in N dimension splitting
         //    float values in group of 2 bytes. N must be large enough
-        if((!bfp32parm && (c % 2 != 0 && last_zlocalsize < (size_t)stash_values)) ||
-           ((last_ylocalsize < stash_values) && (last_zlocalsize < (size_t)stash_values)))
+        if((!bfp32parm && (c % 2 != 0 && last_zlocalsize < static_cast<size_t>(stash_values))) ||
+           ((last_ylocalsize < stash_values) &&
+            (last_zlocalsize < static_cast<size_t>(stash_values))))
         {
             return false;
         }
@@ -428,7 +433,7 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
         //    be large enough
         stash_values *= (problem.GetXDesc().GetType() == miopenFloat ? 1 : 2);
-        if(last_ylocalsize < stash_values && last_zlocalsize < (size_t)stash_values)
+        if(last_ylocalsize < stash_values && last_zlocalsize < static_cast<size_t>(stash_values))
         {
             return false;
         }

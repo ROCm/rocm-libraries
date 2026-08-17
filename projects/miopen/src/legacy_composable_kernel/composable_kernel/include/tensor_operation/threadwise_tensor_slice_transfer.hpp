@@ -216,8 +216,7 @@ struct ThreadwiseTensorSliceTransfer_v1r3
                 is_dst_valid,
                 dst_vector.template AsType<dst_vector_t>()[Number<0>{}]);
 
-            constexpr auto move_on_dim = [&]() constexpr
-            {
+            constexpr auto move_on_dim = [&]() constexpr {
                 StaticallyIndexedArray<bool, nDim> move_on_dim_;
 
                 static_for<0, nDim, 1>{}([&](auto i) {
@@ -229,8 +228,7 @@ struct ThreadwiseTensorSliceTransfer_v1r3
                 });
 
                 return move_on_dim_;
-            }
-            ();
+            }();
 
             // move
             static_for<0, nDim, 1>{}([&](auto i) {
@@ -528,8 +526,7 @@ struct ThreadwiseTensorSliceTransfer_v2
                 dst_buf(Number<dst_offset>{}) = src_vector.template AsType<SrcData>()[i];
             });
 
-            constexpr auto move_on_dim = [&]() constexpr
-            {
+            constexpr auto move_on_dim = [&]() constexpr {
                 StaticallyIndexedArray<bool, nDim> move_on_dim_;
 
                 static_for<0, nDim, 1>{}([&](auto i) {
@@ -541,8 +538,7 @@ struct ThreadwiseTensorSliceTransfer_v2
                 });
 
                 return move_on_dim_;
-            }
-            ();
+            }();
 
             // move
             static_for<0, nDim, 1>{}([&](auto i) {
@@ -836,8 +832,7 @@ struct ThreadwiseTensorSliceTransfer_v3
                 buffer_(Number<buffer_offset>{}) = src_tmp_vector.template AsType<SrcData>()[i];
             });
 
-            constexpr auto move_on_dim = [&]() constexpr
-            {
+            constexpr auto move_on_dim = [&]() constexpr {
                 StaticallyIndexedArray<bool, nDim> move_on_dim_;
 
                 static_for<0, nDim, 1>{}([&](auto i) {
@@ -850,8 +845,7 @@ struct ThreadwiseTensorSliceTransfer_v3
                 });
 
                 return move_on_dim_;
-            }
-            ();
+            }();
 
             // move
             static_for<0, nDim, 1>{}([&](auto i) {
@@ -996,8 +990,7 @@ struct ThreadwiseTensorSliceTransfer_v3
                 is_dst_valid,
                 dst_tmp_vector.template AsType<dst_vector_t>()[Number<0>{}]);
 
-            constexpr auto move_on_dim = [&]() constexpr
-            {
+            constexpr auto move_on_dim = [&]() constexpr {
                 StaticallyIndexedArray<bool, nDim> move_on_dim_;
 
                 static_for<0, nDim, 1>{}([&](auto i) {
@@ -1010,8 +1003,7 @@ struct ThreadwiseTensorSliceTransfer_v3
                 });
 
                 return move_on_dim_;
-            }
-            ();
+            }();
 
             // move
             static_for<0, nDim, 1>{}([&](auto i) {

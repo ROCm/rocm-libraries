@@ -72,9 +72,7 @@ rocblas_status rocsolver_lauum_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     rocblas_int strideW = n * n;
     rocblas_int blocks = (n - 1) / BS2 + 1;
@@ -99,7 +97,6 @@ rocblas_status rocsolver_lauum_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(copy_mat<T>, grid, threads, 0, stream, n, n, work, 0, n, strideW, A,
                             shiftA, lda, strideA, no_mask{}, uplo);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

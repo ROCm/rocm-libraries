@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,14 @@ endif()
 
 if(BUILD_ROCSPARSE_ILP64)
   add_compile_options(-Drocsparse_ILP64)
+endif()
+
+if(BUILD_WITH_CSC_TRSV)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSV)
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+  add_compile_options(-DROCSPARSE_WITH_CSC_TRSM)
 endif()
 
 set(ROCSPARSE_BENCHMARK_SOURCES
@@ -75,6 +83,8 @@ set(ROCSPARSE_CLIENTS_COMMON
   ../common/rocsparse_importer_format_t.cpp
   ../common/rocsparse_clients_envariables.cpp
   ../common/rocsparse_clients_matrices_dir.cpp
+  ../common/rocsparse_clients_spmat_descr.cpp
+  ../common/rocsparse_clients_dnvec_descr.cpp
   ../common/rocsparseio.cpp
 )
 
@@ -110,6 +120,11 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spmm_batched_csc.cpp
 ../testings/testing_spmm_batched_coo.cpp
 ../testings/testing_spmm_batched_bell.cpp
+../testings/testing_sddmm_batched_ell.cpp
+../testings/testing_sddmm_batched_coo.cpp
+../testings/testing_sddmm_batched_coo_aos.cpp
+../testings/testing_sddmm_batched_csr.cpp
+../testings/testing_sddmm_batched_csc.cpp
 ../testings/testing_csrsm.cpp
 ../testings/testing_bsrsm.cpp
 ../testings/testing_gemmi.cpp
@@ -176,16 +191,24 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_v2_spmv_sell.cpp
 ../testings/testing_spsv_csr.cpp
 ../testings/testing_spsv_coo.cpp
+../testings/testing_spsv_csc.cpp
 ../testings/testing_sptrsv_csr.cpp
+../testings/testing_sptrsv_csc.cpp
 ../testings/testing_sptrsv_coo.cpp
 ../testings/testing_spitsv_csr.cpp
+../testings/testing_spic0.cpp
+../testings/testing_spilu0.cpp
+../testings/testing_sptrsv.cpp
 ../testings/testing_spsm_csr.cpp
+../testings/testing_spsm_csc.cpp
 ../testings/testing_spsm_coo.cpp
 ../testings/testing_sptrsm_csr.cpp
+../testings/testing_sptrsm_csc.cpp
 ../testings/testing_sptrsm_coo.cpp
 ../testings/testing_sparse_to_dense_coo.cpp
 ../testings/testing_sparse_to_dense_csr.cpp
 ../testings/testing_sparse_to_dense_csc.cpp
+../testings/testing_dense_to_sparse_bell.cpp
 ../testings/testing_dense_to_sparse_coo.cpp
 ../testings/testing_dense_to_sparse_csr.cpp
 ../testings/testing_dense_to_sparse_csc.cpp
@@ -211,6 +234,10 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
 )
+
+if(BUILD_WITH_ILDLT0)
+  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spildlt0.cpp)
+endif()
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 

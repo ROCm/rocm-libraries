@@ -3,111 +3,168 @@
 This document outlines the development roadmap for hipDNN, a comprehensive graph-based deep learning library for AMD GPUs. For current operation support details, refer to the [Operation Support documentation](./OperationSupport.md).
 
 > [!NOTE]
-> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements.
+> 📝 This roadmap is subject to change based on project priorities, community feedback, and technical requirements. The hipDNN team will endeavor to keep the roadmap up to date but the further out the quarter, the more speculative our plans. 😅
+>
+> ✅ = Done
+>
+> ⏳ = In progress
 
-## hipDNN Core
+## Q1 2026
 
-The following improvements represent foundational changes spanning all hipDNN components.
+**Focus:** Stable foundation & core operations
 
-### Near-Term Priorities
+### Conv
+- **Convolution MIOpen plugin support** ✅
+  - Including basic fusions ✅
 
-- **Version Management**: Implement consistent version numbering across Frontend, SDKs, and Backend components
-- **EngineId Management**: Update engineId registration to support plugin development workflows
-- **Enhanced Logging**: Add detailed logging for API calls and runtime graph serialization capture
-- **Persistence**: Implement graph save and load functionality
-- **Benchmarking & Validation**: Develop Python-based tool suite for graph execution, performance measurement, and validation
+### Normalization
+- **Batch normalization MIOpen plugin support** ✅
+  - Including basic fusions ✅
+- **LayerNorm & RMSNorm frontend API** ✅
 
-### Longer-Term Priorities
+### GEMM
+- **Initial frontend GEMM API support** ✅
+- hipBLASLt plugin initial enablement ✅
 
-- **Execution Plan Persistence**: Implement save and load functionality for execution plans
-- **API Extensions**: Add support for behavioral notes and tunable knobs
-- **Plugin Systems**:
-  - Benchmarking and tuning plugin system (see [Design.md](./Design.md#high-level-architecture))
-  - Heuristic plugin system (see [Design.md](./Design.md#high-level-architecture))
+### SDPA
+- **SDPA frontend API & backend descriptors** ✅
 
-## Frontend
+### Core
+- **Stable, robust library to build upon** ✅
+- Kernel engine settings (Engine knob configurations API + implementation) ✅
+  - Ex. Flag for enabling benchmarking mode on MIOpen plugin
+- Initial Python bindings POC ✅
+- Initial benchmarking & performance tooling ✅
 
-The Frontend provides the user-facing C++ API, focusing on usability and feature completeness.
+## Q2 2026 (Current milestone)
 
-### Near-Term Priorities
+**Focus:** SDPA forward path, client auto-tuning, performance-tooling, and a generated support matrix.
 
-- **Python API**: Add Python frontend for broader accessibility
-- **Engine Selection**: Enhance documentation and headers for available engines and preferred source selection
+### SDPA
+- First-wave SDPA forward kernels callable end-to-end through the graph API ⏳
+  - SDPA forward golden-reference data + tests landed ✅
+  - Forward GPU reference, LSE/stats output, and causal-grid fixes in progress ⏳
+- Overridable tensor shapes API (required for variable sequence lengths) ✅
+  - Phase 1 override-shape plumbing landed (RFC 0008) ✅
+- Note: SDPA backward pass is now in active development (mask support, FP32 gradient accumulation); production-quality backward and SDPA feature-flag gating remain tracked in later quarters
 
-### Longer-Term Priorities
+### Auto-tuning
+- **Client auto-tuning API** ⏳
+  - Autotune RFC merged ✅
+  - Initial implementation and config op-matching in progress ⏳
+- Build N alternative execution plans for a single graph ⏳
+- Sampling run that ranks plans by wall-time and selects a winner ⏳
+- Export auto-tuning result to a config file for reuse across runs ⏳
 
-- **Extended Operations**: Support additional operation types
-- **Dynamic Loading**: Enable runtime loading of hipDNN backend libraries
+### Benchmarking & performance testing
 
-## Backend
+> [!IMPORTANT]
+> The dnn-benchmarking tool has moved to its own repository: [ROCm/dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking).
 
-The Backend manages plugins and orchestrates graph execution. See [Design.md](./Design.md) for detailed architecture information.
+- **Benchmarking & performance Python tools** ⏳
+  - Core dnn-benchmarking tool (engine comparison, SDPA/PyTorch references, HIP-event timing) landed ✅
+  - Cross-platform (Windows) port in progress ⏳
 
-### Longer-Term Priorities
+### Support matrix
+- Integration tests emit structured pass/fail per op × datatype × engine × architecture ✅
+- Generation step produces a human-readable support matrix from those results ✅
+- Per-graph engine support-claims model defined (RFC 0015) ✅
 
-- **C API Support**: Add graph building C API for language interoperability
-- **Custom Schema Support**: Allow users to extend graphs without recompiling hipDNN backend
+### Heuristics
+- **Engine selection config file support** ✅
+  - Frontend heuristic policy enumeration API landed (RFC 0007) ✅
 
-## SDKs
+### Core
+- Kernel engine tagging & filtering ✅
+  - Behavioral notes for filtering ✅
+- **Graph + execution-plan binary serialize/deserialize** ✅
 
-hipDNN provides three SDK libraries ensuring compatibility between Frontend, Backend, and Plugins:
-- **Data SDK** (`data_sdk`): FlatBuffers schemas and data structures for graph representation
-- **Plugin SDK** (`plugin_sdk`): Plugin API and utilities for creating engine plugins
-- **Test SDK** (`test_sdk`): Testing utilities and CPU reference implementations for plugin validation
+## Q3 2026
 
-### Near-Term Priorities
+**Focus:** SDPA, GEMM with MX low-precision data types, better heuristics & improved kernel provider selection
 
-- **Test SDK Expansion**: Continue extracting testing utilities from MIOpen plugin into the unified Test SDK
-- **CPU Reference Coverage**: Expand CPU reference implementations for additional operations
+### SDPA
+- Wider SDPA support
+- **rocKE SDPA plugin for hipDNN** — ROCm Kernel Engine SDPA provider plugin
+  - ROCm Kernel Engine (rocKE) proof-of-concept underway, including a tiled C-JIT SDPA path ⏳
 
-## Plugins
+### GEMM
+- **hipBLASLt plugin expanded operation & datatype support** ⏳
+  - FP8 (OCP) dequantize + GEMM path in progress ⏳
+- MX GEMMs through the hipBLASLt provider plugin ⏳
+- Documented constraints surfaced for graph builders (alignment, batch, epilogues)
 
-Plugins extend hipDNN's computational capabilities. See [Design.md](./Design.md#engine-plugins) for plugin architecture details.
+### MOE (Mixture of Experts)
+- MOE frontend and backend POC (limited coverage)
 
-### MIOpen Plugin
+### Heuristics
+- Heuristic plugin API
+- Plugin architecture ⏳
+- Phase 1 heuristic plugin: providing heuristic engine selection for limited architectures or team may pivot to support heuristics on rocKE
 
-#### Near-Term Priorities
+### Normalization
+- Expanded LayerNorm & RMSNorm kernel coverage in the HIP kernel provider
+- Expanded layout & datatype coverage for batchnorm
 
-- **Fusion Support**: Complete integration for Convolution fusions
-- **Batchnorm Running Stats**: Add support for running statistics in Batchnorm operations
-- **Code Refactoring**: Extract common MIOpen plugin code into reusable Plugin SDK and Test SDK components
+### Support matrix
+- Matrix published as a regular CI artifact ⏳
+- Bundled Integration Tests ⏳
 
-### Fusilli IREE Plugin
+### Benchmarking & performance testing
+- Set up CICD for the project ⏳
 
-#### Near-Term Priorities
+### PyTorch
+- **PyTorch integration for opt-in hipDNN backend** ⏳
 
-- **Batchnorm Inference**: Implement Batchnorm inference with fusion support
-- **Convolution**: Implement Forward Convolution with fusion support
+### cuDNN compatibility
+- **cuDNN v9 frontend compatibility shim** behind `HIPDNN_ENABLE_CUDNN_COMPATIBILITY` ⏳
+  - Shim skeleton landed ✅
+  - Enum coverage in progress ⏳
 
-#### Mid-Term Priorities
+### MIOpen integration
+- **MIOpen ↔ hipDNN shim** enabling MIOpen to route through hipDNN (RFC stage)
+  - MIOpen superbuild integration ✅
 
-- **Batchnorm Training**: Implement Batchnorm training with fusion support
-- **Convolution**: Implement Backward Convolution (Data & Weight) with fusion support
-- **GEMM**: Implement GEMM operations with fusion support
+### Core
+- Add **hipRTC & caching support** to plugin SDK (Empowers plugin developers, and standardizes caching of artifacts)
+- Kernel engine tagging & filtering
+  - Numeric notes for filtering
+  - Client API to enable filtering
+- Python API wrappers (general availability beyond POC) ⏳
+- Plugin SDK utility expansion to further streamline new-provider development
 
-#### Longer-Term Priorities
+## Q4 2026 & beyond
 
-- **Attention**: Implement Attention operations with fusion support
+**Focus:** Q4 and beyond is far enough out, that there is substantial uncertainty on what will be the most important features at this time. We value community input on what you would like to see!
 
-### General Plugin Ecosystem
+### Increase operational support coverage
+- Additional high performance static fusion support for priority use cases
+- Additional JIT graph support for operations
+- Improve general operational support for operations:
+  - Additional layout support
+  - Additional datatype support
 
-#### Longer-Term Priorities
+### Benchmarking & performance testing
+- Bindings installable as wheels
+- App installable as wheel
 
-- **Extended Plugin Support**: Develop additional plugins to broaden graph support
+### More framework integrations
+- Currently discussing timelines for various framework integrations. Roadmap will be updated as they are defined.
 
-## Testing and Performance
+### Normalization
+- **Distributed normalization support**
 
-### Near-Term Priorities
-
-- **Sample Validation**: Integrate [samples](../samples/README.md) into CI to validate installation and ensure functionality
-- **Reference Plugin**: Create a reference plugin using the Test SDK for validation against other plugins
-
-### Longer-Term Priorities
-
-- **ASAN Integration**: Add AddressSanitizer as an automated CI step
+### Core
+- Fallback (graph splitting) engine
+- Expanded performance and validation suites for hipDNN full install (using real user workloads and benchmarks to drive testing)
+- AOT graph compilation without devices present (Pre-compile graph support)
+- **hipGraph support**
+- Support dynamic linking to backend (enables forwards and backwards compatible client libraries)
+  - Save/Load Execution plans (binary serialize/deserialize of graph + execution plan landed in Q2; full save/load across dynamic linking tracked here)
+- Non-standard tensor support (ragged, non-packed, vectorized)
 
 ## Contributing
 
 hipDNN is an open-source project that welcomes community contributions. Your feedback shapes the project's direction.
 
-For contribution guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md). For questions or suggestions, please open an issue in the hipDNN repository.
+For contribution guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md). For questions or suggestions, please open an issue in the [hipDNN repository](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipdnn).

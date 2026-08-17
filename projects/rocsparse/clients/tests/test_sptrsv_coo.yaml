@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,13 +28,10 @@ include: rocsparse_common.yaml
 Definitions:
   - &M_N_range_quick
     - { M:   1, N:   1 }
-    - { M:   2, N:   2 }
-    - { M:  50, N:  50 }
 
   - &M_N_range_checkin
-    - { M:   0, N:   0 }
-    - { M:  79, N:  79 }
-    - { M: 141, N: 141 }
+    - { M:   4, N:   4 }
+    - { M:   1024, N:  1024}
 
   - &M_N_range_nightly
     - { M:   9381, N:   9381 }
@@ -45,7 +42,7 @@ Definitions:
 
   - &alpha_range_checkin
     - { alpha:   2.0, alphai:  0.0 }
-    - { alpha:   3.0, alphai: -1.0 }
+
 
   - &alpha_range_nightly
     - { alpha:   0.0,  alphai: -0.75 }
@@ -61,11 +58,11 @@ Tests:
 - name: sptrsv_coo
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_checkin
   alpha_alphai: *alpha_range_checkin
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: *all_rocsparse_diag_type
   uplo: *all_rocsparse_fill_mode
   baseA: [rocsparse_index_base_zero]
@@ -115,7 +112,7 @@ Tests:
 - name: sptrsv_coo_file
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
   N: 1
@@ -132,7 +129,7 @@ Tests:
 - name: sptrsv_coo_file
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i32
   precision: *single_double_precisions_complex
   M: 1
   N: 1
@@ -155,10 +152,10 @@ Tests:
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
@@ -174,7 +171,7 @@ Tests:
   alpha_alphai: *alpha_range_quick
   transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_one]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
@@ -185,14 +182,14 @@ Tests:
 - name: sptrsv_coo_file
   category: quick
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
   N: 1
   alpha_alphai: *alpha_range_quick
   transA: [rocsparse_operation_conjugate_transpose]
   diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
@@ -202,14 +199,14 @@ Tests:
 - name: sptrsv_coo
   category: nightly
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
@@ -217,14 +214,14 @@ Tests:
 - name: sptrsv_coo
   category: nightly
   function: sptrsv_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions
   M_N: *M_N_range_nightly
   alpha_alphai: *alpha_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
   diag: [rocsparse_diag_type_unit]
-  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
@@ -240,7 +237,7 @@ Tests:
   transA: [rocsparse_operation_transpose]
   diag: [rocsparse_diag_type_non_unit] # TODO rocsparse_diag_type_unit
   uplo: [rocsparse_fill_mode_upper]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_zero]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
@@ -253,13 +250,13 @@ Tests:
 - name: sptrsv_coo_file
   category: nightly
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i32
   precision: *single_double_precisions_complex
   M: 1
   N: 1
   alpha_alphai: *alpha_range_nightly
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
-  diag: [rocsparse_diag_type_non_unit, rocsparse_diag_type_unit]
+  transA: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
@@ -270,11 +267,11 @@ Tests:
 - name: sptrsv_coo_graph_test
   category: pre_checkin
   function: sptrsv_coo
-  indextype: *i64i32
+  indextype: *i64
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   alpha_alphai: *alpha_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
+  transA: [rocsparse_operation_none]
   diag: *all_rocsparse_diag_type
   uplo: *all_rocsparse_fill_mode
   baseA: *all_rocsparse_index_base

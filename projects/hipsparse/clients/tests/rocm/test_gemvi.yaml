@@ -71,3 +71,18 @@ Tests:
   betai: [0.7]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+
+- name: gemvi
+  category: pre_checkin
+  function: gemvi
+  precision: *double_only_precisions_complex_real
+  M: [2345]
+  N: [2174]
+  nnz: [237]
+  alpha: [-0.5]
+  alphai: [-0.2]
+  beta: [0.5]
+  betai: [1.7]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  graph_test: [true]

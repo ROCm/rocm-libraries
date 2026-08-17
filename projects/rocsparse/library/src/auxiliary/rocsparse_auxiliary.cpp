@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_status status)
 {
@@ -52,10 +53,8 @@ const char* rocsparse::enum_utils::to_string(rocsparse_status status)
         return "memory error";
     case rocsparse_status_internal_error:
         return "internal error";
-        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "invalid value";
-        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "arch mismatch";
     case rocsparse_status_zero_pivot:
@@ -71,11 +70,11 @@ const char* rocsparse::enum_utils::to_string(rocsparse_status status)
     case rocsparse_status_continue:
         return "continue";
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_pointer_mode value)
 {
@@ -88,11 +87,11 @@ const char* rocsparse::enum_utils::to_string(rocsparse_pointer_mode value)
         CASE(rocsparse_pointer_mode_host);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spmat_attribute value)
 {
@@ -107,9 +106,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmat_attribute value)
         CASE(rocsparse_spmat_storage_mode);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -124,9 +121,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_diag_type value)
         CASE(rocsparse_diag_type_non_unit);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -141,9 +136,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_fill_mode value_)
         CASE(rocsparse_fill_mode_upper);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -158,9 +151,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_storage_mode value_)
         CASE(rocsparse_storage_mode_unsorted);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -175,9 +166,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_index_base value_)
         CASE(rocsparse_index_base_one);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -194,9 +183,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_matrix_type value_)
         CASE(rocsparse_matrix_type_triangular);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -211,9 +198,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_direction value_)
         CASE(rocsparse_direction_column);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -229,9 +214,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_operation value_)
         CASE(rocsparse_operation_conjugate_transpose);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -242,14 +225,12 @@ const char* rocsparse::enum_utils::to_string(rocsparse_indextype value_)
         return #C
     switch(value_)
     {
-        CASE(rocsparse_indextype_u16);
+        CASE(deprecated_rocsparse_indextype_u16);
         CASE(rocsparse_indextype_i32);
         CASE(rocsparse_indextype_i64);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -272,9 +253,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_datatype value_)
         CASE(rocsparse_datatype_bf16_r);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -289,9 +268,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_order value_)
         CASE(rocsparse_order_column);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -306,9 +283,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_action value)
         CASE(rocsparse_action_symbolic);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -322,9 +297,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_solve_policy value_)
         CASE(rocsparse_solve_policy_auto);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -339,9 +312,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_analysis_policy value_)
         CASE(rocsparse_analysis_policy_force);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -362,10 +333,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_format value_)
         CASE(rocsparse_format_sell);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmat_attribute value)
@@ -503,7 +473,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_indextype value_)
 {
     switch(value_)
     {
-    case rocsparse_indextype_u16:
+    case deprecated_rocsparse_indextype_u16:
     case rocsparse_indextype_i32:
     case rocsparse_indextype_i64:
     {
@@ -618,6 +588,56 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+/********************************************************************************
+ * \brief rocsparse_handle_create creates the rocsparse library context on a
+ * user-defined stream. All device memory allocation and stream-ordered setup
+ * work is enqueued on the provided stream (which also becomes the handle stream),
+ * so handle creation never touches the default (NULL) stream and never blocks
+ * the calling CPU thread or other GPU streams.
+ *******************************************************************************/
+rocsparse_status
+    rocsparse_handle_create(rocsparse_handle* handle, hipStream_t stream, rocsparse_error* p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, handle);
+    *handle = new _rocsparse_handle(stream);
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_handle_destroy destroys the rocsparse library context and
+ * releases all resources used by the rocSPARSE library.
+ *******************************************************************************/
+rocsparse_status rocsparse_handle_destroy(rocsparse_handle handle, rocsparse_error* p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // A null handle is accepted and treated as a no-op (matching free/delete
+    // semantics), so destroying an already-null handle is not an error.
+    if(handle != nullptr)
+    {
+        delete handle;
+    }
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
+
 /********************************************************************************
  * \brief destroy handle
  *******************************************************************************/
@@ -659,10 +679,8 @@ const char* rocsparse_get_status_name(rocsparse_status status)
         return "rocsparse_status_memory_error";
     case rocsparse_status_internal_error:
         return "rocsparse_status_internal_error";
-        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "rocsparse_status_invalid_value";
-        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "rocsparse_status_arch_mismatch";
     case rocsparse_status_zero_pivot:
@@ -703,10 +721,8 @@ const char* rocsparse_get_status_description(rocsparse_status status)
         return "failed memory allocation, copy, dealloc";
     case rocsparse_status_internal_error:
         return "other internal library failure";
-        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "invalid value parameter";
-        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "device arch is not supported";
     case rocsparse_status_zero_pivot:
@@ -804,6 +820,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, stream_id);
     rocsparse::log_trace(handle, "rocsparse_get_stream", *stream_id);
 
     RETURN_IF_ROCSPARSE_ERROR(handle->get_stream(stream_id));
@@ -828,6 +845,7 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, version);
     *version = ROCSPARSE_VERSION_MAJOR * 100000 + ROCSPARSE_VERSION_MINOR * 100
                + ROCSPARSE_VERSION_PATCH;
 
@@ -1228,10 +1246,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->ell_col_ind, sizeof(rocsparse_int) * src->ell_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->ell_col_ind,
-                                      src->ell_col_ind,
-                                      sizeof(rocsparse_int) * src->ell_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->ell_col_ind,
+                                                src->ell_col_ind,
+                                                sizeof(rocsparse_int) * src->ell_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->ell_val != nullptr)
@@ -1240,8 +1258,8 @@ try
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->ell_val, T_size * src->ell_nnz));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            dest->ell_val, src->ell_val, T_size * src->ell_nnz, hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_row_ind != nullptr)
@@ -1251,10 +1269,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_row_ind, sizeof(rocsparse_int) * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_row_ind,
-                                      src->coo_row_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_row_ind,
+                                                src->coo_row_ind,
+                                                sizeof(rocsparse_int) * src->coo_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_col_ind != nullptr)
@@ -1264,10 +1282,10 @@ try
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMalloc(&dest->coo_col_ind, sizeof(rocsparse_int) * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(hipMemcpy(dest->coo_col_ind,
-                                      src->coo_col_ind,
-                                      sizeof(rocsparse_int) * src->coo_nnz,
-                                      hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(dest->coo_col_ind,
+                                                src->coo_col_ind,
+                                                sizeof(rocsparse_int) * src->coo_nnz,
+                                                hipMemcpyDeviceToDevice));
     }
 
     if(src->coo_val != nullptr)
@@ -1276,8 +1294,8 @@ try
         {
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&dest->coo_val, T_size * src->coo_nnz));
         }
-        RETURN_IF_HIP_ERROR(
-            hipMemcpy(dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpy(
+            dest->coo_val, src->coo_val, T_size * src->coo_nnz, hipMemcpyDeviceToDevice));
     }
 
     dest->m           = src->m;
@@ -1312,7 +1330,7 @@ try
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up ELL part
     if(hyb->ell_col_ind != nullptr)
@@ -1411,6 +1429,19 @@ try
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_bsrmv_info(dest_bsrmv_info, src_bsrmv_info));
     }
 
+    rocsparse_coomv_info src_coomv_info  = src->get_coomv_info();
+    rocsparse_coomv_info dest_coomv_info = dest->get_coomv_info();
+    if(src_coomv_info != nullptr)
+    {
+        if(dest_coomv_info == nullptr)
+        {
+            dest_coomv_info = new _rocsparse_coomv_info();
+            dest->set_coomv_info(dest_coomv_info);
+        }
+
+        dest_coomv_info->max_nnz_per_row = src_coomv_info->max_nnz_per_row;
+    }
+
     if(src->csrgemm_info != nullptr)
     {
         if(dest->csrgemm_info == nullptr)
@@ -1430,11 +1461,7 @@ try
         hipStream_t default_stream{};
         dest->csritsv_info->copy(src->csritsv_info, default_stream);
     }
-
-    dest->boost_enable   = src->boost_enable;
-    dest->boost_tol_size = src->boost_tol_size;
-    dest->boost_tol      = src->boost_tol;
-    dest->boost_val      = src->boost_val;
+    dest->get_boost()->copy(*src->get_boost());
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -1837,7 +1864,6 @@ catch(...)
 // LCOV_EXCL_STOP
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1858,7 +1884,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -1906,7 +1931,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
 }
 
 _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
-                                               bool                 analysed_,
                                                int64_t              batch_count_,
                                                int64_t              m_,
                                                int64_t              n_,
@@ -1929,7 +1953,6 @@ _rocsparse_spmat_descr::_rocsparse_spmat_descr(rocsparse_format     format_,
                                                rocsparse_mat_descr  descr_,
                                                rocsparse_mat_info   info_)
     : init(true)
-    , analysed(analysed_)
     ,
 
     rows(m_)
@@ -2251,7 +2274,6 @@ try
     *descr = new _rocsparse_spmat_descr;
 
     (*descr)->init = true;
-
     (*descr)->rows = rows;
     (*descr)->cols = cols;
     (*descr)->nnz  = nnz;
@@ -2624,8 +2646,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols > cols), rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2697,8 +2721,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, ell_cols > cols, rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, rows * ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2928,9 +2954,9 @@ catch(...)
  * using rocsparse_destroy_spmat_descr(). All data pointers remain valid.
  *******************************************************************************/
 rocsparse_status rocsparse_create_bsr_descr(rocsparse_spmat_descr* descr,
-                                            int64_t                mb,
-                                            int64_t                nb,
-                                            int64_t                nnzb,
+                                            int64_t                brows,
+                                            int64_t                bcols,
+                                            int64_t                bnnz,
                                             rocsparse_direction    block_dir,
                                             int64_t                block_dim,
                                             void*                  bsr_row_ptr,
@@ -2945,16 +2971,16 @@ try
     ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
-    ROCSPARSE_CHECKARG_SIZE(1, mb);
-    ROCSPARSE_CHECKARG_SIZE(2, nb);
-    ROCSPARSE_CHECKARG_SIZE(3, nnzb);
-    ROCSPARSE_CHECKARG(3, nnzb, (nnzb > mb * nb), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_SIZE(1, brows);
+    ROCSPARSE_CHECKARG_SIZE(2, bcols);
+    ROCSPARSE_CHECKARG_SIZE(3, bnnz);
+    ROCSPARSE_CHECKARG(3, bnnz, (bnnz > brows * bcols), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_ENUM(4, block_dir);
     ROCSPARSE_CHECKARG_SIZE(5, block_dim);
     ROCSPARSE_CHECKARG(5, block_dim, (block_dim == 0), rocsparse_status_invalid_size);
-    ROCSPARSE_CHECKARG_ARRAY(6, mb, bsr_row_ptr);
-    ROCSPARSE_CHECKARG_ARRAY(7, nnzb, bsr_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(8, nnzb, bsr_val);
+    ROCSPARSE_CHECKARG_ARRAY(6, brows, bsr_row_ptr);
+    ROCSPARSE_CHECKARG_ARRAY(7, bnnz, bsr_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(8, bnnz, bsr_val);
     ROCSPARSE_CHECKARG_ENUM(9, row_ptr_type);
     ROCSPARSE_CHECKARG_ENUM(10, col_ind_type);
     ROCSPARSE_CHECKARG_ENUM(11, idx_base);
@@ -2964,9 +2990,9 @@ try
 
     (*descr)->init = true;
 
-    (*descr)->rows = mb;
-    (*descr)->cols = nb;
-    (*descr)->nnz  = nnzb;
+    (*descr)->rows = brows;
+    (*descr)->cols = bcols;
+    (*descr)->nnz  = bnnz;
 
     (*descr)->row_data = bsr_row_ptr;
     (*descr)->col_data = bsr_col_ind;
@@ -2996,6 +3022,86 @@ try
     (*descr)->batch_stride                = 0;
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+rocsparse_status rocsparse_create_const_bsr_descr(rocsparse_const_spmat_descr* descr,
+                                                  int64_t                      brows,
+                                                  int64_t                      bcols,
+                                                  int64_t                      bnnz,
+                                                  rocsparse_direction          block_dir,
+                                                  int64_t                      block_dim,
+                                                  const void*                  bsr_row_ptr,
+                                                  const void*                  bsr_col_ind,
+                                                  const void*                  bsr_val,
+                                                  rocsparse_indextype          row_ptr_type,
+                                                  rocsparse_indextype          col_ind_type,
+                                                  rocsparse_index_base         idx_base,
+                                                  rocsparse_datatype           data_type)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG_SIZE(1, brows);
+    ROCSPARSE_CHECKARG_SIZE(2, bcols);
+    ROCSPARSE_CHECKARG_SIZE(3, bnnz);
+    ROCSPARSE_CHECKARG(3, bnnz, (bnnz > brows * bcols), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_ENUM(4, block_dir);
+    ROCSPARSE_CHECKARG_SIZE(5, block_dim);
+    ROCSPARSE_CHECKARG(5, block_dim, (block_dim == 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG_ARRAY(6, brows, bsr_row_ptr);
+    ROCSPARSE_CHECKARG_ARRAY(7, bnnz, bsr_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(8, bnnz, bsr_val);
+    ROCSPARSE_CHECKARG_ENUM(9, row_ptr_type);
+    ROCSPARSE_CHECKARG_ENUM(10, col_ind_type);
+    ROCSPARSE_CHECKARG_ENUM(11, idx_base);
+    ROCSPARSE_CHECKARG_ENUM(12, data_type);
+
+    rocsparse_spmat_descr new_descr = new _rocsparse_spmat_descr;
+
+    new_descr->init = true;
+
+    new_descr->rows = brows;
+    new_descr->cols = bcols;
+    new_descr->nnz  = bnnz;
+
+    new_descr->row_data = nullptr;
+    new_descr->col_data = nullptr;
+    new_descr->val_data = nullptr;
+
+    new_descr->const_row_data = bsr_row_ptr;
+    new_descr->const_col_data = bsr_col_ind;
+    new_descr->const_val_data = bsr_val;
+
+    new_descr->row_type  = row_ptr_type;
+    new_descr->col_type  = col_ind_type;
+    new_descr->data_type = data_type;
+
+    new_descr->idx_base = idx_base;
+    new_descr->format   = rocsparse_format_bsr;
+
+    new_descr->block_dim = block_dim;
+    new_descr->block_dir = block_dir;
+
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_descr(&new_descr->descr));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_create_mat_info(&new_descr->info));
+
+    // Initialize descriptor
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(new_descr->descr, idx_base));
+
+    new_descr->batch_count                 = 1;
+    new_descr->batch_stride                = 0;
+    new_descr->offsets_batch_stride        = 0;
+    new_descr->columns_values_batch_stride = 0;
+
+    *descr = new_descr;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -3337,8 +3443,8 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
                                          int64_t*                    brows,
                                          int64_t*                    bcols,
                                          int64_t*                    bnnz,
-                                         rocsparse_direction*        bdir,
-                                         int64_t*                    bdim,
+                                         rocsparse_direction*        block_dir,
+                                         int64_t*                    block_dim,
                                          const void**                bsr_row_ptr,
                                          const void**                bsr_col_ind,
                                          const void**                bsr_val,
@@ -3350,36 +3456,20 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Check for valid pointers
-    if(descr == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check for invalid size pointers
-    if(brows == nullptr || bcols == nullptr || bnnz == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check for invalid data pointers
-    if(bsr_row_ptr == nullptr || bsr_col_ind == nullptr || bsr_val == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check for invalid property pointers
-    if(row_ptr_type == nullptr || col_ind_type == nullptr || idx_base == nullptr
-       || data_type == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check if descriptor has been initialized
-    if(descr->init == false)
-    {
-        return rocsparse_status_not_initialized;
-    }
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, brows);
+    ROCSPARSE_CHECKARG_POINTER(2, bcols);
+    ROCSPARSE_CHECKARG_POINTER(3, bnnz);
+    ROCSPARSE_CHECKARG_POINTER(4, block_dir);
+    ROCSPARSE_CHECKARG_POINTER(5, block_dim);
+    ROCSPARSE_CHECKARG_POINTER(6, bsr_row_ptr);
+    ROCSPARSE_CHECKARG_POINTER(7, bsr_col_ind);
+    ROCSPARSE_CHECKARG_POINTER(8, bsr_val);
+    ROCSPARSE_CHECKARG_POINTER(9, row_ptr_type);
+    ROCSPARSE_CHECKARG_POINTER(10, col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(11, idx_base);
+    ROCSPARSE_CHECKARG_POINTER(12, data_type);
 
     *brows = descr->rows;
     *bcols = descr->cols;
@@ -3393,8 +3483,8 @@ try
     *col_ind_type = descr->col_type;
     *idx_base     = descr->idx_base;
     *data_type    = descr->data_type;
-    *bdim         = descr->block_dim;
-    *bdir         = descr->block_dir;
+    *block_dim    = descr->block_dim;
+    *block_dir    = descr->block_dir;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -3408,8 +3498,8 @@ rocsparse_status rocsparse_bsr_get(const rocsparse_spmat_descr descr,
                                    int64_t*                    brows,
                                    int64_t*                    bcols,
                                    int64_t*                    bnnz,
-                                   rocsparse_direction*        bdir,
-                                   int64_t*                    bdim,
+                                   rocsparse_direction*        block_dir,
+                                   int64_t*                    block_dim,
                                    void**                      bsr_row_ptr,
                                    void**                      bsr_col_ind,
                                    void**                      bsr_val,
@@ -3421,36 +3511,20 @@ try
 {
     ROCSPARSE_ROUTINE_TRACE;
 
-    // Check for valid pointers
-    if(descr == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check for invalid size pointers
-    if(brows == nullptr || bcols == nullptr || bnnz == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check for invalid data pointers
-    if(bsr_row_ptr == nullptr || bsr_col_ind == nullptr || bsr_val == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check for invalid property pointers
-    if(row_ptr_type == nullptr || col_ind_type == nullptr || idx_base == nullptr
-       || data_type == nullptr)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-
-    // Check if descriptor has been initialized
-    if(descr->init == false)
-    {
-        return rocsparse_status_not_initialized;
-    }
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, brows);
+    ROCSPARSE_CHECKARG_POINTER(2, bcols);
+    ROCSPARSE_CHECKARG_POINTER(3, bnnz);
+    ROCSPARSE_CHECKARG_POINTER(4, block_dir);
+    ROCSPARSE_CHECKARG_POINTER(5, block_dim);
+    ROCSPARSE_CHECKARG_POINTER(6, bsr_row_ptr);
+    ROCSPARSE_CHECKARG_POINTER(7, bsr_col_ind);
+    ROCSPARSE_CHECKARG_POINTER(8, bsr_val);
+    ROCSPARSE_CHECKARG_POINTER(9, row_ptr_type);
+    ROCSPARSE_CHECKARG_POINTER(10, col_ind_type);
+    ROCSPARSE_CHECKARG_POINTER(11, idx_base);
+    ROCSPARSE_CHECKARG_POINTER(12, data_type);
 
     *brows = descr->rows;
     *bcols = descr->cols;
@@ -3464,8 +3538,8 @@ try
     *col_ind_type = descr->col_type;
     *idx_base     = descr->idx_base;
     *data_type    = descr->data_type;
-    *bdim         = descr->block_dim;
-    *bdir         = descr->block_dir;
+    *block_dim    = descr->block_dim;
+    *block_dir    = descr->block_dir;
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -3974,8 +4048,9 @@ try
     ROCSPARSE_CHECKARG(
         3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    // The row pointer is being reassigned, so the cached line-length profile
+    // (used by the default SpMM/SpMV algorithm selection) is now stale.
+    descr->line_profile.known = false;
 
     descr->row_data = csr_row_ptr;
     descr->col_data = csr_col_ind;
@@ -4014,8 +4089,9 @@ try
     ROCSPARSE_CHECKARG(
         3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
+    // The column pointer is being reassigned, so the cached line-length profile
+    // (used by the default SpMM/SpMV algorithm selection) is now stale.
+    descr->line_profile.known = false;
 
     descr->row_data = csc_row_ind;
     descr->col_data = csc_col_ptr;
@@ -4073,18 +4149,13 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
-
     ROCSPARSE_CHECKARG_POINTER(1, bsr_row_ptr);
     ROCSPARSE_CHECKARG(
         2, bsr_col_ind, descr->nnz > 0 && bsr_col_ind == nullptr, rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
         3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
-
-    // Sparsity structure might have changed, analysis is required before calling SpMV
-    descr->analysed = false;
 
     descr->row_data = bsr_row_ptr;
     descr->col_data = bsr_col_ind;
@@ -4093,6 +4164,43 @@ try
     descr->const_row_data = bsr_row_ptr;
     descr->const_col_data = bsr_col_ind;
     descr->const_val_data = bsr_val;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_bell_set_pointers sets the sparse Blocked ELL matrix data pointers.
+ *******************************************************************************/
+rocsparse_status
+    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+
+    const int64_t brows = (descr->rows + descr->block_dim - 1) / descr->block_dim;
+
+    ROCSPARSE_CHECKARG(1,
+                       bell_col_ind,
+                       brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
+                       rocsparse_status_invalid_pointer);
+    ROCSPARSE_CHECKARG(2,
+                       bell_val,
+                       brows * descr->ell_cols > 0 && bell_val == nullptr,
+                       rocsparse_status_invalid_pointer);
+
+    descr->col_data = bell_col_ind;
+    descr->val_data = bell_val;
+
+    descr->const_col_data = bell_col_ind;
+    descr->const_val_data = bell_val;
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -4474,6 +4582,7 @@ try
                        rocsparse_status_invalid_value);
 
     descr->batch_count                 = batch_count;
+    descr->batch_stride                = columns_values_batch_stride;
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = columns_values_batch_stride;
 
@@ -4511,6 +4620,34 @@ try
     descr->batch_count                 = batch_count;
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = rows_values_batch_stride;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_ell_set_strided_batch sets the ELL sparse matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_ell_set_strided_batch(rocsparse_spmat_descr descr,
+                                                 rocsparse_int         batch_count,
+                                                 int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+    ROCSPARSE_CHECKARG(2, batch_stride, (batch_stride < 0), rocsparse_status_invalid_value);
+
+    descr->batch_count  = batch_count;
+    descr->batch_stride = batch_stride;
+
     return rocsparse_status_success;
     // LCOV_EXCL_START
 }
@@ -4710,6 +4847,54 @@ catch(...)
     RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
+
+/********************************************************************************
+ * \brief rocsparse_dnvec_descr_create_scalar creates a descriptor for a single
+ * scalar, recording whether the scalar lives in host or device memory. It is a
+ * convenience wrapper meant to feed scalar arguments (e.g. the scaling factor of
+ * rocsparse_spmat_scale) as a self-describing dense vector descriptor.
+ *
+ * Gated behind the ROCSPARSE_WITH_SPMAT_SCALE build-time feature flag.
+ *******************************************************************************/
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
+rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
+                                                     rocsparse_dnvec_descr* descr,
+                                                     rocsparse_pointer_mode pointer_mode,
+                                                     rocsparse_datatype     data_type,
+                                                     const void*            const_values,
+                                                     void*                  values,
+                                                     rocsparse_error*       p_error)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // p_error is reserved for forward compatibility and is not populated yet.
+    (void)p_error;
+
+    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    ROCSPARSE_CHECKARG_POINTER(1, descr);
+    ROCSPARSE_CHECKARG_ENUM(2, pointer_mode);
+    ROCSPARSE_CHECKARG_ENUM(3, data_type);
+    ROCSPARSE_CHECKARG_POINTER(4, const_values);
+    ROCSPARSE_CHECKARG(
+        5, values, (values != nullptr && values != const_values), rocsparse_status_invalid_pointer);
+
+    static constexpr int64_t size        = 1;
+    static constexpr int64_t batch_count = 1;
+    static constexpr int64_t inc         = 1;
+    static constexpr int64_t batch_dist  = 0;
+    descr[0]                             = new _rocsparse_dnvec_descr(
+        batch_count, size, data_type, const_values, values, inc, batch_dist);
+    descr[0]->pointer_mode = pointer_mode;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+#endif /* ROCSPARSE_WITH_SPMAT_SCALE */
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.
@@ -5170,6 +5355,34 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_dnvec_get_strided_batch gets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr descr,
+                                                   rocsparse_int*              batch_count,
+                                                   int64_t*                    batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG_POINTER(1, batch_count);
+    ROCSPARSE_CHECKARG_POINTER(2, batch_stride);
+
+    *batch_count  = descr->batch_count;
+    *batch_stride = descr->batch_stride;
+
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief rocsparse_dnmat_set_strided_batch sets the dense matrix batch count
  * and batch stride.
  *******************************************************************************/
@@ -5212,6 +5425,33 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+/********************************************************************************
+ * \brief rocsparse_dnvec_set_strided_batch sets the dense matrix batch count
+ * and batch stride.
+ *******************************************************************************/
+rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,
+                                                   rocsparse_int         batch_count,
+                                                   int64_t               batch_stride)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, descr);
+    ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
+
+    descr->batch_count  = batch_count;
+    descr->batch_stride = batch_stride;
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+// LCOV_EXCL_START
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_csr_descr_SWDEV_453599(rocsparse_spmat_descr* descr,
                                                          int64_t                rows,
@@ -5279,7 +5519,6 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
-    // LCOV_EXCL_START
 }
 catch(...)
 {
@@ -5296,11 +5535,13 @@ try
 
     *descr = new _rocsparse_spgeam_descr();
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr)
 try
@@ -5314,7 +5555,7 @@ try
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+    RETURN_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     // Clean up row pointer array
     if(descr->csr_row_ptr_C != nullptr)
@@ -5330,11 +5571,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spgeam_set_input gets the input on the SpGEAM descriptor.
@@ -5427,11 +5670,13 @@ try
     }
     }
     return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spgeam_get_output gets the output from the SpGEAM descriptor.
@@ -5465,11 +5710,13 @@ try
     }
 
     return rocsparse_status_invalid_value;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #ifdef __cplusplus
 }

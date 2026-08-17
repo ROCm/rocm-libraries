@@ -78,3 +78,11 @@ rocsolver_alg_mode
 rocsolver_function
 ------------------------
 .. doxygenenum:: rocsolver_function
+
+rocsolver_norm_type
+------------------------
+.. doxygenenum:: rocsolver_norm_type
+
+rocsolver_cholqr_shift
+------------------------
+.. doxygenenum:: rocsolver_cholqr_shift

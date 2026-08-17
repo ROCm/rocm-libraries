@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -93,14 +70,14 @@ namespace rocRollerTest
         auto valTag   = command->allocateTag();
         auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
         auto sizeTag  = command->allocateTag();
-        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Size);
 
         auto ptr2Tag   = command->allocateTag();
         auto ptr_arg2  = command->allocateArgument(floatPtr, ptr2Tag, ArgumentType::Value);
         auto val2Tag   = command->allocateTag();
         auto val_arg2  = command->allocateArgument(floatVal, val2Tag, ArgumentType::Value);
         auto size2Tag  = command->allocateTag();
-        auto size_arg2 = command->allocateArgument(uintVal, size2Tag, ArgumentType::Limit);
+        auto size_arg2 = command->allocateArgument(uintVal, size2Tag, ArgumentType::Size);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -222,11 +199,11 @@ namespace rocRollerTest
 
         commandArgs.setArgument(ptrTag, ArgumentType::Value, ptr.get());
         commandArgs.setArgument(valTag, ArgumentType::Value, val);
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
+        commandArgs.setArgument(sizeTag, ArgumentType::Size, size);
 
         commandArgs.setArgument(ptr2Tag, ArgumentType::Value, ptr2.get());
         commandArgs.setArgument(val2Tag, ArgumentType::Value, val2);
-        commandArgs.setArgument(size2Tag, ArgumentType::Limit, size2);
+        commandArgs.setArgument(size2Tag, ArgumentType::Size, size2);
 
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
@@ -262,7 +239,7 @@ namespace rocRollerTest
         auto valTag   = command->allocateTag();
         auto val_arg  = command->allocateArgument(intVal, valTag, ArgumentType::Value);
         auto sizeTag  = command->allocateTag();
-        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Size);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -368,7 +345,7 @@ namespace rocRollerTest
         CommandArguments commandArgs = command->createArguments();
         commandArgs.setArgument(ptrTag, ArgumentType::Value, h_ptr.get());
         commandArgs.setArgument(valTag, ArgumentType::Value, h_val);
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, h_size);
+        commandArgs.setArgument(sizeTag, ArgumentType::Size, h_size);
 
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
@@ -501,7 +478,7 @@ namespace rocRollerTest
         auto valTag   = command->allocateTag();
         auto val_arg  = command->allocateArgument(intVal, valTag, ArgumentType::Value);
         auto sizeTag  = command->allocateTag();
-        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
+        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Size);
 
         auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
         auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
@@ -637,7 +614,7 @@ namespace rocRollerTest
         CommandArguments commandArgs = command->createArguments();
         commandArgs.setArgument(ptrTag, ArgumentType::Value, h_ptr.get());
         commandArgs.setArgument(valTag, ArgumentType::Value, h_val);
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, h_size);
+        commandArgs.setArgument(sizeTag, ArgumentType::Size, h_size);
 
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 

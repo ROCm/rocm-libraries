@@ -1,21 +1,76 @@
 name: pre-commit
 
 on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
   pull_request:
     branches: [develop]
 
 permissions:
   contents: read
 
+concurrency:
+  # For PRs, group by PR number so a new commit cancels any in-progress run
+  # for the same PR. For postsubmits, group by commit SHA (unique per commit)
+  # so runs never cancel each other. The workflow name is prepended to avoid
+  # conflicts between different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   pre-commit:
     runs-on: ubuntu-24.04
+    env:
+      # For PRs, diff against the base branch. For pushes, diff against the
+      # commit that existed before the push (github.event.before).
+      FROM_REF: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || github.event.before }}
+      DEFAULT_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
+      # A branch-creation push has no source ref in its event payload. It falls
+      # back to the default branch's merge base and can include inherited changes
+      # when the branch originates elsewhere. PRs use their actual base ref.
+      NULL_REF: 0000000000000000000000000000000000
     steps:
-      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0 # 0 fetches all commit history for --from-ref/--to-ref to function
+          # Blobless partial clone; the sparse-checkout below materializes only
+          # the projects touched by the diff instead of the full ~9 GB tree.
+          filter: blob:none
+          sparse-checkout: .github
 
-      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+      - name: Select diff base for new branch
+        if: env.FROM_REF == env.NULL_REF
+        run: echo "FROM_REF=${DEFAULT_REF}" >> "$GITHUB_ENV"
+
+      - name: Fetch diff base
+        env:
+          CURRENT_BRANCH: ${{ github.ref_name }}
+        run: |
+          # FROM_REF is origin/<base branch> for PRs and the prior commit SHA
+          # for pushes. Fetch the PR base branch or the complete pushed-branch
+          # history so the three-dot merge base is available in this shallow clone.
+          UNSHALLOW=""
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then UNSHALLOW="--unshallow"; fi
+          if [[ "$FROM_REF" == origin/* ]]; then
+            BASE_BRANCH="${FROM_REF#origin/}"
+            TARGET_REF="refs/remotes/${FROM_REF}"
+          else
+            BASE_BRANCH="$CURRENT_BRANCH"
+            TARGET_REF="refs/remotes/origin/${CURRENT_BRANCH}"
+          fi
+          git fetch --no-tags --prune --no-recurse-submodules --filter=blob:none $UNSHALLOW origin \
+            "+refs/heads/${BASE_BRANCH}:${TARGET_REF}"
+
+      - name: Sparse-checkout changed projects
+        run: |
+          # Reduce each changed path to its project prefix and materialize only
+          # those subtrees.
+          mapfile -t DIRS < <(git diff --name-only "${FROM_REF}...HEAD" \
+            | awk -F/ 'NF==2{print $1} NF>=3{print $1"/"$2}' | sort -u)
+          git sparse-checkout set --cone "${DIRS[@]}"
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
 
       - name: Detect project changes
         id: changes
@@ -24,7 +79,7 @@ jobs:
           PROJECTS_WITH_OPTIONAL_DEPS: >-
             hipdnn
         run: |
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD)
+          CHANGED_FILES=$(git diff --name-only ${FROM_REF}...HEAD)
 
           # Check each project for changes
           for project in $PROJECTS_WITH_OPTIONAL_DEPS; do
@@ -51,5 +106,5 @@ jobs:
 
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         with:
-          # Only check changed files in the PR
-          extra_args: --from-ref origin/${{ github.event.pull_request.base.ref }} --to-ref HEAD
+          # Only check changed files in the PR/push.
+          extra_args: --from-ref ${{ env.FROM_REF }} --to-ref HEAD

@@ -60,7 +60,7 @@ enum class FindEnforceAction
     EnforcedLast_  = DbClean,
 };
 
-class MIOPEN_INTERNALS_EXPORT FindEnforce
+class FindEnforce
 {
     FindEnforceAction action;
 
@@ -72,7 +72,7 @@ private:
     }
 
 public:
-    FindEnforce();
+    MIOPEN_INTERNALS_EXPORT FindEnforce();
     explicit FindEnforce(FindEnforceAction action_) : action(action_) {}
 
     template <class Context>
@@ -107,7 +107,7 @@ public:
 
 MIOPEN_INTERNALS_EXPORT std::optional<std::vector<solver::Id>> GetEnvFindOnlySolver();
 
-class MIOPEN_INTERNALS_EXPORT FindMode
+class FindMode
 {
 public:
     enum class Values
@@ -140,7 +140,7 @@ private:
 
 public:
     // Todo: remove default value of primitive
-    FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
+    MIOPEN_INTERNALS_EXPORT FindMode(solver::Primitive primitive = solver::Primitive::Convolution);
     Values Get() const { return value; }
     void Set(Values const v) { value = v; }
 

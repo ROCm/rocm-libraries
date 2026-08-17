@@ -51,6 +51,30 @@ typedef enum rocblas_check_nan_init_
 
 } rocblas_check_nan_init;
 
+// Initialize vector so adjacent entries have alternating zero and passed value.
+template <typename T>
+void rocblas_init_vector_alternating_zero(host_vector<T>& A, T value)
+{
+    auto M   = A.n();
+    auto inc = A.inc();
+    for(size_t i = 0; i < M; ++i)
+    {
+        A[i * inc] = (i & 1) ? T(0) : value;
+    }
+}
+
+// Initialize vector so adjacent entries have alternating sign for passed value.
+template <typename T>
+void rocblas_init_vector_alternating_sign(host_vector<T>& A, T value)
+{
+    auto M   = A.n();
+    auto inc = A.inc();
+    for(size_t i = 0; i < M; ++i)
+    {
+        A[i * inc] = (i & 1) ? -value : value;
+    }
+}
+
 // Initialize matrix so adjacent entries have alternating sign.
 // In gemm if either A or B are initialized with alternating
 // sign the reduction sum will be summing positive

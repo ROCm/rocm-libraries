@@ -44,10 +44,10 @@ Tests:
 - name: spgeam_mult_csr_file_2
   category: quick
   function: spgeam_csr_2
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
-  N: [23, 400, 671]
+  N: [175]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -57,18 +57,37 @@ Tests:
   baseC: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   spgeam_alg: [rocsparse_spgeam_alg_default]
-  filename: [mac_econ_fwd500,
-             nos2,
+  filename: [nos1, 
+             nos4,
+             nos5]
+
+- name: spgeam_mult_csr_file_2
+  category: quick
+  function: spgeam_csr_2
+  indextype: *i64
+  precision: *single_double_precisions
+  M: 1
+  N: [400]
+  K: 1
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgeam_alg: [rocsparse_spgeam_alg_default]
+  filename: [nos3,
              nos6,
-             scircuit]
+             nos7]
 
 - name: spgeam_mult_csr_file_2
   category: pre_checkin
   function: spgeam_csr_2
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: 1
-  N: [5549, 7814]
+  N: [1000]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -80,9 +99,25 @@ Tests:
   spgeam_alg: [rocsparse_spgeam_alg_default]
   filename: [rma10,
              mc2depi,
-             ASIC_320k,
-             nos1,
-             nos7]
+             ASIC_320k]
+
+- name: spgeam_mult_csr_file_2
+  category: pre_checkin
+  function: spgeam_csr_2
+  indextype: *i64i32
+  precision: *single_double_precisions
+  M: 1
+  N: [470]
+  K: 1
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_one]
+  baseC: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spgeam_alg: [rocsparse_spgeam_alg_default]
+  filename: [scircuit]
 
 - name: spgeam_mult_csr_file_2
   category: nightly
@@ -90,7 +125,7 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions
   M: 1
-  N: [6712, 23456, 998037]
+  N: [3356, 4691]
   K: 1
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]

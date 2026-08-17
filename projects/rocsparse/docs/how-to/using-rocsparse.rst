@@ -344,6 +344,9 @@ Function name                                        yes no
 :cpp:func:`rocsparse_spgeam()`                           x
 :cpp:func:`rocsparse_sptrsv_buffer_size()`               x
 :cpp:func:`rocsparse_sptrsm_buffer_size()`               x
+:cpp:func:`rocsparse_spilu0_buffer_size()`               x
+:cpp:func:`rocsparse_spic0_buffer_size()`                x
+:cpp:func:`rocsparse_spildlt0_buffer_size()`             x
 :cpp:func:`rocsparse_sddmm_buffer_size()`                x
 :cpp:func:`rocsparse_sddmm_preprocess()`                 x
 :cpp:func:`rocsparse_sparse_to_sparse_buffer_size()`     x
@@ -356,8 +359,7 @@ Function name                                        yes no
 For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()`,
 ``hipGraph`` is supported when passing the buffer size or compute stages but is not supported when passing the preprocess stage.
 
-For :cpp:func:`rocsparse_v2_spmv()`, :cpp:func:`rocsparse_v2_sptrsv()`, and :cpp:func:`rocsparse_v2_sptrsm()`,
-``hipGraph`` is supported when passing the compute stage but is not supported when passing the analysis stage.
+For :cpp:func:`rocsparse_v2_spmv()`, :cpp:func:`rocsparse_sptrsv()`, :cpp:func:`rocsparse_sptrsm()`, :cpp:func:`rocsparse_spic0()`, :cpp:func:`rocsparse_spildlt0()`, and :cpp:func:`rocsparse_spilu0()`, ``hipGraph`` is supported when passing the compute stage but is not supported when passing the analysis stage.
 
 For :cpp:func:`rocsparse_sddmm()`, ``hipGraph`` is supported only when using the default algorithm.
 
@@ -442,7 +444,7 @@ ROC-TX support in rocSPARSE
 
 The `ROC-TX <https://rocm.docs.amd.com/projects/roctracer/en/latest/reference/roctx-spec.html>`_ library contains application code
 instrumentation APIs to support the high-level correlation of runtime API or activity events. When integrated with rocSPARSE, ROC-TX
-enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as :doc:`rocProfiler <rocprofiler:index>`, offering better insights
+enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as `rocProfiler <https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html>`_, offering better insights
 into runtime behavior and performance bottlenecks.
 
 To enable ROC-TX profiling, set the environment variable ``ROCSPARSE_ROCTX=1`` when running the program with rocProf:
@@ -456,13 +458,13 @@ This will generate a ``.pftrace`` file which can then be viewed using the `Perfe
 .. note::
 
    ROC-TX support in rocSPARSE is unavailable on Windows and is not supported in the static library version on Linux.
-   
+
 rocSPARSE Fortran bindings
 ==============================
 
 Fortran functionality for rocSPARSE is offered by :doc:`hipFORT <hipfort:index>`. For more information,
 consult the :doc:`hipFORT API file list <hipfort:doxygen/html/files>`.
-  
+
 
 hipSPARSE
 =========

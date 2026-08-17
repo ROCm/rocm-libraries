@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,18 +25,16 @@
 
 #include "rocsparse-types.h"
 #include "rocsparse_csrilu0_info.hpp"
+#include "rocsparse_numeric_boost.hpp"
 
 namespace rocsparse
 {
 
-    typedef rocsparse_status (*csrilu0_kernel_launch_t)(rocsparse_handle       handle,
-                                                        rocsparse_csrilu0_info csrilu0_info,
-                                                        rocsparse_spmat_descr  A,
-                                                        int32_t                boost_enable,
-                                                        size_t                 boost_tol_size,
-                                                        const void*            boost_tol,
-                                                        const void*            boost_val,
-                                                        size_t                 buffer_size,
-                                                        void*                  buffer);
+    typedef rocsparse_status (*csrilu0_kernel_launch_t)(rocsparse_handle          handle,
+                                                        rocsparse_csrilu0_info    csrilu0_info,
+                                                        rocsparse_spmat_descr     A,
+                                                        rocsparse::numeric_boost* boost,
+                                                        size_t                    buffer_size,
+                                                        void*                     buffer);
 
 }

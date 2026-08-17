@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,9 @@
  *
  *******************************************************************************/
 
-#include <set>
-
 #include "contraction_solution.hpp"
-#include "util.hpp"
+#include "hash.hpp"
+#include "hiptensor_options.hpp"
 
 namespace hiptensor
 {
@@ -181,7 +180,8 @@ namespace hiptensor
         return true;
     }
 
-    std::vector<std::size_t> applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths)
+    std::vector<std::size_t>
+        applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths)
     {
         std::vector<std::size_t> strides(lengths.size(), 1);
         // Assign second half of strides
@@ -215,27 +215,28 @@ namespace hiptensor
     }
 
     std::tuple<hiptensorStatus_t, float>
-        ContractionSolution::operator()(void const*              alpha,
-                                        void const*              A,
-                                        void const*              B,
-                                        void const*              beta,
-                                        void const*              D,
-                                        void*                    E,
-                                        std::vector<std::size_t> a_ms_ns_lengths,
-                                        std::vector<std::size_t> a_ms_ks_strides,
-                                        std::vector<int32_t>     a_ms_ks_modes,
-                                        std::vector<std::size_t> b_ns_ks_lengths,
-                                        std::vector<std::size_t> b_ns_ks_strides,
-                                        std::vector<int32_t>     b_ns_ks_modes,
-                                        std::vector<std::size_t> ds_ms_ns_lengths,
-                                        std::vector<std::size_t> ds_ms_ns_strides,
-                                        std::vector<int32_t>     ds_ms_ns_modes,
-                                        std::vector<std::size_t> e_ms_ns_lengths,
-                                        std::vector<std::size_t> e_ms_ns_strides,
-                                        std::vector<int32_t>     e_ms_ns_modes,
-                                        void*                    workspacePtr,
-                                        unsigned long            workspaceSize,
-                                        StreamConfig const&      streamConfig /*= StreamConfig{}*/)
+        ContractionSolution::operator()(void const*                alpha,
+                                        void const*                A,
+                                        void const*                B,
+                                        void const*                beta,
+                                        void const*                D,
+                                        void*                      E,
+                                        std::vector<std::size_t>   a_ms_ns_lengths,
+                                        std::vector<std::size_t>   a_ms_ks_strides,
+                                        std::vector<int32_t>       a_ms_ks_modes,
+                                        std::vector<std::size_t>   b_ns_ks_lengths,
+                                        std::vector<std::size_t>   b_ns_ks_strides,
+                                        std::vector<int32_t>       b_ns_ks_modes,
+                                        std::vector<std::size_t>   ds_ms_ns_lengths,
+                                        std::vector<std::size_t>   ds_ms_ns_strides,
+                                        std::vector<int32_t>       ds_ms_ns_modes,
+                                        std::vector<std::size_t>   e_ms_ns_lengths,
+                                        std::vector<std::size_t>   e_ms_ns_strides,
+                                        std::vector<int32_t>       e_ms_ns_modes,
+                                        ContractionUnaryOps const& unaryOps,
+                                        void*                      workspacePtr,
+                                        unsigned long              workspaceSize,
+                                        StreamConfig const& streamConfig /*= StreamConfig{}*/)
     {
         if(!initArgs(alpha,
                      A,
@@ -255,6 +256,7 @@ namespace hiptensor
                      e_ms_ns_lengths,
                      e_ms_ns_strides,
                      e_ms_ns_modes,
+                     unaryOps,
                      workspacePtr))
         {
             return {HIPTENSOR_STATUS_INTERNAL_ERROR, -1.0f};
@@ -283,11 +285,20 @@ namespace hiptensor
 
     size_t ContractionSolution::uid() const
     {
-        // Convert CK uid string into binary.
-        std::istringstream converter(mDeviceOp->GetTypeIdHashCode());
-        size_t             value;
-        converter >> std::hex >> value;
-        return value;
+        // Platform-stable uid: hash the kernel type string (via FNV-1a in Hash{})
+        // together with the data-type / op parameters so that distinct CK template
+        // instantiations that share the same geometry (GetTypeString) but differ in
+        // data types still produce distinct uids.
+        auto const& params = mParams;
+        return Hash{}(mDeviceOp->GetTypeString(),
+                      params->typeA(),
+                      params->typeB(),
+                      params->typeC(),
+                      params->typeD(),
+                      params->typeCompute(),
+                      params->opA(),
+                      params->opB(),
+                      params->opCDE());
     }
 
     std::tuple<ck::index_t, ck::index_t, ck::index_t> ContractionSolution::problemDims() const
@@ -295,7 +306,7 @@ namespace hiptensor
         return std::make_tuple(mM, mN, mK);
     }
 
-    ck::index_t ContractionSolution::problemBytes() const
+    std::size_t ContractionSolution::problemBytes() const
     {
         return mBytes;
     }

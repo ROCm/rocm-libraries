@@ -82,6 +82,9 @@ namespace rocsparse
                                        bool                 mul,
                                        bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
 
@@ -133,7 +136,12 @@ namespace rocsparse
     }
 
     template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I>
-    ROCSPARSE_DEVICE_ILF void csrgemm_group_reduce(int tid, I* __restrict__ data)
+    // NOTE: 'data' points into block-shared LDS and is used for a cross-thread
+    // segmented reduction (each thread reads slots written by other threads across
+    // __syncthreads()). It must NOT be __restrict__: clang lowers __restrict__ to
+    // LLVM noalias, which is interpreted to exclude other-thread writes, letting the
+    // compiler forward the pre-barrier value and drop neighbor contributions.
+    ROCSPARSE_DEVICE_ILF void csrgemm_group_reduce(int tid, I* data)
     {
         // clang-format off
     if(BLOCKSIZE > 512 && tid < 512) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 512) * GROUPS + i]; __syncthreads();
@@ -301,6 +309,8 @@ namespace rocsparse
                                    const I* __restrict__ csr_row_ptr,
                                    J* __restrict__ workspace)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
 
         // Initialize local maximum
@@ -336,6 +346,8 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_max_row_nnz_part2(I* __restrict__ workspace)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         // Shared memory for block reduction
         __shared__ I sdata[BLOCKSIZE];
 
@@ -358,8 +370,13 @@ namespace rocsparse
     // Hash operation to insert key into hash table
     // Returns true if key has been added
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I>
-    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* __restrict__ table)
+    // NOTE: 'table' is a block-shared hash table. The plain load `table[hash]` below
+    // must observe atomic_cas writes from other threads, so 'table' must NOT be
+    // __restrict__ (noalias would let the compiler hoist the load out of the loop).
+    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* table)
     {
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         constexpr I empty = -1;
 
         // Compute hash
@@ -397,9 +414,10 @@ namespace rocsparse
 
     // Hash operation to insert pair into hash table
     template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I, typename T>
-    ROCSPARSE_DEVICE_ILF void
-        insert_pair(I key, T val, I* __restrict__ table, T* __restrict__ data, I empty)
+    ROCSPARSE_DEVICE_ILF void insert_pair(I key, T val, I* table, T* __restrict__ data, I empty)
     {
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Compute hash
         I hash = (key * HASHVAL) & (HASHSIZE - 1);
 
@@ -457,6 +475,11 @@ namespace rocsparse
                                 bool                 mul,
                                 bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -566,6 +589,11 @@ namespace rocsparse
                                    bool                 mul,
                                    bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -675,13 +703,16 @@ namespace rocsparse
                                              const I* __restrict__ csr_row_ptr_D,
                                              const J* __restrict__ csr_col_ind_D,
                                              I* __restrict__ row_nnz,
-                                             I* __restrict__ workspace_B,
+                                             I*                   workspace_B,
                                              rocsparse_index_base idx_base_A,
                                              rocsparse_index_base idx_base_B,
                                              rocsparse_index_base idx_base_D,
                                              bool                 mul,
                                              bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -899,6 +930,11 @@ namespace rocsparse
                                                              bool                 mul,
                                                              bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -982,6 +1018,7 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
         for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -1018,8 +1055,11 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
-            csr_val_C[idx_C]     = data[i];
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+                csr_val_C[idx_C]     = data[i];
+            }
         }
     }
 
@@ -1056,6 +1096,11 @@ namespace rocsparse
                                                                 bool                 mul,
                                                                 bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -1227,8 +1272,11 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtain position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
-            csr_val_C[idx_C]     = val_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                csr_col_ind_C[idx_C] = col_C + idx_base_C;
+                csr_val_C[idx_C]     = val_C;
+            }
         }
     }
 
@@ -1261,7 +1309,7 @@ namespace rocsparse
                                                     const I* __restrict__ csr_row_ptr_C,
                                                     J* __restrict__ csr_col_ind_C,
                                                     T* __restrict__ csr_val_C,
-                                                    I* __restrict__ workspace_B,
+                                                    I*                   workspace_B,
                                                     rocsparse_index_base idx_base_A,
                                                     rocsparse_index_base idx_base_B,
                                                     rocsparse_index_base idx_base_C,
@@ -1269,6 +1317,9 @@ namespace rocsparse
                                                     bool                 mul,
                                                     bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -1295,6 +1346,7 @@ namespace rocsparse
 
         // Entry point into columns of C
         I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over the row chunks until the end of the row has been reached (which is
         // the number of total columns)
@@ -1481,7 +1533,7 @@ namespace rocsparse
                 I idx = row_begin_C + offset - 1;
 
                 // Only threads with a non-zero value write to C
-                if(has_nnz)
+                if(has_nnz && idx < row_end_C)
                 {
                     csr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
                     csr_val_C[idx]     = value;

@@ -85,3 +85,19 @@ Tests:
              ASIC_320k,
              bibd_22_8,
              webbase-1M]
+
+- name: csrmv
+  category: pre_checkin
+  function: csrmv
+  precision: *double_only_precisions_complex_real
+  M: 1
+  N: 1
+  alpha: [-2.0]
+  alphai: [-1.2]
+  beta: [1.5]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [nos7,
+             mc2depi]
+  graph_test: [true]

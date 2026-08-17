@@ -40,6 +40,8 @@
 #include <cstddef>
 #include <map>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -239,3 +241,4 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+

@@ -1,8 +1,9 @@
 #TODO
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
   NumWarmups: 1
   SleepPercent: 50
@@ -13,9 +14,8 @@ GlobalParameters:
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
   DataInitTypeScaleAlphaVec: 2
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   MaxWorkspaceSize: 3355443200
   # PrintStoreRegisterDb: 1
   PrintSolutionRejectionReason: True
@@ -32,11 +32,11 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
-      UseBias:       True
+      UseBias:       1
       UseE:          False
       Activation:    True
       GroupedGemm:   True
@@ -53,17 +53,17 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
@@ -85,11 +85,11 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
-      UseBias:       False
+      UseBias:       0
       UseE:          False
       Activation:    False
       GroupedGemm:   True
@@ -106,17 +106,17 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]
@@ -138,11 +138,11 @@ BenchmarkProblems:
       DestDataType: h
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
-      UseBias:       False
+      UseBias:       0
       UseE:          False
       Activation:    False
       GroupedGemm:   True
@@ -160,17 +160,17 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
         - StaggerU: [4]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [8]

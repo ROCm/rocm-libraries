@@ -9,7 +9,12 @@
 #include "ck/tensor_operation/gpu/thread/threadwise_tensor_slice_transfer.hpp"
 #include "ck/tensor_operation/gpu/warp/wmma_gemm.hpp"
 #include "ck/tensor_description/tensor_adaptor.hpp"
+#include "ck/utility/thread_buf_to_vec_loader.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 
 template <index_t BlockSize,
@@ -70,7 +75,7 @@ struct BlockwiseGemmWmmaops_pipeline_base
 
     static_assert(KPack % (A_K1 * A_KRow) == 0, "wrong!");
     static_assert(KPack % (B_K1 * B_KRow) == 0, "wrong!");
-    static constexpr index_t KRepeat = KPerBlock / KPack;
+    static constexpr index_t KRepeat = ck::math::max(KPerBlock / KPack, 1);
 
     static constexpr auto WmmaK = Number<wmma_gemm.wmma_instr.k_per_wmma>{};
 
@@ -200,22 +205,22 @@ struct BlockwiseGemmWmmaops_pipeline_base
             using AScaleThreadDesc = decltype(AScaleStruct::scale_thread_desc);
             using BScaleThreadDesc = decltype(BScaleStruct::scale_thread_desc);
 
-            static_for<0, num_scale_m_block, 1>{}([&](auto m0) {
-                static_for<0, num_scale_n_block, 1>{}([&](auto n0) {
-                    static_for<0, num_scale_k_block, 1>{}([&](auto k0) {
-                        constexpr index_t c_offset =
-                            CScaleThreadDesc{}.CalculateOffset(make_tuple(k0, m0, n0));
-                        constexpr index_t a_offset =
-                            AScaleThreadDesc{}.CalculateOffset(make_tuple(m0, k0));
-                        constexpr index_t b_offset =
-                            BScaleThreadDesc{}.CalculateOffset(make_tuple(n0, k0));
+            static_ford<Sequence<num_scale_m_block, num_scale_n_block, num_scale_k_block>>{}(
+                [&](auto mnk) {
+                    constexpr auto m0 = Number<mnk[Number<0>{}]>{};
+                    constexpr auto n0 = Number<mnk[Number<1>{}]>{};
+                    constexpr auto k0 = Number<mnk[Number<2>{}]>{};
+                    constexpr index_t c_offset =
+                        CScaleThreadDesc{}.CalculateOffset(make_tuple(k0, m0, n0));
+                    constexpr index_t a_offset =
+                        AScaleThreadDesc{}.CalculateOffset(make_tuple(m0, k0));
+                    constexpr index_t b_offset =
+                        BScaleThreadDesc{}.CalculateOffset(make_tuple(n0, k0));
 
-                        c_scale_thread_bufs(I0)(Number<c_offset>{}) =
-                            a_scale_struct.scale_thread_bufs(I0)[Number<a_offset>{}] *
-                            b_scale_struct.scale_thread_bufs(I0)[Number<b_offset>{}];
-                    });
+                    c_scale_thread_bufs(I0)(Number<c_offset>{}) =
+                        a_scale_struct.scale_thread_bufs(I0)[Number<a_offset>{}] *
+                        b_scale_struct.scale_thread_bufs(I0)[Number<b_offset>{}];
                 });
-            });
         }
 
         __device__ void Clear()
@@ -485,3 +490,6 @@ struct BlockwiseGemmWmmaops_pipeline_base
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,6 @@
 
 #include <hiptensor/hiptensor.h>
 #include <hiptensor/internal/hiptensor_utility.hpp>
-#include <hiptensor_options.hpp>
 
 #include "common.hpp"
 
@@ -145,16 +144,31 @@ int main()
      * Initialize tensors with the input lengths
      ********************************************/
     hiptensorTensorDescriptor_t descA = nullptr;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-        handle, &descA, nmodeA, extentA.data(), nullptr /* stride */, typeA, 0 /* alignmentRequirement */));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
+                                                          &descA,
+                                                          nmodeA,
+                                                          extentA.data(),
+                                                          nullptr /* stride */,
+                                                          typeA,
+                                                          0 /* alignmentRequirement */));
 
     hiptensorTensorDescriptor_t descC = nullptr;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-        handle, &descC, nmodeC, extentC.data(), nullptr /* stride */, typeC, 0 /* alignmentRequirement */));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
+                                                          &descC,
+                                                          nmodeC,
+                                                          extentC.data(),
+                                                          nullptr /* stride */,
+                                                          typeC,
+                                                          0 /* alignmentRequirement */));
 
     hiptensorTensorDescriptor_t descD = nullptr;
-    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
-        handle, &descD, nmodeD, extentD.data(), nullptr /* stride */, typeD, 0 /* alignmentRequirement */));
+    CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(handle,
+                                                          &descD,
+                                                          nmodeD,
+                                                          extentD.data(),
+                                                          nullptr /* stride */,
+                                                          typeD,
+                                                          0 /* alignmentRequirement */));
 
     /***************************************
      * Create Elementwise Binary Descriptor
@@ -209,10 +223,6 @@ int main()
     /**********************
      * Run
      **********************/
-    using hiptensor::HiptensorOptions;
-    auto& options = HiptensorOptions::instance();
-    options->setColdRuns(5);
-    options->setHotRuns(50);
 
     CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryExecute(
         handle, plan, (void*)&alpha, A_d, (void*)&gamma, C_d, D_d, nullptr /* stream */));

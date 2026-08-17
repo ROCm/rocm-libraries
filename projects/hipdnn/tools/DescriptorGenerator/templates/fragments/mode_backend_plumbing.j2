@@ -1,0 +1,127 @@
+{% set sdk_ns = df.cpp_enum.rsplit('::', 1)[0] %}
+{% set sdk_type = df.enum_short_type %}
+# ============================================================
+# Target: backend/include/HipdnnBackendAttributeType.h
+# ============================================================
+
+    {{ df.backend_type_name }} = PLACEHOLDER_VALUE,
+
+# ============================================================
+# Target: backend/src/descriptors/DataTypeConversion.hpp
+# ============================================================
+
+// Converts between C-API {{ df.test_c_type }} and SDK {{ sdk_type }} enum values.
+{{ df.cpp_enum }} toSdk{{ sdk_type }}({{ df.test_c_type }} mode);
+{{ df.test_c_type }} fromSdk{{ sdk_type }}({{ df.cpp_enum }} mode);
+
+# ============================================================
+# Target: backend/src/descriptors/DataTypeConversion.cpp
+# ============================================================
+
+{{ df.cpp_enum }} toSdk{{ sdk_type }}({{ df.test_c_type }} mode)
+{
+    using {{ sdk_ns }}::{{ sdk_type }};
+
+    switch(mode)
+    {
+{% for v in df.enum_def.non_sentinel_values %}
+    case {{ df.enum_def.backend_prefix }}{{ v.name }}:
+        return {{ sdk_type }}::{{ v.effective_sdk_name }};
+{% endfor %}
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported {{ df.test_c_type }} value");
+    }
+}
+
+{{ df.test_c_type }} fromSdk{{ sdk_type }}({{ df.cpp_enum }} mode)
+{
+    using {{ sdk_ns }}::{{ sdk_type }};
+
+    switch(mode)
+    {
+{% for v in df.enum_def.non_sentinel_values %}
+    case {{ sdk_type }}::{{ v.effective_sdk_name }}:
+        return {{ df.enum_def.backend_prefix }}{{ v.name }};
+{% endfor %}
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "Unsupported SDK {{ sdk_type }} value");
+    }
+}
+
+# ============================================================
+# Target: backend/src/descriptors/DescriptorAttributeUtils.hpp
+# ============================================================
+
+void {{ df.backend_setter }}({{ df.cpp_enum }}& target,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t elementCount,
+                 const void* arrayOfElements,
+                 const char* errorPrefix);
+
+void {{ df.backend_getter }}({{ df.cpp_enum }} source,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t requestedElementCount,
+                 int64_t* elementCount,
+                 void* arrayOfElements,
+                 const char* errorPrefix);
+
+# ============================================================
+# Target: backend/src/descriptors/DescriptorAttributeUtils.cpp
+# ============================================================
+
+void {{ df.backend_setter }}({{ df.cpp_enum }}& target,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t elementCount,
+                 const void* arrayOfElements,
+                 const char* errorPrefix)
+{
+    checkSetArgs({{ df.backend_type_name }}, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    {{ df.test_c_type }} tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdk{{ sdk_type }}(tmp);
+}
+
+void {{ df.backend_getter }}({{ df.cpp_enum }} source,
+                 hipdnnBackendAttributeType_t attributeType,
+                 int64_t requestedElementCount,
+                 int64_t* elementCount,
+                 void* arrayOfElements,
+                 const char* errorPrefix)
+{
+    checkGetArgs({{ df.backend_type_name }}, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdk{{ sdk_type }}(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+# ============================================================
+# Target: backend/src/BackendEnumStringUtils.hpp
+# ============================================================
+
+case {{ df.backend_type_name }}:
+    return "{{ df.backend_type_name }}";
+
+# ============================================================
+# Target: backend/include/hipdnn_backend.h
+# ============================================================
+
+#include "{{ df.enum_def.backend_header }}"

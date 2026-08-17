@@ -101,6 +101,56 @@ rocblas_status rocblas_gemm_strided_batched_ex_get_solutions(rocblas_handle    h
             return validArgs;
         }
 
+        auto                    layer_mode = handle->layer_mode;
+        rocblas_internal_logger logger;
+        if(layer_mode & rocblas_layer_mode_log_trace)
+        {
+            auto trans_a_letter = rocblas_transpose_letter(trans_a);
+            auto trans_b_letter = rocblas_transpose_letter(trans_b);
+
+            auto a_type_string       = rocblas_datatype_string(a_type);
+            auto b_type_string       = rocblas_datatype_string(b_type);
+            auto c_type_string       = rocblas_datatype_string(c_type);
+            auto d_type_string       = rocblas_datatype_string(d_type);
+            auto compute_type_string = rocblas_datatype_string(compute_type);
+
+            rocblas_internal_ostream alphass, betass;
+            (void)rocblas_internal_log_trace_alpha_beta_ex(
+                compute_type, alpha, beta, alphass, betass);
+
+            logger.log_trace(handle,
+                             ROCBLAS_API_STR(rocblas_gemm_strided_batched_ex_get_solutions),
+                             trans_a,
+                             trans_b,
+                             m,
+                             n,
+                             k,
+                             alphass.str(),
+                             a,
+                             a_type_string,
+                             lda,
+                             stride_a,
+                             b,
+                             b_type_string,
+                             ldb,
+                             stride_b,
+                             betass.str(),
+                             c,
+                             c_type_string,
+                             ldc,
+                             stride_c,
+                             d,
+                             d_type_string,
+                             ldd,
+                             stride_d,
+                             batch_count,
+                             compute_type_string,
+                             algo,
+                             rocblas_gemm_flags(flags),
+                             list_array,
+                             list_size);
+        }
+
         return rocblas_gemm_ex_get_solutions_template<false>(handle,
                                                              trans_a,
                                                              trans_b,

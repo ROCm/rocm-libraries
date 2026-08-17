@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,15 +32,19 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void csric0_device_binsearch(J m,
                                                       const I* __restrict__ csr_row_ptr,
                                                       const J* __restrict__ csr_col_ind,
-                                                      T* __restrict__ csr_val,
+                                                      T* csr_val,
                                                       const I* __restrict__ csr_diag_ind,
                                                       int32_t* __restrict__ done,
                                                       const J* __restrict__ map,
-                                                      J* __restrict__ zero_pivot,
-                                                      J* __restrict__ singular_pivot,
+                                                      J*                   zero_pivot,
+                                                      J*                   singular_pivot,
                                                       double               tol,
                                                       rocsparse_index_base idx_base)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         const auto lid = hipThreadIdx_x & (WF_SIZE - 1);
         const auto wid = hipThreadIdx_x / WF_SIZE;
         const auto idx = hipBlockIdx_x * BLOCKSIZE / WF_SIZE + wid;
@@ -207,19 +211,28 @@ namespace rocsparse
     void csric0_kernel_binsearch(J m,
                                  const I* __restrict__ csr_row_ptr,
                                  const J* __restrict__ csr_col_ind,
-                                 T* __restrict__ csr_val,
+                                 T*      csr_val,
                                  int64_t csr_val_stride,
                                  const I* __restrict__ csr_diag_ind,
                                  int32_t* __restrict__ done,
                                  int64_t done_stride,
                                  const J* __restrict__ map,
-                                 J* __restrict__ zero_pivot,
-                                 int64_t zero_pivot_stride,
-                                 J* __restrict__ singular_pivot,
-                                 int64_t              singular_pivot_stride,
-                                 double               tol,
+                                 J*                 zero_pivot,
+                                 int64_t            zero_pivot_stride,
+                                 J*                 singular_pivot,
+                                 int64_t            singular_pivot_stride,
+                                 rocsparse_datatype tolerance_datatype,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(float, tolerance_32),
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(double, tolerance_64),
+                                 bool                 is_singular_tol_host_mode,
                                  rocsparse_index_base idx_base)
     {
+
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET(is_singular_tol_host_mode, tolerance_64);
+        const double tolerance
+            = (tolerance_datatype == rocsparse_datatype_f64_r) ? tolerance_64 : tolerance_32;
+
         const auto batch_index = hipBlockIdx_y;
         rocsparse::csric0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
             m,
@@ -231,7 +244,7 @@ namespace rocsparse
             map,
             zero_pivot + batch_index * zero_pivot_stride,
             singular_pivot + batch_index * singular_pivot_stride,
-            tol,
+            tolerance,
             idx_base);
     }
 
@@ -252,6 +265,16 @@ namespace rocsparse
 
         const dim3 csric0_threads(BLOCKSIZE);
 
+        auto                         numeric_exact = csric0_info->get_singularity_numeric_exact();
+        auto                         numeric_near  = csric0_info->get_singularity_numeric_near();
+        const rocsparse_pointer_mode tolerance_pointer_mode
+            = numeric_near->get_tolerance_pointer_mode();
+        const rocsparse_datatype tolerance_datatype = numeric_near->get_tolerance_datatype();
+        const float*             tolerance_pointer_32
+            = reinterpret_cast<const float*>(numeric_near->get_tolerance_pointer());
+        const double* tolerance_pointer_64
+            = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
+
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csric0_kernel_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>),
             csric0_blocks,
@@ -267,11 +290,15 @@ namespace rocsparse
             done_array,
             done_array_stride,
             reinterpret_cast<const J*>(trm_info->get_row_map()),
-            reinterpret_cast<J*>(csric0_info->get_zero_pivot()),
-            csric0_info->get_zero_pivot_stride(),
-            reinterpret_cast<J*>(csric0_info->get_singular_pivot()),
-            csric0_info->get_singular_pivot_stride(),
-            csric0_info->get_singular_tol(),
+            reinterpret_cast<J*>(numeric_exact->get_position()),
+            numeric_exact->get_stride(),
+            reinterpret_cast<J*>(numeric_near->get_position()),
+            numeric_near->get_stride(),
+
+            tolerance_datatype,
+            ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_32),
+            ROCSPARSE_SCALAR_HOST_DEVICE_ARGUMENT(tolerance_pointer_mode, tolerance_pointer_64),
+            (tolerance_pointer_mode == rocsparse_pointer_mode_host),
             A->descr->base);
 
         return rocsparse_status_success;
@@ -293,7 +320,7 @@ namespace rocsparse
             return rocsparse::
                 csric0_kernel_binsearch_launch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, int64_t>;
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -318,7 +345,7 @@ namespace rocsparse
             return rocsparse::transform_j_type<SLEEP, BLOCKSIZE, WF_SIZE, T, int64_t>(
                 std::forward<P>(p)...);
         }
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
@@ -381,7 +408,7 @@ rocsparse::csric0_kernel_launch_t rocsparse::find_csric0_kernel_binsearch_launch
 {
 
     const bool sleep
-        = (rocsparse::handle_get_arch_name(handle) == rocpsarse_arch_names::gfx908 && //
+        = (rocsparse::handle_get_arch_name(handle) == rocsparse_arch_names::gfx908 && //
            handle->asic_rev < 2);
 
     if(sleep)

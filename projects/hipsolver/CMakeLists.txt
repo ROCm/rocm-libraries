@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
 
 # Consider removing this in the future
 # This should appear before the project command, because it does not use FORCE
@@ -46,39 +46,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# This finds the rocm-cmake project, and installs it if not found
-# rocm-cmake contains common cmake code for rocm projects to help setup and install
-set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-find_package(ROCM 0.7.3 CONFIG QUIET PATHS /opt/rocm)
-if(NOT ROCM_FOUND)
-  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-  set(rocm_cmake_url "https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip")
-  set(rocm_cmake_path "${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}")
-  set(rocm_cmake_archive "${rocm_cmake_path}.zip")
-  file(DOWNLOAD "${rocm_cmake_url}" "${rocm_cmake_archive}" STATUS status LOG log)
+# Add our CMake helper files to the lookup path
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-  list(GET status 0 status_code)
-  list(GET status 1 status_string)
-
-  if(status_code EQUAL 0)
-    message(STATUS "downloading... done")
-  else()
-    message(FATAL_ERROR "error: downloading\n'${rocm_cmake_url}' failed
-    status_code: ${status_code}
-    status_string: ${status_string}
-    log: ${log}\n")
-  endif()
-
-  execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzvf "${rocm_cmake_archive}"
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-  execute_process(COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag})
-  execute_process(COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-    WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
-
-  find_package(ROCM 0.7.3 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake)
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 endif()
 
+# Get rocm-cmake
+include(get-rocm-cmake)
+
+# Include the rocm-cmake components we use
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
@@ -87,7 +66,7 @@ include(ROCMInstallSymlinks)
 include(ROCMClients)
 include(ROCMHeaderWrapper)
 
-set(VERSION_STRING "3.3.0")
+set(VERSION_STRING "3.7.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(NOT DEFINED ENV{HIP_PATH})
@@ -107,9 +86,9 @@ option(BUILD_HIPSPARSE_TESTS "Build additional tests to cover sparse functionali
 # BUILD_SHARED_LIBS is a cmake built-in; we make it an explicit option such that it shows in cmake-gui
 option(BUILD_WITH_SPARSE "Build hipSOLVER with sparse functionality available at build time (requires installed dependencies)" OFF)
 option(BUILD_VERBOSE "Output additional build information" OFF)
-option(USE_CUDA "Look for CUDA and use that as a backend if found" OFF)
 option(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(BUILD_FORTRAN_BINDINGS "Build the Fortran bindings" "${UNIX}")
+option(EXPORT_FORTRAN_BINDINGS "Install hipsolver_fortran as an exported CMake target" ON)
 
 if(NOT BUILD_SHARED_LIBS)
   add_compile_definitions(HIPSOLVER_STATIC_LIB)
@@ -136,25 +115,167 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 
-
-# Find CUDA if the user wants a CUDA version.
-if(USE_CUDA)
-  find_package(CUDA REQUIRED)
+# Deprecated USE_CUDA option
+if(DEFINED USE_CUDA)
+  if(USE_CUDA)
+    set(ENV{HIP_PLATFORM} nvidia)
+    set(HIP_PLATFORM nvidia CACHE STRING "HIP platform (e.g., amd or nvidia)")
+    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=nvidia)")
+  else()
+    set(ENV{HIP_PLATFORM} amd)
+    set(HIP_PLATFORM amd CACHE STRING "HIP platform (e.g., amd or nvidia)")
+    message(DEPRECATION "USE_CUDA is deprecated (use environment variable HIP_PLATFORM=amd)")
+  endif()
 endif()
 
 # Hip headers required of all clients; clients use hip to allocate device memory
-if(USE_CUDA)
-  # Append cmake path for hip (for convenience)
-  # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-  list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${HIP_PATH}/cmake)
-  find_package(HIP MODULE REQUIRED)
+find_package(hip CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+
+# support for cuda backend with hip < 6.0
+if(NOT hip_FOUND)
+    find_package(HIP MODULE REQUIRED)
+    list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
+    set(ENV{HIP_PLATFORM} nvidia)
+    if (NOT HIP_PLATFORM)
+      set(HIP_PLATFORM nvidia)
+    endif()
 else()
-  find_package(hip REQUIRED CONFIG PATHS ${HIP_PATH} ${ROCM_PATH} /opt/rocm)
+    if(NOT HIP_PLATFORM)
+      set(HIP_PLATFORM amd)
+    endif()
 endif()
 
-if(USE_CUDA)
-  list(APPEND HIP_INCLUDE_DIRS "${HIP_ROOT_DIR}/include")
+if(HIP_PLATFORM STREQUAL nvidia)
+  find_package(CUDA REQUIRED)
 endif()
+
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
+    # TODO: This LAPACK dependency is only required to support geev
+    # It should be removed once geev is implemented in rocSOLVER
+    option(HIPSOLVER_INTERNAL_LAPACK_BUILD "Link to a locally built, static, OpenBLAS library -- required to support geev, will be removed once geev is implemented in rocSOLVER" ON)
+    if(HIPSOLVER_INTERNAL_LAPACK_BUILD)
+        set(LAPACK_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-src)
+        set(LAPACK_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lapack-bin)
+
+        # Detect if we're using a multi-config generator (focus on Ninja Multi-Config and Visual Studio)
+        get_property(IS_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+
+        # Set BYPRODUCTS based on generator type
+        if(IS_MULTI_CONFIG)
+            # NOTE: OpenBLAS converts the usual config-specific subdirectories
+            # to upper-case (e.g., lib/DEBUG/ instead of lib/Debug) in its
+            # CMakeLists.txt file.
+            if(NOT CMAKE_CONFIGURATION_TYPES)
+                set(CMAKE_CONFIGURATION_TYPES "Debug;Release;RelWithDebInfo;MinSizeRel")
+            endif()
+
+            set(LAPACK_BUILD_BYPRODUCTS)
+            foreach(config ${CMAKE_CONFIGURATION_TYPES})
+                string(TOUPPER ${config} config_upper)
+                list(APPEND LAPACK_BUILD_BYPRODUCTS
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+            endforeach()
+        else()
+            set(LAPACK_BUILD_BYPRODUCTS
+                ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX})
+        endif()
+
+        set(LAPACK_CMAKE_ARGS
+            -DC_LAPACK=ON
+            -DNOFORTRAN=ON
+            -DBUILD_STATIC_LIBS=ON
+            -DBUILD_LAPACK_DEPRECATED=OFF
+            -DBUILD_TESTING=OFF
+            -DBUILD_BENCHMARKS=OFF
+            -DUSE_OPENMP=OFF
+            -DUSE_THREAD=OFF
+            -DCMAKE_C_VISIBILITY_PRESET=hidden
+        )
+
+        # Only pass CMAKE_BUILD_TYPE for single-config generators (it is
+        # ignored in multi-config generators)
+        if(NOT IS_MULTI_CONFIG)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
+        endif()
+
+        # Build OpenBLAS with PIC if hipSOLVER is a shared library
+        if(BUILD_SHARED_LIBS)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_POSITION_INDEPENDENT_CODE=ON)
+        endif()
+
+        # Force OpenBLAS to use the same compiler as hipSOLVER to avoid
+        # runtime library mismatches (e.g., MinGW vs MSVCRT on Windows)
+        if(CMAKE_C_COMPILER)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER})
+        endif()
+        if(CMAKE_CXX_COMPILER)
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER})
+        endif()
+
+        # Force GENERIC target to ensure binaries work on all CPUs
+        list(APPEND LAPACK_CMAKE_ARGS -DTARGET=GENERIC)
+
+        # Downgrade incompatible-pointer-types errors to warnings when using Clang
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            list(APPEND LAPACK_CMAKE_ARGS -DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types)
+        endif()
+
+        include(ExternalProject)
+        # Use OpenBLAS v0.3.33 (commit 62bcfb0)
+        ExternalProject_Add(hipsolver-static-lapack
+            BUILD_BYPRODUCTS    ${LAPACK_BUILD_BYPRODUCTS}
+            GIT_REPOSITORY      https://github.com/OpenMathLib/OpenBLAS
+            GIT_TAG             62bcfb0dc9f1cfa685fc04135c50e2780c303137
+            SOURCE_DIR          ${LAPACK_SOURCE_DIR}
+            BINARY_DIR          ${LAPACK_BINARY_DIR}
+            CMAKE_ARGS          ${LAPACK_CMAKE_ARGS}
+            INSTALL_COMMAND     ""
+        )
+        add_library(lapack_libraries STATIC IMPORTED)
+
+        if(IS_MULTI_CONFIG)
+            foreach(config ${CMAKE_CONFIGURATION_TYPES})
+                string(TOUPPER ${config} config_upper)
+                set_property(TARGET lapack_libraries PROPERTY
+                    IMPORTED_LOCATION_${config_upper}
+                    ${LAPACK_BINARY_DIR}/lib/${config_upper}/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
+                )
+            endforeach()
+        else()
+            set_target_properties(lapack_libraries PROPERTIES
+                IMPORTED_LOCATION ${LAPACK_BINARY_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}openblas${CMAKE_STATIC_LIBRARY_SUFFIX}
+            )
+        endif()
+
+        add_dependencies(lapack_libraries hipsolver-static-lapack)
+    else() # NOT HIPSOLVER_INTERNAL_LAPACK_BUILD
+        # Some CPU side functionality is provided by external lapack
+        # Linking lapack library requires fortran flags
+        set(THREADS_PREFER_PTHREAD_FLAG ON)
+        find_package(Threads REQUIRED)
+        if(HIPSOLVER_FIND_PACKAGE_LAPACK_CONFIG)
+            find_package(LAPACK 3.7 REQUIRED CONFIG)
+        else()
+            find_package(LAPACK 3.7 REQUIRED)
+        endif()
+
+        if(NOT LAPACK_LIBRARIES)
+            set(LAPACK_LIBRARIES
+                ${LAPACK_blas_LIBRARIES}
+                ${LAPACK_lapack_LIBRARIES}
+            )
+        endif()
+
+        if(NOT TARGET lapack_libraries)
+            add_library(lapack_libraries INTERFACE)
+            message(STATUS "Using manually specified LAPACK")
+            target_link_libraries(lapack_libraries INTERFACE
+                ${LAPACK_LIBRARIES}
+            )
+        endif()
+    endif()
+endif()
+
 
 # Append our library helper cmake path
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
@@ -237,9 +358,9 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS)
 endif()
 
 # Package specific CPACK vars
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(rocblas_minimum 4.2.0)
-  set(rocsolver_minimum 3.33.0)
+  set(rocsolver_minimum 3.37.0)
   rocm_package_add_dependencies(SHARED_DEPENDS "rocblas >= ${rocblas_minimum}" "rocsolver >= ${rocsolver_minimum}")
   rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocblas-static-devel >= ${rocblas_minimum}" "rocsolver-static-devel >= ${rocsolver_minimum}")
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
@@ -288,7 +409,7 @@ endif()
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}")
 
 # Give hipsolver compiled for CUDA backend a different name
-if(NOT USE_CUDA)
+if(NOT "${HIP_PLATFORM}" STREQUAL "nvidia")
   set(package_name hipsolver)
 else()
   set(package_name hipsolver-alt)

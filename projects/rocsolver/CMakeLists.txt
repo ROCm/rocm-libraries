@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -63,8 +63,17 @@ option(ROCSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK"
 option(ROCSOLVER_USE_INTERNAL_BLAS "Use internal implementation of GEMM and TRSM for debugging." OFF)
 option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" ON)
 
+# Feature flags
+option(ROCSOLVER_ENABLE_CHOLQR "Enable CholQR method" ON)
+option(ROCSOLVER_ENABLE_EIGENSOLVERS_64 "Enable the 64-bit eigensolver API (syev/heev/syevd/heevd)" ON)
+
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
@@ -92,7 +101,7 @@ get_os_id(OS_ID)
 message(STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set(VERSION_STRING "3.33.0")
+set(VERSION_STRING "3.37.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Workaround until llvm and hip CMake modules fix symlink logic in their config files
@@ -161,7 +170,11 @@ cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP
 if(USE_HIPCXX)
   enable_language(HIP)
 else()
-  if(NOT DEFINED AMDGPU_TARGETS)
+  if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
+    message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+  endif()
+  if(NOT DEFINED GPU_TARGETS)
     set(XNACK_PLUS_TARGETS
       gfx90a:xnack+
       gfx908:xnack+
@@ -176,8 +189,14 @@ else()
       gfx1100
       gfx1101
       gfx1102
+      gfx1150
       gfx1151
+      gfx1152
+      gfx1153
       gfx12-generic
+      gfx1200
+      gfx1201
+      gfx1250
     )
     if(BUILD_ADDRESS_SANITIZER)
       set(OPTIONAL_TARGETS_QUERY ${XNACK_PLUS_TARGETS})
@@ -190,13 +209,13 @@ else()
       )
     endif()
     # Query for compiler support of GPU archs
-    rocm_check_target_ids(OPTIONAL_AMDGPU_TARGETS TARGETS ${OPTIONAL_TARGETS_QUERY})
-    set(AMDGPU_TARGETS_INIT ${OPTIONAL_AMDGPU_TARGETS} ${DEFAULT_TARGETS})
+    rocm_check_target_ids(OPTIONAL_GPU_TARGETS TARGETS ${OPTIONAL_TARGETS_QUERY})
+    set(GPU_TARGETS_INIT ${OPTIONAL_GPU_TARGETS} ${DEFAULT_TARGETS})
   endif()
 
   # Set this before finding hip so that hip::device has the required arch flags
   # added as usage requirements on its interface
-  set(AMDGPU_TARGETS "${AMDGPU_TARGETS_INIT}"
+  set(GPU_TARGETS "${GPU_TARGETS_INIT}"
     CACHE STRING "List of specific machine types for library to target")
 endif()
 

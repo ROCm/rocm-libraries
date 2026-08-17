@@ -14,6 +14,10 @@
 
 #include <hip/hip_runtime.h>
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck_tile {
 
 /// @brief The Grouped GEMM kernel host arguments.
@@ -194,7 +198,11 @@ struct GroupedGemmKernel
         const auto kernel     = kentry<1, Kernel, ConstantPointer, index_t>;
         int occupancy;
         HIP_CHECK_ERROR(
-            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, kBlockSize, 0));
+            hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, BlockSize().x, 0));
+        // TODO: the below is a temporary fix which is due to kernel metadata
+        // .workgroup_processor_mode isn't used correctly in clr for gfx1250. Will removed when clr
+        // and compiler team fix this.
+        occupancy           = occupancy > 0 ? occupancy : 1;
         const int grid_size = get_available_compute_units(s) * occupancy;
         return dim3(grid_size, 1, 1);
     }
@@ -309,7 +317,6 @@ struct GroupedGemmKernel
         // Can we simplify this branching logic?
         if constexpr(GemmPipeline::DoubleSmemBuffer == true)
         {
-
             RunGemmWithPipelineSelection2LDS(
                 a_ptr, b_ptr, c_ptr, kargs.ds_ptr, smem_ptr, kargs, splitk_batch_offset, i_m, i_n);
         }
@@ -507,6 +514,12 @@ struct GroupedGemmKernel
         const index_t group_id = FindGroupId(gemm_desc_ptr, block_id, group_count);
         const auto& kargs      = gemm_desc_ptr[group_id];
 
+        // Early exit if no work to do.
+        if(kargs.group_karg.M == 0 || kargs.group_karg.N == 0 || kargs.group_karg.K == 0)
+        {
+            return;
+        }
+
         const auto grid_size_2d = TilePartitioner::GridSize(kargs.group_karg.M, kargs.group_karg.N);
         const auto block_idx_2d = OffsetTile1DPartitioner::GetOffsetedTileIndex(
             0,
@@ -534,6 +547,22 @@ struct GroupedGemmKernel
             const auto& k_batch    = kargs.k_batch;
             const auto block_start = cum_grid_size;
             cum_grid_size += TilePartitioner::GridSize(kargs.M, kargs.N) * k_batch;
+
+            // Early exit if no work to do.
+            // If M or N is zero, TilePartitioner::GridSize(kargs.M, kargs.N) returns zero,
+            // so this group contributes no blocks and cum_grid_size is unchanged. The group
+            // is naturally skipped by the block_id < cum_grid_size check below.
+            if(kargs.K == 0)
+            {
+                // Advance only if this workgroup was assigned to this group's range,
+                // matching the pattern of the normal while loop below.
+                while(block_id < cum_grid_size)
+                {
+                    block_id += grid_size;
+                }
+                continue;
+            }
+
             while(block_id < cum_grid_size)
             {
                 const auto grid_size_2d = TilePartitioner::GridSize(kargs.M, kargs.N);
@@ -553,3 +582,7 @@ struct GroupedGemmKernel
 };
 
 } // namespace ck_tile
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

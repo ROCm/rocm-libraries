@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,8 @@
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -95,6 +97,8 @@ struct is_default_or_has_tag<default_config, Tag>
 
 } // end of detail namespace
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel primitive that uses binary search for computing a lower bound on a given ordered
 /// range for each element of a given input.
 ///
@@ -147,6 +151,8 @@ struct is_default_or_has_tag<default_config, Tag>
 /// In this example a device-level lower bound computation on a haystack of double precision type
 /// values is performed on an input array of integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_binary_search.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -187,7 +193,7 @@ struct is_default_or_has_tag<default_config, Tag>
 ///                              stream,
 ///                              debug_synchronous);
 ///
-/// // output = {0, 1, 2, 2, 3}
+/// // output = {1, 2, 2, 3, 4}
 /// \endcode
 /// \endparblock
 template<

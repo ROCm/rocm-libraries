@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <filesystem>
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionLibrary.hpp>
@@ -69,15 +70,15 @@ struct LibraryPerformanceTest
 
         if(library == nullptr)
         {
-            std::cout << libraryPath().native() << std::endl;
-            if(!boost::filesystem::is_regular_file(libraryPath()))
+            std::cout << libraryPath().string() << std::endl;
+            if(!std::filesystem::is_regular_file(libraryPath()))
                 GTEST_SKIP();
             else
                 ASSERT_NE(library, nullptr);
         }
     }
 
-    boost::filesystem::path libraryPath()
+    std::filesystem::path libraryPath()
     {
         return TestData::Instance().file(filename);
     }
@@ -87,7 +88,7 @@ struct LibraryPerformanceTest
         if(!cache)
             return loadLibraryNoCache();
 
-        auto pathStr = libraryPath().native();
+        auto pathStr = libraryPath().string();
 
         auto iter = libraryCache.find(pathStr);
         if(iter != libraryCache.end())
@@ -100,8 +101,8 @@ struct LibraryPerformanceTest
     {
         auto path = libraryPath();
 
-        if(boost::filesystem::is_regular_file(path))
-            return LoadLibraryFile<ContractionProblem>(path.native());
+        if(std::filesystem::is_regular_file(path))
+            return LoadLibraryFile<ContractionProblem>(path.string());
 
         return nullptr;
     }

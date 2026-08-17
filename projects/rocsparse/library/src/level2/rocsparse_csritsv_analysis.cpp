@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,13 +163,13 @@ namespace rocsparse
 
         const rocsparse_fill_mode fill_mode  = descr->fill_mode;
         const rocsparse_diag_type diag_type  = descr->diag_type;
-        J*                        zero_pivot = (J*)info->get_zero_pivot();
+        J*                        zero_pivot = (J*)info->get_position();
         if(nnz == 0)
         {
             if(diag_type == rocsparse_diag_type_non_unit)
             {
                 const J b = (J)descr->base;
-                RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                     zero_pivot, &b, sizeof(J), hipMemcpyHostToDevice, handle->stream));
                 return rocsparse_status_success;
             }
@@ -197,13 +197,24 @@ namespace rocsparse
             // Compute ptr_end.
             //
 
-            if((fill_mode == rocsparse_fill_mode_lower && diag_type == rocsparse_diag_type_unit)
-               || (fill_mode == rocsparse_fill_mode_upper
-                   && diag_type == rocsparse_diag_type_non_unit))
+            // Select which ptr_end kernel to launch based on the fill mode.
+            //   lower + unit     / upper + non_unit -> kernel_ptr_end_unit
+            //   lower + non_unit / upper + unit     -> kernel_ptr_end_non_unit
+            bool use_unit_kernel = false;
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
+                use_unit_kernel = (diag_type == rocsparse_diag_type_unit);
+                break;
+            case rocsparse_fill_mode_upper:
+                use_unit_kernel = (diag_type == rocsparse_diag_type_non_unit);
+                break;
+            }
 
-                dim3 blocks((m - 1) / BLOCKSIZE + 1);
-                dim3 threads(BLOCKSIZE);
+            dim3 blocks((m - 1) / BLOCKSIZE + 1);
+            dim3 threads(BLOCKSIZE);
+            if(use_unit_kernel)
+            {
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::kernel_ptr_end_unit<1024, I, J>),
                                                    blocks,
                                                    threads,
@@ -215,14 +226,8 @@ namespace rocsparse
                                                    (I*)info->ptr_end,
                                                    descr->base);
             }
-            else if((fill_mode == rocsparse_fill_mode_lower
-                     && diag_type == rocsparse_diag_type_non_unit)
-                    || (fill_mode == rocsparse_fill_mode_upper
-                        && diag_type == rocsparse_diag_type_unit))
+            else
             {
-
-                dim3 blocks((m - 1) / BLOCKSIZE + 1);
-                dim3 threads(BLOCKSIZE);
                 RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::kernel_ptr_end_non_unit<1024, I, J>),
                                                    blocks,
                                                    threads,
@@ -266,7 +271,8 @@ namespace rocsparse
         if(diag_type == rocsparse_diag_type_non_unit)
         {
 
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
             if(info->is_submatrix)
             {
                 const J ptr_shift = (fill_mode == rocsparse_fill_mode_upper) ? 0 : -1;
@@ -290,8 +296,9 @@ namespace rocsparse
             {
                 dim3 blocks((m - 1) / BLOCKSIZE + 1);
                 dim3 threads(BLOCKSIZE);
-                if(fill_mode == rocsparse_fill_mode_lower)
+                switch(fill_mode)
                 {
+                case rocsparse_fill_mode_lower:
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::
                              kernel_count_missing_diagonal2<rocsparse_fill_mode_lower, 1024, I, J>),
@@ -305,9 +312,8 @@ namespace rocsparse
                         descr->base,
                         (J*)temp_buffer,
                         zero_pivot);
-                }
-                else
-                {
+                    break;
+                case rocsparse_fill_mode_upper:
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                         (rocsparse::
                              kernel_count_missing_diagonal2<rocsparse_fill_mode_upper, 1024, I, J>),
@@ -321,15 +327,16 @@ namespace rocsparse
                         descr->base,
                         (J*)temp_buffer,
                         zero_pivot);
+                    break;
                 }
             }
             J count_missing_diagonal;
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&count_missing_diagonal,
-                                               temp_buffer,
-                                               sizeof(J),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&count_missing_diagonal,
+                                                         temp_buffer,
+                                                         sizeof(J),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             if(count_missing_diagonal > 0)
             {
@@ -352,12 +359,13 @@ namespace rocsparse
                         // We nned to check diagonal element are not present.
                         //
                         RETURN_IF_HIP_ERROR(
-                            hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
+                            rocsparse_hipMemsetAsync(temp_buffer, 0, sizeof(J), handle->stream));
 
                         dim3 blocks((m - 1) / BLOCKSIZE + 1);
                         dim3 threads(BLOCKSIZE);
-                        if(fill_mode == rocsparse_fill_mode_lower)
+                        switch(fill_mode)
                         {
+                        case rocsparse_fill_mode_lower:
                             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                                 (rocsparse::kernel_count_diagonal_triangular<
                                     rocsparse_fill_mode_lower,
@@ -373,9 +381,8 @@ namespace rocsparse
                                 csr_col_ind,
                                 descr->base,
                                 (J*)temp_buffer);
-                        }
-                        else
-                        {
+                            break;
+                        case rocsparse_fill_mode_upper:
                             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                                 (rocsparse::kernel_count_diagonal_triangular<
                                     rocsparse_fill_mode_upper,
@@ -391,14 +398,15 @@ namespace rocsparse
                                 csr_col_ind,
                                 descr->base,
                                 (J*)temp_buffer);
+                            break;
                         }
 
-                        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&count_diagonal,
-                                                           temp_buffer,
-                                                           sizeof(J),
-                                                           hipMemcpyDeviceToHost,
-                                                           handle->stream));
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&count_diagonal,
+                                                                     temp_buffer,
+                                                                     sizeof(J),
+                                                                     hipMemcpyDeviceToHost,
+                                                                     handle->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                     }
 
                     if(count_diagonal > 0)

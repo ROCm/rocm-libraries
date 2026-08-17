@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,9 +49,9 @@ namespace hiptensor
             using Uid    = std::size_t;
             using HashId = std::size_t;
 
-            Query()                   = default;
-            ~Query()                  = default;
-            Query(Query const& other) = default;
+            Query()                              = default;
+            ~Query()                             = default;
+            Query(Query const& other)            = default;
             Query& operator=(Query const& other) = default;
 
             /// Subsequent queries that may be performed on the current query object.
@@ -102,10 +102,10 @@ namespace hiptensor
 
     protected:
         // Move only
-        ReductionSolutionRegistry()                            = default;
-        ReductionSolutionRegistry(ReductionSolutionRegistry&&) = delete;
-        ReductionSolutionRegistry& operator=(ReductionSolutionRegistry&&) = delete;
-        ReductionSolutionRegistry(ReductionSolutionRegistry const&)       = delete;
+        ReductionSolutionRegistry()                                            = default;
+        ReductionSolutionRegistry(ReductionSolutionRegistry&&)                 = delete;
+        ReductionSolutionRegistry& operator=(ReductionSolutionRegistry&&)      = delete;
+        ReductionSolutionRegistry(ReductionSolutionRegistry const&)            = delete;
         ReductionSolutionRegistry& operator=(ReductionSolutionRegistry const&) = delete;
 
         // Import reduction solutions for the registry to manage
@@ -130,4 +130,3 @@ namespace hiptensor
     // @endcond
 
 } // namespace hiptensor
-

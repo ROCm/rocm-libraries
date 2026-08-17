@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import ast
 import shlex, subprocess
 import sys
 import os
@@ -152,7 +153,7 @@ class BenchmarkImplSLURM(object):
         section.createValue("DockerBuildFile", os.path.join(rootTensileDir, "docker", "dockerfile-tensile-tuning-slurm"))
         section.createValue("DockerImageName", "tensile-tuning-cluster-executable")
         section.createValue("DockerImageTag", "TEST")
-        section.createValue("TensileFork", "ROCmSoftwarePlatform")
+        section.createValue("TensileFork", "ROCm")
         section.createValue("TensileBranch", "develop")
         section.createValue("TensileCommit", "HEAD")
 
@@ -330,9 +331,19 @@ class TensileBenchmarkCluster(object):
         def splitExtraParameters(par):
             """
             Allows the --benchmark-parameters option to specify any parameters from the command line.
+
+            Each argument is a ``key=value`` pair. The value is parsed as a Python literal
+            (number, string, tuple, list, dict, bool, or None) via ``ast.literal_eval``.
+            Arbitrary expressions are rejected so a CLI/CI argument cannot execute code.
             """
-            (key, value) = par.split("=")
-            value = eval(value)
+            (key, value) = par.split("=", 1)
+            try:
+                value = ast.literal_eval(value)
+            except (ValueError, SyntaxError) as e:
+                raise argparse.ArgumentTypeError(
+                    f"invalid --benchmark-parameters value for '{key}': {value!r} must be a "
+                    f"Python literal (e.g. 5, True, 'text', [1, 2])"
+                ) from e
             return (key, value)
 
         # Parse incoming args

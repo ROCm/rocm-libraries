@@ -29,11 +29,11 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse COO matrix
+*  \brief Convert a sparse CSR matrix into a sparse COO matrix.
 *
 *  \details
-*  \p hipsparseXcsr2coo converts the CSR array containing the row offsets, that point
-*  to the start of every row, into a COO array of row indices. All arrays are assumed
+*  \p hipsparseXcsr2coo converts the CSR array containing the row offsets that point
+*  to the start of every row into a COO array of row indices. All arrays are assumed
 *  to be allocated by the user prior to calling \p hipsparseXcsr2coo.
 *
 *  For example, given the CSR row pointer array (assuming zero index base):
@@ -43,7 +43,7 @@ extern "C" {
 *    \end{align}
 *  \f]
 *
-*  Calling \p hipsparseXcsr2coo() results in the COO row indices array:
+*  Calling \p hipsparseXcsr2coo results in the COO row indices array:
 *  \f[
 *    \begin{align}
 *    \text{cooRowInd} &= \begin{bmatrix} 0 & 1 & 1 & 2 \end{bmatrix}
@@ -51,15 +51,15 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  It can also be used to convert a CSC array containing the column offsets into a COO
+*  This function can also be used to convert a CSC array containing the column offsets into a COO
 *  array of column indices.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  csrRowPtr   array of \p m+1 elements that point to the start of every row
 *              of the sparse CSR matrix.
@@ -76,7 +76,7 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m or \p nnz is negative,
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle is nullptr, \p m or, \p nnz is negative,
 *          \p csrRowPtr or \p cooRowInd is nullptr when \p nnz is greater than zero, or
 *          \p idxBase is neither \ref HIPSPARSE_INDEX_BASE_ZERO nor \ref HIPSPARSE_INDEX_BASE_ONE.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.

@@ -33,6 +33,8 @@ subtrees:
 
 - caption: API reference
   entries:
+  - file: api-reference/data-type-support
+    title: Precision support
   - file: api-reference/api-reference
     title: API reference guide
 

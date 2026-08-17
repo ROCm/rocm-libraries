@@ -4,10 +4,13 @@
 #pragma once
 
 #include "plugin/EnginePluginResourceManager.hpp"
+#include "plugin/HeuristicPluginResourceManager.hpp"
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <spdlog/fmt/fmt.h>
+#include <string>
+#include <vector>
 
 struct hipdnnHandle // NOLINT
 {
@@ -18,11 +21,17 @@ public:
     virtual hipStream_t getStream() const;
     virtual std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager>
         getPluginResourceManager() const;
+    virtual std::shared_ptr<hipdnn_backend::plugin::HeuristicPluginResourceManager>
+        getHeuristicPluginResourceManager() const;
+    virtual size_t getEngineCount() const;
+    virtual std::vector<hipdnn_backend::plugin::EngineInfo> getEngineInfos() const;
     virtual std::string toString() const;
 
 private:
     hipStream_t _stream = nullptr;
     std::shared_ptr<hipdnn_backend::plugin::EnginePluginResourceManager> _pluginResourceManager;
+    std::shared_ptr<hipdnn_backend::plugin::HeuristicPluginResourceManager>
+        _heuristicPluginResourceManager;
 };
 
 template <>

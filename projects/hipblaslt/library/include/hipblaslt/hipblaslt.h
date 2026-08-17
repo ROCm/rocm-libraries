@@ -85,12 +85,14 @@
 typedef enum {
   HIPBLASLT_EPILOGUE_DEFAULT = 1,                 /**<No special postprocessing. Scale and quantize the results if necessary.*/
   HIPBLASLT_EPILOGUE_RELU = 2,                    /**<Apply ReLU pointwise transform to the results (``x:=max(x, 0)``)*/
-  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply (broadcast) bias from the bias vector. The bias vector length must match the number of rows in matrix D, and it must be packed (so the stride between vector elements is one). The bias vector is broadcast to all columns and added before applying the final postprocessing.*/
+  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply bias from the bias vector, and broadcast to all columns if HIPBLAST_MATMUL_DESC_BIAS_BATCH_STRIDE = 0. The bias vector length must match the number of rows in matrix D, and it must be packed (so the stride between vector elements is one). The bias vector is broadcast to all columns if HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE is 0 and added before applying the final postprocessing.*/
   HIPBLASLT_EPILOGUE_RELU_BIAS = 6,               /**<Apply bias and then ReLU transform.*/
   HIPBLASLT_EPILOGUE_GELU = 32,                   /**<Apply GELU pointwise transform to the results (``x:=GELU(x)``).*/
   HIPBLASLT_EPILOGUE_GELU_BIAS = 36,              /**<Apply Bias and then GELU transform.*/
   HIPBLASLT_EPILOGUE_RELU_AUX = 130,              /**<Output GEMM results before applying RELU transform.*/
   HIPBLASLT_EPILOGUE_RELU_AUX_BIAS = 134,         /**<Output GEMM results after applying bias but before applying RELU transform.*/
+  HIPBLASLT_EPILOGUE_DRELU = 136,      
+  HIPBLASLT_EPILOGUE_DRELU_BGRAD = 152,           /**<Apply gradient RELU transform and bias gradient to the results. Requires additional auxiliary input. */           /**<Apply gradient RELU transform. Requires additional auxiliary input. */
   HIPBLASLT_EPILOGUE_GELU_AUX = 160,              /**<Output GEMM results before applying GELU transform.*/
   HIPBLASLT_EPILOGUE_GELU_AUX_BIAS = 164,         /**<Output GEMM results after applying bias but before applying GELU transform.*/
   HIPBLASLT_EPILOGUE_DGELU = 192,                 /**<Apply gradient GELU transform. Requires additional auxiliary input. */
@@ -107,8 +109,18 @@ typedef enum {
 } hipblasLtEpilogue_t;
 
 /*! \ingroup types_module
+ *  \brief Specify the batch mode of the matrices.
+ */
+
+typedef enum {
+	HIPBLASLT_BATCH_MODE_STRIDED = 0,
+	HIPBLASLT_BATCH_MODE_POINTER_ARRAY = 1,
+} hipblasLtBatchMode_t;
+
+/*! \ingroup types_module
  *  \brief Specifies the attributes that define the details of the matrix.
  */
+
 typedef enum {
   HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT = 0,         /**<Number of batches of this matrix. Default value is 1. Data type: ``int32_t``. */
   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET = 1, /**<Stride (in elements) to the next matrix for the strided batch operation. Default value is 0. Data type: ``int64_t``. */
@@ -151,6 +163,25 @@ typedef enum {
    * ``int64_t``
    */
   HIPBLASLT_MATRIX_LAYOUT_LD = 6,
+
+  /** Matrix Batch Mode.
+   * Batched GEMM can be either:
+   * 1. Strided Batch: Single contiguous memory allocation and stride between matrices in
+   * the batch is specified in terms of number of elements.
+   * 2. General Batched: This uses pointer array with each pointer storing the base address
+   * of the matrices in the batch.
+   * See hipblasLtBatchMode_t
+   */
+  HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
+
+  /** Matrix Offset.
+   *
+   * For ``General Batched GEMM``, we can support for users to access a sub-matrix of
+   * the original matrix by adding an ``offset`` value (in elements) from the base address.
+   * Note that for non-batched or Strided Batch GEMM case, we can directly apply
+   * the offset value by using the strided-offset value.
+   */
+  HIPBLASLT_MATRIX_LAYOUT_OFFSET = 8
 } hipblasLtMatrixLayoutAttribute_t;
 
 /*! \ingroup types_module
@@ -173,8 +204,25 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F = 4,    /**<Not supported yet. Scaling factors are tensors that contain a dedicated ``FP32`` scaling factor for each 128-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F = 5, /**<Not supported yet. Scaling factors are tensors that contain a dedicated ``FP32`` scaling factor for each 128x128-element block in the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT = 1001, /**< Scaling factors are tensors that contain a dedicated 8-bit ``R_8F_UE8M0`` value for each 32-element block in the innermost dimension of the corresponding data tensor. The scale data is pre-swizzled to match the memory access pattern expected by the kernel. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT = 1002, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``R_8F_UE8M0`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT = 1003, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E4M3`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT = 1004, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT = 1005, /**<Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit ``HIP_R_8F_E5M3_EXT`` value for each 32-element block in the innermost dimension of the corresponding data tensor. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
+
+/*! \ingroup types_module
+ *  \brief Mode values for the ``HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT``
+ *  attribute and the C++ ext ``GemmPreference::setStreamKTileSchedulingMode``.
+ *
+ *  The attribute storage stays ``int32_t``; values outside ``{0, 1, 2}`` are
+ *  rejected by the setter with ``HIPBLAS_STATUS_INVALID_VALUE``.
+ */
+typedef enum {
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_OFF  = 0, /**< SK3 static work-assignment sub-path (default). When ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is positive the library heuristic still runs per launch to pick SK4 when appropriate. */
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_ON   = 1, /**< Always request the SK4 dynamic per-XCD work-queue sub-path on StreamK=5 kernels. */
+  HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO = 2, /**< Always let hipBLASLt's heuristic pick between SK3 and SK4 per launch based on tile/CU geometry. */
+} hipblasLtStreamKTileSchedulingMode_t;
 
 /*! \ingroup types_module
  *  \brief Specifies the attributes that define the specifics of the matrix multiply operation.
@@ -196,12 +244,15 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_POINTER_MODE = 13,              /**<Specifies that alpha and beta are passed by reference, whether they are scalars on the host or on the device, or device vectors. Default value is: ``HIPBLASLT_POINTER_MODE_HOST`` (on the host). Data type: ``int32_t`` based on ``hipblasLtPointerMode_t``. */
   HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER = 14,           /**<Device pointer to the memory location that on completion will be set to the maximum of the absolute values in the output matrix. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE = 22,    /**<Type of the auxiliary vector in the device memory. Default value is: ``HIPBLASLT_DATATYPE_INVALID`` (using D matrix type). Data type: ``int32_t`` based on ``hipDataType``. */
+  HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE = 23,              /**<The batch stride of the bias vector pointer in the device memory. This is only applicable for hipblasltBatchMode_t is 0 (Strided Batched GEMM) and hipblasltEpilogue_t is BIAS enabled. Default value is 0 meaning same bias value broadcast across all batches. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
+  HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET = 33,                /**<Target the matmul kernel selection and persistent-grid sizing for this many compute units (CUs). Set to ``0`` (the default) to use all CUs the device exposes. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. This is a hint to the library heuristics; the launched grid is not guaranteed to use exactly this many CUs. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of a matrix multiply. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<First extra argument for the activation function. Data type: ``float``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<Second extra argument for the activation function. Data type: ``float``. */
+  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for StreamK=5 hybrid kernels (static SK3 vs dynamic SK4 work-queue sub-paths). Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 
@@ -211,7 +262,8 @@ typedef enum {
 typedef enum {
   HIPBLASLT_MATMUL_PREF_SEARCH_MODE = 0,          /**<Search mode. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,  /**<Maximum allowed workspace memory. Default is 0 (no workspace memory allowed). Data type: ``uint64_t``. */
-  HIPBLASLT_MATMUL_PREF_MAX = 2
+  HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET = 2,      /**<Bias heuristic algorithm selection toward kernels that perform well at this targeted compute-unit count. ``0`` (default) means no constraint. Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
+  HIPBLASLT_MATMUL_PREF_MAX = 3
 } hipblasLtMatmulPreferenceAttributes_t;
 
 /*! \ingroup types_module
@@ -228,6 +280,15 @@ typedef enum {
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
    */
   HIPBLASLT_ORDER_ROW = 1,
+  
+  /**
+   * Data is ordered in column-major ordered tiles of composite tiles with a total of 32 columns and 128 rows.
+   * A tile is composed of 4 inner tiles in column-major with a total of 32 rows and 128 columns.
+   * The element offset within the tile is calculated as ``row%32+32*col+(row/32)*32*32``.
+   * Note that for this order, the number of columns (rows) of the tensor has to be a multiple of 32(128) or
+   * pre-padded to 32(128).
+   */
+  HIPBLASLT_ORDER_COL16_4R32 = 99,
   /**
    * Data is ordered in column-major ordered tiles of composite tiles with a total of 16 columns and 64 rows.
    * A tile is composed of 4 inner tiles in column-major with a total of 16 rows and 16 columns.
@@ -310,10 +371,15 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  \brief Handle to the hipBLASLt library context queue.
  *
  *  \details
- *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context. Use the following functions to manipulate this library context:
+ *  The ``hipblasLtHandle_t`` type is a pointer type to an opaque structure holding the hipBLASLt library context.
+ *  A handle encapsulates the execution state and manages device-side resources associated with the submitted operations.
+ *
+ *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
+ *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
- *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.
+ *  To initialize the hipBLASLt library context and return a handle to an opaque structure holding the hipBLASLt library context.  
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.
@@ -450,6 +516,84 @@ hipblasStatus_t hipblasLtCreate(hipblasLtHandle_t* handle);
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtDestroy(const hipblasLtHandle_t handle);
+
+/*! \ingroup library_module
+ *  \brief Set the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  The hipBLASLt analogue of cuBLAS's ``cublasSetSmCountTarget``. The value
+ *  hints how many compute units hipBLASLt should target for kernel selection
+ *  and persistent-grid sizing on subsequent matmul calls that use this handle.
+ *
+ *  ``0`` (the default) means "no override; use all CUs the device exposes".
+ *  Negative values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. A
+ *  per-matmul-descriptor (``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET``) or
+ *  per-preference (``HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET``) attribute, when
+ *  set to a non-zero value, takes precedence over this handle-level value.
+ *
+ *  The user must ensure thread safety when modifying handle state from
+ *  multiple threads, the same as for any other handle-mutating helper.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[in]
+ *  smCountTarget    target CU/SM count; ``0`` for "use all CUs".
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is negative.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t           smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Return the handle-level target compute-unit (CU / SM) count.
+ *
+ *  \details
+ *  Returns the value previously programmed via ``hipblasLtSetSmCountTarget``.
+ *  Equivalent to cuBLAS's ``cublasGetSmCountTarget``.
+ *
+ *  @param[in]
+ *  handle           hipBLASLt library context.
+ *  @param[out]
+ *  smCountTarget    receives the previously stored value (``0`` if never set).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p smCountTarget is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
+                                          int32_t*          smCountTarget);
+
+/*! \ingroup library_module
+ *  \brief Drain the post-GEMM check-numerics flag without destroying the handle.
+ *
+ *  \details
+ *  When \c HIPBLASLT_CHECK_NUMERICS is set, this function performs a
+ *  device-wide synchronize, reads the persistent NaN flag, and resets it.
+ *  The matmul \c call_id of the FIRST scanned NaN observed since the
+ *  previous drain (or handle creation) is written to \p first_nan_call_id
+ *  if non-null. Zero means no NaN was observed in that window. Frameworks
+ *  (e.g. PyTorch) call this to obtain a result without relying on the
+ *  handle destructor (which may not run if the process is killed).
+ *
+ *  When the env var is not set, the function is a no-op and returns
+ *  \c HIPBLAS_STATUS_SUCCESS with \p *first_nan_call_id set to 0.
+ *
+ *  @param[in]
+ *  handle Pointer to the allocated hipBLASLt handle.
+ *  @param[out]
+ *  first_nan_call_id Optional. If non-null, receives the call_id of the
+ *  first NaN seen in this drain window (0 = none).
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS Drain completed (or scanning disabled).
+ *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
+                                            uint32_t*         first_nan_call_id);
 
 /*! \ingroup library_module
  *  \brief Create a matrix layout descriptor.
@@ -821,7 +965,7 @@ hipblasStatus_t
                                     int*                             returnAlgoCount);
 
 /*! \ingroup library_module
- *  \brief Retrieve the possible algorithms.
+ *  \brief Compute a matrix multiplication on the described inputs.
  *
  *  \details
  *  This function computes the matrix multiplication of matrices A and B to

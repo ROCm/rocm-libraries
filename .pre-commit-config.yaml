@@ -14,10 +14,14 @@ exclude: |
     # Opted-out projects
     # To opt-in, remove your project from the exclusions.
     # See CONTRIBUTING.md for detailed instructions.
+    #
+    # Some opted-out projects are listed on the individual hooks below instead
+    # of here. This top level exclude hides a file from every hook, and
+    # pre-commit gives a hook no way to opt back in, so anything listed here is
+    # invisible to the security gate as well.
     # ==========================================================================
     projects/composablekernel/.*|
     projects/hipblas/.*|
-    projects/hipblaslt/.*|
     projects/hipblas-common/.*|
     projects/hipcub/.*|
     projects/hipfft/.*|
@@ -26,7 +30,7 @@ exclude: |
     projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
-    projects/miopen/.*|
+    projects/hipthreads/.*|
     projects/rocblas/.*|
     projects/rocfft/.*|
     projects/rocprim/.*|
@@ -37,39 +41,63 @@ exclude: |
     shared/mxdatagenerator/.*|
     shared/origami/.*|
     shared/rocroller/.*|
-    shared/tensile/.*|
     # ==========================================================================
     # Permanent exclusions
     # ==========================================================================
+    # Auto-generated GitHub Agentic Workflow lock files
+    \.github/workflows/.*\.lock\.yml$|
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
-    projects/hipdnn/data_sdk/include/hipdnn_data_sdk/data_objects/.*_generated\.h|
-    # Reference data
-    projects/hipdnn/hipdnn_reference_data/.*|
+    projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
+    # Reference data (auto-generated)
+    dnn-providers/integration-tests/integration-test-bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
-    projects/rocrand/library/.*precomputed\.(cpp|h)
+    projects/rocrand/library/.*precomputed\.(cpp|h)|
+    # MIOpen exclusion list
+    projects/miopen/.*\.s$|
+    projects/miopen/.*\.inc$|
+    projects/miopen/.*\.model$|
+    # RPP exclusion list - raw test data with no early NUL byte, which pre-commit would
+    # otherwise treat as text and corrupt. Matched by extension so new data stays covered.
+    projects/rpp/.*\.(bin|rgb|yuv)$
+
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v3.2.0
     hooks:
       - id: trailing-whitespace
+        # Opted out of the formatting hooks, but still scanned by the security
+        # gate below. Anchored here and aliased onto the other hooks that would
+        # otherwise pick these up from the top level exclude.
+        exclude: &opted_out_but_scanned |
+          (?x)
+          projects/hipblaslt/.*|
+          shared/tensile/.*
       - id: end-of-file-fixer
+        exclude: *opted_out_but_scanned
       - id: check-yaml
         exclude: |
           (?x)
+          projects/hipblaslt/.*|
+          shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
+          ^projects/miopen/\.clang-format$|
           ^dnn-providers/miopen-provider/\.clang-format$|
-          ^dnn-providers/hipblaslt-provider/\.clang-format$
+          ^dnn-providers/hipblaslt-provider/\.clang-format$|
+          ^dnn-providers/hip-kernel-provider/\.clang-format$|
+          ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
+        exclude: *opted_out_but_scanned
 
   - repo: https://github.com/psf/black
     rev: 25.12.0
     hooks:
       - id: black
         language_version: python3
+        exclude: *opted_out_but_scanned
 
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.4
@@ -77,7 +105,22 @@ repos:
       - id: clang-format
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
-        files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+        files: '\.(c|cpp|cc|h|hpp|m|mm|cl)$|\.(h|hpp|cpp)\.in$'
+        exclude: *opted_out_but_scanned
+
+  # Blocks new unsafe yaml.load (arbitrary-object deserialization) from landing.
+  # Intentionally outside the opted-out projects list: this is a security
+  # regression gate, and it only inspects files a commit already touches.
+  # See ROCM-26843 / SEC-00404.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.9.4
+    hooks:
+      - id: bandit
+        name: bandit (unsafe yaml.load / B506)
+        args: ["-t", "B506"]
+        # TODO(ROCM-26843): temporary. Drop once the pre-existing findings here
+        # are converted, so the gate covers the whole repository.
+        exclude: ^shared/rocroller/
 
   - repo: local
     hooks:
@@ -85,13 +128,26 @@ repos:
         name: flatc (hipDNN)
         entry: python projects/hipdnn/scripts/run_flatc.py
         language: python
-        files: ^projects/hipdnn/data_sdk/schemas/.*\.fbs$
+        files: ^projects/hipdnn/(data_sdk|flatbuffers_sdk)/schemas/.*\.fbs$
         pass_filenames: true
+
+      - id: gtest-format-miopen
+        name: GTest naming conventions (MIOpen)
+        entry: python projects/miopen/test/utils/gtest_formating_checks.py
+        language: python
+        files: ^projects/miopen/test/gtest/.*\.cpp$
+        pass_filenames: false
 
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
       - id: cmake-lint
+        exclude: |
+          (?x)
+          projects/hipblaslt/.*|
+          shared/tensile/.*|
+          # MIOpen CMake files have not been audited for cmake-lint compliance yet.
+          ^projects/miopen/.*
       # cmake-format is disabled due to undesirable formatting.
       # We can investigate changing the configuration before re-enabling or using an alternative tool.
       # - id: cmake-format

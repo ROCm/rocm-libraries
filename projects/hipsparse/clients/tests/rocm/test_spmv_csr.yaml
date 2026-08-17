@@ -40,14 +40,52 @@ Tests:
   M: [50]
   N: [84]
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [0.5]
   beta: [1.0]
-  betai: [0.0]
+  betai: [0.5]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
+  call_preprocess: [true, false]
+
+# Test transpose operations with default algorithm (tests fix for rocsparse fallback)
+- name: spmv_csr_transpose
+  category: quick
+  function: spmv_csr
+  indextype: *i32_i64
+  precision: *single_double_precisions_complex_real
+  M: [50]
+  N: [84]
+  alpha: [2.0]
+  alphai: [1.0]
+  beta: [1.0]
+  betai: [1.0]
+  transA: [HIPSPARSE_OPERATION_TRANSPOSE, HIPSPARSE_OPERATION_CONJUGATE_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, HIPSPARSE_SPMV_CSR_ALG3]
+  call_preprocess: [true]
+
+- name: spmv_csr_mixed
+  category: quick
+  function: spmv_csr
+  indextype: *i32_i64
+  precision: *spmv_mixed_precisions
+  M: [50]
+  N: [84]
+  alpha: [2.0]
+  alphai: [-0.5]
+  beta: [1.0]
+  betai: [0.75]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT,
+             HIPSPARSE_SPMV_CSR_ALG1,
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
+  call_preprocess: [true]
 
 - name: spmv_csr
   category: pre_checkin
@@ -57,14 +95,15 @@ Tests:
   M: 1
   N: 1
   alpha: [2.0]
-  alphai: [0.0]
+  alphai: [-0.5]
   beta: [1.0]
-  betai: [0.0]
+  betai: [-0.5]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
   filename: [nos1,
              nos2,
              nos3,
@@ -72,6 +111,8 @@ Tests:
              nos5,
              nos6,
              nos7]
+  call_preprocess: [true]
+             
 - name: spmv_csr
   category: pre_checkin
   function: spmv_csr
@@ -87,7 +128,8 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_CSR_ALG1,
-             HIPSPARSE_SPMV_CSR_ALG2]
+             HIPSPARSE_SPMV_CSR_ALG2,
+             HIPSPARSE_SPMV_CSR_ALG3]
   filename: [Chebyshev4,
              shipsec1,
              bibd_22_8,
@@ -99,3 +141,4 @@ Tests:
              ASIC_320k,
              mac_econ_fwd500,
              mc2depi]
+  call_preprocess: [true]

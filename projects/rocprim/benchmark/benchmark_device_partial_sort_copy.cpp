@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,10 @@
 // SOFTWARE.
 
 #include "benchmark_device_partial_sort_copy.hpp"
-#include "benchmark_utils.hpp"
+#include "primbench.hpp"
 
 #include "../common/utils_custom_type.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #include <rocprim/types.hpp>
@@ -36,39 +35,32 @@
 #include <vector>
 
 #define CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, SMALL_N) \
-    executor.queue_instance(device_partial_sort_copy_benchmark<TYPE>(SMALL_N));
+    executor.queue<device_partial_sort_copy_benchmark<TYPE>>(SMALL_N);
 
-#define CREATE_BENCHMARK(TYPE)                          \
-    {                                                   \
-        CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, true)  \
-        CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, false) \
-    }
+#define CREATE_BENCHMARK(TYPE) \
+    {CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, true) CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, false)}
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
+    primbench::settings settings;
+    settings.size = 128 * primbench::MiB;
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
-    CREATE_BENCHMARK(int)
-    CREATE_BENCHMARK(long long)
+    CREATE_BENCHMARK(int32_t)
+    CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(int8_t)
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::half)
-    CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(int16_t)
     CREATE_BENCHMARK(float)
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    using custom_float2          = common::custom_type<float, float>;
-    using custom_double2         = common::custom_type<double, double>;
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_char_double     = common::custom_type<char, double>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
-    CREATE_BENCHMARK(custom_float2)
-    CREATE_BENCHMARK(custom_double2)
-    CREATE_BENCHMARK(custom_int2)
-    CREATE_BENCHMARK(custom_char_double)
-    CREATE_BENCHMARK(custom_longlong_double)
+    CREATE_BENCHMARK(custom_f32_f32)
+    CREATE_BENCHMARK(custom_f64_f64)
+    CREATE_BENCHMARK(custom_i32_i32)
+    CREATE_BENCHMARK(custom_i8_f64)
+    CREATE_BENCHMARK(custom_i64_f64)
 
     executor.run();
 }

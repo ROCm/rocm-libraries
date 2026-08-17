@@ -88,7 +88,7 @@ static void init_input_data(size_t                              N,
     if(device_data.alloc(Nbytes) != hipSuccess)
         throw std::bad_alloc();
 
-    EXPECT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
+    ASSERT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
               hipSuccess);
 }
 
@@ -103,7 +103,7 @@ static void init_data(size_t N, T init_val, std::vector<T>& host_data, gpubuf_t<
     if(device_data.alloc(Nbytes) != hipSuccess)
         throw std::bad_alloc();
 
-    EXPECT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
+    ASSERT_EQ(hipMemcpy(device_data.data(), host_data.data(), Nbytes, hipMemcpyHostToDevice),
               hipSuccess);
 }
 
@@ -317,7 +317,7 @@ TEST(rocfft_UnitTest, hipGraph_execution)
     rocfft_plan plan_inv;
     create_inverse_fft_plan(N, plan_inv);
 
-    EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
     hipStream_wrapper_t stream;
     hipStream_wrapper_t other_stream;

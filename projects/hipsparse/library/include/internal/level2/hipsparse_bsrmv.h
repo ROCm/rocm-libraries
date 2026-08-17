@@ -29,7 +29,7 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using BSR storage format
+*  \brief Sparse matrix vector multiplication using the BSR storage format.
 *
 *  \details
 *  \p hipsparseXbsrmv multiplies the scalar \f$\alpha\f$ with a sparse
@@ -49,14 +49,14 @@ extern "C" {
 *  and where \f$m = mb \times blockDim\f$ and \f$n= nb \times blockDim\f$.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  Currently, only \p transA == \ref HIPSPARSE_OPERATION_NON_TRANSPOSE is supported.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  dirA            matrix storage of BSR blocks.
 *  @param[in]
@@ -93,11 +93,11 @@ extern "C" {
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha or \p beta is nullptr,
-*          \p mb, \p nb or \p nnzb is negative, \p blockDim is less than or equal to zero, or
-*          \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p x or \p y is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descrA, \p alpha, or \p beta is nullptr,
+*          \p mb, \p nb, or \p nnzb is negative, \p blockDim is less than or equal to zero, or
+*          \p bsrSortedValA, \p bsrSortedRowPtrA, \p bsrSortedColIndA, \p x, or \p y is nullptr.
 *  \retval HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
-*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE,
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p transA is not \ref HIPSPARSE_OPERATION_NON_TRANSPOSE
 *          or \ref hipsparseMatrixType_t is not \ref HIPSPARSE_MATRIX_TYPE_GENERAL.
 */
 /**@{*/

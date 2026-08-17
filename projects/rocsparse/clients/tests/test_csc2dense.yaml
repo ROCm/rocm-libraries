@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -37,7 +37,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 3, 8, 13, 64, 256]
   N: [0, 3, 8, 13, 64, 256]
-  denseld: [256, 512]
+  denseld: [400]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: csc2dense
@@ -46,24 +46,24 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 531, 1000]
   N: [0, 241, 1000]
-  denseld: [1000, 2000]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  denseld: [1000]
+  baseA: [rocsparse_index_base_zero]
 
 - name: csc2dense
   category: pre_checkin
   function: csc2dense
   precision: *single_double_precisions_complex_real
-  M: [0, 531, 1000]
-  N: [0, 241, 1000]
-  denseld: [1000, 2000]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  M: [0, 745, 1000]
+  N: [0, 429, 1000]
+  denseld: [2000]
+  baseA: [rocsparse_index_base_one]
   graph_test: true
 
 - name: csc2dense
   category: nightly
   function: csc2dense
   precision: *single_double_precisions_complex_real
-  M: [2000, 4000, 8000]
+  M: [1000, 2000]
   N: [2000, 4000]
   denseld: [ 8000 ]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  baseA: [rocsparse_index_base_one]

@@ -28,6 +28,8 @@
 
 #include <Tensile/Tensile.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <typename MyProblem, typename MySolution>
@@ -39,3 +41,4 @@ namespace TensileLite
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LLVMLoadLibraryData(std::vector<uint8_t> const& data, std::string filename = "");
 } // namespace TensileLite
+

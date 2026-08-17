@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -219,6 +196,38 @@ namespace rocRoller
 
                 setComment(result, "Split");
                 return {result};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(PairSwap const& e)
+            {
+                using namespace Expression;
+                AssertFatal(srcs.size() == 1 && indexes.size() >= 2);
+                auto col      = indexes[0];
+                auto row      = indexes[1];
+                auto logGrp   = literal(static_cast<unsigned int>(__builtin_ctz(e.rowsPerGroup)));
+                auto groupIdx = row >> logGrp;
+
+                auto swapBit = (groupIdx ^ literal(1u)) & literal(1u);
+                col          = col ^ swapBit;
+                return {col};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Rotate const& e)
+            {
+                using namespace Expression;
+                AssertFatal(srcs.size() == 1 && indexes.size() >= 2);
+                auto col      = indexes[0];
+                auto row      = indexes[1];
+                auto numPos   = literal(e.numPositions);
+                auto logGrp   = literal(static_cast<unsigned int>(__builtin_ctz(e.rowsPerGroup)));
+                auto groupIdx = row >> logGrp;
+
+                auto halfRotation = (groupIdx >> literal(1u)) << literal(1u);
+                if(e.inverse)
+                    col = (col + halfRotation) & (numPos - literal(1u));
+                else
+                    col = (col + numPos - halfRotation) & (numPos - literal(1u));
+                return {col};
             }
 
             std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)
@@ -526,6 +535,28 @@ namespace rocRoller
                 deltas.emplace(srcTags[0], delta);
                 setComment(index, "DSplit");
                 return {index};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(PairSwap const& e)
+            {
+                AssertFatal(srcs.size() == 1);
+                auto delta = getDelta(dstTags[0]);
+                for(size_t i = 0; i < srcs.size(); ++i)
+                    deltas.emplace(srcTags[i], delta);
+                ReverseEdgeVisitor rev;
+                rev.setLocation(indexes, srcs, dsts, srcTags, dstTags);
+                return rev(e);
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Rotate const& e)
+            {
+                AssertFatal(srcs.size() == 1);
+                auto delta = getDelta(dstTags[0]);
+                for(size_t i = 0; i < srcs.size(); ++i)
+                    deltas.emplace(srcTags[i], delta);
+                ReverseEdgeVisitor rev;
+                rev.setLocation(indexes, srcs, dsts, srcTags, dstTags);
+                return rev(e);
             }
 
             std::vector<Expression::ExpressionPtr> operator()(PiecewiseAffineJoin const& e)

@@ -1,0 +1,49 @@
+# serializer version: 1
+# name: test_load_logic_gfx_arch_map_fallback
+  'gfx1100'
+# ---
+# name: test_load_logic_gfx_arch_sequence_dict
+  'gfx90a'
+# ---
+# name: test_load_logic_gfx_arch_sequence_string
+  'gfx942'
+# ---
+# name: test_load_yaml_dict_items
+  dict({
+    'a': 1,
+    'c': list([
+      10,
+      20,
+    ]),
+    'missing': None,
+  })
+# ---
+# name: test_load_yaml_sequence_items
+  dict({
+    'idx0': 'alpha',
+    'idx2': 'gamma',
+    'idx_oob': None,
+  })
+# ---
+# name: test_load_yaml_stream_scalar_types
+  dict({
+    'empty': None,
+    'f': False,
+    'fl': 3.14,
+    'i': -42,
+    'n': None,
+    'nested': dict({
+      'a': 1,
+      'b': 'two',
+    }),
+    'qnull': 'null',
+    's': 'hello',
+    'seq': list([
+      1,
+      2,
+      'three',
+    ]),
+    't': True,
+    'tilde': None,
+  })
+# ---

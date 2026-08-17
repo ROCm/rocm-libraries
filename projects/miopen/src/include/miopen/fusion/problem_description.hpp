@@ -56,8 +56,14 @@ struct FusionDescription : ProblemDescriptionBase
     {
         const auto& input_desc  = fusion_plan_desc->input_desc;
         const auto& output_desc = fusion_plan_desc->output_desc;
-        ss << input_desc.ToString() << ((input_desc.GetType() == miopenHalf) ? "FP16" : "FP32");
-        ss << output_desc.ToString() << ((output_desc.GetType() == miopenHalf) ? "FP16" : "FP32");
+        ss << input_desc.ToString()
+           << ((input_desc.GetType() == miopenFloat)  ? "FP32"
+               : (input_desc.GetType() == miopenHalf) ? "FP16"
+                                                      : "BFP16");
+        ss << output_desc.ToString()
+           << ((output_desc.GetType() == miopenFloat)  ? "FP32"
+               : (output_desc.GetType() == miopenHalf) ? "FP16"
+                                                       : "BFP16");
         GetNetworkConfig(ss);
     }
 
@@ -94,17 +100,28 @@ struct FusionDescription : ProblemDescriptionBase
 
     bool IsFp16() const { return (fusion_plan_desc->input_desc).GetType() == miopenHalf; }
 
+    bool IsBFp16() const { return (fusion_plan_desc->input_desc).GetType() == miopenBFloat16; }
+
     bool Is2D() const { return (fusion_plan_desc->input_desc).GetLengths().size() == 4; }
 
-    bool IsLayoutContiguous() const
+    bool IsLayoutNCHW() const
     {
-        // determine input and output layouts
         const auto in_layout  = fusion_plan_desc->input_desc.GetLayout_str();
         const auto out_layout = fusion_plan_desc->output_desc.GetLayout_str();
 
         return fusion_plan_desc->input_desc.GetLengths().size() == 4
                    ? ((in_layout == "NCHW") && (out_layout == "NCHW"))
                    : ((in_layout == "NCDHW") && (out_layout == "NCDHW"));
+    }
+
+    bool IsLayoutNHWC() const
+    {
+        const auto in_layout  = fusion_plan_desc->input_desc.GetLayout_str();
+        const auto out_layout = fusion_plan_desc->output_desc.GetLayout_str();
+
+        return fusion_plan_desc->input_desc.GetLengths().size() == 4
+                   ? ((in_layout == "NHWC") && (out_layout == "NHWC"))
+                   : ((in_layout == "NDHWC") && (out_layout == "NDHWC"));
     }
 
     // This and the following method should be moved to the Ops once the return type can be unified

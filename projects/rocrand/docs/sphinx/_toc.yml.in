@@ -5,7 +5,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/installing
-      title: Installation guide
+      title: Install rocRAND
+    - file: install/build
+      title: Build from source
 
   - caption: Conceptual
     entries:
@@ -15,6 +17,11 @@ subtrees:
     - file: conceptual/dynamic_ordering_configuration
     - file: conceptual/generator-types
       title: Random number generators
+
+  - caption: How to
+    entries:
+    - file: how-to/rocRAND-primbench
+      title: Use primbench for benchmarking
 
   - caption: Examples
     entries:

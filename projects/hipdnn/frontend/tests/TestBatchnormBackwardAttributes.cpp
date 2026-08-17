@@ -314,7 +314,7 @@ TEST(TestBatchnormBackwardAttributes, SimplifiedSetPeerStatsWithMove)
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
     peerStatsMove.push_back(std::make_shared<hipdnn_frontend::graph::TensorAttributes>());
 
-    size_t originalSize = peerStatsMove.size();
+    const size_t originalSize = peerStatsMove.size();
     batchnormAttributes.set_peer_stats(std::move(peerStatsMove));
 
     // Verify the vector was moved
@@ -335,4 +335,106 @@ TEST(TestBatchnormBackwardAttributes, SimplifiedSetSavedMeanAndInvVarianceWithMo
     // Just verify the tensors were set
     EXPECT_NE(batchnormAttributes.get_mean(), nullptr);
     EXPECT_NE(batchnormAttributes.get_inv_variance(), nullptr);
+}
+
+TEST(TestBatchnormBackwardAttributes, LogicalAndStrictEquality)
+{
+    hipdnn_frontend::graph::BatchnormBackwardAttributes attr1;
+    attr1.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto dy1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dy1->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_dy(dy1);
+
+    auto x1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x1->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_x(x1);
+
+    auto scale1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale1->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_scale(scale1);
+
+    auto mean1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    mean1->set_uid(4).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    auto invVar1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    invVar1->set_uid(5).set_name("InvVar").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr1.set_saved_mean_and_inv_variance(mean1, invVar1);
+
+    hipdnn_frontend::graph::BatchnormBackwardAttributes attr2;
+    attr2.set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto dy2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    dy2->set_uid(1).set_name("DY").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_dy(dy2);
+
+    auto x2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    x2->set_uid(2).set_name("X").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_x(x2);
+
+    auto scale2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    scale2->set_uid(3).set_name("Scale").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_scale(scale2);
+
+    auto mean2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    mean2->set_uid(4).set_name("Mean").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    auto invVar2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    invVar2->set_uid(5).set_name("InvVar").set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_saved_mean_and_inv_variance(mean2, invVar2);
+
+    // Initial check: Everything is exactly matching
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_FALSE(attr1 != attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2)); // Also logically equal
+
+    // Structural modification check
+    auto structuralMismatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    structuralMismatchDy->set_uid(99).set_name("MismatchedDY");
+    attr2.set_dy(structuralMismatchDy);
+
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Structural/Type gap implies logical inequality
+    attr2.set_dy(dy2); // Revert back
+
+    // Vector custom data tracking checks
+    auto peerTensor1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1->set_uid(10).set_name("PeerStat").set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto peerTensor2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2->set_uid(10).set_name("PeerStat").set_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    attr1.set_peer_stats({peerTensor1});
+    EXPECT_TRUE(attr1 != attr2);
+    EXPECT_FALSE(attr1.logicallyEquals(attr2)); // Vector missing elements fails both
+
+    attr2.set_peer_stats({peerTensor2});
+    EXPECT_TRUE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Change metadata (UID/Name) on a standard tensor map item
+    auto logicalMatchDy = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchDy
+        ->set_uid(555) // Diverges from attr1's dy1 (uid: 1)
+        .set_name("DIVERGENT_NAME") // Diverges from attr1's dy1 ("DY")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT); // Mathematical layouts match
+    attr2.set_dy(logicalMatchDy);
+
+    // Expecting: Strict evaluation fails, but functional logical comparison passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
+
+    // Reset back
+    attr2.set_dy(dy2);
+
+    // Change metadata (UID/Name) inside the custom peer_stats vector array
+    auto logicalMatchPeer = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    logicalMatchPeer
+        ->set_uid(999) // Diverges from attr1's peer (uid: 10)
+        .set_name("PEER_ALT_NAME") // Diverges from attr1's peer ("PeerStat")
+        .set_data_type(hipdnn_frontend::DataType::FLOAT);
+    attr2.set_peer_stats({logicalMatchPeer});
+
+    // Expecting: peer_stats strictEqualsImpl fails, but logicallyEqualsImpl passes
+    EXPECT_FALSE(attr1 == attr2);
+    EXPECT_TRUE(attr1.logicallyEquals(attr2));
 }

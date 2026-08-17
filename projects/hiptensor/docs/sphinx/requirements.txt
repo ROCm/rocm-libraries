@@ -37,12 +37,14 @@ click==8.1.7
     #   sphinx-external-toc
 comm==0.2.2
     # via ipykernel
-cryptography==44.0.1
+cryptography==48.0.1
     # via pyjwt
 debugpy==1.8.12
     # via ipykernel
 decorator==5.1.1
     # via ipython
+defusedxml==0.7.1
+    # via sphinxcontrib-datatemplates
 deprecated==1.2.14
     # via pygithub
 docutils==0.21.2
@@ -61,11 +63,11 @@ fastjsonschema==2.19.1
     #   rocm-docs-core
 gitdb==4.0.11
     # via gitpython
-gitpython==3.1.43
+gitpython==3.1.57
     # via rocm-docs-core
 greenlet==3.1.1
     # via sqlalchemy
-idna==3.7
+idna==3.15
     # via requests
 imagesize==1.4.1
     # via sphinx
@@ -157,13 +159,13 @@ pydata-sphinx-theme==0.15.4
     #   sphinx-book-theme
 pygithub==2.3.0
     # via rocm-docs-core
-pygments==2.18.0
+pygments==2.20.0
     # via
     #   accessible-pygments
     #   ipython
     #   pydata-sphinx-theme
     #   sphinx
-pyjwt[crypto]==2.8.0
+pyjwt[crypto]==2.13.0
     # via pygithub
 pynacl==1.6.2
     # via pygithub
@@ -176,6 +178,7 @@ pyyaml==6.0.1
     #   myst-parser
     #   rocm-docs-core
     #   sphinx-external-toc
+    #   sphinxcontrib-datatemplates
 pyzmq==26.2.0
     # via
     #   ipykernel
@@ -184,11 +187,11 @@ referencing==0.36.1
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.4
+requests==2.33.0
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core==1.31.3
+rocm-docs-core==1.39.0
     # via -r requirements.in
 rpds-py==0.22.3
     # via
@@ -200,7 +203,7 @@ smmap==5.0.1
     # via gitdb
 snowballstemmer==2.2.0
     # via sphinx
-soupsieve==2.5
+soupsieve==2.8.4
     # via beautifulsoup4
 sphinx==7.3.7
     # via
@@ -214,6 +217,8 @@ sphinx==7.3.7
     #   sphinx-design
     #   sphinx-external-toc
     #   sphinx-notfound-page
+    #   sphinxcontrib-datatemplates
+    #   sphinxcontrib-runcmd
 sphinx-book-theme==1.1.4
     # via rocm-docs-core
 sphinx-copybutton==0.5.2
@@ -226,6 +231,8 @@ sphinx-notfound-page==1.0.2
     # via rocm-docs-core
 sphinxcontrib-applehelp==1.0.8
     # via sphinx
+sphinxcontrib-datatemplates==0.11.0
+    # via -r requirements.in
 sphinxcontrib-devhelp==1.0.6
     # via sphinx
 sphinxcontrib-htmlhelp==2.0.5
@@ -234,6 +241,8 @@ sphinxcontrib-jsmath==1.0.1
     # via sphinx
 sphinxcontrib-qthelp==1.0.7
     # via sphinx
+sphinxcontrib-runcmd==0.2.0
+    # via sphinxcontrib-datatemplates
 sphinxcontrib-serializinghtml==1.1.10
     # via sphinx
 sqlalchemy==2.0.37
@@ -244,7 +253,7 @@ tabulate==0.9.0
     # via jupyter-cache
 tomli==2.0.1
     # via sphinx
-tornado==6.5
+tornado==6.5.7
     # via
     #   ipykernel
     #   jupyter-client
@@ -258,15 +267,17 @@ traitlets==5.14.3
     #   matplotlib-inline
     #   nbclient
     #   nbformat
-typing-extensions==4.11.0
+typing-extensions==4.15.0
     # via
+    #   cryptography
     #   ipython
     #   myst-nb
     #   pydata-sphinx-theme
     #   pygithub
+    #   pyjwt
     #   referencing
     #   sqlalchemy
-urllib3==2.6.3
+urllib3==2.7.0
     # via
     #   pygithub
     #   requests

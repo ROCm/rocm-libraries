@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -240,6 +240,20 @@ public:
     // ELL
     //
     void init_ell(host_ell_matrix<T, I>& that, I& m, I& n, rocsparse_index_base base);
+
+    //
+    // BLOCKED ELL
+    //
+    void init_bell(std::vector<I>&      bell_col_ind,
+                   std::vector<T>&      bell_val,
+                   I&                   mb,
+                   I&                   nb,
+                   I&                   ell_cols,
+                   I&                   ell_block_size,
+                   rocsparse_index_base base);
+
+    void
+        init_bell(host_bell_matrix<T, I>& that, I& m, I& n, I block_dim, rocsparse_index_base base);
 
     //
     // SLICED ELL

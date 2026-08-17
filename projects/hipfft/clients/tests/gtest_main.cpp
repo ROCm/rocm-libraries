@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include <string>
 
 #include "../../shared/CLI11.hpp"
+#include "../../shared/client_except.h"
 #include "../../shared/concurrency.h"
 #include "../../shared/device_properties.h"
 #include "../../shared/environment.h"
@@ -54,6 +55,10 @@ size_t             random_seed;
 std::random_device default_seed_dev;
 // Overall probability of running conventional tests
 double test_prob;
+// Probability of running tests from the emulation/simulation suite
+double emulation_prob;
+// Probability of running unit tests
+double unittest_prob;
 // Modifier for probability of running tests with complex interleaved data
 double complex_interleaved_prob_factor;
 // Modifier for probability of running tests with real data
@@ -73,16 +78,8 @@ std::string hipfftw_token_for_functional_test;
 // Transform parameters for manual test:
 hipfft_params manual_params;
 
-// Host memory limitation for tests (GiB):
-size_t ramgb;
-
-// Device memory limitation for tests (GiB):
-size_t vramgb;
-
 // Allow skipping tests if there is a runtime error
 bool skip_runtime_fails;
-// But count the number of failures
-int n_hip_failures = 0;
 
 // Manually specified precision cutoffs:
 double single_epsilon;
@@ -97,6 +94,12 @@ double max_l2_eps_single   = 0.0;
 double max_linf_eps_half   = 0.0;
 double max_l2_eps_half     = 0.0;
 
+// Minimum number of random probes per device in hipfftXt data distribution verification
+size_t min_probes_per_dev_for_xt;
+
+// Token string for manual hipfftXt test
+std::string hipfftxt_test_token;
+
 // Control whether we use FFTW's wisdom (which we use to imply FFTW_MEASURE).
 bool use_fftw_wisdom = false;
 
@@ -104,7 +107,7 @@ bool use_fftw_wisdom = false;
 bool fftw_compare = true;
 
 // Cache the last cpu fft that was requested
-last_cpu_fft_cache last_cpu_fft_data;
+reference_fft_data_t reference_fft_data_t::cached_data = reference_fft_data_t::make_default();
 
 // Multi-process library to use
 fft_params::fft_mp_lib mp_lib = fft_params::fft_mp_lib_none;
@@ -130,7 +133,7 @@ void init_gtest_flags()
     std::swap(temp_list_tests, testing::GTEST_FLAG(list_tests));
 
     // move stdout to devnull
-#ifdef WIN32
+#ifdef _WIN32
     int stdout_fd   = _fileno(stdout);
     int devnull     = _open("NUL", _O_WRONLY);
     int stdout_copy = _dup(stdout_fd);
@@ -145,7 +148,7 @@ void init_gtest_flags()
     (void)RUN_ALL_TESTS();
 
     // put stdout back
-#ifdef WIN32
+#ifdef _WIN32
     _dup2(stdout_copy, stdout_fd);
     _close(stdout_copy);
     _close(devnull);
@@ -303,6 +306,10 @@ void precompile_test_kernels(const std::string& precompile_file)
 
 int main(int argc, char* argv[])
 {
+    // Unless specified otherwise by the user, no limit on host/device memory usage
+    // (see corresponding default values)
+    size_t ramgb_limit, vramgb_limit;
+
     CLI::App app{
         "\n"
         "hipFFT/hipFFTW Runtime Test command line options\n"
@@ -332,6 +339,20 @@ int main(int argc, char* argv[])
                    "Probability of running individual tests (excluding non-minimal hipfftw tests)")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--unittest_prob", unittest_prob, "Probability of running individual unit tests")
+        ->default_val(1.0)
+        ->check(CLI::Range(0.0, 1.0));
+    app.add_option("--R", ramgb_limit, "RAM limit in GiB for tests")
+        ->default_val(system_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb_limit, "VRAM limit in GiB for tests (per device)")
+        ->default_val(DivRoundingUp(
+            device_memory_accountant::singleton().get_max_total_mem_on_devices(), ONE_GiB));
+    app.add_option("--emulation_prob,--simulation_prob",
+                   emulation_prob,
+                   "Probability of running individual emulation/simulation tests (disabled by "
+                   "default to alleviate redundancy with rocfft-test)")
+        ->default_val(0.0)
+        ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
                    real_prob_factor,
                    "Probability multiplier for running individual real/complex transforms")
@@ -351,8 +372,61 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::NonNegativeNumber);
+    constexpr auto emulation_quick      = "quick";
+    constexpr auto emulation_smoke      = "smoke";
+    constexpr auto emulation_regression = "regression";
+    constexpr auto emulation_extended   = "extended";
+    app.add_option("--emulation,--simulation",
+                   "Run emulation/simulation tests only (targeted scopes)")
+        ->check(CLI::IsMember(
+            {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
+        ->expected(1)
+        ->excludes("--test_prob", "--emulation_prob", "--unittest_prob", "--callback_prob", "--R")
+        ->each([&](const std::string& emulationtype) {
+            // Emulation test suites focus on well-established software paths.
+
+            // Run all of the emulation tests:
+            emulation_prob = 1.0;
+
+            // Callbacks are not an emulation test target.
+            callback_prob_factor = 0;
+
+            if(emulationtype == emulation_quick)
+            {
+                // Configuration specific for "quick simulation test" category, the whole test run
+                // should complete under 2 hours in the simulation environment (configuration parameters
+                // based on observations)
+                vramgb_limit   = 2;
+                emulation_prob = 0.002;
+                test_prob      = 0;
+                unittest_prob  = 0;
+            }
+            else if(emulationtype == emulation_smoke)
+            {
+                vramgb_limit   = 2;
+                emulation_prob = 0.005;
+                test_prob      = 0;
+                unittest_prob  = 0;
+            }
+            else if(emulationtype == emulation_regression)
+            {
+                vramgb_limit   = 16;
+                emulation_prob = 1;
+                test_prob      = 0.01;
+                unittest_prob  = 0.01;
+            }
+            else
+            {
+                // emulationtype == emulation_extended given CLI11's check above
+                assert((emulationtype == emulation_extended));
+                emulation_prob = 1;
+                test_prob      = 0.02;
+                unittest_prob  = 0.02;
+            }
+        });
+
     app.add_option("--max_hipfftw_test_len",
                    max_length_for_hipfftw_test,
                    "Maximum length to be considered in hipfftw tests")
@@ -425,9 +499,9 @@ int main(int argc, char* argv[])
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
-    non_token->add_flag("--callback", "Inject load/store callbacks")->each([&](const std::string&) {
-        manual_params.run_callbacks = true;
-    });
+    non_token->add_option("--callback", manual_params.run_callbacks, "Inject load/store callbacks.")
+        ->default_val("none")
+        ->check(CLI::IsMember({"none", "funcptr", "jit"}));
     non_token
         ->add_option("--auto_allocation",
                      manual_params.auto_allocate,
@@ -475,23 +549,19 @@ int main(int argc, char* argv[])
         ->default_val(0);
     non_token->add_option("--ioffset", manual_params.ioffset, "Input offset");
     non_token->add_option("--ooffset", manual_params.ooffset, "Output offset");
-    non_token->add_option("--isize", manual_params.isize, "Logical size of input buffer");
-    non_token->add_option("--osize", manual_params.osize, "Logical size of output buffer");
-    non_token->add_option(
-        "--scalefactor", manual_params.scale_factor, "Scale factor to apply to output");
+    app.add_option("--isize", manual_params.isize, "Logical size of input buffer");
+    app.add_option("--osize", manual_params.osize, "Logical size of output buffer");
     // Default value is set in fft_params.h based on if device-side PRNG was enabled.
-    non_token->add_option("-g, --inputGen",
-                          manual_params.igen,
-                          "Input data generation:\n0) PRNG sequence (device)\n"
-                          "1) PRNG sequence (host)\n"
-                          "2) linearly-spaced sequence (device)\n"
-                          "3) linearly-spaced sequence (host)");
+    app.add_option("-g, --inputGen",
+                   manual_params.igen,
+                   "Input data generation:\n0) PRNG sequence (device)\n"
+                   "1) PRNG sequence (host)\n"
+                   "2) linearly-spaced sequence (device)\n"
+                   "3) linearly-spaced sequence (host)");
+    app.add_option("--scalefactor", manual_params.scale_factor, "Scale factor to apply to output");
     const auto* opt_version = app.add_flag(
         "--version",
         "Print queryable version information from the hipfft library's backend (and return)");
-    app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
     app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
     app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
     app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
@@ -499,6 +569,16 @@ int main(int argc, char* argv[])
                    skip_runtime_fails,
                    "Skip the test if there is a runtime failure")
         ->default_val(true);
+    app.add_option("--min_probes_per_dev_for_xt",
+                   min_probes_per_dev_for_xt,
+                   "Minimum number of random probes per device in hipfftXt data distribution "
+                   "verification")
+        ->default_val(10)
+        ->check(CLI::PositiveNumber);
+    app.add_option("--hipfftxt_test_token",
+                   hipfftxt_test_token,
+                   "Token string for manual hipfftXt single-process, multi-GPU tests")
+        ->default_val("");
     app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
     // Filename for fftw and fftwf wisdom.
     std::string fftw_wisdom_filename;
@@ -634,9 +714,25 @@ int main(int argc, char* argv[])
     fftwf_plan_with_nthreads(rocfft_concurrency());
 #endif
 
-    // Set host memory limit from command-line options
-    host_memory::singleton().set_limit_gbytes(ramgb);
-    std::cout << "Host memory limit: " << ramgb << " GiB" << std::endl;
+    system_memory::singleton().set_limit_bytes(ramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than "
+              << byte_size_to_str(system_memory::singleton().get_limit_bytes())
+              << " of system memory." << std::endl;
+    device_memory_accountant::singleton().set_limit_bytes_for_all_devices(vramgb_limit * ONE_GiB);
+    std::cout << "Refraining from using more than ";
+    for(size_t dev_id = 0; dev_id < device_memory_accountant::singleton().num_devices(); dev_id++)
+    {
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << "\n\t";
+        std::cout << byte_size_to_str(
+            device_memory_accountant::singleton().get_limit_bytes_on_device(dev_id))
+                  << " of device memory";
+        if(device_memory_accountant::singleton().num_devices() > 1)
+            std::cout << " for device ID " << dev_id;
+        std::cout << (dev_id == device_memory_accountant::singleton().num_devices() - 1 ? "."
+                                                                                        : ";");
+    }
+    std::cout << std::endl;
 
     if(use_fftw_wisdom)
     {

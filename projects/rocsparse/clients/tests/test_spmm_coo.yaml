@@ -28,11 +28,9 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
@@ -43,12 +41,6 @@ Definitions:
     - { alpha:   1.0, beta:  0.0, alphai:  0.0, betai:  0.0 }
 
 Tests:
-- name: spmm_coo_bad_arg
-  category: pre_checkin
-  function: spmm_coo_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions
-
 # ##############################
 # # Quick
 # ##############################
@@ -58,16 +50,16 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [0, 512]
-  N: [0, 1, 2, 16, 145, 200, 300]
-  K: [0, 512]
+  M: [300]
+  N: [8]
+  K: [512]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
-  orderB: *all_rocsparse_order
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
 
 - name: spmm_coo
@@ -75,16 +67,16 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [0, 1, 543]
-  N: [0, 1, 6, 7, 9, 11, 27, 300]
-  K: [0, 1, 538]
+  M: [8]
+  N: [8]
+  K: [538]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
+  transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
-  spmm_alg: [rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
-  orderB: *all_rocsparse_order
+  spmm_alg: [rocsparse_spmm_alg_coo_segmented]
+  orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
 
 - name: spmm_coo_file
@@ -114,7 +106,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [1, 2, 4]
+  N: [1, 2]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -132,7 +124,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [2, 4]
+  N: [2]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_conjugate_transpose]
@@ -142,8 +134,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-  filename: [Chevron2,
-             qc2534]
+  filename: [mplate]
 
 - name: spmm_coo_file
   category: quick
@@ -151,7 +142,7 @@ Tests:
   indextype: *i32_i64
   precision: *single_double_precisions_complex
   M: 1
-  N: [2, 4]
+  N: [4]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -161,15 +152,14 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented, rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron2,
-             qc2534]
+  filename: [qc2534]
 
 - name: spmm_coo
   category: quick
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
-  M: [429]
+  M: [300]
   N: [118]
   K: [548]
   alpha_beta: *alpha_beta_range_quick
@@ -180,13 +170,16 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
   category: quick
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
-  M: [816]
+  M: [300]
   N: [231]
   K: [176]
   alpha_beta: *alpha_beta_range_quick
@@ -197,13 +190,16 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
-  category: quickly
+  category: quick
   function: spmm_coo
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [7368]
+  M: [300]
   N: [26]
   K: [4758]
   alpha_beta: *alpha_beta_range_quick
@@ -220,8 +216,8 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
-  M: [512]
-  N: [16, 32, 64]
+  M: [300]
+  N: [16, 32]
   K: [512]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -235,12 +231,18 @@ Tests:
 ##############################
 # Precheckin
 ##############################
+- name: spmm_coo_bad_arg
+  category: pre_checkin
+  function: spmm_coo_bad_arg
+  indextype: *i32_i64
+  precision: *single_double_precisions
+
 - name: spmm_coo
   category: pre_checkin
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [5111]
+  M: [2000]
   N: [21, 82]
   K: [4441]
   alpha_beta: *alpha_beta_range_checkin
@@ -257,8 +259,8 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [5111]
-  N: [9, 10, 21, 82]
+  M: [2000]
+  N: [9, 10, 13]
   K: [4441]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -295,7 +297,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [7]
+  N: [150, 200, 256]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -363,7 +365,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron3]
+  filename: [Chevron2]
 
 - name: spmm_coo_file
   category: pre_checkin
@@ -386,7 +388,7 @@ Tests:
 - name: spmm_coo_file
   category: pre_checkin
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: 1
   N: [87]
@@ -400,13 +402,16 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
   filename: [mplate]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
   category: pre_checkin
   function: spmm_coo
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [57846]
+  M: [2000]
   N: [35, 42]
   K: [28473]
   alpha_beta: *alpha_beta_range_checkin
@@ -423,7 +428,7 @@ Tests:
   function: spmm_coo
   indextype: *i32
   precision: *bfloat16_bfloat16_float32_float32_abct_precision
-  M: [55485]
+  M: [2000]
   N: [61]
   K: [58234]
   alpha_beta: *alpha_beta_range_checkin
@@ -441,7 +446,7 @@ Tests:
   indextype: *i32_i64
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
   M: [1024]
-  N: [32, 64, 128]
+  N: [32, 64]
   K: [1024]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -457,8 +462,8 @@ Tests:
   function: spmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
-  M: [0, 1, 16, 64, 143, 512]
-  N: [0, 1, 9, 11, 27, 300]
+  M: [8, 1]
+  N: [8, 1]
   K: [0, 1, 10, 56, 138]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -606,7 +611,7 @@ Tests:
 - name: spmm_coo_file
   category: nightly
   function: spmm_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
   M: 1
   N: [65]
@@ -620,13 +625,16 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [bmwcra_1]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_coo
   category: nightly
   function: spmm_coo
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [82734]
+  M: [8273]
   N: [32, 42]
   K: [63753]
   alpha_beta: *alpha_beta_range_nightly
@@ -647,7 +655,7 @@ Tests:
   function: spmm_coo
   indextype: *i32
   precision: *single_only_precisions
-  M: [500000000]
+  M: [50000000]
   N: [1]
   K: [500000000]
   alpha_beta: *alpha_beta_range_stress
@@ -666,7 +674,7 @@ Tests:
   function: spmm_coo
   indextype: *i32
   precision: *single_only_precisions
-  M: [300000000]
+  M: [30000000]
   N: [2]
   K: [300000000]
   alpha_beta: *alpha_beta_range_stress

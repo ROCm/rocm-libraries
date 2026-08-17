@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -53,8 +53,16 @@ inline double get_gpu_time_msec(double gpu_time_used)
  *    level 1 SPARSE
  * ===========================================================================
  */
+template <typename X, typename Y, typename I>
+constexpr double axpby_gbyte_count(I nnz, I size)
+{
+    // axpby touches: the nnz sparse indices + the nnz sparse values, and the
+    // entire dense vector y once for the beta*y scaling (read + write).
+    return (nnz * sizeof(I) + nnz * sizeof(X) + (2.0 * size) * sizeof(Y)) / 1e9;
+}
+
 template <typename T, typename I>
-constexpr double axpby_gbyte_count(I nnz)
+constexpr double axpyi_gbyte_count(I nnz)
 {
     return (nnz * sizeof(I) + (3.0 * nnz) * sizeof(T)) / 1e9;
 }
@@ -194,6 +202,20 @@ constexpr double
 
     //writes
     size_t writes = nnz_C * sizeof(T);
+
+    return (reads + writes) / 1e9;
+}
+
+template <typename T, typename I>
+constexpr double
+    bellmm_gbyte_count(I Mb, I ell_cols, I ell_block_size, I nnz_B, I nnz_C, bool beta = false)
+{
+    //reads
+    size_t reads = sizeof(I) * Mb * ell_cols / ell_block_size
+                   + sizeof(T) * (Mb * ell_cols * ell_block_size + nnz_B + (beta ? nnz_C : 0));
+
+    //writes
+    size_t writes = sizeof(T) * nnz_C;
 
     return (reads + writes) / 1e9;
 }

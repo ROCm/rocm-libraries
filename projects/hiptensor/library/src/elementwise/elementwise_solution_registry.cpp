@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,8 +66,8 @@ namespace hiptensor
                               operators.cend(),
                               [](auto v) { return v == HIPTENSOR_OP_IDENTITY; })
                && instanceType == ElementwiseExecutionSpaceType_t::DEVICE);
-        auto scale = usePassThroughIfAlphaIsOne ? hiptensor::PermutationOpId_t::PASS_THROUGH
-                                                : hiptensor::PermutationOpId_t::SCALE;
+        auto scale     = usePassThroughIfAlphaIsOne ? hiptensor::PermutationOpId_t::PASS_THROUGH
+                                                    : hiptensor::PermutationOpId_t::SCALE;
         auto hashCodes = ck::tensor_operation::device::instance::getHashCodeOfBestPerfInstances(
             inDataTypes, outDataTypes, scale, nDims, instanceParams);
 

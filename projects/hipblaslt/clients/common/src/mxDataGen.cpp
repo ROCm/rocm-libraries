@@ -1,79 +1,190 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include "mxDataGen.hpp"
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
-#include <cblas.h>
+#include <mxDataGenerator/dataTypeInfo.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <cmath>
+#include <cstring>
+#include <stdexcept>
+#include <utility>
 
+namespace
+{
+    // OCP FP4 E2M1 max-normal magnitude; the "uniform_low_precision" init
+    // method draws uniformly from [-FP4E2M1Max, FP4E2M1Max].
+    constexpr double FP4E2M1Max = 6.0;
+
+    // Per-DTYPE integer range for the legacy "rand_int" init method, mirroring
+    // the hand-tuned ranges in `random_int<T>` (see hipblaslt_init_device.cpp).
+    // Each range fits inside the DTYPE's max normal so satConvertToType doesn't
+    // saturate.
+    inline std::pair<int, int> randIntRangeFor(hipDataType dataType)
+    {
+        switch(static_cast<int>(dataType))
+        {
+        case static_cast<int>(HIP_R_4F_E2M1):
+            return {-4, 4};
+        case static_cast<int>(HIP_R_6F_E2M3):
+            return {-7, 7};
+        case static_cast<int>(HIP_R_6F_E3M2):
+            return {-28, 28};
+        case static_cast<int>(HIP_R_8F_E4M3):
+        case static_cast<int>(HIP_R_8F_E5M2):
+        default:
+            return {1, 10};
+        }
+    }
+
+    // Per-DTYPE std_dev for the legacy "norm_dist" init method. MX block scaling
+    // pre-normalises each block to ~[-1, 1], so on FP4 std=1 lands ~20% of
+    // samples in the round-to-zero bin; widening to 5 cuts that to ~4% (measured).
+    // Other MX widths are already tight enough at std=1.
+    inline double normDistStdDevFor(hipDataType dataType)
+    {
+        switch(static_cast<int>(dataType))
+        {
+        case static_cast<int>(HIP_R_4F_E2M1):
+            return 5.0;
+        default:
+            return 1.0;
+        }
+    }
+} // namespace
+
+namespace
+{
+    using namespace DGen;
+
+    void applyInitMethodString(DataGeneratorOptions&  opt,
+                               std::string_view const initMethod,
+                               hipDataType            dataType,
+                               float                  min_val,
+                               float                  max_val)
+    {
+        opt.min         = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
+        opt.max         = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
+        opt.forceDenorm = false;
+
+        if(initMethod == "Sequential")
+            opt.initMode = DataInitMode(Sequential{});
+        else if(initMethod == "RowIndex")
+            opt.initMode = DataInitMode(RowIndex{});
+        else if(initMethod == "ColIndex")
+            opt.initMode = DataInitMode(ColIndex{});
+        else if(initMethod == "Checkerboard")
+            opt.initMode = DataInitMode(Checkerboard{});
+        else if(initMethod == "ScaledDiagonal")
+            opt.initMode = DataInitMode(ScaledDiagonal{});
+        else if(initMethod == "Identity")
+            opt.initMode = DataInitMode(Identity{});
+        else if(initMethod == "Ones")
+            opt.initMode = DataInitMode(Ones{});
+        else if(initMethod == "Zeros" || initMethod == "zero")
+            opt.initMode = DataInitMode(Zeros{});
+        else if(initMethod == "Twos")
+            opt.initMode = DataInitMode(Twos{});
+        else if(initMethod == "NegOnes")
+            opt.initMode = DataInitMode(NegOnes{});
+        else if(initMethod == "MaxVals")
+            opt.initMode = DataInitMode(MaxVals{});
+        else if(initMethod == "DenormMins")
+            opt.initMode = DataInitMode(DenormMins{});
+        else if(initMethod == "DenormMaxs")
+            opt.initMode = DataInitMode(DenormMaxs{});
+        else if(initMethod == "NaNs")
+            opt.initMode = DataInitMode(NaNs{});
+        else if(initMethod == "Infs")
+            opt.initMode = DataInitMode(Infs{});
+        else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl")
+            opt.initMode = DataInitMode(Bounded{});
+        else if(initMethod == "uniform_low_precision")
+        {
+            opt.min      = -FP4E2M1Max;
+            opt.max      = FP4E2M1Max;
+            opt.initMode = DataInitMode(Bounded{});
+        }
+        else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
+            opt.initMode = DataInitMode(TrigonometricFromFloat{});
+        else if(initMethod == "norm_dist")
+            opt.initMode = DataInitMode(NormalFromFloat{0.0, normDistStdDevFor(dataType)});
+        else if(initMethod == "rand_int")
+        {
+            auto const range = randIntRangeFor(dataType);
+            opt.initMode     = DataInitMode(RandInt{range.first, range.second});
+        }
+        else
+            throw std::runtime_error(
+                std::string("generateMXInput: unsupported initMethod '")
+                + std::string(initMethod)
+                + "'. Supported methods: Bounded/uniform_01, hpl, "
+                  "uniform_low_precision, "
+                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
+                  "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
+                  "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
+                  "DenormMins, DenormMaxs, NaNs, Infs.");
+    }
+
+    void applyScaleInitMethodString(DataGeneratorOptions&  opt,
+                                    std::string_view const scaleInitMethod,
+                                    hipDataType            dataType)
+    {
+        // Optional decoupled scale init: when scaleInitMethod differs from the
+        // data init and canDecoupleScaleInit() approves the pairing, wire the
+        // scale generator to scaleInitMethod instead of mirroring data init.
+        if(scaleInitMethod.empty())
+            return;
+
+        DataGeneratorOptions scaleOpt;
+        applyInitMethodString(scaleOpt, scaleInitMethod, dataType, -1.0f, 1.0f);
+        if(!canDecoupleScaleInit(opt.initMode, scaleOpt.initMode))
+            return;
+        opt.scaleInitMode = scaleOpt.initMode;
+    }
+} // namespace
 
 template <typename DT>
-std::vector<uint8_t> unpackData(std::vector<uint8_t> const& dataBytes)
+std::vector<uint8_t> unpackData(std::vector<uint8_t> const& packedBytes, size_t elementCount)
 {
     // Only F4 and F6 need to unpack data.
     static_assert(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
+                  || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
+                  || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>
                   || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                   || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>);
 
     if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                  || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
     {
-        std::vector<uint8_t> unpackedDataBytes(dataBytes.size() * 8 / 6);
-#pragma omp parallel for
-        for(int i = 0; i < dataBytes.size(); i++)
+        std::vector<uint8_t> unpackedDataBytes(elementCount);
+        for(size_t i = 0; i < elementCount; ++i)
         {
-            int const f6_id = (i * 6) / 8;
-            uint8_t   value = 0;
-            switch(i % 4)
-            {
-            case 0:
-                value = (dataBytes[f6_id] & 0x3F);
-                break;
-            case 1:
-                value = ((dataBytes[f6_id] & 0xC0) >> 6) | ((dataBytes[f6_id + 1] & 0xF) << 2);
-                break;
-            case 2:
-                value = ((dataBytes[f6_id] & 0xF0) >> 4) | ((dataBytes[f6_id + 1] & 0x3) << 4);
-                break;
-            case 3:
-                value = ((dataBytes[f6_id] & 0xFC) >> 2);
-                break;
-            }
-            unpackedDataBytes[i] = value;
+            size_t const bitOffset = i * 6;
+            size_t const byteIndex = bitOffset / 8;
+            size_t const bitIndex  = bitOffset % 8;
+
+            uint16_t word = 0;
+            if(byteIndex < packedBytes.size())
+                word |= static_cast<uint16_t>(packedBytes[byteIndex]);
+            if(byteIndex + 1 < packedBytes.size())
+                word |= static_cast<uint16_t>(packedBytes[byteIndex + 1]) << 8;
+
+            unpackedDataBytes[i] = static_cast<uint8_t>((word >> bitIndex) & 0x3F);
         }
         return unpackedDataBytes;
     }
     else
     {
-        std::vector<uint8_t> unpackedDataBytes(dataBytes.size() * 2);
-#pragma omp parallel for
-        for(int i = 0; i < dataBytes.size(); i++)
+        std::vector<uint8_t> unpackedDataBytes(elementCount);
+        for(size_t i = 0; i < elementCount; ++i)
         {
-            unpackedDataBytes[i * 2]     = (dataBytes[i] & 0x0F);
-            unpackedDataBytes[i * 2 + 1] = (dataBytes[i] >> 4);
+            size_t const  byteIndex = i / 2;
+            uint8_t const b = (byteIndex < packedBytes.size()) ? packedBytes[byteIndex] : 0;
+            unpackedDataBytes[i]
+                = static_cast<uint8_t>((i % 2 == 0) ? (b & 0x0F) : ((b >> 4) & 0x0F));
         }
         return unpackedDataBytes;
     }
@@ -82,37 +193,58 @@ std::vector<uint8_t> unpackData(std::vector<uint8_t> const& dataBytes)
 template <typename DT>
 void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
 {
-    // Only F4 and F6 need to unpack data.
+    // Only F4 and F6 need to pack data.
     static_assert(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
+                  || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
+                  || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>
                   || std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                   || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>);
 
     if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                  || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
     {
-        auto const total = dataBytes.size() * 6 / 8;
-#pragma omp parallel for
-        for(int i = 0; i < total; i += 3)
+        size_t const elementCount = dataBytes.size();
+        size_t const packedSize   = (elementCount * 6 + 7) / 8;
+        std::memset(packedData, 0, packedSize);
+
+        for(size_t i = 0; i < elementCount; ++i)
         {
-            auto const f8_id = i * 8 / 6;
+            uint16_t const v = static_cast<uint16_t>(dataBytes[i] & 0x3F);
+            size_t const   bitOffset = i * 6;
+            size_t const   byteIndex = bitOffset / 8;
+            size_t const   bitIndex  = bitOffset % 8;
 
-            packedData[i] = (dataBytes[f8_id] & 0x3F);
-            packedData[i] |= ((dataBytes[f8_id + 1] & 0x03) << 6);
+            if(byteIndex >= packedSize)
+                break;
 
-            packedData[i + 1] = ((dataBytes[f8_id + 1] & 0xFC) >> 2);
-            packedData[i + 1] |= ((dataBytes[f8_id + 2] & 0x03) << 6);
+            uint16_t word = static_cast<uint16_t>(packedData[byteIndex]);
+            if(byteIndex + 1 < packedSize)
+                word |= static_cast<uint16_t>(packedData[byteIndex + 1]) << 8;
 
-            packedData[i + 2] = ((dataBytes[f8_id + 2] & 0xFC) >> 6);
-            packedData[i + 2] |= ((dataBytes[f8_id + 3] & 0x3F) << 2);
+            uint16_t const mask = static_cast<uint16_t>(0x3F) << bitIndex;
+            word                = static_cast<uint16_t>((word & ~mask) | (v << bitIndex));
+
+            packedData[byteIndex] = static_cast<uint8_t>(word & 0xFF);
+            if(byteIndex + 1 < packedSize)
+                packedData[byteIndex + 1] = static_cast<uint8_t>((word >> 8) & 0xFF);
         }
     }
     else
     {
-#pragma omp parallel for
-        for(int i = 0; i < dataBytes.size() / 2; i++)
+        size_t const elementCount = dataBytes.size();
+        size_t const packedSize   = (elementCount + 1) / 2;
+        std::memset(packedData, 0, packedSize);
+
+        for(size_t i = 0; i < elementCount; ++i)
         {
-            packedData[i] = (dataBytes[2 * i] & 0x0F);
-            packedData[i] |= (dataBytes[2 * i + 1] << 4);
+            size_t const  byteIndex = i / 2;
+            uint8_t const v         = static_cast<uint8_t>(dataBytes[i] & 0x0F);
+
+            if(i % 2 == 0)
+                packedData[byteIndex] = static_cast<uint8_t>((packedData[byteIndex] & 0xF0) | v);
+            else
+                packedData[byteIndex]
+                    = static_cast<uint8_t>((packedData[byteIndex] & 0x0F) | (v << 4));
         }
     }
 }
@@ -145,45 +277,25 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         int M = sizes[0];
         int K = sizes[1];
 
-        // For example, assume matrix A is 128x128 and elementsPerMXBlock is 32.
-        // Before aligned,
-        //
-        //  mk     m     k       scale ID
-        //  0      0     0           0
-        //  1      1     0           1     (data at index 1 use scale 1 not 0)
-        //  2      2     0           2
-        //            ...
-        //  127   127    0          127
-        //
-        //  128    0     1           0
-        //  129    1     1           1
-        //            ...
-        //  255   127    1          127
-        //            ...
-        //
-        // To align data with scale,
-        //
-        //  mk     m     k       scale ID      data id
-        //  0      0     0           0            0
-        //  1      1     0           1           32
-        //  2      2     0           2           64
-        //            ...
-        // 127    127    0          127        4064 (127 x 32)
-        //
-        // We move data at index 32 to index 1 (because the index 1
-        // is using scale 1), data at index 64 to index 2, and so on.
+        int const tailStartM
+            = (M % elementsPerMXBlock != 0) ? (M / elementsPerMXBlock) * elementsPerMXBlock : M;
 
 #pragma omp parallel for
-        for(size_t mk = 0; mk < M * K; ++mk)
+        for(size_t mk = 0; mk < static_cast<size_t>(M * K); ++mk)
         {
-            auto m        = mk % M;
-            auto k        = mk / M;
-            auto scale_id = (k / elementsPerMXBlock) * M + m;
+            auto const m             = static_cast<int>(mk % static_cast<size_t>(M));
+            auto const k             = static_cast<int>(mk / static_cast<size_t>(M));
+            auto const kBlock        = k / elementsPerMXBlock;
+            auto const offsetInBlock = k - kBlock * elementsPerMXBlock;
+            auto const scale_id      = kBlock * M + m;
+            auto const data_id       = (m >= tailStartM)
+                                           ? mk
+                                           : static_cast<size_t>(scale_id) * elementsPerMXBlock
+                                                 + offsetInBlock;
 
-            auto data_id         = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
             alignedDataBytes[mk] = dataBytes[data_id];
-            refFloat[mk]
-                = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            refFloat[mk]         = DGen::toFloat<DT>(
+                scaleBytes.data(), dataBytes.data(), scale_id, static_cast<DGen::index_t>(data_id));
         }
         std::swap(dataBytes, alignedDataBytes);
     }
@@ -192,17 +304,25 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         int N = sizes[0];
         int K = sizes[1];
 
-#pragma omp parallel for
-        for(size_t kn = 0; kn < K * N; ++kn)
-        {
-            auto k        = kn / N;
-            auto n        = kn % N;
-            auto scale_id = (k / elementsPerMXBlock) * N + n;
+        int const tailStartN
+            = (N % elementsPerMXBlock != 0) ? (N / elementsPerMXBlock) * elementsPerMXBlock : N;
 
-            auto data_id         = scale_id * elementsPerMXBlock + k % elementsPerMXBlock;
+#pragma omp parallel for
+        for(size_t kn = 0; kn < static_cast<size_t>(K * N); ++kn)
+        {
+            auto const k             = static_cast<int>(kn / static_cast<size_t>(N));
+            auto const n             = static_cast<int>(kn % static_cast<size_t>(N));
+            auto const kBlock        = k / elementsPerMXBlock;
+            auto const offsetInBlock = k - kBlock * elementsPerMXBlock;
+            auto const scale_id      = kBlock * N + n;
+            auto const data_id       = (n >= tailStartN)
+                                           ? kn
+                                           : static_cast<size_t>(scale_id) * elementsPerMXBlock
+                                                 + offsetInBlock;
+
             alignedDataBytes[kn] = dataBytes[data_id];
-            refFloat[kn]
-                = DGen::toFloat<DT>(scaleBytes.data(), dataBytes.data(), scale_id, data_id);
+            refFloat[kn]         = DGen::toFloat<DT>(
+                scaleBytes.data(), dataBytes.data(), scale_id, static_cast<DGen::index_t>(data_id));
         }
         std::swap(dataBytes, alignedDataBytes);
     }
@@ -220,32 +340,47 @@ std::vector<float> generateData(T                           dgen,
                                 int                         elementsPerMXBlock,
                                 bool                        isTranspose,
                                 bool                        isMatrixA,
-                                std::vector<size_t> const&  preSwizzleTile,
-                                std::vector<size_t> const&  preTile)
+                                MXScaleLayout               scaleLayout)
 {
+    using namespace DGen;
+
     dgen.setSeed(seed);
     dgen.generate(sizes, strides, opt);
 
     std::vector<uint8_t> dataBytes = dgen.getDataBytes();
-    std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
-
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
 
-#ifdef HIPBLASLT_USE_ROCROLLER
-    // Apply pre-swizzle to scale data if preSwizzleTile is provided
-    if(preSwizzleTile.size() == 3)
-    {
-        // Calculate scale tensor dimensions
-        // sizes = {rowSize, colSize} where:
-        //   - For transposed A: rowSize = K, colSize = M
-        //   - For non-transposed B: rowSize = K, colSize = N
-        // The scale tensor has shape (rowSize/blockSize, colSize)
-        size_t scaleRows = sizes[0] / elementsPerMXBlock; // K / blockSize
-        size_t scaleCols = sizes[1]; // M or N
+    std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
-        scaleBytes = DGen::preSwizzle(scaleBytes, {scaleRows, scaleCols}, preSwizzleTile, preTile);
+    // Apply per-architecture scale swizzle on top of the natural-packed
+    // scales mxDataGenerator wrote. Layouts are mutually exclusive by
+    // construction (single enum), so no validation is needed here.
+    size_t const scaleRows = (elementsPerMXBlock > 0)
+                                 ? (static_cast<size_t>(sizes[0]) + static_cast<size_t>(elementsPerMXBlock)
+                                    - 1)
+                                       / static_cast<size_t>(elementsPerMXBlock)
+                                 : 0;
+    size_t const scaleCols = static_cast<size_t>(sizes[1]);
+
+    switch(scaleLayout)
+    {
+    case MXScaleLayout::GFX950:
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {scaleCols, scaleRows});
+        break;
+    case MXScaleLayout::GFX1250:
+        if(elementsPerMXBlock > 0)
+        {
+            scaleBytes
+                = DGen::preSwizzleScalesGFX1250(scaleBytes,
+                                                /*slowDim=*/scaleCols,
+                                                /*fastDim=*/scaleRows,
+                                                /*mxBlock=*/static_cast<size_t>(
+                                                    elementsPerMXBlock));
+        }
+        break;
+    case MXScaleLayout::None:
+        break;
     }
-#endif
 
     std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
 
@@ -269,16 +404,20 @@ std::vector<float> generateData(T                           dgen,
     else if constexpr(std::is_same_v<DT, DGen::ocp_e3m2_mxfp6>
                       || std::is_same_v<DT, DGen::ocp_e2m3_mxfp6>)
     {
-        auto unpackedDataBytes = unpackData<DT>(dataBytes);
+        size_t const elementCount = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
+        auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
         // GPU expects the data are packed
         packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
         return ret;
     }
-    else if constexpr(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>)
+    else if constexpr(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
+                      || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
+                      || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>)
     {
-        auto unpackedDataBytes = unpackData<DT>(dataBytes);
+        size_t const elementCount = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
+        auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
         // GPU expects the data are packed
@@ -291,46 +430,40 @@ std::vector<float> generateData(T                           dgen,
     }
 }
 
-#ifdef HIPBLASLT_USE_ROCROLLER
 /**
- * @brief Generate random data for OCP (MX) F8/F6/F4 types
+ * @brief CPU path for MX matrix/scale initialization.
  *
- * The generated data consist of data part and scale part,
- * and the corresponding float values (combine data and scale)
- * will be returned.
- *
- * @return float values of generated MX type data
+ * Generates packed data and scale bytes on the host, optionally applies
+ * arch-specific scale swizzle (GFX950 / GFX1250), and returns the
+ * dequantized reference float vector callers validate against.
  */
-std::vector<float> generateMXInput(hipDataType                dataType,
-                                   void*                      data,
-                                   void*                      scale,
-                                   DGen::index_t              rowSize,
-                                   DGen::index_t              colSize,
-                                   DGen::index_t              stride,
-                                   bool                       isTranspose,
-                                   const std::vector<size_t>& preSwizzleTile,
-                                   const std::vector<size_t>& preTile,
-                                   int const                  scaleBlockRowSize,
-                                   int const                  scaleBlockColSize,
-                                   bool                       isMatrixA,
-                                   std::string_view const     initMethod,
-                                   float                      min_val,
-                                   float                      max_val)
+std::vector<float> generateMXInput(hipDataType            dataType,
+                                   hipDataType            scaleType,
+                                   void*                  data,
+                                   void*                  scale,
+                                   uint64_t               row,
+                                   uint64_t               col,
+                                   uint64_t               stride,
+                                   bool                   isTranspose,
+                                   int const              scaleBlockRowSize,
+                                   int const              scaleBlockColSize,
+                                   bool                   isMatrixA,
+                                   MXScaleLayout          scaleLayout,
+                                   std::string_view const initMethod,
+                                   float                  min_val,
+                                   float                  max_val,
+                                   std::string_view const scaleInitMethod)
 {
     using namespace DGen;
 
     DataGeneratorOptions opt;
-    opt.min          = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
-    opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    // TODO initMethod == "hpl" should also be Bounded, but fails some tests
-    opt.initMode = (initMethod == "Bounded" || initMethod == "uniform_01")
-                       ? DataInitMode(Bounded{})
-                       : DataInitMode(TrigonometricFromFloat{});
+    applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
+    applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
     const uint32_t seed = 1713573849;
 
-    std::vector<index_t> sizes = {rowSize, colSize};
+    std::vector<index_t> sizes = {row, col};
     std::vector<index_t> strides;
 
     strides.push_back(1);
@@ -351,8 +484,7 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile,
-                                                                  preTile);
+                                                                  scaleLayout);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -367,10 +499,9 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile,
-                                                                  preTile);
+                                                                  scaleLayout);
     }
-    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3_EXT)
+    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3)
     {
         DGen::DataGenerator<DGen::ocp_e2m3_mxfp6> dgen;
         return generateData<decltype(dgen), DGen::ocp_e2m3_mxfp6>(dgen,
@@ -383,10 +514,9 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile,
-                                                                  preTile);
+                                                                  scaleLayout);
     }
-    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2_EXT)
+    else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2)
     {
         DGen::DataGenerator<DGen::ocp_e3m2_mxfp6> dgen;
         return generateData<decltype(dgen), DGen::ocp_e3m2_mxfp6>(dgen,
@@ -399,28 +529,122 @@ std::vector<float> generateMXInput(hipDataType                dataType,
                                                                   elementsPerMXBlock,
                                                                   isTranspose,
                                                                   isMatrixA,
-                                                                  preSwizzleTile,
-                                                                  preTile);
+                                                                  scaleLayout);
     }
-    else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1_EXT)
+    else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1)
     {
-        DGen::DataGenerator<DGen::ocp_e2m1_mxfp4> dgen;
-        return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4>(dgen,
-                                                                  data,
-                                                                  scale,
-                                                                  sizes,
-                                                                  strides,
-                                                                  seed,
-                                                                  opt,
-                                                                  elementsPerMXBlock,
-                                                                  isTranspose,
-                                                                  isMatrixA,
-                                                                  preSwizzleTile,
-                                                                  preTile);
+        if(scaleType == HIP_R_8F_E4M3)
+        {
+            DGen::DataGenerator<DGen::ocp_e2m1_mxfp4_e4m3> dgen;
+            return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4_e4m3>(dgen,
+                                                                          data,
+                                                                          scale,
+                                                                          sizes,
+                                                                          strides,
+                                                                          seed,
+                                                                          opt,
+                                                                          elementsPerMXBlock,
+                                                                          isTranspose,
+                                                                          isMatrixA,
+                                                                          scaleLayout);
+        }
+        else if(scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT))
+        {
+            DGen::DataGenerator<DGen::ocp_e2m1_mxfp4_e5m3> dgen;
+            return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4_e5m3>(dgen,
+                                                                          data,
+                                                                          scale,
+                                                                          sizes,
+                                                                          strides,
+                                                                          seed,
+                                                                          opt,
+                                                                          elementsPerMXBlock,
+                                                                          isTranspose,
+                                                                          isMatrixA,
+                                                                          scaleLayout);
+        }
+        else
+        {
+            DGen::DataGenerator<DGen::ocp_e2m1_mxfp4> dgen;
+            return generateData<decltype(dgen), DGen::ocp_e2m1_mxfp4>(dgen,
+                                                                      data,
+                                                                      scale,
+                                                                      sizes,
+                                                                      strides,
+                                                                      seed,
+                                                                      opt,
+                                                                      elementsPerMXBlock,
+                                                                      isTranspose,
+                                                                      isMatrixA,
+                                                                      scaleLayout);
+        }
     }
     else
     {
         throw std::runtime_error("Unsupported data types in MX data generation!");
     }
 }
-#endif
+
+void restrideMXScaleBufferKFast(uint8_t* buffer,
+                                size_t   compactFreeDim,
+                                size_t   compactKBlocks,
+                                size_t   paddedKBlocks,
+                                size_t   elemBytes)
+{
+    if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
+        return;
+    size_t const compactRow = compactKBlocks * elemBytes;
+    size_t const paddedRow  = paddedKBlocks * elemBytes;
+    size_t const padTail    = paddedRow - compactRow;
+    for(size_t f = compactFreeDim; f-- > 1;)
+    {
+        std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
+        std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+    }
+    std::memset(buffer + compactRow, 0x00, padTail);
+}
+
+void applyMXScaleLayoutInPlace(uint8_t*      scale,
+                               size_t        scaleElemCount,
+                               MXScaleLayout scaleLayout,
+                               size_t        slowDim,
+                               size_t        fastDim,
+                               size_t        mxBlock)
+{
+    if(scaleLayout == MXScaleLayout::None || scaleElemCount == 0)
+        return;
+
+    std::vector<uint8_t> scaleBytes(scale, scale + scaleElemCount);
+    switch(scaleLayout)
+    {
+    case MXScaleLayout::GFX950:
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {slowDim, fastDim});
+        break;
+    case MXScaleLayout::GFX1250:
+        if(mxBlock > 0)
+            scaleBytes = DGen::preSwizzleScalesGFX1250(scaleBytes, slowDim, fastDim, mxBlock);
+        break;
+    case MXScaleLayout::None:
+        break;
+    }
+    std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
+}
+
+MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
+{
+    if(archName.find("gfx950") != std::string_view::npos)
+        return MXScaleLayout::GFX950;
+    if(archName.find("gfx1250") != std::string_view::npos)
+        return MXScaleLayout::GFX1250;
+    return MXScaleLayout::None;
+}
+
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
+                                     std::string_view       archName)
+{
+    if(scalingFormat == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        return MXScaleLayout::GFX950;
+    if(mxScaleLayoutForArchName(archName) == MXScaleLayout::GFX1250)
+        return MXScaleLayout::GFX1250;
+    return MXScaleLayout::None;
+}

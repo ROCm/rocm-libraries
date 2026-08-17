@@ -86,10 +86,11 @@ int main()
     ROCSPARSE_CHECK(rocsparse_sdense2csr(
         handle, m, n, descr, ddense_A, m, dnnz_per_row, dcsr_val, dcsr_row_ptr, dcsr_col_ind));
 
+    HIP_CHECK(hipFree(ddense_A));
+    HIP_CHECK(hipFree(dnnz_per_row));
     HIP_CHECK(hipFree(dcsr_row_ptr));
     HIP_CHECK(hipFree(dcsr_col_ind));
     HIP_CHECK(hipFree(dcsr_val));
-    HIP_CHECK(hipFree(dnnz_per_row));
 
     rocsparse_destroy_mat_descr(descr);
     rocsparse_destroy_handle(handle);

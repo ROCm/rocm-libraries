@@ -35,6 +35,8 @@
 #include <algorithm>
 #include <map>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     // Which placeholder libraries should be initialized at start
@@ -69,6 +71,7 @@ namespace TensileLite
         gfx1153,
         gfx1200,
         gfx1201,
+        gfx1250,
         All
     };
 
@@ -133,6 +136,8 @@ namespace TensileLite
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
             return "TensileLibrary_*_gfx1201";
+        case LazyLoadingInit::gfx1250:
+            return "TensileLibrary_*_gfx1250";
         case LazyLoadingInit::None:
             return "";
         }
@@ -349,6 +354,13 @@ namespace TensileLite
         {
             return this->type();
         }
+
+        // Get the library filename for debug output
+        virtual std::string getLibraryFileName() const override
+        {
+            return filePrefix + suffix;
+        }
     };
 
 } // namespace TensileLite
+

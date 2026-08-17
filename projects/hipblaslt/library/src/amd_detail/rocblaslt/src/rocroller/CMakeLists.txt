@@ -1,9 +1,16 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-add_library(hipblaslt-rocroller OBJECT)
+add_library(hipblaslt-rocroller STATIC)
+
+string(REGEX MATCHALL "gfx[a-z0-9]+" _rocroller_archs "${GPU_TARGETS}")
+if("gfx950" IN_LIST _rocroller_archs)
+    add_subdirectory(custom_kernels)
+endif()
+
 target_sources(hipblaslt-rocroller
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/custom_kernels.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/gemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/parameter_selection.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/runtime_args_selection.cpp"
@@ -11,6 +18,7 @@ target_sources(hipblaslt-rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/solution_cache.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/solution_selection.cpp"
 )
+
 target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
 set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipblaslt-rocroller PRIVATE roc::origami-headers)
@@ -30,4 +38,10 @@ target_include_directories(hipblaslt-rocroller
         "${PROJECT_SOURCE_DIR}/library/include"
         "${PROJECT_SOURCE_DIR}/tensilelite/include"
 )
-target_link_libraries(hipblaslt PRIVATE hipblaslt-rocroller)
+target_link_libraries(hipblaslt PRIVATE $<LINK_LIBRARY:WHOLE_ARCHIVE,hipblaslt-rocroller>)
+
+if(NOT HIPBLASLT_BUILD_SHARED_LIBS)
+    install(TARGETS hipblaslt-rocroller
+        EXPORT hipblaslt-targets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel)
+endif()

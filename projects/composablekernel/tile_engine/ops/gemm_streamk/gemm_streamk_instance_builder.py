@@ -21,11 +21,33 @@ logging.basicConfig(level=logging.INFO)
 
 
 class GemmKernelBuilder:
-    def __init__(self, working_path, datatype, layout, config_json=None):
+    def __init__(
+        self,
+        working_path,
+        datatype,
+        layout,
+        config_json=None,
+        gpu_target="",
+        validation_gpu_target=None,
+        max_instances=None,
+        seed=None,
+        tier=None,
+        manifest_path=None,
+    ):
         self.working_path = Path(working_path)
         self.datatype = datatype
         self.layout = layout
         self.config_json = config_json
+        self.gpu_target = gpu_target
+        if validation_gpu_target is None:
+            validation_gpu_target = (
+                gpu_target.split(";")[0].split(":")[0] if gpu_target else ""
+            )
+        self.validation_gpu_target = validation_gpu_target
+        self.max_instances = max_instances
+        self.seed = seed
+        self.tier = tier
+        self.manifest_path = manifest_path
 
         # Create working directory if it doesn't exist
         self.working_path.mkdir(parents=True, exist_ok=True)
@@ -36,6 +58,86 @@ class GemmKernelBuilder:
                 self.config = json.load(f)
         else:
             self.config = self._get_default_config()
+
+    def _apply_sampling(self, kernel_list):
+        """Apply RFC Sobol+LHS+maximin sampling. Returns sampled subset."""
+        if self.max_instances is None or len(kernel_list) <= self.max_instances:
+            return kernel_list
+
+        import sys
+
+        sampling_parent = os.path.join(os.path.dirname(__file__), "..", "..", "gemm")
+        if sampling_parent not in sys.path:
+            sys.path.insert(0, sampling_parent)
+
+        sampling_root = os.path.join(os.path.dirname(__file__), "..", "..")
+        if sampling_root not in sys.path:
+            sys.path.insert(0, sampling_root)
+
+        from sampling.sampler import sample_feasible_set
+        from sampling.seed import make_seed
+        from sampling.feasible_set import GEMM_STREAMK_AXES
+
+        effective_seed = make_seed(
+            self.seed, self.gpu_target, self.datatype, self.layout
+        )
+
+        flat_items = []
+        for k in kernel_list:
+            flat = dict(k["tile_config"])
+            (
+                pipeline,
+                epilogue,
+                scheduler,
+                reduction_strategy,
+                pad_m,
+                pad_n,
+                pad_k,
+                persistent,
+            ) = k["trait_combo"]
+            flat.update(
+                {
+                    "pipeline": pipeline,
+                    "epilogue": epilogue,
+                    "scheduler": scheduler,
+                    "reduction_strategy": reduction_strategy,
+                    "pad_m": pad_m,
+                    "pad_n": pad_n,
+                    "pad_k": pad_k,
+                    "persistent": persistent,
+                }
+            )
+            flat_items.append(flat)
+
+        selected, method, selected_indices = sample_feasible_set(
+            flat_items,
+            self.max_instances,
+            effective_seed,
+            GEMM_STREAMK_AXES,
+        )
+
+        kernel_list = [kernel_list[i] for i in selected_indices]
+
+        if self.manifest_path:
+            from sampling.manifest import write_manifest
+
+            write_manifest(
+                selected,
+                self.manifest_path,
+                "gemm_streamk",
+                self.datatype,
+                self.layout,
+                self.gpu_target,
+                effective_seed,
+                self.tier or "daily",
+                method,
+            )
+
+        print(
+            f"Sampled {len(kernel_list)} from feasible set "
+            f"(budget={self.max_instances}, seed={effective_seed}, method={method})"
+        )
+        return kernel_list
 
     def _get_default_config(self):
         """Return default configuration if no config file is provided"""
@@ -126,6 +228,25 @@ class GemmKernelBuilder:
             # New format - generate combinations from individual parameter values
             tile_config = self.config["tile_config"]
 
+            if tile_config.get("tile_m").get("values") is None:
+                tile_config.get("tile_m")["values"] = self._generate_values(
+                    tile_config.get("tile_m").get("min"),
+                    tile_config.get("tile_m").get("max"),
+                    tile_config.get("tile_m").get("step"),
+                )
+            if tile_config.get("tile_n").get("values") is None:
+                tile_config.get("tile_n")["values"] = self._generate_values(
+                    tile_config.get("tile_n").get("min"),
+                    tile_config.get("tile_n").get("max"),
+                    tile_config.get("tile_n").get("step"),
+                )
+            if tile_config.get("tile_k").get("values") is None:
+                tile_config.get("tile_k")["values"] = self._generate_values(
+                    tile_config.get("tile_k").get("min"),
+                    tile_config.get("tile_k").get("max"),
+                    tile_config.get("tile_k").get("step"),
+                )
+
             # Get all possible values for each parameter
             tile_m_values = tile_config.get("tile_m", {}).get("values", [256])
             tile_n_values = tile_config.get("tile_n", {}).get("values", [256])
@@ -179,6 +300,15 @@ class GemmKernelBuilder:
             # Fallback to default
             return []
 
+    def _generate_values(self, min_val, max_val, step):
+        """Generate a list of values from min to max with the given step"""
+        values = []
+        val = min_val
+        while val <= max_val:
+            values.append(val)
+            val += step
+        return values
+
     def _validate_tile_config(
         self,
         tile_m,
@@ -190,7 +320,7 @@ class GemmKernelBuilder:
         warp_tile_m,
         warp_tile_n,
         warp_tile_k,
-        pipeline="mem",  # Default pipeline for validation
+        pipeline="compv3",  # Default pipeline for validation
         fast_mode=False,  # Add fast mode option
     ):
         """Validate that tile configuration is reasonable"""
@@ -238,6 +368,8 @@ class GemmKernelBuilder:
                 b_datatype,
                 c_datatype,
                 pipeline,
+                self.layout,
+                self.validation_gpu_target
             )
 
     def _generate_trait_combinations(self):
@@ -376,7 +508,8 @@ class GemmKernelBuilder:
 
         reduction_strategy_map = {
             "atomic": "ck_tile::StreamKReductionStrategy::Atomic",
-            "reduction": "ck_tile::StreamKReductionStrategy::Reduction",
+            "linear": "ck_tile::StreamKReductionStrategy::Linear",
+            "tree": "ck_tile::StreamKReductionStrategy::Tree",
         }
 
         # Determine accumulator type based on datatype
@@ -434,21 +567,20 @@ struct SelectedKernel {{
     static constexpr ck_tile::index_t WarpTileK = {tile_config["warp_tile_k"]};
 
     // Traits
-    static constexpr bool kPadM = {"true" if pad_m == "true" else "false"};
-    static constexpr bool kPadN = {"true" if pad_n == "true" else "false"};
-    static constexpr bool kPadK = {"true" if pad_k == "true" else "false"};
+    static constexpr bool kPadM = {"true" if str(pad_m).lower() == "true" else "false"};
+    static constexpr bool kPadN = {"true" if str(pad_n).lower() == "true" else "false"};
+    static constexpr bool kPadK = {"true" if str(pad_k).lower() == "true" else "false"};
     static constexpr bool Preshuffle = false;
 
-    static constexpr bool DoubleSmemBuffer = {"true" if pipeline == "compv4" else "false"};
+    static constexpr bool DoubleSmemBuffer = {"true" if str(pipeline).lower() == "compv4" else "false"};
     static constexpr int kBlockPerCu       = 1;
     static constexpr bool StructuredSparsity = false;
     static constexpr bool NumWaveGroup       = 1;
 
     static constexpr bool TransposeC = false;
     static constexpr bool UsePersistentKernel = {"true" if str(persistent).lower() == "true" else "false"};
-    static constexpr bool UseStructuredSparsity = false;
     static constexpr ck_tile::index_t NumWaveGroups = 1;
-    static constexpr ck_tile::StreamKReductionStrategy reduction_strategy = {reduction_strategy_map.get(reduction_strategy, "ck_tile::StreamKReductionStrategy::Reduction")};
+    static constexpr ck_tile::StreamKReductionStrategy reduction_strategy = {reduction_strategy_map.get(reduction_strategy, "ck_tile::StreamKReductionStrategy::Linear")};
 
     // Tile shape
     using TileShape = ck_tile::TileGemmShape<
@@ -480,8 +612,9 @@ struct SelectedKernel {{
         AccDataType,
         TileShape,
         GemmUniversalTraits>;
-    
-    static float launch(const ck_tile::StreamKHostArgs& args, const ck_tile::stream_config& stream) {{
+
+    static std::tuple<float, ck_tile::index_t> launch(const ck_tile::StreamKHostArgs& args,
+                                                      const ck_tile::stream_config& stream) {{
             constexpr auto scheduler        = ck_tile::GemmPipelineScheduler::Intrawave;
 
             using UniversalGemmProblem = ck_tile::UniversalGemmPipelineProblem<ADataType,
@@ -550,18 +683,27 @@ struct SelectedKernel {{
                     hipGetErrorString(hipMemsetAsync(
                         args.e_ptr, 0, args.M * args.N * sizeof(CDataType), stream.stream_id_));
                 }}
-                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Reduction)
+                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Linear)
+                {{
+                    // Reset sk flags to zero before each repetition of the kernel
+                    workspace_data.SetZero();
+                }}
+                else if(reduction_strategy == ck_tile::StreamKReductionStrategy::Tree)
                 {{
                     // Reset sk flags to zero before each repetition of the kernel
                     workspace_data.SetZero();
                 }}
             }};
+
+            const ck_tile::index_t num_wgs_per_tile = kargs.tile_partitioner.estimate_num_wgs_per_tile();
      
             // Launch kernel
-            return ck_tile::launch_kernel_time_mask(
+            const float time = ck_tile::launch_kernel_time_mask(
                 stream,
                 reset_data_buffers,
                 ck_tile::make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+            
+            return std::tuple<float, ck_tile::index_t>{{time, num_wgs_per_tile}};
     }}
 }};
 """
@@ -591,6 +733,15 @@ struct SelectedKernel {{
                         self.layout,
                     )
                 )
+
+        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
+        if self.max_instances is not None and len(work_items) > self.max_instances:
+            kernel_dicts = [
+                {"tile_config": item[0], "trait_combo": item[1], "_work_item": item}
+                for item in work_items
+            ]
+            sampled = self._apply_sampling(kernel_dicts)
+            work_items = [k["_work_item"] for k in sampled]
 
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
@@ -685,11 +836,11 @@ struct SelectedKernel {{
                     pipeline,
                     epilogue,
                     scheduler,
+                    reduction_strategy,
                     pad_m,
                     pad_n,
                     pad_k,
                     persistent,
-                    reduction_strategy,
                 ) = trait_combo
 
                 # Create kernel name with proper boolean capitalization
@@ -709,6 +860,9 @@ struct SelectedKernel {{
                         "trait_combo": trait_combo,
                     }
                 )
+
+        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
+        kernel_list = self._apply_sampling(kernel_list)
 
         # Write kernel count
         with open(self.working_path / "gemm_kernel_count.txt", "w") as f:
@@ -808,12 +962,59 @@ def main():
         action="store_true",
         help="List kernel configurations without generating files",
     )
+    parser.add_argument(
+        "--gpu_targets",
+        help="Semicolon-separated list of GPU targets from CMake (e.g., 'gfx90a;gfx942;gfx950')",
+    )
+    parser.add_argument(
+        "--max-instances",
+        type=int,
+        default=None,
+        help="Cap on number of kernel instances per (dtype, layout) combo",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for deterministic sampling; if omitted, derived from today's date",
+    )
+    parser.add_argument(
+        "--tier",
+        default=None,
+        help="Sampling tier (daily/weekly)",
+    )
+    parser.add_argument(
+        "--manifest-path",
+        default=None,
+        help="Directory for chosen_instances.json",
+    )
 
     args = parser.parse_args()
 
-    # Create builder
+    gpu_target = args.gpu_targets or ""
+    validation_gpu_target = ""
+    if gpu_target:
+        targets = [t.strip() for t in gpu_target.split(';') if t.strip()]
+        if targets:
+            validation_gpu_target = targets[0].split(":")[0]  # e.g., "gfx90a" from "gfx90a:xnack+"
+            if len(targets) > 1:
+                logging.warning(
+                    f"Multiple GPU targets provided ({targets}), "
+                    f"using first target '{validation_gpu_target}' for validation"
+                )
+        logging.debug(f"Using validation GPU target: {validation_gpu_target}")
+
     builder = GemmKernelBuilder(
-        args.working_path, args.datatype, args.layout, args.config_json
+        args.working_path,
+        args.datatype,
+        args.layout,
+        args.config_json,
+        gpu_target=gpu_target,
+        validation_gpu_target=validation_gpu_target,
+        max_instances=args.max_instances,
+        seed=args.seed,
+        tier=args.tier,
+        manifest_path=args.manifest_path,
     )
 
     if args.list_kernels:
@@ -851,10 +1052,10 @@ def main():
             trait_parts[1],  # epilogue
             trait_parts[2],  # scheduler
             trait_parts[3],  # reduction_strategy
-            trait_parts[4] == "false",  # pad_m
-            trait_parts[5] == "false",  # pad_n
-            trait_parts[6] == "false",  # pad_k
-            trait_parts[7],  # persistent
+            str(trait_parts[4]).lower() == "true",  # pad_m
+            str(trait_parts[5]).lower() == "true",  # pad_n
+            str(trait_parts[6]).lower() == "true",  # pad_k
+            str(trait_parts[7]).lower() == "true",  # persistent
         )
 
         # Generate the kernel

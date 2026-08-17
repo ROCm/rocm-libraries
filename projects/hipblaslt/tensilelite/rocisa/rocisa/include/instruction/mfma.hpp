@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,8 @@
 
 namespace rocisa
 {
+    using ParamVariant = std::variant<std::shared_ptr<rocisa::Container>, int, std::string>;
+
     DataType instTypeToDataType(InstType instType);
 
     bool is8bitFloat(DataType value);
@@ -43,7 +45,7 @@ namespace rocisa
            && matrixInstB == 1)
         {
             if(dataType == DataType::Half || dataType == DataType::BFloat16
-               || dataType == DataType::Int8 || is8bitFloat(dataType))
+               || dataType == DataType::Int8 || is8bitFloat(dataType) || numBytes < 1)
             {
                 mi_divisor     = 4;
                 miIssueLatency = 1;
@@ -73,8 +75,11 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> acc;
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
-        std::shared_ptr<RegisterContainer> acc2;
+        std::optional<InstructionInput>    acc2;
+        int                                acc2_imm=0;
         bool                               neg;
+        bool                               reuseA = false;
+        bool                               reuseB = false;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -83,9 +88,11 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& acc,
                         const std::shared_ptr<RegisterContainer>& a,
                         const std::shared_ptr<RegisterContainer>& b,
-                        const std::shared_ptr<RegisterContainer>& acc2    = nullptr,
+                        const std::optional<InstructionInput>&    acc2    = std::nullopt,
                         bool                                      neg     = false,
-                        const std::string&                        comment = "")
+                        const std::string&                        comment = "",
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false)
             : Instruction(instType, comment)
             , accType(accType)
             , variant(variant)
@@ -93,8 +100,38 @@ namespace rocisa
             , acc(acc)
             , a(a)
             , b(b)
-            , acc2(acc2 ? acc2 : acc)
+            , acc2(acc2.has_value() ? acc2.value() : InstructionInput(acc))
+            , acc2_imm(0)
             , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+        {
+        }
+
+        MFMAInstruction(InstType                                  instType,
+                        InstType                                  accType,
+                        const std::vector<int>&                   variant,
+                        bool                                      mfma1k,
+                        const std::shared_ptr<RegisterContainer>& acc,
+                        const std::shared_ptr<RegisterContainer>& a,
+                        const std::shared_ptr<RegisterContainer>& b,
+                        int                                       acc2_imm,
+                        bool                                      neg     = false,
+                        const std::string&                        comment = "",
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false)
+            : Instruction(instType, comment)
+            , accType(accType)
+            , variant(variant)
+            , mfma1k(mfma1k)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(std::nullopt)
+            , acc2_imm(acc2_imm)
+            , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -106,8 +143,10 @@ namespace rocisa
             , acc(other.acc ? other.acc->clone2() : nullptr)
             , a(other.a ? other.a->clone2() : nullptr)
             , b(other.b ? other.b->clone2() : nullptr)
-            , acc2(other.acc2 ? other.acc2->clone2() : nullptr)
+            , acc2(other.acc2.has_value() ? copyInstructionInput(other.acc2.value()) : std::optional<InstructionInput>(std::nullopt))
             , neg(other.neg)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -116,8 +155,23 @@ namespace rocisa
             return std::make_shared<MFMAInstruction>(*this);
         }
 
+        // Workaround for gfx1250: low-precision WMMA must use _scale instruction with scale=0
+        // to avoid Base layer issue where VOP3PX2/VOP3PX3 instructions may not execute atomically
+        bool forceScaledWMMA() const
+        {
+            bool        isWMMA      = !capOrDefault(getAsmCaps(), "HasMFMA");
+            auto        isaVersion  = rocIsa::getInstance().getKernel().isaVersion;
+            std::string instTypeStr = typeConvert(instType);
+            // Affected instructions: v_wmma_f32_16x16x128_f8f6f4, v_wmma_f32_32x16x128_f4
+            bool isLowPrecision = (instTypeStr == "f8f6f4") || (instTypeStr == "f4");
+            return isWMMA && (isaVersion == std::array<int, 3>{12, 5, 0}) && isLowPrecision;
+        }
+
         std::string typeConvert(InstType iType) const
         {
+            size_t f8f6f4_k = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 128 : 64;
+            size_t f4_t     = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
+
             switch(iType)
             {
             case InstType::INST_F16:
@@ -137,30 +191,72 @@ namespace rocisa
             case InstType::INST_XF32:
                 return "xf32";
             case InstType::INST_F8:
-                return variant[2] > 32 ? "f8f6f4" : "fp8_fp8";
+                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "fp8_fp8";
             case InstType::INST_BF8:
-                return variant[2] > 32 ? "f8f6f4" : "bf8_bf8";
+                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "bf8_bf8";
             case InstType::INST_F8_BF8:
-                return variant[2] > 32 ? "f8f6f4" : "fp8_bf8";
+                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "fp8_bf8";
             case InstType::INST_BF8_F8:
-                return variant[2] > 32 ? "f8f6f4" : "bf8_fp8";
+                return (variant[2] >= f8f6f4_k) ? "f8f6f4" : "bf8_fp8";
+            case InstType::INST_F6:
+            case InstType::INST_BF6:
+            case InstType::INST_F6_B6:
+            case InstType::INST_B6_F6:
+                return "f8f6f4";
+            case InstType::INST_F4:
+                return ((variant[0] < f4_t) && (variant[1] < f4_t)) ? "f8f6f4" : "f4";
+            case InstType::INST_F8_F4:
+            case InstType::INST_F4_F8:
+            case InstType::INST_F6_F4:
+            case InstType::INST_F4_F6:
+            case InstType::INST_F8_F6:
+            case InstType::INST_F6_F8:
+            case InstType::INST_F8_B6:
+            case InstType::INST_B6_F8:
+            case InstType::INST_B8_F4:
+            case InstType::INST_F4_B8:
+            case InstType::INST_B6_F4:
+            case InstType::INST_F4_B6:
+            case InstType::INST_B8_F6:
+            case InstType::INST_F6_B8:
+            case InstType::INST_B8_B6:
+            case InstType::INST_B6_B8:
+                return "f8f6f4";
             default:
-                throw std::runtime_error("Type not found");
+                std::string msg("Type not found");
+                msg += std::to_string(int(iType));
+                throw std::runtime_error(msg);
             }
         }
 
         std::vector<InstructionInput> getParams() const override
         {
             std::string negStr
-                = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
-            return {acc, a, b, acc2, negStr};
+                = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
+            return {acc, a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), negStr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {acc};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            if(forceScaledWMMA())
+            {
+                // Keep operand model consistent with emitted assembly:
+                // v_wmma_scale_* requires two explicit scale operands.
+                return {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm), 0, 0};
+            }
+            return {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)};
         }
 
         std::string preStr() const override
         {
             std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
                                      + "x" + std::to_string(variant[2]);
-            if(getAsmCaps()["HasMFMA_explictB"] && !mfma1k)
+            if(capOrDefault(getAsmCaps(), "HasMFMA_explictB") && !mfma1k)
             {
                 std::string strB = variant[3] > 1 ? std::to_string(variant[3]) + "b_" : "";
                 return "v_mfma_" + typeConvert(accType) + "_" + variantStr + "_" + strB
@@ -168,10 +264,15 @@ namespace rocisa
             }
             else
             {
-                bool        is_mfma         = getAsmCaps()["HasMFMA"];
+                bool        is_mfma         = capOrDefault(getAsmCaps(), "HasMFMA");
                 std::string instructionName = is_mfma ? "mfma" : "wmma";
                 std::string instructionStep = is_mfma ? "" : "_";
                 std::string mfma_1k         = mfma1k ? "_1k" : "";
+                if(forceScaledWMMA())
+                {
+                    return "v_wmma_scale_" + typeConvert(accType) + "_" + variantStr
+                           + instructionStep + typeConvert(instType);
+                }
                 return "v_" + instructionName + "_" + typeConvert(accType) + "_" + variantStr
                        + instructionStep + typeConvert(instType) + mfma_1k;
             }
@@ -179,38 +280,252 @@ namespace rocisa
 
         std::string getArgStr() const
         {
+            size_t      f4_t = capOrDefault(getAsmCaps(), "HasWMMA_V3") ? 32 : 0;
             std::string negStr
-                = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
+                = !neg ? "" : (capOrDefault(getAsmCaps(), "HasWMMA_V1") ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
             std::string inputPermuteStr = "";
-            if(getAsmCaps()["HasMFMA_f8f6f4"])
+            std::string scaleStr        = "";
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4"))
             {
                 switch(instType)
                 {
                 case InstType::INST_F8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:0 blgp:0" : "";
+                    inputPermuteStr = " cbsz:0 blgp:0";
                     break;
                 case InstType::INST_BF8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:1 blgp:1" : "";
+                    inputPermuteStr = " cbsz:1 blgp:1";
                     break;
                 case InstType::INST_F8_BF8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:0 blgp:1" : "";
+                    inputPermuteStr = " cbsz:0 blgp:1";
                     break;
                 case InstType::INST_BF8_F8:
-                    inputPermuteStr = variant[2] > 32 ? " cbsz:1 blgp:0" : "";
+                    inputPermuteStr = " cbsz:1 blgp:0";
+                    break;
+                case InstType::INST_F6:
+                    inputPermuteStr = " cbsz:2 blgp:2";
+                    break;
+                case InstType::INST_BF6:
+                    inputPermuteStr = " cbsz:3 blgp:3";
+                    break;
+                case InstType::INST_F4:
+                    inputPermuteStr = " cbsz:4 blgp:4";
+                    break;
+                case InstType::INST_F8_F6:
+                    inputPermuteStr = " cbsz:0 blgp:2";
+                    break;
+                case InstType::INST_F6_F8:
+                    inputPermuteStr = " cbsz:2 blgp:0";
+                    break;
+                case InstType::INST_F8_F4:
+                    inputPermuteStr = " cbsz:0 blgp:4";
+                    break;
+                case InstType::INST_F4_F8:
+                    inputPermuteStr = " cbsz:4 blgp:0";
+                    break;
+                case InstType::INST_F6_B6:
+                    inputPermuteStr = " cbsz:2 blgp:3";
+                    break;
+                case InstType::INST_B6_F6:
+                    inputPermuteStr = " cbsz:3 blgp:2";
+                    break;
+                case InstType::INST_F6_F4:
+                    inputPermuteStr = " cbsz:2 blgp:4";
+                    break;
+                case InstType::INST_F4_F6:
+                    inputPermuteStr = " cbsz:4 blgp:2";
+                    break;
+                case InstType::INST_B6_F4:
+                    inputPermuteStr = " cbsz:3 blgp:4";
+                    break;
+                case InstType::INST_F4_B6:
+                    inputPermuteStr = " cbsz:4 blgp:3";
                     break;
                 default:
                     break;
                 }
             }
+            else if(capOrDefault(getAsmCaps(), "HasWMMA_f8f6f4"))
+            {
+                switch(instType)
+                {
+                case InstType::INST_F8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
+                    break;
+                case InstType::INST_BF8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
+                    break;
+                case InstType::INST_F8_BF8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
+                    break;
+                case InstType::INST_BF8_F8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
+                    break;
+                case InstType::INST_F6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
+                    break;
+                case InstType::INST_BF6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
+                    break;
+                case InstType::INST_F6_B6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
+                    break;
+                case InstType::INST_B6_F6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
+                    break;
+                case InstType::INST_F4:
+                {
+                    bool useModifier = ((variant[0] < f4_t) && (variant[1] < f4_t));
+                    inputPermuteStr
+                        = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
+                    break;
+                }
+                case InstType::INST_F8_F4:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
+                    break;
+                case InstType::INST_F4_F8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
+                    break;
+                case InstType::INST_F6_F4:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
+                    break;
+                case InstType::INST_F4_F6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
+                    break;
+                case InstType::INST_F8_F6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
+                    break;
+                case InstType::INST_F6_F8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
+                    break;
+                case InstType::INST_F8_B6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
+                    break;
+                case InstType::INST_B6_F8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8"
+                              : "";
+                    break;
+                case InstType::INST_B8_F4:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
+                    break;
+                case InstType::INST_F4_B8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
+                    break;
+                case InstType::INST_B6_F4:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4"
+                              : "";
+                    break;
+                case InstType::INST_F4_B6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
+                    break;
+                case InstType::INST_B8_F6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6"
+                              : "";
+                    break;
+                case InstType::INST_F6_B8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
+                    break;
+                case InstType::INST_B8_B6:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6"
+                              : "";
+                    break;
+                case InstType::INST_B6_B8:
+                    inputPermuteStr
+                        = (variant[2] > 64)
+                              ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8"
+                              : "";
+                    break;
+                default:
+                    break;
+                }
+                if(forceScaledWMMA())
+                {
+                    scaleStr = ", 0, 0";
+                }
+            }
+            // Matrix-reuse hints: cache the A/B source from the previous identical WMMA.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + acc2->toString() + negStr + inputPermuteStr;
+                   + (!acc2.has_value() ? std::to_string(acc2_imm) : InstructionInputToString(acc2.value()))
+                   + scaleStr + negStr + inputPermuteStr + reuseStr;
         }
 
         std::string toString() const override
         {
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
-            return formatWithComment(kStr);
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {a, b, acc2.has_value() ? acc2.value() : InstructionInput(acc2_imm)}, acc);
+            return kStr;
         }
 
         int getIssueLatency() const override
@@ -218,6 +533,460 @@ namespace rocisa
             auto dataType = instTypeToDataType(instType);
             auto [issueLatency, miLatency]
                 = getMFMAIssueLatency<false>(dataType, variant[0], variant[3]);
+            return issueLatency;
+        }
+    };
+
+    struct MXMFMAInstruction : public Instruction
+    {
+        InstType                           accType;
+        InstType                           mxScaleAType;
+        InstType                           mxScaleBType;
+        std::vector<int>                   variant;
+        std::shared_ptr<RegisterContainer> acc;
+        std::shared_ptr<RegisterContainer> a;
+        std::shared_ptr<RegisterContainer> b;
+        std::shared_ptr<RegisterContainer> acc2;
+        int                                acc2_imm=0;
+        std::shared_ptr<RegisterContainer> mxsa;
+        std::shared_ptr<RegisterContainer> mxsb;
+        std::optional<VOP3PModifiers>      vop3;
+        int                                block;
+        // gfx1250 WMMA matrix-reuse hints (see MFMAInstruction).
+        bool                               reuseA = false;
+        bool                               reuseB = false;
+        // gfx1250 MX scale-select (matrix_a_scale:N / matrix_b_scale:N). Selects which MX
+        // scale slot the WMMA reads: 0 = default (lower half-wave), 1 = partner (upper
+        // half-wave). Used by the MXS TileSpan optimization to read the partner block's
+        // scale directly from a single wave-split ds_load. 0 is emitted implicitly (no
+        // modifier).
+        int                                mxScaleASel = 0;
+        int                                mxScaleBSel = 0;
+
+        MXMFMAInstruction(InstType                                  instType,
+                          InstType                                  accType,
+                          const std::vector<int>&                   variant,
+                          const std::shared_ptr<RegisterContainer>& acc,
+                          const std::shared_ptr<RegisterContainer>& a,
+                          const std::shared_ptr<RegisterContainer>& b,
+                          const std::shared_ptr<RegisterContainer>& acc2         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsa         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsb         = nullptr,
+                          const std::optional<VOP3PModifiers>&      vop3         = std::nullopt,
+                          InstType                                  mxScaleAType = InstType::INST_F32,
+                          InstType                                  mxScaleBType = InstType::INST_F32,
+                          int                                       block        = 0,
+                          const std::string&                        comment      = "",
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false,
+                          int                                       mxScaleASel  = 0,
+                          int                                       mxScaleBSel  = 0)
+            : Instruction(instType, comment)
+            , accType(accType)
+            , mxScaleAType(mxScaleAType)
+            , mxScaleBType(mxScaleBType)
+            , variant(variant)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(acc2 ? acc2 : acc)
+            , acc2_imm(0)
+            , mxsa(mxsa)
+            , mxsb(mxsb)
+            , vop3(vop3)
+            , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+            , mxScaleASel(mxScaleASel)
+            , mxScaleBSel(mxScaleBSel)
+        {
+        }
+
+        MXMFMAInstruction(InstType                                  instType,
+                          InstType                                  accType,
+                          const std::vector<int>&                   variant,
+                          const std::shared_ptr<RegisterContainer>& acc,
+                          const std::shared_ptr<RegisterContainer>& a,
+                          const std::shared_ptr<RegisterContainer>& b,
+                          int                                       acc2_imm = 0,
+                          const std::shared_ptr<RegisterContainer>& mxsa         = nullptr,
+                          const std::shared_ptr<RegisterContainer>& mxsb         = nullptr,
+                          const std::optional<VOP3PModifiers>&      vop3         = std::nullopt,
+                          InstType                                  mxScaleAType = InstType::INST_F32,
+                          InstType                                  mxScaleBType = InstType::INST_F32,
+                          int                                       block        = 0,
+                          const std::string&                        comment      = "",
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false,
+                          int                                       mxScaleASel  = 0,
+                          int                                       mxScaleBSel  = 0)
+            : Instruction(instType, comment)
+            , accType(accType)
+            , mxScaleAType(mxScaleAType)
+            , mxScaleBType(mxScaleBType)
+            , variant(variant)
+            , acc(acc)
+            , a(a)
+            , b(b)
+            , acc2(nullptr)
+            , acc2_imm(acc2_imm)
+            , mxsa(mxsa)
+            , mxsb(mxsb)
+            , vop3(vop3)
+            , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
+            , mxScaleASel(mxScaleASel)
+            , mxScaleBSel(mxScaleBSel)
+        {
+        }
+
+        MXMFMAInstruction(const MXMFMAInstruction& other)
+            : Instruction(other.instType, other.comment)
+            , accType(other.accType)
+            , mxScaleAType(other.mxScaleAType)
+            , mxScaleBType(other.mxScaleBType)
+            , variant(other.variant)
+            , acc(other.acc ? other.acc->clone2() : nullptr)
+            , a(other.a ? other.a->clone2() : nullptr)
+            , b(other.b ? other.b->clone2() : nullptr)
+            , acc2(other.acc2 ? other.acc2->clone2() : nullptr)
+            , mxsa(other.mxsa ? other.mxsa->clone2() : nullptr)
+            , mxsb(other.mxsb ? other.mxsb->clone2() : nullptr)
+            , vop3(other.vop3)
+            , block(other.block)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
+            , mxScaleASel(other.mxScaleASel)
+            , mxScaleBSel(other.mxScaleBSel)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<MXMFMAInstruction>(*this);
+        }
+
+        std::string typeConvert() const
+        {
+            constexpr size_t f4_t = 32;
+            return ((variant[0] < f4_t) && (variant[1] < f4_t)) ? "f8f6f4" : "f4";
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            if(capOrDefault(getAsmCaps(), "HasMFMA"))
+                return {acc, a, b, acc2, mxsa, mxsb};
+            return {acc, a, b, acc2, mxsa, mxsb, block};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {acc};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            // ignore block parameter since it's not an operand in mxmfma instruction.
+            return {a, b, (acc2 ? InstructionInput(acc2) : InstructionInput(acc2_imm)), mxsa, mxsb};
+        }
+
+        std::string preStr() const override
+        {
+            std::string variantStr = std::to_string(variant[0]) + "x" + std::to_string(variant[1])
+                                     + "x" + std::to_string(variant[2]);
+            if(capOrDefault(getAsmCaps(), "HasMFMA"))
+            {
+                return "v_mfma_scale_f32_" + variantStr + "_f8f6f4";
+            }
+            else
+            {
+                std::string blkStr = (block == 16) ? "16" : "";
+                return "v_wmma_scale" + blkStr + "_f32_" + variantStr + "_" + typeConvert();
+            }
+        }
+
+        std::string mfmaInputPermuteStr() const
+        {
+            if(capOrDefault(getAsmCaps(), "HasMFMA_f8f6f4") && variant[2] > 32)
+            {
+                switch(instType)
+                {
+                case InstType::INST_F8:
+                    return " cbsz:0 blgp:0";
+                case InstType::INST_BF8:
+                    return " cbsz:1 blgp:1";
+                case InstType::INST_F8_BF8:
+                    return " cbsz:0 blgp:1";
+                case InstType::INST_BF8_F8:
+                    return " cbsz:1 blgp:0";
+                case InstType::INST_F6:
+                    return " cbsz:2 blgp:2";
+                case InstType::INST_BF6:
+                    return " cbsz:3 blgp:3";
+                case InstType::INST_F4:
+                    return " cbsz:4 blgp:4";
+                case InstType::INST_F8_F6:
+                    return " cbsz:0 blgp:2";
+                case InstType::INST_F6_F8:
+                    return " cbsz:2 blgp:0";
+                case InstType::INST_F8_F4:
+                    return " cbsz:0 blgp:4";
+                case InstType::INST_F4_F8:
+                    return " cbsz:4 blgp:0";
+                case InstType::INST_F6_B6:
+                    return " cbsz:2 blgp:3";
+                case InstType::INST_B6_F6:
+                    return " cbsz:3 blgp:2";
+                case InstType::INST_F6_F4:
+                    return " cbsz:2 blgp:4";
+                case InstType::INST_F4_F6:
+                    return " cbsz:4 blgp:2";
+                case InstType::INST_B6_F4:
+                    return " cbsz:3 blgp:4";
+                case InstType::INST_F4_B6:
+                    return " cbsz:4 blgp:3";
+                case InstType::INST_B8_F4:
+                    return " cbsz:1 blgp:4";
+                case InstType::INST_F4_B8:
+                    return " cbsz:4 blgp:1";
+                default:
+                    break;
+                }
+            }
+            return "";
+        }
+
+        std::string wmmaInputPermuteStr() const
+        {
+            constexpr size_t f4_t = 32;
+            std::string inputPermuteStr = "";
+            switch(instType)
+            {
+            case InstType::INST_F8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
+                break;
+            case InstType::INST_BF8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
+                break;
+            case InstType::INST_F8_BF8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
+                break;
+            case InstType::INST_BF8_F8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
+                break;
+            case InstType::INST_F6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
+                break;
+            case InstType::INST_BF6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
+                break;
+            case InstType::INST_F6_B6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
+                break;
+            case InstType::INST_B6_F6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
+                break;
+            case InstType::INST_F4:
+            {
+                bool useModifier = ((variant[0] < f4_t) && (variant[1] < f4_t));
+                inputPermuteStr
+                    = useModifier ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
+                break;
+            }
+            case InstType::INST_F8_F4:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
+                break;
+            case InstType::INST_F4_F8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
+                break;
+            case InstType::INST_F6_F4:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
+                break;
+            case InstType::INST_F4_F6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
+                break;
+            case InstType::INST_F8_F6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
+                break;
+            case InstType::INST_F6_F8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
+                break;
+            case InstType::INST_F8_B6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
+                break;
+            case InstType::INST_B6_F8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP8"
+                                      : "";
+                break;
+            case InstType::INST_B8_F4:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
+                break;
+            case InstType::INST_F4_B8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
+                break;
+            case InstType::INST_B6_F4:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_FP4"
+                                      : "";
+                break;
+            case InstType::INST_F4_B6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
+                break;
+            case InstType::INST_B8_F6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_FP6"
+                                      : "";
+                break;
+            case InstType::INST_F6_B8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
+                break;
+            case InstType::INST_B8_B6:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF8 matrix_b_fmt:MATRIX_FMT_BF6"
+                                      : "";
+                break;
+            case InstType::INST_B6_B8:
+                inputPermuteStr = variant[2] > 64
+                                      ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF8"
+                                      : "";
+                break;
+            default:
+                break;
+            }
+
+            // MX scale-select (gfx1250): matrix_{a,b}_scale must be emitted BEFORE the
+            // matrix_{a,b}_scale_fmt modifiers. The assembler enforces the modifier order
+            // matrix_*_fmt -> matrix_*_scale -> matrix_*_scale_fmt and rejects any other
+            // ordering with "not a valid operand". 0 is the default (no modifier emitted).
+            if(mxScaleASel)
+                inputPermuteStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                inputPermuteStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
+
+            switch(mxScaleAType)
+            {
+            case InstType::INST_E5M3:
+                inputPermuteStr += " matrix_a_scale_fmt:1";
+                break;
+            case InstType::INST_F8:
+                inputPermuteStr += " matrix_a_scale_fmt:2";
+                break;
+            default:
+                break;
+            }
+
+            switch(mxScaleBType)
+            {
+            case InstType::INST_E5M3:
+                inputPermuteStr += " matrix_b_scale_fmt:1";
+                break;
+            case InstType::INST_F8:
+                inputPermuteStr += " matrix_b_scale_fmt:2";
+                break;
+            default:
+                break;
+            }
+
+            return inputPermuteStr;
+        }
+
+        std::string getArgStr() const
+        {
+            // Matrix-reuse hints (gfx1250): trailing assembler keyword modifiers.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
+            // MX scale-select (gfx1250): pick the partner scale slot from a single wave-split
+            // ds_load. 0 is the default and emitted implicitly (no modifier).
+            std::string scaleSelStr = "";
+            if(mxScaleASel)
+                scaleSelStr += " matrix_a_scale:" + std::to_string(mxScaleASel);
+            if(mxScaleBSel)
+                scaleSelStr += " matrix_b_scale:" + std::to_string(mxScaleBSel);
+            if(capOrDefault(getAsmCaps(), "HasMFMA"))
+            {
+                std::string mxsaStr = mxsa ? mxsa->toString() : "";
+                std::string mxsbStr = mxsb ? mxsb->toString() : "";
+                // op_sel/op_sel_hi must appear before cbsz/blgp for the assembler
+                std::string result  = acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                                    + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
+                                    + mxsaStr + ", " + mxsbStr;
+                if(vop3)
+                {
+                    result += vop3->toString();
+                }
+                result += mfmaInputPermuteStr();
+                result += scaleSelStr;
+                result += reuseStr;
+                return result;
+            }
+            else
+            {
+                // Note: scale-select (matrix_{a,b}_scale) is emitted inside
+                // wmmaInputPermuteStr() so it precedes matrix_{a,b}_scale_fmt as the
+                // assembler requires; do not append scaleSelStr here again.
+                return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
+                       + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
+                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr()
+                       + reuseStr;
+            }
+        }
+
+        std::string toString() const override
+        {
+            auto        newInstStr = preStr();
+            std::string kStr       = newInstStr + " " + getArgStr();
+            setMsb(kStr, {a, b, acc2}, acc);
+            return formatWithComment(kStr);
+        }
+
+        int getIssueLatency() const override
+        {
+            auto dataType                  = instTypeToDataType(instType);
+            auto [issueLatency, miLatency] = getMFMAIssueLatency<false>(
+                dataType, variant[0], variant.size() > 3 ? variant[3] : 1);
             return issueLatency;
         }
     };
@@ -231,6 +1000,7 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> a;
         std::shared_ptr<RegisterContainer> b;
         std::shared_ptr<RegisterContainer> metadata;
+        bool                               neg;
 
         SMFMAInstruction(InstType                                  instType,
                          InstType                                  accType,
@@ -240,6 +1010,7 @@ namespace rocisa
                          const std::shared_ptr<RegisterContainer>& a,
                          const std::shared_ptr<RegisterContainer>& b,
                          const std::shared_ptr<RegisterContainer>& metadata,
+                         bool                                      neg     = false,
                          const std::string&                        comment = "")
             : Instruction(instType, comment)
             , accType(accType)
@@ -249,6 +1020,7 @@ namespace rocisa
             , a(a)
             , b(b)
             , metadata(metadata)
+            , neg(neg)
         {
         }
 
@@ -261,6 +1033,7 @@ namespace rocisa
             , a(other.a ? other.a->clone2() : nullptr)
             , b(other.b ? other.b->clone2() : nullptr)
             , metadata(other.metadata ? other.metadata->clone2() : nullptr)
+            , neg(other.neg)
         {
         }
 
@@ -281,6 +1054,8 @@ namespace rocisa
                 return "bf16";
             case InstType::INST_I8:
                 return "i8";
+            case InstType::INST_U8:
+                return "iu8";
             case InstType::INST_I32:
                 return "i32";
             case InstType::INST_F8:
@@ -298,37 +1073,53 @@ namespace rocisa
 
         std::vector<InstructionInput> getParams() const override
         {
-            return {acc, a, b, metadata};
+            std::string negStr = !neg ? "" : " neg_lo:[1,1]";
+            return {acc, a, b, metadata, negStr};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {acc};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {a, b, metadata, acc};
         }
 
         std::string preStr() const override
         {
             if(variant.size() == 4)
             {
+                bool is_smfma = capOrDefault(getAsmCaps(), "HasSMFMA");
+                std::string instructionName = is_smfma ? "smfmac" : "swmmac";
                 std::string variantStr = std::to_string(variant[0]) + "x"
                                          + std::to_string(variant[1]) + "x"
                                          + std::to_string(variant[2]);
                 std::string strB = variant[3] > 1 ? std::to_string(variant[3]) + "ub_" : "";
-                return "v_smfmac_" + typeConvert(accType) + "_" + variantStr + "_" + strB
+                return "v_" + instructionName + "_" + typeConvert(accType) + "_" + variantStr + "_" + strB
                        + typeConvert(instType);
             }
             else
             {
-                throw std::runtime_error("Currently only support smfma variant 4");
+                throw std::runtime_error("Currently only support smfma and swmma variant 4");
             }
         }
 
         std::string getArgStr() const
         {
+            std::string negStr = !neg ? "" : " neg_lo:[1,1]";
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + metadata->toString();
+                   + metadata->toString() + negStr;
         }
 
         std::string toString() const override
         {
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
-            return formatWithComment(kStr);
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, {a, b, metadata}, acc);
+            return kStr;
         }
 
         int getIssueLatency() const override

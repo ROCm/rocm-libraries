@@ -192,6 +192,10 @@ int main()
     std::cout << "" << std::endl;
 
     // Clean up
+    HIP_CHECK(hipFree(dcsr_row_ptr));
+    HIP_CHECK(hipFree(dcsr_col_ind));
+    HIP_CHECK(hipFree(dcsr_val));
+    HIP_CHECK(hipFree(dB));
     HIP_CHECK(hipFree(temp_buffer));
     ROCSPARSE_CHECK(rocsparse_destroy_mat_info(info));
     ROCSPARSE_CHECK(rocsparse_destroy_mat_descr(descr));

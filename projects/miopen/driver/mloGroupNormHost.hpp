@@ -31,7 +31,6 @@
 ////////////////////////////////////////////////////////////
 //
 ///////////////////////////////////////////////////////////
-
 template <typename Tgpu, typename Tcheck>
 int32_t mloGroupNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
                                    Tgpu* input,
@@ -42,7 +41,8 @@ int32_t mloGroupNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
                                    Tcheck* rstdhost,
                                    uint64_t num_groups,
                                    float eps,
-                                   miopenNormMode_t mode)
+                                   miopenNormMode_t mode,
+                                   bool use_multithread)
 {
     auto dims = miopen::deref(inputDesc).GetLengths();
 
@@ -53,8 +53,9 @@ int32_t mloGroupNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
     size_t outer_size = dims[0] * num_groups;
     size_t inner_size = numel / outer_size;
 
-    for(size_t o = 0; o < outer_size; o++)
-    {
+    size_t min_grain = use_multithread ? 8 : outer_size;
+
+    miopen::par_for(outer_size, min_grain, [&](size_t o) {
         Tcheck pmean = 0.0f;
         Tcheck pvar  = 0.0f;
         for(size_t i = 0; i < inner_size; i++)
@@ -80,8 +81,9 @@ int32_t mloGroupNormForwardRunHost(miopenTensorDescriptor_t inputDesc,
 
             outputhost[idx] = (static_cast<Tcheck>(input[idx]) - pmean) * prstd * pweight + pbias;
         }
-    }
+    });
 
     return 0;
 }
+
 #endif

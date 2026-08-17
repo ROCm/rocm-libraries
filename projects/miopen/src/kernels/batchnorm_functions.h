@@ -20,7 +20,6 @@
 #define _FLOAT_ACCUM float
 #if MIOPEN_USE_FP16 == 1
 #define MIO_BN_NODPP 1
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #define _FLOAT half
 #define _FLOAT_PREC half
 #define EPSILON (_FLOAT)0.0001
@@ -41,7 +40,6 @@
 #endif
 #endif
 #if MIOPEN_USE_FPMIX == 1
-#pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #define _FLOAT half
 
 #ifdef MIO_BN_NODPP
@@ -177,10 +175,14 @@
 // TODO: Spaghetti code!!!
 // MIOPEN_USE_AMDGCN may be defined before this header.
 #ifndef MIOPEN_USE_AMDGCN
+// clang-format off
 #if defined(__AMDGCN__) &&                           \
     !((defined(MIO_BN_GFX103X) && MIO_BN_GFX103X) || \
       (defined(MIO_BN_GFX110X) && MIO_BN_GFX110X) || \
-      (defined(MIO_BN_GFX120X) && MIO_BN_GFX120X) || (defined(MIO_BN_GFX115X) && MIO_BN_GFX115X))
+      (defined(MIO_BN_GFX115X) && MIO_BN_GFX115X) || \
+      (defined(MIO_BN_GFX120X) && MIO_BN_GFX120X) || \
+      (defined(MIO_BN_GFX125X) && MIO_BN_GFX125X))
+// clang-format on
 #define MIOPEN_USE_AMDGCN 1
 #else
 #define MIOPEN_USE_AMDGCN 0
@@ -218,6 +220,10 @@
 
 #ifndef MIO_BN_GFX115X
 #define MIO_BN_GFX115X 0
+#endif
+
+#ifndef MIO_BN_GFX125X
+#define MIO_BN_GFX125X 0
 #endif
 
 #ifndef MIO_BN_VECTORIZE

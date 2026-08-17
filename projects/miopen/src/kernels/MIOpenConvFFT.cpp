@@ -3178,9 +3178,9 @@ constexpr unsigned int strideAL  = 1;
 constexpr unsigned int strideBL  = 1;
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK)
-#define GLOBAL_A(IDXL, IDX0I, IDXK) ((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK)
-#define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK)
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) ((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK)
+#define GLOBAL_A(IDXL, IDX0I, IDXK) ((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK)
+#define GLOBAL_B(IDXL, IDX1J, IDXK) ((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK)
 
 /* data types */
 using TYPE_A = float2;
@@ -3565,9 +3565,12 @@ constexpr unsigned int strideAL  = 1;
 constexpr unsigned int strideBL  = 1;
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
-#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) (((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK))
-#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) \
+    (((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK))
+#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) \
+    (((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK))
+#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) \
+    (((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK))
 
 /* data types */
 using DATA_TYPE   = float2;
@@ -3613,19 +3616,19 @@ using VECTOR_TYPE = float2;
 /* Begin Kernel                         */
 /****************************************/
 extern "C" __global__
-    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
-                                                            const float2* __restrict__ A,
-                                                            const float2* __restrict__ B,
-                                                            unsigned int const strideC1J,
-                                                            unsigned int const strideCK,
-                                                            unsigned int const strideA0I,
-                                                            unsigned int const strideAK,
-                                                            unsigned int const strideB1J,
-                                                            unsigned int const strideBK,
-                                                            unsigned int const size0I,
-                                                            unsigned int const size1J,
-                                                            unsigned int const sizeK,
-                                                            unsigned int const sizeL)
+__launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
+                                                        const float2* __restrict__ A,
+                                                        const float2* __restrict__ B,
+                                                        unsigned int const strideC1J,
+                                                        unsigned int const strideCK,
+                                                        unsigned int const strideA0I,
+                                                        unsigned int const strideAK,
+                                                        unsigned int const strideB1J,
+                                                        unsigned int const strideBK,
+                                                        unsigned int const size0I,
+                                                        unsigned int const size1J,
+                                                        unsigned int const sizeK,
+                                                        unsigned int const sizeL)
 {
 
     /***************************************/
@@ -4118,9 +4121,12 @@ constexpr unsigned int strideAL  = 1;
 constexpr unsigned int strideBL  = 1;
 
 /* global memory indices */
-#define GLOBAL_C(IDX0I, IDX1J, IDXK) (((IDX0I)*strideC0I + (IDX1J)*strideC1J + (IDXK)*strideCK))
-#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) (((IDXL)*strideAL + (IDX0I)*strideA0I + (IDXK)*strideAK))
-#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) (((IDXL)*strideBL + (IDX1J)*strideB1J + (IDXK)*strideBK))
+#define GLOBAL_C(IDX0I, IDX1J, IDXK) \
+    (((IDX0I) * strideC0I + (IDX1J) * strideC1J + (IDXK) * strideCK))
+#define GLOBAL_OFFSET_A(IDXL, IDX0I, IDXK) \
+    (((IDXL) * strideAL + (IDX0I) * strideA0I + (IDXK) * strideAK))
+#define GLOBAL_OFFSET_B(IDXL, IDX1J, IDXK) \
+    (((IDXL) * strideBL + (IDX1J) * strideB1J + (IDXK) * strideBK))
 
 /* data types */
 using DATA_TYPE   = float2;
@@ -4144,19 +4150,19 @@ using VECTOR_TYPE = float2;
 /* Begin Kernel                           */
 /******************************************/
 extern "C" __global__
-    __launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
-                                                            const float2* __restrict__ A,
-                                                            const float2* __restrict__ B,
-                                                            unsigned int const strideC1J,
-                                                            unsigned int const strideCK,
-                                                            unsigned int const strideA0I,
-                                                            unsigned int const strideAK,
-                                                            unsigned int const strideB1J,
-                                                            unsigned int const strideBK,
-                                                            unsigned int const size0I,
-                                                            unsigned int const size1J,
-                                                            unsigned int const sizeK,
-                                                            unsigned int const sizeL)
+__launch_bounds__(NUM_THREADS) void MIOpenConvFFT_cgemm(float2* __restrict__ C,
+                                                        const float2* __restrict__ A,
+                                                        const float2* __restrict__ B,
+                                                        unsigned int const strideC1J,
+                                                        unsigned int const strideCK,
+                                                        unsigned int const strideA0I,
+                                                        unsigned int const strideAK,
+                                                        unsigned int const strideB1J,
+                                                        unsigned int const strideBK,
+                                                        unsigned int const size0I,
+                                                        unsigned int const size1J,
+                                                        unsigned int const sizeK,
+                                                        unsigned int const sizeL)
 {
 
     /******************************************/

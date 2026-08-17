@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -38,6 +15,10 @@
 #include <rocRoller/DataTypes/DataTypes_BF8.hpp>
 #include <rocRoller/DataTypes/DataTypes_BFloat16.hpp>
 #include <rocRoller/DataTypes/DataTypes_Buffer.hpp>
+#include <rocRoller/DataTypes/DataTypes_E4M3.hpp>
+#include <rocRoller/DataTypes/DataTypes_E4M3x4.hpp>
+#include <rocRoller/DataTypes/DataTypes_E5M3.hpp>
+#include <rocRoller/DataTypes/DataTypes_E5M3x4.hpp>
 #include <rocRoller/DataTypes/DataTypes_E8M0.hpp>
 #include <rocRoller/DataTypes/DataTypes_E8M0x4.hpp>
 #include <rocRoller/DataTypes/DataTypes_FP4.hpp>
@@ -48,6 +29,7 @@
 #include <rocRoller/DataTypes/DataTypes_Int8x4.hpp>
 #include <rocRoller/DataTypes/DataTypes_Raw32.hpp>
 #include <rocRoller/DataTypes/DataTypes_Scale_Utils.hpp>
+#include <rocRoller/DataTypes/DataTypes_TDM.hpp>
 #include <rocRoller/DataTypes/DataTypes_UInt8x4.hpp>
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture_fwd.hpp>
@@ -124,6 +106,10 @@ namespace rocRoller
         Bool64, //< Sixty-four booleans packed into 64bits.  Usually the result of a vector-comparison (VCC; On Wave64 VCC is a single Bool64).
         E8M0, //< 8bits scale type
         E8M0x4, //< Four 8bits scale type; packed into 32bits
+        E5M3, //< 8bits scale type
+        E5M3x4, //< Four 8bits scale type; packed into 32bits
+        E4M3, //< 8bits scale type
+        E4M3x4, //< Four 8bits scale type; packed into 32bits
         None, //< Represents: any, unknown/unspecified, or a deferred type.
         Count
     };
@@ -142,6 +128,7 @@ namespace rocRoller
         PointerLocal,
         PointerGlobal,
         Buffer,
+        TDM,
 
         Count,
         None = Count
@@ -163,6 +150,7 @@ namespace rocRoller
         WAVE_SWIZZLE,
         WAVE_FROM_GLOBAL,
         WAVE_LDS_FROM_GLOBAL,
+        WAVE_TDMToLDS,
         Literal,
         None,
         Count
@@ -180,11 +168,14 @@ namespace rocRoller
         MATRIX_A,
         MATRIX_B,
         MATRIX_ACCUMULATOR,
+        ROW_MAJOR,
+        COLUMN_MAJOR,
         None,
         Count
     };
 
     std::string   toString(LayoutType l);
+    std::string   abbrev(LayoutType t);
     std::ostream& operator<<(std::ostream& stream, LayoutType l);
 
     enum class NaryArgument : int

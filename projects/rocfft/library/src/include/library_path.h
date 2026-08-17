@@ -23,7 +23,7 @@
 
 #include "rocfft/rocfft.h"
 
-#ifdef WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
@@ -41,7 +41,7 @@ namespace std
 }
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 static std::filesystem::path get_library_path_win32()
 {
     static const char* ROCFFT_DLL = "rocfft.dll";
@@ -78,7 +78,7 @@ static std::filesystem::path get_library_path()
 #ifdef ROCFFT_STATIC_LIB
     return {};
 #else
-#ifdef WIN32
+#ifdef _WIN32
     return get_library_path_win32();
 #else
     return get_library_path_unix();

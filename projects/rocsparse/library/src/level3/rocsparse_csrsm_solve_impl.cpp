@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,6 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "../level2/rocsparse_csrsv_deprecated_template.hpp"
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
@@ -36,7 +35,7 @@
 #include "csrsm_device.h"
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrsm(rocsparse_operation transB,
                J                   m,
@@ -45,11 +44,11 @@ namespace rocsparse
                const I* __restrict__ csr_row_ptr,
                const J* __restrict__ csr_col_ind,
                const T* __restrict__ csr_val,
-               T* __restrict__ B,
+               T*      B,
                int64_t ldb,
                int* __restrict__ done_array,
                const J* __restrict__ map,
-               J* __restrict__ zero_pivot,
+               J*                   zero_pivot,
                rocsparse_index_base idx_base,
                rocsparse_fill_mode  fill_mode,
                rocsparse_diag_type  diag_type,
@@ -57,21 +56,21 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
 
-        rocsparse::csrsm_device<BLOCKSIZE, WFSIZE, SLEEP>(transB,
-                                                          m,
-                                                          nrhs,
-                                                          alpha,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          csr_val,
-                                                          B,
-                                                          ldb,
-                                                          done_array,
-                                                          map,
-                                                          zero_pivot,
-                                                          idx_base,
-                                                          fill_mode,
-                                                          diag_type);
+        rocsparse::csrsm_device<BLOCKSIZE, SLEEP>(transB,
+                                                  m,
+                                                  nrhs,
+                                                  alpha,
+                                                  csr_row_ptr,
+                                                  csr_col_ind,
+                                                  csr_val,
+                                                  B,
+                                                  ldb,
+                                                  done_array,
+                                                  map,
+                                                  zero_pivot,
+                                                  idx_base,
+                                                  fill_mode,
+                                                  diag_type);
     }
 
     template <typename I, typename J, typename T>
@@ -92,7 +91,8 @@ namespace rocsparse
                                                  rocsparse_mat_info        info,
                                                  rocsparse_solve_policy    policy,
                                                  rocsparse_csrsm_info      csrsm_info,
-                                                 void*                     temp_buffer)
+                                                 void*                     temp_buffer,
+                                                 bool                      force_conj = false)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -129,16 +129,17 @@ namespace rocsparse
             ptr += ((sizeof(T) * m * nrhs - 1) / 256 + 1) * 256;
         }
 
-        // Temporary array to store transpose of A
+        // Temporary array to store transpose of A (or conjugated values for force_conj)
         T* At = nullptr;
         if(trans_A == rocsparse_operation_transpose
-           || trans_A == rocsparse_operation_conjugate_transpose)
+           || trans_A == rocsparse_operation_conjugate_transpose || force_conj)
         {
             At = reinterpret_cast<T*>(ptr);
         }
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
         const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
 
@@ -146,7 +147,7 @@ namespace rocsparse
         if(descr->diag_type == rocsparse_diag_type_unit)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
-                1, rocsparse::get_indextype<J>(), csrsm_info->get_zero_pivot(), stream));
+                1, rocsparse::get_indextype<J>(), csrsm_info->get_position(), stream));
         }
 
         // Leading dimension
@@ -195,8 +196,24 @@ namespace rocsparse
             local_csr_col_ind = (const J*)trm_info->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
-            fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                 : rocsparse_fill_mode_lower;
+            switch(fill_mode)
+            {
+            case rocsparse_fill_mode_lower:
+                fill_mode = rocsparse_fill_mode_upper;
+                break;
+            case rocsparse_fill_mode_upper:
+                fill_mode = rocsparse_fill_mode_lower;
+                break;
+            }
+        }
+        else if(force_conj)
+        {
+            // CSC conjugate_transpose case: values are already in A^T layout (CSC as CSR),
+            // so we only need to conjugate them
+            RETURN_IF_HIP_ERROR(
+                hipMemcpyAsync(At, csr_val, sizeof(T) * nnz, hipMemcpyDeviceToDevice, stream));
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, At));
+            local_csr_val = (const T*)At;
         }
         {
             const dim3 csrsm_blocks(((nrhs - 1) / blockdim + 1) * m);
@@ -211,11 +228,10 @@ namespace rocsparse
 
             if(blockdim == 64)
             {
-
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<64, 64, true>),
+                        (rocsparse::csrsm<64, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -231,7 +247,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -240,7 +256,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<64, 64, false>),
+                        (rocsparse::csrsm<64, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -256,7 +272,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -265,10 +281,10 @@ namespace rocsparse
             }
             else if(blockdim == 128)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<128, 64, true>),
+                        (rocsparse::csrsm<128, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -284,7 +300,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -293,7 +309,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<128, 64, false>),
+                        (rocsparse::csrsm<128, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -309,7 +325,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -318,10 +334,10 @@ namespace rocsparse
             }
             else if(blockdim == 256)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<256, 64, true>),
+                        (rocsparse::csrsm<256, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -337,7 +353,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -346,7 +362,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<256, 64, false>),
+                        (rocsparse::csrsm<256, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -362,7 +378,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -371,10 +387,10 @@ namespace rocsparse
             }
             else if(blockdim == 512)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<512, 64, true>),
+                        (rocsparse::csrsm<512, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -390,7 +406,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -399,7 +415,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<512, 64, false>),
+                        (rocsparse::csrsm<512, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -415,7 +431,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -424,10 +440,10 @@ namespace rocsparse
             }
             else if(blockdim == 1024)
             {
-                if(gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2)
+                if(gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2)
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<1024, 64, true>),
+                        (rocsparse::csrsm<1024, true>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -443,7 +459,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -452,7 +468,7 @@ namespace rocsparse
                 else
                 {
                     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                        (rocsparse::csrsm<1024, 64, false>),
+                        (rocsparse::csrsm<1024, false>),
                         csrsm_blocks,
                         csrsm_threads,
                         0,
@@ -468,7 +484,7 @@ namespace rocsparse
                         ldimB,
                         done_array,
                         (const J*)trm_info->get_row_map(),
-                        (J*)csrsm_info->get_zero_pivot(),
+                        (J*)csrsm_info->get_position(),
                         descr->base,
                         fill_mode,
                         descr->diag_type,
@@ -521,7 +537,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                              rocsparse_mat_info        info,
                                              rocsparse_solve_policy    policy,
                                              rocsparse_csrsm_info      csrsm_info,
-                                             void*                     temp_buffer)
+                                             void*                     temp_buffer,
+                                             bool                      force_conj)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -545,27 +562,55 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
         const int64_t b_inc
             = (trans_B == rocsparse_operation_none && order_B == rocsparse_order_column) ? 1 : ldb;
 
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsv_solve_template<I, J, T>(handle,
-                                                                            trans_A,
-                                                                            m,
-                                                                            nnz,
-                                                                            alpha,
-                                                                            descr,
-                                                                            csr_val,
-                                                                            csr_row_ptr,
-                                                                            csr_col_ind,
-                                                                            info,
-                                                                            B,
-                                                                            b_inc,
-                                                                            y,
-                                                                            policy,
-                                                                            csrsm_info,
-                                                                            temp_buffer)));
+        {
+            const int64_t batch_count     = static_cast<int64_t>(1);
+            const int64_t batch_dist_zero = static_cast<int64_t>(0);
+            const int64_t inc_y           = static_cast<int64_t>(1);
+
+            _rocsparse_spmat_descr csr(rocsparse_format_csr,
+                                       batch_count,
+                                       m,
+                                       m,
+                                       nnz,
+                                       rocsparse::get_datatype<T>(),
+                                       csr_val,
+                                       nullptr,
+                                       batch_dist_zero,
+                                       rocsparse::get_indextype<I>(),
+                                       csr_row_ptr,
+                                       nullptr,
+                                       batch_dist_zero,
+                                       rocsparse::get_indextype<J>(),
+                                       csr_col_ind,
+                                       nullptr,
+                                       batch_dist_zero,
+                                       descr->base,
+                                       descr,
+                                       info);
+
+            _rocsparse_dnvec_descr dnx(
+                batch_count, m, rocsparse::get_datatype<T>(), B, nullptr, b_inc, batch_dist_zero);
+            _rocsparse_dnvec_descr dny(
+                batch_count, m, rocsparse::get_datatype<T>(), y, y, inc_y, batch_dist_zero);
+
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_solve(handle,
+                                                             trans_A,
+                                                             rocsparse::get_datatype<T>(),
+                                                             alpha,
+                                                             batch_dist_zero,
+                                                             &csr,
+                                                             &dnx,
+                                                             &dny,
+                                                             policy,
+                                                             csrsm_info,
+                                                             temp_buffer,
+                                                             force_conj));
+        }
 
         if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column))
         {
-            RETURN_IF_HIP_ERROR(
-                hipMemcpyAsync(B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+                B, y, m * sizeof(T), hipMemcpyDeviceToDevice, handle->stream));
         }
         else
         {
@@ -601,7 +646,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                                               info,
                                                               policy,
                                                               csrsm_info,
-                                                              temp_buffer));
+                                                              temp_buffer,
+                                                              force_conj));
     return rocsparse_status_success;
 }
 
@@ -826,7 +872,8 @@ namespace rocsparse
         rocsparse_mat_info        info,                             \
         rocsparse_solve_policy    policy,                           \
         rocsparse_csrsm_info      csrsm_info,                       \
-        void*                     temp_buffer);
+        void*                     temp_buffer,                      \
+        bool                      force_conj);
 
 INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);

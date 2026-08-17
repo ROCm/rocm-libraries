@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2022-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -30,6 +7,7 @@
 #include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/CodeGen/TensorDataMover.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
@@ -52,6 +30,7 @@ namespace rocRoller
             Local,
             Buffer,
             Buffer2LDS,
+            TDMToLDS,
             Count,
         };
 
@@ -353,6 +332,15 @@ namespace rocRoller
                                               BufferInstructionOptions buffOpts,
                                               int                      numBytes,
                                               Register::ValuePtr       soffset);
+        /**
+         * @brief Generate the instructions required to perform Global into LDS loads using TDM.
+         */
+        Generator<Instruction> loadTensorToLDS(Register::ValuePtr tdmDesc);
+
+        /**
+         * @brief Generate the instructions required to perform LDS into Global stores using TDM.
+         */
+        Generator<Instruction> storeTensorFromLDS(Register::ValuePtr tdmDesc);
 
         /**
          * @brief Generate the instructions required to add a wave synchronization barrier.
@@ -377,13 +365,13 @@ namespace rocRoller
             addLargerOffset2Addr(int& offset, Register::ValuePtr& addr, std::string inst);
 
         /**
-     * Returns a function which can be used with Generator<Instruction>::map() to add `dst` as an extra destination operand to all memory instructions that are yielded by that generator.
-     */
+         * Returns a function which can be used with Generator<Instruction>::map() to add `dst` as an extra destination operand to all memory instructions that are yielded by that generator.
+         */
         static auto addExtraDst(Register::ValuePtr dst);
 
         /**
-     * Returns a function which can be used with Generator<Instruction>::map() to add `src` as an extra source operand to all memory instructions that are yielded by that generator.
-     */
+         * Returns a function which can be used with Generator<Instruction>::map() to add `src` as an extra source operand to all memory instructions that are yielded by that generator.
+         */
         static auto addExtraSrc(Register::ValuePtr src);
 
     private:

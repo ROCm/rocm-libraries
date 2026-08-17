@@ -1,0 +1,101 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --PeepholeOptimizationPass --print-output
+#
+# ADD+MUL Fusion: v_add + v_mul with constants → single v_fma.
+# v_add v0,C1,v1 + v_mul v2,C2,v0 → v_fma v2,C2,v1,(C1*C2)
+# Converted from PeepholeOptimizationPassTest.*ADDMUL*
+
+#--- F32 basic: v_add v0,2.0,v1 + v_mul v2,3.0,v0 → v_fma v2,3.0,v1,6.0
+# CHECK-LABEL: @add_mul_f32_basic
+# CHECK: v_fma_f32
+# CHECK-SAME: v2
+# CHECK-SAME: 3
+# CHECK-SAME: v1
+# CHECK-SAME: 6
+# CHECK-NOT: v_add_f32
+# CHECK-NOT: v_mul_f32
+
+st.func @add_mul_f32_basic() {
+^entry:
+  v0 = "st.v_add_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 basic
+# CHECK-LABEL: @add_mul_f16_basic
+# CHECK: v_fma_f16
+# CHECK-SAME: 3
+# CHECK-SAME: v1
+# CHECK-SAME: 6
+# CHECK-NOT: v_add_f16
+# CHECK-NOT: v_mul_f16
+
+st.func @add_mul_f16_basic() {
+^entry:
+  v0 = "st.v_add_f16"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f16"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: ADD result has multiple uses → no fusion
+# CHECK-LABEL: @no_fusion_addmul_multiple_uses
+# CHECK: v_add_f32
+# CHECK: v_mul_f32
+# CHECK: v_add_f32
+
+st.func @no_fusion_addmul_multiple_uses() {
+^entry:
+  v0 = "st.v_add_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_add_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: ADD has no constant → no fusion
+# CHECK-LABEL: @no_fusion_addmul_add_no_const
+# CHECK: v_add_f32
+# CHECK: v_mul_f32
+
+st.func @no_fusion_addmul_add_no_const() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: MUL has no constant → no fusion
+# CHECK-LABEL: @no_fusion_addmul_mul_no_const
+# CHECK: v_add_f32
+# CHECK: v_mul_f32
+
+st.func @no_fusion_addmul_mul_no_const() {
+^entry:
+  v0 = "st.v_add_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(v3, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative constant: 3.0 * -2.0 = -6.0
+# CHECK-LABEL: @add_mul_negative
+# CHECK: v_fma_f32
+# CHECK-SAME: 3
+# CHECK-SAME: v1
+# CHECK-SAME: -6
+# CHECK-NOT: v_add_f32
+# CHECK-NOT: v_mul_f32
+
+st.func @add_mul_negative() {
+^entry:
+  v0 = "st.v_add_f32"(-2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Both negative: -3.0 * -2.0 = 6.0
+# CHECK-LABEL: @add_mul_both_negative
+# CHECK: v_fma_f32
+# CHECK-SAME: -3
+# CHECK-SAME: v1
+# CHECK-SAME: 6
+# CHECK-NOT: v_add_f32
+# CHECK-NOT: v_mul_f32
+
+st.func @add_mul_both_negative() {
+^entry:
+  v0 = "st.v_add_f32"(-2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(-3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}

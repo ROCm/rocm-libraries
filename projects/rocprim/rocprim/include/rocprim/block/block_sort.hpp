@@ -147,6 +147,8 @@ struct select_block_sort_impl<block_sort_algorithm::stable_merge_sort>
 /// In the examples sort is performed on a block of 256 threads, each thread provides
 /// 8 \p int values, results are returned using the same variable as for input.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_sort.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -36,7 +13,7 @@ namespace rocRoller
     namespace Scheduling
     {
         template <typename T>
-        using WaitQueueMap = std::unordered_map<GPUWaitQueue, T, GPUWaitQueue::Hash>;
+        using WaitQueueMap = std::unordered_map<GPUWaitQueue, T>;
 
         using WaitQueueRegisters = std::array<Register::ValuePtr, Instruction::MaxExtraRegisters>;
 
@@ -129,16 +106,46 @@ namespace rocRoller
             void applyWaitToQueue(int waitCnt, GPUWaitQueue queue);
 
             /**
-             * This function determines if there's a needed wait count that is needed
+             * Determines if there's a waitcount that's needed due to a barrier if the 
+             * alwaysWaitZeroBeforeBarrier kernelOption is set.
+             *
+             * @param inst
+             * @param[out] explanation is an output parameter for an explanation of the wait count required.
+             * @return WaitCount
              */
-            WaitCount computeImplicitWaitCount(Instruction const& inst,
+            WaitCount computeZeroBarrierWaitCount(Instruction const& inst,
+                                                  std::string*       explanation = nullptr) const;
+
+            /**
+             * Determines if there's a waitcount that's needed due to the instruction having a
+             * WaitCount::SyncQueue() wait attached.
+             *
+             * @param inst
+             * @param[out] explanation is an output parameter for an explanation of the wait count required.
+             * @return WaitCount
+             */
+            WaitCount computeSyncQueueWaitCount(Instruction const& inst,
+                                                std::string*       explanation = nullptr) const;
+
+            /**
+             * Determines if there's a waitcount that's needed due to a register dependency 
+             * intersection.
+             *
+             * It searches backwards through each wait queue looking for registers that 
+             * intersect with the new instruction.
+             * If an intersection is found a wait is inserted for the intersection location
+             * or 0 if the wait_zero flag is set for the queue.
+             *
+             * @param inst
+             * @param[out] explanation is an output parameter for an explanation of the wait count required.
+             * @return WaitCount
+             */
+            WaitCount computeRegisterWaitCount(Instruction const& inst,
                                                std::string*       explanation = nullptr) const;
 
             /**
-             * @brief This function determines if an instruction needs a wait count inserted before it and provides an explanation as to why it's needed.
-             *
-             * It searches backwards through each wait queue looking for registers that intersect with the new instruction.
-             * If an intersection is found a wait is inserted for the intersection location or 0 if the wait_zero flag is set for the queue.
+             * @brief This function determines if an instruction needs a wait count inserted before
+             * it and provides an explanation as to why it's needed.
              *
              * @param inst
              * @param[out] explanation is an output parameter for an explanation of the wait count required.

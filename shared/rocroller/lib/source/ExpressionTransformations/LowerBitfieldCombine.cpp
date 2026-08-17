@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Expression.hpp>
 
@@ -110,19 +87,34 @@ namespace rocRoller
                                 ShowValue(expr.width));
                 }
 
+                AssertFatal(expr.width > 0,
+                            "BitfieldCombine width must be greater than 0, width 0 should have "
+                            "been optimized away by simplify");
+                AssertFatal(expr.width <= 32,
+                            "BitfieldCombine width must be less than or equal to 32");
+
+                // Calculate width mask, handling width=32 case to avoid UB
+                uint32_t widthMask;
+                if(expr.width == 32)
+                {
+                    widthMask = std::numeric_limits<uint32_t>::max();
+                }
+                else
+                {
+                    widthMask = (1u << expr.width) - 1u;
+                }
+
                 auto const srcIsZero = expr.srcIsZero && expr.srcIsZero.value();
                 if(not srcIsZero)
                 {
-                    rocRoller::Raw32 srcMask((static_cast<uint32_t>(1ul << expr.width) - 1ul)
-                                             << expr.srcOffset);
+                    rocRoller::Raw32 srcMask(widthMask << expr.srcOffset);
                     lhs = (literal(srcMask) & lhs); // Extract bits
                 }
 
                 auto const dstIsZero = expr.dstIsZero && expr.dstIsZero.value();
                 if(not dstIsZero)
                 {
-                    rocRoller::Raw32 dstMask(
-                        ~((static_cast<uint32_t>(1ul << expr.width) - 1ul) << expr.dstOffset));
+                    rocRoller::Raw32 dstMask(~(widthMask << expr.dstOffset));
                     rhs = (literal(dstMask) & rhs); // Clear bits
                 }
 

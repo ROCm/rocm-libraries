@@ -147,7 +147,7 @@ def compareDestFolderToYaml(originalDir, incFile, incData):
     incAttribute = incData[11] # the last item in yaml file
     if not incAttribute:
         sys.exit(f"[Error] Empty YAML attribute. Need to set Equality or GridBased in {incFile}.")
-    # Check Equality and GradBased folders only
+    # Check Equality and GridBased folders only
     if destFolder in checkFolders and destFolder != incAttribute:
         restuls = f"\t{incFile} must be {destFolder} tuning"
         sys.exit(f"[Error] Destination folder(={destFolder}) failed to match YAML attribute(={incAttribute}): \n{restuls}")

@@ -14,14 +14,35 @@ find_package(Threads REQUIRED)
 
 add_executable(hipdnn_plugin_sdk_tests
     main.cpp
+    TestArchMatch.cpp
     TestPluginDataTypeHelpers.cpp
     TestPluginException.cpp
     TestPluginHelpers.cpp
     TestPluginLastErrorManager.cpp
     TestKnobFactory.cpp
+    TestEngineManager.cpp
+    TestEnginePluginContainer.cpp
+    TestKnobSettingFactory.cpp
+    TestSdkLogging.cpp
+    TestVersion.cpp
+    TestPluginDeviceBuffers.cpp
+    TestRuntimePassByValue.cpp
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestLruCache.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestNativeRegistry.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelHeuristic.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestMatchContext.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestDescriptors.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestArchGate.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelDefinition.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestKernelIngestorStateManager.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericEngine.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:ingestor/TestGenericPlanBuilder.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_KERNEL_INGESTOR}>:TestKernelIngestorConcurrency.cpp>
 )
 
-target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+target_compile_options(hipdnn_plugin_sdk_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS} ${HIPDNN_NO_RTTI_OPTIONS})
+
 target_link_libraries(
     hipdnn_plugin_sdk_tests
     GTest::gtest
@@ -33,4 +54,4 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_plugin_sdk_tests)
-add_unit_test_target(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_plugin_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

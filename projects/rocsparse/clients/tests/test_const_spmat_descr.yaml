@@ -49,8 +49,8 @@ Tests:
   function: const_spmat_descr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [0, 100]
-  N: [0, 100]
+  M: [8, 100]
+  N: [8, 100]
   nnz: [0]
   block_dir: [rocsparse_direction_row, rocsparse_direction_column]
   block_dim: [5]

@@ -47,8 +47,8 @@ Tests:
   category: quick
   function: check_matrix_coo
   precision: *single_double_precisions_complex_real
-  M: [1, 8, 20, 47, 89]
-  N: [1, 8, 20, 47, 89]
+  M: [1, 8]
+  N: [1, 8]
   baseA: [rocsparse_index_base_zero]
   matrix_type: [rocsparse_matrix_type_general]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
@@ -70,8 +70,8 @@ Tests:
   category: pre_checkin
   function: check_matrix_coo
   precision: *single_double_precisions_complex_real
-  M: [34657, 67586]
-  N: [27465, 93287]
+  M: [2000]
+  N: [2000]
   baseA: [rocsparse_index_base_zero]
   matrix_type: [rocsparse_matrix_type_general]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]

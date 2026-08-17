@@ -1,0 +1,72 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# Store-path characterization seed config for gfx942 codegen.
+#
+# Target: GlobalWriteBatch.py missing ranges 287-331, 374-405, 459-542, 568+
+#
+# Knob family: Global write/store batch
+#   - UseScaleAlphaVec: 1 (ProblemType) gates lines 289-291 (globalStoreWait
+#     non-interleave dscnt path) and 559-565 (ScaleAlphaVec epilogue load)
+#   - StoreRemapVectorWidth: [0, 4] gates lines 637, 714, 721, 822 (StoreRemap
+#     epilogue in _prolog and _epilog)
+#   - StorePriorityOpt: [False, True] gates alphaBeforeLoadC (line 385) when MIArchVgpr
+#     + beta + (StorePriorityOpt or StoreSyncOpt) are all true
+#   - SourceSwap: [False] required for StoreRemap compatibility
+#
+# 2 x 2 = 4 emitted kernels (well under <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeScaleAlphaVec: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) TN, BH + Bias + UseScaleAlphaVec
+  # UseScaleAlphaVec=1 gates GlobalWriteBatch.py lines 289-291, 559-565
+  # StorePriorityOpt fork gates alphaBeforeLoadC path (line 385)
+  # StoreRemapVectorWidth fork gates StoreRemap paths (lines 637, 714, 721, 822)
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: False
+      UseScaleAlphaVec: 1
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [False]
+        - StorePriorityOpt: [False, True]
+        - StoreRemapVectorWidth: [0, 4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']

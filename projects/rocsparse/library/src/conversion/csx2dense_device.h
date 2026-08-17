@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,7 +58,6 @@ namespace rocsparse
             //
             for(I index = lane_index; index < size_row; index += WF_SIZE)
             {
-                __syncthreads();
                 const J column_index = csr_col_ind[shift + index] - base;
 
                 if(order == rocsparse_order_column)

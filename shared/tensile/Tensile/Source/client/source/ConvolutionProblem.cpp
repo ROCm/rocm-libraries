@@ -24,12 +24,12 @@
  *
  *******************************************************************************/
 
+#include "ProgramOptions.hpp"
 #include <ConvolutionProblem.hpp>
 #include <Tensile/ContractionProblem.hpp>
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/lexical_cast.hpp>
 #include <vector>
+
+namespace po = Tensile::Client::po;
 
 namespace Tensile
 {
@@ -305,8 +305,7 @@ namespace Tensile
     {
         // example identifier:
         // ConvolutionForward_NCHW_KCHW_NCHW_filter:3x3x1_stride:1x1x1_dilation:1x1x1_groups:1
-        std::vector<std::string> parts;
-        boost::split(parts, identifier, boost::algorithm::is_any_of("_"));
+        std::vector<std::string> parts = po::split_string(identifier, "_");
 
         if(parts.size() < 4)
             // id, formatA, formatB, outputTensor
@@ -323,18 +322,17 @@ namespace Tensile
 
         for(auto part = parts.begin() + 4; part != parts.end(); part++)
         {
-            std::vector<std::string> flags;
-            boost::split(flags, *part, boost::algorithm::is_any_of(":"));
+            std::vector<std::string> flags = po::split_string(*part, ":");
             assert(flags.size() == 2); // must be key:value pair
 
             if(flags[0] == "spatialDims")
-                m_numSpatialDims = boost::lexical_cast<size_t>(flags[1]);
+                m_numSpatialDims = std::stoull(flags[1]);
             else if(flags[0] == "indices")
             {
             }
             else if(flags[0] == "groups")
             {
-                m_groups = boost::lexical_cast<int>(flags[1]);
+                m_groups = std::stoi(flags[1]);
                 assert(m_groups == 1); // not supported yet
             }
             else

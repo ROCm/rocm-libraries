@@ -39,6 +39,7 @@
 #include "../test/random.hpp"
 #include "../test/fusionHost.hpp"
 
+#include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>
@@ -74,7 +75,7 @@ template <typename TInput,
 class BatchNormDriver : public Driver
 {
 public:
-    BatchNormDriver() : Driver() { data_type = (sizeof(TInput) == 4) ? miopenFloat : miopenHalf; }
+    BatchNormDriver() : Driver() { miopenCreateActivationDescriptor(&activ_desc); }
 
     int AddCmdLineArgs() override;
     int ParseCmdLineArgs(int argc, char* argv[]) override;
@@ -113,17 +114,17 @@ public:
     // defined in MIOpen lib.
     void ValidateLayoutInputParameters(std::string layout_type);
 
-    ~BatchNormDriver() override {}
+    ~BatchNormDriver() override { miopenDestroyActivationDescriptor(activ_desc); }
 
 private:
     miopenBatchNormMode_t bn_mode;
     miopenActivationMode_t activ_mode = miopenActivationRELU;
+    miopenActivationDescriptor_t activ_desc;
 
-    bool saveMeanVar;
-    bool bsaveMeanVar;
-    bool keepRunningMeanVar;
-    bool estimatedMeanVar;
-    bool useInverseVar;
+    bool saveMeanVar        = false;
+    bool keepRunningMeanVar = false;
+    bool useInverseVar      = false;
+    bool usePingPongBuffers = false;
 
     int forw;
     int back;
@@ -152,6 +153,8 @@ private:
 
     // forward training
     GpumemTensor<TAcc> savedVariance;
+    GpumemTensor<TAcc> prevRunMean;
+    GpumemTensor<TAcc> prevRunVariance;
     GpumemTensor<TAcc> runMean;
     GpumemTensor<TAcc> runVariance;
     // ref
@@ -258,7 +261,11 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::GetandSetData()
         savedVariance.AllocOnHost(tensor<TAcc>{bn_layout, derivedBnDesc.GetLengths()});
         runMean.AllocOnHost(tensor<TAcc>{bn_layout, derivedBnDesc.GetLengths()});
         runVariance.AllocOnHost(tensor<TAcc>{bn_layout, derivedBnDesc.GetLengths()});
-
+        if(usePingPongBuffers)
+        {
+            prevRunMean.AllocOnHost(tensor<TAcc>{bn_layout, derivedBnDesc.GetLengths()});
+            prevRunVariance.AllocOnHost(tensor<TAcc>{bn_layout, derivedBnDesc.GetLengths()});
+        }
         // -2.0 to 2.0
         runMean.GetTensor().generate(
             uniform_signed_initializer<TAcc>(2e-3 /*scale*/, 1000 /*range*/));
@@ -299,8 +306,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::GetandSetData()
     }
     else
     {
-        std::cout << "\nUnknown batch norm state!\n";
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Unknown batch norm state");
     }
     return miopenStatusSuccess;
 }
@@ -368,10 +374,16 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AddCmdLineArgs()
                          "0",
                          "MIOpen tuning policy (Default=0, or no tuning policy set)",
                          "int");
+    AddHipGraphFlag(inflags);
     inflags.AddInputFlag("inverse_variance",
                          'I',
                          "0",
                          "Use inverse variance for forward inference (Default=0)",
+                         "int");
+    inflags.AddInputFlag("ping_pong_buffers",
+                         'Q',
+                         "0",
+                         "Use ping-pong buffers for running mean and variance (Default=0)",
                          "int");
 
     return miopenStatusSuccess;
@@ -413,8 +425,7 @@ bool BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::ChkLayout_ShortName(
     }
     else
     {
-        std::cerr << "Error:Invalid Short Name for layout!" << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Short Name for layout!");
     }
 }
 
@@ -424,14 +435,13 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::ValidateLayoutInputP
 {
     if(!ChkLayout_ShortName())
     {
-        std::cerr << "Invalid Layout Short Name = " << inflags.FindShortName("layout") << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm,
+                     std::string("Invalid Layout Short Name = ") + inflags.FindShortName("layout"));
     }
     if((layout_value.compare("NCHW") != 0) && (layout_value.compare("NHWC") != 0) &&
        (layout_value.compare("NCDHW") != 0) && (layout_value.compare("NDHWC") != 0))
     {
-        std::cerr << "Invalid Layout Parameter Value - " << layout_value << std::endl;
-        exit(EXIT_FAILURE);
+        MIOPEN_THROW(miopenStatusBadParm, "Invalid Layout Parameter Value - " + layout_value);
     }
 }
 
@@ -477,8 +487,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        std::cout << "Cannot handle layout : " << layout << "\n";
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Cannot handle layout: " + layout);
     }
 
     // batch norm mode type
@@ -492,8 +501,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        printf("Incorrect Batch Normalization Mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Mode");
     }
 
     // save off mean and variance?
@@ -507,8 +515,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        printf("Incorrect Batch Normalization Save mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Save mode");
     }
 
     // keep running mean and variance
@@ -522,22 +529,20 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
     }
     else
     {
-        printf("Incorrect Batch Normalization Running mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization Running mode");
     }
 
     forw = inflags.GetValueInt("forw");
     if(forw > 2)
     {
-        printf("Incorrect Batch Normalization forward mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Incorrect Batch Normalization forward mode");
     }
 
     back = inflags.GetValueInt("back");
     if(back > 1)
     {
-        printf("Incorrect Batch Normalization backwards propagation mode\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm,
+                     "Incorrect Batch Normalization backwards propagation mode");
     }
 
     if(back && forw)
@@ -573,6 +578,20 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::SetBNParametersFromCm
         printf("Inverse variance can only be used with forward inference\n");
         exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
     }
+    if(inflags.GetValueInt("ping_pong_buffers") == 1)
+    {
+        if(forw != 1 || !keepRunningMeanVar)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "Ping-pong buffers are only supported in forward training when running "
+                         "mean and variance are kept");
+        }
+        usePingPongBuffers = true;
+    }
+    else
+    {
+        usePingPongBuffers = false;
+    }
 
     return miopenStatusSuccess;
 }
@@ -582,17 +601,14 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
 {
     status_t status = STATUS_SUCCESS;
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     status |= in.AllocOnDeviceAndInit(q, ctx, GetTensorSize(&in.GetTensor().desc), buffer_check);
 
     if(isFwdInfer || isFwdTrain)
     {
         status |=
             out.AllocOnDeviceAndInit(q, ctx, GetTensorSize(&out.GetTensor().desc), buffer_check);
-        out_ref =
-            tensor<Tref>{out.GetTensor().desc.GetLayout_t(), out.GetTensor().desc.GetLengths()};
+        out_ref = tensor<Tref>{out.GetTensor().desc.GetLayoutEnum().value(),
+                               out.GetTensor().desc.GetLengths()};
         status |= scale.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&scale.GetTensor().desc), buffer_check);
         status |=
@@ -615,17 +631,24 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
             q, ctx, GetTensorSize(&runMean.GetTensor().desc), buffer_check);
         status |= runVariance.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&runVariance.GetTensor().desc), buffer_check);
+        if(usePingPongBuffers)
+        {
+            status |= prevRunMean.AllocOnDeviceAndInit(
+                q, ctx, GetTensorSize(&prevRunMean.GetTensor().desc), buffer_check);
+            status |= prevRunVariance.AllocOnDeviceAndInit(
+                q, ctx, GetTensorSize(&prevRunVariance.GetTensor().desc), buffer_check);
+        }
 
-        savedMean_ref = tensor<Tref>{savedMean.GetTensor().desc.GetLayout_t(),
+        savedMean_ref = tensor<Tref>{savedMean.GetTensor().desc.GetLayoutEnum().value(),
                                      savedMean.GetTensor().desc.GetLengths()};
 
-        savedVariance_ref = tensor<Tref>{savedVariance.GetTensor().desc.GetLayout_t(),
+        savedVariance_ref = tensor<Tref>{savedVariance.GetTensor().desc.GetLayoutEnum().value(),
                                          savedVariance.GetTensor().desc.GetLengths()};
 
-        runMean_ref = tensor<Tref>{runMean.GetTensor().desc.GetLayout_t(),
+        runMean_ref = tensor<Tref>{runMean.GetTensor().desc.GetLayoutEnum().value(),
                                    runMean.GetTensor().desc.GetLengths()};
 
-        runVariance_ref = tensor<Tref>{runVariance.GetTensor().desc.GetLayout_t(),
+        runVariance_ref = tensor<Tref>{runVariance.GetTensor().desc.GetLayoutEnum().value(),
                                        runVariance.GetTensor().desc.GetLengths()};
     }
     if(isBwd)
@@ -633,7 +656,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
         status |= out_bwd.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&out_bwd.GetTensor().desc), buffer_check);
 
-        out_ref = tensor<Tref>{out_bwd.GetTensor().desc.GetLayout_t(),
+        out_ref = tensor<Tref>{out_bwd.GetTensor().desc.GetLayoutEnum().value(),
                                out_bwd.GetTensor().desc.GetLengths()};
 
         status |= bnScale.AllocOnDeviceAndInit(
@@ -652,11 +675,11 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
         status |= savedInvVar.AllocOnDeviceAndInit(
             q, ctx, GetTensorSize(&savedInvVar.GetTensor().desc), buffer_check);
 
-        dScale_ref = tensor<Tref>{dScale.GetTensor().desc.GetLayout_t(),
+        dScale_ref = tensor<Tref>{dScale.GetTensor().desc.GetLayoutEnum().value(),
                                   dScale.GetTensor().desc.GetLengths()};
 
-        dBias_ref =
-            tensor<Tref>{dBias.GetTensor().desc.GetLayout_t(), dBias.GetTensor().desc.GetLengths()};
+        dBias_ref = tensor<Tref>{dBias.GetTensor().desc.GetLayoutEnum().value(),
+                                 dBias.GetTensor().desc.GetLengths()};
     }
 
     for(size_t i = 0; i < runMean.GetVector().size(); ++i)
@@ -670,7 +693,10 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
     }
 
     if(status != STATUS_SUCCESS)
-        printf("Fatal: Error copying data to GPU\nExiting...\n\n");
+    {
+        printf("Fatal: Error allocating GPU buffers\nExiting...\n\n");
+        return miopenStatusAllocFailed;
+    }
 
     return miopenStatusSuccess;
 }
@@ -772,8 +798,6 @@ template <typename TInput, typename Tref, typename TAcc, typename TScaleBias, ty
 void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdInferenceActivation(
     Tref epsilon, float alpha, float beta)
 {
-    miopenActivationDescriptor_t activ_desc;
-    miopenCreateActivationDescriptor(&activ_desc);
     miopenSetActivationDescriptor(activ_desc,
                                   activ_mode,
                                   inflags.GetValueDouble("activ_alpha"),
@@ -867,7 +891,6 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdInferenceAc
                                                                  activ_desc);
         }
     }
-    miopenDestroyActivationDescriptor(activ_desc);
     return;
 }
 
@@ -879,26 +902,66 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrain(Tref 
 {
     if(saveMeanVar && keepRunningMeanVar)
     {
-        miopenBatchNormalizationForwardTraining_V2(GetHandle(),
-                                                   bn_mode,
-                                                   &alpha,
-                                                   &beta,
-                                                   &in.GetTensor().desc,
-                                                   in.GetDevicePtr(),
-                                                   &out.GetTensor().desc,
-                                                   out.GetDevicePtr(),
-                                                   &scale.GetTensor().desc,
-                                                   &bias.GetTensor().desc,
-                                                   &savedMean.GetTensor().desc,
-                                                   &savedVariance.GetTensor().desc,
-                                                   scale.GetDevicePtr(),
-                                                   bias.GetDevicePtr(),
-                                                   eAF,
-                                                   runMean.GetDevicePtr(),
-                                                   runVariance.GetDevicePtr(),
-                                                   epsilon,
-                                                   savedMean.GetDevicePtr(),
-                                                   savedVariance.GetDevicePtr());
+        if(usePingPongBuffers)
+        {
+            // copy data from current running mean/var to previous running mean/var
+            (void)hipMemcpy(prevRunMean.GetDevicePtr(),
+                            runMean.GetDevicePtr(),
+                            runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunVariance.GetDevicePtr(),
+                            runVariance.GetDevicePtr(),
+                            runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            // not required, but just in case for consistency
+            prevRunMean.CopyFromDeviceToHost(GetStream());
+            prevRunVariance.CopyFromDeviceToHost(GetStream());
+            miopenBatchNormalizationForwardTraining_V3(GetHandle(),
+                                                       bn_mode,
+                                                       &alpha,
+                                                       &beta,
+                                                       &in.GetTensor().desc,
+                                                       in.GetDevicePtr(),
+                                                       &out.GetTensor().desc,
+                                                       out.GetDevicePtr(),
+                                                       &scale.GetTensor().desc,
+                                                       &bias.GetTensor().desc,
+                                                       &savedMean.GetTensor().desc,
+                                                       &savedVariance.GetTensor().desc,
+                                                       scale.GetDevicePtr(),
+                                                       bias.GetDevicePtr(),
+                                                       eAF,
+                                                       prevRunMean.GetDevicePtr(),
+                                                       prevRunVariance.GetDevicePtr(),
+                                                       runMean.GetDevicePtr(),
+                                                       runVariance.GetDevicePtr(),
+                                                       epsilon,
+                                                       savedMean.GetDevicePtr(),
+                                                       savedVariance.GetDevicePtr());
+        }
+        else
+        {
+            miopenBatchNormalizationForwardTraining_V2(GetHandle(),
+                                                       bn_mode,
+                                                       &alpha,
+                                                       &beta,
+                                                       &in.GetTensor().desc,
+                                                       in.GetDevicePtr(),
+                                                       &out.GetTensor().desc,
+                                                       out.GetDevicePtr(),
+                                                       &scale.GetTensor().desc,
+                                                       &bias.GetTensor().desc,
+                                                       &savedMean.GetTensor().desc,
+                                                       &savedVariance.GetTensor().desc,
+                                                       scale.GetDevicePtr(),
+                                                       bias.GetDevicePtr(),
+                                                       eAF,
+                                                       runMean.GetDevicePtr(),
+                                                       runVariance.GetDevicePtr(),
+                                                       epsilon,
+                                                       savedMean.GetDevicePtr(),
+                                                       savedVariance.GetDevicePtr());
+        }
     }
     else if(saveMeanVar)
     {
@@ -925,26 +988,66 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrain(Tref 
     }
     else if(keepRunningMeanVar)
     {
-        miopenBatchNormalizationForwardTraining_V2(GetHandle(),
-                                                   bn_mode,
-                                                   &alpha,
-                                                   &beta,
-                                                   &in.GetTensor().desc,
-                                                   in.GetDevicePtr(),
-                                                   &out.GetTensor().desc,
-                                                   out.GetDevicePtr(),
-                                                   &scale.GetTensor().desc,
-                                                   &bias.GetTensor().desc,
-                                                   &savedMean.GetTensor().desc,
-                                                   &savedVariance.GetTensor().desc,
-                                                   scale.GetDevicePtr(),
-                                                   bias.GetDevicePtr(),
-                                                   eAF,
-                                                   runMean.GetDevicePtr(),
-                                                   runVariance.GetDevicePtr(),
-                                                   epsilon,
-                                                   nullptr,
-                                                   nullptr);
+        if(usePingPongBuffers)
+        {
+            // copy data from current running mean/var to previous running mean/var
+            (void)hipMemcpy(prevRunMean.GetDevicePtr(),
+                            runMean.GetDevicePtr(),
+                            runMean.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            (void)hipMemcpy(prevRunVariance.GetDevicePtr(),
+                            runVariance.GetDevicePtr(),
+                            runVariance.GetTensor().desc.GetElementSize() * sizeof(TAcc),
+                            hipMemcpyDeviceToDevice);
+            // not required, but just in case for consistency
+            prevRunMean.CopyFromDeviceToHost(GetStream());
+            prevRunVariance.CopyFromDeviceToHost(GetStream());
+            miopenBatchNormalizationForwardTraining_V3(GetHandle(),
+                                                       bn_mode,
+                                                       &alpha,
+                                                       &beta,
+                                                       &in.GetTensor().desc,
+                                                       in.GetDevicePtr(),
+                                                       &out.GetTensor().desc,
+                                                       out.GetDevicePtr(),
+                                                       &scale.GetTensor().desc,
+                                                       &bias.GetTensor().desc,
+                                                       &savedMean.GetTensor().desc,
+                                                       &savedVariance.GetTensor().desc,
+                                                       scale.GetDevicePtr(),
+                                                       bias.GetDevicePtr(),
+                                                       eAF,
+                                                       prevRunMean.GetDevicePtr(),
+                                                       prevRunVariance.GetDevicePtr(),
+                                                       runMean.GetDevicePtr(),
+                                                       runVariance.GetDevicePtr(),
+                                                       epsilon,
+                                                       nullptr,
+                                                       nullptr);
+        }
+        else
+        {
+            miopenBatchNormalizationForwardTraining_V2(GetHandle(),
+                                                       bn_mode,
+                                                       &alpha,
+                                                       &beta,
+                                                       &in.GetTensor().desc,
+                                                       in.GetDevicePtr(),
+                                                       &out.GetTensor().desc,
+                                                       out.GetDevicePtr(),
+                                                       &scale.GetTensor().desc,
+                                                       &bias.GetTensor().desc,
+                                                       &savedMean.GetTensor().desc,
+                                                       &savedVariance.GetTensor().desc,
+                                                       scale.GetDevicePtr(),
+                                                       bias.GetDevicePtr(),
+                                                       eAF,
+                                                       runMean.GetDevicePtr(),
+                                                       runVariance.GetDevicePtr(),
+                                                       epsilon,
+                                                       nullptr,
+                                                       nullptr);
+        }
     }
     else
     {
@@ -1000,8 +1103,6 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrainActiva
                                                                                      float alpha,
                                                                                      float beta)
 {
-    miopenActivationDescriptor_t activ_desc;
-    miopenCreateActivationDescriptor(&activ_desc);
     miopenSetActivationDescriptor(activ_desc,
                                   activ_mode,
                                   inflags.GetValueDouble("activ_alpha"),
@@ -1127,7 +1228,6 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runGPUFwdTrainActiva
                                              nullptr,
                                              activ_desc);
 #endif
-    miopenDestroyActivationDescriptor(activ_desc);
 }
 
 template <typename TInput, typename Tref, typename TAcc, typename TScaleBias, typename TOut>
@@ -1136,23 +1236,33 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
 
     float alpha = static_cast<float>(1), beta = static_cast<float>(0);
     Tref epsilon = static_cast<Tref>(EPSILON);
-    Tref eAF     = static_cast<Tref>(1.0);
+    Tref eAF     = static_cast<Tref>(0.1); // will be changed
 
     Timer t;
-    double fulltime = 0.;
-    auto iters      = inflags.GetValueInt("iter");
-    float lowtime   = 100000000.0;
-    float avgtime   = 0.;
+    double fulltime    = 0.;
+    auto iters         = inflags.GetValueInt("iter");
+    float lowtime      = 100000000.0;
+    float avgtime      = 0.;
+    bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
-    for(int i = 0; i < iters; i++)
-    {
-
-        START_TIME
-
+    // Capture the graph for the first iteration (or if not using HIP graph, just execute)
+    int iteration   = 0; // for the case of not using HIP graph, will be captured by reference.
+    int return_code = CaptureKernel([&]() -> int {
         // if run fwd train
         if(forw == 1)
         { // training only
-            eAF = static_cast<Tref>(1.0) / (static_cast<Tref>(i) + static_cast<Tref>(1.0));
+            if(use_hip_graph)
+            {
+                eAF = static_cast<Tref>(0.1);
+                // This is the standard value used in PyTorch, TensorFlow, etc.
+                // eAF = 1 / (iteration + 1) is Cumulative Moving Average (CMA),
+                // cannot be used because current HIP graph wrapper need a constant
+            }
+            else
+            {
+                eAF = static_cast<Tref>(1.0) /
+                      (static_cast<Tref>(iteration) + static_cast<Tref>(1.0));
+            }
             if(activ_mode == 0)
             {
                 runGPUFwdTrain(epsilon, eAF, alpha, beta);
@@ -1182,6 +1292,18 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
             printf("Batch normalization mode forward GPU selection out of range, skipping.\n");
             return miopenStatusNotImplemented;
         }
+        return miopenStatusSuccess;
+    }); // end of the CaptureKernel
+
+    if(return_code != miopenStatusSuccess)
+        return return_code;
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        iteration = i; // Modifies the captured reference for the case of not using HIP graph
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1197,12 +1319,21 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardGPU()
         if(inflags.GetValueStr("time") == "1")
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
         }
     }
+
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
@@ -1296,9 +1427,8 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runCPUFwdInference(T
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
     return;
 }
@@ -1375,9 +1505,8 @@ void BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::runCPUFwdTrain(Tref 
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
 }
 
@@ -1403,8 +1532,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunForwardCPU()
     }
     else
     {
-        printf("Unsupported forward cpu run state.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusBadParm, "Unsupported forward cpu run state");
     }
 
     return miopenStatusSuccess;
@@ -1426,18 +1554,16 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
     float lowtime   = 100000000.0;
     float avgtime   = 0.;
 
-    miopenActivationDescriptor_t activ_desc;
-    miopenCreateActivationDescriptor(&activ_desc);
     miopenSetActivationDescriptor(activ_desc,
                                   activ_mode,
                                   inflags.GetValueDouble("activ_alpha"),
                                   inflags.GetValueDouble("activ_beta"),
                                   static_cast<double>(0.0));
 
-    for(int i = 0; i < iters; i++)
-    {
-        START_TIME
+    bool use_hip_graph = inflags.GetValueInt("use_hip_graph") != 0;
 
+    // Capture the graph for the first iteration (or if not using HIP graph, just execute)
+    int return_code = CaptureKernel([&]() -> int {
         if(saveMeanVar)
         {
             if(activ_mode == 0)
@@ -1548,6 +1674,20 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                                                   activ_desc);
             }
         }
+        return miopenStatusSuccess;
+    });
+
+    if(return_code != miopenStatusSuccess)
+    {
+        miopenDestroyActivationDescriptor(activ_desc);
+        return return_code;
+    }
+
+    for(int i = 0; i < iters; i++)
+    {
+        START_TIME
+
+        ExecuteKernel();
 
         miopen::deref(GetHandle()).Finish();
         STOP_TIME
@@ -1562,7 +1702,14 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
         if(inflags.GetValueStr("time") == "1")
         {
             float time = 0.0;
-            miopenGetKernelTime(GetHandle(), &time);
+            if(use_hip_graph)
+            {
+                time = GetHipGraphExecutionTime();
+            }
+            else
+            {
+                miopenGetKernelTime(GetHandle(), &time);
+            }
             lowtime = (time < lowtime) ? time : lowtime;
             if(iters > 1 && i > 0)
                 avgtime += time;
@@ -1581,7 +1728,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardGPU()
                    lowtime);
         }
     }
-    miopenDestroyActivationDescriptor(activ_desc);
+
+    FinalizeKernel();
 
     if(WALL_CLOCK)
     {
@@ -1783,7 +1931,7 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyForward()
                 std::cout << "out_ref[" << i << "] produced a nan: " << out_ref.data[i]
                           << std::endl;
             }
-            diff   = Tref(fabs(out.GetVector()[i]) - fabs(out_ref.data[i]));
+            diff   = fabs(Tref(fabs(out.GetVector()[i]) - fabs(out_ref.data[i])));
             maxval = maxval < diff ? diff : maxval;
             if(!std::isfinite(diff) || diff > tolerance)
             {
@@ -1907,9 +2055,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::RunBackwardCPU()
     }
     else
     {
-        printf("Something went wrong.\nBad batch normalization mode in host kernel "
-               "selection.\nExiting...\n\n");
-        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "Bad batch normalization mode in host kernel selection");
     }
 
     return miopenStatusSuccess;
@@ -1922,9 +2069,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
     if(!back)
         return miopenStatusSuccess;
 
-    const Tref maxrms =
-        static_cast<Tref>(((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16) * 1000);
-    bool anError = false;
+    const Tref maxrms = static_cast<Tref>((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16);
+    bool anError      = false;
 
     RunBackwardCPU();
 

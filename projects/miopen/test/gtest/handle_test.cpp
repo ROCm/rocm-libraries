@@ -55,236 +55,108 @@
 
 namespace {
 
-enum kernel_type_t
-{
-    miopenHIPKernelType,
-    miopenOpenCLKernelType
-};
-
 using TestCase = NamedParameter<bool>;
 
-static std::string Write2s(kernel_type_t kern_type)
+static std::string Write2s()
 {
-    if(kern_type == miopenHIPKernelType)
-    {
-        return "#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS\n"
-               "#include <hip/hip_runtime.h>\n"
+    return "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
+           "#include <hip/hip_runtime.h>\n"
 #if WORKAROUND_SWDEV_257056_PCH_MISSING_MACROS
-               "#else\n"
-               "#ifdef hipThreadIdx_x\n"
-               "#undef hipThreadIdx_x\n"
-               "#endif\n"
-               "#define hipThreadIdx_x threadIdx.x\n"
-               "\n"
-               "#ifdef hipBlockDim_x\n"
-               "#undef hipBlockDim_x\n"
-               "#endif\n"
-               "#define hipBlockDim_x blockDim.x\n"
-               "\n"
-               "#ifdef hipBlockIdx_x\n"
-               "#undef hipBlockIdx_x\n"
-               "#endif\n"
-               "#define hipBlockIdx_x blockIdx.x\n"
+           "#else\n"
+           "#ifdef hipThreadIdx_x\n"
+           "#undef hipThreadIdx_x\n"
+           "#endif\n"
+           "#define hipThreadIdx_x threadIdx.x\n"
+           "\n"
+           "#ifdef hipBlockDim_x\n"
+           "#undef hipBlockDim_x\n"
+           "#endif\n"
+           "#define hipBlockDim_x blockDim.x\n"
+           "\n"
+           "#ifdef hipBlockIdx_x\n"
+           "#undef hipBlockIdx_x\n"
+           "#endif\n"
+           "#define hipBlockIdx_x blockIdx.x\n"
 #endif
-               "#endif\n"
-               "extern \"C\" {\n"
-               "__global__ void write(int* data) {\n"
-               "    int num = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;\n"
-               "    data[num] *= 2;\n"
-               "}\n"
-               "}\n";
-    }
-    else if(kern_type == miopenOpenCLKernelType)
-    {
-        return "__kernel void write(__global int* data) { data[get_global_id(0)] *= 2; }\n";
-    }
-    else
-    {
-        MIOPEN_THROW("Unsupported kernel type");
-    }
+           "#endif\n"
+           "extern \"C\" {\n"
+           "__global__ void write(int* data) {\n"
+           "    int num = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;\n"
+           "    data[num] *= 2;\n"
+           "}\n"
+           "}\n";
 }
 
-static void run2s(const miopen::Handle& h, std::size_t n, kernel_type_t kern_type)
+static void run2s(const miopen::Handle& h, std::size_t n)
 {
     std::vector<int> data_in(n, 1);
     auto data_dev = h.Write(data_in);
-    if(kern_type == miopenOpenCLKernelType)
-    {
-        h.AddKernel("NoAlgo",
-                    "",
-                    "test_ocl.cl",
-                    "write",
-                    {n, 1, 1},
-                    {n, 1, 1},
-                    "",
-                    0,
-                    Write2s(miopenOpenCLKernelType))(data_dev.get());
-    }
-    else if(kern_type == miopenHIPKernelType)
-    {
-        h.AddKernel("NoAlgo",
-                    "",
-                    "test_hip.cpp",
-                    "write",
-                    {n, 1, 1},
-                    {n, 1, 1},
-                    "",
-                    0,
-                    Write2s(miopenHIPKernelType))(data_dev.get());
-    }
-    else
-    {
-        MIOPEN_THROW("Unsupported kernel type");
-    }
+    h.AddKernel("NoAlgo", "", "test_hip.cpp", "write", {n, 1, 1}, {n, 1, 1}, "", 0, Write2s())(
+        data_dev.get());
     std::fill(data_in.begin(), data_in.end(), 2);
 
     auto data_out = h.Read<int>(data_dev, n);
     EXPECT_EQ(data_out, data_in);
 }
 
-static void test_multithreads(kernel_type_t kern_type, const bool with_stream = false)
+static void test_multithreads(const bool with_stream = false)
 {
     auto&& h1 = get_handle();
     auto&& h2 = get_handle_with_stream(h1);
-    std::thread([&] { run2s(with_stream ? h2 : h1, 16, kern_type); }).join();
-    std::thread([&] { run2s(with_stream ? h2 : h1, 32, kern_type); }).join();
-    std::thread([&] {
-        std::thread([&] { run2s(with_stream ? h2 : h1, 64, kern_type); }).join();
-    }).join();
-    run2s(with_stream ? h2 : h1, 4, kern_type);
+    std::thread([&] { run2s(with_stream ? h2 : h1, 16); }).join();
+    std::thread([&] { run2s(with_stream ? h2 : h1, 32); }).join();
+    std::thread([&] { std::thread([&] { run2s(with_stream ? h2 : h1, 64); }).join(); }).join();
+    run2s(with_stream ? h2 : h1, 4);
 }
 
-static std::string WriteError(kernel_type_t kern_type)
+static std::string WriteError()
 {
-    if(kern_type == miopenOpenCLKernelType)
-    {
-        return "__kernel void write(__global int* data) { data[i] = 0; }\n";
-    }
-    else if(kern_type == miopenHIPKernelType)
-    {
-        return "#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS\n"
-               "#include <hip/hip_runtime.h>\n"
-               "#endif\n"
-               "extern \"C\" {\n"
-               "__global__ void write(int* data) {\n"
-               "    data[num] *= 2;\n"
-               "}\n"
-               "}\n";
-    }
-    else
-    {
-        MIOPEN_THROW("Unsupported kernel type");
-    }
+    return "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
+           "#include <hip/hip_runtime.h>\n"
+           "#endif\n"
+           "extern \"C\" {\n"
+           "__global__ void write(int* data) {\n"
+           "    data[num] *= 2;\n"
+           "}\n"
+           "}\n";
 }
 
-static void test_errors(kernel_type_t kern_type)
+static void test_errors()
 {
     auto&& h = get_handle();
-    if(kern_type == miopenOpenCLKernelType)
-    {
-        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
-                                     "",
-                                     "error_ocl.cl",
-                                     "write",
-                                     {1, 1, 1},
-                                     {1, 1, 1},
-                                     "",
-                                     0,
-                                     WriteError(kern_type)));
+    EXPECT_ANY_THROW(h.AddKernel(
+        "NoAlgo", "", "error_hip.cpp", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteError()));
 
-        try
-        {
-            h.AddKernel("NoAlgo",
-                        "",
-                        "error_ocl.cl",
-                        "write",
-                        {1, 1, 1},
-                        {1, 1, 1},
-                        "",
-                        0,
-                        WriteError(kern_type));
-        }
-        catch(miopen::Exception& e)
-        {
-            EXPECT_FALSE(std::string(e.what()).empty());
-        }
+    try
+    {
+        h.AddKernel(
+            "NoAlgo", "", "error_hip.cpp", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteError());
     }
-    else if(kern_type == miopenHIPKernelType)
+    catch(miopen::Exception& e)
     {
-        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
-                                     "",
-                                     "error_hip.cpp",
-                                     "write",
-                                     {1, 1, 1},
-                                     {1, 1, 1},
-                                     "",
-                                     0,
-                                     WriteError(miopenHIPKernelType)));
-
-        try
-        {
-            h.AddKernel("NoAlgo",
-                        "",
-                        "error_hip.cpp",
-                        "write",
-                        {1, 1, 1},
-                        {1, 1, 1},
-                        "",
-                        0,
-                        WriteError(miopenHIPKernelType));
-        }
-        catch(miopen::Exception& e)
-        {
-            EXPECT_FALSE(std::string(e.what()).empty());
-        }
+        EXPECT_FALSE(std::string(e.what()).empty());
     }
 }
 
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
-static std::string WriteNop(kernel_type_t kern_type)
+static std::string WriteNop()
 {
-    if(kern_type == miopenOpenCLKernelType)
-    {
-        return "__kernel void write(__global int* data) {}\n";
-    }
-    else if(kern_type == miopenHIPKernelType)
-    {
-        return "#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS\n"
-               "#include <hip/hip_runtime.h>\n"
-               "#endif\n"
-               "extern \"C\" {\n"
-               "__global__ void write(int* data) {\n"
-               "}\n"
-               "}\n";
-    }
-    else
-    {
-        MIOPEN_THROW("Unsupported kernel type");
-    }
+    return "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
+           "#include <hip/hip_runtime.h>\n"
+           "#endif\n"
+           "extern \"C\" {\n"
+           "__global__ void write(int* data) {\n"
+           "}\n"
+           "}\n";
 }
 #endif
 
-static void test_warnings([[maybe_unused]] kernel_type_t kern_type)
+static void test_warnings()
 {
 #if MIOPEN_BUILD_DEV && !WORKAROUND_ISSUE_2600 && !MIOPEN_WORKAROUND_COMPILER_CHANGE
     auto&& h = get_handle();
-    if(kern_type == miopenOpenCLKernelType)
-    {
-        EXPECT_ANY_THROW(h.AddKernel(
-            "NoAlgo", "", "nop_ocl.cl", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteNop(kern_type)));
-    }
-    else if(kern_type == miopenHIPKernelType)
-    {
-        EXPECT_ANY_THROW(h.AddKernel("NoAlgo",
-                                     "",
-                                     "nop_hip.cpp",
-                                     "write",
-                                     {1, 1, 1},
-                                     {1, 1, 1},
-                                     "",
-                                     0,
-                                     WriteNop(kern_type)));
-    }
+    EXPECT_ANY_THROW(
+        h.AddKernel("NoAlgo", "", "nop_hip.cpp", "write", {1, 1, 1}, {1, 1, 1}, "", 0, WriteNop()));
 #endif
 }
 
@@ -292,24 +164,10 @@ static void test_arch_name()
 {
     auto&& h = get_handle();
 
-    const auto known_arch = {"gfx908",
-                             "gfx90a",
-                             "gfx906",
-                             "gfx900",
-                             "gfx942",
-                             "gfx950",
-                             "gfx803",
-                             "gfx1030",
-                             "gfx1031",
-                             "gfx1100",
-                             "gfx1101",
-                             "gfx1102",
-                             "gfx1150",
-                             "gfx1151",
-                             "gfx1152",
-                             "gfx1153",
-                             "gfx1200",
-                             "gfx1201"};
+    const auto known_arch = {"gfx908",  "gfx90a",  "gfx906",  "gfx900",  "gfx942",
+                             "gfx950",  "gfx803",  "gfx1030", "gfx1031", "gfx1100",
+                             "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151",
+                             "gfx1152", "gfx1153", "gfx1200", "gfx1201", "gfx1250"};
 
     const auto this_arch = h.GetDeviceName();
 
@@ -341,26 +199,12 @@ struct HandleTest : testing::TestWithParam<TestCase>
 
         if(h.GetDeviceName() != "gfx803" && miopen::IsHipKernelsEnabled())
         {
-            test_multithreads(miopenHIPKernelType, with_stream);
-            test_errors(miopenHIPKernelType);
-            // Warnings currently don't work in OpenCL
-#if !MIOPEN_BACKEND_OPENCL
-            test_warnings(miopenHIPKernelType);
-#endif
+            test_multithreads(with_stream);
+            test_errors();
+            test_warnings();
         }
 
         test_arch_name();
-    }
-
-    void RunCL()
-    {
-        test_multithreads(miopenOpenCLKernelType, with_stream);
-        test_errors(miopenOpenCLKernelType);
-        test_arch_name();
-        // Warnings currently don't work in OpenCL
-#if !MIOPEN_BACKEND_OPENCL
-        test_warnings(miopenOpenCLKernelType);
-#endif
     }
 
 private:
@@ -391,7 +235,5 @@ struct TestNameGenerator
 using CPU_Handle_NONE = HandleTest;
 
 TEST_P(CPU_Handle_NONE, TestHIP) { this->RunHIP(); }
-
-TEST_P(CPU_Handle_NONE, TestCL) { this->RunCL(); }
 
 INSTANTIATE_TEST_SUITE_P(Smoke, CPU_Handle_NONE, GetCases(), TestNameGenerator{});

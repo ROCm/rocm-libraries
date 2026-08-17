@@ -15,57 +15,36 @@ This section covers how CK Tile's :ref:`tensor descriptor <ck_tile_descriptors>`
 
 The key insight is that convolution can be transformed from a complex nested loop operation into a highly parallel matrix multiplication through the image to column (im2col) transformation. CK Tile's tensor descriptors provide the perfect abstraction for implementing this transformation efficiently without data duplication.
 
-.. 
-   Original mermaid diagram (edit here, then run update_diagrams.py)
-   
-.. 
-   Original mermaid diagram (edit here, then run update_diagrams.py)
-   
-      .. mermaid::
-      
-         graph TB
-             subgraph "Convolution Process"
-                 I["Input Image<br/>6×6"]
-                 K["Kernel<br/>3×3"]
-                 SW["Sliding Window<br/>Extract 3×3 patches"]
-                 DP["Dot Product<br/>Element-wise multiply & sum"]
-                 O["Output<br/>4×4"]
-             end
-             
-             subgraph "Im2col Optimization"
-                 W["Windows Matrix<br/>16×9<br/>(all patches)"]
-                 KF["Kernel Flattened<br/>9×1"]
-                 MM["Matrix Multiply<br/>W @ K"]
-                 OF["Output Flattened<br/>16×1"]
-             end
-             
-             I --> SW
-             K --> DP
-             SW --> DP
-             DP --> O
-             
-             SW --> W
-             K --> KF
-             W --> MM
-             KF --> MM
-             MM --> OF
-             OF --> O
-             
-             style I fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-             style O fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-             style MM fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-      
-      
-   
-   
+.. mermaid::
 
-.. image:: diagrams/convolution_example.svg
-   :alt: Diagram
-   :align: center
+   graph TB
+       subgraph "Convolution Process"
+           I["Input Image<br/>6×6"]
+           K["Kernel<br/>3×3"]
+           SW["Sliding Window<br/>Extract 3×3 patches"]
+           DP["Dot Product<br/>Element-wise multiply & sum"]
+           O["Output<br/>4×4"]
+       end
 
-.. image:: diagrams/convolution_example.svg
-   :alt: Diagram
-   :align: center
+       subgraph "Im2col Optimization"
+           W["Windows Matrix<br/>16×9<br/>(all patches)"]
+           KF["Kernel Flattened<br/>9×1"]
+           MM["Matrix Multiply<br/>W @ K"]
+           OF["Output Flattened<br/>16×1"]
+       end
+
+       I --> SW
+       K --> DP
+       SW --> DP
+       DP --> O
+
+       SW --> W
+       K --> KF
+       W --> MM
+       KF --> MM
+       MM --> OF
+       OF --> O
+
 
 Understanding Sliding Windows
 =============================
@@ -88,7 +67,6 @@ Non-overlapping tiles:
         
         // Original matrix: shape=(6, 6), strides=(6, 1)
         // Tiled view: shape=(3, 3, 2, 2), strides=(12, 2, 6, 1)
-        // See :ref:`ck_tile_descriptors` for descriptor details
         using TileDescriptor = TensorDescriptor<
             Sequence<kNumTiles, kNumTiles, kTileSize, kTileSize>,
             Sequence<12, 2, 6, 1>
@@ -243,7 +221,6 @@ The im2col transformation converts the 4D windows tensor into a 2D matrix suitab
         >;
         
         // Step 2: Apply merge transforms to create 2D im2col layout
-        // See :ref:`ck_tile_transforms` for transform operations
         using Im2colDescriptor = decltype(
             transform_tensor_descriptor(
                 WindowsDescriptor{},
@@ -312,7 +289,6 @@ Combining all components into an optimized convolution implementation:
         >;
         
         // Tile distribution for matrix multiplication
-        // See :ref:`ck_tile_tile_distribution` for details
         using ATileDist = TileDistribution<
             Sequence<TileM, TileK>,
             Sequence<BlockM, 1>
@@ -327,7 +303,6 @@ Combining all components into an optimized convolution implementation:
         >;
         
         // Thread-local accumulator
-        // See :ref:`ck_tile_static_distributed_tensor`
         StaticDistributedTensor<DataType, CTileDist> c_accumulator;
         
         // Initialize accumulator
@@ -339,7 +314,6 @@ Combining all components into an optimized convolution implementation:
         // Main GEMM loop over K dimension
         for (index_t k_tile = 0; k_tile < PatchSize; k_tile += TileK) {
             // Create tile windows for im2col matrix and kernel
-            // See :ref:`ck_tile_tile_window` for window operations
             auto a_window = make_tile_window<ATileDist>(
                 input, Im2colDesc{H, W, K},
                 {blockIdx.y * TileM, k_tile}
@@ -350,7 +324,7 @@ Combining all components into an optimized convolution implementation:
                 {k_tile, 0}
             );
             
-            // Load tiles - see :ref:`ck_tile_load_store_traits` for optimization
+            // Load tiles 
             auto a_tile = a_window.load();
             auto b_tile = b_window.load();
             
@@ -476,7 +450,6 @@ CK Tile enables several optimizations for convolution:
     __shared__ float smem_b[TileK][TileN];
     
     // Collaborative loading with proper bank conflict avoidance
-    // See :ref:`ck_tile_lds_bank_conflicts` for optimization
     auto load_tile_to_smem = [&](auto& window, float smem[][TileK]) {
         #pragma unroll
         for (index_t i = threadIdx.y; i < TileM; i += blockDim.y) {

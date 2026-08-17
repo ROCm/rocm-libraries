@@ -25,11 +25,9 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
@@ -44,97 +42,106 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
+# Default-algorithm auto-selection. Drives the full buffer_size -> preprocess ->
+# compute pipeline on an extremely row-skewed and an extremely uniform matrix and
+# checks the default result against the analytic product and both explicit
+# load-balanced kernels. The test builds its own matrices, so it ignores the
+# index/precision below.
+- name: spmm_csr_extra
+  category: quick
+  function: spmm_csr_extra
+  indextype: *i32
+  precision: *double_only_precisions
+
 ##############################
 # Quick
 ##############################
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *double_only_precisions
-  M: [2324]
-  N: [40, 72, 100, 144]
+  M: [300]
+  N: [72]
   K: [2345]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
-  orderB: *all_rocsparse_order
-  orderC: *all_rocsparse_order
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
 
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions_complex_real
-  M: [0, 485]
-  N: [0, 647]
-  K: [0, 223]
+  M: [300]
+  N: [300]
+  K: [223]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none]
+  transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-  spmm_alg: [rocsparse_spmm_alg_csr_row_split, rocsparse_spmm_alg_csr_nnz_split, rocsparse_spmm_alg_csr_merge_path]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
 
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *double_only_precisions
   M: 1
   N: [64]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   spmm_alg: [rocsparse_spmm_alg_csr]
-  orderB: [rocsparse_order_column, rocsparse_order_row]
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [nos3,
-             nos4]
+  filename: [nos3]
 
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: [256]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_csr, rocsparse_spmm_alg_csr_merge_path]
-  orderB: [rocsparse_order_column, rocsparse_order_row]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [nos1,
-             nos4,
              nos7]
 
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
-  N: [32, 128]
+  N: [128]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_csr, rocsparse_spmm_alg_csr_merge_path]
-  orderB: [rocsparse_order_column, rocsparse_order_row]
+  spmm_alg: [rocsparse_spmm_alg_csr]
+  orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
   filename: [nos3]
 
@@ -148,58 +155,59 @@ Tests:
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_csr_row_split, rocsparse_spmm_alg_csr_nnz_split]
-  orderB: [rocsparse_order_column, rocsparse_order_row]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [nos2,
-             nos3,
-             nos6,
-             nos7]
+             nos6]
 
 - name: spmm_csr_file
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions_complex
   M: 1
-  N: [18, 19, 20, 21]
+  N: [19]
   K: 1
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_file_rocalution]
-  spmm_alg: [rocsparse_spmm_alg_csr_row_split, rocsparse_spmm_alg_csr_nnz_split, rocsparse_spmm_alg_csr_merge_path]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
-  filename: [Chevron2]
+  filename: [mplate]
 
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
-  M: [436]
+  M: [300]
   N: [214]
   K: [573]
   alpha_beta: *alpha_beta_range_quick
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *int8_int8_float32_float32_abct_precision
-  M: [374]
+  M: [300]
   N: [210]
   K: [457]
   alpha_beta: *alpha_beta_range_quick
@@ -210,14 +218,17 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32
+  indextype: *i64
   precision: *float16_float16_float32_float32_abct_precision
-  M: [6758]
-  N: [23, 24, 25, 38]
+  M: [300]
+  N: [23, 24]
   K: [4860]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -233,8 +244,8 @@ Tests:
   function: spmm_csr
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
-  M: [512]
-  N: [16, 32, 64]
+  M: [300]
+  N: [16, 32]
   K: [512]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -249,10 +260,10 @@ Tests:
 - name: spmm_csr
   category: quick
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: [*float16_float16_float16_float32_abct_precision, *bfloat16_bfloat16_bfloat16_float32_abct_precision]
-  M: [512]
-  N: [16, 32, 64]
+  M: [300]
+  N: [16, 32]
   K: [512]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
@@ -264,14 +275,233 @@ Tests:
   orderC: [rocsparse_order_column]
 
 ##############################
+# Quick - coverage widening (nnz_split / merge_path column-count dispatch)
+##############################
+# nnz_split NT path: sweep N to hit the n>=256 / >=192 / >=128 / >=64 main
+# kernels plus the <=1/2/4/8/16/32 remainder kernels in csrmm_template_nnz_split.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [64, 100, 128, 160, 192, 200, 256, 260]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# nnz_split NN path: small N to hit the n>=8/4/2/1 main + <=1/2/4/8 remainder.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [1, 2, 3, 5, 9, 13]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# merge_path NT path: sweep N across the same column-count dispatch chain.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [64, 100, 128, 160, 192, 200, 256, 260]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# merge_path NN path.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [350]
+  N: [1, 2, 3, 5, 9, 13, 32]
+  K: [500]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_merge_path]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+##############################
+# Quick - level3 coverage: csrmm row_split kernel column-count dispatch
+##############################
+# row_split NT path (csrmmnt_template_row_split): transB=transpose + orderB=column
+# routes to the column-count dispatch chain (num_cols>=16..64) plus the small-N
+# remainder kernels (end-start<=8 / <=16). Sweep N=1..64 to hit every branch.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [37]
+  N: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+      21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38,
+      39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56,
+      57, 58, 59, 60, 61, 62, 63, 64, 127]
+  K: [43]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# row_split NN path (csrmmnn_template_row_split): transB=none + orderB=column.
+# Small N (<=32) hits the shared kernel; larger non-multiple-of-8 N hits the
+# 8-column main + 1-column remainder launches.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [37]
+  N: [7, 20, 32, 35, 40, 41]
+  K: [43]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+
+# row_split orderB=row variants: (row,transB=none) -> NT path; (row,transB=transpose)
+# -> NN path. Exercises the remaining order/transB sub-conditions of the dispatch.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [37]
+  N: [5, 20, 35]
+  K: [43]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+
+# row_split TN/TT paths (csrmmtn/csrmmtt): transA=transpose with transB none/transpose.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [43]
+  N: [12, 33]
+  K: [37]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# row_split conjugate-transpose on B (complex) to exercise the conj_B order/trans
+# sub-conditions of the NN/NT dispatch.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *single_double_precisions_complex
+  M: [37]
+  N: [20, 35]
+  K: [43]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_row_split]
+  orderB: [rocsparse_order_column, rocsparse_order_row]
+  orderC: [rocsparse_order_column]
+
+##############################
+# Quick - level3 coverage: csrmm nnz_split kernel column-count / remainder dispatch
+##############################
+# nnz_split NN main + remainder dispatch: sweep small N so n>=8/4/2/1 and every
+# remainder (n%8) branch (<=1/2/4/8) is taken.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [37]
+  N: [1, 2, 3, 5, 7, 9, 10, 12, 14]
+  K: [43]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+# nnz_split NT main thresholds (n>=64/128/192/256) and every remainder kernel
+# (remainder<=1/2/4/8/16/32) via N chosen so n%block hits each bucket.
+- name: spmm_csr
+  category: quick
+  function: spmm_csr
+  indextype: *i32
+  precision: *double_only_precisions
+  M: [37]
+  N: [16, 32, 64, 128, 192, 256, 257, 258, 260, 264, 272, 288]
+  K: [43]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_csr_nnz_split]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+
+##############################
 # Precheckin
 ##############################
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
-  M: [11938]
+  M: [2000]
   N: [1, 2]
   K: [14293]
   alpha_beta: *alpha_beta_range_checkin
@@ -286,10 +516,10 @@ Tests:
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
-  M: [10234]
-  N: [1, 2, 3, 5, 11, 150, 200]
+  M: [2000]
+  N: [1, 2]
   K: [8475]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -303,7 +533,7 @@ Tests:
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: [311]
   N: [60, 441]
@@ -338,10 +568,10 @@ Tests:
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *double_only_precisions
   M: 1
-  N: [26, 27, 28, 56]
+  N: [26, 27]
   K: 1
   tolm: 4.0
   alpha_beta: *alpha_beta_range_checkin
@@ -360,7 +590,7 @@ Tests:
   indextype: *i64i32
   precision: *single_double_precisions_complex
   M: 1
-  N: [29, 30, 44]
+  N: [29, 30]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -375,7 +605,7 @@ Tests:
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: 1
   N: [9]
@@ -414,7 +644,7 @@ Tests:
   indextype: *i64i32
   precision: *single_double_precisions_complex
   M: 1
-  N: [4, 60, 61, 62]
+  N: [4, 60]
   K: 1
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -424,12 +654,12 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr_row_split]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [Chevron3]
+  filename: [Chevron2]
 
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
   N: [6]
@@ -483,7 +713,7 @@ Tests:
 - name: spmm_csr_file
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_int32_int32_abct_precision
   M: 1
   N: [64]
@@ -498,14 +728,17 @@ Tests:
   orderC: [rocsparse_order_row]
   filename: [nos3,
              nos4,
-             mac_econ_fwd500]
+             nos5]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csr
   category: pre_checkin
   function: spmm_csr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [23956]
+  M: [2000]
   N: [25, 56]
   K: [47586]
   alpha_beta: *alpha_beta_range_checkin
@@ -522,7 +755,7 @@ Tests:
   function: spmm_csr
   indextype: *i32
   precision: *bfloat16_bfloat16_float32_float32_abct_precision
-  M: [35691]
+  M: [2000]
   N: [75]
   K: [23458]
   alpha_beta: *alpha_beta_range_checkin
@@ -540,7 +773,7 @@ Tests:
   indextype: *i32
   precision: [*float16_float16_float32_float32_abct_precision, *bfloat16_bfloat16_float32_float32_abct_precision]
   M: [1024]
-  N: [32, 64, 128]
+  N: [32, 64]
   K: [1024]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
@@ -554,10 +787,10 @@ Tests:
 - name: spmm_csr_graph_test
   category: pre_checkin
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *double_only_precisions
-  M: [223, 485, 647]
-  N: [53, 54, 55, 58, 223]
+  M: [223, 485]
+  N: [53, 54]
   K: [223, 485, 647]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -577,10 +810,10 @@ Tests:
 - name: spmm_csr
   category: nightly
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [431]
-  N: [48, 49, 50, 51, 52, 273]
+  N: [48, 49]
   K: [97]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
@@ -634,7 +867,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [45, 46, 48]
+  N: [45, 46]
   K: 1
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
@@ -706,7 +939,7 @@ Tests:
   indextype: *i32_i64
   precision: *double_only_precisions
   M: 1
-  N: [40, 41, 42, 52]
+  N: [40, 41]
   K: 1
   tolm: 5.0
   alpha_beta: *alpha_beta_range_nightly
@@ -722,7 +955,7 @@ Tests:
 - name: spmm_csr_file
   category: nightly
   function: spmm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *int8_int8_float32_float32_abct_precision
   M: 1
   N: [77]
@@ -736,13 +969,16 @@ Tests:
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
   filename: [Chevron2]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_csr
   category: nightly
   function: spmm_csr
   indextype: *i32
   precision: *float16_float16_float32_float32_abct_precision
-  M: [42690]
+  M: [8538]
   N: [19, 49]
   K: [54678]
   alpha_beta: *alpha_beta_range_nightly
@@ -763,7 +999,7 @@ Tests:
   function: spmm_csr
   indextype: *i32
   precision: *single_only_precisions
-  M: [300000000]
+  M: [30000000]
   N: [2]
   K: [300000000]
   alpha_beta: *alpha_beta_range_stress

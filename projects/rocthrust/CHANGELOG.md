@@ -3,17 +3,52 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## rocThrust x.y.z for ROCm x.y
+## rocThrust x.x.x for ROCm 10.1.0
+
+### Changed
+
+* rocThrust now searches for an existing SQLite3 system library first by default.  SQLITE_USE_SYSTEM_PACKAGE can be set to OFF to force a local download of SQLite3.  The minimum required version of SQLite3 is 3.51.3.
+
+## rocThrust 4.6.0 for ROCm 10.0.0
+ 
+### Added
+ 
+* True global support in hipstdpar
+* Return value checks for assorted locations in the codebase that were previously missing.
+ 
+### Fixed
+ 
+* Fixed over-read and NULL deref in __hipstdpar_realloc
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
+
+## rocThrust 4.5.0 for ROCm 7.14
+
+### Added
+
+* gfx1250 support
+* For hipstdpar algorithms running on GPUs that support xnack, and __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__ are not enabled, emit a runtime warning once if xnack is off.
+
+## Since last release ROCm 7.12
+
+### Resolved issues
+
+* Fixed memory leak in unit test.
+* Fixed unit test compatibility with ASAN.
+
+## rocThrust 4.3.0 for ROCm 7.12
 
 ### Added
 
 * If you are using rocThrust on the host-side only, you can now build using g++ or non-HIP-aware clang++. To configure rocThrust in this-way, set the new CMake option `ROCTHRUST_DEVICE_SYSTEM` to `CPP` (other options include `HIP`, `CUDA`, `OpenMP`, and `TBB`), and set `CXX` to g++ or clang++. Then install rocThrust via `make install`. When you compile your application, don't forget to include the rocThrust include directory (`-I /opt/rocm/include`), since this won't happen automatically like it does when building with hipcc. Note that currently, rocThrust tests and benchmarks cannot be built when configuring rocThrust for host-side-only use.
-
 * Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
 
 ### Changed
 
 * Updated the documentation on how to run rocThrust tests on multiple GPUs in parallel.
+* Renamed CMake option `ROCTHRUST_DEVICE_SYSTEM` to `LINK_HIP_DEVICE_LIBS` and changed it to a boolean (`ON/OFF`). Added new CMake options `THRUST_DEVICE_SYSTEM` and `THRUST_HOST_SYSTEM` to set the device and host backends, respectively. Device system options include `OMP`, `TBB`, `CPP`, and `HIP`. Host system options include `CPP`, `OMP`, and `TBB`.
 
 ### Removed
 

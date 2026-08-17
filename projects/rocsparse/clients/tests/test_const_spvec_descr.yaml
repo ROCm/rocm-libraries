@@ -46,6 +46,6 @@ Tests:
   function: const_spvec_descr
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [0]
+  M: [8]
   nnz: [0]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

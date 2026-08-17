@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "ReferenceValidator.hpp"
 #include "ResultComparison.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "Reference.hpp"
 
@@ -34,6 +35,7 @@
 #include <Tensile/hip/HipUtils.hpp>
 
 #include <cstddef>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -53,11 +55,13 @@ namespace TensileLite
             m_printTensorD             = args["print-tensor-d"].as<bool>();
             m_printTensorRef           = args["print-tensor-ref"].as<bool>();
             m_printTensorBias          = args["print-tensor-bias"].as<bool>();
+            m_printTensorGate          = args["print-tensor-gate"].as<bool>();
             m_printTensorScaleAlphaVec = args["print-tensor-scale-alpha-vec"].as<bool>();
             m_printTensorAmaxD         = args["print-tensor-amaxd"].as<bool>();
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
-                         || m_printTensorRef || m_printTensorBias || m_printTensorAmaxD;
+                         || m_printTensorRef || m_printTensorBias || m_printTensorGate
+                         || m_printTensorAmaxD;
 
             m_enabled = m_elementsToValidate != 0 || m_printAny;
         }
@@ -81,9 +85,44 @@ namespace TensileLite
         {
             if(m_enabled)
             {
-                m_problem         = problem;
-                m_referenceInputs = m_dataInit->prepareCPUInputs(problem);
-                SolveCPU(problem, m_referenceInputs.get(), m_elementsToValidate);
+                m_problem = problem;
+
+                // Report problem context for timing correlation
+                if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem))
+                {
+                    size_t M          = gemm->freeSizeA(0);
+                    size_t N          = gemm->freeSizeB(0);
+                    size_t K          = gemm->boundSize(0);
+                    size_t batchCount = gemm->batchSize(0);
+                    reportProblemContext(M, N, K, batchCount,
+                                         TensileLite::ToString(gemm->a().dataType()),
+                                         TensileLite::ToString(gemm->d().dataType()));
+                }
+                else if(auto grouped = dynamic_cast<ContractionProblemGroupedGemm*>(problem))
+                {
+                    size_t totalGemms = grouped->gemms.size();
+                    for(size_t i = 0; i < totalGemms; i++)
+                    {
+                        auto&  g          = grouped->gemms[i];
+                        size_t M          = g.freeSizeA(0);
+                        size_t N          = g.freeSizeB(0);
+                        size_t K          = g.boundSize(0);
+                        size_t batchCount = g.batchSize(0);
+                        reportGroupedProblemContext(i, totalGemms, M, N, K, batchCount,
+                                                    TensileLite::ToString(g.a().dataType()),
+                                                    TensileLite::ToString(g.d().dataType()));
+                    }
+                }
+
+                {
+                    ScopedTimer timer("cpu_data_init");
+                    m_referenceInputs = m_dataInit->prepareCPUInputs(problem);
+                }
+
+                {
+                    ScopedTimer timer("cpu_reference_gemm");
+                    SolveCPU(problem, m_referenceInputs.get(), m_elementsToValidate);
+                }
             }
         }
 
@@ -92,6 +131,20 @@ namespace TensileLite
             m_validatedSolution = false;
             m_errorInSolution   = false;
             m_executedSolution  = false;
+
+            // Re-run CPU reference after DataInitialization refreshes MX inputs.
+            if(!m_enabled || m_problem == nullptr || m_referenceInputs == nullptr
+               || solution == nullptr)
+                return;
+
+            if(auto* gemm = dynamic_cast<ContractionProblemGemm*>(m_problem))
+            {
+                // Match DataInitialization MX gate.
+                if(!isMXProblem(*gemm))
+                    return;
+                ScopedTimer timer("cpu_reference_gemm_per_solution");
+                SolveCPU(m_problem, m_referenceInputs.get(), m_elementsToValidate);
+            }
         }
 
         bool ReferenceValidator::needMoreRunsInSolution() const
@@ -172,7 +225,8 @@ namespace TensileLite
                                               void const*             resPtr,
                                               size_t                  maxElements,
                                               bool                    isgpu,
-                                              size_t                  validationStride)
+                                              size_t                  validationStride,
+                                              double                  threshold)
         {
             bool rv = false;
             switch(tensor.dataType())
@@ -184,7 +238,8 @@ namespace TensileLite
                                        (float const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Double:
@@ -194,7 +249,8 @@ namespace TensileLite
                                        (double const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::ComplexFloat:
@@ -204,7 +260,8 @@ namespace TensileLite
                                        (std::complex<float> const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::ComplexDouble:
@@ -214,7 +271,8 @@ namespace TensileLite
                                        (std::complex<double> const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Half:
@@ -224,7 +282,8 @@ namespace TensileLite
                                        (Half const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Float8:
@@ -234,7 +293,8 @@ namespace TensileLite
                                        (Float8 const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::BFloat8:
@@ -244,7 +304,8 @@ namespace TensileLite
                                        (BFloat8 const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Float8_fnuz:
@@ -254,7 +315,8 @@ namespace TensileLite
                                        (Float8_fnuz const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::BFloat8_fnuz:
@@ -264,7 +326,8 @@ namespace TensileLite
                                        (BFloat8_fnuz const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Int8x4:
@@ -279,7 +342,8 @@ namespace TensileLite
                                        (int32_t const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::BFloat16:
@@ -289,7 +353,8 @@ namespace TensileLite
                                        (BFloat16 const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             case rocisa::DataType::Int8:
@@ -299,7 +364,8 @@ namespace TensileLite
                                        (int8_t const*)resPtr,
                                        maxElements,
                                        isgpu,
-                                       validationStride);
+                                       validationStride,
+                                       threshold);
             }
             break;
             default:
@@ -310,6 +376,15 @@ namespace TensileLite
                 std::cout << "Check failed in output tensor: " << tensor << std::endl;
             }
             return rv;
+        }
+
+        bool ReferenceValidator::shouldSkipNullTensor(const std::string& tensorName,
+                                                      bool hasNullPointer,
+                                                      bool hasZeroElements) const
+        {
+            // Only output tensors reach this function (filtered by isOutput() check)
+            // Output tensors should never have null pointers or zero elements
+            return false;
         }
 
         bool ReferenceValidator::validate(ContractionProblemGemm const& problem,
@@ -323,6 +398,20 @@ namespace TensileLite
 
             if(m_printAny)
                 printTensors(problem, reference, result);
+
+            auto k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
+            bool isTF32 = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
+            bool isTF32x1 = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
+                && problem.computeInputTypeB() == rocisa::DataType::BFloat16
+                && problem.computeType() == rocisa::DataType::Float
+                && problem.a().dataType() == rocisa::DataType::Float
+                && problem.b().dataType() == rocisa::DataType::Float);
+            double threshold = -1.0;
+            if (isTF32) {
+                threshold = 0.01 * sqrt(double(k));
+            } else if (isTF32x1) {
+                threshold = 0.3 * sqrt(double(k));
+            }
 
             for(size_t i = 0; i < problem.tensors().size(); i++)
             {
@@ -375,6 +464,12 @@ namespace TensileLite
                     resPtr = result.bias;
                 }
                 break;
+                case ContractionProblemGemm::TENSOR::GATE_RESIDUAL:
+                {
+                    refPtr = reference.gateResidual;
+                    resPtr = result.gateResidual;
+                }
+                break;
                 case ContractionProblemGemm::TENSOR::SCALEA:
                 {
                     refPtr = reference.scaleA;
@@ -404,11 +499,13 @@ namespace TensileLite
                     refPtr = reference.scaleAlphaVec;
                     resPtr = result.scaleAlphaVec;
                 }
+                break;
                 case ContractionProblemGemm::TENSOR::Synchronizer:
                 {
                     refPtr = reference.Synchronizer;
                     resPtr = result.Synchronizer;
                 }
+                break;
                 case ContractionProblemGemm::TENSOR::AMAXD:
                 {
                     refPtr = reference.amaxD;
@@ -425,21 +522,42 @@ namespace TensileLite
                               << refPtr << ", gpu pointer " << resPtr
                               << ", size = " << result.maxElements[i] << std::endl;
 
+                // Check if we should skip this tensor due to null pointers or zero elements
+                bool hasNullPointer = (resPtr == nullptr || refPtr == nullptr);
+                bool hasZeroElements = (result.maxElements[i] == 0);
+
+                if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
+                {
+                    continue;
+                }
+
+                // If we reach here with null pointers or zero elements, it's an error
+                if(hasNullPointer || hasZeroElements)
+                {
+                    std::stringstream ss;
+                    ss << "Unexpected null pointer or zero elements for tensor " << tensor.getName()
+                       << " (resPtr=" << resPtr << ", refPtr=" << refPtr
+                       << ", maxElements=" << result.maxElements[i] << ")";
+                    throw std::runtime_error(ss.str());
+                }
+
                 rv &= checkResults(
-                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride);
+                    tensor, refPtr, resPtr, result.maxElements[i], result.gpu, validationStride, threshold);
             }
             return rv;
         }
 
         void ReferenceValidator::allocateResultBuffer(size_t bytes)
         {
-            if(m_cpuResultBufferSize == bytes)
+            // Only skip reallocation if size matches AND buffer is valid
+            if(m_cpuResultBufferSize == bytes && m_cpuResultBuffer.get() != nullptr)
                 return;
+
             m_cpuResultBuffer.reset();
 
             uint8_t* buffer;
-            HIP_CHECK_EXC(hipHostMalloc(&buffer, bytes, 0));
-            m_cpuResultBuffer.reset(buffer, hipFree);
+            HIP_CHECK_EXC(hipHostMalloc((void**)&buffer, bytes, 0));
+            m_cpuResultBuffer.reset(buffer, [](uint8_t* p) { HIP_CHECK_EXC(hipHostFree(p)); });
             m_cpuResultBufferSize = bytes;
         }
 
@@ -472,6 +590,9 @@ namespace TensileLite
             if(m_printTensorBias)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.bias().totalAllocatedBytes());
+            if(m_printTensorGate)
+                requiredBufferSize
+                    = std::max(requiredBufferSize, problem.gateResidual().totalAllocatedBytes());
             if(m_printTensorScaleAlphaVec)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.scaleAlphaVec().totalAllocatedBytes());
@@ -479,14 +600,21 @@ namespace TensileLite
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.amaxd().totalAllocatedBytes());
 
-            if(m_cpuResultBufferSize < requiredBufferSize)
-                allocateResultBuffer(requiredBufferSize);
+            allocateResultBuffer(requiredBufferSize);
 
             if(m_printTensorA)
             {
-                auto a = problem.a();
                 m_reporter->logTensor(
                     LogLevel::Verbose, "A", reference.a, problem.a(), reference.a);
+                if(problem.a().dataType() == rocisa::DataType::Float4
+                   && problem.mxBlockA() > 0)
+                {
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "MXSA",
+                                          reference.mxsa,
+                                          problem.mxsa(),
+                                          reference.mxsa);
+                }
                 if(problem.sparse() && problem.sparse() != 2)
                 {
                     m_reporter->logTensor(LogLevel::Verbose,
@@ -499,9 +627,17 @@ namespace TensileLite
 
             if(m_printTensorB)
             {
-                auto b = problem.b();
                 m_reporter->logTensor(
                     LogLevel::Verbose, "B", reference.b, problem.b(), reference.b);
+                if(problem.b().dataType() == rocisa::DataType::Float4
+                   && problem.mxBlockB() > 0)
+                {
+                    m_reporter->logTensor(LogLevel::Verbose,
+                                          "MXSB",
+                                          reference.mxsb,
+                                          problem.mxsb(),
+                                          reference.mxsb);
+                }
                 if(problem.sparse() && problem.sparse() == 2)
                 {
                     m_reporter->logTensor(LogLevel::Verbose,
@@ -575,6 +711,18 @@ namespace TensileLite
                                       problem.bias(),
                                       result.bias);
             }
+            if(m_printTensorGate)
+            {
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
+                                        result.gateResidual,
+                                        problem.gateResidual().totalAllocatedBytes(),
+                                        hipMemcpyDeviceToHost));
+                m_reporter->logTensor(LogLevel::Verbose,
+                                      "gateResidual",
+                                      m_cpuResultBuffer.get(),
+                                      problem.gateResidual(),
+                                      result.gateResidual);
+            }
             if(m_printTensorScaleAlphaVec)
             {
                 HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
@@ -607,65 +755,22 @@ namespace TensileLite
             }
         }
 
-        template <typename ValidType>
-        bool ReferenceValidator::checkResultsTyped(TensorDescriptor const& tensor,
-                                                   ValidType const*        reference,
-                                                   ValidType const*        result,
-                                                   size_t                  maxElement,
-                                                   bool                    isgpu,
-                                                   size_t                  validationStride)
+        template <typename ValidType, typename Comparator>
+        void forEachElement(TensorDescriptor const& tensor,
+                            ValidType const*        reference,
+                            ValidType const*        resultData,
+                            size_t                  validationStride,
+                            Comparator&             compare)
         {
-            PointwiseComparison<ValidType> compareValid(m_printValids, m_printMax, m_printMax > 0);
-            InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
-
-            size_t elementsToCopy       = tensor.totalAllocatedElements();
-            size_t elementsOffsetToCopy = 0;
-            size_t elementsBeforeData   = 0;
-            size_t elementsAfterData    = 0;
-
-            BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
-            if(boundsCheck == BoundsCheckMode::NaN)
-                elementsToCopy = maxElement;
-            size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
-
-            if(m_cpuResultBufferSize < bytesToCopy)
-                allocateResultBuffer(bytesToCopy);
-
-            auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
-
-            HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), result, bytesToCopy, copykind));
-
-            if(boundsCheck == BoundsCheckMode::NaN)
-            {
-                ptrdiff_t bPadding = maxElement - tensor.totalAllocatedElements();
-                elementsBeforeData = bPadding / 2;
-                elementsAfterData
-                    = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
-            }
-            // If there was extra data allocated before the tensor to do bounds
-            // checking, resultBuffer is the whole allocation, while resultData
-            // points directly to the result.
-            ValidType const* resultBuffer
-                = reinterpret_cast<ValidType const*>(m_cpuResultBuffer.get());
-            ValidType const* resultData      = resultBuffer + elementsBeforeData;
-            ValidType const* resultAfterData = resultData + tensor.totalAllocatedElements();
-
-            size_t boundsCheckElements = 0;
-
-            for(ptrdiff_t i = 0; i < elementsBeforeData; i++)
-            {
-                boundsCheckElements++;
-                compareInvalid.before(resultBuffer[i], i, elementsBeforeData);
-            }
-
             if(validationStride == 1)
             {
                 std::vector<size_t> coord(tensor.dimensions());
-                size_t outerCount = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
+                size_t outerCount
+                    = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
 
-                size_t       prevBaseIndex = 0;
-                const size_t innerDimSize  = tensor.sizes()[0];
-                const size_t initialStride = tensor.strides()[0];
+                size_t       elemNumberBase = 0;
+                const size_t innerDimSize   = tensor.sizes()[0];
+                const size_t initialStride  = tensor.strides()[0];
 
                 for(size_t i = 0; i < outerCount; i++)
                 {
@@ -676,36 +781,22 @@ namespace TensileLite
                                   tensor.sizes().end());
                     size_t baseElemIndex = tensor.index(coord);
 
-                    if(boundsCheck == BoundsCheckMode::NaN && baseElemIndex != 0
-                       && baseElemIndex != prevBaseIndex + innerDimSize)
-                    {
-                        for(auto innerIndex = prevBaseIndex + innerDimSize;
-                            innerIndex < baseElemIndex;
-                            innerIndex++)
-                        {
-                            compareInvalid.inside(
-                                resultData[innerIndex], innerIndex, baseElemIndex);
-                        }
-                    }
-
-                    prevBaseIndex = baseElemIndex;
-
                     for(size_t j = 0; j < innerDimSize; j++)
                     {
-                        size_t elemIndex = baseElemIndex + (j * initialStride);
+                        size_t elemIndex  = baseElemIndex + (j * initialStride);
+                        size_t elemNumber = elemNumberBase + j;
 
-                        ValidType referenceValue = reference[elemIndex];
-                        ValidType resultValue    = resultData[elemIndex];
-
-                        compareValid(
-                            referenceValue, resultValue, elemIndex, (i * tensor.sizes()[0]) + j);
+                        compare(reference[elemIndex], resultData[elemIndex],
+                                elemIndex, elemNumber);
                     }
+                    elemNumberBase += innerDimSize;
                 }
             }
             else
             {
                 std::vector<size_t> coord(tensor.dimensions());
-                for(size_t elemNumber = 0; elemNumber < tensor.totalLogicalElements();
+                for(size_t elemNumber = 0;
+                    elemNumber < tensor.totalLogicalElements();
                     elemNumber += validationStride)
                 {
                     CoordNumbered(elemNumber,
@@ -715,21 +806,165 @@ namespace TensileLite
                                   tensor.sizes().end());
                     size_t elemIndex = tensor.index(coord);
 
-                    ValidType referenceValue = reference[elemIndex];
-                    ValidType resultValue    = resultData[elemIndex];
-
-                    compareValid(referenceValue, resultValue, elemIndex, elemNumber);
+                    compare(reference[elemIndex], resultData[elemIndex],
+                            elemIndex, elemNumber);
                 }
             }
+        }
 
-            for(ptrdiff_t i = 0; i < elementsAfterData; i++)
+        template <typename ValidType>
+        bool ReferenceValidator::checkResultsTyped(TensorDescriptor const& tensor,
+                                                   ValidType const*        reference,
+                                                   ValidType const*        result,
+                                                   size_t                  maxElement,
+                                                   bool                    isgpu,
+                                                   size_t                  validationStride,
+                                                   double                  threshold)
+        {
+            size_t elementsToCopy       = tensor.totalAllocatedElements();
+            size_t elementsOffsetToCopy = 0;
+            size_t elementsBeforeData   = 0;
+            size_t elementsAfterData    = 0;
+
+            BoundsCheckMode boundsCheck = m_dataInit->getCurBoundsCheck();
+            // For NaN bounds checking, copy the full padded buffer from GPU for all tensors
+            if(boundsCheck == BoundsCheckMode::NaN)
+                elementsToCopy = maxElement;
+            size_t bytesToCopy = elementsToCopy * sizeof(ValidType);
+
+            // Check if we should skip this tensor due to null pointers or no data
+            bool hasNullPointer = (result == nullptr || reference == nullptr);
+            bool hasZeroElements = (bytesToCopy == 0 || maxElement == 0);
+
+            if(shouldSkipNullTensor(tensor.getName(), hasNullPointer, hasZeroElements))
             {
-                compareInvalid.after(resultAfterData[i], i, elementsAfterData);
+                return true;
+            }
+
+            // If we reach here with null pointers or no data, it's an error
+            if(hasNullPointer || hasZeroElements)
+            {
+                std::stringstream ss;
+                ss << "Unexpected null pointer or no data for tensor " << tensor.getName()
+                   << " (result=" << result << ", reference=" << reference
+                   << ", bytesToCopy=" << bytesToCopy << ", maxElement=" << maxElement << ")";
+                throw std::runtime_error(ss.str());
+            }
+
+            allocateResultBuffer(bytesToCopy);
+
+            auto copykind = isgpu ? hipMemcpyDeviceToHost : hipMemcpyHostToHost;
+
+            // For NaN bounds checking, the result pointer points to valid data (middle of buffer)
+            // We need to adjust it back to buffer start to copy the NaN padding
+            void const* copySource = result;
+            if(boundsCheck == BoundsCheckMode::NaN)
+            {
+                // Match the EXACT allocation logic in copyBadInputBuffers:
+                // dPadding = totalElements - totalAllocatedElements()  (in elements)
+                // dPadding = multiplyElementSize(dPadding, elementBytes())  (convert to bytes)
+                // dPadding = round to multiple of (2 * ceil(max(1, elementBytes)))  (ensure alignment)
+                // dstOffset = dst + dPadding / 2  (divide bytes by 2)
+                ptrdiff_t paddingElements = maxElement - tensor.totalAllocatedElements();
+                size_t paddingBytes = multiplyElementSize(paddingElements, tensor.elementBytes());
+
+                // Ensure paddingBytes/2 is properly aligned for the element type
+                // Match the exact rounding logic from copyBadInputBuffers
+                float elementBytes = tensor.elementBytes();
+                size_t alignmentBytes = 2 * static_cast<size_t>(std::ceil(std::max(1.0f, elementBytes)));
+                paddingBytes = (paddingBytes / alignmentBytes) * alignmentBytes;
+
+                size_t bytesBeforeData = paddingBytes / 2;
+
+                copySource = (uint8_t const*)result - bytesBeforeData;
+
+                // Calculate elementsBeforeData for bounds checking display
+                // Note: for sub-byte types this may not be exact due to rounding
+                elementsBeforeData = bytesBeforeData / std::max(static_cast<size_t>(1),
+                                                                 static_cast<size_t>(tensor.elementBytes()));
+                elementsAfterData
+                    = elementsToCopy - (tensor.totalAllocatedElements() + elementsBeforeData);
+            }
+
+            {
+                ScopedTimer timer("validate_gpu_readback");
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(), copySource, bytesToCopy, copykind));
+            }
+            // If there was extra data allocated before the tensor to do bounds
+            // checking, resultBuffer is the whole allocation, while resultData
+            // points directly to the result.
+            ValidType const* resultBuffer
+                = reinterpret_cast<ValidType const*>(m_cpuResultBuffer.get());
+            ValidType const* resultData      = resultBuffer + elementsBeforeData;
+            ValidType const* resultAfterData = resultData + tensor.totalAllocatedElements();
+
+            FastPointwiseComparison<ValidType> compareValid(m_printMax > 0, threshold);
+            InvalidComparison<ValidType>   compareInvalid(m_printMax, m_printMax > 0);
+
+            size_t boundsCheckElements = 0;
+
+            {
+                ScopedTimer timer("validate_element_comparison");
+
+                for(ptrdiff_t i = 0; i < elementsBeforeData; i++)
+                {
+                    boundsCheckElements++;
+                    compareInvalid.before(resultBuffer[i], i, elementsBeforeData);
+                }
+
+                forEachElement(tensor, reference, resultData, validationStride, compareValid);
+
+                if(boundsCheck == BoundsCheckMode::NaN && validationStride == 1)
+                {
+                    std::vector<size_t> coord(tensor.dimensions());
+                    size_t outerCount
+                        = CoordCount(tensor.sizes().begin() + 1, tensor.sizes().end());
+                    size_t       prevBaseIndex = 0;
+                    const size_t innerDimSize  = tensor.sizes()[0];
+
+                    for(size_t i = 0; i < outerCount; i++)
+                    {
+                        CoordNumbered(i,
+                                      coord.begin() + 1,
+                                      coord.end(),
+                                      tensor.sizes().begin() + 1,
+                                      tensor.sizes().end());
+                        size_t baseElemIndex = tensor.index(coord);
+
+                        if(baseElemIndex != 0
+                           && baseElemIndex != prevBaseIndex + innerDimSize)
+                        {
+                            for(auto innerIndex = prevBaseIndex + innerDimSize;
+                                innerIndex < baseElemIndex;
+                                innerIndex++)
+                            {
+                                compareInvalid.inside(
+                                    resultData[innerIndex], innerIndex, baseElemIndex);
+                            }
+                        }
+                        prevBaseIndex = baseElemIndex;
+                    }
+                }
+
+                for(ptrdiff_t i = 0; i < elementsAfterData; i++)
+                {
+                    compareInvalid.after(resultAfterData[i], i, elementsAfterData);
+                }
             }
 
             if(boundsCheckElements > 0)
                 std::cout << "Performed bounds check on " << boundsCheckElements << " elements ("
                           << elementsBeforeData << " before data)" << std::endl;
+
+            if((compareValid.errorCount() > 0 || m_printValids) && m_printMax > 0)
+            {
+                ScopedTimer timer("validate_mismatch_printing");
+
+                PointwiseComparison<ValidType> comparePrint(
+                    m_printValids, m_printMax, false, threshold);
+
+                forEachElement(tensor, reference, resultData, validationStride, comparePrint);
+            }
 
             compareValid.report();
             compareInvalid.report();
@@ -747,6 +982,7 @@ namespace TensileLite
 
         void ReferenceValidator::postSolution()
         {
+            ScopedTimer timer("post_solution_validation");
             if(!m_executedSolution)
                 return;
 

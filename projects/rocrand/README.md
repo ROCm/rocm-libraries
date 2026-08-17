@@ -54,6 +54,8 @@ Optional:
   * `gfortran` is recommended
 * Python 3.5+ (required only for Python wrapper)
 * [doxygen](https://www.doxygen.nl/) to build the documentation
+* [AMD SMI](https://github.com/ROCm/amdsmi)
+  * Required only for benchmarks. Building benchmarks is off by default.
 
 If some dependencies are missing, the CMake script automatically downloads, builds, and installs them.
 Setting the `DEPENDENCIES_FORCE_DOWNLOAD` option to `ON` forces the script to download all
@@ -92,10 +94,11 @@ cd rocm-libraries/projects/rocrand; mkdir build; cd build
 #
 # The python interface do not work with static library.
 #
+# The package and install scripts require Make, but otherwise passing -GNinja is recommended for faster building.
 [CXX=hipcc] cmake -DBUILD_BENCHMARK=ON ../. -DCMAKE_PREFIX_PATH=/opt/rocm # or cmake-gui ../.
 
 # Build
-make -j4
+make -j4 # or `ninja`
 
 # Optionally, run tests if they're enabled
 ctest --output-on-failure
@@ -144,65 +147,57 @@ ctest
 
 ## Running benchmarks
 
+rocRAND uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options) for advanced usage.
+
 ```shell
 # Go to rocRAND build directory
 cd rocm-libraries/projects/rocrand; cd build
 
 # To run benchmark for the host generate functions:
-# The benchmarks are registered with Google Benchmark as `device_generate<engine,distribution>`, where
-# engine -> xorwow, mrg31k3p, mrg32k3a, mtgp32, philox, lfsr113, mt19937,
-#           threefry2x32, threefry2x64, threefry4x32, threefry4x64,
-#           sobol32, scrambled_sobol32, sobol64, scrambled_sobol64
-# distribution -> uniform-uint, uniform-uchar, uniform-ushort,
-#                 uniform-half, uniform-float, uniform-double,
-#                 normal-half, normal-float, normal-double,
-#                 log-normal-half, log-normal-float, log-normal-double, poisson
-# Further option can be found using --help
+# Specializations are named as `distribution: <dist>, engine: <engine>, ordering: <ordering>, type: <type>`, where
+# engine -> lfsr113, mrg31k3p, mrg32k3a, mt19937, mtgp32, philox4_32_10,
+#           scrambled_sobol32, scrambled_sobol64, sobol32, sobol64,
+#           threefry2_32_20, threefry2_64_20, threefry4_32_20, threefry4_64_20, xorwow
+# distribution -> log_normal, normal, poisson, uniform
+# ordering -> default, dynamic, quasi_default
+# type -> f32, f64, half, u8, u16, u32
+# Further options can be found using --help
 ./benchmark/benchmark_rocrand_host_api
+# To list all specializations without running them:
+./benchmark/benchmark_rocrand_host_api --dry
 # To run specific benchmarks:
-./benchmark/benchmark_rocrand_host_api --benchmark_filter=<regex>
-# For example to run benchmarks with engine sobol64:
-./benchmark/benchmark_rocrand_host_api --benchmark_filter="device_generate<sobol64*"
-# To view all registered benchmarks:
-./benchmark/benchmark_rocrand_host_api --benchmark_list_tests=true
+./benchmark/benchmark_rocrand_host_api --filter <regex>
+# For example, to run benchmarks with engine sobol64:
+./benchmark/benchmark_rocrand_host_api --filter "engine: sobol64"
 # The benchmark also supports user input:
-./benchmark/benchmark_rocrand_host_api --size <number> --trials <number> --offset <number> --dimensions <number> --lambda <float float float ...>
-# And can print output in different formats:
-./benchmark/benchmark_rocrand_host_api --benchmark_format=<console|json|csv>
+./benchmark/benchmark_rocrand_host_api --size <number> --offset <number> --dimensions <number> --lambda <space-separated list of floats>
+# Results are written to benchmark_rocrand_host_api.json by default; CSV output can also be enabled:
+./benchmark/benchmark_rocrand_host_api --json-out benchmark_rocrand_host_api.json --csv-out benchmark_rocrand_host_api.csv
 
 # To run benchmark for device kernel functions:
-# The benchmarks are registered with Google Benchmark as `device_kernel<engine,distribution>`, where
-# engine -> xorwow, mrg31k3p, mrg32k3a, mtgp32, philox, lfsr113,
-#           threefry2x32, threefry2x64, threefry4x32, threefry4x64,
-#           sobol32, scrambled_sobol32, sobol64, scrambled_sobol64
-# distribution -> uniform-uint or uniform-ullong, uniform-float, uniform-double, normal-float, normal-double,
-#                 log-normal-float, log-normal-double, poisson, discrete-poisson, discrete-custom
-# Further option can be found using --help
+# Specializations are named as `cfg: { blocks: <n>, threads: <n> }, distribution: <dist>, engine: <engine>, type: <type>`, where
+# engine -> lfsr113, mrg31k3p, mrg32k3a, mtgp32, philox4_32_10,
+#           scrambled_sobol32, scrambled_sobol64, sobol32, sobol64,
+#           threefry2_32_20, threefry2_64_20, threefry4_32_20, threefry4_64_20, xorwow
+# distribution -> discrete_custom, discrete_poisson, log_normal, normal, poisson, uniform
+# type -> f32, f64, u32, u64
+# Further options can be found using --help
 ./benchmark/benchmark_rocrand_device_api
+# To list all specializations without running them:
+./benchmark/benchmark_rocrand_device_api --dry
 # To run specific benchmarks:
-./benchmark/benchmark_rocrand_device_api --benchmark_filter=<regex>
-# For example to run benchmarks with engine sobol64:
-./benchmark/benchmark_rocrand_device_api --benchmark_filter="device_kernel<sobol64*"
-# To view all registered benchmarks:
-./benchmark/benchmark_rocrand_device_api --benchmark_list_tests=true
+./benchmark/benchmark_rocrand_device_api --filter <regex>
+# For example, to run benchmarks with engine sobol64:
+./benchmark/benchmark_rocrand_device_api --filter "engine: sobol64"
 # The benchmark also supports user input:
-./benchmark/benchmark_rocrand_device_api --size <number> --trials <number> --dimensions <number> --lambda <float float float ...>
-# And can print output in different formats:
-./benchmark/benchmark_rocrand_device_api --benchmark_format=<console|json|csv>
+./benchmark/benchmark_rocrand_device_api --size <number> --offset <number> --dimensions <number> --lambda <space-separated list of floats> --blocks <number> --threads <number>
+# Results are written to benchmark_rocrand_device_api.json by default; CSV output can also be enabled:
+./benchmark/benchmark_rocrand_device_api --json-out benchmark_rocrand_device_api.json --csv-out benchmark_rocrand_device_api.csv
 
 # To compare against cuRAND (cuRAND must be supported):
-./benchmark/benchmark_curand_host_api [google benchmark options]
-./benchmark/benchmark_curand_device_api [google benchmark options]
+./benchmark/benchmark_curand_host_api [primbench options]
+./benchmark/benchmark_curand_device_api [primbench options]
 ```
-
-### Legacy benchmarks
-
-You can disable legacy benchmarks (those used prior to Google Benchmark) by setting the
-CMake option `BUILD_LEGACY_BENCHMARK` to `OFF`. For compatibility, the default setting is `ON`
-when `BUILD_BENCHMARK` is set.
-
-Legacy benchmarks are deprecated and will be removed in a future version once all benchmarks have
-been migrated to the new framework.
 
 ## Wrappers
 

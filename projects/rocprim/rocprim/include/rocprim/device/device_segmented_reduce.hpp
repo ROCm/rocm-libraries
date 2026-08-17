@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,11 +34,12 @@
 #include "detail/device_segmented_reduce.hpp"
 #include "rocprim/type_traits.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
 
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 namespace detail
 {
 
@@ -65,13 +66,7 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 
     using Selector = segmented_reduce_config_selector<result_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -88,34 +83,48 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
     if(segments == 0u)
         return hipSuccess;
 
+    // HIP supports (2^32 - 1) max threads.  We have to ensure block_size * segments
+    // doesn't exceed that.  Compute the maximum number of segments:
+    const size_t max_segments = 0xffffffff / static_cast<size_t>(block_size);
+
     std::chrono::steady_clock::time_point start;
 
     if(debug_synchronous)
     {
         start = std::chrono::steady_clock::now();
     }
-    auto segmented_reduce_kernel = [=](auto arch_config)
-    {
-        segmented_reduce<decltype(arch_config)>(input,
-                                                output,
-                                                begin_offsets,
-                                                end_offsets,
-                                                reduce_op,
-                                                static_cast<result_type>(initial_value));
-    };
 
-    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
-                                                                  segmented_reduce_kernel,
-                                                                  dim3(segments),
-                                                                  dim3(block_size),
-                                                                  0,
-                                                                  stream));
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", segments, start);
+    // If the number of segments is greater than max_segments, split the
+    // work into multiple kernel calls.
+    for (size_t offset = 0; offset < segments; offset += max_segments) {
+        size_t remaining_segments = segments - offset;
+        size_t batch_size = std::min(max_segments, remaining_segments);
+
+        auto segmented_reduce_kernel = [=](auto target_config)
+        {
+            segmented_reduce<decltype(target_config)>(input,
+                                                      output + offset,
+                                                      begin_offsets + offset,
+                                                      end_offsets + offset,
+                                                      reduce_op,
+                                                      static_cast<result_type>(initial_value));
+        };
+
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      segmented_reduce_kernel,
+                                                                      dim3(batch_size),
+                                                                      dim3(block_size),
+                                                                      0,
+                                                                      stream));
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("segmented_reduce", batch_size, start);
+    }
 
     return hipSuccess;
 }
 
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel segmented reduction primitive for device level.
 ///
@@ -169,6 +178,8 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 /// \parblock
 /// In this example a device-level segmented min-reduction operation is performed on an array of
 /// integer values (<tt>short</tt>s are reduced into <tt>int</tt>s) using custom operator.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_reduce.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
@@ -242,9 +253,9 @@ inline hipError_t segmented_reduce(void*          temporary_storage,
                                                  debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_

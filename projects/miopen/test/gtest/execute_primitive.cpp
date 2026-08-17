@@ -87,7 +87,7 @@ struct TestProblemDescription : miopen::ProblemDescriptionBase,
 #endif
 
     template <class TSelf>
-    static void Visit(TSelf&& self, std::function<void(std::string, std::string)> visitor)
+    static void Visit(TSelf&& /*self*/, std::function<void(std::string, std::string)> /*visitor*/)
     {
     }
 
@@ -106,8 +106,8 @@ struct TestProblemDescription : miopen::ProblemDescriptionBase,
               [&](std::string value, std::string name) { visitor(value, name); });
     }
 
-    friend auto GetDb(const miopen::ExecutionContext&, const TestProblemDescriptionTag& problem)
-        -> miopen::PerformanceDb
+    friend auto GetDb(const miopen::ExecutionContext&,
+                      const TestProblemDescriptionTag& problem) -> miopen::PerformanceDb
     {
         return {miopen::DbKinds::PerfDb, problem.pdb_path, problem.updb_path};
     }
@@ -122,7 +122,7 @@ struct TestPerfConfig : miopen::solver::PerfConfig
 
     TestPerfConfig(std::uint32_t check_value_ = 0) : check_value(check_value_) {}
 
-    void Serialize(std::ostream& stream) const override {}
+    void Serialize(std::ostream& /*stream*/) const override {}
     auto Deserialize(const std::string&) -> bool override { return true; }
 };
 
@@ -141,8 +141,8 @@ struct RegularTestSolver
         return GetSolverDbId<RegularTestSolver>();
     }
 
-    auto IsApplicable(const miopen::ExecutionContext&, const TestProblemDescription&) const
-        -> bool override
+    auto IsApplicable(const miopen::ExecutionContext&,
+                      const TestProblemDescription&) const -> bool override
     {
         return true;
     }
@@ -164,8 +164,8 @@ struct TunableTestSolver : miopen::solver::TunableSolverMixin<miopen::ExecutionC
     {
         return GetSolverDbId<TunableTestSolver>();
     }
-    auto IsApplicable(const miopen::ExecutionContext&, const TestProblemDescription&) const
-        -> bool override
+    auto IsApplicable(const miopen::ExecutionContext&,
+                      const TestProblemDescription&) const -> bool override
     {
         return true;
     }
@@ -193,10 +193,10 @@ struct TunableTestSolver : miopen::solver::TunableSolverMixin<miopen::ExecutionC
         return {TestPerfConfig::searched_value};
     }
 
-    auto GetSolution(const miopen::ExecutionContext&,
-                     const TestProblemDescription& problem,
-                     const TestPerfConfig& raw_perf_cfg) const
-        -> miopen::solver::ConvSolution override
+    auto
+    GetSolution(const miopen::ExecutionContext&,
+                const TestProblemDescription& problem,
+                const TestPerfConfig& raw_perf_cfg) const -> miopen::solver::ConvSolution override
     {
         const auto& perf_cfg = dynamic_cast<const TestPerfConfig&>(raw_perf_cfg);
 

@@ -1,6 +1,13 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+# Optional: CTest test categorization when building in rocm-libraries with shared/ctest.
+# Skipped when shared/ is not present (e.g. standalone hipsparse or sparse checkout in CI).
+if(DEFINED ROCM_LIBRARIES_ROOT AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+  set(HIPSPARSE_HAS_CTEST_CATEGORIES ON)
+endif()
+
 find_package(GTest REQUIRED)
 
 # Download or copy client matrices
@@ -84,12 +91,15 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_coo_aos.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_sell.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_axpby.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gather.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_scatter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_rot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spvv.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_bell_no_set_pointers.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_dense_to_sparse_coo.cpp"
@@ -97,15 +107,19 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sparse_to_dense_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_batched_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bell.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spmm_bsr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spgeam_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spgemmreuse_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_csc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_sddmm_coo_aos.cpp"
@@ -116,10 +130,29 @@ target_sources(hipsparse-test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/test_gtsv_interleaved_batch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_csrcolor.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csr_reuse_descr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_coo.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csr.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_coo.cpp"
 )
+
+if(HIPSPARSE_ENABLE_SPMV_BSR)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spmv_bsr.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSV)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsv_csc.cpp"
+    )
+endif()
+
+if(BUILD_WITH_CSC_TRSM)
+    target_sources(hipsparse-test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_spsm_csc.cpp"
+    )
+endif()
 
 if(HIPSPARSE_ENABLE_HIP)
     target_sources(hipsparse-test PRIVATE
@@ -141,11 +174,14 @@ endif()
 if(HIPSPARSE_ENABLE_HIP)
   include(rocm/CMakeLists.txt)
 elseif(HIPSPARSE_ENABLE_CUDA)
-  if(CUDAToolkit_VERSION MATCHES "12.8")
+  if(CUDAToolkit_VERSION MATCHES "^12\\.8")
     include(cuda/12.8/CMakeLists.txt)
-    message("Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
+    message(STATUS "Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
+  elseif(CUDAToolkit_VERSION MATCHES "^13\\.")
+    include(cuda/13/CMakeLists.txt)
+    message(STATUS "Building hipsparse-test executable using CUDAToolkit_VERSION ${CUDAToolkit_VERSION}")
   else()
-    message("ERROR: Testing on CUDAToolkit_VERSION ${CUDAToolkit_VERSION} not supported.")
+    message(WARNING "Testing on CUDAToolkit_VERSION ${CUDAToolkit_VERSION} not explicitly supported; no test data will be generated.")
   endif()
 endif()
 
@@ -155,6 +191,11 @@ target_link_libraries(hipsparse-test PRIVATE
     hipsparse::clients-common
     GTest::gtest
 )
+
+# GTest requires pthread on Unix platforms
+if(NOT WIN32)
+    target_link_libraries(hipsparse-test PRIVATE pthread)
+endif()
 
 if(HIPSPARSE_ENABLE_OPENMP)
     target_link_libraries(hipsparse-test PRIVATE OpenMP::OpenMP_CXX)
@@ -239,6 +280,44 @@ rocm_install(TARGETS hipsparse-test COMPONENT tests)
 rocm_install(FILES ${HIPSPARSE_TEST_DATA} DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test" COMPONENT tests)
 
 
+
+# Only when both test_categories.yaml and shared/ctest exist (full rocm-libraries tree).
+set(HIPSPARSE_CTEST_INSTALL_FILE "")
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+  if(HIPSPARSE_HAS_CTEST_CATEGORIES)
+    message(STATUS "hipSPARSE: YAML-based test categorization")
+    file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+    # Install-time CTestTestfile for TheRock: relative paths so ctest can run from installed location
+    set(HIPSPARSE_CTEST_INSTALL_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
+    file(WRITE "${HIPSPARSE_CTEST_INSTALL_FILE}"
+[=[
+# This is a test file generated by hipSPARSE for install time.
+# Tests are defined with relative paths to work in the installed location.
+]=]
+    )
+    apply_test_category_labels(
+      hipsparse-test
+      "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+      "${PROJECT_BINARY_DIR}/staging"
+      "${HIPSPARSE_CTEST_INSTALL_FILE}"
+    )
+  else()
+    message(STATUS "hipSPARSE: shared/ctest not found (e.g. standalone checkout), skipping CTest categories")
+  endif()
+else()
+  message(STATUS "hipSPARSE: No test_categories.yaml (CTest categories not used)")
+endif()
+
+if(HIPSPARSE_CTEST_INSTALL_FILE)
+    rocm_install(
+      FILES "${HIPSPARSE_CTEST_INSTALL_FILE}"
+      DESTINATION "${CMAKE_INSTALL_BINDIR}/hipsparse"
+      COMPONENT tests
+      RENAME "CTestTestfile.cmake"
+  )
+endif()
+
 # Windows-specific DLL copying
 if(WIN32)
     # For now adding in all .dll as dependency chain is not cmake based on win32
@@ -256,5 +335,3 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/clients/staging/)
     endforeach(file_i)
 endif()
-
-add_test(hipsparse-test hipsparse-test)

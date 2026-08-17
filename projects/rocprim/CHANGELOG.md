@@ -2,7 +2,67 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## rocPRIM x.y.z for ROCm 8.0
+## rocPRIM 4.6.0 for ROCm 10.0.0
+
+### Added
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+* Added a parallel `device_segmented_topk`, which finds the largest/smallest K elements from segmented groups.
+* `device_topk` and `device_segmented_topk` are controlled by cmake flag `ROCPRIM_ENABLE_TOPK`. Passing `-DROCPRIM_ENABLE_TOPK=ON` to enable these features
+
+### Changed
+
+* Combined and simplified separate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
+## rocPRIM 4.5.0 for ROCm 7.14
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+* gfx1250 support
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
+
+### Changed
+
+* Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
+## Since last release ROCm 7.12
+
+### Added
+
+* Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+* Unit tests for config_types
+
+### Optimized
+
+* Reduced build times for unit tests.
+* Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
+
+### Resolved issues
+
+* Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
+* Certain large unit tests now properly detect if insufficient system memory is present and skip the test case accordingly.
+* Fixed out-of-bounds memory access in block run length decode.
+* Fixed memory leak in unit tests.
+
+## rocPRIM 4.3.0 for ROCm 7.12
+
+### Added
+
+* Added tested examples for all algorithms.
 
 ### Optimizations
 
@@ -15,6 +75,19 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Changed
 
 * Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
+* Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
+  * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
+  * See `shared/primbench/README.md` for primbench its documentation.
+* Uses mold linker for compilation if availible.
+
+### Removed
+
+* Removed the CMake option `BENCHMARK_USE_AMDSMI`, as benchmarking now requires AMD SMI to be installed.
+
+### Removed
+
+* Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
+* Removed duplicate `inequality_operator` from binary_op_warpper.hpp
 
 ## rocPRIM 4.2.0 for ROCm 7.2
 
@@ -27,7 +100,8 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
 * Kernel Tuner proof-of-concept.
 * Enhanced SPIR-V support and performance.
-  
+* Added `block_adjacent_difference_crosslane` using warp intrinsics, for better performance in some cases compared to using only LDS.
+
 ### Optimizations
 
 * Improved performance of `device_radix_sort` onesweep variant 
@@ -56,6 +130,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
 * Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
 
+
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
 
 ### Changed
 

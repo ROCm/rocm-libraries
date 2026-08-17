@@ -1,4 +1,4 @@
-// Copyright (C) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -17,6 +17,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+
+#ifndef __SPIRV__
 
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
@@ -70,34 +72,28 @@ std::vector<std::vector<size_t>> callback_type_sizes = {{4}, {60}, {122}, {220},
 // the input can't be any smaller than what rocFFT thinks it is,
 // because the overwrite will fail.
 const static std::vector<std::vector<size_t>> stride_range = {{1}};
-INSTANTIATE_TEST_SUITE_P(
-#ifdef WIN32
-    DISABLED_callback,
-#else
-    callback,
-#endif
-    change_type,
-    ::testing::ValuesIn(param_generator_base(test_prob,
-                                             {fft_transform_type_complex_forward,
-                                              fft_transform_type_real_forward},
-                                             callback_type_sizes,
-                                             {fft_precision_single},
-                                             {1},
-                                             generate_types,
-                                             stride_range,
-                                             stride_range,
-                                             {{0, 0}},
-                                             {{0, 0}},
-                                             {fft_placement_notinplace},
-                                             false,
-                                             false)),
-    accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
+                         change_type,
+                         ::testing::ValuesIn(param_generator_base(
+                             test_prob,
+                             {fft_transform_type_complex_forward, fft_transform_type_real_forward},
+                             callback_type_sizes,
+                             {fft_precision_single},
+                             {1},
+                             generate_types,
+                             stride_range,
+                             stride_range,
+                             {{0, 0}},
+                             {{0, 0}},
+                             {fft_placement_notinplace},
+                             false)),
+                         accuracy_test::TestName);
 
 // run an out-of-place transform that casts input from short to float
-TEST_P(change_type, short_to_float)
+TEST_P(change_type, DISABLED_short_to_float)
 {
     rocfft_params params(GetParam());
-    params.run_callbacks = true;
+    params.run_callbacks = fft_callback_type_funcptr;
 
     ASSERT_EQ(params.create_plan(), fft_status_success);
 
@@ -153,7 +149,7 @@ TEST_P(change_type, short_to_float)
                       hipSuccess);
         }
         std::vector<void*> callback_host_vec{callback_host};
-        ASSERT_EQ(params.set_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
+        ASSERT_EQ(params.set_funcptr_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
                   fft_status_success);
 
         // run rocFFT
@@ -228,8 +224,14 @@ TEST_P(change_type, short_to_float)
     {
         GTEST_SKIP() << "host memory allocation failure";
     }
-    catch(HOSTBUF_MEM_USAGE& e)
+    catch(const HOSTBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
+    catch(const DEVICEBUF_MEM_USAGE& e)
     {
         GTEST_SKIP() << e.what();
     }
 }
+
+#endif

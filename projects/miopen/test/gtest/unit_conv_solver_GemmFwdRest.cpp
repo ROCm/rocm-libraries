@@ -68,6 +68,19 @@ const auto& GetTestParams()
     return params;
 }
 
+// BFP16 Full tests include 3D convolution shapes that trigger a rocBLAS bug on gfx90a
+// (rocBLAS does not support BF16->BF16 GEMM on that architecture). Skip on gfx90A only;
+// all other GPUs continue to exercise the full test suite.
+// TODO: Remove this exclusion once the rocBLAS bug is fixed.
+const auto& GetTestParamsNoGfx90A()
+{
+    static const auto params = [] {
+        auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All & ~Gpu::gfx90A);
+        return p;
+    }();
+    return params;
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverGemmFwdRestFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
@@ -142,7 +155,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_UnitTestConvSolverGemmFwdRestFwd_BFP16,
-                         testing::Combine(testing::Values(GetTestParams()),
+                         testing::Combine(testing::Values(GetTestParamsNoGfx90A()),
                                           testing::Values(miopenConvolutionAlgoGEMM),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenBFloat16))));
 

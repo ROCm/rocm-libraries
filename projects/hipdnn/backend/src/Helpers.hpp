@@ -35,7 +35,7 @@ std::string logPtr(T* ptr)
 }
 
 template <class F>
-hipdnnStatus_t tryCatch(F f, std::string const& prefix = std::string{})
+hipdnnStatus_t tryCatch(F f, const std::string& prefix = std::string{})
 {
     try
     {

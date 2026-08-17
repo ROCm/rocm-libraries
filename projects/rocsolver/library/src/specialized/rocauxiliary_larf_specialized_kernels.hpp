@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -181,14 +182,21 @@ rocblas_status larf_run_small(rocblas_handle handle,
             ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel_small<256, T>), grid, dim3(256), 0, stream, m,
                                     n, x, shiftX, incX, strideX, tau, strideP, A, shiftA, lda,
                                     strideA);
-        else if(m <= 512)
-            ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel_small<512, T>), grid, dim3(512), 0, stream, m,
-                                    n, x, shiftX, incX, strideX, tau, strideP, A, shiftA, lda,
-                                    strideA);
         else
-            ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel_small<1024, T>), grid, dim3(1024), 0, stream,
-                                    m, n, x, shiftX, incX, strideX, tau, strideP, A, shiftA, lda,
-                                    strideA);
+        {
+            if constexpr(rocsolver_enable_asan)
+                ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel_small<256, T>), grid, dim3(256), 0,
+                                        stream, m, n, x, shiftX, incX, strideX, tau, strideP, A,
+                                        shiftA, lda, strideA);
+            else if(m <= 512)
+                ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel_small<512, T>), grid, dim3(512), 0,
+                                        stream, m, n, x, shiftX, incX, strideX, tau, strideP, A,
+                                        shiftA, lda, strideA);
+            else
+                ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel_small<1024, T>), grid, dim3(1024), 0,
+                                        stream, m, n, x, shiftX, incX, strideX, tau, strideP, A,
+                                        shiftA, lda, strideA);
+        }
     }
     else
     {
@@ -205,14 +213,21 @@ rocblas_status larf_run_small(rocblas_handle handle,
             ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel_small<256, T>), grid, dim3(256), 0, stream,
                                     m, n, x, shiftX, incX, strideX, tau, strideP, A, shiftA, lda,
                                     strideA);
-        else if(n <= 512)
-            ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel_small<512, T>), grid, dim3(512), 0, stream,
-                                    m, n, x, shiftX, incX, strideX, tau, strideP, A, shiftA, lda,
-                                    strideA);
         else
-            ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel_small<1024, T>), grid, dim3(1024), 0, stream,
-                                    m, n, x, shiftX, incX, strideX, tau, strideP, A, shiftA, lda,
-                                    strideA);
+        {
+            if constexpr(rocsolver_enable_asan)
+                ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel_small<256, T>), grid, dim3(256), 0,
+                                        stream, m, n, x, shiftX, incX, strideX, tau, strideP, A,
+                                        shiftA, lda, strideA);
+            else if(n <= 512)
+                ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel_small<512, T>), grid, dim3(512), 0,
+                                        stream, m, n, x, shiftX, incX, strideX, tau, strideP, A,
+                                        shiftA, lda, strideA);
+            else
+                ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel_small<1024, T>), grid, dim3(1024), 0,
+                                        stream, m, n, x, shiftX, incX, strideX, tau, strideP, A,
+                                        shiftA, lda, strideA);
+        }
     }
 
     return rocblas_status_success;

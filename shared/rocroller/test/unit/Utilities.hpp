@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -44,4 +21,28 @@ MATCHER_P(HasHipSuccess, p, "")
         *result_listener << msg;
     }
     return result == hipSuccess;
+}
+
+template <typename T>
+requires(std::is_same_v<std::tuple_element_t<0, T>, rocRoller::GPUArchitectureTarget>) static ::
+    testing::internal::ParamGenerator<T> filterValidDataTypeScaleTypeParams(
+        ::testing::internal::ParamGenerator<T>&& inputParamGenerator)
+{
+    std::vector<T> filtered;
+    for(auto const& inputParam : inputParamGenerator)
+    {
+        const auto& params = std::get<1>(inputParam);
+
+        const auto& typeA      = std::get<0>(params);
+        const auto& typeB      = std::get<1>(params);
+        const auto& scaleTypeA = std::get<2>(params);
+        const auto& scaleTypeB = std::get<3>(params);
+
+        if(isValidDataTypeScaleTypeCombination(typeA, typeB, scaleTypeA, scaleTypeB))
+        {
+            filtered.push_back(inputParam);
+        }
+    }
+
+    return ::testing::ValuesIn(filtered);
 }

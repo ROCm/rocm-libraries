@@ -49,7 +49,7 @@ std::string HipdnnBackendDescriptor::toString() const
 
 bool HipdnnBackendDescriptor::isValid()
 {
-    return _impl && getType() != hipdnnBackendDescriptorType_t::HIPDNN_INVALID_TYPE;
+    return _impl && getType() != hipdnnBackendDescriptorType_t::HIPDNN_INVALID_TYPE_EXT;
 }
 
 bool HipdnnBackendDescriptor::operator==(const HipdnnBackendDescriptor& other) const

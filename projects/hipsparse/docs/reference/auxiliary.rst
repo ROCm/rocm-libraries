@@ -27,6 +27,16 @@ hipsparseDestroy()
 
 .. doxygenfunction:: hipsparseDestroy
 
+hipsparseGetErrorName()
+=======================
+
+.. doxygenfunction:: hipsparseGetErrorName
+
+hipsparseGetErrorString()
+=========================
+
+.. doxygenfunction:: hipsparseGetErrorString
+
 hipsparseGetVersion()
 =====================
 
@@ -249,6 +259,11 @@ hipsparseCreateSpVec()
 
 .. doxygenfunction:: hipsparseCreateSpVec
 
+hipsparseCreateConstSpVec()
+===========================
+
+.. doxygenfunction:: hipsparseCreateConstSpVec
+
 hipsparseDestroySpVec()
 =======================
 
@@ -258,6 +273,11 @@ hipsparseSpVecGet()
 ====================
 
 .. doxygenfunction:: hipsparseSpVecGet
+
+hipsparseConstSpVecGet()
+========================
+
+.. doxygenfunction:: hipsparseConstSpVecGet
 
 hipsparseSpVecGetIndexBase()
 =============================
@@ -269,6 +289,11 @@ hipsparseSpVecGetValues()
 
 .. doxygenfunction:: hipsparseSpVecGetValues
 
+hipsparseConstSpVecGetValues()
+==============================
+
+.. doxygenfunction:: hipsparseConstSpVecGetValues
+
 hipsparseSpVecSetValues()
 ==========================
 
@@ -278,6 +303,11 @@ hipsparseCreateCoo()
 ====================
 
 .. doxygenfunction:: hipsparseCreateCoo
+
+hipsparseCreateConstCoo()
+=========================
+
+.. doxygenfunction:: hipsparseCreateConstCoo
 
 hipsparseCreateCooAoS()
 =======================
@@ -289,15 +319,50 @@ hipsparseCreateCsr()
 
 .. doxygenfunction:: hipsparseCreateCsr
 
+hipsparseCreateConstCsr()
+=========================
+
+.. doxygenfunction:: hipsparseCreateConstCsr
+
 hipsparseCreateCsc()
 ====================
 
 .. doxygenfunction:: hipsparseCreateCsc
 
+hipsparseCreateConstCsc()
+=========================
+
+.. doxygenfunction:: hipsparseCreateConstCsc
+
 hipsparseCreateBlockedEll()
 ===========================
 
 .. doxygenfunction:: hipsparseCreateBlockedEll
+
+hipsparseCreateConstBlockedEll()
+================================
+
+.. doxygenfunction:: hipsparseCreateConstBlockedEll
+
+hipsparseCreateSlicedEll()
+==========================
+
+.. doxygenfunction:: hipsparseCreateSlicedEll
+
+hipsparseCreateConstSlicedEll()
+===============================
+
+.. doxygenfunction:: hipsparseCreateConstSlicedEll
+
+hipsparseCreateBsr()
+====================
+
+.. doxygenfunction:: hipsparseCreateBsr
+
+hipsparseCreateConstBsr()
+=========================
+
+.. doxygenfunction:: hipsparseCreateConstBsr
 
 hipsparseDestroySpMat()
 =======================
@@ -309,6 +374,11 @@ hipsparseCooGet()
 
 .. doxygenfunction:: hipsparseCooGet
 
+hipsparseConstCooGet()
+======================
+
+.. doxygenfunction:: hipsparseConstCooGet
+
 hipsparseCooAoSGet()
 ====================
 
@@ -319,10 +389,30 @@ hipsparseCsrGet()
 
 .. doxygenfunction:: hipsparseCsrGet
 
+hipsparseConstCsrGet()
+======================
+
+.. doxygenfunction:: hipsparseConstCsrGet
+
+hipsparseCscGet()
+=================
+
+.. doxygenfunction:: hipsparseCscGet
+
+hipsparseConstCscGet()
+======================
+
+.. doxygenfunction:: hipsparseConstCscGet
+
 hipsparseBlockedEllGet()
 ========================
 
 .. doxygenfunction:: hipsparseBlockedEllGet
+
+hipsparseConstBlockedEllGet()
+=============================
+
+.. doxygenfunction:: hipsparseConstBlockedEllGet
 
 hipsparseCsrSetPointers()
 =========================
@@ -338,6 +428,11 @@ hipsparseCooSetPointers()
 ==========================
 
 .. doxygenfunction:: hipsparseCooSetPointers
+
+hipsparseBlockedEllSetPointers()
+================================
+
+.. doxygenfunction:: hipsparseBlockedEllSetPointers
 
 hipsparseSpMatGetSize()
 =======================
@@ -359,10 +454,35 @@ hipsparseSpMatGetValues()
 
 .. doxygenfunction:: hipsparseSpMatGetValues
 
+hipsparseConstSpMatGetValues()
+==============================
+
+.. doxygenfunction:: hipsparseConstSpMatGetValues
+
 hipsparseSpMatSetValues()
 ==========================
 
 .. doxygenfunction:: hipsparseSpMatSetValues
+
+hipsparseSpMatGetStridedBatch()
+===============================
+
+.. doxygenfunction:: hipsparseSpMatGetStridedBatch
+
+hipsparseSpMatSetStridedBatch()
+===============================
+
+.. doxygenfunction:: hipsparseSpMatSetStridedBatch
+
+hipsparseCooSetStridedBatch()
+=============================
+
+.. doxygenfunction:: hipsparseCooSetStridedBatch
+
+hipsparseCsrSetStridedBatch()
+=============================
+
+.. doxygenfunction:: hipsparseCsrSetStridedBatch
 
 hipsparseSpMatGetAttribute()
 =============================
@@ -379,6 +499,11 @@ hipsparseCreateDnVec()
 
 .. doxygenfunction:: hipsparseCreateDnVec
 
+hipsparseCreateConstDnVec()
+===========================
+
+.. doxygenfunction:: hipsparseCreateConstDnVec
+
 hipsparseDestroyDnVec()
 =======================
 
@@ -389,10 +514,20 @@ hipsparseDnVecGet()
 
 .. doxygenfunction:: hipsparseDnVecGet
 
+hipsparseConstDnVecGet()
+========================
+
+.. doxygenfunction:: hipsparseConstDnVecGet
+
 hipsparseDnVecGetValues()
 ==========================
 
 .. doxygenfunction:: hipsparseDnVecGetValues
+
+hipsparseConstDnVecGetValues()
+==============================
+
+.. doxygenfunction:: hipsparseConstDnVecGetValues
 
 hipsparseDnVecSetValues()
 ==========================
@@ -404,6 +539,11 @@ hipsparseCreateDnMat()
 
 .. doxygenfunction:: hipsparseCreateDnMat
 
+hipsparseCreateConstDnMat()
+===========================
+
+.. doxygenfunction:: hipsparseCreateConstDnMat
+
 hipsparseDestroyDnMat()
 =======================
 
@@ -414,12 +554,32 @@ hipsparseDnMatGet()
 
 .. doxygenfunction:: hipsparseDnMatGet
 
+hipsparseConstDnMatGet()
+========================
+
+.. doxygenfunction:: hipsparseConstDnMatGet
+
 hipsparseDnMatGetValues()
 ==========================
 
 .. doxygenfunction:: hipsparseDnMatGetValues
 
+hipsparseConstDnMatGetValues()
+==============================
+
+.. doxygenfunction:: hipsparseConstDnMatGetValues
+
 hipsparseDnMatSetValues()
 ==========================
 
 .. doxygenfunction:: hipsparseDnMatSetValues
+
+hipsparseDnMatGetStridedBatch()
+===============================
+
+.. doxygenfunction:: hipsparseDnMatGetStridedBatch
+
+hipsparseDnMatSetStridedBatch()
+===============================
+
+.. doxygenfunction:: hipsparseDnMatSetStridedBatch

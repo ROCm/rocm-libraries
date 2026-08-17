@@ -1,35 +1,15 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <string>
 
 #include "client/GEMMParameters.hpp"
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
 #include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace CLI
 {
@@ -39,6 +19,36 @@ namespace CLI
         {
             v = rocRoller::fromString<rocRoller::Parameters::Solution::LoadPath>(s);
             return true;
+        }
+
+        inline bool lexical_cast(const std::string&                          s,
+                                 rocRoller::Parameters::Solution::StorePath& v)
+        {
+            v = rocRoller::fromString<rocRoller::Parameters::Solution::StorePath>(s);
+            return true;
+        }
+
+        inline bool lexical_cast(const std::string& s, rocRoller::StreamKMode& v)
+        {
+            v = rocRoller::fromString<rocRoller::StreamKMode>(s);
+            return true;
+        }
+
+        inline bool lexical_cast(const std::string& s, rocRoller::LDSBankSwizzleMode& v)
+        {
+            v = rocRoller::fromString<rocRoller::LDSBankSwizzleMode>(s);
+            return true;
+        }
+
+        inline bool lexical_cast(const std::string& s, rocRoller::ScaleSkipPermlaneMode& v)
+        {
+            v = rocRoller::fromString<rocRoller::ScaleSkipPermlaneMode>(s);
+            return true;
+        }
+
+        inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::XYTuple& v)
+        {
+            return rocRoller::Client::GEMMClient::CLI::ParseXY(s, v);
         }
 
         inline bool lexical_cast(const std::string& s, rocRoller::Client::GEMMClient::MNKTuple& v)

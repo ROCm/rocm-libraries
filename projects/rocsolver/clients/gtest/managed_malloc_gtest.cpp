@@ -82,7 +82,7 @@ class MANAGED_MALLOC : public ::TestWithParam<managed_malloc_tuple>
 protected:
     void TearDown() override
     {
-        EXPECT_EQ(hipGetLastError(), hipSuccess);
+        ASSERT_EQ(hipGetLastError(), hipSuccess);
     }
 
     template <typename T>

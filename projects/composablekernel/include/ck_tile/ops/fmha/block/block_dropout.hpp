@@ -33,6 +33,42 @@ namespace ck_tile {
 namespace detail {
 // The number of Philox 4x32 results required to fill 32x32 tile of 8-bit values
 constexpr index_t philox_per_tile = 64;
+
+// C distribution of gfx11 WMMA differs from C distribution of gfx9 MFMA and gfx12 WMMA.
+// This function deinterleaves the generated random values to make them compatible with other
+// architectures and verification code on host.
+template <index_t N>
+CK_TILE_DEVICE void PermuteBlockDropoutRandval(uint8_t (&random_uint8_t)[N])
+{
+#if defined(__gfx11__)
+    static_for<0, N, 8>{}([&](auto i_offset) {
+        array<uint8_t, 8> rs;
+        static_for<0, 8, 1>{}([&](auto i) { rs.data[i] = random_uint8_t[i_offset + i]; });
+
+        const uint32_t r0 = rs.template get_as<uint32_t>(number<0>{});
+        const uint32_t r1 = rs.template get_as<uint32_t>(number<1>{});
+
+        // Deinterleave values (even and odd indices)
+        const uint32_t v0 = __builtin_amdgcn_perm(r1, r0, 0x06'04'02'00);
+        const uint32_t v1 = __builtin_amdgcn_perm(r1, r0, 0x07'05'03'01);
+
+        // Swap rows (lane <-> lane ^ 16)
+        const uint32_t w0 =
+            __builtin_amdgcn_permlanex16(0, v0, 0x76543210, 0xfedcba98, false, true);
+        const uint32_t w1 =
+            __builtin_amdgcn_permlanex16(0, v1, 0x76543210, 0xfedcba98, false, true);
+
+        rs.template set_as<uint32_t>(number<0>{}, get_lane_id() < 16 ? v0 : w1);
+        rs.template set_as<uint32_t>(number<1>{}, get_lane_id() < 16 ? w0 : v1);
+
+        static_for<0, 8, 1>{}([&](auto i) { random_uint8_t[i_offset + i] = rs.data[i]; });
+    });
+#else
+    static_assert(false, "PermuteBlockDropoutRandval is only for gfx11");
+    ignore = random_uint8_t;
+#endif
+}
+
 } // namespace detail
 
 struct NullBlockDropout
@@ -164,7 +200,7 @@ struct BlockDropout
             sequence<1, 2>,
             sequence<1, 0>>{};
 
-        // Use Bwd WarpGemm to ensure that Fwd's random values ​​are consistent with Bwd.
+        // Use Bwd WarpGemm to ensure that Fwd's random values are consistent with Bwd.
         constexpr auto randval_block_inner_part_dstr_encoding =
             typename WarpGemmDispatcher<typename WG::ADataType,
                                         typename WG::BDataType,
@@ -295,6 +331,9 @@ struct BlockDropout
                         static_assert(randval_dist_generated.kThreadElementSpaceSize == 16);
                         ph.get_random_16x8(random_uint8_t, ph_subsequence);
                     }
+#if defined(__gfx11__)
+                    detail::PermuteBlockDropoutRandval(random_uint8_t);
+#endif
                 }
                 else
                 {
@@ -342,24 +381,28 @@ struct BlockDropout
                     store_tile(randval_dram_window, randval_store);
                 }
                 move_tile_window(randval_dram_window, {0, kNPerStep});
-                // Drop values of P based on the generated probabilities
-                constexpr auto randval_spans = decltype(randval)::get_distributed_spans();
-                sweep_tile_span(randval_spans[number<0>{}], [&](auto idx0) {
-                    sweep_tile_span(randval_spans[number<1>{}], [&](auto idx1) {
-                        constexpr auto p_idx0 =
-                            tile_distributed_index<i_m0 * MIterPerWarp +
-                                                   idx0.impl_.template at<0>()>{};
-                        constexpr auto p_idx1 =
-                            tile_distributed_index<i_n0,
-                                                   idx1.impl_.template at<1>(),
-                                                   idx1.impl_.template at<2>()>{};
-                        constexpr auto p_idx = ck_tile::make_tuple(p_idx0, p_idx1);
-                        constexpr auto r_idx = ck_tile::make_tuple(idx0, idx1);
-                        p_compute(p_idx)     = randval[r_idx] <= p_undrop_in_uint8_t
-                                                   ? p_compute[p_idx] * rp_undrop
-                                                   : PComputeDataType(0);
+
+                if constexpr(!is_null_tile_window_v<PComputeWindow>)
+                {
+                    // Drop values of P based on the generated probabilities
+                    constexpr auto randval_spans = decltype(randval)::get_distributed_spans();
+                    sweep_tile_span(randval_spans[number<0>{}], [&](auto idx0) {
+                        sweep_tile_span(randval_spans[number<1>{}], [&](auto idx1) {
+                            constexpr auto p_idx0 =
+                                tile_distributed_index<i_m0 * MIterPerWarp +
+                                                       idx0.impl_.template at<0>()>{};
+                            constexpr auto p_idx1 =
+                                tile_distributed_index<i_n0,
+                                                       idx1.impl_.template at<1>(),
+                                                       idx1.impl_.template at<2>()>{};
+                            constexpr auto p_idx = ck_tile::make_tuple(p_idx0, p_idx1);
+                            constexpr auto r_idx = ck_tile::make_tuple(idx0, idx1);
+                            p_compute(p_idx)     = randval[r_idx] <= p_undrop_in_uint8_t
+                                                       ? p_compute[p_idx] * rp_undrop
+                                                       : PComputeDataType(0);
+                        });
                     });
-                });
+                }
             });
             move_tile_window(randval_dram_window, {kMPerStep, -kNPerBlock});
         });
@@ -566,6 +609,9 @@ struct BlockDropoutBwd<true, IsWG32_, IsStoreRandval_>
                         static_assert(randval_dist_generated.kThreadElementSpaceSize == 16);
                         ph.get_random_16x8(random_uint8_t, ph_subsequence);
                     }
+#if defined(__gfx11__)
+                    detail::PermuteBlockDropoutRandval(random_uint8_t);
+#endif
                 }
                 else
                 {
@@ -603,7 +649,7 @@ struct BlockDropoutBwd<true, IsWG32_, IsStoreRandval_>
             static_for<0, kMPerBlock / kMPerStep, 1>{}([&](auto i_m0) {
                 const auto randval = generate_randval(i_m0, i_n0);
                 // Drop values of P based on the generated probabilities, negative sign is used to
-                // distinguish such values ​​later in bwd pipeline.
+                // distinguish such values later in bwd pipeline.
                 constexpr auto randval_spans = decltype(randval)::get_distributed_spans();
                 sweep_tile_span(randval_spans[number<0>{}], [&](auto idx0) {
                     sweep_tile_span(randval_spans[number<1>{}], [&](auto idx1) {

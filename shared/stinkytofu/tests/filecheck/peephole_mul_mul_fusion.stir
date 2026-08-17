@@ -1,0 +1,98 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --PeepholeOptimizationPass --print-output
+#
+# MUL+MUL Fusion: v_mul + v_mul with constants → single v_mul with multiplied constant.
+# Converted from PeepholeOptimizationPassTest.*MULMUL*
+
+#--- F32 basic: 2.0 * 3.0 = 6.0
+# CHECK-LABEL: @mul_mul_f32_basic
+# CHECK: v_mul_f32
+# CHECK-SAME: v2
+# CHECK-SAME: 6
+# CHECK-SAME: v1
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_mul_f32_basic() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F32 in-place: 2.0 * 3.0 = 6.0
+# CHECK-LABEL: @mul_mul_f32_inplace
+# CHECK: v_mul_f32
+# CHECK-SAME: v0
+# CHECK-SAME: 6
+# CHECK-SAME: v1
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_mul_f32_inplace() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 basic: 2.5 * 4.0 = 10.0
+# CHECK-LABEL: @mul_mul_f16_basic
+# CHECK: v_mul_f16
+# CHECK-SAME: v2
+# CHECK-SAME: 10
+# CHECK-SAME: v1
+# CHECK-NOT: v_mul_f16
+
+st.func @mul_mul_f16_basic() {
+^entry:
+  v0 = "st.v_mul_f16"(2.5, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f16"(4.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: first MUL result has multiple uses → no fusion
+# CHECK-LABEL: @no_fusion_mul_multiple_uses
+# CHECK: v_mul_f32
+# CHECK: v_mul_f32
+# CHECK: v_mul_f32
+
+st.func @no_fusion_mul_multiple_uses() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(4.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: second MUL has no constant → no fusion
+# CHECK-LABEL: @no_fusion_mul_missing_const
+# CHECK: v_mul_f32
+# CHECK: v_mul_f32
+
+st.func @no_fusion_mul_missing_const() {
+^entry:
+  v0 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(v3, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- With zero: 5.0 * 0.0 = 0.0
+# CHECK-LABEL: @mul_mul_with_zero
+# CHECK: v_mul_f32
+# CHECK-SAME: v2
+# CHECK-SAME: 0
+# CHECK-SAME: v1
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_mul_with_zero() {
+^entry:
+  v0 = "st.v_mul_f32"(5.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(0.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative values: -2.0 * 3.0 = -6.0
+# CHECK-LABEL: @mul_mul_negative
+# CHECK: v_mul_f32
+# CHECK-SAME: v2
+# CHECK-SAME: -6
+# CHECK-SAME: v1
+# CHECK-NOT: v_mul_f32
+
+st.func @mul_mul_negative() {
+^entry:
+  v0 = "st.v_mul_f32"(-2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(3.0, v0) { issueCycles = 1, latencyCycles = 5 }
+}

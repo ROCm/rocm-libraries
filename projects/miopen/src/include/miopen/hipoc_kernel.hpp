@@ -35,6 +35,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace miopen {
@@ -43,9 +44,35 @@ using HipEventPtr = MIOPEN_MANAGE_PTR(hipEvent_t, hipEventDestroy);
 inline HipEventPtr make_hip_event()
 {
     hipEvent_t result = nullptr;
-    hipEventCreate(&result);
+
+    const auto status = hipEventCreate(&result);
+    if(status != hipSuccess)
+        MIOPEN_THROW_HIP_STATUS(status, "hipEventCreate failed");
+
     return HipEventPtr{result};
 }
+
+/// Validates that a kernel's total work-item count can be expressed by the HIP module
+/// launch APIs. Both hipExtModuleLaunchKernel() and hipModuleLaunchCooperativeKernel()
+/// bound the per-dimension work-item count to uint32_t -- the former takes it directly,
+/// the latter takes a workgroup count that the runtime multiplies back out by the
+/// workgroup size -- so the same limit applies to both. A count of 2^32 or more is not
+/// representable and is silently truncated modulo 2^32:
+///
+///   - a multiple of 2^32 truncates to zero, which HIP rejects asynchronously from an
+///     unrelated later call, making the true origin hard to attribute, and
+///   - any other value truncates to a smaller non-zero grid, which HIP accepts. The
+///     kernel then covers only part of the problem and returns wrong results with no
+///     error reported anywhere.
+///
+/// Note this bounds the number of WORK-ITEMS per dimension, not the number of
+/// workgroups; there is no separate per-dimension workgroup-count limit on either path.
+///
+/// \param gdims Global work size, in work-items (already gridDim * blockDim).
+/// \param name Kernel name, used in the exception message.
+/// \throws miopen::Exception if the global work size is not representable.
+MIOPEN_INTERNALS_EXPORT void ValidateGlobalWorkSize(const std::array<size_t, 3>& gdims,
+                                                    const std::string& name);
 
 struct HipEventProfiler
 {
@@ -53,8 +80,8 @@ struct HipEventProfiler
     HipEventPtr start;
     HipEventPtr stop;
 
-    HipEventProfiler(const Handle& handle_);
-    ~HipEventProfiler();
+    MIOPEN_INTERNALS_EXPORT HipEventProfiler(const Handle& handle_);
+    MIOPEN_INTERNALS_EXPORT ~HipEventProfiler();
 };
 
 #if 1 // Keep around other storage techinques -- @pfultz2 27.03.2017
@@ -119,7 +146,7 @@ struct KernelArgs
     uint64_t hidden[6] = {};
 };
 
-struct MIOPEN_INTERNALS_EXPORT HIPOCKernelInvoke
+struct HIPOCKernelInvoke
 {
     HIPOCKernelInvoke() {}
     HIPOCKernelInvoke(hipStream_t pstream,
@@ -185,8 +212,8 @@ struct MIOPEN_INTERNALS_EXPORT HIPOCKernelInvoke
     const std::string& GetName() const { return name; }
 
 private:
-    void run(void* args, std::size_t size) const;
-    void run_cooperative(void** kern_args) const;
+    MIOPEN_INTERNALS_EXPORT void run(void* args, std::size_t size) const;
+    MIOPEN_INTERNALS_EXPORT void run_cooperative(void** kern_args) const;
 
     hipStream_t stream          = nullptr;
     hipFunction_t fun           = nullptr;
@@ -197,7 +224,7 @@ private:
     bool coop_launch;
 };
 
-struct MIOPEN_INTERNALS_EXPORT HIPOCKernel
+struct HIPOCKernel
 {
     HIPOCProgram program;
     std::string name;
@@ -225,9 +252,16 @@ struct MIOPEN_INTERNALS_EXPORT HIPOCKernel
         auto status   = hipModuleGetFunction(&fun, program.GetModule(), kernel_module.c_str());
         if(hipSuccess != status)
         {
-            MIOPEN_THROW_HIP_STATUS(status,
-                                    "Failed to get function: " + kernel_module + " from " +
-                                        program.GetCodeObjectPathname());
+            if(program.IsCodeObjectInFile())
+            {
+                MIOPEN_THROW_HIP_STATUS(status,
+                                        "Failed to get function: " + kernel_module + " from " +
+                                            program.GetCodeObjectPathname());
+            }
+            else
+            {
+                MIOPEN_THROW_HIP_STATUS(status, "Failed to get function: " + kernel_module);
+            }
         }
     }
 

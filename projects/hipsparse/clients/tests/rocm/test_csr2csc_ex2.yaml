@@ -71,3 +71,14 @@ Tests:
              webbase-1M,
              shipsec1]
 
+- name: csr2csc_ex2_graph_test
+  category: pre_checkin
+  function: csr2csc_ex2
+  precision: *single_double_precisions_complex_real
+  M: [1243]
+  N: [2876]
+  action: [HIPSPARSE_ACTION_NUMERIC]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  csr2csc_alg: [HIPSPARSE_CSR2CSC_ALG1]
+  graph_test: true
+

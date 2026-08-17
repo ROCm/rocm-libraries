@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,117 +31,283 @@
 #include <hip/hip_runtime.h>
 
 ROCSPARSE_KERNEL(1) void init_kernel(){};
-
+static hipStream_t main_stream{};
 /*******************************************************************************
  * constructor
+ *
+ * Uses function-try-block to ensure cleanup of partially-allocated GPU resources
+ * if an exception is thrown during initialization.
  ******************************************************************************/
-_rocsparse_handle::_rocsparse_handle()
+#ifdef ROCSPARSE_WITH_HANDLE_CREATE
+_rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
 {
-    ROCSPARSE_ROUTINE_TRACE;
+    try
+    {
+        ROCSPARSE_ROUTINE_TRACE;
 
-    // Default device is active device
-    THROW_IF_HIP_ERROR(hipGetDevice(&device));
-    THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
+        // Route all stream-ordered setup onto the user stream so creation never
+        // touches the default (NULL) stream (which would otherwise implicitly
+        // synchronize with the user's other streams).
+        this->stream = user_stream;
 
-    // Device wavefront size
-    wavefront_size = properties.warpSize;
+        // Default device is active device
+        THROW_IF_HIP_ERROR(hipGetDevice(&device));
+        THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
 
-    // Shared memory per block opt-in
-    shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
+        // Device wavefront size
+        wavefront_size = properties.warpSize;
+
+        // Shared memory per block opt-in
+        shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
 
 #if HIP_VERSION >= 307
-    // ASIC revision
-    asic_rev = properties.asicRevision;
+        // ASIC revision
+        asic_rev = properties.asicRevision;
 #else
-    asic_rev = 0;
+        asic_rev = 0;
 #endif
 
-    // Layer mode
-    char* str_layer_mode;
-    if((str_layer_mode = getenv("ROCSPARSE_LAYER")) == NULL)
-    {
-        layer_mode = rocsparse_layer_mode_none;
-    }
-    else
-    {
-        layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode));
-    }
+        // Layer mode
+        char* str_layer_mode;
+        if((str_layer_mode = getenv("ROCSPARSE_LAYER")) == NULL)
+        {
+            layer_mode = rocsparse_layer_mode_none;
+        }
+        else
+        {
+            layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode));
+        }
 
-    // Obtain size for coomv device buffer
-    rocsparse_int nthreads = properties.maxThreadsPerBlock;
-    rocsparse_int nprocs   = 2 * properties.multiProcessorCount;
-    rocsparse_int nblocks  = (nprocs * nthreads - 1) / 256 + 1;
+        // Obtain size for coomv device buffer
+        rocsparse_int nthreads = properties.maxThreadsPerBlock;
+        rocsparse_int nprocs   = 2 * properties.multiProcessorCount;
+        rocsparse_int nblocks  = (nprocs * nthreads - 1) / 256 + 1;
 
-    size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
+        size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
 
-    // Allocate device buffer
-    buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+        // Allocate device buffer — stream-ordered so handle creation never blocks
+        // streams other than the one passed by the caller.
+        buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&buffer, buffer_size, this->stream));
 
-    // Device alpha and beta
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+        // Device alpha and beta
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&alpha, sizeof(double) * 2, this->stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&beta, sizeof(double) * 2, this->stream));
 
-    // Device one
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
-    THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
+        // Device one
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&sone, sizeof(float) * 2, this->stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&done, sizeof(double) * 2, this->stream));
 
-    // Execute empty kernel for initialization
+        // Execute empty kernel for initialization
 
-    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
-    hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
-    THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
+        THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
+        hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, this->stream);
+        THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
 
-    // Execute memset for initialization
-    THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
-    THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
+        // Execute memset for initialization
+        THROW_IF_HIP_ERROR(hipMemsetAsync(sone, 0, sizeof(float) * 2, this->stream));
+        THROW_IF_HIP_ERROR(hipMemsetAsync(done, 0, sizeof(double) * 2, this->stream));
 
-    const float  s_value = 1.0f;
-    const double d_value = 1.0;
-    THROW_IF_HIP_ERROR(
-        hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
-    THROW_IF_HIP_ERROR(
-        hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+        const float  s_value = 1.0f;
+        const double d_value = 1.0;
+        THROW_IF_HIP_ERROR(
+            hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, this->stream));
+        THROW_IF_HIP_ERROR(
+            hipMemcpyAsync(done, &d_value, sizeof(double), hipMemcpyHostToDevice, this->stream));
 
-    // Wait for device transfer to finish
-    THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        // No sync needed: all initialization is enqueued on `stream`, so a later
+        // operation on the same stream sees it. Using the handle on a different
+        // stream first requires the caller to synchronize `stream`.
 
-    // create blas handle
-    rocsparse::blas_impl blas_impl;
+#if defined(ROCSPARSE_WITH_ASAN)
+        const size_t required_stack_size = 64 * 1024;
+        THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
+#endif
+
+        // create blas handle
+        rocsparse::blas_impl blas_impl;
 
 #ifdef ROCSPARSE_WITH_ROCBLAS
 
-    blas_impl = rocsparse::blas_impl_rocblas;
+        blas_impl = rocsparse::blas_impl_rocblas;
 
 #else
 
-    //
-    // Other implementation available? Otherwise, set it to none.
-    //
-    blas_impl = rocsparse::blas_impl_none;
+        //
+        // Other implementation available? Otherwise, set it to none.
+        //
+        blas_impl = rocsparse::blas_impl_none;
 #endif
 
-    THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
-    THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
-    THROW_IF_ROCSPARSE_ERROR(
-        rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
+        THROW_IF_ROCSPARSE_ERROR(
+            rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
 
-    // Open log file
-    if(layer_mode & rocsparse_layer_mode_log_trace)
-    {
-        rocsparse::open_log_stream(&log_trace_os, &log_trace_ofs, "ROCSPARSE_LOG_TRACE_PATH");
+        // Open log file
+        if(layer_mode & rocsparse_layer_mode_log_trace)
+        {
+            rocsparse::open_log_stream(&log_trace_os, &log_trace_ofs, "ROCSPARSE_LOG_TRACE_PATH");
+        }
+
+        // Open log_bench file
+        if(layer_mode & rocsparse_layer_mode_log_bench)
+        {
+            rocsparse::open_log_stream(&log_bench_os, &log_bench_ofs, "ROCSPARSE_LOG_BENCH_PATH");
+        }
+
+        // Open log_debug file
+        if(layer_mode & rocsparse_layer_mode_log_debug)
+        {
+            rocsparse::open_log_stream(&log_debug_os, &log_debug_ofs, "ROCSPARSE_LOG_DEBUG_PATH");
+        }
     }
-
-    // Open log_bench file
-    if(layer_mode & rocsparse_layer_mode_log_bench)
+    catch(...)
     {
-        rocsparse::open_log_stream(&log_bench_os, &log_bench_ofs, "ROCSPARSE_LOG_BENCH_PATH");
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
+        PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(blas_handle), "handle error");
+        throw;
     }
+}
+#endif // ROCSPARSE_WITH_HANDLE_CREATE
 
-    // Open log_debug file
-    if(layer_mode & rocsparse_layer_mode_log_debug)
+// Default constructor used by rocsparse_create_handle. It performs synchronous
+// initialization on an internally-managed stream. It is always compiled so that
+// the default handle-creation path keeps its behavior independently of the
+// optional rocsparse_handle_create API (ROCSPARSE_WITH_HANDLE_CREATE).
+_rocsparse_handle::_rocsparse_handle()
+{
+    try
     {
-        rocsparse::open_log_stream(&log_debug_os, &log_debug_ofs, "ROCSPARSE_LOG_DEBUG_PATH");
+        ROCSPARSE_ROUTINE_TRACE;
+
+        // Default device is active device
+        THROW_IF_HIP_ERROR(hipGetDevice(&device));
+        THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
+
+        // Device wavefront size
+        wavefront_size = properties.warpSize;
+
+        // Shared memory per block opt-in
+        shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
+        if(main_stream == nullptr)
+        {
+            std::ignore = hipStreamCreate(&main_stream);
+        }
+        stream = main_stream;
+#if HIP_VERSION >= 307
+        // ASIC revision
+        asic_rev = properties.asicRevision;
+#else
+        asic_rev = 0;
+#endif
+
+        // Layer mode
+        char* str_layer_mode;
+        if((str_layer_mode = getenv("ROCSPARSE_LAYER")) == NULL)
+        {
+            layer_mode = rocsparse_layer_mode_none;
+        }
+        else
+        {
+            layer_mode = (rocsparse_layer_mode)(atoi(str_layer_mode));
+        }
+
+        // Obtain size for coomv device buffer
+        rocsparse_int nthreads = properties.maxThreadsPerBlock;
+        rocsparse_int nprocs   = 2 * properties.multiProcessorCount;
+        rocsparse_int nblocks  = (nprocs * nthreads - 1) / 256 + 1;
+
+        size_t coomv_size = (((sizeof(rocsparse_int) + 16) * nblocks - 1) / 256 + 1) * 256;
+
+        // Allocate device buffer
+        buffer_size = (coomv_size > 1024 * 1024) ? coomv_size : 1024 * 1024;
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
+
+        // Device alpha and beta
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&alpha, sizeof(double) * 2));
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&beta, sizeof(double) * 2));
+
+        // Device one
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&sone, sizeof(float) * 2));
+        THROW_IF_HIP_ERROR(rocsparse_hipMalloc(&done, sizeof(double) * 2));
+
+        // Execute empty kernel for initialization
+
+        THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");
+        hipLaunchKernelGGL(init_kernel, dim3(1), dim3(1), 0, stream);
+        THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "'empty kernel scheduling failed'");
+
+        // Execute memset for initialization
+        THROW_IF_HIP_ERROR(rocsparse_hipMemsetAsync(sone, 0, sizeof(float) * 2, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done, 0, sizeof(double) * 2, stream));
+
+        const float  s_value = 1.0f;
+        const double d_value = 1.0;
+        THROW_IF_HIP_ERROR(
+            rocsparse_hipMemcpyAsync(sone, &s_value, sizeof(float), hipMemcpyHostToDevice, stream));
+        THROW_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            done, &d_value, sizeof(double), hipMemcpyHostToDevice, stream));
+
+        // Wait for device transfer to finish
+        THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+#if defined(ROCSPARSE_WITH_ASAN)
+        const size_t required_stack_size = 64 * 1024;
+        THROW_IF_HIP_ERROR(hipDeviceSetLimit(hipLimitStackSize, required_stack_size));
+#endif
+
+        // create blas handle
+        rocsparse::blas_impl blas_impl;
+
+#ifdef ROCSPARSE_WITH_ROCBLAS
+
+        blas_impl = rocsparse::blas_impl_rocblas;
+
+#else
+
+        //
+        // Other implementation available? Otherwise, set it to none.
+        //
+        blas_impl = rocsparse::blas_impl_none;
+#endif
+
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_create_handle(&this->blas_handle, blas_impl));
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::blas_set_stream(this->blas_handle, this->stream));
+        THROW_IF_ROCSPARSE_ERROR(
+            rocsparse::blas_set_pointer_mode(this->blas_handle, this->pointer_mode));
+
+        // Open log file
+        if(layer_mode & rocsparse_layer_mode_log_trace)
+        {
+            rocsparse::open_log_stream(&log_trace_os, &log_trace_ofs, "ROCSPARSE_LOG_TRACE_PATH");
+        }
+
+        // Open log_bench file
+        if(layer_mode & rocsparse_layer_mode_log_bench)
+        {
+            rocsparse::open_log_stream(&log_bench_os, &log_bench_ofs, "ROCSPARSE_LOG_BENCH_PATH");
+        }
+
+        // Open log_debug file
+        if(layer_mode & rocsparse_layer_mode_log_debug)
+        {
+            rocsparse::open_log_stream(&log_debug_os, &log_debug_ofs, "ROCSPARSE_LOG_DEBUG_PATH");
+        }
+    }
+    catch(...)
+    {
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(alpha));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
+        PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
+        PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(blas_handle), "handle error");
+        throw;
     }
 }
 
@@ -157,7 +323,7 @@ _rocsparse_handle::~_rocsparse_handle()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    PRINT_IF_HIP_ERROR(hipDeviceSynchronize());
+    PRINT_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
@@ -166,11 +332,7 @@ _rocsparse_handle::~_rocsparse_handle()
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(beta));
 
     // destroy blas handle
-    rocsparse_status status = rocsparse::blas_destroy_handle(this->blas_handle);
-    if(status != rocsparse_status_success)
-    {
-        ROCSPARSE_ERROR_MESSAGE(status, "handle error");
-    }
+    PRINT_IF_ROCSPARSE_ERROR(rocsparse::blas_destroy_handle(this->blas_handle), "handle error");
 
     // Close log files
     if(log_trace_ofs.is_open())

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -45,28 +45,8 @@ Tests:
   category: quick
   function: csr2csc
   precision: *single_double_precisions_complex_real
-  M: [10, 872]
-  N: [33, 623]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2csc
-  category: pre_checkin
-  function: csr2csc
-  precision: *single_double_precisions_complex_real
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2csc
-  category: nightly
-  function: csr2csc
-  precision: *single_double_precisions_complex_real
-  M: [27428, 941291, 1105637]
-  N: [18582, 571938, 995827]
+  M: [50, 872]
+  N: [42, 623]
   action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
@@ -80,11 +60,23 @@ Tests:
   action: [rocsparse_action_numeric, rocsparse_action_symbolic]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
+
+- name: csr2csc
+  category: pre_checkin
+  function: csr2csc
+  precision: *single_double_precisions_complex_real
+  M: [0, 500, 1000]
+  N: [0, 242, 1000]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: csr2csc_file
   category: pre_checkin
@@ -97,11 +89,44 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [rma10,
              mc2depi,
-             ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
+             ASIC_320k]
+
+- name: csr2csc_file
+  category: pre_checkin
+  function: csr2csc
+  precision: *single_double_precisions_complex
+  M: 1
+  N: 1
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             qc2534,
+             Chevron2,
+             Chevron3]
+
+- name: csr2csc_file
+  category: pre_checkin
+  function: csr2csc
+  precision: *single_double_precisions
+  M: 1
+  N: 1
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             scircuit]
+  graph_test: true
+
+- name: csr2csc
+  category: nightly
+  function: csr2csc
+  precision: *single_double_precisions_complex_real
+  M: [27428, 941291, 1105637]
+  N: [18582, 571938, 995827]
+  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: csr2csc_file
   category: nightly
@@ -121,30 +146,6 @@ Tests:
              shipsec1]
 
 - name: csr2csc_file
-  category: quick
-  function: csr2csc
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [qc2534,
-             Chevron2]
-
-- name: csr2csc_file
-  category: pre_checkin
-  function: csr2csc
-  precision: *single_double_precisions_complex
-  M: 1
-  N: 1
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: csr2csc_file
   category: nightly
   function: csr2csc
   precision: *single_double_precisions_complex
@@ -154,21 +155,3 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
-
-- name: csr2csc_file
-  category: pre_checkin
-  function: csr2csc
-  precision: *single_double_precisions
-  M: 1
-  N: 1
-  action: [rocsparse_action_numeric, rocsparse_action_symbolic]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [rma10,
-             mc2depi,
-             ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
-  graph_test: true

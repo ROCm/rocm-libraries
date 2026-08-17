@@ -4,97 +4,28 @@
 #pragma once
 
 #include "ck_tile/core/config.hpp"
-#include "ck_tile/core/container/array.hpp"
-#include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/core/numeric/integral_constant.hpp"
-#include "ck_tile/core/numeric/float8.hpp"
-#include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/bfloat16.hpp"
-#include "ck_tile/core/numeric/pk_int4.hpp"
 #include "ck_tile/core/numeric/e8m0.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
+#include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/int8.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/pk_int4.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 
+#include <type_traits>
+
 namespace ck_tile {
-
-// this structure is used to pick up the <base> type inside
-// using xxx = <base> __attribute__((ext_vector_type(N)));
-// because clang only allow native type + bool in this term (custom type will fail)
-// overload this structure to let proper <base> type
-
-template <typename T>
-struct native_t
-{
-    using type = remove_cvref_t<T>;
-};
-
-// we name this as ext_vector purposely, because clang ext_vector_type extention only accept literay
-// basic type to construct a ext_vector_type you must be very careful using this, or will have lot
-// of compiler errors e.g. struct A; using Ax2_t = A __attribute__((ext_vector_type(2)));  -> will
-// have compiler error
-namespace impl {
-
-template <typename T_, index_t N_, typename = void>
-struct ext_vector;
-
-template <typename T_, index_t N_>
-struct ext_vector<T_, N_, std::enable_if_t<!std::is_class_v<typename native_t<T_>::type>>>
-{
-    static constexpr index_t N = N_;
-    // struct type is not supported for ext_vector
-    using value_type = typename native_t<T_>::type;
-    static_assert(!std::is_class_v<value_type>);
-    using type = value_type __attribute__((ext_vector_type(N))); // this is danguous
-};
-
-template <typename T_, index_t N_>
-struct ext_vector<T_, N_, std::enable_if_t<std::is_class_v<typename native_t<T_>::type>>>
-{
-    static constexpr index_t N = N_;
-    // struct type is not supported for ext_vector
-    using value_type = typename native_t<T_>::type::type;
-    static_assert(!std::is_class_v<value_type>);
-    using type = value_type __attribute__((ext_vector_type(N))); // this is danguous
-};
-
-template <typename V_, index_t Vs_, index_t N_>
-struct ext_vector<V_ __attribute__((ext_vector_type(Vs_))),
-                  N_,
-                  std::enable_if_t<!std::is_class_v<typename native_t<V_>::type>>>
-{
-    static constexpr index_t N = Vs_ * N_;
-    using value_type           = typename native_t<remove_cvref_t<V_>>::type;
-    static_assert(!std::is_class_v<value_type>);
-    using type = value_type __attribute__((ext_vector_type(N))); // this is danguous
-};
-
-template <typename V_, index_t Vs_, index_t N_>
-struct ext_vector<V_ __attribute__((ext_vector_type(Vs_))),
-                  N_,
-                  std::enable_if_t<std::is_class_v<typename native_t<V_>::type>>>
-{
-    static constexpr index_t N = Vs_ * N_;
-    using value_type           = typename native_t<remove_cvref_t<V_>>::type::type;
-    static_assert(!std::is_class_v<value_type>);
-    using type = value_type __attribute__((ext_vector_type(N))); // this is danguous
-};
-
-} // namespace impl
-
-template <typename T, index_t N>
-using ext_vector_t = typename impl::ext_vector<T, N>::type;
 
 // by default, any type will result in a vector_size=1 with scalar_type=T traits.
 // ... unless we have other vector_traits specialization
 template <typename T, typename = void>
 struct vector_traits
 {
-    using scalar_type =
-        std::conditional_t<std::is_same_v<remove_cvref_t<T>, pk_int4_t>,
-                           int8_t,
-                           std::conditional_t<std::is_same_v<remove_cvref_t<T>, pk_fp4_t> ||
-                                                  std::is_same_v<remove_cvref_t<T>, e8m0_t>,
-                                              uint8_t,
-                                              remove_cvref_t<T>>>;
+    using scalar_type = std::conditional_t<
+        std::is_same_v<remove_cvref_t<T>, pk_int4_t>,
+        int8_t,
+        std::conditional_t<std::is_same_v<remove_cvref_t<T>, e8m0_t>, uint8_t, remove_cvref_t<T>>>;
     static constexpr index_t vector_size = 1;
 };
 
@@ -102,12 +33,10 @@ struct vector_traits
 template <typename T, index_t N>
 struct vector_traits<T __attribute__((ext_vector_type(N))), void>
 {
-    using scalar_type = std::conditional_t<
-        std::is_same_v<T, pk_int4_t>,
-        int8_t,
-        std::conditional_t<std::is_same_v<T, pk_fp4_t> || std::is_same_v<remove_cvref_t<T>, e8m0_t>,
-                           uint8_t,
-                           T>>;
+    using scalar_type =
+        std::conditional_t<std::is_same_v<T, pk_int4_t>,
+                           int8_t,
+                           std::conditional_t<std::is_same_v<T, e8m0_t>, uint8_t, T>>;
     static constexpr index_t vector_size = N;
 };
 
@@ -140,6 +69,9 @@ using fp16x16_t = _Float16 __attribute__((ext_vector_type(16)));
 using fp16x32_t = _Float16 __attribute__((ext_vector_type(32)));
 using fp16x64_t = _Float16 __attribute__((ext_vector_type(64)));
 
+using llvm_fp16x8_t  = __fp16 __attribute__((ext_vector_type(8)));
+using llvm_fp16x16_t = __fp16 __attribute__((ext_vector_type(16)));
+
 // bf16
 // using bf16_t = ...
 using bf16x2_t  = bfloat16_t __attribute__((ext_vector_type(2)));
@@ -158,6 +90,19 @@ using int32x8_t  = int32_t __attribute__((ext_vector_type(8)));
 using int32x16_t = int32_t __attribute__((ext_vector_type(16)));
 using int32x32_t = int32_t __attribute__((ext_vector_type(32)));
 using int32x64_t = int32_t __attribute__((ext_vector_type(64)));
+
+struct int32x3_tt
+{
+    int32_t data[3];
+};
+
+template <>
+struct impl::ext_vector<int8_t, 12>
+{
+    static constexpr index_t N = 12;
+    using value_type           = int32x3_tt;
+    using type                 = int32x3_tt;
+};
 
 // u32
 // using uint32_t = ...

@@ -152,7 +152,7 @@ def getInstalledRocBLASCommitHash():
 
 def cloneRepository(destinationPath):
     print("Cloning repository...")
-    shellCmd("git clone https://github.com/ROCmSoftwarePlatform/rocBLAS.git %s" % destinationPath)
+    shellCmd("git clone https://github.com/ROCm/rocBLAS.git %s" % destinationPath)
 
 def checkoutSpecifiedCommit(destinationPath, commit):
     originalPath = shellCmd("pwd").rstrip('\n')

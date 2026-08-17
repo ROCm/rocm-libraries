@@ -1,0 +1,17 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+enum ResampleMode : byte {
+    NOT_SET = 0,
+    MAXPOOL = 1,
+    AVGPOOL_EXCLUDE_PADDING = 2,
+    AVGPOOL_INCLUDE_PADDING = 3
+}
+
+enum PaddingMode : byte {
+    PADDING_NOT_SET = 0,
+    NEG_INF_PAD = 1,
+    ZERO_PAD = 2
+}

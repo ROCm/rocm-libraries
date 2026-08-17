@@ -4,14 +4,17 @@
 #include "utils/ckb_conv_tile_test_configs.hpp"
 #include "utils/ckb_conv_test_utils.hpp"
 #include "utils/conv_algorithm_type_utils.hpp"
-#include "ck_tile/builder/testing/conv_fwd_ck_tile.hpp"
-#include "ck_tile/builder/testing/conv_fwd_reference.hpp"
+#include "ck_tile/builder/testing/conv/ck_tile.hpp"
+#include "ck_tile/builder/testing/conv/reference.hpp"
 #include "ck_tile/host/device_prop.hpp"
 #include "testing_utils.hpp"
 
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
 namespace cku = ck_tile::builder::test_utils;
+
+using ck_tile::test::MatchesReference;
+using ck_tile::test::SuccessfulRun;
 
 constexpr auto SIGNATURE =
     ckt::ConvSignature{.spatial_dim            = 2,
@@ -28,8 +31,10 @@ constexpr auto ALGORITHM =
         .with_tile_thread_block(cku::FwdTileThreadBlock_64x64x64)
         .with_tile_block_gemm(cku::TileBlockGemmDesc_16x16_v3_intrawave)
         .with_tile_transfer(cku::FwdTileTransfer_4x4x4)
-        .with_tile_optimizations(ckt::TileOptimizations{
-            .num_groups_to_merge = 1, .split_image = false, .explicit_gemm = false});
+        .with_tile_optimizations(ckt::TileOptimizations{.num_groups_to_merge = 1,
+                                                        .split_image         = false,
+                                                        .explicit_gemm       = false,
+                                                        .two_stage           = false});
 
 using Builder   = ckb::ConvBuilder<SIGNATURE, ALGORITHM>;
 using Instance  = Builder::Instance;
@@ -75,10 +80,10 @@ TEST(Fwd2DFp16_CShufV3_NHWGC, EndToEnd)
     ckt::init_inputs(args, inputs.get());
 
     auto conv = Instance{};
-    ckt::run(conv, args, inputs.get(), outputs.get());
+    EXPECT_THAT(ckt::run(conv, args, inputs.get(), outputs.get()), SuccessfulRun());
 
     auto ref_conv = Reference{};
-    ckt::run(ref_conv, args, inputs.get(), reference.get());
+    EXPECT_THAT(ckt::run(ref_conv, args, inputs.get(), reference.get()), SuccessfulRun());
 
-    EXPECT_THAT(outputs.get(), ck_tile::test::MatchesReference(args, reference.get()));
+    EXPECT_THAT(outputs.get(), MatchesReference(args, reference.get()));
 }

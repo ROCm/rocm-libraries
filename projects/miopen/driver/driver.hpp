@@ -27,7 +27,7 @@
 #define GUARD_MIOPEN_DRIVER_HPP
 
 #include <half/half.hpp>
-#include "random.hpp"
+#include "../driver/random.hpp"
 
 #include "InputFlags.hpp"
 #include <algorithm>
@@ -38,6 +38,7 @@
 #include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/bfloat16.hpp>
+#include <miopen/handle.hpp>
 #include <../test/tensor_holder.hpp>
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
@@ -50,15 +51,8 @@ using bfloat8_fnuz = miopen_f8::hip_f8<miopen_f8::hip_f8_type::bf8>;
 #include <numeric>
 #include <vector>
 
-#if MIOPEN_BACKEND_OPENCL
-#if defined(__APPLE__) || defined(__MACOSX)
-#include <OpenCL/cl.h>
-#else
-#include <CL/cl.h>
-#endif
-#elif MIOPEN_BACKEND_HIP
 #include <hip/hip_runtime_api.h>
-#endif
+#include <functional>
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
 
@@ -83,35 +77,7 @@ struct GPUMem
         Back,
     };
 
-#if MIOPEN_BACKEND_OPENCL
-    GPUMem(){};
-    GPUMem(cl_context& ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
-        : sz(psz), data_sz(pdata_sz)
-    {
-        buf = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_sz * sz, nullptr, nullptr);
-    }
-
-    int ToGPU(cl_command_queue& q, void* p) const
-    {
-        return clEnqueueWriteBuffer(q, buf, CL_TRUE, 0, data_sz * sz, p, 0, nullptr, nullptr);
-    }
-    int FromGPU(cl_command_queue& q, void* p) const
-    {
-        return clEnqueueReadBuffer(q, buf, CL_TRUE, 0, data_sz * sz, p, 0, nullptr, nullptr);
-    }
-
-    cl_mem GetMem() const { return buf; }
-    size_t GetSize() const { return sz * data_sz; }
-
-    ~GPUMem() { clReleaseMemObject(buf); }
-
-    cl_mem buf;
-    size_t sz;
-    size_t data_sz;
-
-#elif MIOPEN_BACKEND_HIP
-
-    GPUMem(){};
+    GPUMem() {};
     GPUMem(uint32_t ctx, size_t psz, size_t pdata_sz, Check ch = Check::None)
         : _ctx(ctx), sz(psz), data_sz(pdata_sz), check(ch)
     {
@@ -132,7 +98,7 @@ struct GPUMem
     }
     int FromGPU(hipStream_t q, void* p)
     {
-        hipDeviceSynchronize();
+        (void)hipDeviceSynchronize();
         _q = q;
         return static_cast<int>(hipMemcpy(p, buf, GetSize(), hipMemcpyDeviceToHost));
     }
@@ -209,13 +175,12 @@ struct GPUMem
                               "hipFree " << size << " at " << buf << " Ok");
     }
 
-    hipStream_t _q; // Place holder for opencl context
+    hipStream_t _q;
     uint32_t _ctx;
     void* buf;
     size_t sz;
     size_t data_sz;
     Check check;
-#endif
 };
 
 template <typename Tgpu>
@@ -383,7 +348,7 @@ inline void PadBufferSize(size_t& sz, int datatype_sz)
 {
     printf("Usage: ./driver *base_arg* *other_args*\n");
     printf("Supported Base Arguments: conv[fp16|int8|bfp16], CBAInfer[fp16|bfp16], "
-           "CAInfer[fp16|bfp16], pool[fp16], lrn[fp16], activ[fp16], softmax[bfp16|fp16], "
+           "CAInfer[fp16|bfp16], pool[fp16|bfp16], lrn[fp16], activ[fp16], softmax[bfp16|fp16], "
            "bnorm[fp16|bfp16], rnn[fp16], rnn_seq[fp16], gemm[fp16], ctc, dropout[fp16], tensorop, "
            "reduce[fp16|fp64], layernorm[bfp16|fp16], groupnorm[bfp16|fp16], cat[bfp16|fp16], "
            "addlayernorm[bfp16|fp16], t5layernorm[bfp16|fp16], adam[fp16], ampadam, "
@@ -407,6 +372,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
     // List of valid base arguments
     static const std::vector<std::string> valid_args = {"conv",
                                                         "convfp16",
+                                                        "convfp32",
                                                         "convint8",
                                                         "convbfp16",
                                                         "CBAInfer",
@@ -417,6 +383,7 @@ inline std::string ParseBaseArg(int argc, char* argv[])
                                                         "CAInferbfp16",
                                                         "pool",
                                                         "poolfp16",
+                                                        "poolbfp16",
                                                         "lrn",
                                                         "lrnfp16",
                                                         "activ",
@@ -512,26 +479,31 @@ public:
     Driver()
     {
         data_type = miopenFloat;
-#if MIOPEN_BACKEND_OPENCL
-        miopenCreate(&handle);
-#elif MIOPEN_BACKEND_HIP
-        hipStream_t s;
-        hipStreamCreate(&s);
-        miopenCreateWithStream(&handle, s);
-#endif
-
-        miopenGetStream(handle, &q);
+        (void)hipStreamCreate(&q);
+        miopenCreateWithStream(&handle, q);
     }
 
     miopenHandle_t GetHandle() { return handle; }
     miopenDataType_t GetDataType() { return data_type; }
 
-#if MIOPEN_BACKEND_OPENCL
-    cl_command_queue& GetStream() { return q; }
-#elif MIOPEN_BACKEND_HIP
     hipStream_t& GetStream() { return q; }
-#endif
-    virtual ~Driver() { miopenDestroy(handle); }
+    using hipGraphFuncPtrType   = std::function<int()>;
+    hipGraph_t hipGraph         = nullptr;
+    hipGraphExec_t hipGraphExec = nullptr;
+    hipGraphFuncPtrType hipGraphFuncPtr;
+    hipEvent_t hipGraphStartEvent   = nullptr;
+    hipEvent_t hipGraphStopEvent    = nullptr;
+    float hipGraphLastExecutionTime = 0.0f;
+    int CaptureKernel(hipGraphFuncPtrType functPtr);
+    int CaptureKernelCapturing(hipGraphFuncPtrType functPtr);
+    int ExecuteKernel();
+    void FinalizeKernel();
+    float GetHipGraphExecutionTime() { return hipGraphLastExecutionTime; }
+    virtual ~Driver()
+    {
+        miopenDestroy(handle);
+        (void)hipStreamDestroy(q);
+    }
 
     // TODO: add timing APIs
     virtual int AddCmdLineArgs()                         = 0;
@@ -544,19 +516,18 @@ public:
     virtual int RunBackwardGPU()                         = 0;
     virtual int VerifyBackward()                         = 0;
 
+    std::string name;
+
 protected:
     template <typename Tgpu>
     void InitDataType();
     void AddGpuBufferCheckFlag(InputFlags& inflags);
     GPUMem::Check GetGpuBufferCheck(const InputFlags& inflags) const;
+    void AddHipGraphFlag(InputFlags& inflags);
     miopenHandle_t handle;
     miopenDataType_t data_type;
 
-#if MIOPEN_BACKEND_OPENCL
-    cl_command_queue q;
-#elif MIOPEN_BACKEND_HIP
     hipStream_t q;
-#endif
 };
 
 template <>

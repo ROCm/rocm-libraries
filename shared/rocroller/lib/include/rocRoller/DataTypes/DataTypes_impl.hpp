@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -789,6 +766,62 @@ namespace rocRoller
     };
 
     template <>
+    struct TypeInfo<E5M3> : public BaseTypeInfo<E5M3,
+                                                DataType::E5M3,
+                                                DataType::E5M3,
+                                                PointerType::Value,
+                                                1,
+                                                1,
+                                                8,
+                                                false,
+                                                true,
+                                                false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E5M3x4> : public BaseTypeInfo<E5M3x4,
+                                                  DataType::E5M3x4,
+                                                  DataType::E5M3,
+                                                  PointerType::Value,
+                                                  4,
+                                                  1,
+                                                  32,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E4M3> : public BaseTypeInfo<E4M3,
+                                                DataType::E4M3,
+                                                DataType::E4M3,
+                                                PointerType::Value,
+                                                1,
+                                                1,
+                                                8,
+                                                false,
+                                                true,
+                                                false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E4M3x4> : public BaseTypeInfo<E4M3x4,
+                                                  DataType::E4M3x4,
+                                                  DataType::E4M3,
+                                                  PointerType::Value,
+                                                  4,
+                                                  1,
+                                                  32,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
+    template <>
     struct TypeInfo<Buffer> : public BaseTypeInfo<Buffer,
                                                   DataType::None,
                                                   DataType::None,
@@ -799,6 +832,20 @@ namespace rocRoller
                                                   false,
                                                   true,
                                                   false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<TDM> : public BaseTypeInfo<TDM,
+                                               DataType::None,
+                                               DataType::None,
+                                               PointerType::TDM,
+                                               1,
+                                               12,
+                                               384,
+                                               false,
+                                               true,
+                                               false>
     {
     };
 
@@ -841,6 +888,10 @@ namespace rocRoller
     DeclareEnumTypeInfo(Bool64, Bool64);
     DeclareEnumTypeInfo(E8M0, E8M0);
     DeclareEnumTypeInfo(E8M0x4, E8M0x4);
+    DeclareEnumTypeInfo(E5M3, E5M3);
+    DeclareEnumTypeInfo(E5M3x4, E5M3x4);
+    DeclareEnumTypeInfo(E4M3, E4M3);
+    DeclareEnumTypeInfo(E4M3x4, E4M3x4);
 
 #undef DeclareEnumTypeInfo
 

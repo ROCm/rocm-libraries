@@ -25,8 +25,10 @@
  *******************************************************************************/
 
 #include <ResultFileReporter.hpp>
+#include "TimingInstrumentation.hpp"
 
 #include <cstddef>
+#include <sstream>
 
 namespace TensileLite
 {
@@ -60,7 +62,9 @@ namespace TensileLite
         template <typename T>
         void ResultFileReporter::reportValue(std::string const& key, T const& value)
         {
-            std::string valueStr = boost::lexical_cast<std::string>(value);
+            std::ostringstream oss;
+            oss << value;
+            std::string valueStr = oss.str();
 
             if(key == ResultKey::Validation)
             {
@@ -75,10 +79,12 @@ namespace TensileLite
                 m_solutionName = valueStr;
                 m_output.setHeaderForKey(valueStr, valueStr);
             }
+            else if(key == ResultKey::SolutionIndex)
+            {
+                m_currSolutionIdx = std::stod(valueStr);
+            }
             else if(key == ResultKey::TimeUS)
             {
-                // cascade from BenchmarkTimer, Time-US first
-                ++m_currSolutionIdx;
                 if(!m_invalidSolution)
                 {
                     double timeUS    = std::stod(valueStr);
@@ -94,6 +100,15 @@ namespace TensileLite
                                 = std::stod(m_output.readValueFromKey(ResultKey::TotalGranularity));
                         }
                     }
+                }
+            }
+            else if(key == ResultKey::GbpsBW)
+            {
+                if(!m_invalidSolution)
+                {
+                    double bandwidth = std::stod(valueStr);
+                    if(!std::isnan(bandwidth) && bandwidth > m_fastestBandwidthGbps)
+                        m_fastestBandwidthGbps = bandwidth;
                 }
             }
             else if((key == ResultKey::SpeedGFlops
@@ -160,6 +175,8 @@ namespace TensileLite
                 m_output.setHeaderForKey(ResultKey::LDA, "LDA");
                 m_output.setHeaderForKey(ResultKey::LDB, "LDB");
                 m_output.setHeaderForKey(ResultKey::TotalFlops, "TotalFlops");
+                m_output.setHeaderForKey(ResultKey::GbpsBW, "GbpsBW");
+
                 if(m_extraCol)
                 {
                     m_output.setHeaderForKey(ResultKey::TilesPerCu, "TilesPerCu");
@@ -191,6 +208,7 @@ namespace TensileLite
                 m_output.setHeaderForKey(ResultKey::LDA, "LDA");
                 m_output.setHeaderForKey(ResultKey::LDB, "LDB");
                 m_output.setHeaderForKey(ResultKey::TotalFlops, "TotalFlops");
+                m_output.setHeaderForKey(ResultKey::GbpsBW, "GbpsBW");
 
                 if(m_extraCol)
                 {
@@ -248,6 +266,14 @@ namespace TensileLite
                     // skip, we update these together with FastestGFlops
                     continue;
                 }
+                else if(key.compare(ResultKey::GbpsBW) == 0)
+                {
+                    double oldBandwidth
+                        = (oldRowIter.second.empty()) ? 0.0 : std::stod(oldRowIter.second);
+                    double newBandwidth = (newRow[key].empty()) ? 0.0 : std::stod(newRow[key]);
+                    if(newBandwidth > oldBandwidth)
+                        oldRow[key] = newRow[key];
+                }
                 else
                 {
                     // these are gflops for each solution
@@ -275,6 +301,7 @@ namespace TensileLite
                 m_output.setValueForKey(ResultKey::SolutionWinnerIdx, m_winnerSolutionIdx);
                 m_output.setValueForKey(ResultKey::SolutionWinner, m_winnerSolution);
             }
+            m_output.setValueForKey(ResultKey::GbpsBW, m_fastestBandwidthGbps);
             // reset
             m_winnerSolution          = "";
             m_currSolutionIdx         = -1;
@@ -283,6 +310,7 @@ namespace TensileLite
             m_fasterTimeUS            = -1.0;
             m_fastestTilesPerCu       = -1.0;
             m_fastestTotalGranularity = -1.0;
+            m_fastestBandwidthGbps    = -1.0;
 
             if(!m_mergeSameProblems)
             {
@@ -301,6 +329,7 @@ namespace TensileLite
 
         void ResultFileReporter::postSolution()
         {
+            ScopedTimer timer("post_solution_result_file");
             m_solutionName    = "";
             m_invalidSolution = false;
         }

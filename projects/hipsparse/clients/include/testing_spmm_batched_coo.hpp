@@ -172,8 +172,8 @@ void testing_spmm_batched_coo(Arguments argus)
     I                    m        = argus.M;
     I                    n        = argus.N;
     I                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
-    T                    h_beta   = make_DataType<T>(argus.beta);
+    T                    h_alpha  = argus.get_alpha<T>();
+    T                    h_beta   = argus.get_beta<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderB   = argus.orderB;
@@ -379,19 +379,22 @@ void testing_spmm_batched_coo(Arguments argus)
     void* buffer;
     CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
 
-    // HIPSPARSE pointer mode host
+    if(argus.call_preprocess)
+    {
+        // HIPSPARSE pointer mode host
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
-        handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
+            handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 #endif
 
-    // HIPSPARSE pointer mode device
+        // HIPSPARSE pointer mode device
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
-    CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
-        handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
+            handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 #endif
+    }
 
     if(argus.unit_check)
     {

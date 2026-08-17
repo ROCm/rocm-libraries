@@ -242,8 +242,8 @@ void batchNormSpatialHostFwdTrain(const tensor<T>& input,
                     mean_accum += inval;
                     variance_accum += inval * inval;
                 } // end for (column)
-            }     // end for (row)
-        }         // end for (n)
+            } // end for (row)
+        } // end for (n)
 
         mean_accum /= nhw;
         variance_accum /= nhw;
@@ -265,8 +265,8 @@ void batchNormSpatialHostFwdTrain(const tensor<T>& input,
                     out(bidx, cidx, row, column) = static_cast<T>(
                         scale(0, cidx, 0, 0) * (invVar * elemStd) + bias(0, cidx, 0, 0));
                 } // for (column)
-            }     // for (row)
-        }         // end for(n_batchs)
+            } // for (row)
+        } // end for(n_batchs)
         if(!saveMean.data.empty())
         {
             saveMean(0, cidx, 0, 0)   = mean_accum;
@@ -313,7 +313,7 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
     if(activ_mode > 0)
     {
         tensor<AccDataType> input_norm =
-            tensor<AccDataType>{x_input.desc.GetLayout_t(), x_input.desc.GetLengths()};
+            tensor<AccDataType>{x_input.desc.GetLayoutEnum().value(), x_input.desc.GetLengths()};
         miopen::par_for(channels, 1, [&](int cidx) {
             double mean           = 0.0;
             double invVar         = 0.0;
@@ -405,8 +405,8 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                         mean_accum += inval;
                         variance_accum += inval * inval;
                     } // end for (column)
-                }     // end for (row)
-            }         // end for (n)
+                } // end for (row)
+            } // end for (n)
 
             mean_accum /= nhw;
             variance_accum /= nhw;
@@ -431,8 +431,8 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                     dbias(0, cidx, 0, 0) += dyelem;
                     dscale(0, cidx, 0, 0) += xhat[xhat_index] * dyelem;
                 } // end for(n_batch)
-            }     // for (column)
-        }         // for (row)
+            } // for (column)
+        } // for (row)
 
         for(int row = 0; row < height; row++)
         { // via rows
@@ -448,9 +448,9 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
                     dx_out(bidx, cidx, row, column) =
                         static_cast<RefDataType>(tmp3 * (tmp2 + tmp1));
                 } // end for(n_batchs)
-            }     // for (column)
-        }         // for (row)
-    });           // for (channel)
+            } // for (column)
+        } // for (row)
+    }); // for (channel)
 }
 
 template <typename XDataType,
@@ -518,8 +518,8 @@ void batchNormActivSpatialHostBwdTrain(miopenActivationMode_t activMode,
                     dbias(0, cidx, 0, 0) += dyelem;
                     dscale(0, cidx, 0, 0) += xhat[xhat_index] * dyelem;
                 } // end for(n_batch)
-            }     // for (column)
-        }         // for (row)
+            } // for (column)
+        } // for (row)
 
         for(int row = 0; row < height; row++)
         { // via rows
@@ -544,9 +544,9 @@ void batchNormActivSpatialHostBwdTrain(miopenActivationMode_t activMode,
                     double tmp3                     = (bnScale(0, cidx, 0, 0) * invVar) / nhw;
                     dx_out(bidx, cidx, row, column) = static_cast<DxDataType>(tmp3 * (tmp2 + tmp1));
                 } // end for(n_batchs)
-            }     // for (column)
-        }         // for (row)
-    });           // for (channel)
+            } // for (column)
+        } // for (row)
+    }); // for (channel)
 }
 
 template <class T, class U, class Tref, class TOutref>
@@ -627,7 +627,7 @@ void batchNormPerActHostFwdTrain(const tensor<T>& input,
                 }
 
             } // for (column)
-        }     // for (row)
+        } // for (row)
     });
 }
 
@@ -723,8 +723,8 @@ void batchNormPerActHostBwdTrain(const tensor<XDataType>& x_input,
                     double tmp3                     = elemInvVar / (double(n));
                     dx_out(bidx, cidx, row, column) = static_cast<DxDataType>(tmp3 * tmp2);
                 } // end for(n_batchs)
-            }     // for (column)
-        }         // for (row)
+            } // for (column)
+        } // for (row)
     });
 }
 
@@ -816,8 +816,8 @@ void batchNormActivPerActHostBwdTrain(miopenActivationMode_t activMode,
                     double tmp3 = elemInvVar / (double(n));
                     dx_out(bidx, cidx, row, column) = static_cast<T>(tmp3 * tmp2);
                 } // end for(n_batchs)
-            }     // for (column)
-        }         // for (row)
+            } // for (column)
+        } // for (row)
     });
 }
 

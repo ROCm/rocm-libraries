@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,8 +28,8 @@
 #include "../elementwise_solution_instances.hpp"
 
 // Ensure access to
-#include "../device/hiptensor_ck_types.hpp"
 #include "../device/hiptensor_elementwise_scale_instances.hpp"
+#include "hiptensor_ck_types.hpp"
 
 namespace hiptensor
 {

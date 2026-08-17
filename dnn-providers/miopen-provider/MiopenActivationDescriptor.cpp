@@ -6,11 +6,11 @@
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 MiopenActivationDescriptor::MiopenActivationDescriptor(
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttrs)
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttrs)
 {
     using namespace miopen_utils;
 
@@ -60,4 +60,4 @@ miopenActivationDescriptor_t MiopenActivationDescriptor::activationDescriptor() 
     return _descriptor;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

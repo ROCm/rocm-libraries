@@ -1,0 +1,426 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --InsertWaitAluPass=enableESM2TrackValuVsrc --print-output
+#
+# InsertWaitAluPass: whole-kernel mode-2 s_wait_alu insertion + SCHED_MODE enable.
+# - setreg HW_REG_WAVE_SCHED_MODE (size=2, value=2) inserted at function entry
+#   (whole-kernel mode2 stays active across calls and is never disabled)
+# - VALU→VMEM RAW emits s_wait_alu va_vdst(N)
+# - VMEM→VALU dst WAR emits s_wait_alu vm_vsrc(N)
+# - VALU→VALU consumer suppresses va_vdst (HW per-register scoreboard covers it)
+# - Instructions that write EXEC eagerly drain VA_VDST via va_vdst(0)
+
+#--- setreg(SCHED_MODE)=2 at function entry; mode2 is never disabled, so no
+#--- setreg(0) is emitted before s_endpgm.
+# CHECK-LABEL: @lifecycle_entry_and_return
+# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(2)
+# CHECK: v_add_f32
+# CHECK-NOT: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(0)
+# CHECK: s_endpgm
+
+st.func @lifecycle_entry_and_return() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_endpgm"() { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- VALU producer → buffer_load consumer reads v0: emit va_vdst wait
+#--- before the load. Two unrelated VALUs sit between, so the encoded
+#--- wait value is non-zero (UB - score = number of VALUs after producer).
+# CHECK-LABEL: @valu_to_vmem_raw
+# CHECK: v_add_f32
+# CHECK: v_mov_b32
+# CHECK: v_mov_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: buffer_load_b32
+
+st.func @valu_to_vmem_raw() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- VMEM read → VALU write to same VGPR: vm_vsrc(0) WAR drain before
+#--- the VALU clobbers a register an in-flight VMEM is still reading.
+# CHECK-LABEL: @vmem_to_valu_war
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @vmem_to_valu_war() {
+^entry:
+  v10 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v3 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- VALU producer → VALU consumer of the same VGPR: VA_VDST is suppressed
+#--- on VALU consumers (HW per-register scoreboard handles VALU→VGPR→VALU
+#--- forwarding in every SCHED_MODE). No s_wait_alu should appear between
+#--- the two VALU instructions.
+# CHECK-LABEL: @valu_to_valu_no_wait
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu
+# CHECK: v_mul_f32
+
+st.func @valu_to_valu_no_wait() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(v0, v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- SALU writes EXEC (s_and_saveexec) between a VALU and a downstream
+#--- VMEM consumer: must drain VA_VDST at the saveexec to prevent the
+#--- non-zero wait value from being satisfied by EXEC-skipped VALUs.
+# CHECK-LABEL: @exec_modifier_drains_va_vdst
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: s_and_saveexec_b32
+
+st.func @exec_modifier_drains_va_vdst() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  s0 = "st.s_and_saveexec_b32"(s1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- v_cmpx_* is VALU that writes EXEC. Step 2 (VALU suppression) would
+#--- otherwise suppress va_vdst here; Step 3 must override with va_vdst(0)
+#--- because the EXEC write invalidates non-zero VA_VDST waits.
+# CHECK-LABEL: @vcmpx_drains_va_vdst
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: v_cmpx_eq_u32
+
+st.func @vcmpx_drains_va_vdst() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.v_cmpx_eq_u32"(v0, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- No EXEC drain when VA_VDST is already empty (no pending VALU).
+# CHECK-LABEL: @exec_no_drain_when_empty
+# CHECK-NOT: s_wait_alu
+# CHECK: s_and_saveexec_b32
+
+st.func @exec_no_drain_when_empty() {
+^entry:
+  s0 = "st.s_and_saveexec_b32"(s1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- VALU→VMEM with no intervening VALU emits va_vdst with the tightest
+#--- (smallest) wait value; the producer is the most recent VALU.
+# CHECK-LABEL: @valu_to_vmem_tight
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst
+# CHECK: buffer_load_b32
+
+st.func @valu_to_vmem_tight() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- Independent VALU before VMEM that reads a *different* register: no
+#--- wait needed (no dependency on the VMEM source operand).
+# CHECK-LABEL: @no_wait_no_dep
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu
+# CHECK: buffer_load_b32
+
+st.func @no_wait_no_dep() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v20) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- TRANS producer (v_rcp_f32) is last of its pipe; a CSMACC in another pipe
+#--- doesn't count. Zero same-pipe followers → va_vdst(0).
+# CHECK-LABEL: @va_vdst_producer_last_of_pipe_zero
+# CHECK: v_rcp_f32
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: buffer_load_b32
+
+st.func @va_vdst_producer_last_of_pipe_zero() {
+^entry:
+  v0 = "st.v_rcp_f32"(v1) { issueCycles = 1, latencyCycles = 8 }
+  v2 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- CSMACC producer (v10) with one later same-pipe CSMACC (v20), plus a TRANS
+#--- in a second pipe. One same-pipe follower → va_vdst(1), not a full drain.
+# CHECK-LABEL: @va_vdst_ooo_follower_nonzero
+# CHECK: v_add_f32
+# CHECK: v_add_f32
+# CHECK: v_rcp_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 1
+# CHECK: buffer_load_b32
+
+st.func @va_vdst_ooo_follower_nonzero() {
+^entry:
+  v10 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v20 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v30 = "st.v_rcp_f32"(v5) { issueCycles = 1, latencyCycles = 8 }
+  v40 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- CSMACC producer (v10) is last of its pipe; two later TRANS in a second pipe
+#--- can't lift the wait (may complete out-of-order). Zero followers → va_vdst(0).
+# CHECK-LABEL: @va_vdst_ooo_producer_last_zero
+# CHECK: v_add_f32
+# CHECK: v_rcp_f32
+# CHECK: v_rcp_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: buffer_load_b32
+
+st.func @va_vdst_ooo_producer_last_zero() {
+^entry:
+  v10 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v30 = "st.v_rcp_f32"(v5) { issueCycles = 1, latencyCycles = 8 }
+  v50 = "st.v_rcp_f32"(v6) { issueCycles = 1, latencyCycles = 8 }
+  v40 = "st.buffer_load_b32"(v10) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- Consumer needs two producers in different pipes: CSMACC v10 (f=1) and TRANS
+#--- v30 (f=0). Wait is min across operands = min(1,0) = 0.
+# CHECK-LABEL: @va_vdst_ooo_two_pipe_consumer_min
+# CHECK: v_add_f32
+# CHECK: v_add_f32
+# CHECK: v_rcp_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: buffer_load_b32
+
+st.func @va_vdst_ooo_two_pipe_consumer_min() {
+^entry:
+  v10 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v20 = "st.v_add_f32"(v3, v4) { issueCycles = 1, latencyCycles = 5 }
+  v30 = "st.v_rcp_f32"(v5) { issueCycles = 1, latencyCycles = 8 }
+  v40 = "st.buffer_load_b32"(v10, v30) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- Fall-off exit: the function has no s_endpgm. Mode2 is enabled at entry and
+#--- never disabled (owned across the whole kernel; region-exit disables no
+#--- longer exist), so only the entry enable is emitted.
+# CHECK-LABEL: @fall_off_exit
+# CHECK: hwreg(26,0,2) = "st.s_setreg_IMM32_b32"(2)
+# CHECK: v_add_f32
+# CHECK-NOT: "st.s_setreg_IMM32_b32"(0)
+
+st.func @fall_off_exit() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- A hold_cnt-only s_wait_alu (a RemoveWaitAluPass survivor) sits
+#--- immediately before a VMEM consumer that needs a fresh va_vdst wait. The
+#--- pass merges the fresh va_vdst field into the existing instruction so the
+#--- hold_cnt constraint is preserved and only one s_wait_alu remains.
+# CHECK-LABEL: @merge_hold_cnt_with_va_vdst
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK-SAME: hold_cnt = 1
+# CHECK-NEXT: buffer_load_b32
+# CHECK-NOT: s_wait_alu
+
+st.func @merge_hold_cnt_with_va_vdst() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  "st.s_wait_alu"() { issueCycles = 1, latencyCycles = 1, mod.waitalu = { hold_cnt = 1 } }
+  v10 = "st.buffer_load_b32"(v0) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- WAR on a VALU *source* operand: a VALU reads v0, then a VMEM load writes
+#--- v0. The load must not clobber v0 until the VALU has finished reading it, so
+#--- va_vdst is tracked on the VALU's source operand (not just its dest) and a
+#--- drain is emitted before the writer.
+# CHECK-LABEL: @valu_src_war_before_vmem_write
+# CHECK: v_add_f32
+# CHECK: s_wait_alu
+# CHECK-SAME: va_vdst = 0
+# CHECK: buffer_load_b32
+
+st.func @valu_src_war_before_vmem_write() {
+^entry:
+  v10 = "st.v_add_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- No WAR when the writer targets a different register than the VALU read:
+#--- the VALU reads v0 but the load writes v30, so no va_vdst drain is needed.
+# CHECK-LABEL: @valu_src_no_war_diff_reg
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu
+# CHECK: buffer_load_b32
+
+st.func @valu_src_no_war_diff_reg() {
+^entry:
+  v10 = "st.v_add_f32"(v0, v2) { issueCycles = 1, latencyCycles = 5 }
+  v30 = "st.buffer_load_b32"(v5) { issueCycles = 1, latencyCycles = 100 }
+}
+
+#--- VM_VSRC WAR wait = producer's same-group follower count, not a full drain.
+#--- Group A = {ds_*, flat_*}, Group B = {buffer/global/scratch/image, flat_*};
+#--- flat_* is in both.
+
+#--- Group A, two ds_loads: producer v0 has 1 same-group follower → vm_vsrc(1).
+# CHECK-LABEL: @vm_ds_ds_follower
+# CHECK: ds_load_b32
+# CHECK: ds_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 1
+# CHECK: v_mov_b32
+
+st.func @vm_ds_ds_follower() {
+^entry:
+  v10 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v11 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- LDS producer with a Group-A follower, plus a Group-B buffer_load. The
+#--- buffer_load is a different group, so producer has 1 follower → vm_vsrc(1).
+# CHECK-LABEL: @vm_ds_buffer_follower
+# CHECK: ds_load_b32
+# CHECK: ds_load_b32
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 1
+# CHECK: v_mov_b32
+
+st.func @vm_ds_buffer_follower() {
+^entry:
+  v10 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v11 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v12 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- LDS producer is last of Group A; two Group-B buffer_loads can't prove it done
+#--- (disjoint FIFO). Zero same-group followers → vm_vsrc(0).
+# CHECK-LABEL: @vm_ds_buffer_last_of_group
+# CHECK: ds_load_b32
+# CHECK: buffer_load_b32
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @vm_ds_buffer_last_of_group() {
+^entry:
+  v10 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v11 = "st.buffer_load_b32"(v1) { issueCycles = 1, latencyCycles = 100 }
+  v12 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- flat_* producer is in both groups, with a follower in each (ds_load in A,
+#--- buffer_load in B). f = max(fA=1, fB=1) = 1 → vm_vsrc(1).
+# CHECK-LABEL: @vm_flat_both_groups
+# CHECK: flat_load_b32
+# CHECK: ds_load_b32
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 1
+# CHECK: v_mov_b32
+
+st.func @vm_flat_both_groups() {
+^entry:
+  v40 = "st.flat_load_b32"(v[0:1], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  v41 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v42 = "st.buffer_load_b32"(v3) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- ds_load producer with a flat_load follower: flat is in Group A, so it counts
+#--- as a same-group follower → vm_vsrc(1).
+# CHECK-LABEL: @vm_flat_ds_groupA
+# CHECK: ds_load_b32
+# CHECK: flat_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 1
+# CHECK: v_mov_b32
+
+st.func @vm_flat_ds_groupA() {
+^entry:
+  v40 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v41 = "st.flat_load_b32"(v[2:3], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- flat_* producer with a Group-B buffer_load follower: fA=0, fB=1 → max=1 →
+#--- vm_vsrc(1).
+# CHECK-LABEL: @vm_flat_buffer_groupB
+# CHECK: flat_load_b32
+# CHECK: buffer_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 1
+# CHECK: v_mov_b32
+
+st.func @vm_flat_buffer_groupB() {
+^entry:
+  v40 = "st.flat_load_b32"(v[0:1], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  v41 = "st.buffer_load_b32"(v2) { issueCycles = 1, latencyCycles = 100 }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Single ds_load, last (and only) op of its group: f==0 → vm_vsrc(0).
+# CHECK-LABEL: @vm_ds_last_single
+# CHECK: ds_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 0
+# CHECK: v_mov_b32
+
+st.func @vm_ds_last_single() {
+^entry:
+  v10 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Four ds_loads in Group A; producer v0 has 3 same-group followers → vm_vsrc(3).
+# CHECK-LABEL: @vm_many_ds
+# CHECK: ds_load_b32
+# CHECK: s_wait_alu
+# CHECK-SAME: vm_vsrc = 3
+# CHECK: v_mov_b32
+
+st.func @vm_many_ds() {
+^entry:
+  v10 = "st.ds_load_b32"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v11 = "st.ds_load_b32"(v1) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v12 = "st.ds_load_b32"(v2) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v13 = "st.ds_load_b32"(v3) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  v0 = "st.v_mov_b32"(v4) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- g_enableESM2SuppressValuToGlobalVaVdst gate on global_prefetch_b8: a VALU
+#--- writes a vaddr VGPR (v0), then global_prefetch_b8 reads it. The gate drops the
+#--- src-RAW va_vdst wait (the DAG already spaces the producer >=32 cycles). Two
+#--- unrelated VALUs sit between, so WITHOUT the suppression a non-zero va_vdst wait
+#--- would be emitted before the prefetch.
+#---
+#--- Regression for the classifier fix: global_prefetch_b8 does NOT carry
+#--- IF_GLOBALLoad, so the original isGLOBALOrAtomic-only gate silently skipped it,
+#--- leaving the wait in place. The gate must also classify it via isGlobalPrefetch().
+#--- No s_wait_alu va_vdst may appear between the producer and the prefetch.
+# CHECK-LABEL: @valu_to_global_prefetch_suppressed
+# CHECK: v_add_f32
+# CHECK-NOT: s_wait_alu{{.*}}va_vdst
+# CHECK: "st.global_prefetch_b8"
+
+st.func @valu_to_global_prefetch_suppressed() {
+^entry:
+  v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v5 = "st.v_mov_b32"(v6) { issueCycles = 1, latencyCycles = 5 }
+  v7 = "st.v_mov_b32"(v8) { issueCycles = 1, latencyCycles = 5 }
+  "st.global_prefetch_b8"(v0, s[0:1]) { issueCycles = 1, latencyCycles = 1 }
+}

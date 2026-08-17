@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,11 +29,6 @@
 namespace rocsparse
 {
     //
-    // Log a message.
-    //
-    void message(const char* msg_, const char* function_, const char* file_, int line_);
-
-    //
     // Log a warning message.
     //
     void warning_message(const char* msg_, const char* function_, const char* file_, int line_);
@@ -47,7 +42,6 @@ namespace rocsparse
                        const char*      file_,
                        int              line_);
 
-#define ROCSPARSE_MESSAGE(MESSAGE__) rocsparse::message(MESSAGE__, __FUNCTION__, __FILE__, __LINE__)
 #define ROCSPARSE_WARNING_MESSAGE(MESSAGE__) \
     rocsparse::warning_message(MESSAGE__, __FUNCTION__, __FILE__, __LINE__)
 #define ROCSPARSE_ERROR_MESSAGE(STATUS__, MESSAGE__) \

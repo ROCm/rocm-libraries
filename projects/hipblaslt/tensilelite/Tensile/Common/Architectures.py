@@ -28,11 +28,11 @@ from subprocess import run, PIPE
 from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
-from .Utilities import print2
+from .Utilities import print1
 
 import rocisa
 
-# Translate GPU targets to filter filenames in Tensile_LOGIC directory
+# Translate GPU targets to filename prefixes in tensilelite logic files
 architectureMap = {
     "all": "_",
     "gfx000": "none",
@@ -67,6 +67,11 @@ architectureMap = {
     "gfx1153": "gfx1153",
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
+    "gfx1250": "gfx1250",
+    # gfx1250 v0 silicon; its capability deltas are in ARCH_CAP_OVERRIDES. It
+    # shares gfx1250's ISA, so `all` -- built from SUPPORTED_ISA -- cannot name
+    # it and it has to be asked for explicitly.
+    "gfx1250v0": "gfx1250v0",
 }
 
 gfxVariantMap = {
@@ -75,6 +80,33 @@ gfxVariantMap = {
     "gfx90a": ["gfx90a:xnack+", "gfx90a:xnack-"],
     "gfx942": ["gfx942:xnack+", "gfx942:xnack-"],
     "gfx950": ["gfx950:xnack+", "gfx950:xnack-"],
+}
+
+# The single declaration point for gfx1250 v0's capability deltas. Both ASIC
+# revisions share ISA (12,5,0) and assemble at `-mcpu=gfx1250`, so the probe
+# can't tell them apart; one build is one revision, so the deltas are declared
+# here and layered onto the probed table. Keys are grouped by capability nature
+# (instruction-shaped vs architectural), matching the dict each consumer reads.
+ARCH_CAP_OVERRIDES = {
+    "gfx1250v0": {
+        # Instruction-shaped: v0 lacks the fp4 32x16 WMMA opcode.
+        "asmCaps": {
+            "HasWMMA_f4_32x16": False,
+        },
+        # Architectural: v0 has no TDM-multicast. NOTE: v0 still requires the
+        # XNACK-replay xcnt drain + SMEM dst/base overlap fix (RequiresXCntForVolatileVMEM),
+        # so it is intentionally NOT overridden here and inherits the probed default (True).
+        "archCaps": {
+            "HasTDMMulticast": False,
+        },
+    },
+}
+
+# Compiler target for names that are not themselves valid targets. The compiler
+# does not model steppings, so gfx1250v0 has to reach `-mcpu` / `--offload-arch`
+# as gfx1250; otherwise clang fails with `unsupported HIP gpu architecture`.
+ARCH_COMPILER_TARGET = {
+    "gfx1250v0": "gfx1250",
 }
 
 SUPPORTED_ISA = [
@@ -99,41 +131,40 @@ SUPPORTED_ISA = [
     IsaVersion(11, 5, 3),
     IsaVersion(12, 0, 0),
     IsaVersion(12, 0, 1),
+    IsaVersion(12, 5, 0),
 ]
 
-SUPPORTED_ARCH_DEVICE_IDS = {
-    "id=74a0": "gfx942",
-    "id=74a1": "gfx942",
-    "id=74a2": "gfx942",
-    "id=74a3": "gfx942",
-    "id=74a5": "gfx942",
-    "id=74a9": "gfx942",
-    "id=75a0": "gfx950",
-    "id=75a2": "gfx950",
-    "id=75a3": "gfx950",
-    # This dictionary should be extended to add device ID-based
-    # filtering support for other architectures.
+# Source-of-truth chip IDs used to generate build predicates.
+GFX_CHIP_IDS = {
+    "gfx942": ["74a0", "74a1", "74a2", "74a3", "74a5", "74a9"],
+    "gfx950": ["75a0", "75b0", "75a2", "75b2", "75a3", "75b3", "75a8", "75b8"],
 }
 
-SUPPORTED_ARCH_CU_COUNTS = {
-    "cu=20": "gfx942",
-    "cu=38": "gfx942",
-    "cu=64": "gfx942",
-    "cu=80": "gfx942",
-    "cu=96": "gfx942",
-    "cu=228": "gfx942",
-    "cu=304": "gfx942",
-    # This dictionary should be extended to add CU count-based
-    # filtering support for other architectures.
+# Source-of-truth CU counts used to generate build predicates.
+GFX_CU_COUNTS = {
+    "gfx942": ["20", "38", "64", "80", "96", "228", "304"],
 }
 
-ARCH_DEVICE_ID_FALLBACKS = {
+SUPPORTED_BUILD_CHIP_IDS = {
+    f"id={chipId}": gfx for gfx, chipIds in GFX_CHIP_IDS.items() for chipId in chipIds
+}
+
+SUPPORTED_BUILD_CU_COUNTS = {
+    f"cu={cuCount}": gfx for gfx, cuCounts in GFX_CU_COUNTS.items() for cuCount in cuCounts
+}
+
+SUPPORTED_CHIP_ID_FALLBACKS = {
+    "id=75b0": ["id=75a0"],
     "id=75a2": ["id=75a0"],
+    "id=75b2": ["id=75a0"],
     "id=75a3": ["id=75a0"],
+    "id=75b3": ["id=75a0"],
+    "id=75a8": ["id=75a0"],
+    "id=75b8": ["id=75a0"],
 }
 
-# Here, `None` refers to an unspecified CU count.
-ARCH_CU_COUNT_FALLBACKS = {
+# `None` refers to an unspecified CU count.
+SUPPORTED_CU_COUNT_FALLBACKS = {
     "cu=20": None,
     "cu=38": None,
     "cu=64": None,
@@ -142,6 +173,14 @@ ARCH_CU_COUNT_FALLBACKS = {
     "cu=228": None,
     "cu=304": None,
 }
+
+def supportsChipIdPredicate(gfx: str) -> bool:
+    """
+    Returns whether PCI chip ID predicates are currently enabled for a GFX architecture.
+
+    Extend as needed to support other architectures.
+    """
+    return gfx == "gfx950"
 
 
 def isaToGfx(arch: IsaVersion) -> str:
@@ -159,6 +198,55 @@ def isaToGfx(arch: IsaVersion) -> str:
 
 
 SUPPORTED_GFX = [isaToGfx(isa) for isa in SUPPORTED_ISA]
+
+
+def gfxToCompilerTarget(name: str) -> str:
+    """The target to compile an architecture name with.
+
+    The two differ only where a name carries something the compiler does not
+    model, currently gfx1250's stepping. Anything else is returned unchanged,
+    which keeps qualifiers like ``:xnack+`` that deriving the target from the
+    ISA version would drop.
+
+    Args:
+        name: A requested gfx architecture name (e.g. 'gfx1250v0').
+
+    Returns:
+        The target for ``-mcpu`` / ``--offload-arch`` (e.g. 'gfx1250').
+    """
+    return ARCH_COMPILER_TARGET.get(name, name)
+
+
+def expandAllArchitectures(archs: List[str]) -> List[str]:
+    """Replaces the ``all`` keyword with the architectures it covers.
+
+    ``all`` is built from SUPPORTED_ISA, so it cannot name an architecture that
+    shares another's ISA; those names survive alongside it and reach the
+    mixed-build guard, rather than being dropped into a silent build of the
+    other stepping. Qualified specs (``gfx942:xnack+``) name architectures
+    ``all`` already covers, so they stay absorbed.
+
+    Empty entries are dropped: cmake joins ``GPU_TARGETS`` with ``;``, so a
+    trailing one arrives as an empty spec the predicate splitter would reject.
+
+    Args:
+        archs: The requested architecture names, possibly including 'all'.
+
+    Returns:
+        The list with 'all' replaced by the architectures it covers.
+    """
+    archs = [a.strip() for a in archs if a.strip()]
+    if "all" not in archs:
+        return archs
+    covered = set(SUPPORTED_GFX)
+    return SUPPORTED_GFX + [
+        a for a in archs if a != "all" and baseArchName(a) not in covered
+    ]
+
+
+def baseArchName(spec: str) -> str:
+    """The bare architecture name in a spec, without predicates or qualifiers."""
+    return spec.split("[")[0].split(":")[0].strip()
 
 
 def gfxToIsa(name: str) -> Optional[IsaVersion]:
@@ -233,6 +321,20 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     """
     Returns returncode if detection failure
     """
+    # Belt-and-suspenders for the GPU-less --cpu-only switch: when CpuOnly is set,
+    # return a spoofed per-arch IsaVersion (derived from gfxToIsa) instead of shelling
+    # out to a device-enumeration tool. The arch comes from the CpuOnlyArch plumbing key.
+    # This backstops any entry path that reaches detection without passing an arch (the
+    # primary path supplies the arch via --gpu-targets and never reaches here). Returning
+    # an IsaVersion makes the isinstance(...) guard in detectGlobalCurrentISA pass so the
+    # "Failed to detect currect ISA" raise never fires GPU-less.
+    # Imported lazily to avoid a circular import (GlobalParameters imports from this module).
+    from .GlobalParameters import globalParameters
+    if globalParameters.get("CpuOnly"):
+        isa = gfxToIsa(globalParameters.get("CpuOnlyArch", "gfx942"))
+        if isa is not None:
+            print(f"# CpuOnly: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
+            return isa
     process = run([detectionTool], stdout=PIPE)
     archList = []
     for line in process.stdout.decode().split("\n"):
@@ -265,6 +367,63 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     return result
 
 
+def detectHostGfxArchs() -> List[str]:
+    """Enumerate the supported GPU architectures physically present on this host.
+
+    Reuses the same device-enumeration tool selection as the rest of the
+    toolchain (``ToolchainDefaults.DEVICE_ENUMERATOR`` -> ``rocm_agent_enumerator``
+    or ``amdgpu-arch``) and the canonical ``gfxToIsa``/``isaToGfx`` maps. Each
+    enumerated line is normalized through ``gfxToIsa`` (which strips ``:xnack±``
+    and other suffixes) and filtered to ``SUPPORTED_ISA``, so CPU agents
+    (``gfx000``) and unsupported devices are dropped.
+
+    Returns:
+        A de-duplicated list of canonical gfx names (e.g. ``["gfx950"]``).
+        Returns an empty list when no enumerator is available or it fails --
+        callers should treat "empty" as "cannot benchmark here".
+    """
+    # Lazy import: keep this module free of a load-time dependency on the
+    # Toolchain package (which imports Common.Utilities) and avoid any import cycle.
+    try:
+        from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
+    except Exception:
+        return []
+
+    tool = ToolchainDefaults.DEVICE_ENUMERATOR
+    try:
+        toolPath = validateToolchain(tool)
+    except (FileNotFoundError, ValueError):
+        return []
+
+    try:
+        process = run([toolPath], stdout=PIPE, stderr=PIPE)
+    except OSError:
+        return []
+    if process.returncode:
+        return []
+
+    archs: List[str] = []
+    for line in process.stdout.decode(errors="replace").splitlines():
+        isa = gfxToIsa(line.strip())
+        if isa is not None and isa in SUPPORTED_ISA:
+            gfx = isaToGfx(isa)
+            if gfx not in archs:
+                archs.append(gfx)
+    return archs
+
+
+def hostHasArch(arch: str) -> bool:
+    """Return True iff ``arch`` matches a supported GPU present on this host.
+
+    Comparison is done on the normalized ISA version, so ``:xnack±`` / CU
+    variants on either side (requested arch or enumerated arch) compare equal.
+    """
+    target = gfxToIsa(arch)
+    if target is None:
+        return False
+    return any(gfxToIsa(a) == target for a in detectHostGfxArchs())
+
+
 class ArchInfo(NamedTuple):
     Name: str
     Gfx: str
@@ -278,26 +437,35 @@ class LogicFileError(Exception):
         super().__init__(self.message)
 
 
-def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
-    """
-    Extracts architecture predicate information from a given logic file.
+class _RawArchHeader(NamedTuple):
+    Name: str
+    Gfx: str
+    DeviceIds: Set[str]
+    CUCount: Optional[str] = None
 
-    The file is expected to have the following format:
-    - Line 0: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
-    - Line 1: Code name of the architecture (e.g., "- aquavanjaram")
-    - Line 2: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
-    - Line 3: Device IDs (e.g., "- [Device 1234, Device 5678]")
 
-    Args:
-        file: Path to a logic file.
-    Returns:
-        ArchInfo: An object containing the extracted architecture predicates.
-    Raises:
-        LogicFileError: If the file does not match the expected format.
+_LIST_MINVER_RE = re.compile(r"- (?:\{MinimumRequiredVersion|MinimumRequiredVersion:)")
+_LIST_ARCH_WITH_CU_RE = re.compile(r"- \{Architecture: (\w+), CUCount: (\d+)\}")
+_LIST_ARCH_RE = re.compile(r"- gfx(\w+)")
+_LIST_DEVICE_LINE_RE = re.compile(r"- \[Device")
+
+_DICT_DEVICE_NAMES_KEY_RE = re.compile(r"^\s*DeviceNames\s*:\s*")
+_DICT_DEVICE_INLINE_RE = re.compile(r"Device\s+([0-9a-fA-F]+)")
+_DICT_DEVICE_ITEM_RE = re.compile(r"^\s*-\s*Device\s+[0-9a-fA-F]+\s*$")
+
+
+def _extractArchInfoFromList(lines: List[str], file: Union[str, Path]) -> _RawArchHeader:
+    """Parse the legacy list-format logic header into a raw architecture tuple.
+
+    Expected header lines are:
+    1) minimum required version,
+    2) schedule/code name,
+    3) architecture (optionally with CUCount),
+    4) device ID list.
     """
 
     def l0(line: str):
-        if not re.match(r"- \{MinimumRequiredVersion", line):
+        if not _LIST_MINVER_RE.match(line):
             raise LogicFileError(
                 f"Expected minimum required version:\n  line: {line}  file: {file}"
             )
@@ -306,8 +474,8 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
         return line[2:].strip()
 
     def l2(line: str):
-        match1 = re.match(r"- \{Architecture: (\w+), CUCount: (\d+)\}", line)
-        match2 = re.match(r"- gfx(\w+)", line)
+        match1 = _LIST_ARCH_WITH_CU_RE.match(line)
+        match2 = _LIST_ARCH_RE.match(line)
         if match1:
             architecture, cu_count = match1.groups()
             return architecture, f"cu={cu_count}"
@@ -319,25 +487,166 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
             )
 
     def l3(line: str):
-        if re.match(r"- \[Device", line):
+        if _LIST_DEVICE_LINE_RE.match(line):
             devIds = re.findall(r"Device (\w+)", line)
-            return set(f"id={id}" for id in devIds)
+            # Normalize to lowercase so downstream consumers (predicate
+            # tables, fallback maps, chip-ID directory matchers) all agree
+            # on the canonical form.
+            return set(f"id={id.lower()}" for id in devIds)
         else:
             raise LogicFileError(f"No device IDs found: line: {line}")
 
+    if len(lines) < 4:
+        raise LogicFileError(f"Expected at least 4 list-format header lines in {file}")
+
+    l0(lines[0])
+    name = l1(lines[1])
+    gfx, cu = l2(lines[2])
+    deviceIds = l3(lines[3])
+    return _RawArchHeader(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
+
+
+def _extractArchInfoFromDictFast(lines: List[str], file: Union[str, Path]) -> _RawArchHeader:
+    """Fast-scan dict-format logic headers without full YAML-object parsing.
+
+    Extracts ScheduleName, ArchitectureName, optional CUCount, and DeviceNames
+    (inline list or multi-line list) directly from text lines.
+    """
+
+    def find_scalar(key: str) -> Optional[str]:
+        pattern = re.compile(rf"^\s*{re.escape(key)}\s*:\s*(.+?)\s*$")
+        for line in lines:
+            match = pattern.match(line)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def parse_device_ids() -> Set[str]:
+        for idx, line in enumerate(lines):
+            if not _DICT_DEVICE_NAMES_KEY_RE.match(line):
+                continue
+
+            rhs = _DICT_DEVICE_NAMES_KEY_RE.sub("", line)
+
+            # Inline list form: DeviceNames: [Device 75a0, Device 75a2]
+            if rhs:
+                ids = _DICT_DEVICE_INLINE_RE.findall(rhs)
+                if not ids:
+                    raise LogicFileError(f"Malformed DeviceNames entry in dict-format logic: {file}")
+                return set(f"id={chip_id.lower()}" for chip_id in ids)
+
+            # Multi-line form:
+            # DeviceNames:
+            #   - Device 75a0
+            ids = []
+            for next_line in lines[idx + 1 :]:
+                if _DICT_DEVICE_ITEM_RE.match(next_line):
+                    ids.extend(_DICT_DEVICE_INLINE_RE.findall(next_line))
+                    continue
+                if not next_line.strip():
+                    continue
+                if re.match(r"^\s", next_line):
+                    break
+                break
+
+            if not ids:
+                raise LogicFileError(f"Malformed DeviceNames entry in dict-format logic: {file}")
+            return set(f"id={chip_id.lower()}" for chip_id in ids)
+
+        raise LogicFileError(f"Expected DeviceNames list in dict-format logic: {file}")
+
+    name = find_scalar("ScheduleName")
+    if not name:
+        raise LogicFileError(f"Expected ScheduleName in dict-format logic: {file}")
+    name = name.strip("'\"")
+
+    gfx = find_scalar("ArchitectureName")
+    if not gfx:
+        raise LogicFileError(f"Expected ArchitectureName in dict-format logic: {file}")
+    gfx = gfx.strip("'\"")
+
+    cu = None
+    cu_count = find_scalar("CUCount")
+    if cu_count:
+        cu_count = cu_count.strip("'\"")
+        if cu_count.isdigit():
+            cu = f"cu={cu_count}"
+
+    deviceIds = parse_device_ids()
+    return _RawArchHeader(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
+
+
+def _finalizeArchInfo(
+    raw: _RawArchHeader,
+    file: Union[str, Path],
+    validateDeviceIds: bool,
+) -> ArchInfo:
+    if validateDeviceIds:
+        try:
+            for predicateSpec in raw.DeviceIds:
+                _verifyPredicate(predicateSpec, raw.Gfx)
+        except ValueError as e:
+            raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+
+    return ArchInfo(
+        Name=raw.Name,
+        Gfx=raw.Gfx,
+        DeviceIds=raw.DeviceIds,
+        CUCount=raw.CUCount,
+    )
+
+
+def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> ArchInfo:
+    """
+    Extracts architecture predicate information from a given logic file.
+
+    Supported logic header formats:
+
+    1) Legacy list format:
+        - Line 0: minimum required version
+            (e.g., "- {MinimumRequiredVersion: 4.33.0}")
+        - Line 1: schedule/code name (e.g., "- aquavanjaram")
+        - Line 2: architecture, optionally with CU count
+            (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
+        - Line 3: device IDs
+            (e.g., "- [Device 1234, Device 5678]")
+
+    2) Dict format (fast header scan, no full YAML-object parsing):
+        - ``ScheduleName``
+        - ``ArchitectureName``
+        - ``CUCount`` (optional)
+        - ``DeviceNames`` (inline or multi-line list)
+
+    Args:
+        file: Path to a logic file.
+        validateDeviceIds: Whether to validate Device IDs against the supported
+            chip-ID tables while parsing.
+    Returns:
+        ArchInfo: An object containing the extracted architecture predicates.
+    Raises:
+        LogicFileError: If the file does not match the expected format.
+    """
+
     with open(file, "r") as f:
-        l0(f.readline())
-        name = l1(f.readline())
-        gfx, cu = l2(f.readline())
-        deviceIds = l3(f.readline())
+        lines = f.read().splitlines()
 
-    try:
-        for id in deviceIds:
-            _verifyPredicate(id, gfx)
-    except ValueError as e:
-        raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+    first_nonempty = next(
+        (
+            line.strip()
+            for line in lines
+            if line.strip() and not line.lstrip().startswith("#")
+        ),
+        "",
+    )
 
-    return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
+    if first_nonempty.startswith("-"): 
+        # List format
+        raw = _extractArchInfoFromList(lines, file)
+    else:  
+        # Dict format
+        raw = _extractArchInfoFromDictFast(lines, file)
+
+    return _finalizeArchInfo(raw, file, validateDeviceIds)
 
 
 def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
@@ -356,14 +665,14 @@ def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
     msgPrefix = f"Invalid predicate: {predicateSpec}"
     key, _, val = predicateSpec.partition("=")
     if key == "id":
-        if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
+        if predicateSpec not in SUPPORTED_BUILD_CHIP_IDS:
             raise ValueError(f"{msgPrefix}: device ID not supported")
-        if gfx and SUPPORTED_ARCH_DEVICE_IDS[predicateSpec] != gfx:
+        if gfx and SUPPORTED_BUILD_CHIP_IDS[predicateSpec] != gfx:
             raise ValueError(f"{msgPrefix}: device ID is not associated with {gfx}")
     elif key == "cu":
-        if predicateSpec not in SUPPORTED_ARCH_CU_COUNTS:
+        if predicateSpec not in SUPPORTED_BUILD_CU_COUNTS:
             raise ValueError(f"{msgPrefix}: CU count not supported")
-        if gfx and SUPPORTED_ARCH_CU_COUNTS[predicateSpec] != gfx:
+        if gfx and SUPPORTED_BUILD_CU_COUNTS[predicateSpec] != gfx:
             raise ValueError(f"{msgPrefix}: CU count is not associated with {gfx}")
     else:
         raise ValueError(f"{msgPrefix}: only device ID and CU count-based predicates are currently supported")
@@ -464,10 +773,10 @@ def _populateVariantMap(
     fallbackDevIds = {
         fallbackId
         for v in requestedDevIds
-        if v in ARCH_DEVICE_ID_FALLBACKS
-        for fallbackId in ARCH_DEVICE_ID_FALLBACKS[v]
+        if v in SUPPORTED_CHIP_ID_FALLBACKS
+        for fallbackId in SUPPORTED_CHIP_ID_FALLBACKS[v]
     }
-    fallbackCUs = {ARCH_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in ARCH_CU_COUNT_FALLBACKS}
+    fallbackCUs = {SUPPORTED_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in SUPPORTED_CU_COUNT_FALLBACKS}
 
     isCuFallback = not requestedCUs or archinfo.CUCount in fallbackCUs
     isDevIdFallback = not requestedDevIds or (

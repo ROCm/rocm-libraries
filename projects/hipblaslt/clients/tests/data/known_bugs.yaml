@@ -7,3 +7,29 @@
 #Known bugs:
 #- { function: matmul, grouped_gemm: 1, known_bug_platforms: "gfx1100, gfx1101, gfx1102, gfx1200, gfx1201" }
 #- { function: matmul, gradient: 1, known_bug_platforms: "gfx1100, gfx1101, gfx1102, gfx1200, gfx1201" }
+
+Known bugs:
+  # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
+  - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+  # ROCM-1545 (same root cause): the special-FP sweep hits it on the TF32 (xf32)
+  # compute type when the input is +Inf or -Inf -- the GPU returns -nan where the
+  # CPU reference is +Inf, failing check_special_value_consistency(). Only the xf32
+  # Inf/-Inf cases fail; the f16/bf16/f32/f64 Inf cases and the xf32 NaN case pass,
+  # so scope the quarantine to compute_type xf32_r + inf/neg_inf. REMOVE once the
+  # TF32 Inf fix lands so these re-activate as an enforced consistency gate.
+  - { name: matmul_special_fp_64x64, function: matmul, compute_type: c_xf32_r, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+  - { name: matmul_special_fp_64x64, function: matmul, compute_type: c_xf32_r, initialization: neg_inf, known_bug_platforms: "gfx950, gfx1250" }
+  # ROCM-26455: bf16 matmul output-store address overflow -- an output element
+  # offset > 2^31 (from an oversized output leading dimension ldc/ldd) wraps in the
+  # 32-bit global-write address path and produces silent wrong results. The gate
+  # matmul_size_t_output_overflow_bf16_ROCM26455 is the bit-exact reproducer
+  # (FAIL-pre-fix / PASS-post-fix). It is registered here as a known failure on the
+  # affected data-center arches so the reproducer can land ahead of the kernel fix.
+  # REMOVE this entry once the output-store path is fixed so the case re-activates
+  # as an enforced bit-exact regression gate.
+
+  # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
+  # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
+  # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
+  - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 128, N: 192, known_bug_platforms: gfx950 }
+  - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 192, N: 128, known_bug_platforms: gfx950 }

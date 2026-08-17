@@ -17,6 +17,20 @@
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/gemm_quant.hpp"
 
+template <bool Is8Bit, ck_tile::index_t M_Warp_Tile = 16>
+constexpr ck_tile::index_t get_k_warp_tile()
+{
+#if CK_TILE_USE_WMMA
+#if defined(CK_USE_GFX1250)
+    return Is8Bit ? 64 : 32;
+#else
+    return 16;
+#endif
+#else
+    return Is8Bit ? 64 : 32;
+#endif
+}
+
 // Forward declarations for quant type-specific implementations
 template <ck_tile::QuantType QT>
 struct QuantTypeTraits;
@@ -39,6 +53,31 @@ struct SafeTupleElement<TTuple,
 template <typename TTuple, size_t Index, typename DefaultType>
 using SafeTupleElement_t = typename SafeTupleElement<TTuple, Index, DefaultType>::type;
 
+namespace test_gemm_quant_base_detail {
+// TODO: replace with C++20 requires later.
+// C++17 detection idiom: true when
+// T::run_quant_gemm_impl<Shape, Partitioner, Traits>(QuantGemmHostArgs, stream_config, bool)
+// is a well-formed expression.
+template <typename T, typename Shape, typename Partitioner, typename Traits, typename = void>
+struct has_run_quant_gemm_impl_splitk : std::false_type
+{
+};
+
+template <typename T, typename Shape, typename Partitioner, typename Traits>
+struct has_run_quant_gemm_impl_splitk<
+    T,
+    Shape,
+    Partitioner,
+    Traits,
+    std::void_t<
+        decltype(std::declval<T*>()->template run_quant_gemm_impl<Shape, Partitioner, Traits>(
+            std::declval<const ck_tile::QuantGemmHostArgs&>(),
+            std::declval<const ck_tile::stream_config&>(),
+            std::declval<bool>()))>> : std::true_type
+{
+};
+} // namespace test_gemm_quant_base_detail
+
 // Base class for common quant gemm functionality
 template <typename Tuple, typename Derived>
 class TestCkTileGemmQuantBase : public ::testing::Test
@@ -58,7 +97,11 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     using AQuantGroupSize           = QuantGroupSize;
     using BQuantGroupSize           = SafeTupleElement_t<Tuple, 11, QuantGroupSize>;
     using BQLayout                  = SafeTupleElement_t<Tuple, 12, AQLayout>;
+    using DsDataType                = SafeTupleElement_t<Tuple, 13, ck_tile::tuple<>>;
+    using DsLayout                  = SafeTupleElement_t<Tuple, 14, ck_tile::tuple<>>;
     using AccDataType               = float; // accumulate always in float
+
+    static_assert(DsDataType::size() == DsLayout::size());
 
     // Get the quant-type specific data types from traits
     using QuantTraits     = QuantTypeTraits<QuantType>;
@@ -74,11 +117,21 @@ class TestCkTileGemmQuantBase : public ::testing::Test
 
     static constexpr ck_tile::index_t M_Warp_Tile = GemmConfig::M_Warp_Tile;
     static constexpr ck_tile::index_t N_Warp_Tile = GemmConfig::N_Warp_Tile;
+
+    // K_Warp_Tile is variant with respect to the compute data type and M warp tile size.
+#if defined(CK_USE_GFX1250)
+    static constexpr bool is_8bit = !(std::is_same_v<ComputeDataType, ck_tile::fp16_t> ||
+                                      std::is_same_v<ComputeDataType, ck_tile::bf16_t>);
+    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<is_8bit, M_Warp_Tile>();
+#else
     static constexpr ck_tile::index_t K_Warp_Tile = GemmConfig::K_Warp_Tile;
-    static constexpr bool PreshuffleQuant         = GemmConfig::PreshuffleQuant;
-    static constexpr bool PreshuffleB             = GemmConfig::PreshuffleB;
-    static constexpr bool TiledMMAPermuteN        = GemmConfig::TiledMMAPermuteN;
-    static constexpr bool DoubleSmemBuffer        = GemmConfig::DoubleSmemBuffer;
+#endif
+
+    static constexpr bool APreshuffleQuant = GemmConfig::APreshuffleQuant;
+    static constexpr bool BPreshuffleQuant = GemmConfig::BPreshuffleQuant;
+    static constexpr bool PreshuffleB      = GemmConfig::PreshuffleB;
+    static constexpr bool TiledMMAPermuteN = GemmConfig::TiledMMAPermuteN;
+    static constexpr bool DoubleSmemBuffer = GemmConfig::DoubleSmemBuffer;
 
     static constexpr bool kPadM = GemmConfig::kPadM;
     static constexpr bool kPadN = GemmConfig::kPadN;
@@ -90,17 +143,19 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     void TearDown() override { static_cast<Derived*>(this)->TearDownQuantTypeSpecific(); }
 
     // Common test execution logic
-    void invoke_quant_gemm(const ck_tile::QuantGemmHostArgs& args, const ck_tile::stream_config& s)
+    template <typename HostArgs>
+    void invoke_quant_gemm(const HostArgs& args,
+                           const ck_tile::stream_config& s,
+                           bool allow_runtime_splitk_tail = false)
     {
         // WP pipeline requires per-thread tile size aligned to Problem::VectorLoadSize.
         // static_assert((WG::kM * WG::kK * sizeof(ADataType) * MIterPerWarp / WaveSize) %
-        // VectorLoadSize == 0). gfx9 cards match the requirements but it fails on gfx12. so we only
-        // need to check the limitation on RDNA cards, i.e. assume wave size is 32.
-        constexpr ck_tile::index_t WaveSize     = 32;
-        constexpr ck_tile::index_t MIterPerWarp = M_Tile / (M_Warp * M_Warp_Tile);
-        constexpr bool SupportVectorSize16 =
+        // VectorLoadSize == 0).
+        const ck_tile::index_t WaveSize     = ck_tile::get_warp_size();
+        const ck_tile::index_t MIterPerWarp = M_Tile / (M_Warp * M_Warp_Tile);
+        const bool SupportVectorSize16 =
             (M_Warp_Tile * K_Warp_Tile * sizeof(ADataType) * MIterPerWarp / WaveSize) % 16 == 0;
-        constexpr int VectorSize = PreshuffleB ? (SupportVectorSize16 ? 16 : 8) : 16;
+        const int VectorSize = PreshuffleB ? (SupportVectorSize16 ? 16 : 8) : 16;
         using CodegenGemmShape =
             ck_tile::TileGemmShape<ck_tile::sequence<M_Tile, N_Tile, K_Tile>,
                                    ck_tile::sequence<M_Warp, N_Warp, K_Warp>,
@@ -111,7 +166,8 @@ class TestCkTileGemmQuantBase : public ::testing::Test
         using CodegenGemmTraits = ck_tile::TileGemmQuantTraits<kPadM,
                                                                kPadN,
                                                                kPadK,
-                                                               PreshuffleQuant,
+                                                               APreshuffleQuant,
+                                                               BPreshuffleQuant,
                                                                PreshuffleB,
                                                                ALayout,
                                                                BLayout,
@@ -125,9 +181,24 @@ class TestCkTileGemmQuantBase : public ::testing::Test
                                                                VectorSize>;
 
         // Let the derived class create the appropriate pipeline and epilogue
-        static_cast<Derived*>(this)
-            ->template run_quant_gemm_impl<CodegenGemmShape, TilePartitioner, CodegenGemmTraits>(
-                args, s);
+        auto* derived = static_cast<Derived*>(this);
+        if constexpr(test_gemm_quant_base_detail::has_run_quant_gemm_impl_splitk<
+                         Derived,
+                         CodegenGemmShape,
+                         TilePartitioner,
+                         CodegenGemmTraits>::value)
+        {
+            derived->template run_quant_gemm_impl<CodegenGemmShape,
+                                                  TilePartitioner,
+                                                  CodegenGemmTraits>(
+                args, s, allow_runtime_splitk_tail);
+        }
+        else
+        {
+            derived->template run_quant_gemm_impl<CodegenGemmShape,
+                                                  TilePartitioner,
+                                                  CodegenGemmTraits>(args, s);
+        }
     }
 
     void RunTest(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
@@ -151,7 +222,7 @@ class TestCkTileGemmQuantBase : public ::testing::Test
                              const float max_accumulated_value)
     {
         using ComputeType = std::conditional_t<
-            std::is_same_v<BDataType_, ck_tile::pk_fp4_raw_t>,
+            std::is_same_v<BDataType_, ck_tile::pk_fp4_t>,
             ADataType_,
             std::conditional_t<sizeof(ADataType_) < sizeof(BDataType_), ADataType_, BDataType_>>;
         // Calculate thresholds
@@ -207,7 +278,7 @@ template <>
 struct QuantTypeTraits<ck_tile::QuantType::ABQuantGrouped>
 {
     template <typename ADataType, typename BDataType>
-    using ComputeDataType = BDataType; // For AQuant, compute type is BDataType
+    using ComputeDataType = void; // Use automatically determined compute type
 
     static constexpr const char* name = "abquant";
 };

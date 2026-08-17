@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -253,6 +253,12 @@ try
             "                           Leading dimension of matrices C.\n"
             "                           ")
 
+        ("ldr",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices R.\n"
+            "                           ")
+
         ("ldt",
          value<rocblas_int>(),
             "Matrix size parameter.\n"
@@ -337,6 +343,12 @@ try
          value<rocblas_stride>(),
             "Matrix/vector stride parameter.\n"
             "                           Stride for vectors tau, taup, and ipiv.\n"
+            "                           ")
+
+        ("strideR",
+         value<rocblas_stride>(),
+            "Matrix/vector stride parameter.\n"
+            "                           Stride for matrices/vectors R.\n"
             "                           ")
 
         ("strideS",
@@ -565,6 +577,25 @@ try
             "                           Used in iterative Jacobi functions.\n"
             "                           ")
 
+        // cholqr options
+        ("cholshift",
+         value<char>()->default_value('N'),
+            "N = None, C = Computed, P = Provided.\n"
+            "                           Specifies how sigma is determined for the shifted cholqr method.\n"
+            "                           ")
+
+        ("cholnum",
+         value<rocblas_int>()->default_value(1),
+            "Total number of Cholesky factorizations performed by the cholqr method.\n"
+            "                           Cholnum - 1 factorizations are used for the refinement.\n"
+            "                           ")
+
+        ("sigma",
+         value<double>()->default_value(0),
+            "Value of sigma when provided for the shifted cholqr method .\n"
+            "                           Same value is used for all matrices in batched cases.\n"
+            "                           ")
+
         // other options
         ("abstol",
          value<double>()->default_value(0),
@@ -633,6 +664,12 @@ try
             "                           Indicates if matrix B should be transposed.\n"
             "                           ")
 
+        ("norm_type",
+         value<char>()->default_value('1'),
+            "1 (or O) = one-norm, F = Frobenius, I = infinity-norm, M = max element.\n"
+            "                           Specifies which matrix norm to compute.\n"
+            "                           ")
+
         ("uplo",
          value<char>()->default_value('U'),
             "U = upper, L = lower.\n"
@@ -659,6 +696,7 @@ try
     if(!argus.perf)
     {
         print_version_info();
+        print_asan_kernel_warning("rocsolver-bench");
 
         rocblas_int device_count = query_device_property();
         if(device_count <= 0)
@@ -687,7 +725,9 @@ try
     argus.validate_eorder("eorder");
     argus.validate_esort("esort");
     argus.validate_itype("itype");
+    argus.validate_norm_type("norm_type");
     argus.validate_rfinfo_mode("rfinfo_mode");
+    argus.validate_cholshift("cholshift");
 
     // prepare logging infrastructure and ignore environment variables
     rocsolver_log_begin();

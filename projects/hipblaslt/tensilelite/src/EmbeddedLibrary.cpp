@@ -24,8 +24,6 @@
  *
  *******************************************************************************/
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
-
 #include <Tensile/EmbeddedLibrary.hpp>
 
 #include <Tensile/Contractions.hpp>
@@ -50,5 +48,3 @@ namespace TensileLite
         EmbeddedLibrary<ContractionProblemGemm, ContractionSolution>::NewLibrary(
             std::string const&);
 } // namespace TensileLite
-
-#endif

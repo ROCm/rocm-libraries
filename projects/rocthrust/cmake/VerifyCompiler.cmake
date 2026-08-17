@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
     list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
     find_package(hip REQUIRED CONFIG PATHS /opt/rocm)
 endif()
@@ -29,19 +29,19 @@ if(HIP_COMPILER STREQUAL "nvcc")
     message(FATAL_ERROR "rocThrust does not support the CUDA backend.")
 endif()
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
     # When building for HIP, make sure we have a hip-aware clang.
     if(HIP_COMPILER STREQUAL "clang")
         if(USE_HIPCXX)
             if(NOT (CMAKE_HIP_COMPILER MATCHES ".*hipcc$" OR CMAKE_HIP_COMPILER MATCHES ".*clang\\+\\+"))
-                message(FATAL_ERROR "When ROCTHRUST_DEVICE_SYSTEM is set to 'HIP', then 'hipcc' or a HIP-aware Clang must be used as the C++ compiler.")
+                message(FATAL_ERROR "When LINK_HIP_DEVICE_LIBS is set to 'ON', then 'hipcc' or a HIP-aware Clang must be used as the C++ compiler.")
             endif()
         else()
             if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-                message(FATAL_ERROR "When ROCTHRUST_DEVICE_SYSTEM is set to 'HIP', then 'hipcc' or a HIP-aware Clang must be used as the C++ compiler.")
+                message(FATAL_ERROR "When LINK_HIP_DEVICE_LIBS is set to 'ON', then 'hipcc' or a HIP-aware Clang must be used as the C++ compiler.")
             endif()
         endif()
     else()
-        message(FATAL_ERROR "When ROCTHRUST_DEVICE_SYSTEM is set to 'HIP', HIP_COMPILER must be `clang` (AMD ROCm platform)")
+        message(FATAL_ERROR "When LINK_HIP_DEVICE_LIBS is set to 'ON', HIP_COMPILER must be `clang` (AMD ROCm platform)")
     endif()
 endif()

@@ -28,7 +28,7 @@ The CPU Graph Executor is a reference implementation system designed to execute 
 
 The CPU Graph Executor follows a modular architecture pattern with clear separation of concerns:
 
-![CPU Graph Executor Architecture](./images/CPU_reference_graph_executor_high_level_arch.png)
+![CPU Graph Executor Architecture](../images/CPU_reference_graph_executor_high_level_arch.png)
 
 ## Architecture Components
 

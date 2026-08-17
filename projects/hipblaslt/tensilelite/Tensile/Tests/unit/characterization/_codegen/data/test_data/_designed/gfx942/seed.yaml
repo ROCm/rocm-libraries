@@ -1,0 +1,73 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2 designed seed config for gfx942 codegen characterization.
+#
+# Goal: exercise the most whole-project lines with the fewest emitted kernels.
+# The P1 attribution (_codegen/attribution-gfx942.json) shows one rich
+# bf16 BH + Bias + Activation config (gfx942__BBS_BH_Bias_Act_yaml) alone
+# dominates the arch line union (~19,219 whole-project lines, 1 kernel).
+#
+# The harness only drives BenchmarkProblems[0], so the ProblemType is fixed to
+# that dominant bf16/BH/Bias/Activation shape. We then add the cheapest
+# marginal coverage *within the same data type* via a tiny ForkParameters
+# cartesian product:
+#   - MatrixInstruction : 2 MFMA shapes  (marginal MI paths; cited by the
+#                         F8N_multi/DTV/DB attribution entries that achieve
+#                         their marginal yield by varying MatrixInstruction)
+#   - DirectToVgprA     : [False, True]  (gfx942__DTV_yaml, +388 marginal lines)
+# => 2 x 2 = 4 emitted kernels (well under the <=8 budget).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) NT, BH + Bias + Activation
+  # == dominant attribution entry gfx942__BBS_BH_Bias_Act_yaml
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+          - [32, 32,  8, 1,  1,   1, 1,  4, 1 ]
+        - DirectToVgprA: [False, True]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - DepthU: [32]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: relu]

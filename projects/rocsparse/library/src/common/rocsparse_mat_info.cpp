@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,16 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+const rocsparse::numeric_boost* _rocsparse_mat_info::get_boost() const
+{
+    return &this->m_boost;
+}
+
+rocsparse::numeric_boost* _rocsparse_mat_info::get_boost()
+{
+    return &this->m_boost;
+}
+
 rocsparse_csrsm_info _rocsparse_mat_info::get_csrsm_info()
 {
     return this->m_trm.create_csrsm_info();
@@ -40,6 +50,10 @@ rocsparse_csrilu0_info _rocsparse_mat_info::get_csrilu0_info()
 rocsparse_csric0_info _rocsparse_mat_info::get_csric0_info()
 {
     return this->m_trm.create_csric0_info();
+}
+rocsparse_csrildlt0_info _rocsparse_mat_info::get_csrildlt0_info()
+{
+    return this->m_trm.create_csrildlt0_info();
 }
 rocsparse_bsrsm_info _rocsparse_mat_info::get_bsrsm_info()
 {
@@ -80,6 +94,12 @@ rocsparse::trm_info_t* _rocsparse_mat_info::get_csric0_info(rocsparse_operation 
                                                             rocsparse_fill_mode fill_mode)
 {
     return this->get_csric0_info()->get(operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrildlt0_info(rocsparse_operation operation,
+                                                               rocsparse_fill_mode fill_mode)
+{
+    return this->get_csrildlt0_info()->get(operation, fill_mode);
 }
 
 rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsm_info(rocsparse_operation operation,
@@ -162,6 +182,13 @@ void _rocsparse_mat_info::set_csric0_info(rocsparse_operation    operation,
     this->m_trm.create_csric0_info()->set(operation, fill_mode, trm);
 }
 
+void _rocsparse_mat_info::set_csrildlt0_info(rocsparse_operation    operation,
+                                             rocsparse_fill_mode    fill_mode,
+                                             rocsparse::trm_info_t* trm)
+{
+    this->m_trm.create_csrildlt0_info()->set(operation, fill_mode, trm);
+}
+
 std::shared_ptr<_rocsparse_csrsv_info> _rocsparse_mat_info::get_shared_csrsv_info()
 {
     return this->m_trm.get_shared_csrsv_info();
@@ -177,6 +204,10 @@ std::shared_ptr<_rocsparse_csrilu0_info> _rocsparse_mat_info::get_shared_csrilu0
 std::shared_ptr<_rocsparse_csric0_info> _rocsparse_mat_info::get_shared_csric0_info()
 {
     return this->m_trm.get_shared_csric0_info();
+}
+std::shared_ptr<_rocsparse_csrildlt0_info> _rocsparse_mat_info::get_shared_csrildlt0_info()
+{
+    return this->m_trm.get_shared_csrildlt0_info();
 }
 
 std::shared_ptr<_rocsparse_bsrsv_info> _rocsparse_mat_info::get_shared_bsrsv_info()
@@ -211,6 +242,10 @@ void _rocsparse_mat_info::clear_csrilu0_info()
 void _rocsparse_mat_info::clear_csric0_info()
 {
     this->m_trm.clear_csric0_info();
+}
+void _rocsparse_mat_info::clear_csrildlt0_info()
+{
+    this->m_trm.clear_csrildlt0_info();
 }
 void _rocsparse_mat_info::clear_bsrsv_info()
 {
@@ -257,6 +292,16 @@ void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
     this->bsrmv_info = value;
 }
 
+rocsparse_coomv_info _rocsparse_mat_info::get_coomv_info()
+{
+    return this->coomv_info;
+}
+
+void _rocsparse_mat_info::set_coomv_info(rocsparse_coomv_info value)
+{
+    this->coomv_info = value;
+}
+
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
 {
     this->m_sorted_coo2csr_info = value;
@@ -284,7 +329,7 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
     // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
     // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-    WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
+    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
     //
     // TRM_INFO data are automatically destroyed.
@@ -299,6 +344,12 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     {
         delete this->bsrmv_info;
         this->bsrmv_info = nullptr;
+    }
+
+    if(this->coomv_info != nullptr)
+    {
+        delete this->coomv_info;
+        this->coomv_info = nullptr;
     }
 
     rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();

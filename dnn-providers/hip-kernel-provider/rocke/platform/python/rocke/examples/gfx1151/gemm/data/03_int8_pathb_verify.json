@@ -1,0 +1,15 @@
+{
+  "kernel": "wmma_gemm_int8 (Path B: int8 storage / f16 compute)",
+  "shape": {
+    "M": 128,
+    "N": 128,
+    "K": 128
+  },
+  "scale_a": 0.05,
+  "scale_b": 0.05,
+  "tol": 0.02,
+  "max_abs_diff": 1.7881393432617188e-07,
+  "bad": 0,
+  "size": 16384,
+  "pass": true
+}

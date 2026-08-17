@@ -31,31 +31,31 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
 *  \details
-*  \p hipsparseXcsrilu02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT, if either a
+*  \p hipsparseXcsrilu02_zeroPivot returns \ref HIPSPARSE_STATUS_ZERO_PIVOT if either a
 *  structural or numerical zero has been found during \ref hipsparseScsrilu02 "hipsparseXcsrilu02()"
-*  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using same
+*  computation. The first zero pivot \f$j\f$ at \f$A_{j,j}\f$ is stored in \p position, using the same
 *  index base as the CSR matrix.
 *
 *  \p position can be in host or device memory. If no zero pivot has been found,
 *  \p position is set to -1 and \ref HIPSPARSE_STATUS_SUCCESS is returned instead.
 *
-*  \note \p hipsparseXcsrilu02_zeroPivot is a blocking function. It might influence
-*  performance negatively.
+*  \note \p hipsparseXcsrilu02_zeroPivot is a blocking function. It might negatively influence
+*  performance.
 *
 *  \deprecated
 *  This function is deprecated when using the CUDA backend (CUDA 12.0+) and will be 
 *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  info        structure that holds the information collected during the analysis step.
 *  @param[inout]
-*  position    pointer to zero pivot \f$j\f$, can be in host or device memory.
+*  position    pointer to zero pivot \f$j\f$, which can be in host or device memory.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
-*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info or \p position is nullptr.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, or \p position is nullptr.
 *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 *  \retval HIPSPARSE_STATUS_ZERO_PIVOT zero pivot has been found.
 */
@@ -83,7 +83,7 @@ hipsparseStatus_t
  *  removed in CUDA 13.0. This deprecation does not apply to the ROCm backend.
  *
  *  @param[in]
- *  handle          handle to the hipsparse library context queue.
+ *  handle          handle to the hipSPARSE library context queue.
  *  @param[in]
  *  info            structure that holds the information collected during the analysis step.
  *  @param[in]
@@ -95,7 +95,7 @@ hipsparseStatus_t
  *
  *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
  *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
- *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, \p tol or \p boost_val is nullptr.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p info, \p tol, or \p boost_val is nullptr.
  *  \retval HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
  */
 /**@{*/
@@ -139,7 +139,7 @@ hipsparseStatus_t hipsparseZcsrilu02_numericBoost(hipsparseHandle_t handle,
 *  must be allocated by the user.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                  number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -163,7 +163,7 @@ hipsparseStatus_t hipsparseZcsrilu02_numericBoost(hipsparseHandle_t handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
-*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBufferSizeInBytes pointer
+*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info, or \p pBufferSizeInBytes pointer
 *              is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -223,7 +223,7 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSize(hipsparseHandle_t         handle
 *  must be allocated by the user.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                  number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -247,7 +247,7 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSize(hipsparseHandle_t         handle
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
-*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBufferSizeInBytes pointer
+*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info, or \p pBufferSizeInBytes pointer
 *              is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
@@ -305,11 +305,11 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSizeExt(hipsparseHandle_t         han
 *  If the matrix sparsity pattern changes, the gathered information will become invalid.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle           handle to the hipsparse library context queue.
+*  handle           handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -334,7 +334,7 @@ hipsparseStatus_t hipsparseZcsrilu02_bufferSizeExt(hipsparseHandle_t         han
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA,
-*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info or \p pBuffer pointer is invalid.
+*              \p csrSortedRowPtrA, \p csrSortedColIndA, \p info, or \p pBuffer pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */
 /**@{*/
@@ -391,8 +391,8 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
 /*! \ingroup precond_module
-*  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using CSR
-*  storage format
+*  \brief Incomplete LU factorization with 0 fill-ins and no pivoting using the CSR
+*  storage format.
 *
 *  \details
 *  \p hipsparseXcsrilu02 computes the incomplete LU factorization with 0 fill-ins and no
@@ -411,12 +411,12 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 *
 *  Computing the above incomplete \f$LU\f$ factorization requires three steps to complete. First,
 *  the user determines the size of the required temporary storage buffer by calling
-*  \ref hipsparseScsrilu02_bufferSize "hipsparseXcsrilu02_bufferSize()". Once this buffer size has been determined,
+*  \ref hipsparseScsrilu02_bufferSize "hipsparseXcsrilu02_bufferSize()". After this buffer size has been determined,
 *  the user allocates the buffer and passes it to \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()".
 *  This will perform analysis on the sparsity pattern of the matrix. Finally, the user calls \p hipsparseScsrilu02,
 *  \p hipsparseDcsrilu02, \p hipsparseCcsrilu02, or \p hipsparseZcsrilu02 to perform the actual factorization. The calculation
-*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern
-*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. Once all calls
+*  of the buffer size and the analysis of the sparse matrix only need to be performed once for a given sparsity pattern,
+*  while the factorization can be repeatedly applied to multiple matrices having the same sparsity pattern. After all calls
 *  to \ref hipsparseScsrilu02 "hipsparseXcsrilu02()" are complete, the temporary buffer can be deallocated.
 *
 *  When computing the \f$LU\f$ factorization, it is possible that \f$U_{jj} == 0\f$ which would result in a division by zero.
@@ -430,7 +430,7 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 *    0 & 1 & 2
 *    \end{bmatrix}
 *  \f]
-*  results in a successful \f$LU\f$ factorization, however running with the matrix:
+*  results in a successful \f$LU\f$ factorization. However, running with the matrix:
 *  \f[
 *    \begin{bmatrix}
 *    2 & 1 & 0 \\
@@ -452,10 +452,10 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 *  \ref hipsparseScsrilu02_analysis "hipsparseXcsrilu02_analysis()" and/or the presence of a structural or
 *  numerical zero by calling \ref hipsparseXcsrilu02_zeroPivot() after \ref hipsparseScsrilu02 "hipsparseXcsrilu02()".
 *  In both cases, \ref hipsparseXcsrilu02_zeroPivot() will report the first zero pivot (either numerical or structural)
-*  found. See example below. The user can also set the diagonal type to be \f$1\f$ using \ref hipsparseSetMatDiagType()
+*  found. See the example below. The user can also set the diagonal type to be \f$1\f$ using \ref hipsparseSetMatDiagType(),
 *  which will interpret the matrix \f$A\f$ as having ones on its diagonal (even if no nonzero exists in the sparsity pattern).
 *
-*  \p hipsparseXcsrilu02 computes the \f$LU\f$ factorization inplace meaning that the values array \p csrSortedValA_valM of the \f$A\f$
+*  \p hipsparseXcsrilu02 computes the \f$LU\f$ factorization inplace, meaning that the values array \p csrSortedValA_valM of the \f$A\f$
 *  matrix is overwritten with the \f$L\f$ matrix stored in the strictly lower triangular part of \f$A\f$ and the \f$U\f$ matrix
 *  stored in the upper part of \f$A\f$:
 *
@@ -475,21 +475,21 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 *    \end{align}
 *  \f]
 *  The row pointer array \p csrSortedRowPtrA and the column indices array \p csrSortedColIndA remain the same for \f$A\f$ and \f$LU\f$ as
-*  the incomplete factorization does not generate new nonzeros in \f$LU\f$ which do not already exist in \f$A\f$.
+*  the incomplete factorization does not generate new non-zeros in \f$LU\f$ which do not already exist in \f$A\f$.
 *
-*  The performance of computing \f$LU\f$ factorization with hipSPARSE greatly depends on the sparisty pattern
-*  the the matrix \f$A\f$ as this is what determines the amount of parallelism available.
+*  The performance of computing \f$LU\f$ factorization with hipSPARSE greatly depends on the sparsity pattern
+*  of the matrix \f$A\f$, because this is what determines the amount of parallelism available.
 *
 *  \note
 *  The sparse CSR matrix has to be sorted. This can be achieved by calling
 *  \ref hipsparseXcsrsort().
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m                  number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -513,7 +513,7 @@ hipsparseStatus_t hipsparseZcsrilu02_analysis(hipsparseHandle_t         handle,
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p m, \p nnz, \p descrA, \p csrSortedValA_valM,
-*              \p csrSortedRowPtrA or \p csrSortedColIndA pointer is invalid.
+*              \p csrSortedRowPtrA, or \p csrSortedColIndA pointer is invalid.
 *  \retval     HIPSPARSE_STATUS_ARCH_MISMATCH the device is not supported.
 *  \retval     HIPSPARSE_STATUS_INTERNAL_ERROR an internal error occurred.
 */

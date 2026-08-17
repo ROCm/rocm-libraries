@@ -1,7 +1,7 @@
 ---
 include: hipsparselt_common.yaml
 include: known_bugs.yaml
-include: spmm_common_row.yaml
+include: spmm_common_16_row.yaml
 
 Definitions:
   - &alpha_beta_range

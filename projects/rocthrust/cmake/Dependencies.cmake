@@ -13,8 +13,16 @@
 include(cmake/DownloadProject.cmake)
 include(FetchContent)
 
+# Suppress ROCMChecks WARNING on third-party dependencies that modify CMAKE_CXX_FLAGS
+set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
+macro(rocm_check_toolchain_var var access value list_file)
+  if(NOT _ROCTHRUST_DISABLE_ROCM_CHECKS)
+    _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
+  endif()
+endmacro()
+
 # The option of using the SQLite provided by the system, instead of downloading a copy
-option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
+option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" ON )
 
 # This function checks to see if the download branch given by "branch" exists in the repository.
 # It does so using the git ls-remote command.
@@ -236,7 +244,7 @@ function(fetch_dep method repo_name repo_path download_branch)
   endif()
 endfunction()
 
-if(${ROCTHRUST_DEVICE_SYSTEM} STREQUAL "HIP")
+if(${LINK_HIP_DEVICE_LIBS})
   fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
 
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
@@ -288,7 +296,9 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
         GIT_TAG        release-1.11.0
       )
     endif()
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googletest)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main  ALIAS gtest_main)
   endif()
@@ -314,22 +324,23 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   endif()
 
   # SQlite (for run-to-run bitwise-reproducibility tests)
-  # Note: SQLite 3.36.0 enabled the backup API by default, which we need
-  # for cache serialization.  We also want to use a static SQLite,
-  # and distro static libraries aren't typically built
-  # position-independent.
-  if( SQLITE_USE_SYSTEM_PACKAGE )
-    find_package(SQLite3 3.36 REQUIRED)
+  # Note: SQLite 3.51.3 to address CVE https://github.com/advisories/GHSA-p36r-6g67-869c
+  set(SQLITE_MIN_VERSION "3.51.3")
+  string(REPLACE "." "_" SQLITE_VER_UNDERSCORE ${SQLITE_MIN_VERSION})
+
+  if(SQLITE_USE_SYSTEM_PACKAGE)
+    find_package(SQLite3 ${SQLITE_MIN_VERSION} REQUIRED)
     list(APPEND static_depends PACKAGE SQLite3)
     set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
   else()
-    if(DEFINED ENV{SQLITE_3_50_2_SRC_URL})
-      set(SQLITE_3_50_2_SRC_URL_INIT $ENV{SQLITE_3_50_2_SRC_URL})
+    message(STATUS "Force download local copy of SQLite on. Downloading and building SQLite.")
+    if(DEFINED ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
+      set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT $ENV{SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL})
     else()
-      set(SQLITE_3_50_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3500200.zip)
+      set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT https://sqlite.org/2026/sqlite-amalgamation-3510300.zip)
     endif()
-    set(SQLITE_3_50_2_SRC_URL ${SQLITE_3_50_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
-    set(SQLITE_SRC_3_50_2_SHA3_256 75c118e727ee6a9a3d2c0e7c577500b0c16a848d109027f087b915b671f61f8a CACHE STRING "SHA3-256 hash of SQLite source code")
+    set(SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL ${SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
+    set(SQLITE_SRC_${SQLITE_VER_UNDERSCORE}_SHA3_256 ced02ff9738970f338c9c8e269897b554bcda73f6cf1029d49459e1324dbeaea CACHE STRING "SHA3-256 hash of SQLite source code")
 
     # embed SQLite
     if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
@@ -337,10 +348,9 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       cmake_policy(SET CMP0135 NEW)
     endif()
 
-    message("Downloading SQLite.")
     FetchContent_Declare(sqlite_local
-      URL ${SQLITE_3_50_2_SRC_URL}
-      URL_HASH SHA3_256=${SQLITE_SRC_3_50_2_SHA3_256}
+      URL ${SQLITE_${SQLITE_VER_UNDERSCORE}_SRC_URL}
+      URL_HASH SHA3_256=${SQLITE_SRC_${SQLITE_VER_UNDERSCORE}_SHA3_256}
     )
     FetchContent_MakeAvailable(sqlite_local)
 
@@ -367,7 +377,7 @@ endif()
 
 # Benchmark dependencies
 if(BUILD_BENCHMARK)
-  set(BENCHMARK_VERSION 1.9.4)
+  set(BENCHMARK_VERSION 1.9.5)
   if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
     find_package(benchmark ${BENCHMARK_VERSION} QUIET)
@@ -398,10 +408,24 @@ if(BUILD_BENCHMARK)
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        v${BENCHMARK_VERSION}
     )
+    set(HAVE_STD_REGEX ON)
+    set(RUN_HAVE_STD_REGEX 1)
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS TRUE)
     FetchContent_MakeAvailable(googlebench)
-    if(NOT TARGET benchmark::benchmark)
-      add_library(benchmark::benchmark ALIAS benchmark)
-    endif()
+    set(_ROCTHRUST_DISABLE_ROCM_CHECKS FALSE)
+	# Clang on Windows throws the following warnings with Googlebenchmark v1.9.5 (along with Werror):
+    # googlebench-src/src/string_util.cc:158:34: error: format string is not a string literal [-Werror,-Wformat-nonliteral]
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND WIN32)  
+	  if(TARGET benchmark)  
+	    target_compile_options(benchmark PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)  
+	  endif()  
+	  if(TARGET benchmark_main)  
+	    target_compile_options(benchmark_main PRIVATE -Wno-format-nonliteral -Wno-missing-format-attribute -Wno-unused-command-line-argument)	
+	  endif()
+      if(NOT TARGET benchmark::benchmark)
+        add_library(benchmark::benchmark ALIAS benchmark)
+      endif()
+	endif()
   endif()
 
   # rocRAND (https://github.com/ROCm/rocm-libraries)

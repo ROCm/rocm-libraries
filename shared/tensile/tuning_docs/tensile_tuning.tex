@@ -1252,7 +1252,7 @@ Options:
 \item To avoid throttling, set the system clock (sclk) and memory clock (memclk) to a near one-to-one ratio?
 
   \begin{itemize}
-  	\item Can be done using rocm-smi or atitool?
+  	\item Can be done using amd-smi or atitool?
   \end{itemize}
 
 \item CPU timers are used by rocblas-bench, while GPU timers are used by Tensile?
@@ -1312,7 +1312,7 @@ Use the following steps to install the Tensile and automation dependencies. \new
 sudo apt install -y --no-install-recommends cmake make ca-certificates git \
 pkg-config python3 python3-dev python3-matplotlib python3-pandas python3-pip \
 python3-setuptools python3-tk python3-venv python3-yaml libnuma1 llvm-6.0-dev \
-libboost-all-dev zlib1g-dev libomp-dev gfortran libpthread-stubs0-dev \
+zlib1g-dev libomp-dev gfortran libpthread-stubs0-dev \
 libmsgpack-dev libmsgpackc2 wget
 \end{lstlisting}
 

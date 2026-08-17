@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Serialization/Base.hpp>
+
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -102,12 +104,15 @@ namespace TensileLite
                 iot::mapOptional(io, "packSummationDims", s.packSummationDims);
                 iot::mapOptional(io, "magicDivAlg", s.magicDivAlg);
                 iot::mapOptional(io, "streamK", s.streamK);
+                iot::mapOptional(io, "streamKForceDPOnly", s.streamKForceDPOnly);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
+                iot::mapOptional(io, "prefetchAcrossPersistent", s.prefetchAcrossPersistent);
                 iot::mapOptional(io, "persistentKernel", s.persistentKernel);
                 iot::mapOptional(io, "persistentKernelAlongBatch", s.persistentKernelAlongBatch);
                 iot::mapRequired(io, "sourceKernel", s.sourceKernel);
 
                 iot::mapRequired(io, "globalAccumulation", s.globalAccumulation);
+                iot::mapOptional(io, "adaptiveGemmGSUA", s.adaptiveGemmGSUA);
                 iot::mapRequired(io, "workspaceSizePerElemC", s.workspaceSizePerElemC);
                 iot::mapRequired(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
 
@@ -128,7 +133,25 @@ namespace TensileLite
                 iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
                 iot::mapRequired(io, "nonTemporalA", s.nonTemporalA);
                 iot::mapRequired(io, "nonTemporalB", s.nonTemporalB);
+                iot::mapOptional(io, "adaptiveGemmNTAB", s.adaptiveGemmNTAB);
                 iot::mapRequired(io, "customMainLoopScheduling", s.customMainLoopScheduling);
+                iot::mapOptional(io, "useSubtileImpl", s.useSubtileImpl);
+                iot::mapRequired(io, "NonTemporalD", s.NonTemporalD);
+                iot::mapRequired(io, "WaveSeparateGlobalReadA", s.WaveSeparateGlobalReadA);
+                iot::mapRequired(io, "WaveSeparateGlobalReadB", s.WaveSeparateGlobalReadB);
+                iot::mapRequired(io, "UnrollLoopSwapGlobalReadOrder", s.UnrollLoopSwapGlobalReadOrder);
+                iot::mapRequired(io, "DirectToVgprA", s.DirectToVgprA);
+                iot::mapRequired(io, "DirectToVgprB", s.DirectToVgprB);
+                iot::mapRequired(io, "NumLoadsCoalescedA", s.NumLoadsCoalescedA);
+                iot::mapRequired(io, "NumLoadsCoalescedB", s.NumLoadsCoalescedB);
+                iot::mapRequired(io, "WaveGroup", s.waveGroup);
+                iot::mapRequired(io, "VectorWidthA", s.VectorWidthA);
+                iot::mapRequired(io, "VectorWidthB", s.VectorWidthB);
+                iot::mapRequired(io, "LocalSplitU", s.LocalSplitU);
+                iot::mapRequired(io, "DirectToLdsA", s.DirectToLdsA);
+                iot::mapRequired(io, "DirectToLdsB", s.DirectToLdsB);
+                iot::mapOptional(io, "ExpertSchedulingMode", s.expertSchedulingMode);
+                iot::mapOptional(io, "clusterDim", s.clusterDim);
             }
 
             const static bool flow = false;
@@ -166,12 +189,14 @@ namespace TensileLite
                 iot::mapRequired(io, "cType", s.cType);
                 iot::mapRequired(io, "dType", s.dType);
                 iot::mapOptional(io, "eType", s.eType);
-                iot::mapRequired(io, "computeInputType", s.computeInputType);
+                iot::mapRequired(io, "computeInputTypeA", s.computeInputTypeA);
+                iot::mapRequired(io, "computeInputTypeB", s.computeInputTypeB);
                 iot::mapRequired(io, "computeType", s.computeType);
                 iot::mapOptional(io, "useGradient", s.useGradient);
                 iot::mapRequired(io, "useBeta", s.useBeta);
                 iot::mapOptional(io, "useBias", s.useBias);
                 iot::mapOptional(io, "useE", s.useE);
+                iot::mapOptional(io, "useGateResidual", s.useGateResidual);
                 iot::mapOptional(io, "useScaleAB", s.useScaleAB);
                 iot::mapOptional(io, "useScaleCD", s.useScaleCD);
                 iot::mapOptional(io, "useScaleAlphaVec", s.useScaleAlphaVec);
@@ -187,11 +212,20 @@ namespace TensileLite
                 iot::mapOptional(io, "activationNoGuard", s.activationNoGuard);
                 iot::mapOptional(io, "biasSrcWhiteList", s.biasSrcWhiteList);
                 iot::mapOptional(io, "biasDataTypeWhiteList", s.biasDataTypeWhiteList);
+                iot::mapOptional(io, "gateResidualDataTypeWhiteList", s.gateResidualDataTypeWhiteList);
                 iot::mapOptional(io, "sparse", s.sparse);
                 iot::mapOptional(io, "f32XdlMathOp", s.f32XdlMathOp);
                 iot::mapOptional(io, "supportDeviceUserArguments", s.supportDeviceUserArguments);
+                iot::mapOptional(io, "mxBlockA", s.mxBlockA);
+                iot::mapOptional(io, "mxTypeA", s.mxTypeA);
+                iot::mapOptional(io, "mxBlockB", s.mxBlockB);
+                iot::mapOptional(io, "mxTypeB", s.mxTypeB);
                 iot::mapOptional(io, "swizzleTensorA", s.swizzleTensorA);
                 iot::mapOptional(io, "swizzleTensorB", s.swizzleTensorB);
+                iot::mapOptional(io, "metadataLayout", s.metadataLayout);
+                // mxScaleFormat is mapped as optional so logic files that omit it
+                // (e.g. non-MX problems) deserialize cleanly with the default 0 = NoSwizzle.
+                iot::mapOptional(io, "mxScaleFormat", s.mxScaleFormat);
             }
 
             const static bool flow = false;
@@ -227,3 +261,4 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+

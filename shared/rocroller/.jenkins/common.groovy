@@ -7,6 +7,15 @@ def getPrComments(pullRequest) {
   return comments
 }
 
+def truncateLongResults(results, maxLength = 60000) {
+    def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
+    if (results.length() > maxLength) {
+        def truncateIndex = results.lastIndexOf('\n', maxLength)
+        return results.substring(0, truncateIndex) + truncatedMessage
+    }
+    return results
+}
+
 def withSSH(platform, pipeline) {
     withCredentials(
         [
@@ -53,12 +62,34 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                 cd build
                 # Check that all tests are included.
                 ../scripts/check_included_tests.py
+                
+                # Detect pytest installation location
+                echo "Detecting pytest installation..."
+                PYTEST_PATH=""
+                if command -v pytest &>/dev/null; then
+                    echo "pytest found at: \$(which pytest)"
+                    PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                    echo "Python prefix: \$PYTEST_PREFIX"
+                    PYTEST_PATH=";\$PYTEST_PREFIX"
+                elif python3 -c "import pytest" &>/dev/null; then
+                    echo "pytest found as Python module"
+                    PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                    echo "Python prefix: \$PYTEST_PREFIX"
+                    PYTEST_PATH=";\$PYTEST_PREFIX"
+                else
+                    echo "Warning: pytest not found, searching filesystem..."
+                    echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                    find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                    echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                    find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
+                fi
+                
                 cmake ../ \\
                     ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${useCppCheck}\\
                     -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\
                     -DROCROLLER_ENABLE_FETCH=ON \\
-                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
+                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                 ccache --print-stats
                 make -j ${target}
                 ccache --print-stats
@@ -70,20 +101,11 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
 
 def runTestCommand (platform, project)
 {
-    String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
-
-    def numThreads = 8
-
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
-
-                pushd build
-                echo Using ${numThreads} out of `nproc` threads for testing.
-                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=2 ctest -j ${numThreads} --output-on-failure ${testExclude}
-                export ROCROLLER_BUILD_DIR="\$(pwd)"
-                popd
-                scripts/rrperf generate --suite generate_gfx950 --arch gfx950
+                # Run sharded tests (auto-detects ncores/2, respecting cgroups)
+                scripts/run-tests-sharded precheckin-mci build
             """
 
     try
@@ -173,7 +195,27 @@ def runBuildDocsCommand(platform, project)
                     set -ex
                     cd ${project.paths.project_build_prefix}
                     ${sshBlock}
-                    cmake --preset docs -B build -S .
+                    # Detect pytest installation location
+                    echo "Detecting pytest installation..."
+                    PYTEST_PATH=""
+                    if command -v pytest &>/dev/null; then
+                        echo "pytest found at: \$(which pytest)"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    elif python3 -c "import pytest" &>/dev/null; then
+                        echo "pytest found as Python module"
+                        PYTEST_PREFIX=\$(python3 -c "import sys; print(sys.prefix)")
+                        echo "Python prefix: \$PYTEST_PREFIX"
+                        PYTEST_PATH=";\$PYTEST_PREFIX"
+                    else
+                        echo "Warning: pytest not found, searching filesystem..."
+                        echo "Running: find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5"
+                        find /usr /opt /home -name 'pytest' -type f 2>/dev/null | head -5 || echo "No pytest found via system search"
+                        echo "Running: find /usr -name '*pytest*' -type d 2>/dev/null | head -5"
+                        find /usr -name '*pytest*' -type d 2>/dev/null | head -5 || echo "No pytest directories found"
+                    fi
+                    cmake --preset docs -B build -S . -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm\$PYTEST_PATH"
                     cmake --build build --target docs
                     """
         platform.runCommand(this, command)
@@ -244,7 +286,7 @@ def runPerformanceCommand (platform, project)
                     ./scripts/rrperf compare \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > performance_comparison_${platform.gpu}.md
-                    
+
                     ./scripts/rrperf compare --format resource_md \\
                         \$(ls -trd ./performance_build_${platform.gpu}/performance_${platform.gpu}/*) \\
                             > resource_comparison_${platform.gpu}.md
@@ -289,7 +331,7 @@ def runPerformanceCommand (platform, project)
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
                             > performance_comparison_${platform.gpu}.md
-                        
+
                         ./scripts/rrperf compare --format resource_md \\
                             ./performance_${platform.gpu}_master/performance_${platform.gpu}/* \\
                             ./performance_build_${platform.gpu}/performance_${platform.gpu}/* \\
@@ -337,6 +379,8 @@ def runPerformanceCommand (platform, project)
             def perfCommentTitle = "# Performance Report for ${platform.gpu}"
             def perfCommentString = "${perfCommentTitle}\n\n"
             def perfResults = readFile("${project.paths.project_build_prefix}/performance_comparison_${platform.gpu}.md").trim()
+            perfResults = truncateLongResults(perfResults)
+
             def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
             perfCommentString += "## Results${estimateString}\n\n"
             perfCommentString += "<details open>\n\n${perfResults}\n</details>\n"
@@ -357,19 +401,12 @@ def runPerformanceCommand (platform, project)
             if (!perfCommentExists) {
                 def comment = pullRequest.comment(perfCommentString)
             }
-            
+
             def resCommentTitle = "# Resource Report for ${platform.gpu}"
             def resCommentString = "${resCommentTitle}\n\n"
             def resResults = readFile("${project.paths.project_build_prefix}/resource_comparison_${platform.gpu}.md").trim()
-            
-            def maxResultsLength = 60000
-            def truncatedMessage = "\n```\n\n**Results truncated, see full report in workspace**"
-            
-            if (resResults.length() > maxResultsLength) {
-                def truncateIndex = resResults.lastIndexOf('\n', maxResultsLength)
-                resResults = resResults.substring(0, truncateIndex) + truncatedMessage
-            }
-            
+            resResults = truncateLongResults(resResults)
+
             resCommentString += "## Results${estimateString}\n\n"
             resCommentString += "<details open>\n\n${resResults}\n</details>\n"
             resCommentString += "<details><summary>Links</summary>\n\n"
@@ -512,7 +549,15 @@ def runCodeQLCompileCommand (platform, project, jobName)
 
                     ${sshBlock}
 
-                    ./codeql/setup_codeql
+                    python3 -m venv .venv
+                    source .venv/bin/activate
+                    pip install --upgrade pip setuptools wheel
+                    pip install -r requirements.txt
+
+                    CODEQL_INSTALL_DIR=\$PWD/codeql/install
+                    export PATH="\${CODEQL_INSTALL_DIR}/codeql:\$PATH"
+
+                    ./codeql/setup_codeql \${CODEQL_INSTALL_DIR}
                     ./codeql/create_database
                     """
 
@@ -527,6 +572,11 @@ def runCodeQLTestCommand (platform, project)
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
+
+                CODEQL_INSTALL_DIR=\$PWD/codeql/install
+                export PATH="\${CODEQL_INSTALL_DIR}/codeql:\$PATH"
+
+                source .venv/bin/activate
 
                 # Run CodeQL unit tests
                 ./codeql/run_tests

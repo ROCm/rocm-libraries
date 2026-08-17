@@ -38,6 +38,7 @@
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
 #include "conv_common.hpp"
+#include "cpu_bias.hpp"
 
 #include "conv_test_base.hpp"
 #include "conv_tensor_gen.hpp"
@@ -162,9 +163,7 @@ private:
                 }
                 MIOPEN_THROW(miopenStatusInternalError);
             },
-            []() {
-                return miopen::FindOptions::Workspace{nullptr, 0};
-            },
+            []() { return miopen::FindOptions::Workspace{nullptr, 0}; },
             params);
     }
 

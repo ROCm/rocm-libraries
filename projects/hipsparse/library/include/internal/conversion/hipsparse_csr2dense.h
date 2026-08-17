@@ -31,12 +31,12 @@ extern "C" {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION < 12000)
 /*! \ingroup conv_module
 *  \brief
-*  \p hipsparseXcsr2dense function converts the sparse matrix in CSR format into a dense matrix.
+*  \p hipsparseXcsr2dense functions convert the sparse matrix in CSR format into a dense matrix.
 *
 *  \details
 *  Given the input CSR matrix of size \p mxn, the routine writes the matrix to the dense array \p A such
 *  that \p A has leading dimension \p ld and is column ordered. This means that \p A has size \p ldxn where
-*  \p ld>=m. All the parameters are assumed to have been pre-allocated by the user. If the input CSR matrix
+*  \p ld>=m. All the parameters are assumed to have been preallocated by the user. If the input CSR matrix
 *  has index base of one, it must be set in the \ref hipsparseMatDescr_t. See \ref hipsparseSetMatIndexBase()
 *  prior to calling \p hipsparseXcsr2dense.
 *
@@ -64,7 +64,7 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  It is executed asynchronously with respect to the host and may return control to the application
+*  This function is executed asynchronously with respect to the host and can return control to the application
 *  on the host before the entire result is ready.
 *
 *  \deprecated
@@ -72,16 +72,16 @@ extern "C" {
 *  removed in CUDA 12.0. This deprecation does not apply to the ROCm backend.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the dense matrix \p A. Must be non-negative.
 *  @param[in]
 *  n           number of columns of the dense matrix \p A. Must be non-negative.
 *  @param[in]
 *  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref HIPSPARSE_MATRIX_TYPE_GENERAL and
-*              also any valid value of the \ref hipsparseIndexBase_t.
+*              any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
-*  csrVal      array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) nonzero elements of matrix \p A.
+*  csrVal      array of nnz ( = \p csrRowPtr[m] - \p csrRowPtr[0] ) non-zero elements of matrix \p A.
 *  @param[in]
 *  csrRowPtr   integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[in]
@@ -94,7 +94,7 @@ extern "C" {
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
 *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p descr, \p csrVal, \p csrRowPtr,
-*          \p csrColInd or \p A is nullptr, \p m or \p n is negative, or \p ld is invalid.
+*          \p csrColInd, or \p A is nullptr, \p m or \p n is negative, or \p ld is invalid.
 */
 /**@{*/
 DEPRECATED_CUDA_11000("The routine will be removed in CUDA 12")

@@ -31,6 +31,7 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
+#include "test_utils_memory_check.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -43,6 +44,8 @@
 #include <cstddef>
 #include <numeric>
 #include <stdint.h>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -92,7 +95,27 @@ using RocprimDeviceSelectTestsParams
                                           common::custom_huge_type<1024, int>,
                                           int>>;
 
-TYPED_TEST_SUITE(RocprimDeviceSelectTests, RocprimDeviceSelectTestsParams);
+// Default TYPED_TEST_SUITE naming uses the plain index of the type in
+// RocprimDeviceSelectTestsParams, which shifts whenever a param is added or
+// removed. Give the huge-type case a fixed, type-derived name so filters
+// (e.g. test_categories.yaml) that target it stay valid across reordering.
+struct RocprimDeviceSelectTestsNameGenerator
+{
+    template<class Params>
+    static std::string GetName(int index)
+    {
+        if constexpr(std::is_same<typename Params::input_type,
+                                   common::custom_huge_type<1024, int>>::value)
+        {
+            return "CustomHugeType1024Int";
+        }
+        return std::to_string(index);
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceSelectTests,
+                 RocprimDeviceSelectTestsParams,
+                 RocprimDeviceSelectTestsNameGenerator);
 
 TYPED_TEST(RocprimDeviceSelectTests, Flagged)
 {
@@ -1252,6 +1275,9 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -1278,6 +1304,8 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
             break;
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        test_utils::MemCheck memcheck;
+
         // Generate data
         size_t        initial_value = 0;
         InputIterator input_begin(initial_value);
@@ -1295,9 +1323,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
 
         size_t expected_output_size = rocprim::detail::ceiling_div(size, flag_selector);
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
 
         // Calculate expected results on host
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         for(size_t i = 0; i < expected_output_size; i++)
         {
@@ -1321,6 +1351,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         common::device_ptr<void>     d_temp_storage(temp_storage_size_bytes);
         test_utils::GraphHelper      gHelper;
         if(use_graphs)
@@ -1351,6 +1382,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
         ASSERT_EQ(selected_count_output, expected_output_size);
 
         // Check if output values are as expected
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
 
         ASSERT_NO_FATAL_FAILURE(
@@ -1380,6 +1412,9 @@ struct large_select_op
 
 TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -1406,6 +1441,8 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
             break;
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        test_utils::MemCheck memcheck;
+
         // Generate data
         auto input_iota = rocprim::make_counting_iterator(std::size_t{0});
 
@@ -1413,9 +1450,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
 
         size_t expected_output_size = selected_input;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
 
         // Calculate expected results on host
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         std::iota(expected_output.begin(), expected_output.end(), 0);
 
@@ -1439,6 +1478,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
         test_utils::GraphHelper gHelper;
@@ -1470,6 +1510,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
         ASSERT_EQ(selected_count_output, expected_output_size);
 
         // Check if output values are as expected
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
 
         ASSERT_NO_FATAL_FAILURE(
@@ -1487,6 +1528,9 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectOp)
 
 TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
@@ -1512,6 +1556,8 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
             break;
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        test_utils::MemCheck memcheck;
+
         const size_t selected_flags = std::get<0>(param);
         auto         select_op      = large_select_op<size_t>{selected_flags};
 
@@ -1525,9 +1571,11 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
 
         size_t expected_output_size = selected_flags;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
 
         // Calculate expected results on host
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         std::iota(expected_output.begin(), expected_output.end(), 0);
 
@@ -1552,6 +1600,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
         test_utils::GraphHelper gHelper;
@@ -1584,6 +1633,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
         ASSERT_EQ(selected_count_output, expected_output_size);
 
         // Check if output values are as expected
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_eq(output, expected_output, expected_output.size()));
@@ -1600,6 +1650,9 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputSelectFlagged)
 
 TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     static constexpr bool debug_synchronous = false;
 
     auto               param          = GetParam();
@@ -1624,14 +1677,18 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
             break;
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        test_utils::MemCheck memcheck;
+
         auto input_it = rocprim::make_transform_iterator(rocprim::make_counting_iterator(size_t(0)),
                                                          [segment_length](size_t i)
                                                          { return i / segment_length; });
 
         const size_t expected_output_size = rocprim::detail::ceiling_div(size, segment_length);
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         std::vector<size_t> expected_output(expected_output_size);
         std::iota(expected_output.begin(), expected_output.end(), 0);
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(size_t, expected_output_size)
         common::device_ptr<size_t> d_output(expected_output_size);
         common::device_ptr<size_t> d_unique_count_output(1);
 
@@ -1648,6 +1705,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
                                   debug_synchronous));
 
         ASSERT_GT(temp_storage_size_bytes, 0);
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         common::device_ptr<void>     d_temp_storage(temp_storage_size_bytes);
         test_utils::GraphHelper      gHelper;
         if(use_graphs)
@@ -1673,6 +1731,7 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
         const auto unique_count_output = d_unique_count_output.load()[0];
         ASSERT_EQ(unique_count_output, expected_output_size);
 
+        MEMCHECK_OR_BREAK_ALLOC_HOST(size_t, expected_output_size)
         const auto output = d_output.load();
         ASSERT_NO_FATAL_FAILURE(
             test_utils::assert_eq(output, expected_output, expected_output.size()));

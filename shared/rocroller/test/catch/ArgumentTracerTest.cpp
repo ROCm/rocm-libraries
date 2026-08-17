@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <compare>
 #include <fstream>
@@ -121,13 +98,14 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
-        kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
-        kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
-        kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::RemoveSetCoordinate>(kgraph);
+        kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::LowerLinear>(kgraph, context.get());
+        kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);
+        kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::SetWorkitemCount>(kgraph, context.get());
+        kgraph = transform<KG::AddDeallocateArguments>(kgraph, context.get());
+        kgraph = transform<KG::SetWorkitemCount>(kgraph, context.get());
+        kgraph = transform<KG::RemoveSetCoordinate>(kgraph);
 
         auto hasUserMapping = [](KG::KernelGraph const& kg, int userDim) {
             auto pred
@@ -141,9 +119,9 @@ namespace ArgumentTracerTest
             auto aPtrArg = findKernarg(findPtrComArg(command, kgraph, example.aTag));
             REQUIRE(aPtrArg != nullptr);
 
-            auto aDim = findDimForKernarg(kgraph, aPtrArg->name);
+            auto aDim = findDimForKernarg(kgraph, aPtrArg->getName());
             REQUIRE(aDim != std::nullopt);
-            auto aPtrDeallocate = findDeallocate(kgraph, aPtrArg->name);
+            auto aPtrDeallocate = findDeallocate(kgraph, aPtrArg->getName());
             REQUIRE(aPtrDeallocate != std::nullopt);
 
             auto aLoad = kgraph.control.getNodes<CG::LoadVGPR>()
@@ -159,9 +137,9 @@ namespace ArgumentTracerTest
             auto bPtrArg = findKernarg(findPtrComArg(command, kgraph, example.bTag));
             REQUIRE(bPtrArg != nullptr);
 
-            auto bDim = findDimForKernarg(kgraph, bPtrArg->name);
+            auto bDim = findDimForKernarg(kgraph, bPtrArg->getName());
             REQUIRE(bDim != std::nullopt);
-            auto bPtrDeallocate = findDeallocate(kgraph, bPtrArg->name);
+            auto bPtrDeallocate = findDeallocate(kgraph, bPtrArg->getName());
             REQUIRE(bPtrDeallocate != std::nullopt);
 
             auto bLoad = kgraph.control.getNodes<CG::LoadVGPR>()
@@ -177,9 +155,9 @@ namespace ArgumentTracerTest
             auto dPtrArg = findKernarg(findPtrComArg(command, kgraph, example.resultTag));
             REQUIRE(dPtrArg != nullptr);
 
-            auto dDim = findDimForKernarg(kgraph, dPtrArg->name);
+            auto dDim = findDimForKernarg(kgraph, dPtrArg->getName());
             REQUIRE(dDim != std::nullopt);
-            auto dPtrDeallocate = findDeallocate(kgraph, dPtrArg->name);
+            auto dPtrDeallocate = findDeallocate(kgraph, dPtrArg->getName());
             REQUIRE(dPtrDeallocate != std::nullopt);
 
             auto dLoad = kgraph.control.getNodes<CG::StoreVGPR>()
@@ -266,9 +244,10 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
-        kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
-        kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
+        kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::LowerLinear>(kgraph, context.get());
+        kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);
 
         // Add a new unused argument
         context->kernel()->addArgument(
@@ -277,7 +256,7 @@ namespace ArgumentTracerTest
         // Ensure the unused arg has been added to the kernel successfully
         CHECK_NOTHROW(context->kernel()->findArgument("unusedArg"));
 
-        kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
+        kgraph = transform<KG::AddDeallocateArguments>(kgraph, context.get());
 
         // Verify unused argument is removed after AddDeallocateArguments by
         // checking an error is thrown when finding it in the kernel.

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -130,6 +130,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
                            device_input,
                            device_output,
                            distance);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -212,6 +213,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
                            device_input,
                            device_output,
                            distance);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -295,6 +297,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
                            0,
                            device_input,
                            device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -393,6 +396,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUpWithSuffix)
             device_input,
             device_output,
             device_suffix);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -427,6 +431,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUpWithSuffix)
         delete[] host_block_suffix;
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_suffix));
     }
 }
 
@@ -488,6 +493,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
                            0,
                            device_input,
                            device_output);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(hipMemcpy(output_data.data(),
@@ -586,6 +592,7 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDownWithSuffix)
             device_input,
             device_output,
             device_prefix);
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(
@@ -620,5 +627,6 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDownWithSuffix)
         delete[] host_block_prefix;
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_prefix));
     }
 }

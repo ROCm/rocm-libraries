@@ -188,9 +188,9 @@ int main(int argc, char* argv[])
     }
     std::cout << std::endl;
 
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(matA));
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(matB));
-    HIPSPARSE_CHECK(hipsparseDestroyMatDescr(matC));
+    HIPSPARSE_CHECK(hipsparseDestroyDnMat(matA));
+    HIPSPARSE_CHECK(hipsparseDestroyDnMat(matB));
+    HIPSPARSE_CHECK(hipsparseDestroySpMat(matC));
     HIPSPARSE_CHECK(hipsparseDestroy(handle));
 
     HIP_CHECK(hipFree(dA));

@@ -36,14 +36,14 @@ extern "C" {
 
 /*! \ingroup aux_module
  * \details Enable rocTX instrumentation.
- * \note This routine ignores the environment variable ROCSPARSE_ROCTX.
+ * \note This routine ignores the environment variable \p ROCSPARSE_ROCTX.
  */
 ROCSPARSE_EXPORT
 void rocsparse_enable_roctx();
 
 /*! \ingroup aux_module
  * \details Disable rocTX instrumentation.
- * \note This routine ignores the environment variable ROCSPARSE_ROCTX.
+ * \note This routine ignores the environment variable \p ROCSPARSE_ROCTX.
  */
 ROCSPARSE_EXPORT void rocsparse_disable_roctx();
 

@@ -32,6 +32,7 @@
 #include <fmt/core.h>
 #include <rocblas/rocblas.h>
 
+#include "asan_helpers.hpp"
 #include "clients_utility.hpp"
 #include "rocblas_random.hpp"
 
@@ -149,4 +150,20 @@ void set_device(rocblas_int device_id)
     hipError_t status = hipSetDevice(device_id);
     if(status != hipSuccess)
         fmt::print(stderr, "Set device error: cannot set device ID {}\n", device_id);
+}
+
+/*  print ASAN kernel parameter warning */
+void print_asan_kernel_warning(const char* program_name)
+{
+    if constexpr(rocsolver_enable_asan)
+    {
+        fmt::print(
+            "{} WARNING: AddressSanitizer build active; some kernel launch configurations are "
+            "reduced for stability and may not match production performance.\n",
+            program_name);
+    }
+    else
+    {
+        (void)program_name;
+    }
 }

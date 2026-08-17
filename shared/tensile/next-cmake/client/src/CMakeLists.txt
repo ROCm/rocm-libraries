@@ -38,6 +38,7 @@ target_sources(
           "${_CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/ProgramOptions.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/ProgressListener.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/Reference.cpp"
           "${_CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator.cpp"

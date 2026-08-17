@@ -1,0 +1,31 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(hip CONFIG REQUIRED)
+
+# Subdirectory path for hipDNN engine plugins (relative to lib)
+set(HIPDNN_PLUGIN_ENGINE_SUBDIR "@HIPDNN_PLUGIN_ENGINE_SUBDIR@")
+
+# Full install path for engine plugins (relocatable using PACKAGE_ prefix from configure_package_config_file)
+set(HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR "@PACKAGE_HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR@")
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR@")
+
+# Subdirectory path for hipDNN heuristic plugins (relative to lib)
+set(HIPDNN_PLUGIN_HEURISTIC_SUBDIR "@HIPDNN_PLUGIN_HEURISTIC_SUBDIR@")
+
+# Full install path for heuristic plugins (relocatable using PACKAGE_ prefix from configure_package_config_file)
+set(HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR "@PACKAGE_HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR@")
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR "@HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR@")
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_data_sdkTargets.cmake")
+
+message(STATUS "hipDNN Data SDK: Engine plugin build directory is ${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}")
+message(STATUS "hipDNN Data SDK: Plugin absolute installation directory ${HIPDNN_FULL_INSTALL_PLUGIN_ENGINE_DIR}")
+message(STATUS "hipDNN Data SDK: Plugin relative installation directory ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}")
+message(STATUS "hipDNN Data SDK: Heuristic plugin build directory is ${CMAKE_INSTALL_LIBDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}")
+message(STATUS "hipDNN Data SDK: Heuristic plugin absolute installation directory ${HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR}")
+message(STATUS "hipDNN Data SDK: Heuristic plugin relative installation directory ${HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR}")

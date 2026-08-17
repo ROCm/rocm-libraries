@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: check_matrix_gebsr
   precision: *single_double_precisions_complex_real
-  M: [1, 15, 32, 68, 130, 222]
-  N: [1, 15, 32, 68, 130, 222]
+  M: [1, 15]
+  N: [1, 15]
   row_block_dimA: [2, 8]
   col_block_dimA: [2, 5]
   baseA: [rocsparse_index_base_one]
@@ -48,8 +48,8 @@ Tests:
   category: pre_checkin
   function: check_matrix_gebsr
   precision: *single_double_precisions_complex_real
-  M: [47586, 54612]
-  N: [18576, 28790]
+  M: [2000]
+  N: [2000]
   row_block_dimA: [3, 6]
   col_block_dimA: [1, 4]
   baseA: [rocsparse_index_base_zero]

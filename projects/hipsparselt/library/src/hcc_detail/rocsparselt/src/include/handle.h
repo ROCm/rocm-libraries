@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,8 @@ struct _rocsparselt_handle
     // asic revision
     int asic_rev;
 
-    bool has_fp8_ocp = false;
+    bool has_fp8_ocp  = false;
+    bool has_fp8_fnuz = false;
 
     // pointer mode ; default mode is host
     rocsparselt_pointer_mode pointer_mode = rocsparselt_pointer_mode_host;
@@ -121,7 +122,7 @@ struct _rocsparselt_mat_descr
         clear();
     };
 
-    _rocsparselt_mat_descr* clone()
+    _rocsparselt_mat_descr* clone() const
     {
         return new _rocsparselt_mat_descr(*this);
     };
@@ -197,6 +198,7 @@ struct _rocsparselt_matmul_descr
         , bias_stride(rhs.bias_stride)
         , bias_type(rhs.bias_type)
         , alpha_vector_scaling(rhs.alpha_vector_scaling)
+        , gate_residual_mat_pointer(rhs.gate_residual_mat_pointer)
         , m(rhs.m)
         , n(rhs.n)
         , k(rhs.k)
@@ -215,6 +217,7 @@ struct _rocsparselt_matmul_descr
         matrix_B     = rhs.matrix_B->clone();
         matrix_C     = rhs.matrix_C->clone();
         matrix_D     = rhs.matrix_D->clone();
+        gate_residual_desc = rhs.gate_residual_desc ? rhs.gate_residual_desc->clone() : nullptr;
         is_reference = false;
         is_init      = (uintptr_t)handle;
     };
@@ -229,6 +232,8 @@ struct _rocsparselt_matmul_descr
             delete matrix_C;
             delete matrix_D;
         }
+        if(gate_residual_desc != nullptr)
+            delete gate_residual_desc;
         is_init = 0;
     };
 
@@ -261,7 +266,9 @@ struct _rocsparselt_matmul_descr
     float*      bias_pointer                      = nullptr;
     int64_t     bias_stride                       = 0;
     hipDataType bias_type;
-    int         alpha_vector_scaling = 0;
+    int         alpha_vector_scaling              = 0;
+    void*                   gate_residual_mat_pointer = nullptr;
+    _rocsparselt_mat_descr* gate_residual_desc  = nullptr;
     int64_t     m                    = 0;
     int64_t     n                    = 0;
     int64_t     k                    = 0;
@@ -319,6 +326,12 @@ struct _rocsparselt_matmul_alg_selection
     // destructor
     ~_rocsparselt_matmul_alg_selection()
     {
+        clear();
+    }
+
+    void clear()
+    {
+        handle = nullptr;
         is_init = 0;
     };
 
@@ -391,8 +404,11 @@ enum _rocsparselt_matmul_datatype
     MATMUL_DATATYPE_I8_I8_S,
     MATMUL_DATATYPE_I8_H_S,
     MATMUL_DATATYPE_I8_B_S,
+    MATMUL_DATATYPE_I8_I_S,
     MATMUL_DATATYPE_E4M3_S_S,
     MATMUL_DATATYPE_E5M2_S_S,
+    MATMUL_DATATYPE_E4M3_FNUZ_S_S,
+    MATMUL_DATATYPE_E5M2_FNUZ_S_S,
     MATMUL_DATATYPE_UNKNOWN,
 };
 
@@ -413,9 +429,14 @@ constexpr _rocsparselt_matmul_type valid_matmul_datatypes[] =
     {MATMUL_DATATYPE_I8_I8_S, HIP_R_8I, HIP_R_8I, HIP_R_8I, HIP_R_8I, rocsparselt_compute_i32},
     {MATMUL_DATATYPE_I8_H_S, HIP_R_8I, HIP_R_8I, HIP_R_16F, HIP_R_16F, rocsparselt_compute_i32},
     {MATMUL_DATATYPE_I8_B_S, HIP_R_8I, HIP_R_8I, HIP_R_16BF, HIP_R_16BF, rocsparselt_compute_i32},
+    {MATMUL_DATATYPE_I8_I_S, HIP_R_8I, HIP_R_8I, HIP_R_32I, HIP_R_32I, rocsparselt_compute_i32},
 #if HIP_FP8_TYPE_OCP
     {MATMUL_DATATYPE_E4M3_S_S, HIP_R_8F_E4M3, HIP_R_8F_E4M3, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
     {MATMUL_DATATYPE_E5M2_S_S, HIP_R_8F_E5M2, HIP_R_8F_E5M2, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
+#endif
+#if HIP_FP8_TYPE_FNUZ
+    {MATMUL_DATATYPE_E4M3_FNUZ_S_S, HIP_R_8F_E4M3_FNUZ, HIP_R_8F_E4M3_FNUZ, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
+    {MATMUL_DATATYPE_E5M2_FNUZ_S_S, HIP_R_8F_E5M2_FNUZ, HIP_R_8F_E5M2_FNUZ, HIP_R_32F, HIP_R_32F, rocsparselt_compute_f32},
 #endif
 };
 

@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,9 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
-
+if( NOT DEFINED ROCM_LIBRARIES_ROOT )
+  set( ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
@@ -85,7 +87,10 @@ if( ROCM_PATH )
 endif()
 
 # Using standardized versioning from rocm-cmake
-set ( VERSION_STRING "1.0.37" )
+set ( ROCFFT_VERSION_MAJOR "1" )
+set ( ROCFFT_VERSION_MINOR "0" )
+set ( ROCFFT_VERSION_PATCH "40" )
+set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # Append our library helper cmake path and the cmake path for hip (for
@@ -127,6 +132,7 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
+  gfx90c
   gfx942
   gfx950
   gfx1030
@@ -138,7 +144,9 @@ set(DEFAULT_GPUS
   gfx1152
   gfx1153
   gfx1200
-  gfx1201)
+  gfx1201
+  gfx1250
+)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address)
@@ -173,35 +181,20 @@ endif()
 # tolerate comma as a value separator since the compiler does the
 # same
 string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
+# Filter out target flags as rocFFT builds generic code for each target.
+list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+list(REMOVE_DUPLICATES GPU_TARGETS)
 rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   
 # HIP is required - library and clients use HIP to access the device
 find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
 find_package( hiprtc REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hiprtc/ )
 
-# The nvidia backend can be used to compile for CUDA devices.
-# Specify the CUDA prefix in the CUDA_PREFIX variable.
-# CUDA_ARCH (e.g. sm_75) is also required.
-if( USE_CUDA )
-  if( NOT DEFINED CUDA_PREFIX )
-    message( FATAL_ERROR "CUDA_PREFIX variable is required (e.g. /usr/local/cuda-11.4)" )
-  endif()
-  if( NOT DEFINED CUDA_ARCH )
-    message( FATAL_ERROR "CUDA_ARCH variable is required. (e.g. sm_75)" )
-  endif()
-  add_compile_options(-I${HIP_ROOT_DIR}/include -I${CUDA_PREFIX}/include -D__HIP_PLATFORM_NVIDIA__)
-  add_link_options(-L${CUDA_PREFIX}/lib64 -pthread)
-endif( )
-
 # hipcc automatically provides HIP include dirs and HIP platform,
 # but plain clang needs to be told
 if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
   include_directories( ${HIP_INCLUDE_DIRS} )
-  if( USE_CUDA )
-    add_compile_definitions( __HIP_PLATFORM_NVIDIA__ )
-  else()
-    add_compile_definitions( __HIP_PLATFORM_AMD__ )
-  endif()
+  add_compile_definitions( __HIP_PLATFORM_AMD__ )
 endif()
 
 # Enable MPI support in rocFFT:
@@ -210,6 +203,29 @@ option(ROCFFT_CRAY_MPI_ENABLE "Cray MPI" OFF)
 if( ROCFFT_MPI_ENABLE )
   find_package( MPI REQUIRED )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
+endif()
+
+# Optional RCCL backend for single-node multi-GPU communication.
+option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
+
+# Internal (library-side) unit tests.  enable_testing() must be called
+# here, an ancestor of library/src, for ctest to discover them.
+option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )
+option( ROCFFT_RUN_INTERNAL_TESTS "Run internal tests as part of the build" OFF )
+# GoogleTest filter for the build-time run; empty = all.
+set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
+  "GoogleTest filter applied to internal tests run at build time (empty = all)" )
+if( ROCFFT_RUN_INTERNAL_TESTS AND NOT ROCFFT_BUILD_INTERNAL_TESTS )
+  message( FATAL_ERROR
+    "ROCFFT_RUN_INTERNAL_TESTS=ON requires ROCFFT_BUILD_INTERNAL_TESTS=ON." )
+endif()
+# Coverage needs the internal tests built too.
+if( BUILD_CODE_COVERAGE )
+  set( ROCFFT_BUILD_INTERNAL_TESTS ON CACHE BOOL
+    "Build internal (library-side) unit tests" FORCE )
+endif()
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  enable_testing()
 endif()
 
 add_subdirectory( library )
@@ -250,6 +266,7 @@ if( BUILD_CLIENTS_SAMPLES
     set( HIPRAND_DEP hiprand )
   endif()
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(
       tests
       DEPENDS

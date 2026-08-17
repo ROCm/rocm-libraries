@@ -1,28 +1,6 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #include <miopen/config.h>
 #include <miopen/gemm_v2.hpp>
 #include <miopen/logger.hpp>
@@ -64,7 +42,7 @@
 #include <miopen/perf_field.hpp>
 #endif
 
-#include <boost/range/adaptors.hpp>
+#include <ranges>
 #include <tuple> // std::ignore
 
 #if MIOPEN_USE_ROCBLAS
@@ -195,12 +173,12 @@ rocblas_status miopen_rocblas_gemm_ex3(const miopen::Handle& handle,
     return rb_status;
 #pragma clang diagnostic pop
 #else
-    std::ignore      = A;
-    std::ignore      = a_offset;
-    std::ignore      = B;
-    std::ignore      = b_offset;
-    std::ignore      = C;
-    std::ignore      = c_offset;
+    std::ignore = A;
+    std::ignore = a_offset;
+    std::ignore = B;
+    std::ignore = b_offset;
+    std::ignore = C;
+    std::ignore = c_offset;
 #endif
     MIOPEN_THROW(miopenStatusInternalError,
                  "An appropriate version of rocBLAS is required for this op");
@@ -280,25 +258,17 @@ bool IsFP8Supported(const std::string& device_name)
 
 std::ostream& operator<<(std::ostream& stream, const GemmDescriptor& gemm_desc)
 {
-    return stream << "{"
-                  << "isColMajor " << gemm_desc.isColMajor << ", "
-                  << "transA " << gemm_desc.transA << ", "
-                  << "transB " << gemm_desc.transB << ", "
-                  << "m " << gemm_desc.m << ", "
-                  << "n " << gemm_desc.n << ", "
-                  << "k " << gemm_desc.k << ", "
-                  << "lda " << gemm_desc.lda << ", "
-                  << "ldb " << gemm_desc.ldb << ", "
-                  << "ldc " << gemm_desc.ldc << ", "
-                  << "batch_count " << gemm_desc.batch_count << ", "
-                  << "strideA " << gemm_desc.strideA << ", "
-                  << "strideB " << gemm_desc.strideB << ", "
-                  << "strideC " << gemm_desc.strideC << ", "
-                  << "alpha " << gemm_desc.alpha << ", "
-                  << "beta " << gemm_desc.beta << ", "
-                  << "dataType " << GetDataType(gemm_desc.dataType) << ", "
-                  << "a_cast_type " << GetDataType(gemm_desc.a_cast_type) << ", "
-                  << "b_cast_type " << GetDataType(gemm_desc.b_cast_type) << "} ";
+    return stream << "{" << "isColMajor " << gemm_desc.isColMajor << ", " << "transA "
+                  << gemm_desc.transA << ", " << "transB " << gemm_desc.transB << ", " << "m "
+                  << gemm_desc.m << ", " << "n " << gemm_desc.n << ", " << "k " << gemm_desc.k
+                  << ", " << "lda " << gemm_desc.lda << ", " << "ldb " << gemm_desc.ldb << ", "
+                  << "ldc " << gemm_desc.ldc << ", " << "batch_count " << gemm_desc.batch_count
+                  << ", " << "strideA " << gemm_desc.strideA << ", " << "strideB "
+                  << gemm_desc.strideB << ", " << "strideC " << gemm_desc.strideC << ", "
+                  << "alpha " << gemm_desc.alpha << ", " << "beta " << gemm_desc.beta << ", "
+                  << "dataType " << GetDataType(gemm_desc.dataType) << ", " << "a_cast_type "
+                  << GetDataType(gemm_desc.a_cast_type) << ", " << "b_cast_type "
+                  << GetDataType(gemm_desc.b_cast_type) << "} ";
 }
 
 #if MIOPEN_USE_ROCBLAS
@@ -331,15 +301,15 @@ inline void ProfilingRecordStart(const Handle& handle, HipEventPtr& start, HipEv
 {
     start = make_hip_event();
     stop  = make_hip_event();
-    hipEventRecord(start.get(), handle.GetStream());
+    (void)hipEventRecord(start.get(), handle.GetStream());
 }
 
 inline void ProfilingRecordStop(const Handle& handle, HipEventPtr& start, HipEventPtr& stop)
 {
-    hipEventRecord(stop.get(), handle.GetStream());
-    hipEventSynchronize(stop.get());
+    (void)hipEventRecord(stop.get(), handle.GetStream());
+    (void)hipEventSynchronize(stop.get());
     float mS = 0;
-    hipEventElapsedTime(&mS, start.get(), stop.get());
+    (void)hipEventElapsedTime(&mS, start.get(), stop.get());
     handle.ResetKernelTime();
     handle.AccumKernelTime(mS);
 }
@@ -955,6 +925,116 @@ miopenStatus_t CallGemm(const Handle& handle,
     return miopenStatusUnknownError;
 }
 
+miopenStatus_t CallGemm(const Handle& handle,
+                        GemmDescriptor gemm_desc,
+                        ConstData_t A,
+                        std::size_t a_offset,
+                        ConstData_t B,
+                        std::size_t b_offset,
+                        Data_t C,
+                        std::size_t c_offset,
+                        miopenDataType_t cType,
+                        GemmBackend_t gemm_backend)
+{
+    // If C/D type matches A/B type, delegate to the standard overload
+    if(cType == gemm_desc.dataType)
+        return CallGemm(handle, gemm_desc, A, a_offset, B, b_offset, C, c_offset, gemm_backend);
+
+    MIOPEN_LOG_I2("gemm_desc: " << gemm_desc << " cType: " << GetDataType(cType));
+
+    gemm_backend = enforce_gemm_backend(gemm_backend);
+
+    if(!gemm_desc.isColMajor)
+    {
+        gemm_desc.isColMajor = !gemm_desc.isColMajor;
+        std::swap(A, B);
+        std::swap(a_offset, b_offset);
+        std::swap(gemm_desc.a_cast_type, gemm_desc.b_cast_type);
+        std::swap(gemm_desc.transA, gemm_desc.transB);
+        std::swap(gemm_desc.m, gemm_desc.n);
+        std::swap(gemm_desc.lda, gemm_desc.ldb);
+    }
+
+    switch(gemm_backend)
+    {
+    case GemmBackend_t::nogemmbackend: return miopenStatusNotImplemented;
+    case GemmBackend_t::rocblas: {
+#if MIOPEN_USE_ROCBLAS
+        MIOPEN_LOG_I2("rocBLAS mixed-precision C/D");
+
+        HipEventPtr start = nullptr;
+        HipEventPtr stop  = nullptr;
+        if(handle.IsProfilingEnabled())
+        {
+            ProfilingRecordStart(handle, start, stop);
+        }
+        rocblas_atomics_mode cur_mode = rocblas_atomics_mode::rocblas_atomics_allowed;
+        if(gemm_desc.deterministic)
+            cur_mode = DisableRocblasAtomics(handle);
+
+        rocblas_status rb_status = rocblas_status::rocblas_status_internal_error;
+
+        // Currently only bf16 A/B with fp32 C/D is supported
+        if(gemm_desc.dataType == miopenBFloat16 && cType == miopenFloat)
+        {
+            float alpha = gemm_desc.alpha;
+            float beta  = gemm_desc.beta;
+
+            rb_status = miopen_rocblas_gemm_ex(
+                handle,
+                gemm_desc,
+                gemm_desc.transA ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.transB ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.m,
+                gemm_desc.n,
+                gemm_desc.k,
+                &alpha,
+                static_cast<const rocblas_bfloat16*>(A) + a_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.lda,
+                static_cast<const rocblas_bfloat16*>(B) + b_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.ldb,
+                &beta,
+                static_cast<const float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                static_cast<float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                rocBlasComputeType(gemm_desc),
+                rocblas_gemm_algo::rocblas_gemm_algo_standard,
+                0,
+                0);
+        }
+        else
+        {
+            MIOPEN_THROW(miopenStatusInternalError,
+                         "CallGemm with cType: unsupported dataType/cType combination");
+        }
+
+        if(handle.IsProfilingEnabled())
+            ProfilingRecordStop(handle, start, stop);
+
+        if(rb_status != rocblas_status::rocblas_status_success)
+            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+
+        if(gemm_desc.deterministic)
+            SetRocblasAtomics(handle, cur_mode);
+        return miopenStatusSuccess;
+#else
+        return miopenStatusNotImplemented;
+#endif
+    }
+    case GemmBackend_t::hipblaslt: {
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "CallGemm with cType: hipblaslt backend not supported");
+    }
+    }
+
+    return miopenStatusUnknownError;
+}
+
 miopenStatus_t CallGemmStridedBatched(const Handle& handle,
                                       GemmDescriptor gemm_desc,
                                       ConstData_t A,
@@ -1238,6 +1318,124 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
 #else
         return miopenStatusNotImplemented;
 #endif
+    }
+    }
+
+    return miopenStatusUnknownError;
+}
+
+miopenStatus_t CallGemmStridedBatched(const Handle& handle,
+                                      GemmDescriptor gemm_desc,
+                                      ConstData_t A,
+                                      std::size_t a_offset,
+                                      ConstData_t B,
+                                      std::size_t b_offset,
+                                      Data_t C,
+                                      std::size_t c_offset,
+                                      miopenDataType_t cType,
+                                      GemmBackend_t gemm_backend)
+{
+    // If C/D type matches A/B type, delegate to the standard overload
+    if(cType == gemm_desc.dataType)
+        return CallGemmStridedBatched(
+            handle, gemm_desc, A, a_offset, B, b_offset, C, c_offset, gemm_backend);
+
+    MIOPEN_LOG_I2("gemm_desc: " << gemm_desc << " cType: " << GetDataType(cType));
+
+    gemm_backend = enforce_gemm_backend(gemm_backend);
+
+    if(!gemm_desc.isColMajor)
+    {
+        gemm_desc.isColMajor = !gemm_desc.isColMajor;
+        std::swap(A, B);
+        std::swap(a_offset, b_offset);
+        std::swap(gemm_desc.a_cast_type, gemm_desc.b_cast_type);
+        std::swap(gemm_desc.transA, gemm_desc.transB);
+        std::swap(gemm_desc.m, gemm_desc.n);
+        std::swap(gemm_desc.lda, gemm_desc.ldb);
+        std::swap(gemm_desc.strideA, gemm_desc.strideB);
+    }
+
+    switch(gemm_backend)
+    {
+    case GemmBackend_t::nogemmbackend: return miopenStatusNotImplemented;
+    case GemmBackend_t::rocblas: {
+#if MIOPEN_USE_ROCBLAS
+        MIOPEN_LOG_I2("rocBLAS mixed-precision C/D (strided batched)");
+
+        HipEventPtr start = nullptr;
+        HipEventPtr stop  = nullptr;
+        if(handle.IsProfilingEnabled())
+        {
+            ProfilingRecordStart(handle, start, stop);
+        }
+        rocblas_atomics_mode cur_mode = rocblas_atomics_mode::rocblas_atomics_allowed;
+        if(gemm_desc.deterministic)
+            cur_mode = DisableRocblasAtomics(handle);
+
+        rocblas_status rb_status = rocblas_status::rocblas_status_internal_error;
+
+        // Currently only bf16 A/B with fp32 C/D is supported
+        if(gemm_desc.dataType == miopenBFloat16 && cType == miopenFloat)
+        {
+            float alpha = gemm_desc.alpha;
+            float beta  = gemm_desc.beta;
+
+            rb_status = miopen_rocblas_gemm_strided_batched_ex(
+                handle.rhandle().get(),
+                gemm_desc.transA ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.transB ? rocblas_operation_transpose : rocblas_operation_none,
+                gemm_desc.m,
+                gemm_desc.n,
+                gemm_desc.k,
+                &alpha,
+                static_cast<const rocblas_bfloat16*>(A) + a_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.lda,
+                gemm_desc.strideA,
+                static_cast<const rocblas_bfloat16*>(B) + b_offset,
+                rocblas_datatype::rocblas_datatype_bf16_r,
+                gemm_desc.ldb,
+                gemm_desc.strideB,
+                &beta,
+                static_cast<const float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                gemm_desc.strideC,
+                static_cast<float*>(C) + c_offset,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                gemm_desc.ldc,
+                gemm_desc.strideC,
+                gemm_desc.batch_count,
+                rocblas_datatype::rocblas_datatype_f32_r,
+                rocblas_gemm_algo::rocblas_gemm_algo_standard,
+                0,
+                0);
+        }
+        else
+        {
+            MIOPEN_THROW(
+                miopenStatusInternalError,
+                "CallGemmStridedBatched with cType: unsupported dataType/cType combination");
+        }
+
+        if(handle.IsProfilingEnabled())
+            ProfilingRecordStop(handle, start, stop);
+
+        if(rb_status != rocblas_status::rocblas_status_success)
+            MIOPEN_THROW(miopenStatusInternalError, "rocBlas error encountered");
+
+        if(gemm_desc.deterministic)
+            SetRocblasAtomics(handle, cur_mode);
+
+        return miopenStatusSuccess;
+#else
+        return miopenStatusNotImplemented;
+#endif
+    }
+    case GemmBackend_t::hipblaslt: {
+        MIOPEN_THROW(miopenStatusInternalError,
+                     "CallGemmStridedBatched with cType: hipblaslt backend not supported");
     }
     }
 
@@ -1547,16 +1745,21 @@ GemmDescriptor CreateGemmDescriptorConvFwd(const TensorDescriptor& wDesc,
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k =
-        in_c * std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                    wei_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int lda         = k;
     int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
     int ldc         = n;
@@ -1598,19 +1801,24 @@ GemmDescriptor CreateGemmDescriptorConvBwdData(const TensorDescriptor& wDesc,
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
-    int m =
-        in_c * std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int n   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k   = wei_k;
-    int lda = m;
-    int ldb = n;
-    int ldc = n;
+    int m           = in_c * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                    wei_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = wei_k;
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1649,19 +1857,25 @@ GemmDescriptor CreateGemmDescriptorConvBwdWeight(const TensorDescriptor& dyDesc,
     std::size_t in_c  = xDesc.GetLengths()[1];
     std::size_t wei_k = dwDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(dwDesc.GetLengths(), 2, dwDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial = dwDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dwDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = true;
     int m           = wei_k;
-    int n           = static_cast<int>(in_c) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int k   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int lda = k;
-    int ldb = k;
-    int ldc = n;
+    int n =
+        static_cast<int>(in_c) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                  wei_spatial.end(),
+                                                                  std::size_t{1},
+                                                                  std::multiplies<std::size_t>()));
+    int k           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
     int batch_count = 1;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(0);
@@ -1703,14 +1917,17 @@ GemmDescriptor CreateGemmDescriptorConvCNHWFwd(const TensorDescriptor& wDesc,
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = in_c;
     int lda         = k;
     int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
@@ -1754,14 +1971,17 @@ GemmDescriptor CreateGemmDescriptorConvCNHWBwdData(const TensorDescriptor& wDesc
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
     int m           = in_c;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = wei_k;
     int lda         = m;
     int ldb         = n;
@@ -1809,17 +2029,19 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1Fwd(const TensorDescript
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto in_spatial = boost::adaptors::slice(xDesc.GetLengths(), 2, xDesc.GetLengths().size());
+    auto in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(xDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = (wDesc.GetType() == miopenInt8);
     int m           = wei_k;
-    int n   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
-    int k   = in_c;
-    int lda = k;
-    int ldb = wDesc.GetType() == miopenInt8 ? k : n;
-    int ldc = n;
+    int n           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = in_c;
+    int lda         = k;
+    int ldb         = wDesc.GetType() == miopenInt8 ? k : n;
+    int ldc         = n;
     int batch_count = in_n;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(k) * n;
@@ -1861,17 +2083,19 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdData(const TensorDesc
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto in_spatial = boost::adaptors::slice(dxDesc.GetLengths(), 2, dxDesc.GetLengths().size());
+    auto in_spatial = dxDesc.GetLengths() | std::views::drop(2) |
+                      std::views::take(dxDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
     int m           = in_c;
-    int n   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
-    int k   = wei_k;
-    int lda = m;
-    int ldb = n;
-    int ldc = n;
+    int n           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = wei_k;
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
     int batch_count = in_n;
     auto strideA    = static_cast<long long>(0);
     auto strideB    = static_cast<long long>(k) * n;
@@ -1913,17 +2137,19 @@ GemmDescriptor CreateGemmStridedBatchedDescriptorConv1x1BwdWeight(const TensorDe
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = dwDesc.GetLengths()[0];
 
-    auto in_spatial = boost::adaptors::slice(xDesc.GetLengths(), 2, xDesc.GetLengths().size());
+    auto in_spatial =
+        xDesc.GetLengths() | std::views::drop(2) | std::views::take(xDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = true;
     int m           = wei_k;
     int n           = in_c;
-    int k   = std::accumulate(in_spatial.begin(), in_spatial.end(), 1, std::multiplies<int>());
-    int lda = k;
-    int ldb = k;
-    int ldc = n;
+    int k           = static_cast<int>(std::accumulate(
+        in_spatial.begin(), in_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
     int batch_count = in_n;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
@@ -1963,16 +2189,21 @@ GemmDescriptor CreateGemmDescriptorGroupConvFwd(const TensorDescriptor& wDesc,
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = false;
     int m           = wei_k / groupCount;
-    int n = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                   wei_spatial.end(),
+                                                                   std::size_t{1},
+                                                                   std::multiplies<std::size_t>()));
     int lda         = k;
     int ldb         = n;
     int ldc         = n;
@@ -2015,19 +2246,24 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdData(const TensorDescriptor& wDes
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(wDesc.GetLengths(), 2, wDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial =
+        wDesc.GetLengths() | std::views::drop(2) | std::views::take(wDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
-    int m           = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int n   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int k   = wei_k / groupCount;
-    int lda = m;
-    int ldb = n;
-    int ldc = n;
+    int m           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                   wei_spatial.end(),
+                                                                   std::size_t{1},
+                                                                   std::multiplies<std::size_t>()));
+    int n           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int k           = wei_k / groupCount;
+    int lda         = m;
+    int ldb         = n;
+    int ldc         = n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
@@ -2067,19 +2303,24 @@ GemmDescriptor CreateGemmDescriptorGroupConvBwdWeight(const TensorDescriptor& dy
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = dwDesc.GetLengths()[0];
 
-    auto wei_spatial = boost::adaptors::slice(dwDesc.GetLengths(), 2, dwDesc.GetLengths().size());
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto wei_spatial = dwDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dwDesc.GetLengths().size() - 2);
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = true;
     int m           = wei_k / groupCount;
-    int n           = (in_c / groupCount) *
-            std::accumulate(wei_spatial.begin(), wei_spatial.end(), 1, std::multiplies<int>());
-    int k   = std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
-    int lda = k;
-    int ldb = k;
-    int ldc = n;
+    int n           = (in_c / groupCount) * static_cast<int>(std::accumulate(wei_spatial.begin(),
+                                                                   wei_spatial.end(),
+                                                                   std::size_t{1},
+                                                                   std::multiplies<std::size_t>()));
+    int k           = static_cast<int>(std::accumulate(
+        out_spatial.begin(), out_spatial.end(), std::size_t{1}, std::multiplies<std::size_t>()));
+    int lda         = k;
+    int ldb         = k;
+    int ldc         = n;
     int batch_count = groupCount;
     auto strideA    = static_cast<long long>(m) * k;
     auto strideB    = static_cast<long long>(k) * n;
@@ -2120,14 +2361,17 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWFwd(const TensorDescriptor& wDes
     int in_c  = xDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(yDesc.GetLengths(), 2, yDesc.GetLengths().size());
+    auto out_spatial =
+        yDesc.GetLengths() | std::views::drop(2) | std::views::take(yDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = false;
     bool transB     = false;
     int m           = wei_k / groupCount;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = in_c / groupCount;
     int lda         = k;
     int ldb         = n;
@@ -2172,14 +2416,17 @@ GemmDescriptor CreateGemmDescriptorGroupConvCNHWBwdData(const TensorDescriptor& 
     int in_c  = dxDesc.GetLengths()[1];
     int wei_k = wDesc.GetLengths()[0];
 
-    auto out_spatial = boost::adaptors::slice(dyDesc.GetLengths(), 2, dyDesc.GetLengths().size());
+    auto out_spatial = dyDesc.GetLengths() | std::views::drop(2) |
+                       std::views::take(dyDesc.GetLengths().size() - 2);
 
     bool isColMajor = false;
     bool transA     = true;
     bool transB     = false;
     int m           = in_c / groupCount;
-    int n =
-        in_n * std::accumulate(out_spatial.begin(), out_spatial.end(), 1, std::multiplies<int>());
+    int n           = in_n * static_cast<int>(std::accumulate(out_spatial.begin(),
+                                                    out_spatial.end(),
+                                                    std::size_t{1},
+                                                    std::multiplies<std::size_t>()));
     int k           = wei_k / groupCount;
     int lda         = m;
     int ldb         = n;

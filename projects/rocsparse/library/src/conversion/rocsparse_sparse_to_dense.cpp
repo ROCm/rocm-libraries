@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@
 
 #include <map>
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_sparse_to_dense_alg value_)
 {
@@ -42,10 +43,10 @@ const char* rocsparse::enum_utils::to_string(rocsparse_sparse_to_dense_alg value
         CASE(rocsparse_sparse_to_dense_alg_default);
 #undef CASE
     }
-    // LCOV_EXCL_START
+
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_sparse_to_dense_alg value_)
@@ -132,7 +133,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     typedef rocsparse_status (*sparse_to_dense_t)(rocsparse_handle              handle,

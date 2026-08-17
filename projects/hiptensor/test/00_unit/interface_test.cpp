@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -310,8 +310,7 @@ TEST(hiptensorContractionTest, UtilTest)
         = 0xFFFFFFFFFFFFFFFF; // A hack method that forcefully changes the data of the underlying handle. During subsequent comparisons, the underlying handle represented by the handle is invalid.
     output = hiptensorContraction(
         handle, &plan, &alpha, A, B, &beta, C, D, workspace, workspaceSize, 0);
-    EXPECT_EQ(
-        output,
-        HIPTENSOR_STATUS_ARCH_MISMATCH); // fail for handle->mDevice.getDeviceId() == -1
+    EXPECT_EQ(output,
+              HIPTENSOR_STATUS_ARCH_MISMATCH); // fail for handle->mDevice.getDeviceId() == -1
     CHECK_HIPTENSOR_ERROR(hiptensorDestroy(handle));
 }

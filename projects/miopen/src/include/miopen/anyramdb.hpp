@@ -40,18 +40,18 @@ namespace miopen {
 
 class LockFile;
 
-struct MIOPEN_INTERNALS_EXPORT AnyRamDb
+struct AnyRamDb
 {
     using TRecord = std::vector<std::any>;
 
 public:
     AnyRamDb(const fs::path& filename_)
-        : filename(filename_), lock_file(LockFile::Get(LockFilePath(filename_))){};
+        : filename(filename_), lock_file(LockFile::Get(LockFilePath(filename_))) {};
 
-    AnyRamDb(const AnyRamDb&) = delete;
-    AnyRamDb(AnyRamDb&&)      = delete;
+    AnyRamDb(const AnyRamDb&)            = delete;
+    AnyRamDb(AnyRamDb&&)                 = delete;
     AnyRamDb& operator=(const AnyRamDb&) = delete;
-    AnyRamDb& operator=(AnyRamDb&&) = delete;
+    AnyRamDb& operator=(AnyRamDb&&)      = delete;
 
     static AnyRamDb& GetCached(const fs::path& path);
 

@@ -88,11 +88,130 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i64
   precision: f64_c
-  M: [17, 49, 203]
-  N: [7, 17, 419]
+  M: [17, 49]
+  N: [7, 17]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: exercise the f64_r datatype branch of the generic
+# converters (gcsr2ell/gell2csr/gcsr2bsr/gbsr2csr/gcsr2csc/gcsc2csr/gcoo*).
+# NOTE: sparse_to_sparse requires baseA == baseB, so bases are kept matched.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i32
+  index_type_J: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  precision: *double_precision
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: exercise the f32_c (single complex) datatype branch of
+# the generic converters.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i32
+  index_type_J: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  precision: *single_precision_complex
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: run the all-format sweep with base_one (matched) so the
+# index-base handling branches of every generic converter are hit.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i32
+  index_type_J: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  precision: *double_precision
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_one]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: mixed index types (I=i64, J=i32) to exercise the
+# 64/32-bit mixed instantiations of the generic converters.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i64
+  index_type_J: i32
+  B_row_indextype: i64
+  B_col_indextype: i32
+  precision: *double_precision
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: i64/i64 f64_r branch for the 64-bit instantiations.
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i64
+  index_type_J: i64
+  B_row_indextype: i64
+  B_col_indextype: i64
+  precision: *double_precision
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: f64_c (double complex) datatype branch of the generic
+# converters (the f64_c CASE in gcsr2ell/gcsr2bsr/gell2csr/... was never hit).
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i32
+  index_type_J: i32
+  B_row_indextype: i32
+  B_col_indextype: i32
+  precision: *double_precision_complex
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
+
+# Coverage widening: i64/i64 f32_r branch to hit the 64-bit integer + float
+# CALL variants of the generic converters (distinct from the f64_r entry).
+- name: sparse_to_sparse
+  category: quick
+  function: sparse_to_sparse
+  index_type_I: i64
+  index_type_J: i64
+  B_row_indextype: i64
+  B_col_indextype: i64
+  precision: *single_precision
+  M: [17]
+  N: [17]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_ell, rocsparse_format_bsr ]
+  formatB: [rocsparse_format_coo, rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_ell, rocsparse_format_bsr ]
 
 - name: sparse_to_sparse
   category: pre_checkin
@@ -102,8 +221,8 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i64
   precision: f32_c
-  M: [49, 203, 20033]
-  N: [419, 65402]
+  M: [49, 203]
+  N: [419, 2000]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
@@ -117,8 +236,8 @@ Tests:
   B_row_indextype: i64
   B_col_indextype: i32
   precision: f64_c
-  M: [1, 2, 2048, 4096]
-  N: [1, 2, 2048, 4096]
+  M: [1, 2]
+  N: [1, 2]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_bsr ]
   formatB: [rocsparse_format_csc, rocsparse_format_csr, rocsparse_format_bsr, rocsparse_format_coo, rocsparse_format_ell ]
@@ -131,8 +250,8 @@ Tests:
   B_row_indextype: i32
   B_col_indextype: i32
   precision: f32_r
-  M: [17939, 3249, 79392]
-  N: [79392, 1337, 3249]
+  M: [2000]
+  N: [2000, 1337]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_csc, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]
@@ -145,8 +264,8 @@ Tests:
   B_row_indextype: i32
   B_col_indextype: i32
   precision: f32_r
-  M: [179399, 33249, 931392]
-  N: [739392, 433370, 324943]
+  M: [5000]
+  N: [5000]
   baseA: [rocsparse_index_base_zero]
   formatA: [rocsparse_format_csr, rocsparse_format_coo, rocsparse_format_coo_aos,  rocsparse_format_ell, rocsparse_format_bsr ]
   formatB: [rocsparse_format_coo, rocsparse_format_coo_aos, rocsparse_format_csc, rocsparse_format_csr,  rocsparse_format_ell, rocsparse_format_bsr ]

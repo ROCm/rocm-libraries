@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,8 @@
 #ifndef ROCSPARSE_GENERIC_H
 #define ROCSPARSE_GENERIC_H
 
+#include "rocsparse/rocsparse-config.h"
+
 #include "generic/rocsparse_axpby.h"
 #include "generic/rocsparse_check_spmat.h"
 #include "generic/rocsparse_dense_to_sparse.h"
@@ -41,6 +43,14 @@
 #include "generic/rocsparse_sparse_to_sparse.h"
 #include "generic/rocsparse_spgeam.h"
 #include "generic/rocsparse_spgemm.h"
+#include "generic/rocsparse_spic0.h"
+#ifdef ROCSPARSE_WITH_SPMAT_SCALE
+#include "generic/rocsparse_spmat_scale.h"
+#endif
+#ifdef ROCSPARSE_WITH_ILDLT0
+#include "generic/rocsparse_spildlt0.h"
+#endif
+#include "generic/rocsparse_spilu0.h"
 #include "generic/rocsparse_spitsv.h"
 #include "generic/rocsparse_spmm.h"
 #include "generic/rocsparse_spmv.h"

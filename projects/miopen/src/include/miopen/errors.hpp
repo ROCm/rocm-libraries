@@ -28,6 +28,7 @@
 
 #include <exception>
 #include <iostream>
+#include <miopen/logger.hpp>
 #include <miopen/miopen.h>
 #include <miopen/object.hpp>
 #include <miopen/returns.hpp>
@@ -57,13 +58,13 @@ struct Exception : std::exception
     const char* what() const noexcept override { return message.c_str(); }
 };
 
-MIOPEN_EXPORT std::string OpenCLErrorMessage(int error, const std::string& msg = "");
 MIOPEN_EXPORT std::string HIPErrorMessage(int error, const std::string& msg = "");
 
 template <class... Params>
 [[noreturn]] void MIOpenThrow(const std::string& file, int line, Params&&... args)
 {
-    throw miopen::Exception(std::forward<Params>(args)...).SetContext(file, line);
+    auto exe = miopen::Exception(std::forward<Params>(args)...);
+    throw exe.SetContext(file, line);
 }
 
 #define MIOPEN_THROW(...)                                     \
@@ -84,8 +85,6 @@ template <class... Params>
         }                                                                              \
     } while(false)
 
-#define MIOPEN_THROW_CL_STATUS(...) \
-    MIOPEN_THROW(miopenStatusUnknownError, miopen::OpenCLErrorMessage(__VA_ARGS__))
 #define MIOPEN_THROW_HIP_STATUS(...) \
     MIOPEN_THROW(miopenStatusUnknownError, miopen::HIPErrorMessage(__VA_ARGS__))
 
@@ -117,8 +116,9 @@ miopenStatus_t try_(F f, bool output = true)
 }
 
 template <class T>
-auto deref(T&& x, [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm)
-    -> decltype((x == nullptr), get_object(*x))
+auto deref(T&& x,
+           [[maybe_unused]] miopenStatus_t err = miopenStatusBadParm) -> decltype((x == nullptr),
+                                                                                  get_object(*x))
 {
     if(x == nullptr)
     {

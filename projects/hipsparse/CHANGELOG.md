@@ -3,17 +3,53 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
-## (Unreleased) hipSPARSE 4.3.0
+
+## (Unreleased) hipSPARSE 4.8.0
 
 ### Added
+* Added the generic API routines `hipsparseSpGEAM_createDescr`, `hipsparseSpGEAM_destroyDescr`, `hipsparseSpGEAM_bufferSize`, `hipsparseSpGEAM_nnz`, and `hipsparseSpGEAM` for sparse matrix-matrix addition (`C = alpha * op(A) + beta * op(B)`), along with the `hipsparseSpGEAMDescr_t` type and the `hipsparseSpGEAMAlg_t` algorithm enum, to match the cuSPARSE 13.3 generic `SpGEAM` API.
 
-* Added sliced ELL format support to the `hipsparseSpMV` routine.
-* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+## hipSPARSE 4.7.0 for ROCm 10.0
+
+### Added
+* Added Blocked ELL format support to the `hipsparseDenseToSparse` routine, along with the new `hipsparseBlockedEllSetPointers` function.
+* Added the `HIPSPARSE_SPMV_CSR_ALG3` algorithm to `hipsparseSpMV`, which exposes the rocSPARSE CSR nnz split algorithm (`rocsparse_spmv_alg_csr_nnzsplit`).
+* Added CSC format support to `hipsparseSpSV`.
+* Added CSC format support to `hipsparseSpSM`.
+
+### Resolved issues
+* Fixed an issue with `hipsparseSpMM`, which produced incorrect results for the Blocked ELL sparse format.
+
+## hipSPARSE 4.6.0 for ROCm 7.14
+
+### Added
+* Added `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.
+* Added BSR format support to `hipsparseSpMV`.
+* Added BSR format support to `hipsparseSpMM`.
+
+### Resolved issues
+* Fixed an issue where calling `hipsparseSpMV` multiple times with different `hipsparseOperation_t`, `hipsparseSpMVAlg_t`, or compute-datatypes using the same sparse matrix descriptor resulted in errors.
+
+### Upcoming changes
+* The routines `hipsparseXcsrgeamNnz`, `hipsparseScsrgeam`, `hipsparseDcsrgeam`, `hipsparseCcsrgeam`, and `hipsparseZcsrgeam` have been deprecated and will be removed in a future release. Use `hipsparseScsrgeam2_bufferSizeExt`, `hipsparseDcsrgeam2_bufferSizeExt`, `hipsparseCcsrgeam2_bufferSizeExt`, `hipsparseZcsrgeam2_bufferSizeExt`, `hipsparseXcsrgeam2Nnz`, `hipsparseScsrgeam2`, `hipsparseDcsrgeam2`, `hipsparseCcsrgeam2`, and `hipsparseZcsrgeam2` instead.
+
+## hipSPARSE 4.5.0 for ROCm 7.12.0
+
+### Added
+* For sparse matrix vector product (`hipsparseSpMV`), when using `HIPSPARSE_SPMV_ALG_DEFAULT`, the routine now automatically falls back to a supported algorithm depending on the sparse matrix format and requested operation. For example, CSR format with transposed operations or CSC format with non-transposed operations will fall back to an appropriate algorithm.
+
+### Resolved issues
+* Fixed an issue where out-of-bounds memory reads can occur in the single precision bsrxmv kernels when `block_dim` equals `5` or `8`.
+
+## hipSPARSE 4.4.0 for ROCm 7.11.0
+
+### Added
 * Added brain half float mixed precision to `hipsparseSpMV` where A, X, and Y use bfloat16 and the compute type uses float.
 * Added half float mixed precision to `hipsparseSpMV` where A, X, and Y use float16 and the compute type uses float.
 * Added brain half float mixed precision to `hipsparseSpMM` where A, B, and C use bfloat16 and the compute type use float.
 * Added half float mixed precision to `hipsparseSpMM` where A, B, and C use float16 and the compute type use float.
-
+* Added the `debian`, `almalinux`, `rockylinux`, and `oraclelinux` OS names to install script.
+* Added sliced ELL format support to the `hipsparseSpMV` routine.
 
 ### Resolved issues
 * In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter, which does not match the NVIDIA CUDA cuSPARSE API. The `hipsparseSpSM_solve_ex()` routine has been added to properly match the

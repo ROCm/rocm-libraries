@@ -10,7 +10,7 @@ namespace hipdnn_backend
 
 TEST(TestHandle, DefaultStreamIsNull)
 {
-    hipdnnHandle handle;
+    const hipdnnHandle handle;
     EXPECT_EQ(handle.getStream(), nullptr) << "Default stream should be nullptr.";
 }
 

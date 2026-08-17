@@ -11,14 +11,19 @@ This guide provides practical information for both using hipDNN components and e
   - [CMake Integration](#cmake-integration)
   - [Logging Setup](#logging-setup)
   - [Working with Schemas](#working-with-schemas)
+  - [Configuring Engine Knobs](#configuring-engine-knobs)
 - [Extending hipDNN](#extending-hipdnn)
   - [Adding a New Plugin](#adding-a-new-plugin)
   - [Adding a New Operation](#adding-a-new-operation)
+  - [Descriptor Code Generator](#descriptor-code-generator)
   - [Development Workflow](#development-workflow)
 
 ---
 
 ## Consuming hipDNN
+
+> [!TIP]
+> For a minimal end-to-end example of using hipDNN in a CMake project, see [Add hipDNN to your project](https://rocm.docs.amd.com/projects/hipdnn/en/latest/install/add-project.html) in the published hipDNN documentation.
 
 This section covers how to use the various components of hipDNN in your applications.
 
@@ -44,7 +49,7 @@ The hipDNN backend is a shared library that provides the core C API for graph ex
 hipDNN provides three header-only C++ SDK libraries for plugin development and testing. For complete SDK functionality and roadmap, see the [SDKs section in the Design Guide](./Design.md#sdks).
 
 #### Key Components
-- **Data SDK**: Schema files and data structures: [`data_sdk/schemas/`](../data_sdk/schemas/)
+- **FlatBuffers SDK**: Schema files and generated data objects: [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
 - **Plugin SDK**: Plugin interface definitions: [`plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h`](../plugin_sdk/include/hipdnn_plugin_sdk/EnginePluginApi.h)
 - **Test SDK**: Test utilities and CPU reference implementations: [`test_sdk/include/hipdnn_test_sdk/`](../test_sdk/include/hipdnn_test_sdk/)
 - Logging: [`data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp`](../data_sdk/include/hipdnn_data_sdk/logging/Logger.hpp)
@@ -100,16 +105,6 @@ target_link_libraries(your_target hip::host hip::device)
 > [!NOTE]
 > 📝 If CMake cannot find the packages after installation, ensure your `CMAKE_PREFIX_PATH` includes the install location. By default on Linux systems, hipDNN CMake files are installed to `/opt/rocm/lib/cmake`.
 
-### Logging Setup
-
-hipDNN uses the spdlog header-only library for logging. See the [Environment docs](./Environment.md#logging-configuration) for further details.
-
-> [!CAUTION]
-> There is a known issue on Windows where logging must be explicitly shut down before the application exits to ensure all log messages are flushed and resources are released. See [spdlog Windows Issues](https://github.com/gabime/spdlog/wiki/Asynchronous-logging#windows-issues) for more information.
-> ```cpp
-> spdlog::shutdown();
-> ```
-
 ### Working with Schemas
 
 hipDNN uses FlatBuffers for schema-based data objects to describe graphs and operations.
@@ -117,7 +112,15 @@ hipDNN uses FlatBuffers for schema-based data objects to describe graphs and ope
 #### Key Concepts
 - Graphs and operations are defined using `.fbs` schema files
 - Attributes marked as `long` types in graphs are foreign keys to the `uid` in `tensor_attributes`
-- Schema files are located in [`data_sdk/schemas/`](../data_sdk/schemas/)
+- Schema files are located in [`flatbuffers_sdk/schemas/`](../flatbuffers_sdk/schemas/)
+
+### Configuring Engine Knobs
+
+hipDNN engines support runtime configuration through **knobs** - configurable parameters that control engine behavior, performance tuning, and feature selection.
+
+> [!TIP]
+> For comprehensive knobs documentation including all available knobs, constraints, validation, and advanced usage, see the [Knobs Documentation](./Knobs.md).
+
 ---
 
 ## Extending hipDNN
@@ -126,72 +129,91 @@ This section covers how to extend hipDNN with new functionality.
 
 ### Adding a New Plugin
 
-Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
+Plugins extend hipDNN to support new or additional implementations of kernel engines, benchmarking, and heuristics. The Plugin SDK provides interfaces and utilities to simplify plugin development:
+
+- **Engine interfaces**: `IEngine`, `IPlanBuilder`, `IPlan` templates for building plugin components
+- **Engine management**: `EngineManager` template for managing multiple engines
+- **Knob utilities**: `KnobFactory`, `KnobSettingFactory`, and `GlobalKnobDefines` for implementing runtime-configurable knobs
+
+For comprehensive guidance on plugin development, including architecture details, implementation steps, and examples, see the [Plugin Development Guide](./PluginDevelopment.md).
 
 ### Adding a New Operation
 
-Adding a new operation requires coordinated changes across multiple components. Here's the complete workflow:
+Adding a new operation touches every layer of the stack — FlatBuffers schema, backend descriptor and enums, frontend attributes/packer/unpacker/node/Graph API, JSON utilities, optional Python bindings, and tests at four levels. The [`hipdnn-codegen`](../tools/DescriptorGenerator/.claude/skills/hipdnn-codegen/SKILL.md) agent skill (backed by [`tools/DescriptorGenerator/`](../tools/DescriptorGenerator/)) automates the mechanical parts.
 
-#### Prerequisites
-
-When adding a completely new operation type (not currently supported in hipDNN), you'll need to:
-
-1. Define the operation in the Data SDK schemas
-2. Create frontend classes
-3. Implement the operation in target plugins
-
-#### Data SDK Schema Changes
-
-If the operation is new to hipDNN, start by defining its data structures:
-
-1. **Create Attribute Schema**
-   - Add a new `.fbs` file in [`data_sdk/schemas/`](../data_sdk/schemas/)
-   - Define the operation's attributes (parameters, configurations)
-   - Example: [`data_sdk/schemas/batchnorm_attributes.fbs`](../data_sdk/schemas/batchnorm_attributes.fbs)
-
-2. **Update Graph Schema**
-   - Modify [`data_sdk/schemas/graph.fbs`](../data_sdk/schemas/graph.fbs)
-   - Add your new attributes to the `NodeAttributes` union
-   - Include your schema file
-
-Example:
-```flatbuffers
-include "your_operation_attributes.fbs";
-
-union NodeAttributes {
-    BatchnormInferenceAttributes,
-    PointwiseAttributes,
-    ...
-    YourOperationAttributes  // Add your new operation
-}
-```
-
-After updating FlatBuffer schemas, regenerate the C++ headers:
-
-```bash
-ninja generate_hipdnn_data_sdk_headers
-```
-
-#### Frontend Implementation
-
-Create C++ classes to expose the operation to users:
-
-1. **Create Node Class**
-   - Add header file in [`frontend/include/hipdnn_frontend/node/`](../frontend/include/hipdnn_frontend/node/)
-   - Inherit from the base `Node` class
-   - Example: [`frontend/include/hipdnn_frontend/node/BatchnormNode.hpp`](../frontend/include/hipdnn_frontend/node/BatchnormNode.hpp)
-
-2. **Create Attribute Classes**
-   - Add corresponding attribute classes in [`frontend/include/hipdnn_frontend/attributes/`](../frontend/include/hipdnn_frontend/attributes/)
-   - These wrap the FlatBuffer-generated structures
-
-3. **Update Frontend Tests**
-   - Add tests for your new node and attributes
-   - See examples in [`frontend/tests/`](../frontend/tests/)
+> [!TIP]
+> See the [Adding a New Operation Guide](./AddingNewOperations.md) for the full contributor walkthrough — cuDNN naming parity rules, the recommended workflow, layer-by-layer reference, testing matrix, and PR checklist.
 
 #### Plugin Integration
 
-Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the operation execution in target plugins.
+Once the operation lands across the layers above, refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement execution in target plugins.
+
+### Descriptor Code Generator
+
+The Descriptor Code Generator ([`tools/DescriptorGenerator/`](../tools/DescriptorGenerator/)) is a Python tool that generates the C++ boilerplate required to land a new operation type in hipDNN. Each operation in hipDNN requires a consistent set of files — descriptors, packers, unpackers, attributes, nodes, enum entries, factory wiring, and tests — and the generator produces all of them from a single YAML configuration.
+
+#### What It Generates
+
+From one YAML config, the tool produces:
+
+- **Backend descriptor** (`.hpp`/`.cpp`) with `setAttribute`/`getAttribute`, `finalize`, `buildNode`, `fromNode`, and `toString`
+- **Frontend packer** and **unpacker** for lowering and lifting between frontend graph nodes and backend descriptors
+- **Frontend attributes** class and **node** class with graph method
+- **Unit tests** for the descriptor, graph building, and `fromNode` round-trips
+- **Integration tests** for lowering and lifting round-trips
+- **Fragment files** with enum entries, factory cases, CMake entries, and string utility switch cases for insertion into existing shared files
+
+#### When to Use It
+
+| Scenario | Generator Mode |
+|----------|---------------|
+| Brand new operation (nothing exists yet) | `--mode full` |
+| Adding backend only (frontend exists or will be added later) | `--mode backend` |
+| Adding frontend only (backend descriptor already exists) | `--mode frontend` |
+
+#### Existing Configurations
+
+The tool ships with validated configs for all current operations:
+
+| Config | Operation |
+|--------|-----------|
+| `convolution_fwd.yaml` | Convolution forward (reference config) |
+| `convolution_bwd.yaml` | Convolution backward data |
+| `convolution_wrw.yaml` | Convolution backward weights |
+| `matmul.yaml` | Matrix multiplication |
+| `pointwise.yaml` | Pointwise operations |
+| `batchnorm.yaml` | Batch normalization (training forward) |
+| `batchnorm_backward.yaml` | Batch normalization backward |
+| `batchnorm_inference.yaml` | Batch normalization inference |
+| `batchnorm_inference_variance_ext.yaml` | Batch normalization inference (variance extension) |
+| `sdpa.yaml` | Scaled dot-product attention |
+
+These serve as references when creating a config for a new operation. Use `convolution_fwd.yaml` as the primary reference — it exercises all config features.
+
+#### Quick Start
+
+```bash
+cd projects/hipdnn/tools/DescriptorGenerator
+
+# One-time setup
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# Preview what would be generated (dry run)
+.venv/bin/python generate.py \
+    --config configs/your_operation.yaml \
+    --output-dir /tmp/preview \
+    --mode full \
+    --dry-run
+
+# Generate into the project tree
+.venv/bin/python generate.py \
+    --config configs/your_operation.yaml \
+    --output-dir ../../ \
+    --mode full
+```
+
+For full documentation on YAML config format, field types, mode enum definitions, and post-generation integration steps, see the [Descriptor Code Generator README](../tools/DescriptorGenerator/README.md).
 
 ---
 
@@ -199,12 +221,17 @@ Refer to the [Plugin Development Guide](./PluginDevelopment.md) to implement the
 
 ### Typical Development Flow
 
-1. **For New Operations**:
+1. **For New Operations** (using the code generator):
    ```
-   Data SDK Schema → Frontend Classes → Plugin Implementation → Tests
+   FBS Schema → YAML Config → Code Generator → Place Files & Fragments → Plugin Implementation → Tests
    ```
 
-2. **For Existing Operations in New Plugins**:
+2. **For New Operations** (manual):
+   ```
+   Data SDK Schema → Backend Descriptor → Frontend Classes → Plugin Implementation → Tests
+   ```
+
+3. **For Existing Operations in New Plugins**:
    ```
    Plugin Implementation → Integration Tests
    ```

@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -54,12 +55,11 @@ void testing_gebsr2csr_bad_arg(const Arguments& argus)
     hipsparseIndexBase_t bsr_idx_base  = HIPSPARSE_INDEX_BASE_ZERO;
     hipsparseDirection_t dir           = HIPSPARSE_DIRECTION_ROW;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
-    std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
-    hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
-    hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
+    hipsparseLocalHandle_t        handle;
+    std::unique_ptr<descr_struct> unique_ptr_csr_descr(new descr_struct);
+    hipsparseMatDescr_t           csr_descr = unique_ptr_csr_descr->descr;
+    std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
+    hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);
@@ -296,12 +296,11 @@ void testing_gebsr2csr(Arguments argus)
     hipsparseDirection_t dir           = argus.dirA;
     std::string          filename      = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
-    std::unique_ptr<descr_struct>  unique_ptr_csr_descr(new descr_struct);
-    hipsparseMatDescr_t            csr_descr = unique_ptr_csr_descr->descr;
-    std::unique_ptr<descr_struct>  unique_ptr_bsr_descr(new descr_struct);
-    hipsparseMatDescr_t            bsr_descr = unique_ptr_bsr_descr->descr;
+    hipsparseLocalHandle_t        handle(argus);
+    std::unique_ptr<descr_struct> unique_ptr_csr_descr(new descr_struct);
+    hipsparseMatDescr_t           csr_descr = unique_ptr_csr_descr->descr;
+    std::unique_ptr<descr_struct> unique_ptr_bsr_descr(new descr_struct);
+    hipsparseMatDescr_t           bsr_descr = unique_ptr_bsr_descr->descr;
 
     hipsparseSetMatIndexBase(csr_descr, csr_idx_base);
     hipsparseSetMatIndexBase(bsr_descr, bsr_idx_base);

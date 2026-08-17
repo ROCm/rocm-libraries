@@ -140,7 +140,14 @@ inline std::vector<BN2DTestCase> Network2DLarge()
         // {1, 512, 7, 7, miopen::batchnorm::Direction::Backward, 1, 1},
         // edge cases
         {69328, 1, 22, 22, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
-        {69328, 1, 13, 79, miopen::batchnorm::Direction::ForwardTraining, 1, 1}
+        {69328, 1, 13, 79, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        // Forward passes that should select variant 3 according to the current heuristic in common_spatial.hpp:DefaultConfigSpatialSingle and layout NCHW
+        {16, 1, 32, 32, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        // NHWC with a non-power-of-2 C exercises the vector-size
+        // fallback in GetHeuristicsConfigTuningNHWC (which selects vectorsize 8).
+        // Verified end-to-end when run under tuning (MIOPEN_FIND_ENFORCE=SEARCH).
+        {8, 24, 56, 56, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {8, 24, 56, 56, miopen::batchnorm::Direction::Backward, 0, 1}
         };
     // clang-format on
 }

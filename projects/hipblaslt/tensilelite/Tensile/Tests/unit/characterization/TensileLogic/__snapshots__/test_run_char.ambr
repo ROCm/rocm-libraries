@@ -1,0 +1,126 @@
+# serializer version: 1
+# name: test_check_namedtuple
+  dict({
+    'All': False,
+    'OnlyCustomKernels': True,
+  })
+# ---
+# name: test_main_happy_no_rejects
+  '''
+  Total  2 solutions
+  Keep   2 solutions
+  Reject 0 solutions
+  
+  '''
+# ---
+# name: test_main_known_bugs_and_chip_id_failures
+  dict({
+    'exit_code': 1,
+    'stdout': '''
+      Total  3 solutions
+      Keep   1 solutions
+      Reject 2 solutions
+      Known-bugs skip  1 solutions (see --known-bugs YAML)
+      Chip-ID failures  1 files
+  
+    ''',
+  })
+# ---
+# name: test_main_rejects_exit
+  dict({
+    'exit_code': 1,
+    'stdout': '''
+      Total  2 solutions
+      Keep   1 solutions
+      Reject 1 solutions
+  
+    ''',
+  })
+# ---
+# name: test_runchecks_all_pass
+  dict({
+    'chip_id_failures': 0,
+    'keep': 2,
+    'known_bug_skips': 0,
+    'total': 2,
+  })
+# ---
+# name: test_runchecks_chip_id_failure
+  dict({
+    'chip_id_failures': 1,
+    'keep': 0,
+    'known_bug_skips': 0,
+    'total': 0,
+  })
+# ---
+# name: test_runchecks_experimental_skipped
+  dict({
+    'chip_id_failures': 0,
+    'keep': 0,
+    'known_bug_skips': 0,
+    'total': 0,
+  })
+# ---
+# name: test_runchecks_known_bug_skip
+  dict({
+    'chip_id_failures': 0,
+    'keep': 1,
+    'known_bug_skips': 1,
+    'total': 2,
+  })
+# ---
+# name: test_runchecks_one_validator_fails
+  dict({
+    'chip_id_failures': 0,
+    'keep': 0,
+    'known_bug_skips': 0,
+    'total': 1,
+  })
+# ---
+# name: test_runchecks_only_custom_kernels_filters
+  dict({
+    'chip_id_failures': 0,
+    'keep': 1,
+    'known_bug_skips': 0,
+    'total': 1,
+  })
+# ---
+# name: test_runchecks_only_custom_no_custom_in_file
+  dict({
+    'chip_id_failures': 0,
+    'keep': 0,
+    'known_bug_skips': 0,
+    'total': 0,
+  })
+# ---
+# name: test_runchecks_single_file_relative_dot
+  dict({
+    'chip_id_failures': 0,
+    'keep': 1,
+    'known_bug_skips': 0,
+    'total': 1,
+  })
+# ---
+# name: test_setup_happy_check_all
+  dict({
+    'check': dict({
+      'All': True,
+      'OnlyCustomKernels': False,
+    }),
+    'gp_config': dict({
+    }),
+    'jobs': 48,
+    'num_files': 1,
+  })
+# ---
+# name: test_setup_single_yaml_file
+  dict({
+    'is_solo': True,
+    'num_files': 1,
+  })
+# ---
+# name: test_setup_verbose2_sets_print_rejection
+  dict({
+    'PrintSolutionRejectionReason': True,
+  })
+# ---

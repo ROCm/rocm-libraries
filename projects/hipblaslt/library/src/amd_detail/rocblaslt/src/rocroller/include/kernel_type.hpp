@@ -1,29 +1,5 @@
-/*! \file */
-/* ************************************************************************
- *
- * MIT License
- *
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -50,37 +26,40 @@ struct ScaleType
     auto operator<=>(const ScaleType& other) const = default;
 };
 
+namespace detail
+{
+    // boost::hash_combine implementation for combining hash values
+    // - 0x9e3779b9: Golden ratio constant (2^32 / phi) for good bit distribution
+    // - Bit shifts (<< 6, >> 2): Ensures element order matters in final hash
+    // - XOR (^=): Combines new hash with accumulated value
+    inline void hash_combine(size_t& seed, size_t value)
+    {
+        seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+} // namespace detail
+
 template <>
 struct std::hash<ScaleType>
 {
     size_t operator()(const ScaleType& s) const noexcept
     {
-        size_t modeHash         = std::hash<rocRoller::Operations::ScaleMode>{}(s.mode);
-        size_t blockRowSizeHash = std::hash<size_t>{}(s.blockRowSize);
-        size_t blockColSizeHash = std::hash<size_t>{}(s.blockColSize);
-        size_t typeHash         = std::hash<rocRoller::DataType>{}(s.type);
+        size_t seed = 0;
+        detail::hash_combine(seed, std::hash<rocRoller::Operations::ScaleMode>{}(s.mode));
+        detail::hash_combine(seed, std::hash<size_t>{}(s.blockRowSize));
+        detail::hash_combine(seed, std::hash<size_t>{}(s.blockColSize));
+        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(s.type));
 
-        // Hash the preSwizzleTile vector by combining hashes of its elements
-        // Uses boost::hash_combine technique:
-        // - 0x9e3779b9: Golden ratio constant (2^32 / phi) for good bit distribution
-        // - Bit shifts (<< 6, >> 2): Ensures element order matters in final hash
-        // - XOR (^=): Combines new hash with accumulated value
-        size_t preSwizzleTileHash = 0;
         for(const auto& elem : s.preSwizzleTile)
         {
-            preSwizzleTileHash ^= std::hash<size_t>{}(elem) + 0x9e3779b9 + (preSwizzleTileHash << 6)
-                                  + (preSwizzleTileHash >> 2);
+            detail::hash_combine(seed, std::hash<size_t>{}(elem));
         }
 
-        size_t preTileHash = 0;
         for(const auto& elem : s.preTile)
         {
-            preTileHash ^= std::hash<size_t>{}(elem) + 0x9e3779b9 + (preTileHash << 6)
-                           + (preTileHash >> 2);
+            detail::hash_combine(seed, std::hash<size_t>{}(elem));
         }
 
-        return modeHash ^ (blockRowSizeHash << 1) ^ (blockColSizeHash << 2) ^ (typeHash << 3)
-               ^ (preSwizzleTileHash << 4) ^ (preTileHash << 5);
+        return seed;
     }
 };
 
@@ -105,6 +84,9 @@ struct KernelType
     ScaleType scaleTypeA;
     ScaleType scaleTypeB;
 
+    bool swizzleA = false;
+    bool swizzleB = false;
+
     auto operator<=>(const KernelType& other) const = default;
 };
 
@@ -113,18 +95,18 @@ struct std::hash<KernelType>
 {
     size_t operator()(const KernelType& k) const noexcept
     {
-        size_t typeAHash      = std::hash<rocRoller::DataType>{}(k.typeA);
-        size_t typeBHash      = std::hash<rocRoller::DataType>{}(k.typeB);
-        size_t typeCHash      = std::hash<rocRoller::DataType>{}(k.typeC);
-        size_t typeDHash      = std::hash<rocRoller::DataType>{}(k.typeD);
-        size_t typeAccHash    = std::hash<rocRoller::DataType>{}(k.typeAcc);
-        size_t scaleTypeAHash = std::hash<ScaleType>{}(k.scaleTypeA);
-        size_t scaleTypeBHash = std::hash<ScaleType>{}(k.scaleTypeB);
-        size_t transAHash     = std::hash<bool>{}(k.transA);
-        size_t transBHash     = std::hash<bool>{}(k.transB);
-
-        return typeAHash ^ (typeBHash << 1) ^ (typeCHash << 2) ^ (typeDHash << 3)
-               ^ (typeAccHash << 4) ^ (scaleTypeAHash << 5) ^ (scaleTypeBHash << 6)
-               ^ (transAHash << 7) ^ (transBHash << 8);
+        size_t seed = 0;
+        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeA));
+        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeB));
+        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeC));
+        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeD));
+        detail::hash_combine(seed, std::hash<rocRoller::DataType>{}(k.typeAcc));
+        detail::hash_combine(seed, std::hash<ScaleType>{}(k.scaleTypeA));
+        detail::hash_combine(seed, std::hash<ScaleType>{}(k.scaleTypeB));
+        detail::hash_combine(seed, std::hash<bool>{}(k.transA));
+        detail::hash_combine(seed, std::hash<bool>{}(k.transB));
+        detail::hash_combine(seed, std::hash<bool>{}(k.swizzleA));
+        detail::hash_combine(seed, std::hash<bool>{}(k.swizzleB));
+        return seed;
     }
 };

@@ -55,33 +55,25 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_forward_substitution_calc(bool is_unit_diag
 
         __syncthreads();
 
+        rocblas_int rowA   = tx + i;
+        rocblas_int colA   = i;
+        size_t      indexA = rocblas_packed_matrix_index(is_transpose, is_transpose, n, rowA, colA);
         // iterate through the current block and solve elements
-        for(rocblas_int j = 0; j < BLK_SIZE; j++)
+        for(rocblas_int j = 0; j < BLK_SIZE; j++, colA++)
         {
             // solve element that can be solved
             if(tx == j && !is_unit_diag && j + i < n)
-            {
-                rocblas_int colA = j + i;
-                rocblas_int rowA = j + i;
-                size_t      indexA
-                    = rocblas_packed_matrix_index(is_transpose, is_transpose, n, rowA, colA);
                 xshared[tx] = xshared[tx] / (CONJ ? conj(A[indexA]) : A[indexA]);
-            }
 
             __syncthreads();
 
             // for rest of block, subtract previous solved part
             if(tx > j && j + i < n)
-            {
-                rocblas_int colA = j + i;
-                rocblas_int rowA = tx + i;
-                size_t      indexA
-                    = rocblas_packed_matrix_index(is_transpose, is_transpose, n, rowA, colA);
-
                 // Ensure row is in range, and subtract
                 if(rowA < n)
                     xshared[tx] -= (CONJ ? conj(A[indexA]) : A[indexA]) * xshared[j];
-            }
+
+            indexA += is_transpose ? 1 : n - colA - 1;
         }
 
         __syncthreads();
@@ -94,18 +86,18 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_forward_substitution_calc(bool is_unit_diag
                 break;
 
             // 2. Sum result (across columns) to be subtracted from original value
-            T val = 0;
-            for(rocblas_int p = 0; p < BLK_SIZE; p++)
+            T           val  = 0;
+            rocblas_int rowA = tx + j;
+            rocblas_int colA = i;
+            size_t indexA = rocblas_packed_matrix_index(is_transpose, is_transpose, n, rowA, colA);
+            for(rocblas_int p = 0; p < BLK_SIZE; p++, colA++)
             {
-                rocblas_int colA = i + p;
-                rocblas_int rowA = tx + j;
-                size_t      indexA
-                    = rocblas_packed_matrix_index(is_transpose, is_transpose, n, rowA, colA);
-
                 if(is_unit_diag && colA == rowA)
                     val += xshared[p];
                 else if(colA < n)
                     val += (CONJ ? conj(A[indexA]) : A[indexA]) * xshared[p];
+
+                indexA += is_transpose ? 1 : n - colA - 1;
             }
 
             x[(tx + j) * incx] -= val;
@@ -141,33 +133,25 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_backward_substitution_calc(bool is_unit_dia
 
         __syncthreads();
 
+        rocblas_int rowA = tx + i;
+        rocblas_int colA = i + BLK_SIZE - 1;
+        size_t indexA    = rocblas_packed_matrix_index(!is_transpose, is_transpose, n, rowA, colA);
         // Iterate backwards through the current block to solve elements.
-        for(rocblas_int j = BLK_SIZE - 1; j >= 0; j--)
+        for(rocblas_int j = BLK_SIZE - 1; j >= 0; j--, colA--)
         {
             // Solve the new element that can be solved
             if(tx == j && !is_unit_diag && j + i >= 0)
-            {
-                rocblas_int colA = j + i;
-                rocblas_int rowA = j + i;
-                size_t      indexA
-                    = rocblas_packed_matrix_index(!is_transpose, is_transpose, n, rowA, colA);
                 xshared[tx] = xshared[tx] / (CONJ ? conj(A[indexA]) : A[indexA]);
-            }
 
             __syncthreads();
 
             // for rest of block, subtract previous solved part
             if(tx < j && j + i >= 0)
-            {
-                rocblas_int colA = j + i;
-                rocblas_int rowA = tx + i;
-                size_t      indexA
-                    = rocblas_packed_matrix_index(!is_transpose, is_transpose, n, rowA, colA);
-
                 // Ensure row is in range, and subtract
                 if(rowA >= 0)
                     xshared[tx] -= (CONJ ? conj(A[indexA]) : A[indexA]) * xshared[j];
-            }
+
+            indexA -= is_transpose ? 1 : colA;
         }
 
         __syncthreads();
@@ -180,18 +164,18 @@ ROCBLAS_KERNEL_ILF void rocblas_tpsv_backward_substitution_calc(bool is_unit_dia
                 break;
 
             // 2. Sum result (across columns) to be subtracted from the original value
-            T val = 0;
-            for(rocblas_int p = 0; p < BLK_SIZE; p++)
+            T           val  = 0;
+            rocblas_int rowA = tx + j;
+            rocblas_int colA = i;
+            size_t indexA = rocblas_packed_matrix_index(!is_transpose, is_transpose, n, rowA, colA);
+            for(rocblas_int p = 0; p < BLK_SIZE; p++, colA++)
             {
-                rocblas_int colA = i + p;
-                rocblas_int rowA = tx + j;
-                size_t      indexA
-                    = rocblas_packed_matrix_index(!is_transpose, is_transpose, n, rowA, colA);
-
                 if(is_unit_diag && colA == rowA)
                     val += xshared[p];
                 else
                     val += (CONJ ? conj(A[indexA]) : A[indexA]) * xshared[p];
+
+                indexA += is_transpose ? 1 : colA + 1;
             }
 
             x[(tx + j) * incx] -= val;

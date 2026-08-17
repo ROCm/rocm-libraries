@@ -5,27 +5,31 @@
 #include <gtest/gtest.h>
 #include <memory>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-class TestMiopenHipdnnEnginePluginHandle : public ::testing::Test
+#include "HipdnnMiopenHandle.hpp"
+
+class TestMiopenHipdnnMiopenHandle : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
-        _handle = std::make_unique<HipdnnEnginePluginHandle>();
+        SKIP_IF_NO_DEVICES();
+        _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    std::unique_ptr<HipdnnEnginePluginHandle> _handle;
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
 };
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, DefaultConstruction)
+TEST_F(TestMiopenHipdnnMiopenHandle, DefaultConstruction)
 {
-    EXPECT_EQ(_handle->miopenHandle, nullptr);
-    EXPECT_EQ(_handle->miopenContainer, nullptr);
+
+    EXPECT_NE(_handle->miopenHandle, nullptr);
+    EXPECT_EQ(_handle->container, nullptr);
     EXPECT_EQ(_handle->getStream(), nullptr);
 }
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, StoreDetachedBuffer)
+TEST_F(TestMiopenHipdnnMiopenHandle, StoreDetachedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto createdString = builder.CreateString("test");
@@ -39,7 +43,7 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, StoreDetachedBuffer)
     _handle->removeEngineDetailsDetachedBuffer(ptr);
 }
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, RemoveDetachedBuffer)
+TEST_F(TestMiopenHipdnnMiopenHandle, RemoveDetachedBuffer)
 {
     flatbuffers::FlatBufferBuilder builder;
     auto createdString = builder.CreateString("test");
@@ -54,7 +58,7 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, RemoveDetachedBuffer)
     _handle->removeEngineDetailsDetachedBuffer(ptr);
 }
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, RemoveNonExistentBuffer)
+TEST_F(TestMiopenHipdnnMiopenHandle, RemoveNonExistentBuffer)
 {
     const void* fakePtr = reinterpret_cast<const void*>(0x12345678);
 
@@ -62,7 +66,7 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, RemoveNonExistentBuffer)
     EXPECT_NO_THROW(_handle->removeEngineDetailsDetachedBuffer(fakePtr));
 }
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, MultipleBuffers)
+TEST_F(TestMiopenHipdnnMiopenHandle, MultipleBuffers)
 {
     flatbuffers::FlatBufferBuilder builder1;
     auto createdString1 = builder1.CreateString("test");
@@ -83,7 +87,7 @@ TEST_F(TestMiopenHipdnnEnginePluginHandle, MultipleBuffers)
     _handle->removeEngineDetailsDetachedBuffer(ptr2);
 }
 
-TEST_F(TestMiopenHipdnnEnginePluginHandle, ThrowsWithNoMiopenHandle)
+TEST_F(TestMiopenHipdnnMiopenHandle, WillNotThrowOnSetStreamNullptr)
 {
-    EXPECT_THROW(_handle->setStream(nullptr), hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_NO_THROW(_handle->setStream(nullptr));
 }

@@ -5,7 +5,7 @@
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <vector>
 
@@ -42,10 +42,11 @@ public:
 
             // Apply operation and set output
             auto result = op(inputValue);
-            output.setHostValue(safeConvert<OutputType>(result), indices);
+            output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
         };
 
-        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
 
@@ -84,10 +85,11 @@ public:
 
             // Apply operation and set output
             auto result = op(input1Value, input2Value);
-            output.setHostValue(safeConvert<OutputType>(result), indices);
+            output.setHostValue(hipdnn_test_sdk::detail::safeConvert<OutputType>(result), indices);
         };
 
-        auto parallelFunc = makeParallelTensorFunctor(func, broadcastShape);
+        auto parallelFunc
+            = hipdnn_test_sdk::detail::makeParallelTensorFunctor(func, broadcastShape);
         parallelFunc();
     }
 
@@ -107,11 +109,11 @@ private:
 
         std::vector<int64_t> broadcastedIndex(tensorDims.size());
 
-        size_t dimOffset = broadcastIndex.size() - tensorDims.size();
+        const size_t dimOffset = broadcastIndex.size() - tensorDims.size();
 
         for(size_t i = 0; i < tensorDims.size(); ++i)
         {
-            size_t broadcastDimIdx = dimOffset + i;
+            const size_t broadcastDimIdx = dimOffset + i;
             broadcastedIndex[i] = (tensorDims[i] == 1) ? 0 : broadcastIndex[broadcastDimIdx];
         }
 

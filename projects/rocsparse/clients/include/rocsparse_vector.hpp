@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #define ROCSPARSE_VECTOR_HPP
 
 #include "rocsparse_allocator.hpp"
+#include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
 #include "rocsparse_init.hpp"
 

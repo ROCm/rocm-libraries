@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,13 +36,17 @@
 #include <Tensile/hip/HipHardware.hpp>
 
 #include <Tensile/UtilsOrigami.hpp>
+#include <iostream>
 #include <origami/streamk.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <mutex>
 #include <random>
+
+#include <sstream>
 
 #ifdef ENABLE_ROCTX
 #include <roctracer/roctx.h>
@@ -53,6 +57,100 @@
 
 namespace TensileLite
 {
+    namespace
+    {
+        // The dynamic-queue StreamK kernels (SK4 and the SK4 sub-path of SK5)
+        // bake a fixed power-of-two per-XCD queue count for fast index masking.
+        // Codegen derives it from the arch's XCD count (StreamK.py
+        // _wsQueueConstants / archCaps["NumXCD"], mirroring origami
+        // get_default_num_xcds); the host reads the SAME origami value here so
+        // codegen and the runtime guard stay in lockstep. Returns 0 when the
+        // architecture cannot be determined (guard treats that as unsupported).
+        inline size_t streamKBakedQueueCount(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return 0;
+            try
+            {
+                return origami::hardware_t::get_default_num_xcds(
+                    hipAMDGPU->analyticalHardware->arch);
+            }
+            catch(std::exception const&)
+            {
+                // origami throws for architectures without a hardcoded default
+                // XCD count; treat that as "cannot determine" (0 == unsupported)
+                // rather than propagating the exception through solution
+                // selection.
+                return 0;
+            }
+        }
+
+        // Per-XCD counter stride (bytes) for the dynamic-queue work-queue
+        // region. Set equal to the hardware L2 cache-line size so each per-XCD
+        // atomic counter occupies its own line (no false sharing). Sourced from
+        // origami (hardware_t::get_default_cache_line_bytes) -- the SAME value
+        // the codegen mirrors via rocisa archCaps["CacheLineBytes"]
+        // (StreamK.py _wsQueueConstants). Host (origami) and codegen (archCaps)
+        // strides are two mirrors of the one origami cache-line size, so the
+        // workspace the host reserves matches the layout the kernel addresses.
+        // Returns 0 when the architecture cannot be determined.
+        inline size_t streamKPerQueueStrideBytes(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return 0;
+            return origami::hardware_t::get_default_cache_line_bytes(
+                hipAMDGPU->analyticalHardware->arch);
+        }
+
+        // The dynamic-queue fetch / work stealing is only correct when the
+        // device's runtime NUM_XCD is a power of two AND equals the baked
+        // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
+        // unknown (not a HipAMDGPU, missing analytical hardware, or no baked
+        // per-XCD queue count), when NUM_XCD is 0, not a power of two, or
+        // NUM_XCD != baked (e.g. MI300A's 6 XCDs, or a 4-XCD partition of an
+        // 8-XCD gfx942). Unknown hardware is treated as UNSUPPORTED: the
+        // dynamic-queue solution is then excluded from selection and a
+        // non-dynamic-queue solution serves the GEMM, rather than staying
+        // selectable while the per-XCD counter workspace is sized with an
+        // unknown (0) queue count (which would under-allocate). Kept isolated
+        // here so it stays trivially unit-testable (see CuCount_test.cpp).
+        inline bool streamKDynamicQueueUnsupported(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return true;
+            size_t baked  = streamKBakedQueueCount(hardware);
+            size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
+            return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0
+                   || numXCD != baked;
+        }
+
+        // Emit a single, user-visible warning (not once-per-call spam) when a
+        // StreamK dynamic-queue / work-stealing solution is excluded from
+        // selection because the device's XCD count does not match the compiled
+        // per-XCD queue count. This is what surfaces the reject to the user
+        // instead of silently degrading to tree reduction.
+        void warnStreamKDynamicQueueUnsupportedOnce(Hardware const& hardware)
+        {
+            static std::once_flag warnedFlag;
+            std::call_once(warnedFlag, [&]() {
+                size_t      numXCD    = 0;
+                auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                if(hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr)
+                    numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
+                size_t baked = streamKBakedQueueCount(hardware);
+                std::cerr << "hipBLASLt Warning: StreamK dynamic-queue (work-stealing) solutions "
+                             "require the device's XCD count to be a power of two and to equal the "
+                             "compiled per-XCD queue count; this device reports NUM_XCD="
+                          << numXCD << " with a compiled per-XCD queue count of " << baked
+                          << ", so those solutions are excluded from selection and a "
+                             "non-work-stealing solution will be used instead.\n";
+            });
+        }
+    }
+
     enum class KERNELARGTYPE
     {
         NORMAL   = 0,
@@ -307,10 +405,16 @@ namespace TensileLite
         }
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility push(default)
+#endif
     template void
         setDeviceUserArgs<float>(std::vector<ContractionSolution::Problem> const& problems,
                                  ContractionSolution::GroupedInputs const&        inputs,
                                  DeviceUserArguments<float>*                      args);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility pop
+#endif
 
     PerfModel perf;
 
@@ -551,7 +655,9 @@ namespace TensileLite
         }
 
         TensorDescriptor const& a          = problem.a();
+        TensorDescriptor const& mxsa       = problem.mxsa();
         TensorDescriptor const& b          = problem.b();
+        TensorDescriptor const& mxsb       = problem.mxsb();
         TensorDescriptor const& c          = problem.c();
         TensorDescriptor const& d          = problem.d();
         TensorDescriptor const& e          = problem.tensor(ContractionProblemGemm::TENSOR::E);
@@ -559,9 +665,13 @@ namespace TensileLite
         TensorDescriptor const& compressed = problem.compressed();
         TensorDescriptor const& metadata   = problem.metadata();
 
-        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, hardware, sk.grid);
+        auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+            = calculateAutoWGM(problem, hardware, sk.grid);
+        auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+            = calculateAutoStaggerU(problem, hardware, sk.grid, autoWGM);
         uint32_t autoGsuVal = calculateAutoGSU(problem, hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, hardware);
 
         {
             int idx = 0;
@@ -576,6 +686,8 @@ namespace TensileLite
            && (problemType.computeType != problemType.dType
                || problemType.activationType != ActivationType::None))
             singleWSD = true;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsu > 1 && sizeMapping.streamK == 0
            && ((singleWSD || sizeMapping.globalAccumulation == 2)
                || (sizeMapping.globalAccumulation == 3)))
@@ -616,8 +728,12 @@ namespace TensileLite
         {
             args.template append<void const*>(
                 "a", problemType.sparse == 1 ? inputs.compressed : inputs.a);
+            if(problemType.mxBlockA)
+                args.template append<void const*>("mxsa", inputs.mxsa);
             args.template append<void const*>(
                 "b", problemType.sparse == 2 ? inputs.compressed : inputs.b);
+            if(problemType.mxBlockB)
+                args.template append<void const*>("mxsb", inputs.mxsb);
         }
         else
         {
@@ -628,7 +744,18 @@ namespace TensileLite
         if(problemType.sparse)
             args.template append<unsigned char const*>("metadata", inputs.metadata);
 
-        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0)
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
+        //
+        // StreamKForceDPOnly (SK3 DP-first, gfx1250) always reduces via the tree path
+        // (getSKReduction returns tree, Flags == Synchronizer, never parallel) and never
+        // touches the workspace partials/fixup path, so AddressWS/AddressFlags are dead.
+        // The device kernel drops them from the SGPR define and .kd metadata, so we must
+        // not append ws/Flags here or the positional kernarg layout would corrupt the
+        // downstream (StridesD/Alpha/...) offsets. Keep appending for every other
+        // streamK>0 && atomic==0 kernel (layout unchanged).
+        if(sizeMapping.streamK > 0 && sizeMapping.streamKAtomic == 0
+           && sizeMapping.streamKForceDPOnly == 0)
         {
             // Assert hardware is not null
             // For now grouped gemm is not supported and passes nullptr
@@ -649,6 +776,8 @@ namespace TensileLite
         bool gsuWSStride
             = gsu > 1 && sizeMapping.globalAccumulation != 3 && sizeMapping.streamK == 0;
         bool skWSStride = sizeMapping.streamK > 0 && sk.reduction == origami::reduction_t::parallel;
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(gsuWSStride || skWSStride)
         {
             size_t wsStride = startStrideCD ? d.sizes()[0] : 1;
@@ -682,11 +811,19 @@ namespace TensileLite
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideA", i), stride_a);
         }
 
+        if(problemType.mxBlockA)
+            for(size_t i = startStrideAB; i < mxsa.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSA", i), mxsa.strides()[i]);
+
         for(size_t i = startStrideAB; i < b.dimensions(); i++)
         {
             auto stride_b = problemType.sparse == 2 ? compressed.strides()[i] : b.strides()[i];
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideB", i), stride_b);
         }
+
+        if(problemType.mxBlockB)
+            for(size_t i = startStrideAB; i < mxsb.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideMXSB", i), mxsb.strides()[i]);
 
         if(problemType.sparse)
         {
@@ -696,19 +833,45 @@ namespace TensileLite
         }
 
         args.append("alpha", inputs.alpha, problem.alphaType());
+
         if(problem.alphaType() == rocisa::DataType::Half)
             args.append("alpha_2", inputs.alpha, problem.alphaType());
 
         if(problemType.useBeta)
         {
             args.append("beta", inputs.beta, problem.betaType());
+            
             if(problem.betaType() == rocisa::DataType::Half)
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
 
+        if(sizeMapping.expertSchedulingMode > 0)
+        {
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+            if(hipAMDGPU
+               && (hipAMDGPU->processor == AMDGPU::Processor::gfx1200
+                   || hipAMDGPU->processor == AMDGPU::Processor::gfx1201))
+            {
+                int32_t esmRuntimeSupported = 0;
+#if HIP_VERSION >= 70353390
+                HIP_CHECK_EXC(hipDeviceGetAttribute(&esmRuntimeSupported,
+                                                    hipDeviceAttributeExpertSchedMode,
+                                                    hipAMDGPU->deviceId));
+#endif
+                args.template append<int32_t>("ESMRuntimeSupported", esmRuntimeSupported);
+            }
+        }
+
+        // Additional check for General Batched GEMM until GSU and StreamK are supported
+        // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
-            // SK doesn't care gsu
+            if(sizeMapping.streamK != 3 && sizeMapping.streamK != 4 && sizeMapping.streamK != 5)
+            {
+                throw std::runtime_error("Stream-K modes 1 and 2 are no longer supported; "
+                                         "use StreamK=3, 4, or 5");
+            }
+
             if(gsu > 1)
             {
                 std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
@@ -716,28 +879,162 @@ namespace TensileLite
                 gsu = 1;
             }
 
-            auto tiles = problem.getNumTiles(sizeMapping, 1);
-
-            // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
-            // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
-            auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
-            auto     totalIters   = tiles * itersPerTile;
-            uint32_t magicNumberItersPerTile;
-            uint32_t magicShiftItersPerTile;
-            magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
-
-            args.template append<uint32_t>("itersPerTile", itersPerTile);
-            args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
-            args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-            args.template append<uint32_t>("totalIters", totalIters);
-
-            if(sizeMapping.streamK == 1) // Basic SK
+            // Dynamic Stream-K uses a different kernel argument layout from Stream-K 3.
+            if(sizeMapping.streamK == 4)
             {
-                uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
-                args.template append<uint32_t>("SKItersPerWG", itersPerWave);
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                assert(pAMDGPU != nullptr);
+                int overrideTiles = pAMDGPU->skTiles;
+                int overrideSplit = pAMDGPU->skSplit;
+
+                auto itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                auto tiles = problem.getNumTiles(sizeMapping, 1);
+                // Determine number of stream-k tiles and splitting factor
+                uint32_t skTiles = 0;
+                uint32_t skSplit = 2;
+                // Check for debug overrides
+                if (overrideTiles > -1)
+                    skTiles = overrideTiles;
+                if (overrideSplit > -1)
+                    skSplit = overrideSplit;
+                // Calculate number of stream-k iterations per workitem
+                uint32_t skItersPerWI = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
+                // Calculate real splitting factor in case iterations don't divide evenly
+                skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+                uint32_t totalItems = (tiles - skTiles) + skTiles * skSplit;
+
+                args.template append<uint32_t>("ItersPerTile", itersPerTile);
+                args.template append<uint32_t>("TotalItems", totalItems);
+                args.template append<uint32_t>("SKTiles", skTiles);
+                args.template append<uint32_t>("SKSplit", skSplit);
+                args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
+                args.template append<uint32_t>("SKGrid", sk.grid);
             }
-            else if(sizeMapping.streamK >= 2) // Two-tile SK
+            else if(sizeMapping.streamK == 5)
             {
+                // SK5 hybrid: pack 6 args for the active sub-mode (SK3/SK4 RegSet-alias
+                // the same SGPR slots). Mode bit is bit 30 of slot 2 — not bit 31,
+                // which magicNumberAlg2 uses as the magic-division "add" indicator.
+
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+
+                auto sk3_tiles = problem.getNumTiles(sizeMapping, 1);
+                auto sk3_itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
+                const bool effectiveDynamic
+                    = streamK5EffectiveDynamic(problem, *hardware);
+
+                if(effectiveDynamic)
+                {
+                    int overrideTiles = pAMDGPU->skTiles;
+                    int overrideSplit = pAMDGPU->skSplit;
+                    uint32_t sk4_skTiles = 0;
+                    uint32_t sk4_skSplit = 2;
+                    if(overrideTiles > -1)
+                        sk4_skTiles = overrideTiles;
+                    if(overrideSplit > -1)
+                        sk4_skSplit = overrideSplit;
+                    uint32_t sk4_skItersPerWI
+                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
+                                     sk4_skSplit);
+                    sk4_skSplit
+                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
+                                     sk4_skItersPerWI);
+                    uint32_t sk4_totalItems
+                        = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
+
+                    TENSILE_ASSERT_EXC((sk4_skTiles & 0xC0000000u) == 0u
+                                       && "SK5 SK4 skTiles collides with mode/magic bits");
+                    uint32_t packedSkTiles = sk4_skTiles | 0x40000000u;
+
+                    args.template append<uint32_t>("ItersPerTile",
+                                                   sk3_itersPerTile);
+                    args.template append<uint32_t>("TotalItems",
+                                                   sk4_totalItems);
+                    args.template append<uint32_t>("SKTiles|ModeBit",
+                                                   packedSkTiles);
+                    args.template append<uint32_t>("SKSplit", sk4_skSplit);
+                    args.template append<uint32_t>("SKItersPerWI",
+                                                   sk4_skItersPerWI);
+                    args.template append<uint32_t>("SKGrid", sk.grid);
+                }
+                else
+                {
+                    // SK5-off mirrors standalone SK3 arg packing.
+                    uint32_t magicNumberItersPerTile;
+                    uint32_t magicShiftItersPerTile;
+                    magicNumberItersPerTile = magicNumber(
+                        2, sk3_itersPerTile, &magicShiftItersPerTile);
+                    assert((magicShiftItersPerTile & 0x40000000u) == 0u);
+
+                    uint32_t sk3_skItersPerWG;
+                    uint32_t sk3_skTiles;
+                    if(sk.reduction == origami::reduction_t::parallel)
+                    {
+                        uint32_t skSplit
+                            = static_cast<uint32_t>(sk.grid / sk3_tiles);
+                        sk3_skItersPerWG
+                            = static_cast<uint32_t>(sk3_itersPerTile) / skSplit;
+                        sk3_skTiles = skSplit;
+                    }
+                    else
+                    {
+                        int  sk3_fullTiles = pAMDGPU->skFullTiles;
+                        bool sk3_bigEnough = sk3_tiles > sk.grid;
+                        bool forceDPOnly   = sizeMapping.streamKForceDPOnly != 0;
+                        sk3_skTiles
+                            = forceDPOnly ? 0u : static_cast<uint32_t>(sk.grid);
+                        if(!forceDPOnly && sk3_tiles % sk.grid != 0)
+                        {
+                            sk3_skTiles
+                                = sk3_bigEnough
+                                      ? sk.grid * sk3_fullTiles + sk3_tiles % sk.grid
+                                      : sk3_tiles;
+                            sk3_skTiles = std::min(
+                                sk3_skTiles, static_cast<uint32_t>(sk3_tiles));
+                        }
+                        sk3_skItersPerWG = sk3_skTiles * sk3_itersPerTile / sk.grid;
+                    }
+
+                    args.template append<uint32_t>("ItersPerTile",
+                                                   sk3_itersPerTile);
+                    args.template append<uint32_t>("MagicNumberItersPerTile",
+                                                   magicNumberItersPerTile);
+                    args.template append<uint32_t>("MagicShiftItersPerTile",
+                                                   magicShiftItersPerTile);
+                    args.template append<uint32_t>("SKItersPerWG",
+                                                   sk3_skItersPerWG);
+                    args.template append<uint32_t>("skGrid",
+                                                   static_cast<uint32_t>(sk.grid));
+                    args.template append<uint32_t>("skTiles", sk3_skTiles);
+                }
+            }
+            else
+            {
+                auto tiles = problem.getNumTiles(sizeMapping, 1);
+
+                // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
+                // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
+                auto     itersPerTile = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+                auto     totalIters   = tiles * itersPerTile;
+
+                uint32_t magicNumberItersPerTile;
+                uint32_t magicShiftItersPerTile;
+                magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
+
+                args.template append<uint32_t>("itersPerTile", itersPerTile);
+                args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
+                args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
+
+                // Custom kernels still use totalIters
+                if(!sizeMapping.customKernelName.empty())
+                {
+                    args.template append<uint32_t>("totalIters", totalIters);
+                }
+
+                // Stream-K 3 uses the two-tile ABI.
                 if(sk.reduction == origami::reduction_t::parallel)
                 {
                     uint32_t skSplit
@@ -760,15 +1057,18 @@ namespace TensileLite
                     // followed by an even number of data-parllel tiles.
                     // If total tiles is evenly divisble by grid size,
                     // then no Stream-K tiles are needed, all data-parallel
-                    uint32_t skTiles = sk.grid;
+                    // Force-DP-only mode is a persistent DP-only use of StreamK=3. Setting
+                    // skTiles to zero makes every output tile stay in the DP region.
+                    bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
+                    uint32_t skTiles = forceDPOnly ? 0 : sk.grid;
                     // If not evenly divisible, determine number of Stream-K tiles
-                    if(tiles % sk.grid != 0)
+                    if(!forceDPOnly && tiles % sk.grid != 0)
                     {
                         // Number of data-parallel tiles on each workgroup would be:
                         // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
                         skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
                         // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                        skTiles = min(skTiles, tiles);
+                        skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                     }
 
                     uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
@@ -791,9 +1091,16 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
-                                          autoGsuVal);
+                                          autoWGMXCCSPLITK,
+                                          autoStaggerUMapping,
+                                          autoStaggerU,
+                                          autoStaggerUStrideShift,
+                                          autoGsuVal,
+                                          ntab);
 
-        if(!problemType.useScaleAB.empty()) //kernel input data
+	// NOTE: an assumption here is A & B must be both MX data types or non-MX data types.
+	//       Mixing is not supported.
+        if(!problemType.useScaleAB.empty())
         {
             args.template append<void const*>("scaleA", inputs.scaleA);
             args.template append<void const*>("scaleB", inputs.scaleB);
@@ -839,12 +1146,35 @@ namespace TensileLite
                 args.template append<uint32_t>("bias_type",
                                                static_cast<uint32_t>(problem.bias().dataType()));
                 if(problemType.useBias)
+                {
                     args.template append<uint32_t>(
                         "strideBias",
                         static_cast<uint32_t>(problem.useBias() && bias.dimensions()
                                                   ? bias.strides()[bias.dimensions() - 1]
                                                   : 0)); // reserved
+                }
             }
+        }
+
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
         }
 
         if(problemType.useScaleAlphaVec == 3 || problemType.useBias == 3)
@@ -956,41 +1286,37 @@ namespace TensileLite
         return (double)(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount)
                / std::ceil(std::ceil(m / mt0) * std::ceil(n / mt1) * gsu / cuCount);
     }
-    
-    std::tuple<int32_t, uint32_t, uint32_t> ContractionSolution::calculateAutoWGM(
-        Problem const&  problem,
-        Hardware const* hardware,
-        uint32_t const  skgrid) const
+
+    std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
+        Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
         // Hardware
         AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
         hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
 
         // Default WGM
-        int32_t defaultWGM;
-        uint32_t defaultWGMXCC;
-        uint32_t defaultWGMXCCCHUNK;
+        int32_t  defaultWGM          = 1;
+        uint32_t defaultWGMXCC       = 1;
+        uint32_t defaultWGMXCCCHUNK  = 0;
+        uint32_t defaultWGMXCCSPLITK = 0;
 
         // Dynamically pick the values
         if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
-           && sizeMapping.workGroupMappingXCC == -1
-           && sizeMapping.nonTemporalA < 4 /* Exclude NTs for now till we fix libs */
-           && sizeMapping.nonTemporalB < 4 /* Exclude NTs for now till we fix libs */)
+           && sizeMapping.workGroupMappingXCC == -1)
         {
-            int32_t c_wgm = 0;
-            uint32_t c_wgmxcc = 0;
-            uint32_t c_wgmxccchunk = 0;
-            // Try to find cached WGM and WGMXCC and WGMXCCCHUNK
-            std::tie(c_wgm, c_wgmxcc, c_wgmxccchunk) = paramsCache.find(problem);
+            auto sizes = problem.problemSizes();
+            // Try to find cached WGM, WGMXCC, WGMXCCCHUNK, WGMXCCSPLITK
+            auto cachedWGMParams = wgmParamsCache.find(problem);
 
-            if(!c_wgm && !c_wgmxcc && !c_wgmxccchunk)
-            { 
-                auto sizes = problem.problemSizes();
+            if(cachedWGMParams == std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX))
+            {
                 if(sizes.size() >= 4)
                 {
                     origami::problem_t origami_problem = {
                         .size  = {sizes[0], sizes[1], sizes[3]},
                         .batch = sizes[2],
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -999,30 +1325,33 @@ namespace TensileLite
                         .cache_hints_a = sizeMapping.nonTemporalA,
                         .cache_hints_b = sizeMapping.nonTemporalB,
                     };
-                    
-                    origami::workgroup_mapping_t prediction_results = 
-                        origami::select_workgroup_mapping(origami_problem, 
-                                                          *(hipAMDGPU->analyticalHardware), 
-                                                          origami_config, 
-                                                          skgrid);
-                    
-                    defaultWGM         = prediction_results.wgm;
-                    defaultWGMXCC      = prediction_results.wgmxcc;
-                    defaultWGMXCCCHUNK = prediction_results.wgmxccchunk;
+
+                    origami::workgroup_mapping_t prediction_results
+                        = origami::select_workgroup_mapping(origami_problem,
+                                                            *(hipAMDGPU->analyticalHardware),
+                                                            origami_config,
+                                                            skgrid);
+
+                    defaultWGM          = prediction_results.wgm;
+                    defaultWGMXCC       = prediction_results.wgmxcc;
+                    defaultWGMXCCCHUNK  = prediction_results.wgmxccchunk;
+                    defaultWGMXCCSPLITK = prediction_results.wgmxccsplitk;
 
                     // Add to cache only if dynamically calculated.
-                    paramsCache.add(std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK), problem);
+                    wgmParamsCache.add(
+                        std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK),
+                        problem);
                     if(Debug::Instance().printPropertyEvaluation())
-                        std::cout << "Dynamic WGM "<< defaultWGM 
-                                  << ", WGMXCC " << defaultWGMXCC
-                                  << ", WGMXCCCHUNK " << defaultWGMXCCCHUNK << std::endl;
+                        std::cout << "AutoWGM - WGM: " << defaultWGM
+                                  << ", WGMXCC: " << defaultWGMXCC
+                                  << ", WGMXCCCHUNK: " << defaultWGMXCCCHUNK
+                                  << ", WGMXCCSPLITK: " << defaultWGMXCCSPLITK << std::endl;
                 }
             }
             else
             {
-                defaultWGM    = c_wgm;
-                defaultWGMXCC = c_wgmxcc;
-                defaultWGMXCCCHUNK = c_wgmxccchunk;
+                std::tie(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK)
+                    = cachedWGMParams;
             }
         }
         else
@@ -1040,38 +1369,144 @@ namespace TensileLite
 
             // Default WGMXCC
             if(sizeMapping.workGroupMappingXCC == -1)
-            {
                 defaultWGMXCC = hipAMDGPU->analyticalHardware->NUM_XCD;
-            }
             else
                 defaultWGMXCC = sizeMapping.workGroupMappingXCC;
 
             // Default WGMXCCCHUNK
-            defaultWGMXCCCHUNK = 0;
+            defaultWGMXCCCHUNK  = 0;
+
+            // Default WGMXCCSPLITK
+            defaultWGMXCCSPLITK = 0;
         }
 
-        // If WGM and WGMXCC are explicitly specified at runtime, they override default and predictions
+        // If values are explicitly specified at runtime, they override predictions and default values
         if(pAMDGPU->fixedWGM != std::numeric_limits<int>::max())
-        {
             defaultWGM = pAMDGPU->fixedWGM;
-        }
         if(pAMDGPU->fixedWGMXCC != std::numeric_limits<size_t>::max())
-        {
             defaultWGMXCC = pAMDGPU->fixedWGMXCC;
-        }
         if(pAMDGPU->fixedWGMXCCCHUNK != std::numeric_limits<size_t>::max())
-        {
             defaultWGMXCCCHUNK = pAMDGPU->fixedWGMXCCCHUNK;
+        if(pAMDGPU->fixedWGMXCCSPLITK != std::numeric_limits<size_t>::max())
+            defaultWGMXCCSPLITK = pAMDGPU->fixedWGMXCCSPLITK;
+
+        // These range assertions only apply when SpaceFillingCurve (SFC) is not used.
+        // When SFC is enabled, workGroupMapping contains a packed 32-bit encoding of
+        // grid dimensions (SFCWGM) which can exceed the normal WGM range.
+        if(!internalArgsSupport.useSFC)
+        {
+            if(sizeMapping.workGroupMappingXCC == -1)
+            {
+                // New bit layout: 10 K + 8 chunk + 4 XCC + 10 WGM
+                assert(std::fabs(defaultWGM) < 512);   // 10-bit signed
+                assert(defaultWGMXCC < 16);             // 4 bits
+                assert(defaultWGMXCCCHUNK < 256);       // 8 bits
+                assert(defaultWGMXCCSPLITK < 1024);     // 10 bits
+            }
+            else
+            {
+                // Old bit layout (used when WorkGroupMappingXCC != -1)
+                assert(std::fabs(defaultWGM) < 1024);
+                assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
+                assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
+            }
         }
 
-        // WGM should be in this range: [-1023, -1022, ..., -1, 0, 1, ..., 1023]
-        assert(std::fabs(defaultWGM) < 1024);
-        // WGMXCC should be in this range: [0, 1, 2, 3, ..., 63]
-        assert(defaultWGMXCC >= 0 && defaultWGMXCC < 64);
-        // WGMXCCCHUNK should be in this range: [0, 1, 2, 3, ..., 1023]
-        assert(defaultWGMXCCCHUNK >= 0 && defaultWGMXCCCHUNK < 1024);
-        
-        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK);
+        return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK);
+    }
+
+    std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
+        Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
+    {
+        // Hardware
+        AMDGPU const*         pAMDGPU   = dynamic_cast<AMDGPU const*>(hardware);
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(hardware);
+
+        // Default StaggerU
+        size_t defaultStaggerUMapping     = 0;
+        size_t defaultStaggerU            = 0;
+        size_t defaultStaggerUStrideShift = 0;
+
+        // Dynamically pick the values
+        if(sizeMapping.streamK != 0 && skgrid != 0 && sizeMapping.workGroupMapping == 0
+           && sizeMapping.workGroupMappingXCC == -1)
+        {
+            auto sizes = problem.problemSizes();
+            // Try to find cached StaggerUMapping, StaggerU and StaggerUStrideShift
+            auto cachedStaggerUParams = staggerUParamsCache.find(problem);
+
+            if(cachedStaggerUParams == std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX))
+            {
+                if(sizes.size() >= 4)
+                {
+                    origami::problem_t origami_problem = {
+                        .size    = {sizes[0], sizes[1], sizes[3]},
+                        .batch   = sizes[2],
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                    };
+                    origami::config_t origami_config = {
+                        .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
+                                          static_cast<size_t>(sizeMapping.macroTile.y),
+                                          static_cast<size_t>(sizeMapping.depthU)},
+                        .cache_hints_a = sizeMapping.nonTemporalA,
+                        .cache_hints_b = sizeMapping.nonTemporalB,
+                    };
+
+                    origami::staggerU_t prediction_results
+                        = origami::select_staggerU(origami_problem,
+                                                   *(hipAMDGPU->analyticalHardware),
+                                                   origami_config,
+                                                   skgrid,
+                                                   autoWGM);
+
+                    defaultStaggerUMapping     = prediction_results.staggerUMapping;
+                    defaultStaggerU            = prediction_results.staggerU;
+                    defaultStaggerUStrideShift = prediction_results.staggerUStrideShift;
+
+                    // Add to cache only if dynamically calculated.
+                    staggerUParamsCache.add(std::make_tuple(defaultStaggerUMapping,
+                                                            defaultStaggerU,
+                                                            defaultStaggerUStrideShift),
+                                            problem);
+                    if(Debug::Instance().printPropertyEvaluation())
+                        std::cout << "AutoStaggerU - Mapping: " << defaultStaggerUMapping
+                                  << ", StaggerU: " << defaultStaggerU
+                                  << ", StaggerUStrideShift: " << defaultStaggerUStrideShift
+                                  << std::endl;
+                }
+            }
+            else
+            {
+                std::tie(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift)
+                    = cachedStaggerUParams;
+            }
+        }
+        else
+        {
+            defaultStaggerUMapping     = sizeMapping.staggerUMapping;
+            defaultStaggerU            = sizeMapping.staggerU;
+            defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
+        }
+
+        // If values are explicitly specified at runtime, they override predictions and default values
+        if(pAMDGPU->fixedStaggerUMapping != std::numeric_limits<size_t>::max())
+            defaultStaggerUMapping = pAMDGPU->fixedStaggerUMapping;
+        if(pAMDGPU->fixedStaggerU != std::numeric_limits<size_t>::max())
+            defaultStaggerU = pAMDGPU->fixedStaggerU;
+        if(pAMDGPU->fixedStaggerUStrideShift != std::numeric_limits<size_t>::max())
+            defaultStaggerUStrideShift = pAMDGPU->fixedStaggerUStrideShift;
+
+        // Mapping should be in this range: [0, 1, 2, 3, 4]
+        assert(defaultStaggerUMapping < 5);
+        // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
+        assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
+        // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]
+        assert(defaultStaggerUStrideShift <= 31);
+
+        return std::make_tuple(defaultStaggerUMapping, defaultStaggerU, defaultStaggerUStrideShift);
     }
 
     uint32_t ContractionSolution::calculateAutoGSU(Problem const&  problem,
@@ -1080,6 +1515,7 @@ namespace TensileLite
         // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
+            // std::cout<<"Returning the sizeMapping.globalsplitU value as autoGSU: "<<sizeMapping.globalSplitU<<"\n";
             return sizeMapping.globalSplitU;
         }
 
@@ -1099,27 +1535,33 @@ namespace TensileLite
         uint32_t N         = problem.freeSizeB(0);
         uint32_t B         = problem.batchSize(0);
         uint32_t K         = problem.boundSize(0);
-        uint32_t GSULimit1 = max(1, (uint32_t)std::floor(numCUs / numWGs));
-        uint32_t GSULimit2 = max(1, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
-        uint32_t gsuVal    = min(GSULimit2, max(1, GSULimit1));
+        uint32_t GSULimit1 = std::max(1u, (uint32_t)std::floor(numCUs / numWGs));
+        uint32_t GSULimit2 = std::max(1u, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
+        uint32_t gsuVal    = std::min(GSULimit2, std::max(1u, GSULimit1));
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
         if(gsuVal > 1)
-            gsuVal = min(gsuVal,
-                         MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
-                             / std::ceil(static_cast<float>(N) / MT1) / B);
+            gsuVal = std::min(gsuVal,
+                         static_cast<uint32_t>(MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
+                             / std::ceil(static_cast<float>(N) / MT1) / B));
 
         // GlobalSplitUCheckMinK
         if(gsuVal > 1)
-            gsuVal = min(gsuVal, std::ceil(static_cast<float>(K) / MT2));
+            gsuVal = std::min(gsuVal, static_cast<uint32_t>(std::ceil(static_cast<float>(K) / MT2)));
 
         // SynchronizerSizeCheck
         if(gsuVal > 1 && sizeMapping.globalAccumulation == 3) // MBSK
         {
             uint32_t synchronizerUsage
                 = sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B;
-            gsuVal = synchronizerUsage > 409600 ? 1 : gsuVal;
+
+            if (problem.groupedGemm() && (problem.groupedGemmCount() > 1))
+            {
+                gsuVal = synchronizerUsage > (409600 * 16 / problem.groupedGemmCount()) ? 1 : gsuVal;
+            }
+            else
+                gsuVal = synchronizerUsage > (409600 * 16) ? 1 : gsuVal;
         }
 
         // Avoid selecting a gsu value that would make launch grid over the limit
@@ -1129,16 +1571,112 @@ namespace TensileLite
         uint32_t workGroupSize = sizeMapping.workGroupSize.x * sizeMapping.workGroupSize.y
                                  * sizeMapping.workGroupSize.z;
         uint32_t maxGsuValue = (std::numeric_limits<uint32_t>::max() / workGroupSize) / tiles;
-        gsuVal               = min(gsuVal, maxGsuValue);
+        gsuVal               = std::min(gsuVal, maxGsuValue);
 
         // avoid gsu < 1
-        gsuVal = max(gsuVal, 1);
+        gsuVal = std::max(gsuVal, 1u);
 
         static const char* envStr = std::getenv("TENSILE_AUTO_GSU_ALGO");
         if(envStr != NULL)
             std::cout << "autoGSU is calculated: " << gsuVal << std::endl;
 
         return gsuVal;
+    }
+
+    ContractionSolution::AdaptiveGemmNTAB
+        ContractionSolution::calculateAdaptiveGemmNTAB(Problem const&  problem,
+                                                      Hardware const* hardware) const
+    {
+        // Hardware is currently unused: the heuristic below is purely
+        // shape/alignment/iter-count based and has been validated.
+        // Kept in the signature so a future ISA-specific fallback (e.g. a
+        // different L1 policy on a new arch) can plug in without touching
+        // every call site.
+        (void)hardware;
+
+        AdaptiveGemmNTAB result{};
+        if(sizeMapping.adaptiveGemmNTAB == 0)
+            return result;
+
+        const uint32_t MT0    = sizeMapping.macroTile.x;                    // MT_M
+        const uint32_t MT1    = sizeMapping.macroTile.y;                    // MT_N
+        const uint32_t depthU = static_cast<uint32_t>(sizeMapping.depthU);  // MT_K
+
+        const uint32_t bpeA    = static_cast<uint32_t>(problem.a().elementBytes());
+        const uint32_t bpeB    = static_cast<uint32_t>(problem.b().elementBytes());
+        const uint32_t minLenA = 128 / bpeA; // elements that fit one 128 B cache line
+        const uint32_t minLenB = 128 / bpeB;
+
+        const uint32_t ldA = problem.a().strides()[1];
+        const uint32_t ldB = problem.b().strides()[1];
+
+        const uint32_t M = problem.freeSizeA(0);
+        const uint32_t N = problem.freeSizeB(0);
+        const uint32_t K = problem.boundSize(0);
+
+        // Stride-1 (contiguous) macro-tile dim per transpose. A and B are
+        // both col-major tensors, so stride-1 is whichever index is the
+        // leading one in the Tensile tensor name:
+        //   transA()==false  (Ailk): stride-1 = i (=M) -> contigA = MT_M (=MT0)
+        //   transA()==true   (Alik): stride-1 = l (=K) -> contigA = MT_K (=depthU)
+        //   transB()==false  (Bljk): stride-1 = l (=K) -> contigB = MT_K (=depthU)
+        //   transB()==true   (Bjlk): stride-1 = j (=N) -> contigB = MT_N (=MT1)
+        // Note the A/B asymmetry: Tensile's transA()==true shifts A's contig
+        // from M to K, but transB()==true shifts B's contig from K to N.
+        const bool     transA  = problem.transA();
+        const bool     transB  = problem.transB();
+        const uint32_t contigA = transA ? depthU : MT0;
+        const uint32_t contigB = transB ? MT1    : depthU;
+
+        // Shape gate. NT=4 (cache bypass) is only profitable when the OTHER
+        // dim fits in one macro-tile: then the dominant tensor has no
+        // cross-WG reuse in L1 (every WG streams its slab once), so bypassing
+        // L1 is pure win and frees L1 for the short side. Dense (non-skinny)
+        // GEMMs still reuse each line across WGs; skip NT=4 there.
+        const bool skinnyA = (N <= MT1);
+        const bool skinnyB = (M <= MT0);
+        const bool longA   = (static_cast<uint64_t>(M) >= static_cast<uint64_t>(MT0) * 256);
+        const bool longB   = (static_cast<uint64_t>(N) >= static_cast<uint64_t>(MT1) * 128);
+
+        // Alignment gate. NT=4 has to consume whole 128 B cache lines;
+        // otherwise each straddling load pulls two lines from HBM and the
+        // bypass savings evaporate. Both the contiguous macro-tile dim AND
+        // the leading stride must be cache-line multiples.
+        const bool alignedA = (contigA % minLenA == 0) && (ldA % minLenA == 0);
+        const bool alignedB = (contigB % minLenB == 0) && (ldB % minLenB == 0);
+
+        // Main-loop iteration floor. The NTA/NTB kernArg bits only drive the
+        // main unroll body; PGR prefetches and the tail loop run under the
+        // static NonTemporalA/B kernel parameter. loopIters > 2 guarantees
+        // at least one main-body iter under PGR=2 so the bypass actually
+        // executes; at or below 2 iters everything lives in PGR/tail and the
+        // runtime choice is a no-op (pure overhead).
+        const uint32_t loopIters = (depthU > 0) ? (K / depthU) : 0;
+        const bool     enough    = loopIters > 2;
+
+        // These constraints are intentionally conservative: keep the gate off
+        // small problems where bypassing L1 has no streaming benefit.
+        if(skinnyA && longA && alignedA && enough)
+            result.nta = 4;
+        if(skinnyB && longB && alignedB && enough)
+            result.ntb = 4;
+
+        static const char* envStr = std::getenv("TENSILE_ADAPTIVE_GEMM_NTAB_ALGO");
+        if(envStr != nullptr)
+        {
+            std::cout << "AdaptiveGemmNTAB: nta=" << result.nta << " ntb=" << result.ntb
+                      << " (M=" << M << " N=" << N << " K=" << K
+                      << " MT0=" << MT0 << " MT1=" << MT1 << " DU=" << depthU
+                      << " transA=" << transA << " transB=" << transB
+                      << " contigA=" << contigA << " contigB=" << contigB
+                      << " minLenA=" << minLenA << " minLenB=" << minLenB
+                      << " ldA=" << ldA << " ldB=" << ldB
+                      << " loopIters=" << loopIters
+                      << " longA=" << longA << " longB=" << longB << ")"
+                      << "\n";
+        }
+
+        return result;
     }
 
     template <bool T_Debug, bool Legacy, typename KA>
@@ -1149,9 +1687,14 @@ namespace TensileLite
                                          Hardware const*                     hardware,
                                          const ContractionProblemParameters& param,
                                          int32_t                             autoWGM,
-                                         uint32_t                            autoWGMXCC,
-                                         uint32_t                            autoWGMXCCCHUNK,
-                                         uint32_t                            autoGsuVal) const
+                                         size_t                              autoWGMXCC,
+                                         size_t                              autoWGMXCCCHUNK,
+                                         size_t                              autoWGMXCCSPLITK,
+                                         size_t                              autoStaggerUMapping,
+                                         size_t                              autoStaggerU,
+                                         size_t       autoStaggerUStrideShift,
+                                         uint32_t     autoGsuVal,
+                                         AdaptiveGemmNTAB ntab) const
     {
         if constexpr(!Legacy)
         {
@@ -1161,18 +1704,46 @@ namespace TensileLite
             args.template append<uint32_t>("gemm_count", gemmCount);
         }
 
-        uint32_t       gsu          = param.gsu() > 0 ? param.gsu() : autoGsuVal;
-        bool           gsuc         = false; // initialized false
-        bool           gsuwgmrr     = false; // initialized false
-        int32_t        wgm          = param.wgm() != 0 ? param.wgm() : autoWGM;
-        uint32_t       wgmxcc       = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
-        uint32_t       wgmxccchunk  = autoWGMXCCCHUNK;
-        int32_t        wgmxccg      = -1;
-        const uint32_t mask16       = 0xFFFF;
-        const uint32_t mask14       = 0x3FFF;
-        const uint32_t mask8        = 0xFF;
-        uint32_t       internalArg0 = 0;
-        uint32_t       internalArg1 = 0;
+        uint32_t       gsu                 = param.gsu() > 0 ? param.gsu() : autoGsuVal;
+        bool           gsuc                = false; // initialized false
+        bool           gsuwgmrr            = false; // initialized false
+        int32_t        wgm                 = param.wgm() != 0 ? param.wgm() : autoWGM;
+        size_t         wgmxcc              = param.wgmxcc() != 0 ? param.wgmxcc() : autoWGMXCC;
+        size_t         wgmxccchunk         = autoWGMXCCCHUNK;
+        size_t         wgmxccsplitk        = autoWGMXCCSPLITK;
+        int32_t        wgmxccg             = -1; // initialized -1
+        size_t         staggerUMapping     = autoStaggerUMapping;
+        size_t         staggerU            = autoStaggerU;
+        size_t         staggerUStrideShift = autoStaggerUStrideShift;
+        const uint32_t mask16              = 0xFFFF;
+        const uint32_t mask14              = 0x3FFF;
+        const uint32_t mask8               = 0xFF;
+        uint32_t       internalArg0        = 0;
+        uint32_t       internalArg1        = 0;
+
+        // GSU bit-width depends on InternalArgsSupport.version:
+        //   v <  3: GSU occupies bits 0..13 (mask 0x3FFF, max 16383)
+        //   v >= 3: GSU narrowed to bits 0..11 (mask 0x0FFF, max 4095);
+        //           bits 12/13 carry NTA / NTB for AdaptiveGemmNTAB.
+        constexpr uint32_t kGsuMaskV3   = 0x0FFF;
+        constexpr uint32_t kNtaBitPos   = 12;
+        constexpr uint32_t kNtbBitPos   = 13;
+        const bool         useNtabBits  = (internalArgsSupport.version >= 3);
+        const uint32_t     gsuMask      = useNtabBits ? kGsuMaskV3 : mask14;
+        // Belt-and-suspenders: if a v<3 solution somehow has AGNTAB!=0, that's a codegen bug.
+        assert((useNtabBits || sizeMapping.adaptiveGemmNTAB == 0)
+               && "AdaptiveGemmNTAB requires InternalArgsSupport.version >= 3");
+        // Only forward NT bits if both the kernel knows the new layout AND the
+        // solution actually opted in to AdaptiveGemmNTAB. Otherwise leave bits clear
+        // so a v<3 kernel reading 0x3FFF doesn't see them folded into GSU.
+        const uint32_t ntaBit = (useNtabBits && sizeMapping.adaptiveGemmNTAB != 0
+                                 && ntab.nta == 4)
+                                    ? 1
+                                    : 0;
+        const uint32_t ntbBit = (useNtabBits && sizeMapping.adaptiveGemmNTAB != 0
+                                 && ntab.ntb == 4)
+                                    ? 1
+                                    : 0;
 
         if(internalArgsSupport.wgm && internalArgsSupport.version == 0)
         {
@@ -1190,7 +1761,7 @@ namespace TensileLite
             {
                 internalArg1 = wgm;
             }
-            else if(internalArgsSupport.version == 2 && !internalArgsSupport.useSFC)
+            else if(internalArgsSupport.version >= 2 && !internalArgsSupport.useSFC)
             {
                 // NB: get value from param= set in runtime / vs value from sizeMapping: from logic yaml.
                 //     param: default values: [xcc = 0, xccg = 0]. So when we never set xcc/xccg in runtime: we always get from sizeMapping.
@@ -1203,13 +1774,23 @@ namespace TensileLite
                     assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
                     wgmxccg = pAMDGPU->computeUnitCount;
                 }
+                // if using WGMXCCn1, wgmxccg is not used. Repurpose it for wgmxccchunk
                 if(sizeMapping.workGroupMappingXCC == -1)
                 {
-                    wgmxccg = wgmxccchunk;
+                    // New bit layout: K(31:22) | chunk(21:14) | xcc(13:10) | wgm(9:0)
+                    internalArg1 = internalArg1
+                                   | ((wgmxccsplitk & 0x3FF) << 22)
+                                   | ((wgmxccchunk & 0xFF) << 14)
+                                   | ((wgmxcc & 0xF) << 10)
+                                   | (wgm & 0x3FF);
                 }
-                internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
+                else
+                {
+                    // Old bit layout: wgmxccg(31:22) | wgmxcc(21:16) | wgm(15:0)
+                    internalArg1 = internalArg1 | (wgmxccg << 22) | (wgmxcc << 16) | (mask16 & wgm);
+                }
             }
-            else if(internalArgsSupport.version == 2 && internalArgsSupport.useSFC)
+            else if(internalArgsSupport.version >= 2 && internalArgsSupport.useSFC)
             {
                 internalArg1 = wgm;
             }
@@ -1223,21 +1804,39 @@ namespace TensileLite
                                             : sizeMapping.globalSplitUWorkGroupMappingRoundRobin;
         }
 
-        internalArg0
-            = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14) | (mask14 & gsu);
+        // Runtime sanity: GSU must fit in the available bits (12 or 14, depending on version).
+        if(((uint32_t)gsu & ~gsuMask) != 0)
+        {
+            std::stringstream gsuMaskHex;
+            gsuMaskHex << "0x" << std::hex << gsuMask;
+            std::string msg
+                = std::string("GSU value ") + std::to_string((uint32_t)gsu)
+                  + " exceeds the GSU bit-field in internalArg0 (max allowed="
+                  + std::to_string(gsuMask) + ", gsuMask=" + gsuMaskHex.str()
+                  + ", InternalArgsSupport.version="
+                  + std::to_string(internalArgsSupport.version) + ", AdaptiveGemmNTAB="
+                  + std::to_string(sizeMapping.adaptiveGemmNTAB)
+                  + "). When AdaptiveGemmNTAB is enabled (version>=3), GSU is narrowed"
+                  + " from bits 0..13 (max 16383) to bits 0..11 (max 4095) because"
+                  + " bits 12/13 carry the NTA/NTB selector.";
+            throw std::runtime_error(msg.c_str());
+        }
+        internalArg0 = internalArg0 | ((uint32_t)gsuc << 15) | ((uint32_t)gsuwgmrr << 14)
+                       | (ntbBit << kNtbBitPos) | (ntaBit << kNtaBitPos)
+                       | (gsuMask & (uint32_t)gsu);
 
         // StaggerU
         if(internalArgsSupport.staggerU)
         {
-            const uint32_t staggerMask1    = 0x1F00;
-            uint32_t       staggerUMapping = (sizeMapping.staggerUMapping << 13);
-            uint32_t       staggerUShift   = staggerMask1 & ((sizeMapping.staggerStrideShift) << 8);
-            uint32_t       staggerU        = mask8 & sizeMapping.staggerU;
+            constexpr size_t staggerMask1 = 0x1F00;
+            size_t           sum          = staggerUMapping << 13;
+            size_t           sus          = staggerMask1 & (staggerUStrideShift << 8);
+            size_t           su           = mask8 & staggerU;
             if(Debug::Instance().disableStaggerU())
-                staggerU = 0;
-            staggerU     = staggerU | staggerUShift;
-            staggerU     = staggerU | staggerUMapping;
-            internalArg0 = internalArg0 | (staggerU << 16);
+                su = 0;
+            su           = su | sus;
+            su           = su | sum;
+            internalArg0 = internalArg0 | (su << 16);
         }
         else if(T_Debug && Debug::Instance().disableStaggerU())
             std::cout << "solution doesn't support configurable staggerU" << std::endl;
@@ -1295,7 +1894,8 @@ namespace TensileLite
         ContractionSolution::generateSingleCall(ContractionSolution::Problem const& problem,
                                                 ContractionInputs const&            inputs,
                                                 Hardware const&                     hardware,
-                                                StreamKSettings const&              sk) const
+                                                StreamKSettings const&              sk,
+                                                GSUSettings const&                  gsuSettings) const
     {
         KernelInvocation rv;
 
@@ -1323,27 +1923,28 @@ namespace TensileLite
             rv.numWorkGroups.z = 1;
         }
 
-        //short-term workaround
-        int             deviceId;
-        hipDeviceProp_t deviceProperties;
-
-        auto removePrefix = [](const std::string& s) {
-            size_t pos = s.find("gfx");
-            if(pos != std::string::npos)
-            {
-                return s.substr(pos + 3);
-            }
-            return s;
-        };
-
-        static_cast<void>(hipGetDevice(&deviceId));
-        static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-        auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
-        if(internalArgsSupport.version >= 1)
+        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        if(!enableCluster)
         {
-            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(internalArgsSupport.version >= 1)
+            {
+                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
+        }
+
+        rv.clusterDim = sizeMapping.clusterDim;
+
+        // The HIP driver rejects a cluster launch whose grid is not divisible by
+        // clusterDim, so round up. The extra padded WGs early-exit in the kernel
+        // prologue; their WAVEDONE decrements the barrier's live member count.
+        // Stream-K has its own cluster-aware 1-D grid (sk.grid) and WG-id decode,
+        // so leave it untouched.
+        if(enableCluster && sizeMapping.streamK == 0)
+        {
+            rv.numWorkGroups.x = RoundUpToMultiple(rv.numWorkGroups.x, rv.clusterDim.x);
+            rv.numWorkGroups.y = RoundUpToMultiple(rv.numWorkGroups.y, rv.clusterDim.y);
         }
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
@@ -1354,24 +1955,81 @@ namespace TensileLite
 
         if(internalArgsSupport.useUniversalArgs)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problem, &hardware, sk.grid);
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+                = calculateAutoWGM(problem, &hardware, sk.grid);
+            auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+                = calculateAutoStaggerU(problem, &hardware, sk.grid, autoWGM);
             if(T_Debug)
             {
-                std::cout << "AutoWGM: " << autoWGM << std::endl;
-                std::cout << "AutoWGMXCC: " << autoWGMXCC << std::endl;
-                std::cout << "AutoWGMXCCCHUNK: " << autoWGMXCCCHUNK << std::endl;
+                std::cout << "OCCUPANCY: " << sizeMapping.CUOccupancy << std::endl;
+                std::cout << "WGM: " << autoWGM << ", WGMXCC: " << autoWGMXCC
+                          << ", WGMXCCCHUNK: " << autoWGMXCCCHUNK
+                          << ", WGMXCCSPLITK: " << autoWGMXCCSPLITK << std::endl;
+                std::cout << "StaggerUMapping: " << autoStaggerUMapping
+                          << ", StaggerU: " << autoStaggerU
+                          << ", StaggerUStrideShift: " << autoStaggerUStrideShift << std::endl;
             }
-            kernelArgs<T_Debug, false>(
-                1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams(), autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoGsuVal);
+            AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problem, &hardware);
+            if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::POINTER_ARRAY)
+            {
+                kernelArgs<T_Debug, false>( 1,
+                                            3,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoWGMXCCSPLITK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal,
+                                            ntab);
+            }
+            else
+            {
+                kernelArgs<T_Debug, false>( 1,
+                                            0,
+                                            rv.args,
+                                            getNumWorkGroups(rv),
+                                            &hardware,
+                                            problem.getParams(),
+                                            autoWGM,
+                                            autoWGMXCC,
+                                            autoWGMXCCCHUNK,
+                                            autoWGMXCCSPLITK,
+                                            autoStaggerUMapping,
+                                            autoStaggerU,
+                                            autoStaggerUStrideShift,
+                                            autoGsuVal,
+                                            ntab);
+            }
         }
         singleCallArgs<T_Debug, true>(
             problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args, sk);
 
-        if(sizeMapping.globalAccumulation == 3)
+        if(gsuSettings.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
         {
             rv.args.append<void const*>("dstD", inputs.d);
-            rv.args.append<void const*>("Synchronizer", inputs.Synchronizer);
+            // MBSK: synchronizer address, MB: null address
+            rv.args.append<void const*>("Synchronizer",
+                                        gsuSettings.globalAccumulation == 3
+                                        ? inputs.Synchronizer
+                                        : NULL);
             rv.args.append<uint32_t>("GSUSync", 0);
+        }
+
+        // Batch offset support for General Batched GEMM (SupportUserArgs kernels).
+        // Appended at the tail, after the dstD/Synchronizer block, to match the
+        // kernel signature order (see Signature.py).
+        if(!problemType.groupedGemm && sizeMapping.customKernelName.empty())
+        {
+            rv.args.append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            rv.args.append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+            rv.args.append<int64_t>("batchOffsetA", inputs.batchOffsetA);
+            rv.args.append<int64_t>("batchOffsetB", inputs.batchOffsetB);
         }
 
         if(problemType.stochasticRounding)
@@ -1512,11 +2170,14 @@ namespace TensileLite
                                                h_args,
                                                sk);
 
-                if(sizeMapping.globalAccumulation == 3)
+                if(sizeMapping.globalAccumulation == 3 || sizeMapping.adaptiveGemmGSUA == 1) // MBSK or MB with AdaptiveGemmGSUA
                 {
                     h_args.template append<void const*>("dstD", inputs.grouped[idx].d);
+                    // MBSK: synchronizer address, MB: null address
                     h_args.template append<void const*>("Synchronizer",
-                                                        inputs.grouped[idx].Synchronizer);
+                                                        sizeMapping.globalAccumulation == 3
+                                                        ? inputs.grouped[idx].Synchronizer
+                                                        : NULL);
                     h_args.template append<uint32_t>("GSUSync", 0);
                 }
 
@@ -1527,7 +2188,11 @@ namespace TensileLite
 
         if constexpr(!std::is_same<KA, KernelArgumentsCounter>::value)
         {
-            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK] = calculateAutoWGM(problems[0], &hardware, 0);
+            auto [autoWGM, autoWGMXCC, autoWGMXCCCHUNK, autoWGMXCCSPLITK]
+                = calculateAutoWGM(problems[0], &hardware, 0);
+            auto [autoStaggerUMapping, autoStaggerU, autoStaggerUStrideShift]
+                = calculateAutoStaggerU(problems[0], &hardware, 0, autoWGM);
+            AdaptiveGemmNTAB ntab = calculateAdaptiveGemmNTAB(problems[0], &hardware);
 
             if(internalArgsSupport.useUniversalArgs)
             {
@@ -1545,7 +2210,12 @@ namespace TensileLite
                                            autoWGM,
                                            autoWGMXCC,
                                            autoWGMXCCCHUNK,
-                                           autoGsuVal);
+                                           autoWGMXCCSPLITK,
+                                           autoStaggerUMapping,
+                                           autoStaggerU,
+                                           autoStaggerUStrideShift,
+                                           autoGsuVal,
+                                           ntab);
                 // For user input
                 if(argType == KERNELARGTYPE::USERARGS)
                 {
@@ -1574,7 +2244,12 @@ namespace TensileLite
                                           autoWGM,
                                           autoWGMXCC,
                                           autoWGMXCCCHUNK,
-                                          autoGsuVal);
+                                          autoWGMXCCSPLITK,
+                                          autoStaggerUMapping,
+                                          autoStaggerU,
+                                          autoStaggerUStrideShift,
+                                          autoGsuVal,
+                                          ntab);
             }
 
             rv.args.append<void const*>("Synchronizer", (void*)inputs.grouped[0].Synchronizer);
@@ -1706,6 +2381,26 @@ namespace TensileLite
 
         rv.args.append("beta", inputs.beta, problem.betaType());
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                rv.args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                rv.args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            rv.args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = 1; i < d.dimensions(); i++)
+                rv.args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
         //Pass along code object dependency
         rv.codeObjectFile = codeObjectFilename.load();
 
@@ -1770,7 +2465,10 @@ namespace TensileLite
         {
             name += "_GA";
         }
-
+        if(problemType.useGateResidual)
+        {
+            name += ("_GateR");
+        }
         return name;
     }
 
@@ -1780,7 +2478,8 @@ namespace TensileLite
                                                        uint32_t const&        workspaceOffsetInByte,
                                                        KA&                    args,
                                                        StreamKSettings const& sk,
-                                                       uint32_t               autoGsuVal) const
+                                                       uint32_t               autoGsuVal,
+                                                       uint32_t               additionalPaddingPerBatchGeneralBatch) const
     {
         TensorDescriptor const& c = problem.c();
         TensorDescriptor const& d = problem.d();
@@ -1851,6 +2550,9 @@ namespace TensileLite
             args.template append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
         }
 
+        if(problemType.useGateResidual)
+            args.template append<void const*>("gateResidual", inputs.gateResidual);
+
         if(sizeMapping.globalAccumulation == 2 || sizeMapping.streamK > 0)
             args.append("alpha", inputs.alpha, problem.alphaType());
         else
@@ -1919,6 +2621,16 @@ namespace TensileLite
         for(size_t i = 1; i < c.dimensions(); i++)
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideC", i), c.strides()[i]);
 
+        if(problemType.useGateResidual)
+        {
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            bool hasGate = problem.useGateResidual();
+            for(size_t i = 1; i < c.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(useBias)
         {
             TensorDescriptor const& bias = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
@@ -1941,14 +2653,36 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles = problem.getNumTiles(sizeMapping, 1);
-            gsu        = sk.grid / tiles;
+            // Avoid 0 division when tiles is 0 (e.g. zero-sized dimension in grouped gemm)
+            if(tiles > 0)
+                gsu = sk.grid / tiles;
         }
 
         args.template append<uint32_t>(concatenate_if<T_Debug>("gsu"), gsu);
-        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec)
+        // Added the extra check for useScaleAlphaVec with value 3 to match the condition in KernelWriterConversion.py for expecting
+        // argument in the kernel side.
+        if((useBias && problemType.useBias == 3) || problemType.useScaleAlphaVec == 3)
         {
             args.template append<uint32_t>("factorDim", (uint32_t)problem.getParams().factorDim());
         }
+        // Adding the batchmode kernel argument for post GSU kernel to determine 
+        // how to index the batch dimension in Strided Batch versus General Batched.
+        if(problemType.groupedGemm == false && sizeMapping.customKernelName.empty())
+        {
+            ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
+            args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
+            args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);
+
+            // The HIP-compiled conversion kernel lays out these int64_t params on
+            // 8-byte-aligned kernarg slots. Match that alignment on the host so the
+            // bytes line up; a bare append() leaves them 4-byte-shifted when the
+            // preceding args don't end on an 8-byte boundary (e.g. the non-HAS
+            // variant), causing the kernel to read the neighboring offset into the
+            // high dword of the address and fault.
+            args.template appendAligned<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            args.template appendAligned<int64_t>("batchOffsetC", inputs.batchOffsetC);
+        }
+
     }
 
     template <bool T_Debug>
@@ -1987,8 +2721,8 @@ namespace TensileLite
                       < DataTypeInfo::Get(rocisa::DataType::Double).elementSize)
                 vw = 4;
             else if(problem.freeSizeA(0) % 2 == 0
-                && DataTypeInfo::Get(problemType.aType).elementSize
-                      < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
+                    && DataTypeInfo::Get(problemType.aType).elementSize
+                           < DataTypeInfo::Get(rocisa::DataType::ComplexDouble).elementSize)
                 vw = 2;
         }
 
@@ -2005,8 +2739,15 @@ namespace TensileLite
             gsu        = sk.grid / tiles;
         }
         rv.kernelName = outputConversionKernelName(problem, inputs, vw, gsu);
-
-        rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
+        int additionalPaddingPerBatchGeneralBatch = 0;
+        if(problem.batchMode() == ContractionProblemGemm::BATCHMODE::STRIDED)
+            rv.numWorkGroups.x = CeilDivide(wiX * wiY * wiZ, rv.workGroupSize.x * vw);
+        else
+        {
+            rv.numWorkGroups.x = CeilDivide(wiX * wiY, rv.workGroupSize.x * vw) * wiZ;
+            int extra_work_items = (wiX * wiY) % (rv.workGroupSize.x * vw);
+            additionalPaddingPerBatchGeneralBatch = extra_work_items > 0 ? (rv.workGroupSize.x * vw) - extra_work_items : 0;
+        }
         rv.numWorkGroups.y = 1;
         rv.numWorkGroups.z = 1;
 
@@ -2014,7 +2755,7 @@ namespace TensileLite
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;
         rv.numWorkItems.z = rv.workGroupSize.z * rv.numWorkGroups.z;
 
-        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal);
+        outputConversionCallArgs<T_Debug>(problem, inputs, 0, rv.args, sk, autoGsuVal, additionalPaddingPerBatchGeneralBatch);
 
         //@TODO determine if this is needed, may not end up in the same code object file
         rv.codeObjectFile = codeObjectFilename.load();
@@ -2289,7 +3030,7 @@ namespace TensileLite
         }
 
         int factorDim
-            = max(problemType.useGradient ? 0 : problemType.useBias, problemType.useScaleAlphaVec);
+            = std::max(problemType.useGradient ? 0 : problemType.useBias, problemType.useScaleAlphaVec);
         if(factorDim)
         {
             if(factorDim == 2)
@@ -2310,6 +3051,14 @@ namespace TensileLite
             {
                 name += ("_Aux" + s);
             }
+        }
+
+        if(problemType.useGateResidual)
+        {
+            auto gateDtype = problem.useGateResidual()
+                                 ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                                 : problemType.gateResidualDataTypeWhiteList.at(0);
+            name += ("_Gate" + rocisa::TypeAbbrev(gateDtype));
         }
 
         if(problemType.activationType != ActivationType::None)
@@ -2369,7 +3118,10 @@ namespace TensileLite
                              sizeMapping.globalSplitUPGR));
 
         name += "_VW" + std::to_string(vw);
-
+        if(problemType.useGateResidual)
+        {
+            name += "_GateR";
+        }
         return name;
     }
 
@@ -2405,7 +3157,8 @@ namespace TensileLite
         }
         else
         {
-            mt1 = int(problem.d().sizes()[1] / 2) * 2;
+            // MT1 should be the power of 2 to match setting in tensileLite
+            mt1 = static_cast<int>(pow(2, ceil(log2(mt1))));
             if(mt1 == 0)
                 mt1 = 1;
         }
@@ -2535,6 +3288,16 @@ namespace TensileLite
         }
     }
 
+    namespace
+    {
+        size_t getSKGridImpl(ContractionSolution const& self,
+                             ContractionProblemGemm const& problem,
+                             Hardware const&               hardware,
+                             size_t                        tiles,
+                             origami::reduction_t          reductionStrat,
+                             bool const*                   sk5EffectiveDynamic);
+    }
+
     std::vector<KernelInvocation>
         ContractionSolution::solve(ContractionSolution::Problem const& problem,
                                    ContractionSolution::Inputs const&  inputs,
@@ -2542,7 +3305,8 @@ namespace TensileLite
     {
         calculateAutoGSU(problem, &hardware);
         if(Debug::Instance().printWinningKernelName())
-            std::cout << "Running kernel: " << this->KernelName() << std::endl;
+            std::cout << "Running kernel: " << this->KernelName()
+                      << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
 
         // retreive alpha/beta type set via setAlpha/BetaType()
         auto alphaType = problem.alphaType();
@@ -2623,18 +3387,81 @@ namespace TensileLite
         StreamKSettings sk;
         if(sizeMapping.streamK > 0)
         {
-            sk.reduction         = getSKReduction(problem, hardware);
-            auto tiles           = problem.getNumTiles(sizeMapping, 1);
-            sk.grid              = getSKGrid(problem, hardware, tiles, sk.reduction);
+            auto tiles = problem.getNumTiles(sizeMapping, 1);
+            const bool effectiveDynamic = (sizeMapping.streamK == 5)
+                                              ? streamK5EffectiveDynamic(problem, hardware)
+                                              : false;
+            // Defensive: dynamic-queue / work-stealing StreamK solutions are
+            // excluded from selection on devices whose runtime XCD count is not
+            // a power of two or does not equal the baked per-XCD queue count
+            // (see streamKDynamicQueueSupported() wired into softwarePredicate).
+            // The normal path therefore never reaches solve() for such a
+            // solution; a different (SK3-static / non-StreamK) solution serves
+            // the GEMM instead. If we DO get here it means the software
+            // predicate was bypassed (e.g. an explicit select-by-index), so
+            // reject EXPLICITLY rather than silently running the fixed-mask
+            // kernel with a mismatched queue count (which would corrupt
+            // results).
+            const bool dynamicQueuePath
+                = (sizeMapping.streamK == 4)
+                  || (sizeMapping.streamK == 5 && effectiveDynamic);
+            if(dynamicQueuePath && streamKDynamicQueueUnsupported(hardware))
+            {
+                warnStreamKDynamicQueueUnsupportedOnce(hardware);
+                // Fail EARLY -- before workspace sizing / kernel-arg packing --
+                // when NUM_XCD is unknown (baked queue count == 0, e.g. missing
+                // analyticalHardware). Sizing the per-XCD counter region with a
+                // 0 queue count would under-allocate the workspace the kernel
+                // writes; reject with an actionable message instead.
+                if(streamKBakedQueueCount(hardware) == 0)
+                    throw std::runtime_error(
+                        "hipBLASLt Error: StreamK dynamic-queue (work-stealing) requires a known "
+                        "NUM_XCD (analyticalHardware unavailable); refusing to size the per-XCD "
+                        "counter workspace with an unknown queue count. "
+                        "Select a non-work-stealing solution instead.");
+                throw std::runtime_error(
+                    "hipBLASLt Error: StreamK dynamic-queue (work-stealing) solution selected on a "
+                    "device whose XCD count is not a power of two or does not equal the compiled "
+                    "per-XCD queue count; this kernel is unsupported here. "
+                    "Select a non-work-stealing solution instead.");
+            }
+            if(sizeMapping.streamK == 4)
+                sk.reduction = origami::reduction_t::tree;
+            else if(sizeMapping.streamK == 5)
+                sk.reduction = effectiveDynamic ? origami::reduction_t::tree
+                                                : getSKReduction(problem, hardware);
+            else
+                sk.reduction = getSKReduction(problem, hardware);
+            sk.streamKTileSchedulingMode = problem.getParams().streamKTileSchedulingMode();
+            sk.smCountTarget         = problem.getParams().smCountTarget();
+            sk.grid = getSKGridImpl(*this,
+                                    problem,
+                                    hardware,
+                                    tiles,
+                                    sk.reduction,
+                                    sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
             if(sk.grid > 0
                && (sk.reduction == origami::reduction_t::parallel
-                   || (tiles % sk.grid != 0 && !streamKDP)))
+                   || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
             {
-                // Check ideal amount of workspace for optimal performance
                 size_t idealWorkspace = partialTileSize(sk.grid);
+                // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
+                // sizes like standalone SK3. The region is sized as (per-queue
+                // stride) * (baked per-XCD queue count), both sourced from origami:
+                // the stride is the L2 cache-line size (get_default_cache_line_bytes,
+                // 128 B for gfx942/gfx950) so each counter owns its line (no false
+                // sharing), and the queue count is the per-arch XCD count. The
+                // acceptance guard requires runtime NUM_XCD == baked, so this equals
+                // cacheLineBytes * NUM_XCD for every device that reaches here.
+                if(dynamicQueuePath)
+                    idealWorkspace
+                        += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
                 // If given workspace is less than ideal, we can fall back to DP mode
-                // Performance will likely be lower, but the kernel can run if workspace is unavailable
+                // Performance will likely be lower, but the kernel can run if workspace is unavailable.
+                // (The non-power-of-two XCD case is handled earlier by explicit
+                // rejection, not by a silent fall back to tree reduction.)
                 if(idealWorkspace > problem.workspaceSize())
                 {
                     sk.reduction = origami::reduction_t::tree;
@@ -2644,16 +3471,20 @@ namespace TensileLite
 
             if(sk.reduction == origami::reduction_t::parallel && sk.grid / tiles < 2)
             {
-                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with StreamK kernel with splitting factor < 2\n");
+                throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
+                                         "StreamK kernel with splitting factor < 2\n");
             }
         }
 
-        if(debug)
-            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk));
-        else
-            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk));
+        GSUSettings gsuSettings;
+        gsuSettings.globalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
-        if(((sizeMapping.globalAccumulation != 3) && gsu > 1 && sizeMapping.globalAccumulation)
+        if(debug)
+            rv.push_back(generateSingleCall<true>(problem, inputs, hardware, sk, gsuSettings));
+        else
+            rv.push_back(generateSingleCall<false>(problem, inputs, hardware, sk, gsuSettings));
+
+        if((gsu > 1 && gsuSettings.globalAccumulation && gsuSettings.globalAccumulation != 3)
            || sk.reduction == origami::reduction_t::parallel)
         {
             if(debug)
@@ -2692,7 +3523,8 @@ namespace TensileLite
         hipStream_t                                      stream) const
     {
         if(Debug::Instance().printWinningKernelName())
-            std::cout << "Running kernel: " << this->KernelName() << std::endl;
+            std::cout << "Running kernel: " << this->KernelName()
+                      << " [MatchingTag: " << this->matchingTag() << "]" << std::endl;
 
         // retreive alpha/beta type set via setAlpha/BetaType()
         auto alphaType = problems[0].alphaType();
@@ -2934,26 +3766,26 @@ namespace TensileLite
         auto cInfo = DataTypeInfo::Get(problemType.cType);
         auto dInfo = DataTypeInfo::Get(problemType.dType);
 
-        spm.memReadBytesA = (NumBatches * M * N * K) / MT1 * aInfo.elementSize;
-        spm.memReadBytesB = (NumBatches * M * N * K) / MT0 * bInfo.elementSize;
-        spm.memReadBytesC = (NumBatches * M * N) * betaReads * cInfo.elementSize;
+        spm.memReadBytesA = multiplyElementSize((NumBatches * M * N * K) / MT1, aInfo.elementSize);
+        spm.memReadBytesB = multiplyElementSize((NumBatches * M * N * K) / MT0, bInfo.elementSize);
+        spm.memReadBytesC = multiplyElementSize((NumBatches * M * N) * betaReads, cInfo.elementSize);
 
         if(GlobalSplitU == 1)
-            spm.memWriteBytesD = (NumBatches * M * N) * (1 + betaWrites) * dInfo.elementSize;
+            spm.memWriteBytesD = multiplyElementSize((NumBatches * M * N) * (1 + betaWrites), dInfo.elementSize);
         else
         {
             bool   hardwareAtomic   = false; // TODO-model
             double atomicOperations = hardwareAtomic ? 2 : 3; // read-mod-write or cas  //TODO-model
             double atomicCollisions = 1.0; // TODO-could be based on K, GSU
-            spm.memWriteBytesD      = (NumBatches * M * N)
+            spm.memWriteBytesD      = multiplyElementSize((NumBatches * M * N)
                                  * (betaWrites + atomicOperations * atomicCollisions)
-                                 * dInfo.elementSize;
+                                 , dInfo.elementSize);
         }
         spm.memReadBytes   = spm.memReadBytesA + spm.memReadBytesB + spm.memReadBytesC;
-        spm.memGlobalReads = spm.memReadBytesA / aInfo.elementSize
-                             + spm.memReadBytesB / bInfo.elementSize
-                             + spm.memReadBytesC / cInfo.elementSize;
-        spm.memGlobalWrites = spm.memWriteBytesD / dInfo.elementSize;
+        spm.memGlobalReads = divideElementSize(spm.memReadBytesA, aInfo.elementSize)
+                             + divideElementSize(spm.memReadBytesB, bInfo.elementSize)
+                             + divideElementSize(spm.memReadBytesC, cInfo.elementSize);
+        spm.memGlobalWrites = divideElementSize(spm.memWriteBytesD, dInfo.elementSize);
 
         return spm;
     }
@@ -3029,11 +3861,21 @@ namespace TensileLite
                 gsu = 1;
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
             auto       tiles     = problem.getNumTiles(sizeMapping, 1);
             if(tiles > 0) // Grouped GEMM reports 0 tiles
             {
+                const bool effectiveDynamic = (sizeMapping.streamK == 5)
+                                                  ? streamK5EffectiveDynamic(problem, hardware)
+                                                  : false;
                 auto   reductionStrat = getSKReduction(problem, hardware);
-                size_t skGrid         = getSKGrid(problem, hardware, tiles, reductionStrat);
+                size_t skGrid = getSKGridImpl(*this,
+                                              problem,
+                                              hardware,
+                                              tiles,
+                                              reductionStrat,
+                                              sizeMapping.streamK == 5 ? &effectiveDynamic
+                                                                       : nullptr);
                 // Get space required for partial tiles=
                 if(reductionStrat == origami::reduction_t::parallel)
                 {
@@ -3042,10 +3884,22 @@ namespace TensileLite
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
-                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP))
+                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
                 {
-                    // Check ideal amount of workspace for optimal performance
                     size_t idealWorkspace = partialTileSize(skGrid);
+                    // Reserve the per-XCD work-queue region for the dynamic-queue
+                    // path. Sized as (per-queue stride) * (baked per-XCD queue
+                    // count), both from origami: the stride is the L2 cache-line
+                    // size (get_default_cache_line_bytes, 128 B for gfx942/gfx950)
+                    // so each counter owns its line (no false sharing), and the
+                    // queue count is the per-arch XCD count (e.g. 8 for
+                    // gfx942/gfx950). This may slightly over-report on a device
+                    // that falls back to tree reduction (e.g. MI300A), which is
+                    // safe (never under-sized).
+                    if(sizeMapping.streamK == 4
+                       || (sizeMapping.streamK == 5 && effectiveDynamic))
+                        idealWorkspace
+                            += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -3098,7 +3952,7 @@ namespace TensileLite
         if(problemType.outputAmaxD)
         {
             auto numWGS = getNumWorkGroups(problem, sizeMapping);
-            size += problem.amaxd().elementBytes() * numWGS;
+            size += multiplyElementSize(numWGS, problem.amaxd().elementBytes());
         }
 
         return size;
@@ -3175,8 +4029,18 @@ namespace TensileLite
             // Custom kernel currently only supports single-kernel reduction
             reductionStrat = origami::reduction_t::tree;
         }
-        else if(pAMDGPU->skDynamicGrid > 0)
+        else if(sizeMapping.streamKForceDPOnly != 0)
         {
+            reductionStrat = origami::reduction_t::tree;
+        }
+        else
+        {
+            if(static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid)
+               != origami::grid_selection_t::k_split_aware)
+            {
+                return reductionStrat;
+            }
+
             size_t x     = 1;
             size_t y     = 1;
             size_t z     = 1;
@@ -3198,10 +4062,14 @@ namespace TensileLite
                 batch *= problem.batchSize(i);
             }
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
+            TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
 
             origami::problem_t origami_problem = {
                 .size  = {x, y, z},
                 .batch = batch,
+                // CU budget hint; 0 = use all CUs.
+                .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
             };
             origami::config_t origami_config = {
                 .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3219,112 +4087,324 @@ namespace TensileLite
         return reductionStrat;
     }
 
+    bool ContractionSolution::streamK5EffectiveDynamic(Problem const&  problem,
+                                                       Hardware const& hardware) const
+    {
+        bool        effectiveDynamic = false;
+        const char* reasonStr        = "default";
+
+        const int sk5DebugMode = Debug::Instance().streamK5ForceMode();
+        if(sk5DebugMode == 0)
+        {
+            effectiveDynamic = false;
+            reasonStr        = "force-env";
+        }
+        else if(sk5DebugMode == 1)
+        {
+            effectiveDynamic = true;
+            reasonStr        = "force-env";
+        }
+        else
+        {
+            // -1 (or any non 0/1) -> respect the API attribute and run the
+            // original requested-mode logic.
+            bool      runHeuristic  = false;
+            const int requestedMode = problem.getParams().streamKTileSchedulingMode();
+            switch(requestedMode)
+            {
+            case 1: // ON -> dynamic (SK4) path
+                effectiveDynamic = true;
+                reasonStr        = "api-on";
+                break;
+            case 0: // OFF -> static (SK3) unless sm_count_target engages heuristic
+                if(problem.getParams().smCountTarget() <= 0)
+                {
+                    effectiveDynamic = false;
+                    reasonStr        = "api-off-static";
+                }
+                else
+                {
+                    runHeuristic = true;
+                    reasonStr    = "api-off-heuristic";
+                }
+                break;
+            case 2: // AUTO -> origami hybrid-mode heuristic
+                runHeuristic = true;
+                reasonStr    = "api-auto-heuristic";
+                break;
+            default:
+                effectiveDynamic = false;
+                reasonStr        = "default";
+                break;
+            }
+
+            if(runHeuristic)
+            {
+                size_t x = 1, y = 1, z = 1, batchSz = 1;
+                for(size_t i = 0; i < problem.freeIndicesA().size(); ++i)
+                    x *= problem.freeSizeA(i);
+                for(size_t i = 0; i < problem.freeIndicesB().size(); ++i)
+                    y *= problem.freeSizeB(i);
+                for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+                    z *= problem.boundSize(i);
+                for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                    batchSz *= problem.batchSize(i);
+
+                origami::problem_t origami_problem = {
+                    .size  = {x, y, z},
+                    .batch = batchSz,
+                    // CU budget hint; 0 = use all CUs.
+                    .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
+                };
+                origami::config_t origami_config = {
+                    .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
+                           static_cast<size_t>(sizeMapping.macroTile.y),
+                           static_cast<size_t>(sizeMapping.depthU)},
+                    .occupancy = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
+                };
+
+                hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+                TENSILE_ASSERT_EXC(hipAMDGPU != nullptr);
+                TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+                const auto autoMode = origami::streamk::select_hybrid_mode(
+                    origami_problem,
+                    *(hipAMDGPU->analyticalHardware),
+                    origami_config,
+                    static_cast<size_t>(problem.getParams().smCountTarget()));
+                effectiveDynamic = autoMode == origami::hybrid_mode_t::dynamic;
+            }
+        }
+
+        if(Debug::Instance().printStreamKModeSelection())
+        {
+            const int   forceMode = Debug::Instance().streamK5ForceMode();
+            const int   requested = problem.getParams().streamKTileSchedulingMode();
+            const int   smCount   = problem.getParams().smCountTarget();
+            const char* reqStr
+                = (requested == 0 ? "OFF" : requested == 1 ? "ON" : requested == 2 ? "AUTO" : "?");
+            std::cerr << "TensileLite::DEBUG: SK5 hybrid mode for kernel '" << this->kernelName
+                      << "': requested=" << reqStr << " forceEnv=" << forceMode
+                      << " smCountTarget=" << smCount << " reason=" << reasonStr << " -> effective="
+                      << (effectiveDynamic ? "dynamic(SK4/work-queue)" : "static(SK3/static-tile)")
+                      << "\n";
+        }
+
+        return effectiveDynamic;
+    }
+
+    bool ContractionSolution::streamKDynamicQueueSupported(Problem const&  problem,
+                                                           Hardware const& hardware) const
+    {
+        // Only StreamK solutions can ever take the dynamic-queue / work-stealing
+        // path; everything else (SK3-static, non-StreamK) is always selectable.
+        if(sizeMapping.streamK != 4 && sizeMapping.streamK != 5)
+            return true;
+
+        // Fast/common path: on hardware whose runtime XCD count is a power of
+        // two AND equals the baked per-XCD queue count, the fixed queue masking
+        // is valid, so nothing is excluded. Unknown hardware (missing analytical
+        // info / no baked count) is treated as UNSUPPORTED by the predicate, so
+        // it falls through to the reject-and-continue path below rather than
+        // being kept. Checked before streamK5EffectiveDynamic() so the mainline
+        // gfx942(MI300X)/gfx950 path stays cheap.
+        if(!streamKDynamicQueueUnsupported(hardware))
+            return true;
+
+        // Runtime XCD count is not a power of two or does not equal the baked
+        // per-XCD queue count. Only the dynamic-queue sub-path is affected: an
+        // SK5 solution that resolves to the static (SK3) sub-path for this
+        // problem stays valid and selectable.
+        const bool dynamicQueue
+            = (sizeMapping.streamK == 4)
+              || (sizeMapping.streamK == 5 && streamK5EffectiveDynamic(problem, hardware));
+        if(!dynamicQueue)
+            return true;
+
+        // Reject-and-continue: exclude this dynamic-queue / work-stealing
+        // solution from selection (return false) and warn the user ONCE so they
+        // are informed rather than silently degraded to tree reduction. Because
+        // this is a selection-time predicate, other solutions (SK3-static,
+        // non-StreamK) remain available to serve the GEMM.
+        warnStreamKDynamicQueueUnsupportedOnce(hardware);
+        return false;
+    }
+
+    namespace
+    {
+        size_t getSKGridImpl(ContractionSolution const& self,
+                             ContractionProblemGemm const& problem,
+                             Hardware const&               hardware,
+                             size_t                        tiles,
+                             origami::reduction_t          reductionStrat,
+                             bool const*                   sk5EffectiveDynamic)
+        {
+            size_t     skGrid    = tiles; // Fallback
+            const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            if(streamKDP)
+                skGrid = tiles;
+
+            // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
+            size_t z = 1;
+            for(size_t i = 0; i < problem.boundIndices().size(); ++i)
+            {
+                z *= problem.boundSize(i);
+            }
+            if(z == 0)
+                skGrid = tiles;
+
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+
+            assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+            size_t cuCount = pAMDGPU->computeUnitCount;
+
+            // User-specified grid size for Stream-K kernel.
+            if(pAMDGPU->skFixedGrid > 0)
+            {
+                skGrid = pAMDGPU->skFixedGrid;
+            }
+            else if(pAMDGPU->skDynamicGrid > 0)
+            {
+                const bool sk5UsesSK4Grid
+                    = (self.sizeMapping.streamK == 5)
+                      && (sk5EffectiveDynamic != nullptr
+                              ? *sk5EffectiveDynamic
+                              : self.streamK5EffectiveDynamic(problem, hardware));
+                if(self.sizeMapping.streamK == 4 || sk5UsesSK4Grid)
+                {
+                    // Limit workgroups per CU to 3
+                    // TODO Verify this limit is best
+                    auto kernelOccupancy = std::min(self.sizeMapping.CUOccupancy, 3);
+                    auto maxGrid         = cuCount * kernelOccupancy;
+                    if(pAMDGPU->skMaxCUs > 0)
+                    {
+                        maxGrid = std::min(maxGrid, static_cast<size_t>(pAMDGPU->skMaxCUs));
+                    }
+                    // TODO Calculate total work items when dynamic queue works with stream-k
+                    // For now, all work items are full tiles
+                    auto workItems = tiles;
+                    // Select grid to use all CUs, unless number of work items is less
+                    skGrid = std::min(workItems, maxGrid);
+                }
+                else
+                {
+                    size_t x     = 1;
+                    size_t y     = 1;
+                    size_t batch = 1;
+                    for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+                    {
+                        x *= problem.freeSizeA(i);
+                    }
+                    for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+                    {
+                        y *= problem.freeSizeB(i);
+                    }
+                    for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+                    {
+                        batch *= problem.batchSize(i);
+                    }
+                    hip::HipAMDGPU const* hipAMDGPU
+                        = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+
+                    // Fold both CU budgets into origami_problem.num_cus (the single
+                    // source of truth select_grid_size derives its budget from).
+                    // smCountTarget and skMaxCUs each use 0 to mean "no cap"; take the
+                    // tighter (minimum) positive cap so the analytical path honors both.
+                    auto   smt       = problem.getParams().smCountTarget(); // int, 0 = no cap
+                    auto   skm       = pAMDGPU->skMaxCUs;                   // int, 0 = no cap
+                    size_t budget    = 0;                                  // 0 = use all CUs
+                    if(smt > 0)
+                        budget = static_cast<size_t>(smt);
+                    if(skm > 0)
+                        budget = (budget == 0) ? static_cast<size_t>(skm)
+                                               : std::min(budget, static_cast<size_t>(skm));
+
+                    origami::problem_t origami_problem = {
+                        .size        = {x, y, z},
+                        .batch       = batch,
+                        // CU budget hint; 0 = use all CUs.
+                        .num_cus     = budget,
+                        .a_transpose = problem.transA() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .b_transpose = problem.transB() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .mi_dtype    = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
+                    };
+                    if(Debug::Instance().printPropertyEvaluation() && self.sizeMapping.CUOccupancy <= 0)
+                    {
+                        std::cerr << "TensileLite::DEBUG: sizeMapping.CUOccupancy="
+                                  << self.sizeMapping.CUOccupancy
+                                  << " (<=0) for kernel '" << self.kernelName
+                                  << "'; clamping to 1 for origami grid selection.\n";
+                    }
+                    origami::config_t origami_config = {
+                        .mt = {static_cast<size_t>(self.sizeMapping.macroTile.x),
+                               static_cast<size_t>(self.sizeMapping.macroTile.y),
+                               static_cast<size_t>(self.sizeMapping.depthU)},
+                        .mi = {static_cast<size_t>(self.sizeMapping.matrixInstruction[0]),
+                               static_cast<size_t>(self.sizeMapping.matrixInstruction[1]),
+                               static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
+                        .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
+                        .workgroup_mapping         = self.sizeMapping.workGroupMapping,
+                        .workspace_size            = problem.workspaceSize(),
+                        .workspace_size_per_elem_c = self.sizeMapping.workspaceSizePerElemC,
+                        .reduction_strategy        = reductionStrat,
+                    };
+
+                    TENSILE_ASSERT_EXC(hipAMDGPU->analyticalHardware != nullptr);
+
+                    skGrid = origami::streamk::select_grid_size(
+                        origami_problem,
+                        *(hipAMDGPU->analyticalHardware),
+                        origami_config,
+                        static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid));
+                }
+            }
+            // Limit the CUs Stream-K is launched on either max or the specified,
+            // whichever is minimum.
+            else if(pAMDGPU->skMaxCUs > 0)
+            {
+                skGrid = std::min(cuCount, static_cast<size_t>(pAMDGPU->skMaxCUs));
+            }
+
+            // Multiply the cuCount with a constant factor (c), and launch
+            // c * cuCount number of workgroups for Stream-K.
+            else if(pAMDGPU->skGridMultiplier > 1)
+            {
+                skGrid = cuCount * pAMDGPU->skGridMultiplier;
+            }
+
+            // If no option is specified, launch exactly cuCount worth of workgroups.
+            else
+            {
+                skGrid = cuCount;
+            }
+
+            // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
+            // If we exceed those bounds, fall back to DP.
+            if(reductionStrat == origami::reduction_t::tree)
+            {
+                size_t itersPerTile = problem.getItersPerTile(self.sizeMapping);
+                size_t itersPerWG   = tiles * itersPerTile / skGrid;
+
+                if(itersPerTile >= 65536 || itersPerWG >= 65536
+                   || (tiles * itersPerTile) >= 16777216)
+                {
+                    skGrid = tiles;
+                }
+            }
+
+            return skGrid;
+        }
+    } // namespace
+
     size_t ContractionSolution::getSKGrid(Problem const&       problem,
                                           Hardware const&      hardware,
                                           size_t               tiles,
                                           origami::reduction_t reductionStrat) const
     {
-        size_t     skGrid    = tiles; // Fallback
-        const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
-        if(streamKDP)
-            skGrid = tiles;
-
-        // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
-        size_t z = 1;
-        for(size_t i = 0; i < problem.boundIndices().size(); ++i)
-        {
-            z *= problem.boundSize(i);
-        }
-        if(z == 0)
-            skGrid = tiles;
-
-        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
-
-        assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-        size_t cuCount = pAMDGPU->computeUnitCount;
-
-        // User-specified grid size for Stream-K kernel.
-        if(pAMDGPU->skFixedGrid > 0)
-        {
-            skGrid = pAMDGPU->skFixedGrid;
-        }
-        else if(pAMDGPU->skDynamicGrid > 0)
-        {
-            size_t x     = 1;
-            size_t y     = 1;
-            size_t batch = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-            {
-                x *= problem.freeSizeA(i);
-            }
-            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-            {
-                y *= problem.freeSizeB(i);
-            }
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            {
-                batch *= problem.batchSize(i);
-            }
-            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-
-            origami::problem_t origami_problem = {
-                .size     = {x, y, z},
-                .batch    = batch,
-                .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
-                .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputType()),
-            };
-            origami::config_t origami_config = {
-                .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),
-                                              static_cast<size_t>(sizeMapping.macroTile.y),
-                                              static_cast<size_t>(sizeMapping.depthU)},
-                .mi                        = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
-                                              static_cast<size_t>(sizeMapping.matrixInstruction[1]),
-                                              static_cast<size_t>(sizeMapping.matrixInstruction[2])},
-                .occupancy                 = std::max(sizeMapping.CUOccupancy, static_cast<int>(1)),
-                .workgroup_mapping         = sizeMapping.workGroupMapping,
-                .workspace_size            = problem.workspaceSize(),
-                .workspace_size_per_elem_c = sizeMapping.workspaceSizePerElemC,
-                .reduction_strategy        = reductionStrat,
-            };
-            skGrid = origami::streamk::select_grid_size(
-                origami_problem,
-                *(hipAMDGPU->analyticalHardware),
-                origami_config,
-                static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid),
-                pAMDGPU->skMaxCUs);
-        }
-        // Limit the CUs Stream-K is launched on either max or the specified,
-        // whichever is minimum.
-        else if(pAMDGPU->skMaxCUs > 0)
-        {
-            skGrid = min(cuCount, pAMDGPU->skMaxCUs);
-        }
-
-        // Multiply the cuCount with a constant factor (c), and launch
-        // c * cuCount number of workgroups for Stream-K.
-        else if(pAMDGPU->skGridMultiplier > 1)
-        {
-            skGrid = cuCount * pAMDGPU->skGridMultiplier;
-        }
-
-        // If no option is specified, launch exactly cuCount worth of workgroups.
-        else
-        {
-            skGrid = cuCount;
-        }
-
-        // For tree-reduction there are some limits for divisions to avoid overflow
-        // If we hit one of the limits, fallback to DP
-        size_t itersPerTile = problem.getItersPerTile(sizeMapping);
-        size_t itersPerWG   = tiles * itersPerTile / skGrid;
-        if(itersPerTile >= 65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
-        {
-            reductionStrat = origami::reduction_t::tree;
-            skGrid         = tiles;
-        }
-
-        return skGrid;
+        return getSKGridImpl(*this, problem, hardware, tiles, reductionStrat, nullptr);
     }
 
     size_t ContractionSolution::partialTileSize(size_t skGrid) const
@@ -3489,6 +4569,54 @@ namespace TensileLite
         pp.CUs         = NumCUs;
 
         return pp;
+    }
+
+    double ContractionSolution::calculateDimensionM(Problem const& problem) const
+    {
+        double M = 1.0;
+        if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesA(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                M *= problem.a().sizes()[*pi];
+        }
+        else
+        {
+            M = problem.freeSizeA(0);
+        }
+        return M;
+    }
+
+    double ContractionSolution::calculateDimensionN(Problem const& problem) const
+    {
+        double N = 1.0;
+        if(problem.freeIndicesB().size() > 1 || sizeMapping.packBatchDims & 0x2)
+        {
+            std::vector<size_t> packedIndices
+                = generatePackedIndicesB(problem, sizeMapping.packBatchDims);
+            for(auto pi = packedIndices.begin(); pi != packedIndices.end(); pi++)
+                N *= problem.b().sizes()[*pi];
+        }
+        else
+            N = problem.freeSizeB(0);
+        return N;
+    }
+
+    double ContractionSolution::calculateNumBatches(Problem const& problem) const
+    {
+        double NumBatches = 1;
+        if(sizeMapping.packBatchDims == 0)
+        {
+            for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                NumBatches *= problem.batchSize(i);
+        }
+        return NumBatches;
+    }
+
+    origami::data_type_t ContractionSolution::getOrigamiDatatype(Problem const& problem) const
+    {
+        return datatypeToAnalyticalDatatype(problem.computeInputTypeA());
     }
 
     std::ostream& operator<<(std::ostream&                                      stream,

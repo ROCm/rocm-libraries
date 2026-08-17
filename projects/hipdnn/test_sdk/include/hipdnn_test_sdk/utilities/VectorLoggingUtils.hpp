@@ -3,24 +3,47 @@
 
 #pragma once
 
-#include <spdlog/spdlog.h>
+#include <ostream>
+#include <vector>
 
-template <>
-struct fmt::formatter<std::vector<int64_t>> : fmt::formatter<std::string>
+namespace hipdnn_test_sdk::utilities
 {
-    template <typename FormatContext>
-    auto format(const std::vector<int64_t>& vec, FormatContext& ctx) const
+
+/**
+ * @brief Wrapper for streaming std::vector to ostream
+ *
+ * This wrapper provides a safe way to log vectors without polluting
+ * the global namespace with operator<< for std::vector.
+ *
+ * Usage: std::cout << StreamVec(myVector);
+ * Usage: HIPDNN_LOG_INFO("dims: " << StreamVec(tensor.get_dim()));
+ */
+template <typename T>
+class StreamVec
+{
+public:
+    explicit StreamVec(const std::vector<T>& vec)
+        : _vec(vec)
     {
-        std::string result = "[";
-        for(size_t i = 0; i < vec.size(); ++i)
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const StreamVec& wrapper)
+    {
+        os << "[";
+        for(size_t i = 0; i < wrapper._vec.size(); ++i)
         {
             if(i > 0)
             {
-                result += ", ";
+                os << ", ";
             }
-            result += std::to_string(vec[i]);
+            os << wrapper._vec[i];
         }
-        result += "]";
-        return fmt::formatter<std::string>::format(result, ctx);
+        os << "]";
+        return os;
     }
+
+private:
+    const std::vector<T>& _vec;
 };
+
+} // namespace hipdnn_test_sdk::utilities

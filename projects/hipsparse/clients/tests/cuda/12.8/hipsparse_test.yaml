@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
 
 #level2
 include: test_bsrmv.yaml
+include: test_bsrxmv.yaml
 include: test_bsrsv2.yaml
 include: test_gemvi.yaml
 
@@ -78,6 +79,8 @@ include: test_sddmm_coo_aos.yaml
 include: test_sddmm_coo.yaml
 include: test_sddmm_csc.yaml
 include: test_sddmm_csr.yaml
+include: test_sddmm_csr_reuse_descr.yaml
+include: test_dense_to_sparse_bell_no_set_pointers.yaml
 include: test_dense_to_sparse_coo.yaml
 include: test_dense_to_sparse_csc.yaml
 include: test_dense_to_sparse_csr.yaml
@@ -89,15 +92,20 @@ include: test_spgemmreuse_csr.yaml
 include: test_spmm_batched_coo.yaml
 include: test_spmm_batched_csc.yaml
 include: test_spmm_batched_csr.yaml
+include: test_spmm_bell.yaml
+include: test_spmm_bsr.yaml
 include: test_spmm_coo.yaml
 include: test_spmm_csc.yaml
 include: test_spmm_csr.yaml
+include: test_spmm_csr_reuse_descr.yaml
 include: test_spmv_coo_aos.yaml
 include: test_spmv_coo.yaml
 include: test_spmv_csr.yaml
+include: test_spmv_csr_reuse_descr.yaml
 include: test_spmv_sell.yaml
 include: test_spsv_coo.yaml
 include: test_spsv_csr.yaml
+include: test_spsv_csr_reuse_descr.yaml
 include: test_spsm_coo.yaml
 include: test_spsm_csr.yaml
 include: test_spvv.yaml

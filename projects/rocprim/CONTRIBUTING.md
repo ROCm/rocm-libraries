@@ -76,8 +76,8 @@ Correctness code (tests) is located inside the `test` folder. Several test suite
 
 Finally, performance code (benchmarks) is located inside the `benchmark` folder. Tuned algorithms use three files:
 * `benchmark/benchmark_<algorithm>.cpp`
+* `benchmark/benchmark_<algorithm>.hpp`
 * `benchmark/benchmark_<algorithm>.parallel.cpp.in`
-* `benchmark/benchmark_<algorithm>.parallel.hpp`
 
 while non-tuned algorithms have only one `benchmark/benchmark_<algorithm>.cpp` file.
 

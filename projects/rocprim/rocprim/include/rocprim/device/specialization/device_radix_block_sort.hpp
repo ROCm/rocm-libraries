@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,13 +54,7 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
 
     using Selector = radix_sort_block_sort_config_selector<key_type, value_type>;
 
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -86,18 +80,22 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
         start = std::chrono::steady_clock::now();
     }
 
-    auto radix_sort_block_sort_kernel = [=](auto arch_config)
+    auto radix_sort_block_sort_kernel = [=](auto target_config)
     {
-        static constexpr auto params = decltype(arch_config)::params;
+        using TargetConfig           = decltype(target_config);
+        static constexpr auto params = TargetConfig::params;
 
-        sort_single<params.block_size, params.items_per_thread, Descending>(keys_input,
-                                                                            keys_output,
-                                                                            values_input,
-                                                                            values_output,
-                                                                            size,
-                                                                            decomposer,
-                                                                            bit,
-                                                                            current_radix_bits);
+        sort_single<params.block_size,
+                    params.items_per_thread,
+                    Descending,
+                    TargetConfig::wavefront>(keys_input,
+                                             keys_output,
+                                             values_input,
+                                             values_output,
+                                             size,
+                                             decomposer,
+                                             bit,
+                                             current_radix_bits);
     };
 
     ROCPRIM_RETURN_ON_ERROR(

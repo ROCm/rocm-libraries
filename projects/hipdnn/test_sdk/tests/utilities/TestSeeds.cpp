@@ -80,7 +80,7 @@ TEST_F(TestSeeds, ReturnsRandomSeedWhenRandomSpecified)
 
 TEST_F(TestSeeds, RandomIsCaseInsensitive)
 {
-    std::vector<std::string> randomVariants = {"RANDOM", "random", "Random", "RaNdOm"};
+    const std::vector<std::string> randomVariants = {"RANDOM", "random", "Random", "RaNdOm"};
 
     for(const auto& variant : randomVariants)
     {

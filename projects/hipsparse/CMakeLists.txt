@@ -8,7 +8,7 @@ include(hipsparse_shim)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
-project(hipsparse VERSION 4.3.0 LANGUAGES CXX C)
+project(hipsparse VERSION 4.8.0 LANGUAGES CXX C)
 
 if(POLICY CMP0066)
     cmake_policy(SET CMP0066 NEW) # Honor per-config flags in try_compile()
@@ -35,6 +35,18 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP HIPSPARSE_COPYRIGHT_YEAR "%Y")
+    if(hipsparse_VERSION_TWEAK)
+        set(HIPSPARSE_PRODUCT_VERSION_DISPLAY "${hipsparse_VERSION_MAJOR}.${hipsparse_VERSION_MINOR} (${hipsparse_VERSION_TWEAK})")
+    else()
+        set(HIPSPARSE_PRODUCT_VERSION_DISPLAY "${hipsparse_VERSION_MAJOR}.${hipsparse_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
+
 # --- Build options and validation ---
 option(HIPSPARSE_ENABLE_CUDA "Build hipSPARSE with CUDA backend." OFF)
 option(HIPSPARSE_ENABLE_HIP "Build hipSPARSE with HIP backend." ON)
@@ -43,7 +55,7 @@ option(HIPSPARSE_BUILD_SHARED_LIBS "Build hipSPARSE as a shared library." ON)
 set(BUILD_SHARED_LIBS ${HIPSPARSE_BUILD_SHARED_LIBS})
 option(HIPSPARSE_ENABLE_HOST "Build hipSPARSE library." ON)
 
-option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." ON)
+option(HIPSPARSE_ENABLE_CLIENT "Build hipSPARSE clients." OFF)
 if(HIPSPARSE_ENABLE_CLIENT)
     option(HIPSPARSE_ENABLE_BENCHMARKS "Build benchmark client." ON)
     option(HIPSPARSE_ENABLE_SAMPLES "Build sample programs." ON)
@@ -56,6 +68,10 @@ if(HIPSPARSE_ENABLE_CLIENT)
 endif()
 
 option(HIPSPARSE_BUILD_TESTING "Build test client." OFF)
+option(HIPSPARSE_ENABLE_SPMV_BSR "Build hipSPARSE with BSR format support in hipsparseSpMV." ON)
+option(HIPSPARSE_ENABLE_SPGEAM "Build hipSPARSE with the generic SpGEAM (sparse matrix sparse matrix addition) API." ON)
+option(BUILD_WITH_CSC_TRSV "Build hipSPARSE clients with CSC format support tests for hipsparseSpSV (requires a rocSPARSE built with BUILD_WITH_CSC_TRSV)." ON)
+option(BUILD_WITH_CSC_TRSM "Build hipSPARSE clients with CSC format support tests for hipsparseSpSM (requires a rocSPARSE built with BUILD_WITH_CSC_TRSM)." ON)
 option(HIPSPARSE_ENABLE_COVERAGE "Build with code coverage enabled." OFF)
 option(HIPSPARSE_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSE_BUILD_DOCS "Build documentation." OFF)
@@ -83,6 +99,8 @@ if(HIPSPARSE_ENABLE_CUDA)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
     find_package(rocsparse REQUIRED)
+    get_target_property(ROCSPARSE_LOCATION roc::rocsparse LOCATION)
+    message(STATUS "Found rocsparse shared library: ${ROCSPARSE_LOCATION}")
 endif()
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
@@ -97,9 +115,18 @@ if(HIPSPARSE_ENABLE_HOST)
     add_subdirectory(library)
 endif()
 
+# Must be set before add_subdirectory(clients): clients/tests needs it for CTest categories
+# (shared/ctest/TestCategories.cmake and test_categories.yaml).
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # --- Client targets ---
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
+    # Required at project root so ${CMAKE_BINARY_DIR}/CTestTestfile.cmake exists.
+    # Otherwise ctest run from the build root finds no tests (they only lived under clients/).
+    enable_testing()
     include(rocm_client_prerequisites)
     add_subdirectory(clients)
 endif()
@@ -264,7 +291,7 @@ if(HIPSPARSE_ENABLE_ASAN)
     target_link_options(hipsparse PRIVATE -fsanitize=address -shared-libasan -fuse-ld=lld)
     
     # Apply ASAN to client common libraries
-    if(HIPSPARSE_ENABLE_CLIENT)
+    if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
         target_compile_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan)
         target_link_options(hipsparse-clients-common PUBLIC -fsanitize=address -shared-libasan -fuse-ld=lld)
         

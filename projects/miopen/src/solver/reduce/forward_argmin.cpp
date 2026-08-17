@@ -133,16 +133,16 @@ ArgminForward::GetSolution(const ExecutionContext&,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::reduce::ExtremeInvokeParams>();
 
-            auto xdims      = params.xDesc->GetLengths();
-            auto indicedims = params.indiceDesc->GetLengths();
-            auto dim        = params.dim;
+            auto xdims_      = params.xDesc->GetLengths();
+            auto indice_dims = params.indiceDesc->GetLengths();
+            auto dim         = params.dim;
 
-            int32_t reduce_size = static_cast<int32_t>(xdims[dim]);
+            int32_t reduce_size = static_cast<int32_t>(xdims_[dim]);
             auto indice_numel   = std::accumulate(
-                indicedims.begin(), indicedims.end(), 1ULL, std::multiplies<size_t>());
+                indice_dims.begin(), indice_dims.end(), 1ULL, std::multiplies<size_t>());
 
             auto inner_size = std::accumulate(
-                xdims.begin() + dim + 1, xdims.end(), 1ULL, std::multiplies<size_t>());
+                xdims_.begin() + dim + 1, xdims_.end(), 1ULL, std::multiplies<size_t>());
 
             kernel(params.x, nullptr, params.indice, indice_numel, reduce_size, inner_size);
         };

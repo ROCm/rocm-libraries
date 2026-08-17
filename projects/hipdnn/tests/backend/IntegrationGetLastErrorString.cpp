@@ -13,7 +13,7 @@
 // NOLINTBEGIN(modernize-avoid-c-arrays)
 TEST(IntegrationGetErrorString, AllStatusCodes)
 {
-    std::vector<std::tuple<hipdnnStatus_t, std::string>> statusPairs
+    const std::vector<std::tuple<hipdnnStatus_t, std::string>> statusPairs
         = {{HIPDNN_STATUS_SUCCESS, "HIPDNN_STATUS_SUCCESS"},
            {HIPDNN_STATUS_NOT_INITIALIZED, "HIPDNN_STATUS_NOT_INITIALIZED"},
            {HIPDNN_STATUS_BAD_PARAM, "HIPDNN_STATUS_BAD_PARAM"},
@@ -30,6 +30,8 @@ TEST(IntegrationGetErrorString, AllStatusCodes)
            {HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED,
             "HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED"},
            {HIPDNN_STATUS_EXECUTION_FAILED, "HIPDNN_STATUS_EXECUTION_FAILED"},
+           {HIPDNN_STATUS_PLUGIN_ERROR, "HIPDNN_STATUS_PLUGIN_ERROR"},
+           {HIPDNN_STATUS_VERSION_MISMATCH, "HIPDNN_STATUS_VERSION_MISMATCH"},
            {static_cast<hipdnnStatus_t>(-999), "HIPDNN_STATUS_UNKNOWN"}};
 
     for(const auto& [status, text] : statusPairs)
@@ -42,7 +44,7 @@ TEST(IntegrationGetErrorString, AllStatusCodes)
 TEST(IntegrationGetLastErrorString, ReturnLastError)
 {
     char buffer[HIPDNN_ERROR_STRING_MAX_LENGTH];
-    hipdnnStatus_t status = hipdnnDestroy(nullptr);
+    const hipdnnStatus_t status = hipdnnDestroy(nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     hipdnnGetLastErrorString(buffer, sizeof(buffer));
@@ -59,7 +61,7 @@ TEST(IntegrationGetLastErrorString, NullBufferOrZeroSize)
 
 TEST(IntegrationGetLastErrorString, BufferTruncationAndNullTermination)
 {
-    hipdnnStatus_t status = hipdnnDestroy(nullptr);
+    const hipdnnStatus_t status = hipdnnDestroy(nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     char buffer[2];
@@ -67,7 +69,7 @@ TEST(IntegrationGetLastErrorString, BufferTruncationAndNullTermination)
 
     ASSERT_EQ(buffer[sizeof(buffer) - 1], '\0');
     ASSERT_LT(strlen(buffer), sizeof(buffer));
-    std::string bufferStr(buffer);
+    const std::string bufferStr(buffer);
     ASSERT_NE(bufferStr, "");
 }
 
@@ -107,7 +109,7 @@ TEST(IntegrationGetLastErrorString, BufferLargerThanMax)
 TEST(IntegrationGetLastErrorString, GetClearsError)
 {
     // Generate an error
-    hipdnnStatus_t status = hipdnnDestroy(nullptr);
+    const hipdnnStatus_t status = hipdnnDestroy(nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     // First call should return the error
@@ -124,7 +126,7 @@ TEST(IntegrationGetLastErrorString, GetClearsError)
 TEST(IntegrationGetLastErrorString, PeekDoesNotClearError)
 {
     // Generate an error
-    hipdnnStatus_t status = hipdnnDestroy(nullptr);
+    const hipdnnStatus_t status = hipdnnDestroy(nullptr);
     ASSERT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     // First peek should return the error

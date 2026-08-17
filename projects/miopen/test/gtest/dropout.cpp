@@ -224,7 +224,7 @@ inline auto GenCases()
 #else
 #define DROPOUT_LARGE_CTEST 0
 
-    std::set<std::vector<int>> get_inputs_set               = get_inputs(1);
+    std::set<std::vector<int>> get_inputs_set = get_inputs(1);
 
 #if DROPOUT_LARGE_CTEST
     std::set<std::vector<int>> get_3d_conv_input_shapes_set = get_3d_conv_input_shapes(1);
@@ -331,13 +331,7 @@ struct DropoutCommon : public testing::TestWithParam<TestCase>
         DropoutDesc.InitPRNGState(
             handle, DropoutDesc.pstates, DropoutDesc.stateSizeInBytes, DropoutDesc.seed);
 #if DROPOUT_DEBUG_CTEST
-        std::cout <<
-#if MIOPEN_BACKEND_OPENCL
-            "Use OpenCL backend."
-#elif MIOPEN_BACKEND_HIP
-            "Use HIP backend."
-#endif
-                  << std::endl;
+        std::cout << "Use HIP backend." << std::endl;
 #endif
 
         auto out = tensor<T>{in_dim};

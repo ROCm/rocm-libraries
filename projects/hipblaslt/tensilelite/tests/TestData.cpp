@@ -27,22 +27,14 @@
 #include "TestData.hpp"
 
 #include <glob.h>
-#include <unistd.h>
 #include <memory>
-
-#include <boost/version.hpp>
-
-#if BOOST_VERSION >= 106100
-#include <boost/dll/runtime_symbol_info.hpp>
-#else
-#define TEST_DATA_USE_PROC_EXE
-#endif
+#include <unistd.h>
 
 #include <Tensile/Utils.hpp>
 
 TestData::operator bool() const
 {
-    return boost::filesystem::is_directory(dataDir());
+    return std::filesystem::is_directory(dataDir());
 }
 
 TestData TestData::Invalid()
@@ -60,35 +52,35 @@ TestData TestData::Env(std::string const& varName)
     return TestData(var);
 }
 
-boost::filesystem::path TestData::dataDir() const
+std::filesystem::path TestData::dataDir() const
 {
     return m_dataDir;
 }
 
-boost::filesystem::path TestData::file(std::string const& filename) const
+std::filesystem::path TestData::file(std::string const& filename) const
 {
     auto simple = dataDir() / filename;
-    if(boost::filesystem::is_regular_file(simple))
+    if(std::filesystem::is_regular_file(simple))
         return simple;
 
     auto datFile = file(filename, "dat");
-    if(boost::filesystem::is_regular_file(datFile))
+    if(std::filesystem::is_regular_file(datFile))
         return datFile;
 
     auto yamlFile = file(filename, "yaml");
-    if(boost::filesystem::is_regular_file(yamlFile))
+    if(std::filesystem::is_regular_file(yamlFile))
         return yamlFile;
 
     return simple;
 }
 
-boost::filesystem::path TestData::file(std::string const& filename,
-                                       std::string const& extension) const
+std::filesystem::path TestData::file(std::string const& filename,
+                                     std::string const& extension) const
 {
     return dataDir() / (filename + "." + extension);
 }
 
-std::vector<boost::filesystem::path> TestData::glob(std::string const& pattern) const
+std::vector<std::filesystem::path> TestData::glob(std::string const& pattern) const
 {
     std::string wholePattern = (dataDir() / pattern).native();
 
@@ -105,7 +97,7 @@ std::vector<boost::filesystem::path> TestData::glob(std::string const& pattern) 
     if(err == GLOB_NOSPACE || err == GLOB_ABORTED)
         throw std::runtime_error(TensileLite::concatenate("Glob ", wholePattern, " failed."));
 
-    std::vector<boost::filesystem::path> rv(result.gl_pathc);
+    std::vector<std::filesystem::path> rv(result.gl_pathc);
 
     for(size_t i = 0; i < result.gl_pathc; i++)
         rv[i] = result.gl_pathv[i];
@@ -113,22 +105,23 @@ std::vector<boost::filesystem::path> TestData::glob(std::string const& pattern) 
     return rv;
 }
 
-boost::filesystem::path TestData::ProgramLocation()
+std::filesystem::path TestData::ProgramLocation()
 {
-#ifdef TEST_DATA_USE_PROC_EXE
-    return boost::filesystem::read_symlink("/proc/self/exe");
+#ifdef __linux__
+    return std::filesystem::read_symlink("/proc/self/exe");
 #else
-    return boost::dll::program_location();
+    // Fallback for non-Linux: not used by current CI; add platform API if needed.
+    return std::filesystem::current_path();
 #endif
 }
 
 TestData::TestData()
     : m_dataDir(ProgramLocation().parent_path() / "data")
 {
-    if(!boost::filesystem::is_directory(m_dataDir))
+    if(!std::filesystem::is_directory(m_dataDir))
     {
         auto newValue = ProgramLocation().parent_path().parent_path() / "data";
-        if(boost::filesystem::is_directory(newValue))
+        if(std::filesystem::is_directory(newValue))
             m_dataDir = newValue;
     }
 }

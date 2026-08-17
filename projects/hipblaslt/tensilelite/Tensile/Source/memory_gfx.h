@@ -53,6 +53,9 @@
 #elif defined(__gfx1200__) || defined(__gfx1201__)
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x30020000
+#elif defined(__gfx1250__)
+#define USE_GFX_BUFFER_INTRINSIC
+#define BUFFER_RESOURCE_3RD_DWORD 0x00000000
 #else // not support
 #define BUFFER_RESOURCE_3RD_DWORD -1
 #endif
@@ -100,21 +103,32 @@ struct alignas(16) BufferResource
     };
 
     INLINEDEVICE
-    BufferResource(void const* base_addr, uint32_t num_records = (0xFFFFFFFF - 1))
+    BufferResource(void const* base_addr, uint64_t num_records = (0xFFFFFFFF - 1))
     {
-        // Reference:
-        //   For CDNA: see section 9.1.8 in the AMD resources
-        //   https://developer.amd.com/wp-content/resources/CDNA1_Shader_ISA_14December2020.pdf
-        //   For RDNA: see section 8.1.8 in the AMD resources
-        //   https://developer.amd.com/wp-content/resources/RDNA2_Shader_ISA_November2020.pdf
-        //   The d32[3] field represents the 0x[127] ~ [96]
+        //   GFX1250:
+        //      base address bits [56:0] (57 bits)
+        //      num_records bits [101:57] (45 bits)
+        //   Other archs:
+        //      base address bits [47:0] (47 bits)
+        //      num_records bits [95:64] (32 bits)
 
-        // 64-bit base address
+#if defined(__gfx1250__)
+        uint64_t addr = reinterpret_cast<uint64_t>(const_cast<void*>(base_addr));
+
+        // bits [56:0] - base address (57 bits)
+        desc_.d32[0] = static_cast<uint32_t>(addr);
+        desc_.d32[1] = static_cast<uint32_t>(addr >> 32) & 0x01FFFFFFu;  // bits 32-56
+
+        // bits [101:57] - num_records (45 bits)
+        desc_.d32[1] |= static_cast<uint32_t>((num_records & 0x7Fu) << 25);   // bits 57-63
+        desc_.d32[2] = static_cast<uint32_t>((num_records >> 7) & 0xFFFFFFFFu); // bits 64-95
+        desc_.d32[3] = (BUFFER_RESOURCE_3RD_DWORD & 0xFFFFFFC0u) |
+                       static_cast<uint32_t>((num_records >> 39) & 0x3Fu);     // bits 96-101
+#else
         desc_.d64[0] = const_cast<void*>(base_addr);
-        // 32-bit number of records in bytes which is used to guard against out-of-range access
-        desc_.d32[2] = num_records;
-        // 32-bit buffer resource descriptor
+        desc_.d32[2] = static_cast<uint32_t>(num_records);
         desc_.d32[3] = BUFFER_RESOURCE_3RD_DWORD;
+#endif
     }
 
     INLINEDEVICE
@@ -135,6 +149,15 @@ struct alignas(16) BufferResource
 
     Desc desc_;
 };
+
+INLINEDEVICE
+void const* splitBufferOffset(void const* base_ptr, uint64_t voffset, uint32_t& voffset_lo)
+{
+    voffset_lo     = static_cast<uint32_t>(voffset);
+    uint64_t base  = reinterpret_cast<uint64_t>(const_cast<void*>(base_ptr));
+    base          += voffset & 0xFFFFFFFF00000000ull;
+    return reinterpret_cast<void const*>(base);
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -520,6 +543,21 @@ struct buffer_store<AccessType, 1, cache_op>
         llvm_amdgcn_raw_buffer_store_i8(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        char           data = *reinterpret_cast<char const*>(&D);
+        llvm_amdgcn_raw_buffer_store_i8(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
 };
 
 template <typename AccessType, CacheOperation::Kind cache_op>
@@ -536,6 +574,21 @@ struct buffer_store<AccessType, 2, cache_op>
         float16_t      data = *reinterpret_cast<float16_t const*>(&D);
         llvm_amdgcn_raw_buffer_store_f16(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float16_t      data = *reinterpret_cast<float16_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f16(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
 };
 
@@ -554,6 +607,21 @@ struct buffer_store<AccessType, 4, cache_op>
         llvm_amdgcn_raw_buffer_store_f32(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float32_t      data = *reinterpret_cast<float32_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f32(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
 };
 
 template <typename AccessType, CacheOperation::Kind cache_op>
@@ -571,6 +639,21 @@ struct buffer_store<AccessType, 8, cache_op>
         llvm_amdgcn_raw_buffer_store_f32x2(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float32x2_t    data = *reinterpret_cast<float32x2_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f32x2(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
 };
 
 template <typename AccessType, CacheOperation::Kind cache_op>
@@ -587,6 +670,21 @@ struct buffer_store<AccessType, 16, cache_op>
         float32x4_t    data = *reinterpret_cast<float32x4_t const*>(&D);
         llvm_amdgcn_raw_buffer_store_f32x4(
             data, buffer_rsc, voffset, __builtin_amdgcn_readfirstlane(soffset), cache_op);
+    }
+
+    INLINEDEVICE
+    buffer_store(const AccessType& D,
+                 void const*       base_ptr,
+                 uint64_t          voffset,
+                 uint32_t          soffset,
+                 uint32_t          num_records = (0xFFFFFFFF - 1))
+    {
+        uint32_t voffset_lo = 0;
+        base_ptr            = splitBufferOffset(base_ptr, voffset, voffset_lo);
+        BufferResource buffer_rsc(base_ptr, num_records);
+        float32x4_t    data = *reinterpret_cast<float32x4_t const*>(&D);
+        llvm_amdgcn_raw_buffer_store_f32x4(
+            data, buffer_rsc, voffset_lo, __builtin_amdgcn_readfirstlane(soffset), cache_op);
     }
 };
 

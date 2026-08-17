@@ -29,8 +29,9 @@ if(HIPSPARSELT_ENABLE_HIP)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Enable F16C intrinsics
-    target_compile_options(hipsparselt PRIVATE -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+        target_compile_options(hipsparselt PRIVATE -mf16c)
+    endif()
 endif()
 
 if(HIPSPARSELT_ENABLE_ASAN)
@@ -40,6 +41,7 @@ endif()
 
 if(HIPSPARSELT_ENABLE_MARKER)
     target_compile_definitions(hipsparselt PRIVATE HIPSPARSELT_ENABLE_MARKER)
+    target_include_directories(hipsparselt PRIVATE ${ROCTRACER_INCLUDE_DIR})
     target_link_libraries(hipsparselt PRIVATE ${ROCTX64_LIBRARY})
 else()
     target_compile_definitions(hipsparselt PRIVATE DISABLE_ROCTX)

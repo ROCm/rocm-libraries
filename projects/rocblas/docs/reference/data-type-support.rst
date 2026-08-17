@@ -1,11 +1,11 @@
 .. meta::
-  :description: rocBLAS library data type support
+  :description: rocBLAS library precision support
   :keywords: rocBLAS, ROCm, API, Linear Algebra, documentation, data type support
 
-.. _data-types-support:
+.. _rocblas-data-type-support:
 
 ********************************************************************
-Data type support
+rocBLAS precision support
 ********************************************************************
 
 This topic lists the data type support for the rocBLAS library on AMD GPUs for
@@ -17,14 +17,63 @@ these interfaces, all ``rocblas_int`` arguments are replaced by the type name
 ``int64_t``. For more information on these ``_64`` functions, see the
 :ref:`ILP64 API` section.
 
-The icons representing different levels of support are explained in the
-following table.
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _rocblas-input-output-type-support:
+
+Supported data types overview
+=============================
+
+The following table summarizes the input and output data types supported by
+rocBLAS. For per-function support details, see the operation-level tables in the
+following sections.
 
 .. list-table::
     :header-rows: 1
 
     *
-      -  Icon
+      - Icon
+      - Definition
+    *
+      - ✅
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
+
+Data types not listed in the table below are not supported.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
+
+Functions data type support
+===========================
+
+The following sections list the per-function data type support for each level of
+BLAS operation. The icons representing different levels of support are explained
+in the following table.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
       - Definition
 
     *
@@ -43,12 +92,8 @@ following table.
       - ✅
       - Full support
 
-
-For more information about data type support for the other ROCm libraries, see
-:doc:`Data types and precision support page <rocm:reference/precision-support>`.
-
 Level 1 functions - vector operations
-=====================================
+-------------------------------------
 
 Level-1 functions perform scalar, vector, and vector-vector operations.
 
@@ -209,7 +254,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
           - ✅
 
 Level 2 functions - matrix-vector operations
-============================================
+--------------------------------------------
 
 Level-2 functions perform matrix-vector operations.
 
@@ -342,7 +387,6 @@ Level-2 functions perform matrix-vector operations.
           - NA
           - NA
 
-
         *
           - :ref:`HPR <rocblas_hpr>`, :ref:`HPR2 <rocblas_hpr2>`
           - Hermitian packed rank-1 and rank-2 update of packed.
@@ -350,8 +394,6 @@ Level-2 functions perform matrix-vector operations.
           - NA
           - NA
           - NA
-
-
 
   .. tab-item:: Complex types
     :sync: complex-type
@@ -457,9 +499,9 @@ Level-2 functions perform matrix-vector operations.
           - ✅
 
 Level 3 functions - matrix-matrix operations
-============================================
+--------------------------------------------
 
-Level-3 functions perform matix-matrix operations. rocBLAS calls the AMD
+Level-3 functions perform matrix-matrix operations. rocBLAS calls the AMD
 :doc:`Tensile <tensile:src/index>` and :doc:`hipBLASLt <hipblaslt:index>`
 libraries for Level-3 GEMMs (matrix matrix multiplication).
 
@@ -558,7 +600,6 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-
   .. tab-item:: Complex types
     :sync: complex-type
 
@@ -630,9 +671,8 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ❌
           - ❌
 
-
 Extensions
-==========
+----------
 
 The extension function data type support is listed for every function separately
 on the :ref:`Extensions reference page <extension>`.

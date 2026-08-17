@@ -34,22 +34,22 @@ extern "C" {
 
 /*! \ingroup conv_module
 *  \brief Pads a value to the diagonal of the last block (if the last block is a diagonal block) in the sparse BSR matrix
-*  when the matrix expands outside m x m
+*  when the matrix expands outside \p m x \p m.
 *
-*  \details When converting from a CSR matrix to a BSR matrix the resulting BSR matrix will be larger when m < mb * block_dim.
-*  In these situations, the CSR to BSR conversion will expand the BSR matrix to have zeros when outside m x m. This routine
+*  \details When converting from a CSR matrix to a BSR matrix, the resulting BSR matrix will be larger when \p m < \p mb * \p block_dim.
+*  In these situations, the CSR to BSR conversion will expand the BSR matrix to have zeros when outside \p m x \p m. This routine
 *  converts the resulting BSR matrix to one that has a value on the last diagonal blocks diagonal if this last block is a diagonal
 *  block in the BSR matrix.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse BSR matrix.
 *  @param[in]
@@ -59,7 +59,7 @@ extern "C" {
 *  @param[in]
 *  block_dim   block dimension of the sparse BSR matrix.
 *  @param[in]
-*  value       scalar value that is set on the diagonal of the last block when the matrix expands outside of \p m x \p m
+*  value       scalar value that is set on the diagonal of the last block when the matrix expands outside of \p m x \p m.
 *  @param[in]
 *  bsr_descr   descriptor of the sparse BSR matrix. Currently, only
 *              \ref rocsparse_matrix_type_general is supported.
@@ -74,10 +74,10 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p mb, \p nnzb or \p block_dim is
+*  \retval     rocsparse_status_invalid_size \p m, \p mb, \p nnzb, or \p block_dim is
 *              invalid.
 *  \retval     rocsparse_status_invalid_pointer \p bsr_descr, \p bsr_val,
-*              \p bsr_row_ind, \p bsr_col_ind, pointer is invalid.
+*              \p bsr_row_ind, or \p bsr_col_ind pointer is invalid.
 */
 /**@{*/
 ROCSPARSE_EXPORT

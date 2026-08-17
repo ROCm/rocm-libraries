@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,6 +29,7 @@
 
 #include "lib_device_helpers.hpp"
 #include "lib_macros.hpp"
+#include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_logger.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -621,7 +622,16 @@ __device__ void lasrt_increasing(const rocblas_int n, T* D, rocblas_int* stack)
 
 /** IAMAX finds the maximum element of a given vector.
     MAX_THDS should be 128, 256, 512, or 1024, and sval should
-    be a shared array of size MAX_THDS. **/
+    be a shared array of size MAX_THDS.
+
+    NOTE: Suppose we consider an element a vector of the form [Re(.), Im(.)],
+    IAMAX finds element of maximum |Re(.)| + |Im(.)| (this is like the inf-norm of an element)
+    IMAX1 finds element of maximum absolute value (this is like the 2-norm of an element).
+
+    The absolute value is sqrt( Re(.)^2 + Im(.)^2 ).
+    IAMAX and IMAX1 behave the same for real numbers.
+
+   TODO: Test and update IAMAX and IMAX1 for NaN and Inf propagation **/
 template <int MAX_THDS, typename T, typename I, typename S>
 __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval)
 {
@@ -709,6 +719,191 @@ __device__ void iamax(const I tid, const I n, T* A, const I incA, S* sval, I* si
     for(I i = tid; i < n; i += MAX_THDS)
     {
         val2 = aabs<S>(A[i * incA]);
+        idx2 = i + 1; // add one to make it 1-based index
+        if(val1 < val2 || idx1 == INT_MAX)
+        {
+            val1 = val2;
+            idx1 = idx2;
+        }
+    }
+    sval[tid] = val1;
+    sidx[tid] = idx1;
+    __syncthreads();
+
+    if(n <= 1)
+        return;
+
+        /** <========= Next do the reduction on the shared memory array =========>
+        (We halve the number of active threads at each step
+        reducing two elements in the shared array. **/
+
+#pragma unroll
+    for(I i = MAX_THDS / 2; i > warpSize; i /= 2)
+    {
+        if(tid < i)
+        {
+            val2 = sval[tid + i];
+            idx2 = sidx[tid + i];
+            if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+            {
+                sval[tid] = val1 = val2;
+                sidx[tid] = idx1 = idx2;
+            }
+        }
+        __syncthreads();
+    }
+
+    // from this point, as all the active threads will form a single wavefront
+    // and work in lock-step, there is no need for synchronizations and barriers
+    if(tid < warpSize)
+    {
+        if(warpSize >= 64 && MAX_THDS >= 128)
+        {
+            val2 = sval[tid + 64];
+            idx2 = sidx[tid + 64];
+            if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+            {
+                sval[tid] = val1 = val2;
+                sidx[tid] = idx1 = idx2;
+            }
+        }
+        val2 = sval[tid + 32];
+        idx2 = sidx[tid + 32];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 16];
+        idx2 = sidx[tid + 16];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 8];
+        idx2 = sidx[tid + 8];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 4];
+        idx2 = sidx[tid + 4];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 2];
+        idx2 = sidx[tid + 2];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+        val2 = sval[tid + 1];
+        idx2 = sidx[tid + 1];
+        if((val1 < val2) || (val1 == val2 && idx1 > idx2))
+        {
+            sval[tid] = val1 = val2;
+            sidx[tid] = idx1 = idx2;
+        }
+    }
+
+    // after the reduction, the maximum of the elements is in sval[0] and sidx[0]
+}
+
+/** IMAX1 finds the maximum element of a given vector.
+    MAX_THDS should be 128, 256, 512, or 1024, and sval should
+    be a shared array of size MAX_THDS. **/
+template <int MAX_THDS, typename T, typename I, typename S>
+__device__ void imax1(const I tid, const I n, T* A, const I incA, S* sval)
+{
+    // local memory setup
+    S val1, val2;
+
+    // read into shared memory while doing initial step
+    // (each thread reduce as many elements as needed to cover the original array)
+    val1 = 0;
+    for(I i = tid; i < n; i += MAX_THDS)
+    {
+        val2 = rocblas_abs(A[i * incA]);
+        if(val1 < val2)
+            val1 = val2;
+    }
+    sval[tid] = val1;
+    __syncthreads();
+
+    if(n <= 1)
+        return;
+
+        /** <========= Next do the reduction on the shared memory array =========>
+        (We halve the number of active threads at each step
+        reducing two elements in the shared array. **/
+
+#pragma unroll
+    for(I i = MAX_THDS / 2; i > warpSize; i /= 2)
+    {
+        if(tid < i)
+        {
+            val2 = sval[tid + i];
+            if(val1 < val2)
+                sval[tid] = val1 = val2;
+        }
+        __syncthreads();
+    }
+
+    // from this point, as all the active threads will form a single wavefront
+    // and work in lock-step, there is no need for synchronizations and barriers
+    if(tid < warpSize)
+    {
+        if(warpSize >= 64)
+        {
+            val2 = sval[tid + 64];
+            if(val1 < val2)
+                sval[tid] = val1 = val2;
+        }
+        val2 = sval[tid + 32];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 16];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 8];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 4];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 2];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+        val2 = sval[tid + 1];
+        if(val1 < val2)
+            sval[tid] = val1 = val2;
+    }
+
+    // after the reduction, the maximum of the elements is in sval[0]
+}
+
+/** IMAX1 finds the maximum element of a given vector and its index.
+    MAX_THDS should be 64, 128, 256, 512, or 1024, and sval and sidx should
+    be shared arrays of size MAX_THDS. **/
+template <int MAX_THDS, typename T, typename I, typename S>
+__device__ void imax1(const I tid, const I n, T* A, const I incA, S* sval, I* sidx)
+{
+    // local memory setup
+    S val1, val2;
+    I idx1, idx2;
+
+    // read into shared memory while doing initial step
+    // (each thread reduce as many elements as needed to cover the original array)
+    val1 = 0;
+    idx1 = INT_MAX;
+    for(I i = tid; i < n; i += MAX_THDS)
+    {
+        val2 = rocblas_abs(A[i * incA]);
         idx2 = i + 1; // add one to make it 1-based index
         if(val1 < val2 || idx1 == INT_MAX)
         {
@@ -899,13 +1094,7 @@ __device__ void dot(const rocblas_int tid,
 
     /** <========= Next do the reduction on the shared memory array =========> **/
 
-    val += shift_left(val, 1);
-    val += shift_left(val, 2);
-    val += shift_left(val, 4);
-    val += shift_left(val, 8);
-    val += shift_left(val, 16);
-    if(warpSize > 32)
-        val += shift_left(val, 32);
+    reduce_wave_sum(val);
     if(tid % warpSize == 0)
         sval[tid / warpSize] = val;
     __syncthreads();
@@ -2973,6 +3162,104 @@ __device__ rocblas_int seq_solve_ext(const rocblas_int dd,
     return converged ? 0 : 1;
 }
 
+// -----------------------------
+// Initialize matrix
+// motivated by xLASET in LAPACK
+//
+// matrix A is m by n
+//
+// uplo == rocblas_fill_upper : assign to upper triangular matrix
+// uplo == rocblas_fill_lower : assign to lower triangular matrix
+// uplo == rocblas_fill_full : assign to entire matrix
+//
+// assign beta to diagonal
+// assign alpha to off-diagonal
+// -----------------------------
+
+template <typename T, typename I, typename UA>
+__global__ static void laset_kernel(const rocblas_fill uplo,
+                                    const I m,
+                                    const I n,
+                                    const T alpha,
+                                    const T beta,
+                                    UA AA,
+                                    const rocblas_stride shiftA,
+                                    const I lda,
+                                    const rocblas_stride strideA,
+                                    const I batch_count)
+{
+    I const bid_start = blockIdx.z;
+    I const bid_inc = gridDim.z;
+
+    I const i_start = threadIdx.x + blockIdx.x * blockDim.x;
+    I const i_inc = blockDim.x * gridDim.x;
+
+    I const j_start = threadIdx.y + blockIdx.y * blockDim.y;
+    I const j_inc = blockDim.y * gridDim.y;
+
+    for(I bid = bid_start; bid < batch_count; bid += bid_inc)
+    {
+        T* const A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+
+        if(uplo == rocblas_fill_lower)
+        {
+            // ---------------------------------
+            // assign to lower triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = j + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else if(uplo == rocblas_fill_upper)
+        {
+            // ---------------------------------
+            // assign to upper triangular matrix
+            // ---------------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < std::min(m, j + 1); i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+        else
+        {
+            // ------------------------
+            // assign to entire matrix
+            // ------------------------
+
+            for(I j = 0 + j_start; j < n; j += j_inc)
+            {
+                for(I i = 0 + i_start; i < m; i += i_inc)
+                {
+                    bool const is_diagonal = (i == j);
+                    auto const ij = idx2D(i, j, lda);
+                    auto const aij = (is_diagonal) ? beta : alpha;
+
+                    A[ij] = aij;
+                }
+            }
+        }
+
+        __syncthreads();
+    }
+}
+
 /** This local gemm adapts rocblas_gemm to multiply complex*real, and
     overwrite result: A = A*B **/
 template <bool BATCHED,
@@ -3069,6 +3356,688 @@ void local_gemm(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, S, false>), dim3(blocks, blocks, batch_count),
                             dim3(BS2, BS2), 0, stream, copymat_from_buffer, n, n, A, shiftA, lda,
                             strideA, temp);
+}
+
+/******************************************************************************
+ * LACN2: 1-Norm Estimator for Inverse Matrices
+ *
+ * This is an internal utility routine that estimates ||A^{-1}||_1 using a
+ * reverse-communication iterative algorithm based on power iteration.
+ *
+ * ALGORITHM OVERVIEW:
+ * ------------------
+ * LACN2 uses a stateful iteration pattern where the caller:
+ * 1. Calls LACN2 to get the next operation to perform (via kase parameter)
+ * 2. Performs the requested matrix solve (A*x or A^H*x)
+ * 3. Calls LACN2 again with the result
+ * 4. Repeats until kase = 0 (convergence)
+ *
+ * STATE MACHINE:
+ * -------------
+ * kase = 0: Converged (d_est contains the final estimate of ||A^{-1}||_1)
+ * kase = 1: Caller should solve A*x = x and call LACN2 again
+ * kase = 2: Caller should solve A^H*x = x and call LACN2 again
+ *
+ * jump values (internal state transitions):
+ * - jump = 1: Initial iteration, compute first estimate
+ * - jump = 2: Find maximum component and set up unit vector
+ * - jump = 3: Check convergence criteria
+ * - jump = 4: Update max index and check stopping conditions
+ * - jump = 5: Finalize estimate
+ *
+ * DESIGN NOTES:
+ * ------------
+ * - This is an INTERNAL template utility, not a public API
+ * - LACN2 only computes the norm estimate; the caller computes rcond = 1/(||A||_1 * ||A^{-1}||_1)
+ * - Typically converges in 3-5 iterations
+ * - LACN2 can only process one matrix at a time, batched routines should compute
+ *   the condition number for one batch at a time in a loop
+ *
+ * REFERENCE:
+ * ---------
+ * Based on LAPACK's SLACN2/DLACN2/CLACN2/ZLACN2 routines
+ * Higham, N. J. (1988). FORTRAN codes for estimating the one-norm of a
+ * real or complex matrix, with applications to condition estimation.
+ * ACM Trans. Math. Softw., 14(4), 381-396.
+ *****************************************************************************/
+
+#ifndef LACN2_BLOCKSIZE
+#define LACN2_BLOCKSIZE 1024
+#endif
+
+/**
+ * lacn2_max_index: Device helper for finding max index via warp reduction
+ * Reduces within a warp using shuffle operations on both value and index
+ */
+template <typename T, typename I>
+__device__ inline void lacn2_max_index(const I n, T* local_max, I* local_max_index, rocblas_int offset)
+{
+    T compare_local_max = shift_left(*local_max, offset);
+    I compare_local_index = shift_left(*local_max_index, offset);
+    if(compare_local_max > *local_max)
+    {
+        *local_max = compare_local_max;
+        *local_max_index = compare_local_index;
+    }
+}
+
+/**
+ * lacn2_jump1_n_equals_one: Special case for n=1
+ * Simply stores the absolute value of x[0] as the estimate
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
+    lacn2_jump1_n_equals_one(const I n, T* x, S* norm, I* isgn)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    if(tid == 0)
+    {
+        *norm = rocblas_abs(x[0]);
+    }
+}
+
+/**
+ * lacn2_jump1: First iteration - compute initial estimate and set up x
+ * Computes sum of absolute values and normalizes x to unit entries
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
+    lacn2_jump1(const I n, T* x, S* norm, I* isgn)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+
+    // sum absolute values
+    S sum = 0;
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+    {
+        sum += rocblas_abs(x[i]);
+
+        if constexpr(rocblas_is_complex<T>)
+        {
+            S absxi = rocblas_abs(x[i]);
+            if(absxi == 0)
+            {
+                x[i] = T(1);
+            }
+            else
+            {
+                x[i] = x[i] / absxi;
+            }
+        }
+        else
+        {
+            if(x[i] >= 0)
+            {
+                x[i] = T(1);
+                isgn[i] = 1;
+            }
+            else
+            {
+                x[i] = T(-1);
+                isgn[i] = -1;
+            }
+        }
+    }
+
+    // reduce within Warp
+    reduce_wave_sum(sum);
+
+    if(tid % WarpSize == 0)
+        sval[tid / WarpSize] = sum;
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+            sum += sval[k];
+        *norm = sum;
+    }
+}
+
+/**
+ * lacn2_jump2: Find index of maximum absolute value in vector x
+ * Sets all x entries to 0 except the max element which is set to 1
+ * Must be called with only a single block
+ *
+ * Note: Uses imax1 device routine which computes max of sqrt(real(x[i])^2 + imag(x[i])^2) for complex types
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump2(const I n, T* x, I* max_idx)
+{
+    I tid = threadIdx.x;
+
+    // shared variables for imax1
+    __shared__ S sval[LACN2_BLOCKSIZE];
+    __shared__ I sidx[LACN2_BLOCKSIZE];
+
+    // Find index of maximum absolute value using imax1 device routine
+    // For complex types, imax1 uses sqrt(real^2 + imag^2)
+    imax1<LACN2_BLOCKSIZE, T, I, S>(tid, n, x, 1, sval, sidx);
+
+    // imax1 returns 1-based index in sidx[0], convert to 0-based
+    I local_max_index;
+    if(tid == 0)
+    {
+        local_max_index = sidx[0] - 1;
+        *max_idx = local_max_index;
+    }
+    __syncthreads();
+
+    // Read the max index that was computed
+    local_max_index = *max_idx;
+
+    // Zero out all elements except the max
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        x[i] = (i == local_max_index) ? T(1) : T(0);
+}
+
+/**
+ * lacn2_jump3: Check convergence criteria
+ * Must always be launched with one block
+ *
+ * Three possible outcomes:
+ * 1) Repeated signs: write alternating sign pattern, set kase=1, jump=5
+ * 2) Not repeated but est <= est_old: same as (1)
+ * 3) Not repeated and est > est_old: normalize x, set kase=2, jump=4
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
+    lacn2_jump3(const I n, T* x, T* v, I* isgn, rocblas_int* kase, rocblas_int* jump, S* est)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ bool sval_repeated[LACN2_BLOCKSIZE / WarpSize];
+    __shared__ S sval_estold; // for broadcasting est_old to all warps
+
+    // Sum absolute values
+    S sum = 0;
+    int repeated = (rocblas_is_complex<T>) ? 0 : 1;
+    // we iterate over v, since v contains x from previous step (pointers swapped)
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+    {
+        sum += rocblas_abs(v[i]);
+        if constexpr(!rocblas_is_complex<T>)
+        {
+            if(v[i] >= 0)
+            {
+                if(isgn[i] <= -1)
+                    repeated = 0;
+            }
+            else
+            {
+                if(isgn[i] >= 1)
+                    repeated = 0;
+            }
+        }
+    }
+
+    // reduce within Warp
+    reduce_wave_sum(sum);
+    reduce_wave_and(repeated);
+
+    if(tid % WarpSize == 0)
+    {
+        sval[tid / WarpSize] = sum;
+        sval_repeated[tid / WarpSize] = repeated;
+    }
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+        {
+            sum += sval[k];
+            repeated = repeated && sval_repeated[k];
+        }
+        sval_estold = *est; // broadcast
+        *est = sum;
+        sval_repeated[0] = repeated;
+    }
+
+    __syncthreads();
+
+    repeated = sval_repeated[0];
+    S estold = sval_estold; // read broadcast
+
+    if(repeated || (*est <= estold))
+    {
+        for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            // we write over old x
+            T sign = (i % 2 == 0) ? T(1) : T(-1);
+            x[i] = T(sign * (S(1) + S(i) / S(n - 1)));
+        }
+        if(tid == 0)
+        {
+            *kase = 1;
+            *jump = 5;
+        }
+
+        return;
+    }
+
+    // we iterate over v, since v contains old x (pointers swapped)
+    if constexpr(rocblas_is_complex<T>)
+    {
+        for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            S absxi = rocblas_abs(v[i]);
+            if(absxi == 0)
+            {
+                x[i] = T(1);
+            }
+            else
+            {
+                x[i] = v[i] / absxi;
+            }
+        }
+    }
+    else
+    {
+        for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            if(v[i] >= 0)
+            {
+                x[i] = T(1);
+                isgn[i] = 1;
+            }
+            else
+            {
+                x[i] = T(-1);
+                isgn[i] = -1;
+            }
+        }
+    }
+
+    if(tid == 0)
+    {
+        *kase = 2;
+        *jump = 4;
+    }
+}
+
+/**
+ * lacn2_jump4: Update max index and check stopping conditions
+ * Determines if iteration should continue or finalize
+ *
+ * Note: Uses imax1 device routine which computes max of sqrt(real(x[i])^2 + imag(x[i])^2) for complex types
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump4(const I n,
+                                                                     T* x,
+                                                                     I* isgn,
+                                                                     rocblas_int* kase,
+                                                                     rocblas_int* jump,
+                                                                     I* max_idx,
+                                                                     const I iters,
+                                                                     const I iters_max)
+{
+    I tid = threadIdx.x;
+
+    int jlast = *max_idx;
+
+    // shared variables for imax1
+    __shared__ S sval[LACN2_BLOCKSIZE];
+    __shared__ I sidx[LACN2_BLOCKSIZE];
+
+    // Find index of maximum absolute value using imax1 device routine
+    // For complex types, imax1 uses sqrt(real^2 + imag^2)
+    imax1<LACN2_BLOCKSIZE, T, I, S>(tid, n, x, 1, sval, sidx);
+
+    // imax1 returns 1-based index in sidx[0], convert to 0-based
+    I local_max_idx;
+    if(tid == 0)
+    {
+        local_max_idx = sidx[0] - 1;
+        *max_idx = local_max_idx;
+    }
+    __syncthreads();
+
+    // Broadcast the max index to all threads
+    local_max_idx = *max_idx;
+
+    S val_new = rocblas_abs(x[local_max_idx]);
+    S val_old = rocblas_abs(x[jlast]);
+
+    if(val_new == val_old || iters >= iters_max)
+    {
+        for(rocblas_int i = tid; i < n; i += LACN2_BLOCKSIZE)
+        {
+            T sign = (i % 2 == 0) ? T(1) : T(-1);
+            x[i] = T(sign * (S(1) + S(i) / S(n - 1)));
+        }
+        if(tid == 0)
+        {
+            *kase = 1;
+            *jump = 5;
+        }
+
+        return;
+    }
+
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+    {
+        x[i] = T(0);
+    }
+
+    // ensure all threads done zeroing before writing to max element
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        x[local_max_idx] = T(1);
+        *kase = 1;
+        *jump = 3;
+    }
+}
+
+/**
+ * lacn2_jump5: Finalize estimate
+ * Computes final estimate and stores in norm
+ */
+template <typename T, typename I, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump5(const I n, const T* x, S* norm)
+{
+    rocblas_int tid = hipThreadIdx_x;
+
+    __shared__ S sval[LACN2_BLOCKSIZE / WarpSize];
+
+    // sum absolute values
+    S sum = 0;
+    for(I i = tid; i < n; i += LACN2_BLOCKSIZE)
+        sum += rocblas_abs(x[i]);
+
+    // reduce within Warp
+    reduce_wave_sum(sum);
+
+    if(tid % WarpSize == 0)
+        sval[tid / WarpSize] = sum;
+    __syncthreads();
+
+    if(tid == 0)
+    {
+        for(I k = 1; k < std::min((I)LACN2_BLOCKSIZE / WarpSize, (n + WarpSize - 1) / WarpSize); k++)
+            sum += sval[k];
+        sum = 2 * (sum / (3 * n));
+        if(sum > *norm)
+            *norm = sum;
+    }
+}
+
+// Main LACN2 host function - drives the reverse-communication iteration
+// to estimate ||A^-1||_1. Caller performs matrix solves between iterations.
+template <typename T, typename I, typename S>
+rocblas_status rocsolver_lacn2_template(rocblas_handle handle,
+                                        const I n,
+                                        T** x, // passed by reference so swap persists
+                                        T** v, // passed by reference so swap persists
+                                        I* isgn,
+                                        S* d_est,
+                                        I* d_max_idx,
+                                        rocblas_int* d_kase,
+                                        rocblas_int* d_jump,
+                                        rocblas_int* h_kase,
+                                        rocblas_int* h_jump,
+                                        I* h_iters,
+                                        const I max_iters,
+                                        hipStream_t stream)
+{
+    if(*h_kase == 0)
+    {
+        // initialize x = (1/n, ..., 1/n)
+        rocblas_int blocks = (n - 1) / LACN2_BLOCKSIZE + 1;
+
+        // Get device properties and cap grid size to maxGridSize[0]
+        int device;
+        HIP_CHECK(hipGetDevice(&device));
+        hipDeviceProp_t props;
+        HIP_CHECK(hipGetDeviceProperties(&props, device));
+        blocks = std::min(blocks, static_cast<rocblas_int>(props.maxGridSize[0]));
+
+        ROCSOLVER_LAUNCH_KERNEL((reset_info<T, I, T>), dim3(blocks), dim3(LACN2_BLOCKSIZE), 0,
+                                stream, *x, n, T(1) / T(n));
+        *h_kase = 1;
+        *h_jump = 1;
+        return rocblas_status_success;
+    }
+
+    switch(*h_jump)
+    {
+    case 1:
+        if(n == 1)
+        {
+            ROCSOLVER_LAUNCH_KERNEL((lacn2_jump1_n_equals_one<T, I, S>), dim3(1),
+                                    dim3(LACN2_BLOCKSIZE), 0, stream, n, *x, d_est, isgn);
+            *h_kase = 0; // signal to exit
+            return rocblas_status_success;
+        }
+
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump1<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, d_est, isgn);
+
+        *h_kase = 2;
+        *h_jump = 2;
+
+        return rocblas_status_success;
+        break;
+    case 2:
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump2<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, d_max_idx);
+
+        *h_kase = 1;
+        *h_jump = 3;
+
+        *h_iters = 2;
+
+        return rocblas_status_success;
+        break;
+    case 3:
+        std::swap(*x, *v);
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump3<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, *v, isgn, d_kase, d_jump, d_est);
+
+        HIP_CHECK(hipMemcpyAsync(h_jump, d_jump, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipMemcpyAsync(h_kase, d_kase, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        return rocblas_status_success;
+        break;
+    case 4:
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump4<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, isgn, d_kase, d_jump, d_max_idx, *h_iters, max_iters);
+
+        HIP_CHECK(hipMemcpyAsync(h_jump, d_jump, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipMemcpyAsync(h_kase, d_kase, sizeof(rocblas_int), hipMemcpyDeviceToHost, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        if(*h_jump == 3)
+            *h_iters = *h_iters + 1;
+
+        return rocblas_status_success;
+        break;
+    case 5:
+        ROCSOLVER_LAUNCH_KERNEL((lacn2_jump5<T, I, S>), dim3(1), dim3(LACN2_BLOCKSIZE), 0, stream,
+                                n, *x, d_est);
+        std::swap(*x, *v);
+        *h_kase = 0;
+
+        return rocblas_status_success;
+        break;
+    default: return rocblas_status_invalid_value; break;
+    }
+}
+
+// Trapezoidal matrix-vector multiply (no transpose)
+// Performs
+//    y := alpha * A * x + beta * y,
+// where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
+// (modified rocblas_trmvn_kernel from rocBLAS)
+// (grid = dim3(ceil(m / DIM_X), 1, batch_count), block = dim3(DIM_X, DIM_Y))
+template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T, typename V, typename U1, typename U2, typename U3>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
+    rocsolver_tzmvn_kernel(rocblas_int m,
+                           rocblas_int n,
+                           V alpha,
+                           U1 __restrict__ AA,
+                           const rocblas_int shiftA,
+                           const rocblas_int lda,
+                           const rocblas_stride strideA,
+                           U2 __restrict__ xx,
+                           const rocblas_stride shiftX,
+                           const rocblas_int incx,
+                           const rocblas_stride strideX,
+                           V beta,
+                           U3 __restrict__ yy,
+                           const rocblas_stride shiftY,
+                           const rocblas_int incy,
+                           const rocblas_stride strideY)
+{
+    rocblas_int bid = hipBlockIdx_z;
+    rocblas_int tid = threadIdx.x + threadIdx.y * blockDim.x;
+
+    // tx corresponds to row in block, good for memory coalescing
+    // ty corresponds to column
+    rocblas_int tx = threadIdx.x;
+    rocblas_int ty = threadIdx.y;
+
+    rocblas_int row = blockIdx.x * DIM_X + tx;
+
+    rocblas_int dim = std::min(m, n);
+
+    // select batch instance
+    T a = load_scalar(alpha, bid, 0);
+    T b = load_scalar(beta, bid, 0);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* y = load_ptr_batch<T>(yy, bid, shiftY, strideY);
+
+    __shared__ T sdata[DIM_X * DIM_Y];
+    T res_A = 0;
+
+    // handle diagonal separately
+    if(ty == 0 && row < dim)
+    {
+        if constexpr(UNIT)
+            res_A = x[row * incx];
+        else
+            res_A = A[row + row * lda] * x[row * incx];
+    }
+
+    // multiply and sum across columns
+    for(rocblas_int col = ty; col < n; col += DIM_Y)
+    {
+        if(row < m && ((!LOWER && col > row) || (LOWER && col < row)))
+            res_A += A[row + col * lda] * x[col * incx];
+    }
+
+    // move partial sum to shared memory to sum further
+    sdata[tx + ty * DIM_X] = res_A;
+
+    __syncthreads();
+
+    if(tid < DIM_X)
+    {
+        // sum DIM_Y elements to get result
+        for(rocblas_int i = 1; i < DIM_Y; i++)
+            sdata[tid] += sdata[tid + DIM_X * i];
+
+        if(row < m)
+            y[row * incy] = a * sdata[tid] + b * y[row * incy];
+    }
+}
+
+// Trapezoidal matrix-vector multiply (transpose / conjugate transpose)
+// Performs
+//    y := alpha * A^T * x + beta * y, (CONJ = false) or
+//    y := alpha * A^H * x + beta * y, (CONJ = true)
+// where alpha and beta are scalars, x and y are vectors, and A is an m by n trapezoidal matrix.
+// (grid = dim3(n, 1, batch_count), block = dim3(DIM_X))
+template <rocblas_int DIM_X, bool LOWER, bool UNIT, bool CONJ, typename T, typename V, typename U1, typename U2, typename U3>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM_X) rocsolver_tzmvt_kernel(rocblas_int m,
+                                                                      rocblas_int n,
+                                                                      V alpha,
+                                                                      U1 __restrict__ AA,
+                                                                      const rocblas_int shiftA,
+                                                                      const rocblas_int lda,
+                                                                      const rocblas_stride strideA,
+                                                                      U2 __restrict__ xx,
+                                                                      const rocblas_stride shiftX,
+                                                                      const rocblas_int incx,
+                                                                      const rocblas_stride strideX,
+                                                                      V beta,
+                                                                      U3 __restrict__ yy,
+                                                                      const rocblas_stride shiftY,
+                                                                      const rocblas_int incy,
+                                                                      const rocblas_stride strideY)
+{
+    rocblas_int bid = blockIdx.z;
+    rocblas_int tx = threadIdx.x;
+
+    // col of A and element of y
+    rocblas_int col = blockIdx.x;
+
+    // select batch instance
+    T a = load_scalar(alpha, bid, 0);
+    T b = load_scalar(beta, bid, 0);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* y = load_ptr_batch<T>(yy, bid, shiftY, strideY);
+
+    // shift thread block to working column
+    A += col * size_t(lda);
+
+    T res = 0;
+
+    int constexpr MAX_WARPS = 32;
+    __shared__ T sdata[MAX_WARPS];
+
+    for(rocblas_int row = tx; row < m; row += DIM_X)
+    {
+        if((!LOWER && col > row) || (LOWER && col < row))
+        {
+            if constexpr(CONJ)
+                res += conj(A[row]) * x[row * incx];
+            else
+                res += A[row] * x[row * incx];
+        }
+    }
+
+    // reduction of partial sums
+    res += shift_left(res, 1);
+    res += shift_left(res, 2);
+    res += shift_left(res, 4);
+    res += shift_left(res, 8);
+    res += shift_left(res, 16);
+    if(warpSize > 32)
+        res += shift_left(res, 32);
+    if(tx % warpSize == 0)
+        sdata[tx / warpSize] = res;
+    __syncthreads();
+    if(tx == 0)
+    {
+        for(rocblas_int k = 1; k < DIM_X / warpSize; k++)
+            res += sdata[k];
+    }
+
+    if(tx == 0)
+    {
+        if constexpr(UNIT)
+        {
+            y[col * incy] = a * (x[col * incx] + res) + b * y[col * incy];
+        }
+        else if constexpr(CONJ)
+        {
+            y[col * incy] = a * (conj(A[col]) * x[col * incx] + res) + b * y[col * incy];
+        }
+        else
+        {
+            y[col * incy] = a * (A[col] * x[col * incx] + res) + b * y[col * incy];
+        }
+    }
 }
 
 ROCSOLVER_END_NAMESPACE

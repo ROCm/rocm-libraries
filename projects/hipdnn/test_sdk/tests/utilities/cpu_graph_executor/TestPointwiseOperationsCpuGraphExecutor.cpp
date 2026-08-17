@@ -10,28 +10,30 @@
 #include "PointwiseGraphUtils.hpp"
 #include "PointwiseTensorBundles.hpp"
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsBfp16.hpp>
-#include <hipdnn_data_sdk/utilities/UtilsFp16.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_test_sdk::detail;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
-using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
+using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::half;
 
 struct ReluPointwiseTestParams
 {
     hipdnn_frontend::PointwiseMode mode;
     DataType inputDataType = DataType::FLOAT;
     DataType accumulatorDataType = DataType::FLOAT;
-    float in0TensorValue = 0.0f;
-    float in1TensorValue = 0.0f; // For binary operations
+    float in0TensorValue = 0.0f; // RELU_FWD: x; RELU_BWD: dy.
+    float in1TensorValue = 0.0f; // RELU_BWD: x.
     std::vector<int64_t> inputDims = {1, 3, 4, 4};
     std::vector<int64_t> outputDims = {1, 3, 4, 4};
 
@@ -66,8 +68,9 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        auto graphWrap = GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -75,7 +78,7 @@ public:
             params.in0TensorValue);
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
@@ -104,8 +107,9 @@ public:
         auto result = graph->validate();
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
-        auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
-        auto graphWrap = GraphWrapper(flatbufferGraph.data(), flatbufferGraph.size());
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        auto graphWrap = GraphWrapper(serializedGraph.data(), serializedGraph.size());
         const auto& nodeWrap = graphWrap.getNodeWrapper(0);
         const auto& attributes = nodeWrap.attributesAs<PointwiseAttributes>();
 
@@ -115,7 +119,7 @@ public:
             params.in1TensorValue);
 
         CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), variantPack);
+            serializedGraph.data(), serializedGraph.size(), variantPack);
 
         const auto& outTensor = tensorBundle.tensors.at(attributes.out_0_tensor_uid());
 
@@ -148,17 +152,17 @@ public:
                 PointwiseMode::RELU_FWD, output, input0);
         }
 
-        CpuFpReferenceValidation<InputType> validator;
+        const CpuFpReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 
     template <typename InputType>
     static bool verifyReluBackwardOutput(ITensor& outTensor, const ReluPointwiseTestParams& params)
     {
-        Tensor<InputType> input0(params.inputDims);
-        Tensor<InputType> input1(params.inputDims);
-        input0.fillTensorWithValue(params.in0TensorValue);
-        input1.fillTensorWithValue(params.in1TensorValue);
+        Tensor<InputType> upstreamGrad(params.inputDims);
+        Tensor<InputType> input(params.inputDims);
+        upstreamGrad.fillTensorWithValue(params.in0TensorValue);
+        input.fillTensorWithValue(params.in1TensorValue);
 
         Tensor<InputType> output(params.outputDims);
 
@@ -168,8 +172,8 @@ public:
             CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
                 PointwiseMode::RELU_BWD,
                 output,
-                input0,
-                input1,
+                upstreamGrad,
+                input,
                 params.reluLowerClip.has_value() ? params.reluLowerClip.value() : 0.0f,
                 params.reluUpperClip.has_value() ? params.reluUpperClip.value()
                                                  : std::numeric_limits<float>::max(),
@@ -178,10 +182,10 @@ public:
         else
         {
             CpuReferencePointwiseImpl<InputType, InputType, InputType>::pointwiseCompute(
-                PointwiseMode::RELU_BWD, output, input0, input1);
+                PointwiseMode::RELU_BWD, output, upstreamGrad, input);
         }
 
-        CpuFpReferenceValidation<InputType> validator;
+        const CpuFpReferenceValidation<InputType> validator;
         return validator.allClose(output, outTensor);
     }
 };
@@ -193,7 +197,7 @@ protected:
     using DataTypeT = T;
 };
 
-using TestTypes = ::testing::Types<float, half, hip_bfloat16>;
+using TestTypes = ::testing::Types<float, half, bfloat16>;
 TYPED_TEST_SUITE(ReluPointwiseOperationsCpuGraphExecutor, TestTypes, );
 
 // =============================================================================
@@ -327,8 +331,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardNegative
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = -10.0f; // X
-    params.in1TensorValue = 5.0f; // Dy
+    params.in0TensorValue = 5.0f; // Dy
+    params.in1TensorValue = -10.0f; // X
     params.testDescription = "Standard ReLU backward with negative X";
 
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
@@ -340,8 +344,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardStandardPositive
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 10.0f; // X
-    params.in1TensorValue = 5.0f; // Dy
+    params.in0TensorValue = 5.0f; // Dy
+    params.in1TensorValue = 10.0f; // X
     params.testDescription = "Standard ReLU backward with positive X";
 
     PointwiseReluTestHelper::runReluBwdTest<TypeParam>(params);
@@ -353,8 +357,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedBelowBoun
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = -1.0f; // X
-    params.in1TensorValue = 5.0f; // Dy
+    params.in0TensorValue = 5.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU backward with X below bounds";
@@ -368,8 +372,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedAboveBoun
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f; // X
-    params.in1TensorValue = 2.0f; // Dy
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU backward with X above bounds";
@@ -383,8 +387,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardClampedWithinBou
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 0.2f; // X
-    params.in1TensorValue = 1.0f; // Dy
+    params.in0TensorValue = 1.0f; // Dy
+    params.in1TensorValue = 0.2f; // X
     params.reluLowerClip = 0.1f;
     params.reluUpperClip = 0.3f;
     params.testDescription = "Clamped ReLU backward with X within bounds";
@@ -398,8 +402,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyNegativeX)
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = -1.0f; // X
-    params.in1TensorValue = 5.0f; // Dy
+    params.in0TensorValue = 5.0f; // Dy
+    params.in1TensorValue = -1.0f; // X
     params.reluLowerClipSlope = 0.1f;
     params.testDescription = "Leaky ReLU backward with negative X";
 
@@ -412,8 +416,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardLeakyPositiveX)
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f; // X
-    params.in1TensorValue = 2.0f; // Dy
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
     params.reluLowerClipSlope = 0.1f;
     params.testDescription = "Leaky ReLU backward with positive X";
 
@@ -426,8 +430,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyBe
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 1.0f; // X
-    params.in1TensorValue = 5.0f; // Dy
+    params.in0TensorValue = 5.0f; // Dy
+    params.in1TensorValue = 1.0f; // X
     params.reluUpperClip = 10.0f;
     params.testDescription = "Upper-bounded ReLU backward with X below bound";
 
@@ -440,8 +444,8 @@ TYPED_TEST(ReluPointwiseOperationsCpuGraphExecutor, ReluBackwardUpperBoundOnlyAb
     params.mode = hipdnn_frontend::PointwiseMode::RELU_BWD;
     params.inputDataType = nativeTypeToDataType<TypeParam>();
     params.accumulatorDataType = nativeTypeToDataType<float>();
-    params.in0TensorValue = 20.0f; // X
-    params.in1TensorValue = 2.0f; // Dy
+    params.in0TensorValue = 2.0f; // Dy
+    params.in1TensorValue = 20.0f; // X
     params.reluUpperClip = 10.0f;
     params.testDescription = "Upper-bounded ReLU backward with X above bound";
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,8 +35,8 @@
 #include <combined_element_wise_operation.hpp>
 #include <device_elementwise_dynamic_vector_dims_impl.hpp>
 
-#include "performance.hpp"
 #include "elementwise_meta_traits.hpp"
+#include "performance.hpp"
 #include "util.hpp"
 
 namespace hiptensor
@@ -47,9 +47,9 @@ namespace hiptensor
         // Due to unique_ptr ownership of members,
         // ElementwiseSolutions should also be considered unique.
         // This means disabling default and copy ctor
-        ElementwiseSolution()                           = delete;
-        ElementwiseSolution(ElementwiseSolution const&) = delete;
-        virtual ~ElementwiseSolution()                  = default;
+        ElementwiseSolution()                                      = delete;
+        ElementwiseSolution(ElementwiseSolution const&)            = delete;
+        virtual ~ElementwiseSolution()                             = default;
         ElementwiseSolution& operator=(ElementwiseSolution const&) = delete;
 
         // This class is intended to receive DeviceOp kernel pointers from
@@ -102,4 +102,3 @@ namespace hiptensor
 } // namespace hiptensor
 
 #include "elementwise_solution_impl.hpp"
-

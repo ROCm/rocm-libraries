@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -54,15 +54,7 @@ endfunction()
 
 add_executable( rocfft_rtc_helper rocfft_rtc_helper.cpp )
 
-# each backend requires different libraries for host and device code
-if( USE_CUDA )
-  set( ROCFFT_HOST_LINK_LIBS -lcuda )
-  set( ROCFFT_RTC_LINK_LIBS -lnvrtc -lnvrtc-builtins -lnvptxcompiler_static )
-else()
-  set( ROCFFT_HOST_LINK_LIBS hip::host )
-  set( ROCFFT_DEVICE_LINK_LIBS hip::device )
-  set( ROCFFT_RTC_LINK_LIBS hiprtc::hiprtc )
-endif()
+set( ROCFFT_HOST_LINK_LIBS hip::host )
 
 if( ROCFFT_MPI_ENABLE )
   set( ROCFFT_HOST_LINK_LIBS "${ROCFFT_HOST_LINK_LIBS}" "MPI::MPI_CXX" )
@@ -73,17 +65,31 @@ if( ROCFFT_MPI_ENABLE )
   endif()
 endif()
 
+# RCCL: find and link (compile definition added after target creation below).
+if( ROCFFT_RCCL_ENABLE )
+  find_package(rccl)
+  if( rccl_FOUND )
+    message(STATUS "RCCL support enabled for multi-GPU communication")
+    set( ROCFFT_HOST_LINK_LIBS "${ROCFFT_HOST_LINK_LIBS}" "roc::rccl" )
+  else()
+    message(FATAL_ERROR "ROCFFT_RCCL_ENABLE is ON but RCCL was not found. "
+      "Install RCCL or set -DROCFFT_RCCL_ENABLE=OFF.")
+  endif()
+endif()
+
 set( package_targets rocfft )
 target_include_directories( rocfft_rtc_helper
   PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
 )
 # rocfft_rtc_helper will be installed in /opt/rocm-ver/lib/rocfft/VERSION_STRING
-# To find rocm libraries need the relative RPATH
+# To find rocm libraries need the relative RPATH.  Also prevent TheRock builds
+# from overriding this RPATH.
 set(APPEND_ROCMLIB_RPATH "\$ORIGIN/../../../lib")
 target_link_libraries( rocfft_rtc_helper PRIVATE rocfft-rtc-compile )
 set_target_properties( rocfft_rtc_helper PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON
-                                         INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}" )
+                                         INSTALL_RPATH "${APPEND_ROCMLIB_RPATH}"
+                                         THEROCK_NO_INSTALL_RPATH TRUE )
 target_link_directories( rocfft_rtc_helper PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
 # Package that helps me set visibility for function names exported
@@ -94,12 +100,16 @@ find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
 
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  add_subdirectory( tests )
+endif()
+
 #
 # embed the generator itself into c++ files
 #
 
 # script that produces an include file
-set( kgen_embed_command ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator-embed-cpp.py )
+set( kgen_embed_command ${CMAKE_SOURCE_DIR}/shared/embed-to-header-rtc.py )
 
 # location of the generated source file
 set( kgen_embed_cpp ${CMAKE_BINARY_DIR}/library/src/device/kernel-generator-embed.cpp )
@@ -129,6 +139,7 @@ set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/rtc_radix_functions/radix_17.h
 
      # extra files for generating standalone test harnesses for kernels
+     ${CMAKE_SOURCE_DIR}/shared/sys_mem.h
      ${CMAKE_SOURCE_DIR}/shared/device_properties.h
      ${CMAKE_SOURCE_DIR}/shared/rocfft_hip.h
      ${CMAKE_SOURCE_DIR}/shared/gpubuf.h
@@ -147,7 +158,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_complex.h
 
      # python code that does the embedding
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator-embed-cpp.py
+     ${kgen_embed_command}
 
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
@@ -169,6 +180,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_base.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rc.h
@@ -214,7 +226,6 @@ set( solship_py ${CMAKE_SOURCE_DIR}/library/src/device/solution-shipping.py )
 
 # default folder of solution maps that will be built in library,
 # user can specify their own arch and folder
-set( sol_gpu_arch ${GPU_TARGETS} )
 if( NOT ROCFFT_SOLUTION_MAP_DIR )
   set( ROCFFT_SOLUTION_MAP_DIR ${CMAKE_SOURCE_DIR}/library/solution_map CACHE STRING "RocFFT solution map directory" )
 endif()
@@ -224,8 +235,7 @@ file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 add_custom_command(
   OUTPUT ${gen_solutions}
   COMMAND ${Python3_EXECUTABLE} ${solship_py}
-  --gpu-arch="${sol_gpu_arch}"
-  --data-folder=${ROCFFT_SOLUTION_MAP_DIR}
+  --solution_files ${solution_map_files}
   DEPENDS ${solution_map_files}
   COMMENT "Put solution map from external text file into library"
 )
@@ -233,6 +243,8 @@ add_custom_command(
 # The following is a list of implementation files defining the library
 set( rocfft_source
   auxiliary.cpp
+  data_layout.cpp
+  exec_info.cpp
   plan.cpp
   transform.cpp
   repo.cpp
@@ -254,6 +266,7 @@ set( rocfft_source
   rtc_exports.cpp
   tuning_kernel_tuner.cpp
   tuning_plan_tuner.cpp
+  rccl_wrapper.cpp
   )
 
 set(static_depends)
@@ -348,10 +361,7 @@ foreach( target
     POSITION_INDEPENDENT_CODE ON
   )
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options( ${target} PRIVATE -Og )
-  endif()
-  target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} ${ROCFFT_RTC_LINK_LIBS} )
+  target_link_libraries( ${target} PUBLIC ${ROCFFT_HOST_LINK_LIBS} hiprtc::hiprtc )
   rocfft_add_coverage_flags( ${target} )
   target_link_directories( ${target} PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 
@@ -403,10 +413,15 @@ add_library( rocfft
   )
 rocfft_add_coverage_flags( rocfft )
 
+if( WIN32 )
+  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/rocfft.rc.in ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+  target_sources(rocfft PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/rocfft.rc)
+endif()
+
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
-if (NOT WIN32)
+if( NOT WIN32 AND NOT BUILD_CODE_COVERAGE )
   target_compile_options( rocfft PRIVATE -fgpu-rdc )
   target_link_options( rocfft PRIVATE -fgpu-rdc )
 endif()
@@ -414,6 +429,11 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
+endif()
+
+# RCCL: activate RCCL code paths
+if( ROCFFT_RCCL_ENABLE )
+  target_compile_definitions(rocfft PRIVATE ROCFFT_RCCL_ENABLE)
 endif()
 
 add_library( roc::rocfft ALIAS rocfft )
@@ -428,7 +448,7 @@ if( NOT BUILD_SHARED_LIBS )
   target_link_directories( rocfft PRIVATE ${ROCFFT_HOST_LINK_DIRS} )
 endif()
 
-target_link_libraries( rocfft PRIVATE ${ROCFFT_DEVICE_LINK_LIBS} )
+target_link_libraries( rocfft PRIVATE hip::device )
 
 foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_helper rocfft_kernel_config_search )
 
@@ -471,9 +491,6 @@ foreach( target rocfft rocfft_offline_tuner rocfft_solmap_convert rocfft_aot_hel
     endif()
 
   target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
-  if( ${CMAKE_BUILD_TYPE} STREQUAL Debug )
-    target_compile_options(${target} PRIVATE -Og)
-  endif()
 endforeach()
 
 rocfft_link_internal_lib( rocfft generator )
@@ -502,7 +519,7 @@ target_link_std_experimental_filesystem( rocfft_aot_helper )
  # build executable rocfft-offline-tuner
 if( ROCFFT_BUILD_OFFLINE_TUNER )
   target_link_libraries( rocfft_offline_tuner PRIVATE
-    ${ROCFFT_DEVICE_LINK_LIBS}
+    hip::device
     rocfft
     generator
     rocfft-function-pool
@@ -526,14 +543,6 @@ endif()
 # enable a configure-time option to skip kernel cache building
 option( ROCFFT_KERNEL_CACHE_ENABLE "Enable building rocFFT kernel cache" ON)
 
-# cache file should go next to the shared object - on Windows this
-# would be the DLL, not the import library.
-if( WIN32 )
-  set( ROCFFT_KERNEL_CACHE_PATH ${CMAKE_BINARY_DIR}/staging/rocfft_kernel_cache.db )
-else()
-  set( ROCFFT_KERNEL_CACHE_PATH ${CMAKE_BINARY_DIR}/library/src/rocfft_kernel_cache.db )
-endif()
-
 # ROCFFT_BUILD_KERNEL_CACHE_PATH may be specified as a temporary file
 # to collect compiled kernels before writing them out as part of the
 # build.  any kernels that already exist in this file will be reused
@@ -550,6 +559,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   set( GPU_TARGETS_AOT ${GPU_TARGETS} )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx803 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx900 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx90c )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx906 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx940 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )
@@ -560,16 +570,53 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
-  add_custom_command(
-    OUTPUT rocfft_kernel_cache.db
-    COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
-    DEPENDS rocfft_aot_helper rocfft_rtc_helper
-    COMMENT "Compile kernels into shipped cache file"
-  )
-  add_custom_target( rocfft_kernel_cache_target ALL
-    DEPENDS rocfft_kernel_cache.db
-    VERBATIM
-  )
+  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
+
+  # On Windows, to run rocfft_aot_helper we need to be able to find
+  # the hiprtc and HIP runtime DLLs.  So add those dirs to the PATH
+  # when we launch that exe.
+  if( WIN32 )
+    set( aot_exec_path "$ENV{PATH};${hiprtc_BIN_INSTALL_DIR};${hip_BIN_INSTALL_DIR}" )
+  else()
+    set( aot_exec_path "$ENV{PATH}" )
+  endif()
+
+  # build separate kernel cache for each target
+  foreach( arch IN ITEMS ${GPU_TARGETS_AOT} )
+    # cache file should go next to the shared object - on Windows this
+    # would be the DLL, not the import library.
+    if( WIN32 )
+      set( arch_kernel_cache_path ${CMAKE_BINARY_DIR}/staging/rocfft_kernel_cache_${arch}.db )
+    else()
+      set( arch_kernel_cache_path ${CMAKE_BINARY_DIR}/library/src/rocfft_kernel_cache_${arch}.db )
+    endif()
+
+    add_custom_command(
+      OUTPUT rocfft_kernel_cache_${arch}.db
+      COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=$<SHELL_PATH:${aot_exec_path}>"
+        "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${arch_kernel_cache_path} $<TARGET_FILE:rocfft_rtc_helper> ${arch}
+      DEPENDS rocfft_aot_helper rocfft_rtc_helper
+      COMMENT "Compile ${arch} kernels into shipped cache file"
+    )
+    add_custom_target( rocfft_kernel_cache_${arch}_target ALL
+      DEPENDS rocfft_kernel_cache_${arch}.db
+      VERBATIM
+    )
+
+    # make each AOT build depend on the previous one, so that only one is
+    # running at a time.  The AOT build will itself spawn a bunch of
+    # processes to take advantage of multiple CPUs.
+    if( previous_arch )
+      add_dependencies( rocfft_kernel_cache_${arch}_target rocfft_kernel_cache_${previous_arch}_target )
+    endif()
+    set( previous_arch ${arch} )
+
+    # maintain a list of all cache files we produce for install
+    list( APPEND ROCFFT_KERNEL_CACHE_PATHS ${arch_kernel_cache_path} )
+
+  endforeach()
+
 endif()
 
 rocm_set_soversion( rocfft ${rocfft_SOVERSION} )
@@ -603,7 +650,7 @@ else()
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING AND ROCFFT_KERNEL_CACHE_ENABLE)
-  rocm_install(FILES ${ROCFFT_KERNEL_CACHE_PATH}
+  rocm_install(FILES ${ROCFFT_KERNEL_CACHE_PATHS}
     DESTINATION "${ROCFFT_KERNEL_CACHE_INSTALL_DIR}"
     COMPONENT runtime
   )

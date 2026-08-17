@@ -2,12 +2,7 @@
 
 The tuning client is written to exercise Tensile kernels by allocating and initializing input and output memory and calling the kernels while recording their run time and reporting the speed (in GFlops) back to the Python code.
 
-It is written in a modular, structured way which involves the cooperation of many different classes and class hierarchies. It uses the Tensile host runtime library (sometimes referred to as the 'new client') and several Boost libraries:
-
- - Algorithm
- - Any
- - Program options
- - Lexical Cast
+It is written in a modular, structured way which involves the cooperation of many different classes and class hierarchies. It uses the Tensile host runtime library (sometimes referred to as the 'new client') and standard library or custom replacements for program options and value reporting.
 
 This document assumes general familiarity with the Tensile host runtime library.
 
@@ -45,7 +40,7 @@ The `RunListener` objects are generally managed by the `MetaRunListener` object 
 RunListener subclasses implement key functionality in a generic way:
 - `ReferenceValidator` implements correctness checking.
 - `BenchmarkTimer` performs timing with Hip events or via CPU timing and calculates speed in GFlops
-- `HardwareMonitorListener` uses the HardwareMonitor class to monitor the GPU's clock frequency, temperature, fan speed, etc using the ROCm-SMI library.
+- `HardwareMonitorListener` uses the HardwareMonitor class to monitor the GPU's clock frequency, temperature, fan speed, etc using the amd-smi library.
 - The `DataInitialization`, `SolutionIterator`, and `ResultReporter` (mentioned below) classes also inherit from `RunListener`.
 
 The loop conditions of several of the `main` loops are driven by calls into the `MetaRunListener` to allow subclasses to determine loop counts:
@@ -108,7 +103,7 @@ Right now, to get around the limitation in C++ against overloaded virtual functi
      - `reportValue_sizes()`
   - The `MetaResultReporter` implements these virtual functions, forwarding the calls to the child reporters.
 
-The overloading to renamed functions is awkward and may be replaced with `boost::any` or a CRTP implementation at some point.
+The overloading to renamed functions is awkward and may be replaced with `std::any` or a CRTP implementation at some point.
 
 The keys are generally declared as string constants in the `ResultKey` namespace, in order to prevent misspellings from causing uncaught bugs.
 
@@ -158,9 +153,9 @@ This class just calls `findBestSolution()` on the solution library, in order to 
 
 ## `HardwareMonitorListener` and `HardwareMonitor`
 
-Responsible for monitoring GPU temperatures and clock rates, via ROCm-SMI.  **Note**: Hardware monitoring can be disabled by setting the `hardware-monitor` program argument to `false`.
+Responsible for monitoring GPU temperatures and clock rates, via amd-smi.  **Note**: Hardware monitoring can be disabled by setting the `hardware-monitor` program argument to `false`.
 
-`HardwareMonitor` uses threads to asynchronously query ROCm-SMI.  It provides an interface to start/stop monitoring manually, or to monitor between Hip events, to limit query rates, and to specify the specific sensor(s) that are required.  It also examines the PCI id data to make sure we are monitoring the correct device in the case that there are multiple GPUs in the system.
+`HardwareMonitor` uses threads to asynchronously query amd-smi.  It provides an interface to start/stop monitoring manually, or to monitor between Hip events, to limit query rates, and to specify the specific sensor(s) that are required.  It also examines the PCI id data to make sure we are monitoring the correct device in the case that there are multiple GPUs in the system.
 
 `HardwareMonitorListener` implements the `RunListener` interface and uses `HardwareMonitor`'s asynchronous interface to monitor GPU properties while the GPU kernels are actually executing.  It then provides this information to any reporter classes via the `report()` functionality:
 

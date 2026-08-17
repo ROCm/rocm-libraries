@@ -10,7 +10,7 @@
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenUtils.hpp"
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 namespace
@@ -44,8 +44,9 @@ void copyWithCheck(const flatbuffers::Vector<int64_t>* src,
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_data_sdk::data_objects::ConvolutionFwdAttributes& attributes,
-    int groupCount)
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes& attributes,
+    int groupCount,
+    bool deterministicEnabled)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
@@ -53,13 +54,15 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.stride(),
                              attributes.dilation(),
                              attributes.conv_mode(),
-                             groupCount);
+                             groupCount,
+                             deterministicEnabled);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_data_sdk::data_objects::ConvolutionBwdAttributes& attributes,
-    int groupCount)
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes& attributes,
+    int groupCount,
+    bool deterministicEnabled)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
@@ -67,13 +70,15 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.stride(),
                              attributes.dilation(),
                              attributes.conv_mode(),
-                             groupCount);
+                             groupCount,
+                             deterministicEnabled);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(
     size_t spatialDimCount,
-    const hipdnn_data_sdk::data_objects::ConvolutionWrwAttributes& attributes,
-    int groupCount)
+    const hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes& attributes,
+    int groupCount,
+    bool deterministicEnabled)
 {
     createDescriptorInternal(spatialDimCount,
                              attributes.pre_padding(),
@@ -81,7 +86,8 @@ MiopenConvDescriptor::MiopenConvDescriptor(
                              attributes.stride(),
                              attributes.dilation(),
                              attributes.conv_mode(),
-                             groupCount);
+                             groupCount,
+                             deterministicEnabled);
 }
 
 MiopenConvDescriptor::MiopenConvDescriptor(MiopenConvDescriptor&& other) noexcept
@@ -124,8 +130,9 @@ void MiopenConvDescriptor::createDescriptorInternal(
     const flatbuffers::Vector<int64_t>* attrPostPadding,
     const flatbuffers::Vector<int64_t>* attrStride,
     const flatbuffers::Vector<int64_t>* attrDilation,
-    hipdnn_data_sdk::data_objects::ConvMode convMode,
-    int groupCount)
+    hipdnn_flatbuffers_sdk::data_objects::ConvMode convMode,
+    int groupCount,
+    bool deterministicEnabled)
 {
     if(spatialDimCount > std::numeric_limits<int>::max())
     {
@@ -134,7 +141,7 @@ void MiopenConvDescriptor::createDescriptorInternal(
             "MiopenConvDescriptor: spatialDimCount must be not greater than INT_MAX");
     }
 
-    if(convMode != hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION)
+    if(convMode != hipdnn_flatbuffers_sdk::data_objects::ConvMode::CROSS_CORRELATION)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -194,13 +201,49 @@ void MiopenConvDescriptor::createDescriptorInternal(
     copyWithCheck(attrStride, stride, spatialDimCount, "attrStride", "spatialDimCount");
     copyWithCheck(attrDilation, dilation, spatialDimCount, "attrDilation", "spatialDimCount");
 
+    if(!std::all_of(padding.begin(), padding.end(), [](int v) { return v >= 0; }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: padding values must be non-negative");
+    }
+
+    if(!std::all_of(stride.begin(), stride.end(), [](int v) { return v > 0; }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "MiopenConvDescriptor: stride values must be positive");
+    }
+
+    if(!std::all_of(dilation.begin(), dilation.end(), [](int v) { return v > 0; }))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenConvDescriptor: dilation values must be positive");
+    }
+
     THROW_ON_MIOPEN_FAILURE(miopenCreateConvolutionDescriptor(&_descriptor));
-    THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
-                                                              static_cast<int>(spatialDimCount),
-                                                              padding.data(),
-                                                              stride.data(),
-                                                              dilation.data(),
-                                                              miopenConvolution));
-    THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
+
+    try
+    {
+        THROW_ON_MIOPEN_FAILURE(miopenInitConvolutionNdDescriptor(_descriptor,
+                                                                  static_cast<int>(spatialDimCount),
+                                                                  padding.data(),
+                                                                  stride.data(),
+                                                                  dilation.data(),
+                                                                  miopenConvolution));
+        THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionGroupCount(_descriptor, groupCount));
+
+        if(deterministicEnabled)
+        {
+            THROW_ON_MIOPEN_FAILURE(miopenSetConvolutionAttribute(
+                _descriptor, MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1));
+        }
+    }
+    catch(...)
+    {
+        LOG_ON_MIOPEN_FAILURE(miopenDestroyConvolutionDescriptor(_descriptor));
+        _descriptor = nullptr;
+        throw;
+    }
 }
 }

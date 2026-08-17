@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -903,7 +903,7 @@ namespace hipsparse
                                     int*                      nnzPerRowColumn,
                                     int*                      nnzTotalDevHostPtr);
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION < 13000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION < 14000)
     template <typename T>
     hipsparseStatus_t hipsparseXnnz_compress(hipsparseHandle_t         handle,
                                              int                       m,

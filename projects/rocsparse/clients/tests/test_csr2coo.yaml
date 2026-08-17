@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,35 +44,8 @@ Tests:
   category: quick
   function: csr2coo
   precision: *single_precision
-  M: [10, 872]
-  N: [33, 623]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2coo
-  category: pre_checkin
-  function: csr2coo
-  precision: *single_precision
-  M: [0, 500, 1000]
-  N: [0, 242, 1000]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2coo
-  category: pre_checkin
-  function: csr2coo
-  precision: *single_precision
-  M: [345, 653, 978, 1103]
-  N: [535, 875, 923, 2341]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2coo
-  category: nightly
-  function: csr2coo
-  precision: *single_precision
-  M: [27428, 941291, 1105637]
-  N: [18582, 571938, 995827]
+  M: [54, 872]
+  N: [32, 623]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
@@ -84,14 +57,31 @@ Tests:
   N: 1
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit,
-             Chevron2,
-             mplate,
-             qc2534]
+             nos7]
+
+- name: csr2coo
+  category: pre_checkin
+  function: csr2coo
+  precision: *single_precision
+  M: [8, 500]
+  N: [8, 242]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: csr2coo
+  category: pre_checkin
+  function: csr2coo
+  precision: *single_precision
+  M: [345, 653]
+  N: [535, 875]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: csr2coo_file
   category: pre_checkin
@@ -104,10 +94,29 @@ Tests:
   filename: [rma10,
              mc2depi,
              ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
+             scircuit,
+             Chevron2,
+             bibd_22_8,
+             qc2534]
+
+- name: csr2coo_graph_test
+  category: pre_checkin
+  function: csr2coo
+  precision: *single_precision
+  M: [47563]
+  N: [45360]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: csr2coo
+  category: nightly
+  function: csr2coo
+  precision: *single_precision
+  M: [27428, 941291, 1105637]
+  N: [18582, 571938, 995827]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: csr2coo_file
   category: nightly
@@ -117,8 +126,7 @@ Tests:
   N: 1
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bibd_22_8,
-             bmwcra_1,
+  filename: [bmwcra_1,
              amazon0312,
              Chebyshev4,
              sme3Dc,
@@ -126,13 +134,3 @@ Tests:
              shipsec1,
              Chevron3,
              Chevron4]
-
-- name: csr2coo_graph_test
-  category: pre_checkin
-  function: csr2coo
-  precision: *single_precision
-  M: [10, 872]
-  N: [33, 623]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true

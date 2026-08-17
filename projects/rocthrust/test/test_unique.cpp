@@ -434,6 +434,7 @@ TEST(UniqueTests, TestUniqueDevice)
         size,
         thrust::raw_pointer_cast(&d_data[0]),
         thrust::raw_pointer_cast(&d_output_size[0]));
+      HIP_CHECK(hipGetLastError());
 
       ASSERT_EQ(h_new_last - h_data.begin(), d_output_size[0]);
 

@@ -50,8 +50,8 @@ if(ROCBLAS_ENABLE_CLIENT)
   option(ROCBLAS_ENABLE_BENCHMARKS "Build benchmark client." ON)
   option(ROCBLAS_ENABLE_SAMPLES "Build client samples." ON)
   option(ROCBLAS_ENABLE_FORTRAN "Build Fortran clients." ON)
-  # rocm-smi is not presently available on Windows so we do not require it.
-  cmake_dependent_option(ROCBLAS_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
+  # amd-smi is not presently available on Windows so we do not require it.
+  cmake_dependent_option(ROCBLAS_ENABLE_AMD_SMI "Require amd-smi." ON "NOT WIN32" OFF)
 endif()
 
 if(ROCBLAS_ENABLE_TENSILE)
@@ -103,8 +103,8 @@ if(ROCBLAS_ENABLE_HIPBLASLT)
   rocm_package_add_dependencies(DEPENDS "hipblaslt >= 1.0.0")
 endif()
 
-if(ROCBLAS_ENABLE_ROCM_SMI)
-  find_package(rocm_smi REQUIRED)
+if(ROCBLAS_ENABLE_AMD_SMI)
+  find_package(amd_smi REQUIRED)
 endif()
 
 if(ROCBLAS_ENABLE_TENSILE)

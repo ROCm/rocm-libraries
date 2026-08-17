@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/Tensile.hpp>
 
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
 
@@ -39,8 +39,6 @@ namespace TensileLite
 {
     namespace Client
     {
-
-        namespace po = boost::program_options;
 
         class ClientProblemFactory
         {
@@ -82,7 +80,8 @@ namespace TensileLite
             int         m_useScaleAlphaVec;
             bool        m_useSynchronizer;
             bool        m_useE;
-            bool        m_useGradient = false;
+            bool        m_useGradient     = false;
+            bool        m_useGateResidual = false;
             bool        m_outputAmaxD;
 
             int                              m_sparse;
@@ -90,18 +89,31 @@ namespace TensileLite
             PerformanceMetric                m_performanceMetric;
             ActivationType                   m_activationType;
             std::vector<rocisa::DataType>    m_biasTypeArgs;
+            std::vector<rocisa::DataType>    m_gateTypeArgs;
             std::vector<int>                 m_factorDimArgs;
             std::vector<bool>                m_icacheFlushArgs;
             bool                             m_activationNoGuard;
             std::vector<ActivationType>      m_activationEnumArg;
+            // StreamK=5 hybrid-mode toggle values to test. Each element
+            // generates a separate ContractionProblemGemm variant with
+            // setParams().setStreamKTileSchedulingMode(value); the SK5
+            // kernel then runs the static (0), dynamic (1), or
+            // heuristic-picked AUTO (2) path accordingly. Empty or
+            // single-element vectors keep the host's default behavior.
+            std::vector<int>                 m_streamKHybridMode;
             size_t                           m_maxWorkspaceSize = 0;
-            rocisa::DataType                 m_computeInputType;
+            rocisa::DataType                 m_computeInputTypeA;
+            rocisa::DataType                 m_computeInputTypeB;
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            int                              m_metadataLayout;
+            int                              m_mxBlockA;
+            int                              m_mxBlockB;
+            bool                             m_padMXScaleTensorFreeDim;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

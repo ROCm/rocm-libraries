@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifndef GUARD_MIOPEN_GENERIC_SEARCH_HPP_
 #define GUARD_MIOPEN_GENERIC_SEARCH_HPP_
@@ -30,9 +7,11 @@
 #include <miopen/binary_cache.hpp>
 #include <miopen/config.hpp>
 #include <miopen/conv_solution.hpp>
+#include <miopen/env.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/invoke_params.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/logger.hpp>
 #include <miopen/timer.hpp>
 #include <miopen/mt_queue.hpp>
@@ -441,7 +420,7 @@ auto GenericSearch(const Solver s,
     const auto invoke_ctx = [invoke_ctx_]() {
         auto copy = invoke_ctx_;
         copy.SetInvokeType(InvokeType::AutoTune);
-        return copy;
+        return std::move(copy);
     }();
 
     // list of sampled solutions
@@ -524,6 +503,10 @@ auto GenericSearch(const Solver s,
         size_t last_imprv      = 0;
         auto threads_remaining = total_threads;
         std::vector<float> samples;
+        // Set tuning mode flag for kernel logging - extends to all runs in this scope
+        miopen::ScopedKernelPhase phase_scope(miopen::KernelPhase::SolverTuning);
+        float tuning_tolerance =
+            1.0f + static_cast<float>(env::value(MIOPEN_TUNING_FOLLOWUP_TOLERANCE_PCT)) / 100.0f;
         while(true)
         {
             if(n_current >= n_runs_total)
@@ -572,8 +555,35 @@ auto GenericSearch(const Solver s,
                     invoker = profile_h.PrepareInvoker(*current_solution.invoker_factory,
                                                        current_solution.construction_params);
 
+                    // Log solution name for grouped kernel logging (only once per solution)
+                    const auto solver_name = s.SolverDbId();
+                    const auto solver_id   = miopen::solver::Id(solver_name).Value();
+
+                    // LogSolutionName only sets up the solution context once
+                    LogSolutionName(solver_name, solver_id, current_solution.workspace_sz);
+
+                    // Add this specific performance config with kernel name extracted from solution
+                    const auto config_string = current_config.ToString();
+
+                    // Extract kernel name from first kernel in solution (if available)
+                    std::string kernel_name;
+                    if(!current_solution.construction_params.empty() &&
+                       !current_solution.construction_params[0].kernel_name.empty())
+                    {
+                        kernel_name = current_solution.construction_params[0].kernel_name;
+                    }
+                    else
+                    {
+                        kernel_name = solver_name; // Fallback to solver name
+                    }
+
+                    // Pass kernel name and config string as descriptor
+                    AddPerformanceConfig(kernel_name, config_string);
+
                     // Warm-up run for every configuration to eliminate cold-start bias
                     invoker(profile_h, invoke_ctx);
+                    elapsed_time = profile_h.GetKernelTime();
+                    samples.push_back(elapsed_time);
                     profile_h.ResetKernelTime();
 
                     invoker(profile_h, invoke_ctx);
@@ -598,10 +608,10 @@ auto GenericSearch(const Solver s,
                 ret = 1;
             }
 
-            MIOPEN_LOG_T("##"
-                         << "(n_current, n_failed, n_runs_total):  " << n_current << '/' << n_failed
-                         << '/' << n_runs_total << " elapsed_time: " << elapsed_time
-                         << ", best_time: " << best_time << ", " << current_config);
+            MIOPEN_LOG_T("##" << "(n_current, n_failed, n_runs_total):  " << n_current << '/'
+                              << n_failed << '/' << n_runs_total
+                              << " elapsed_time: " << elapsed_time << ", best_time: " << best_time
+                              << ", " << current_config);
 
             if(ret == 0)
             {
@@ -612,23 +622,25 @@ auto GenericSearch(const Solver s,
                                   << elapsed_time << " was greater than cutoff: " << cutoff_time);
                     for(const auto& kernelInfo : current_solution.construction_params)
                         profile_h.ClearProgram(kernelInfo.kernel_file, kernelInfo.comp_options);
+
+                    // Add the timing samples to the current performance config
+                    AddInvokerTimes(samples);
                     break;
                 }
 
                 // Smooth the jitter of measurements:
-                // If the 1st probe is NOT too bad (measured time <= 1.10 * worst sample of the best
-                // config), then gather 9 more samples, and remove positive z-score outliers. Use
-                // the mean value with outliers removed for calculating best config.
-                constexpr int N_RUNS = 10;
+                // If the 1st probe is NOT too bad (measured time <= tuning_tolerance * worst sample
+                // of the best config), then gather more samples, and remove positive z-score
+                // outliers. Use the mean value with outliers removed for calculating best config.
                 last_imprv++;
-                if(elapsed_time < worst_time * 1.10f && elapsed_time < skip_time)
+                if(elapsed_time < worst_time * tuning_tolerance && elapsed_time < skip_time)
                 {
                     MIOPEN_LOG_I2("Finding average for: " << elapsed_time << " / " << best_time
                                                           << " = " << (elapsed_time / best_time));
 
                     try
                     {
-                        for(int i = 1; i < N_RUNS; ++i)
+                        for(int i = 1; i < env::value(MIOPEN_TUNING_ITERATIONS); ++i)
                         {
                             invoker(profile_h, invoke_ctx);
                             samples.push_back(profile_h.GetKernelTime());
@@ -643,6 +655,12 @@ auto GenericSearch(const Solver s,
                     if(ret == 0)
                     {
                         is_passed = true;
+
+                        if(IsLoggingKernel())
+                        {
+                            // Add the timing samples to the current performance config
+                            AddInvokerTimes(samples);
+                        }
 
                         // Remove outliers that are more than 2 positive modified z-score's away,
                         // and get the mean.
@@ -668,12 +686,21 @@ auto GenericSearch(const Solver s,
                         }
                     }
                 }
+                else
+                {
+                    // Config didn't pass threshold for additional runs, but still add the single
+                    // sample
+                    if(IsLoggingKernel())
+                    {
+                        AddInvokerTimes(samples);
+                    }
+                }
                 if(rec_results)
                     perf_sols.push_back({current_config.ToString(), elapsed_time});
             }
 
             // Banchmarked kernels will not be used anymore.
-            // Now we can delete Program objects that belong to OCL/HIP
+            // Now we can delete Program objects that belong to HIP
             // runtime and free the associated resources (memory, file handles...)
             for(const auto& kernelInfo : current_solution.construction_params)
                 profile_h.ClearProgram(kernelInfo.kernel_file, kernelInfo.comp_options);
@@ -711,7 +738,8 @@ auto GenericSearch(const Solver s,
     {
         MIOPEN_LOG_I(
             "Search cutoff or skipped for all kernels.  Last config returned: " << last_config);
-        return last_config;
+        best_config = std::move(last_config);
+        return best_config;
     }
 
     if(!is_passed)

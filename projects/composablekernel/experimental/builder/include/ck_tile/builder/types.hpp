@@ -157,7 +157,11 @@ enum class PipelineVersion
     V3,
     V4,
     V5,
-    WEIGHT_ONLY
+    V6,
+    ASYNC_V1,
+    ASYNC_V4,
+    WEIGHT_ONLY,
+    WAVELET
 };
 
 // Enums for the GEMM specialization.
@@ -236,6 +240,26 @@ enum class ConvAlgorithmSpecialization
     REFERENCE, // GPU reference implementation for validation,
     TWO_STAGE,
     MULTIPLE_D
+};
+
+// StreamK work distribution strategy for the tile partitioner.
+enum class StreamKReductionStrategy
+{
+    LINEAR,
+    TREE
+};
+
+// StreamK configuration for tile-level optimizations.
+struct StreamKConfig
+{
+    bool enabled;
+    StreamKReductionStrategy reduction_strategy;
+    bool persistent;
+
+    static constexpr StreamKConfig disabled()
+    {
+        return {false, StreamKReductionStrategy::LINEAR, false};
+    }
 };
 
 // to_string methods for enum classes
@@ -328,7 +352,11 @@ inline std::string_view to_string(PipelineVersion ver)
     case V3: return "V3";
     case V4: return "V4";
     case V5: return "V5";
+    case V6: return "V6";
+    case ASYNC_V1: return "ASYNC_V1";
+    case ASYNC_V4: return "ASYNC_V4";
     case WEIGHT_ONLY: return "WEIGHT_ONLY";
+    case WAVELET: return "WAVELET";
     default: return "Unknown";
     }
 }
@@ -464,6 +492,17 @@ inline std::string_view to_string(TensorLayout layout)
     }
 }
 
+inline std::string_view to_string(StreamKReductionStrategy s)
+{
+    using enum StreamKReductionStrategy;
+    switch(s)
+    {
+    case LINEAR: return "LINEAR";
+    case TREE: return "TREE";
+    default: return "Unknown";
+    }
+}
+
 // ostream operator overloads for enum classes
 inline std::ostream& operator<<(std::ostream& os, DataType dt) { return os << to_string(dt); }
 
@@ -505,6 +544,11 @@ inline std::ostream& operator<<(std::ostream& os, PipelineScheduler sched)
 inline std::ostream& operator<<(std::ostream& os, TensorLayout layout)
 {
     return os << to_string(layout);
+}
+
+inline std::ostream& operator<<(std::ostream& os, StreamKReductionStrategy s)
+{
+    return os << to_string(s);
 }
 
 } // namespace ck_tile::builder

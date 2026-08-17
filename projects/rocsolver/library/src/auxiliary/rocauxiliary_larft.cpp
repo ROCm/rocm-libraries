@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,20 +26,22 @@
  * *************************************************************************/
 
 #include "rocauxiliary_larft.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T>
+template <typename T, typename I>
 rocblas_status rocsolver_larft_impl(rocblas_handle handle,
                                     const rocblas_direct direct,
                                     const rocblas_storev storev,
-                                    const rocblas_int n,
-                                    const rocblas_int k,
+                                    const I n,
+                                    const I k,
                                     T* V,
-                                    const rocblas_int ldv,
+                                    const I ldv,
                                     T* tau,
                                     T* F,
-                                    const rocblas_int ldf)
+                                    const I ldf)
+try
 {
     ROCSOLVER_ENTER_TOP("larft", "--direct", direct, "--storev", storev, "-n", n, "-k", k, "--ldv",
                         ldv, "--ldt", ldf);
@@ -53,13 +55,13 @@ rocblas_status rocsolver_larft_impl(rocblas_handle handle,
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftV = 0;
+    rocblas_stride shiftV = 0;
 
     // normal (non-batched non-strided) execution
     rocblas_stride stridev = 0;
     rocblas_stride stridet = 0;
     rocblas_stride stridef = 0;
-    rocblas_int batch_count = 1;
+    I batch_count = 1;
 
     // memory workspace sizes:
     // size for constants in rocblas calls
@@ -91,6 +93,10 @@ rocblas_status rocsolver_larft_impl(rocblas_handle handle,
                                        stridet, F, ldf, stridef, batch_count, (T*)scalars, (T*)work,
                                        (T**)workArr);
 }
+catch(...)
+{
+    return exception2rocblas_status();
+}
 
 ROCSOLVER_END_NAMESPACE
 
@@ -113,7 +119,8 @@ rocblas_status rocsolver_slarft(rocblas_handle handle,
                                 float* T,
                                 const rocblas_int ldt)
 {
-    return rocsolver::rocsolver_larft_impl<float>(handle, direct, storev, n, k, V, ldv, tau, T, ldt);
+    return rocsolver::rocsolver_larft_impl<float, rocblas_int>(handle, direct, storev, n, k, V, ldv,
+                                                               tau, T, ldt);
 }
 
 rocblas_status rocsolver_dlarft(rocblas_handle handle,
@@ -127,7 +134,8 @@ rocblas_status rocsolver_dlarft(rocblas_handle handle,
                                 double* T,
                                 const rocblas_int ldt)
 {
-    return rocsolver::rocsolver_larft_impl<double>(handle, direct, storev, n, k, V, ldv, tau, T, ldt);
+    return rocsolver::rocsolver_larft_impl<double, rocblas_int>(handle, direct, storev, n, k, V,
+                                                                ldv, tau, T, ldt);
 }
 
 rocblas_status rocsolver_clarft(rocblas_handle handle,
@@ -141,8 +149,8 @@ rocblas_status rocsolver_clarft(rocblas_handle handle,
                                 rocblas_float_complex* T,
                                 const rocblas_int ldt)
 {
-    return rocsolver::rocsolver_larft_impl<rocblas_float_complex>(handle, direct, storev, n, k, V,
-                                                                  ldv, tau, T, ldt);
+    return rocsolver::rocsolver_larft_impl<rocblas_float_complex, rocblas_int>(
+        handle, direct, storev, n, k, V, ldv, tau, T, ldt);
 }
 
 rocblas_status rocsolver_zlarft(rocblas_handle handle,
@@ -156,8 +164,84 @@ rocblas_status rocsolver_zlarft(rocblas_handle handle,
                                 rocblas_double_complex* T,
                                 const rocblas_int ldt)
 {
-    return rocsolver::rocsolver_larft_impl<rocblas_double_complex>(handle, direct, storev, n, k, V,
-                                                                   ldv, tau, T, ldt);
+    return rocsolver::rocsolver_larft_impl<rocblas_double_complex, rocblas_int>(
+        handle, direct, storev, n, k, V, ldv, tau, T, ldt);
+}
+
+rocblas_status rocsolver_slarft_64(rocblas_handle handle,
+                                   const rocblas_direct direct,
+                                   const rocblas_storev storev,
+                                   const int64_t n,
+                                   const int64_t k,
+                                   float* V,
+                                   const int64_t ldv,
+                                   float* tau,
+                                   float* T,
+                                   const int64_t ldt)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+    return rocsolver::rocsolver_larft_impl<float, int64_t>(handle, direct, storev, n, k, V, ldv,
+                                                           tau, T, ldt);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_dlarft_64(rocblas_handle handle,
+                                   const rocblas_direct direct,
+                                   const rocblas_storev storev,
+                                   const int64_t n,
+                                   const int64_t k,
+                                   double* V,
+                                   const int64_t ldv,
+                                   double* tau,
+                                   double* T,
+                                   const int64_t ldt)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+    return rocsolver::rocsolver_larft_impl<double, int64_t>(handle, direct, storev, n, k, V, ldv,
+                                                            tau, T, ldt);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_clarft_64(rocblas_handle handle,
+                                   const rocblas_direct direct,
+                                   const rocblas_storev storev,
+                                   const int64_t n,
+                                   const int64_t k,
+                                   rocblas_float_complex* V,
+                                   const int64_t ldv,
+                                   rocblas_float_complex* tau,
+                                   rocblas_float_complex* T,
+                                   const int64_t ldt)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+    return rocsolver::rocsolver_larft_impl<rocblas_float_complex, int64_t>(handle, direct, storev, n,
+                                                                           k, V, ldv, tau, T, ldt);
+#else
+    return rocblas_status_not_implemented;
+#endif
+}
+
+rocblas_status rocsolver_zlarft_64(rocblas_handle handle,
+                                   const rocblas_direct direct,
+                                   const rocblas_storev storev,
+                                   const int64_t n,
+                                   const int64_t k,
+                                   rocblas_double_complex* V,
+                                   const int64_t ldv,
+                                   rocblas_double_complex* tau,
+                                   rocblas_double_complex* T,
+                                   const int64_t ldt)
+{
+#if defined(HAVE_ROCBLAS_64) && defined(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+    return rocsolver::rocsolver_larft_impl<rocblas_double_complex, int64_t>(
+        handle, direct, storev, n, k, V, ldv, tau, T, ldt);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 } // extern C

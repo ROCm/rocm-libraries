@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 #include <hipdnn_frontend/attributes/Attributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -22,9 +21,9 @@ TEST(TestAttributes, FillFromContext)
     graphAttributes.set_intermediate_data_type(DataType::BFLOAT16);
     graphAttributes.set_io_data_type(DataType::HALF);
 
-    int nonVirtualId = 0;
-    int virtualId = 1;
-    int setTypeId = 2;
+    const int nonVirtualId = 0;
+    const int virtualId = 1;
+    const int setTypeId = 2;
 
     Dummy attributes;
 

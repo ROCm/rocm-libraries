@@ -1,0 +1,148 @@
+# serializer version: 1
+# name: test_from_hardware_empty_devicenames
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'Processor',
+      'value': 'gfx950',
+    }),
+  })
+# ---
+# name: test_from_hardware_mixed_chipid_warns
+  dict({
+    'state': dict({
+      'type': 'AMDGPU',
+      'value': dict({
+        'type': 'And',
+        'value': list([
+          dict({
+            'type': 'Processor',
+            'value': 'gfx950',
+          }),
+          dict({
+            'type': 'PciChipId',
+            'value': 30112,
+          }),
+        ]),
+      }),
+    }),
+    'warned': True,
+  })
+# ---
+# name: test_from_hardware_multi_chipid
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'And',
+      'value': list([
+        dict({
+          'type': 'Processor',
+          'value': 'gfx950',
+        }),
+        dict({
+          'type': 'Or',
+          'value': list([
+            dict({
+              'type': 'PciChipId',
+              'value': 30112,
+            }),
+            dict({
+              'type': 'PciChipId',
+              'value': 30114,
+            }),
+          ]),
+        }),
+      ]),
+    }),
+  })
+# ---
+# name: test_from_hardware_processor_only
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'Processor',
+      'value': 'gfx942',
+    }),
+  })
+# ---
+# name: test_from_hardware_single_chipid
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'And',
+      'value': list([
+        dict({
+          'type': 'Processor',
+          'value': 'gfx950',
+        }),
+        dict({
+          'type': 'PciChipId',
+          'value': 30112,
+        }),
+      ]),
+    }),
+  })
+# ---
+# name: test_from_hardware_single_string_devicename
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'And',
+      'value': list([
+        dict({
+          'type': 'Processor',
+          'value': 'gfx950',
+        }),
+        dict({
+          'type': 'PciChipId',
+          'value': 30112,
+        }),
+      ]),
+    }),
+  })
+# ---
+# name: test_from_hardware_unsupported_chipid_warns
+  dict({
+    'state': dict({
+      'type': 'AMDGPU',
+      'value': dict({
+        'type': 'Processor',
+        'value': 'gfx950',
+      }),
+    }),
+    'warned': True,
+  })
+# ---
+# name: test_from_hardware_with_cucount
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'And',
+      'value': list([
+        dict({
+          'type': 'Processor',
+          'value': 'gfx942',
+        }),
+        dict({
+          'type': 'CUCount',
+          'value': 64,
+        }),
+      ]),
+    }),
+  })
+# ---
+# name: test_from_isa
+  dict({
+    'type': 'AMDGPU',
+    'value': dict({
+      'type': 'Processor',
+      'value': 'gfx942',
+    }),
+  })
+# ---
+# name: test_lt_different_chipid_sets
+  dict({
+    'one_lt_two': False,
+    'two_lt_one': True,
+  })
+# ---

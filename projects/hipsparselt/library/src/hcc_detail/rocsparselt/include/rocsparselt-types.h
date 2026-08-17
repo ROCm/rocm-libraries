@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -293,6 +293,10 @@ typedef enum rocsparselt_matmul_descr_attribute_
     rocsparselt_matmul_activation_tanh_beta
     = 15, /**< Beta value of the Tanh activation function. */
     rocsparselt_matmul_bias_type = 16, /**< Precision of bias >*/
+    rocsparselt_matmul_gate_residual_mat_pointer
+    = 18, /**< Pointer to the gate residual matrix. */
+    rocsparselt_matmul_gate_residual_desc
+    = 19, /**< Pointer to the gate residual matrix descriptor. */
     rocsparselt_matmul_activation_none, /**< activation function is disabled. */
 } rocsparselt_matmul_descr_attribute;
 

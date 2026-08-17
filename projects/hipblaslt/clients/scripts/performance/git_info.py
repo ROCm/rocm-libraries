@@ -7,9 +7,9 @@ if it is not found in output_folder_location specified by the end user.
 """
 
 
+import os
 from pathlib import Path
 import git
-import os
 
 
 def get_merge_id(git_log: list):

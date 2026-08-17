@@ -14,11 +14,33 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
-  - any-glob-to-any-file: 'shared/rocroller/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "project: hipblaslt-provider":
 - changed-files:
   - any-glob-to-any-file: 'dnn-providers/hipblaslt-provider/**/*'
+
+"project: hip-kernel-provider":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/**/*'
+
+# These labels help distinguish which subteams are responsible for reviews for changes made in rocKE
+
+"rocke-lib: attention":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*attention*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*fmha*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/**/*sdpa*'
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/library/builders/**/attention/**/*'
+
+# This label serves to distiguish work being done in RocKE platform, for the reviewing team and internal tools
+"rocke: platform":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/hip-kernel-provider/rocke/platform/**/*'
+
+"project: hipdnn-integration-tests":
+- changed-files:
+  - any-glob-to-any-file: 'dnn-providers/integration-tests/**/*'
 
 "project: hipcub":
 - changed-files:
@@ -47,6 +69,12 @@
 "project: hipsparselt":
 - changed-files:
   - any-glob-to-any-file: 'projects/hipsparselt/**/*'
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
+
+"ci:hipsparselt-fast":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipblaslt/tensilelite/**/*'
 
 "project: miopen":
 - changed-files:
@@ -59,6 +87,10 @@
 "project: none":
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
+
+"project: rocalution":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocalution/**/*'
 
 "project: rocblas":
 - changed-files:
@@ -89,6 +121,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocthrust/**/*'
 
+"project: rpp":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rpp/**/*'
+
 "shared: mxdatagenerator":
 - changed-files:
   - any-glob-to-any-file: 'shared/mxdatagenerator/**/*'
@@ -96,6 +132,14 @@
 "shared: origami":
 - changed-files:
   - any-glob-to-any-file: 'shared/origami/**/*'
+
+"shared: stinkytofu":
+- changed-files:
+  - any-glob-to-any-file: 'shared/stinkytofu/**/*'
+
+"shared: primbench":
+- changed-files:
+  - any-glob-to-any-file: 'shared/primbench/**/*'
 
 "shared: rocroller":
 - changed-files:

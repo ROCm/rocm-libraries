@@ -3,14 +3,14 @@
 
 #pragma once
 
-#include <string>
-#include <variant>
-
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/utility/json_dump.hpp"
+
+#include <string>
+#include <variant>
 
 struct GemmConfigBase
 {
@@ -32,6 +32,15 @@ struct GemmConfigBase
     static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr bool Preshuffle                = false;
     static constexpr bool TiledMMAPermuteN          = false;
+
+    static constexpr ck_tile::index_t kClusterSizeM       = 1;
+    static constexpr ck_tile::index_t kClusterSizeN       = 1;
+    static constexpr ck_tile::index_t BlockedXDLN_PerWarp = 1;
+    static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchA =
+        ck_tile::DataCachePrefetchKind::None;
+    static constexpr ck_tile::DataCachePrefetchKind DataCachePrefetchB =
+        ck_tile::DataCachePrefetchKind::None;
+    static constexpr bool Async = false;
 };
 
 template <typename PrecType>
@@ -138,6 +147,33 @@ struct GemmConfigComputeV3_2 : public GemmConfigBase
 };
 
 template <typename PrecType>
+struct GemmConfigComputeV3_3 : public GemmConfigBase
+{
+    static constexpr bool kPadM = true;
+    static constexpr bool kPadN = true;
+    static constexpr bool kPadK = true;
+
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 256 / sizeof(PrecType);
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+
+    static constexpr ck_tile::index_t M_Warp = 2;
+    static constexpr ck_tile::index_t N_Warp = 2;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Warp_Tile = 16;
+    static constexpr ck_tile::index_t N_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile>();
+
+    static constexpr bool DoubleSmemBuffer          = false;
+    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
+
+    static constexpr int kBlockPerCu = 2;
+    static constexpr bool Async      = true;
+};
+
+template <typename PrecType>
 struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
@@ -150,12 +186,20 @@ struct GemmConfigComputeV3_WMMA : public GemmConfigBase
 
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile>();
 
     static constexpr bool DoubleSmemBuffer          = false;
     static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_V3;
 
     static constexpr int kBlockPerCu = 2;
+};
+
+template <typename PrecType>
+struct GemmConfigComputeV3_WMMA_ClusterLaunch : public GemmConfigComputeV3_WMMA<PrecType>
+{
+    static constexpr ck_tile::index_t kClusterSizeM = 2;
+    static constexpr ck_tile::index_t kClusterSizeN = 2;
 };
 
 template <typename PrecType>
@@ -242,6 +286,27 @@ struct GemmConfigComputeV6 : public GemmConfigBase
 };
 
 template <typename PrecType>
+struct GemmConfigComputeAsync : public GemmConfigBase
+{
+    static constexpr ck_tile::index_t M_Tile = 64;
+    static constexpr ck_tile::index_t N_Tile = 64;
+    static constexpr ck_tile::index_t K_Tile = 256;
+
+    static constexpr ck_tile::index_t M_Warp = 1;
+    static constexpr ck_tile::index_t N_Warp = 4;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Warp_Tile = 16;
+    static constexpr ck_tile::index_t N_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile = 128;
+
+    static constexpr bool DoubleSmemBuffer          = true;
+    static constexpr ck_tile::GemmPipeline Pipeline = ck_tile::GemmPipeline::COMPUTE_ASYNC;
+    static constexpr ck_tile::index_t NumWaveGroups = 1;
+    static constexpr bool UseStructuredSparsity     = false;
+};
+
+template <typename PrecType>
 struct GemmConfigPreshuffleDecode : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 16;
@@ -289,6 +354,19 @@ struct GemmConfigPreshufflePrefill : public GemmConfigBase
     static constexpr bool DoubleSmemBuffer          = true;
     static constexpr int N_Repeat                   = N_Tile / N_Warp_Tile / N_Warp;
     static constexpr bool TiledMMAPermuteN          = N_Repeat % 2 == 0;
+
+    static constexpr bool Async = false;
+};
+
+template <typename PrecType>
+struct GemmConfigPreshufflePrefillAsync : public GemmConfigPreshufflePrefill<PrecType>
+{
+    static constexpr ck_tile::index_t N_Tile = 256;
+
+    // N_Repeat is even in this config
+    static constexpr bool TiledMMAPermuteN = true;
+
+    static constexpr bool Async = true;
 };
 
 template <typename PrecType>
@@ -296,11 +374,33 @@ struct GemmConfigPreshufflePrefill_Wmma : public GemmConfigPreshufflePrefill<Pre
 {
     static constexpr ck_tile::index_t M_Warp_Tile = 16;
     static constexpr ck_tile::index_t N_Warp_Tile = 16;
-    static constexpr ck_tile::index_t K_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<PrecType, M_Warp_Tile, true>();
+};
+
+template <typename PrecType>
+struct GemmConfigMixedPrec_Wmma : public GemmConfigComputeV3_WMMA<PrecType>
+{
+    static constexpr ck_tile::index_t M_Tile = 128;
+    static constexpr ck_tile::index_t N_Tile = 128;
+    static constexpr ck_tile::index_t K_Tile = 128 / sizeof(PrecType);
+
+    static constexpr ck_tile::index_t M_Warp_Tile = 16;
+    static constexpr ck_tile::index_t N_Warp_Tile = 16;
+    static constexpr ck_tile::index_t K_Warp_Tile = 128;
 };
 
 template <typename ADataType, typename BDataType = ADataType, typename CDataType = ADataType>
 struct GemmTypeConfig;
+
+template <>
+struct GemmTypeConfig<ck_tile::tf32_t, ck_tile::tf32_t, float>
+{
+    using ADataType   = ck_tile::tf32_t;
+    using BDataType   = ck_tile::tf32_t;
+    using AccDataType = float;
+    using CDataType   = float;
+};
 
 template <>
 struct GemmTypeConfig<ck_tile::half_t>
@@ -375,6 +475,33 @@ struct GemmTypeConfig<ck_tile::int8_t, ck_tile::int8_t, int32_t>
     using CDataType   = int32_t;
 };
 
+template <>
+struct GemmTypeConfig<ck_tile::pk_fp4_t, ck_tile::pk_fp4_t, ck_tile::half_t>
+{
+    using ADataType   = ck_tile::pk_fp4_t;
+    using BDataType   = ck_tile::pk_fp4_t;
+    using AccDataType = float;
+    using CDataType   = ck_tile::half_t;
+};
+
+template <>
+struct GemmTypeConfig<ck_tile::fp8_t, ck_tile::pk_fp4_t, ck_tile::half_t>
+{
+    using ADataType   = ck_tile::fp8_t;
+    using BDataType   = ck_tile::pk_fp4_t;
+    using AccDataType = float;
+    using CDataType   = ck_tile::half_t;
+};
+
+template <>
+struct GemmTypeConfig<ck_tile::bf8_t, ck_tile::pk_fp4_t, ck_tile::half_t>
+{
+    using ADataType   = ck_tile::bf8_t;
+    using BDataType   = ck_tile::pk_fp4_t;
+    using AccDataType = float;
+    using CDataType   = ck_tile::half_t;
+};
+
 template <ck_tile::GemmPipeline PipelineId>
 struct PipelineTypeTraits;
 
@@ -383,8 +510,20 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::MEMORY>
 {
     template <typename PipelineProblem>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrMem<PipelineProblem>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::BASIC_V1>
+{
     template <typename PipelineProblem>
-    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrMem<PipelineProblem>;
+    using GemmPipeline = ck_tile::GemmPipelineAGmemBGmemCRegV1<PipelineProblem>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::BASIC_V2>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
 };
 
 template <>
@@ -392,8 +531,6 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V3>
 {
     template <typename PipelineProblem>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV3<PipelineProblem>;
-    template <typename PipelineProblem>
-    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<PipelineProblem>;
 };
 
 template <>
@@ -401,8 +538,6 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V4>
 {
     template <typename PipelineProblem>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV4<PipelineProblem>;
-    template <typename PipelineProblem>
-    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV4<PipelineProblem>;
 };
 
 template <>
@@ -410,8 +545,6 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V5>
 {
     template <typename PipelineProblem>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV5<PipelineProblem>;
-    template <typename PipelineProblem>
-    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV5<PipelineProblem>;
 };
 
 template <>
@@ -419,8 +552,13 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_V6>
 {
     template <typename PipelineProblem>
     using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompV6<PipelineProblem>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_ASYNC>
+{
     template <typename PipelineProblem>
-    using UniversalGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV6<PipelineProblem>;
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompAsync<PipelineProblem>;
 };
 
 template <>
@@ -428,9 +566,66 @@ struct PipelineTypeTraits<ck_tile::GemmPipeline::PRESHUFFLE_V2>
 {
     template <typename PipelineProblem>
     using GemmPipeline = ck_tile::WeightPreshufflePipelineAGmemBGmemCRegV2<PipelineProblem>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_ASYNC_V2>
+{
     template <typename PipelineProblem>
-    using UniversalGemmPipeline =
-        ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<PipelineProblem>;
+    using GemmPipeline = ck_tile::GemmPipelineAgBgCrCompAsyncV2<PipelineProblem>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline =
+        ck_tile::GemmPipelineAgBgCrCompTDMV1<PipelineProblem,
+                                             ck_tile::GemmPipelineAgBgCrCompTDMDefaultPolicy<
+                                                 false,
+                                                 PipelineProblem::Traits::DataCachePrefetchA,
+                                                 PipelineProblem::Traits::DataCachePrefetchB>>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline =
+        ck_tile::GemmPipelineAgBgCrCompTDMV2<PipelineProblem,
+                                             ck_tile::GemmPipelineAgBgCrCompTDMDefaultPolicy<
+                                                 true,
+                                                 PipelineProblem::Traits::DataCachePrefetchA,
+                                                 PipelineProblem::Traits::DataCachePrefetchB>>;
+};
+
+template <>
+struct PipelineTypeTraits<ck_tile::GemmPipeline::PRESHUFFLE_TDM>
+{
+    template <typename PipelineProblem>
+    using GemmPipeline = ck_tile::WeightPreshufflePipelineAGmemBGmemCRegTDM<
+        PipelineProblem,
+        ck_tile::UniversalWeightPreshufflePipelineAgBgCrTDMPolicy<
+            PipelineProblem::Traits::DataCachePrefetchA,
+            PipelineProblem::Traits::DataCachePrefetchB>>;
+};
+
+template <ck_tile::GemmPipeline PipelineId, typename Problem>
+struct EpilogueTypeTraits
+{
+    using Epilogue = ck_tile::CShuffleEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V1, Problem>
+{
+    using Epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct EpilogueTypeTraits<ck_tile::GemmPipeline::COMPUTE_TDM_V2, Problem>
+{
+    using Epilogue = ck_tile::TdmEpilogue<Problem>;
 };
 
 inline auto create_args()
@@ -446,7 +641,7 @@ inline auto create_args()
         .insert("stride_b", "0", "Tensor B stride")
         .insert("stride_c", "0", "Tensor C stride")
         .insert("v", "2", "0. No validation, 1. Validation on CPU, 2. Validation on GPU")
-        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t")
+        .insert("prec", "fp16", "data type. fp16/bf16/fp8/bf8/pk_int4_t/tf32 (tf32 only on gfx950)")
         .insert("warmup", "50", "number of iterations before benchmark the kernel")
         .insert("repeat", "100", "number of iterations to benchmark the kernel")
         .insert("timer", "gpu", "gpu:gpu timer, cpu:cpu timer")

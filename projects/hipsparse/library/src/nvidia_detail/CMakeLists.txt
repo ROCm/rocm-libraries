@@ -40,3 +40,6 @@ else()
 endif()
 
 target_link_libraries(hipsparse PRIVATE CUDA::cusparse)
+
+get_target_property(CUSPARSE_LIB CUDA::cusparse IMPORTED_LOCATION)
+message(STATUS "Found cuSPARSE shared library: ${CUSPARSE_LIB}")

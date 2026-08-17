@@ -1,0 +1,54 @@
+# hipDNN Test Categories Configuration (CTest)
+#
+# Category names are the public CTest filter surface. Each category creates
+# hipdnn-<category>-check and hipdnn-<category>-check-verbose targets, and the
+# category itself becomes the CTest label used by those targets.
+#
+# The shared CTest parser keeps tier semantics for quick/standard/comprehensive/full:
+# quick tests are also labelled standard, comprehensive, and full; standard tests
+# are also labelled comprehensive and full; comprehensive tests are also labelled
+# full. Non-tier categories such as unit and integration label only themselves.
+
+test_categories:
+  quick:
+    description: "All hipDNN tests in the current default tier"
+    test_patterns:
+      - ".*"
+
+  standard:
+    description: "Standard hipDNN validation tier"
+    test_patterns:
+
+  comprehensive:
+    description: "Comprehensive hipDNN validation tier"
+    test_patterns:
+
+  full:
+    description: "Full hipDNN validation tier"
+    test_patterns:
+
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier; currently mirrors the quick tier"
+    test_patterns:
+      - ".*"
+    labels:
+      - "ffm-full"
+
+  unit:
+    description: "Current hipDNN unit-check coverage"
+    test_patterns:
+      - "hipdnn_test_name_validation"
+      - "hipdnn_data_sdk_tests"
+      - "hipdnn_flatbuffers_sdk_tests"
+      - "hipdnn_backend_tests"
+      - "hipdnn_frontend_tests"
+      - "hipdnn_test_sdk_tests"
+      - "hipdnn_plugin_sdk_tests"
+
+  integration:
+    description: "Current hipDNN integration-check coverage"
+    test_patterns:
+      - "hipdnn_test_name_validation"
+      - "hipdnn_public_backend_tests"
+      - "hipdnn_backend_logging_shutdown_tests"
+      - "hipdnn_public_frontend_tests"

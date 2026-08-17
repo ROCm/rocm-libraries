@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,10 @@ namespace rocsparse
                                                  uint32_t* __restrict__ warp_start,
                                                  T tol)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         rocsparse_int tid = hipThreadIdx_x;
         rocsparse_int bid = hipBlockIdx_x;
         rocsparse_int gid = tid + LOOPS * BLOCKSIZE * bid;
@@ -55,9 +59,7 @@ namespace rocsparse
                 const T value = rocsparse::nontemporal_load(csr_val_A + gid);
 
                 // Check if value in matrix will be kept
-                const bool predicate
-                    = (rocsparse::abs(value) > rocsparse::real(tol)
-                       && rocsparse::abs(value) > std::numeric_limits<float>::min());
+                const bool predicate = (rocsparse::abs(value) > rocsparse::real(tol));
 
                 // Inactive threads in warp set their lane to zero in mask
                 const uint64_t wavefront_mask = __ballot(predicate);
@@ -90,6 +92,10 @@ namespace rocsparse
                                                 const uint32_t* __restrict__ warp_start,
                                                 T tol)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
         rocsparse_int tid = hipThreadIdx_x;
         rocsparse_int bid = hipBlockIdx_x;
         rocsparse_int gid = tid + LOOPS * BLOCKSIZE * bid;
@@ -106,9 +112,7 @@ namespace rocsparse
                 const T value = rocsparse::nontemporal_load(csr_val_A + gid);
 
                 // Check if value in matrix will be kept
-                const bool predicate
-                    = (rocsparse::abs(value) > rocsparse::real(tol)
-                       && rocsparse::abs(value) > std::numeric_limits<float>::min());
+                const bool predicate = (rocsparse::abs(value) > rocsparse::real(tol));
 
                 // Inactive threads in warp set their lane to zero in mask
                 const uint64_t wavefront_mask = __ballot(predicate);
@@ -177,6 +181,10 @@ namespace rocsparse
                                 rocsparse_int* __restrict__ csr_col_ind_C,
                                 T tol)
     {
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % SEGMENT_SIZE == 0,
+                      "BLOCKSIZE must be a multiple of SEGMENT_SIZE.");
+        static_assert(WF_SIZE % SEGMENT_SIZE == 0, "WF_SIZE must be a multiple of SEGMENT_SIZE.");
         const rocsparse_int segment_id      = hipThreadIdx_x / SEGMENT_SIZE;
         const rocsparse_int segment_lane_id = hipThreadIdx_x % SEGMENT_SIZE;
 
@@ -201,11 +209,7 @@ namespace rocsparse
                 const T value = csr_val_A[i];
 
                 // Check if value in matrix will be kept
-                const int predicate
-                    = rocsparse::abs(value) > rocsparse::real(tol)
-                              && rocsparse::abs(value) > std::numeric_limits<float>::min()
-                          ? 1
-                          : 0;
+                const int predicate = rocsparse::abs(value) > rocsparse::real(tol) ? 1 : 0;
 
                 // Ballot operates on an entire warp (32 or 64 threads). Therefore the computed
                 // wavefront_mask may contain information for multiple rows if the segment size is

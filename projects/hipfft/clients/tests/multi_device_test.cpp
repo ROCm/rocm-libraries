@@ -1,4 +1,4 @@
-// Copyright (C) 2024 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "../../shared/accuracy_test.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/params_gen.h"
 #include "../hipfft_params.h"
 #include <algorithm>
@@ -35,6 +36,7 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {64, 128, 256},
     {96, 160, 192},
 };
+
 static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
@@ -59,9 +61,7 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                                   fft_auto_allocation            auto_alloc_setting
                                                   = fft_auto_allocation_default)
 {
-    int localDeviceCount = 0;
-    (void)hipGetDeviceCount(&localDeviceCount);
-
+    const size_t localDeviceCount = rocfft_scoped_device::device_count();
     // if we have an explicit split of data on the user side, we need
     // to use the multiprocessing API
     if(type)
@@ -76,40 +76,24 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
 
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
 
+    // function pointer callbacks need -fgpu-rdc, but that causes build
+    // nondeterminism in kpack
+    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_funcptr, */};
+
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
-    std::vector<fft_params> params_single;
-
-    for(auto run_callbacks : {false, true})
-    {
-        auto params = param_generator_complex(test_prob,
-                                              multi_gpu_sizes,
-                                              precision_range_sp_dp,
-                                              multi_gpu_batch_range,
-                                              stride_generator(stride_range),
-                                              stride_generator(stride_range),
-                                              ioffset_range_zero,
-                                              ooffset_range_zero,
-                                              {fft_placement_inplace, fft_placement_notinplace},
-                                              false,
-                                              run_callbacks,
-                                              auto_alloc_setting);
-        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
-
-        params = param_generator_real(test_prob,
-                                      multi_gpu_sizes,
-                                      precision_range_sp_dp,
-                                      multi_gpu_batch_range,
-                                      stride_generator(stride_range),
-                                      stride_generator(stride_range),
-                                      ioffset_range_zero,
-                                      ooffset_range_zero,
-                                      {fft_placement_notinplace},
-                                      false,
-                                      run_callbacks,
-                                      auto_alloc_setting);
-        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
-    }
+    auto params_single = param_generator(test_prob,
+                                         multi_gpu_sizes,
+                                         precision_range_sp_dp,
+                                         multi_gpu_batch_range,
+                                         stride_generator(stride_range),
+                                         stride_generator(stride_range),
+                                         ioffset_range_zero,
+                                         ooffset_range_zero,
+                                         place_range,
+                                         false,
+                                         multi_device_callbacks,
+                                         auto_alloc_setting);
 
     std::vector<fft_params> all_params;
 
@@ -125,7 +109,8 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                 if(p.nbatch == 1 && p.placement == fft_placement_notinplace)
                     continue;
 
-                param_multi.multiGPU = std::min(static_cast<int>(p.nbatch), localDeviceCount);
+                param_multi.multiGPU
+                    = p.nbatch > 1 ? std::min(p.nbatch, localDeviceCount) : localDeviceCount;
                 all_params.emplace_back(std::move(param_multi));
             }
             else
@@ -187,8 +172,8 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                 }
 
                 p_dist.mp_lib = mp_lib;
-                p_dist.distribute_input(localDeviceCount, input_grid);
-                p_dist.distribute_output(localDeviceCount, output_grid);
+                p_dist.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
+                p_dist.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
 
                 // "placement" flag is meaningless if exactly one of
                 // input+output is a field.  So just add those cases if
@@ -246,8 +231,9 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu,
                          ::testing::ValuesIn(param_generator_multi_gpu({})),
                          accuracy_test::TestName);
 
-// Note: disabled for now due to implementation issues and
-// unimplemented features in hipFFT (to fix first)
+// Note: disabled for now due to lack of implementation in hipFFT
+// with rocfft backend (multi-device workspace assignment is not
+// implemented yet)
 INSTANTIATE_TEST_SUITE_P(DISABLED_various_multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({},

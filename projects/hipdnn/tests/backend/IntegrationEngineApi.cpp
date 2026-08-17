@@ -50,7 +50,7 @@ TEST_F(IntegrationEngineApi, SetEngineOperationGraph)
                                         HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_graph),
+                                        static_cast<const void*>(&_graph)),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     test_util::createTestGraph(&_graph, _handle);
@@ -59,7 +59,7 @@ TEST_F(IntegrationEngineApi, SetEngineOperationGraph)
                                         HIPDNN_ATTR_ENGINE_OPERATION_GRAPH,
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
-                                        &_graph),
+                                        static_cast<const void*>(&_graph)),
               HIPDNN_STATUS_SUCCESS);
 }
 
@@ -95,7 +95,7 @@ TEST_F(IntegrationEngineApi, SetAttrEngineAlreadyFinalized)
 
 TEST_F(IntegrationEngineApi, Finalize)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     EXPECT_EQ(hipdnnBackendFinalize(_engine), HIPDNN_STATUS_BAD_PARAM);
     test_util::populateTestEngine(_engine, &_graph, _handle, gidx);
@@ -105,7 +105,7 @@ TEST_F(IntegrationEngineApi, Finalize)
 TEST_F(IntegrationEngineApi, GetEngineOperationGraph)
 {
     hipdnnBackendDescriptor_t graph = nullptr;
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     test_util::populateTestEngine(_engine, &_graph, _handle, gidx, true);
     EXPECT_EQ(hipdnnBackendGetAttribute(_engine,
@@ -113,7 +113,7 @@ TEST_F(IntegrationEngineApi, GetEngineOperationGraph)
                                         HIPDNN_TYPE_BACKEND_DESCRIPTOR,
                                         1,
                                         nullptr,
-                                        &graph),
+                                        static_cast<void*>(&graph)),
               HIPDNN_STATUS_SUCCESS);
     EXPECT_NE(graph, nullptr);
 
@@ -122,7 +122,7 @@ TEST_F(IntegrationEngineApi, GetEngineOperationGraph)
 
 TEST_F(IntegrationEngineApi, GetEngineGlobalIndex)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int64_t gidxOut;
 
     test_util::populateTestEngine(_engine, &_graph, _handle, gidx, true);

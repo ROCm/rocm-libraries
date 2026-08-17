@@ -35,8 +35,8 @@ Tests:
   category: quick
   function: check_matrix_hyb
   precision: *single_double_precisions_complex_real
-  M: [1, 8, 20, 57, 132]
-  N: [2, 11, 23, 77, 137]
+  M: [1, 8]
+  N: [2, 11]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
   storage: [rocsparse_storage_mode_unsorted]

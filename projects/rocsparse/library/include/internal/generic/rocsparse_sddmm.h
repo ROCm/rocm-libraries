@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -41,7 +41,7 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  opA          dense matrix \f$A\f$ operation type.
 *  @param[in]
@@ -67,7 +67,7 @@ extern "C" {
 *  \retval rocsparse_status_invalid_value the value of \p opA or \p opB is incorrect.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
-*          \p mat_A, \p mat_B, \p mat_C or \p buffer_size pointer is invalid.
+*          or the \p mat_A, \p mat_B, \p mat_C, or \p buffer_size pointer is invalid.
 *  \retval rocsparse_status_not_implemented
 *          \p opA == \ref rocsparse_operation_conjugate_transpose or
 *          \p opB == \ref rocsparse_operation_conjugate_transpose.
@@ -94,7 +94,7 @@ rocsparse_status rocsparse_sddmm_buffer_size(rocsparse_handle            handle,
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  opA          dense matrix \f$A\f$ operation type.
 *  @param[in]
@@ -120,8 +120,8 @@ rocsparse_status rocsparse_sddmm_buffer_size(rocsparse_handle            handle,
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_value the value of \p opA or \p opB is incorrect.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
-*          \p mat_A, \p mat_B, \p mat_C or \p temp_buffer pointer is invalid.
+*  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid, or the
+*          \p mat_A, \p mat_B, \p mat_C, or \p temp_buffer pointer is invalid.
 *  \retval rocsparse_status_not_implemented
 *          \p opA == \ref rocsparse_operation_conjugate_transpose or
 *          \p opB == \ref rocsparse_operation_conjugate_transpose.
@@ -178,19 +178,19 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *    \right.
 *  \f]
 *
-*  Computing the above sampled dense-dense multiplication requires three steps to complete. First, the user calls
-*  \ref rocsparse_sddmm_buffer_size to determine the size of the required temporary storage buffer. Next, the user
-*  allocates this buffer and calls \ref rocsparse_sddmm_preprocess which performs any analysis of the input matrices
-*  that may be required. Finally, the user calls \p rocsparse_sddmm to complete the computation. Once all calls to
+*  Computing the above sampled dense-dense multiplication requires three steps to complete. First, call
+*  \ref rocsparse_sddmm_buffer_size to determine the size of the required temporary storage buffer. Next,
+*  allocate this buffer and call \ref rocsparse_sddmm_preprocess, which performs any analysis of the input matrices
+*  that might be required. Finally, call \p rocsparse_sddmm to complete the computation. After all calls to
 *  \p rocsparse_sddmm are complete, the temporary buffer can be deallocated.
 *
 *  \p rocsparse_sddmm supports different algorithms which can provide better performance for different matrices.
 *
 *  <table>
 *  <caption id="sddmm_algorithms">Algorithms</caption>
-*  <tr><th>CSR/CSC Algorithms                <th>Deterministic  <th>Preprocessing  <th>Notes
-*  <tr><td>rocsparse_sddmm_alg_default</td>  <td>Yes</td>       <td>No</td>        <td>Uses the sparsity pattern of matrix C to perform a limited set of dot products </td>
-*  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add </td>
+*  <tr><th>Algorithms                        <th>Deterministic  <th>Preprocessing  <th>Notes
+*  <tr><td>rocsparse_sddmm_alg_default</td>  <td>Yes</td>       <td>No</td>        <td>Uses the sparsity pattern of matrix C to perform a limited set of dot products. </td>
+*  <tr><td>rocsparse_sddmm_alg_dense</td>    <td>Yes</td>       <td>No</td>        <td>Explicitly converts the matrix C into a dense matrix to perform a dense matrix multiply and add. </td>
 *  </table>
 *
 *  Currently, \p rocsparse_sddmm only supports the uniform precisions indicated in the table below. For the sparse matrix \f$C\f$, \p rocsparse_sddmm supports the index types
@@ -207,7 +207,7 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="sddmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B                     <th>C                         <th>compute_type
@@ -218,7 +218,9 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  </table>
 *
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_csr.
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_csr,
+*  \ref rocsparse_format_csc, \ref rocsparse_format_coo, \ref rocsparse_format_coo_aos,
+*  and \ref rocsparse_format_ell.
 *
 *  \note \p opA == \ref rocsparse_operation_conjugate_transpose is not supported.
 *  \note \p opB == \ref rocsparse_operation_conjugate_transpose is not supported.
@@ -227,10 +229,77 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  This routine supports execution in a hipGraph context only when \p alg == \ref rocsparse_sddmm_alg_default.
 *
 *  \note
-*  This routine does not support batched computation.
+*  Batched computation is supported for the \ref rocsparse_format_csr, \ref rocsparse_format_csc, 
+*  \ref rocsparse_format_coo, \ref rocsparse_format_coo_aos and \ref rocsparse_format_ell
+*  formats when \p alg == \ref rocsparse_sddmm_alg_default. The batch count is taken from the
+*  sparse matrix \f$C\f$. Each of the dense matrices \f$A\f$ and \f$B\f$ must either
+*  use the same batch count as \f$C\f$, or be configured with batch count 1 and
+*  batch stride 0 in order to broadcast that operand across all batches of \f$C\f$.
+*  Concretely, the following four configurations are accepted:
+*  \f[
+*    \begin{aligned}
+*      &C_i = (A   \cdot B  ) \circ C_i, &&\text{(both A and B broadcast)} \\
+*      &C_i = (A   \cdot B_i) \circ C_i, &&\text{(A broadcast)} \\
+*      &C_i = (A_i \cdot B  ) \circ C_i, &&\text{(B broadcast)} \\
+*      &C_i = (A_i \cdot B_i) \circ C_i, &&\text{(fully batched)}
+*    \end{aligned}
+*  \f]
+*  Per-batch strides for the dense operands are configured via
+*  \ref rocsparse_dnmat_set_strided_batch, while the per-batch strides for the
+*  sparse output \f$C\f$ are configured with the format-specific routine:
+*  \ref rocsparse_coo_set_strided_batch for \ref rocsparse_format_coo,
+*  \ref rocsparse_csr_set_strided_batch for \ref rocsparse_format_csr,
+*  \ref rocsparse_csc_set_strided_batch for \ref rocsparse_format_csc and 
+*  \ref rocsparse_format_coo_aos, and
+*  \ref rocsparse_ell_set_strided_batch for \ref rocsparse_format_ell.
+*
+*  For COO, \ref rocsparse_coo_set_strided_batch sets a single
+*  per-batch stride that applies to all three COO buffers (row indices, column
+*  indices and values); i.e. the row-index, column-index and value buffers of
+*  batch \f$i\f$ are obtained from the base pointers by adding
+*  \p i * \p batch_stride, and must therefore be laid out with the same stride.
+*  The stride must be at least the per-batch nnz of \f$C\f$, and may be larger
+*  to allow padding.
+*
+*  For CSR, \ref rocsparse_csr_set_strided_batch sets two independent per-batch
+*  strides: \p offsets_batch_stride for the row offset buffer and
+*  \p columns_values_batch_stride for the column-index and value buffers. The
+*  row offset buffer of batch \f$i\f$ is obtained from the base pointer by adding
+*  \p i * \p offsets_batch_stride, and the column-index and value buffers of
+*  batch \f$i\f$ by adding \p i * \p columns_values_batch_stride. The offsets
+*  stride must be at least \f$m + 1\f$, and the columns/values stride must be at
+*  least the per-batch nnz of \f$C\f$; both may be larger to allow padding.
+*
+*  For CSC, \ref rocsparse_csc_set_strided_batch sets two independent per-batch
+*  strides: \p offsets_batch_stride for the column offset buffer and
+*  \p rows_values_batch_stride for the row-index and value buffers. The
+*  column offset buffer of batch \f$i\f$ is obtained from the base pointer by adding
+*  \p i * \p offsets_batch_stride, and the row-index and value buffers of
+*  batch \f$i\f$ by adding \p i * \p rows_values_batch_stride. The offsets
+*  stride must be at least \f$n + 1\f$, and the rows/values stride must be at
+*  least the per-batch nnz of \f$C\f$; both may be larger to allow padding.
+*
+*  For COO AoS, \ref rocsparse_coo_set_strided_batch sets a single per-batch
+*  stride \p batch_stride that is interpreted as the per-batch nnz stride of the
+*  value buffer. Because the row and column indices are stored interleaved in a
+*  single buffer (two index entries per nonzero), the interleaved index buffer of
+*  batch \f$i\f$ is obtained from the base pointer by adding
+*  \p i * (2 * \p batch_stride), while the value buffer of batch \f$i\f$ is
+*  obtained by adding \p i * \p batch_stride. The stride must be at least the
+*  per-batch nnz of \f$C\f$, and can be larger to allow padding.
+*
+*  For ELL, \ref rocsparse_ell_set_strided_batch sets a single per-batch stride
+*  that applies to both ELL buffers (column indices and values); i.e. the
+*  column-index and value buffers of batch \f$i\f$ are obtained from the base
+*  pointers by adding \p i * \p batch_stride, and must therefore be laid out with
+*  the same stride. The stride must be at least the per-batch nnz of \f$C\f$, and
+*  may be larger to allow padding.
+*
+*  All other formats and algorithms currently return \ref rocsparse_status_not_implemented
+*  when the batch count is greater than one.
 *
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  opA          dense matrix \f$A\f$ operation type.
 *  @param[in]
@@ -254,17 +323,17 @@ rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle            handle,
 *  The size must be greater or equal to the size obtained with \ref rocsparse_sddmm_buffer_size.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
-*  \retval rocsparse_status_invalid_value the value of \p opA, \p opB, \p compute\_type or alg is incorrect.
+*  \retval rocsparse_status_invalid_value the value of \p opA, \p opB, \p compute\_type, or \p alg is incorrect.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
-*          \p mat_A, \p mat_B, \p mat_C or \p temp_buffer pointer is invalid.
+*  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid, or the
+*          \p mat_A, \p mat_B, \p mat_C, or \p temp_buffer pointer is invalid.
 *  \retval rocsparse_status_not_implemented
 *          \p opA == \ref rocsparse_operation_conjugate_transpose or
 *          \p opB == \ref rocsparse_operation_conjugate_transpose.
 *
 *  \par Example
-*  This example performs sampled dense-dense matrix product, \f$C := \alpha ( A \cdot B ) \circ spy(C) + \beta C\f$
-*  where \f$\circ\f$ is the hadamard product
+*  This example performs a sampled dense-dense matrix product, \f$C := \alpha ( A \cdot B ) \circ spy(C) + \beta C\f$
+*  where \f$\circ\f$ is the Hadamard product.
 *  \snippet example_rocsparse_sddmm.cpp doc example
 */
 ROCSPARSE_EXPORT

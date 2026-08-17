@@ -121,6 +121,22 @@ public:
 class MockGraphDescriptor : public GraphDescriptor
 {
 public:
+    MockGraphDescriptor()
+    {
+        // By default, delegate hasRaggedTensors() to the real base-class accessor
+        // so tests that build a descriptor containing an actual ragged tensor
+        // observe the derived value without programming an expectation. Tests that
+        // want to exercise the ragged path in isolation can still override this
+        // with EXPECT_CALL / ON_CALL.
+        ON_CALL(*this, hasRaggedTensors()).WillByDefault(::testing::Invoke([this]() {
+            return this->GraphDescriptor::hasRaggedTensors();
+        }));
+        // Same rationale as hasRaggedTensors above, for the tensor-alignment floor.
+        ON_CALL(*this, hasNonDefaultTensorAlignment()).WillByDefault(::testing::Invoke([this]() {
+            return this->GraphDescriptor::hasNonDefaultTensorAlignment();
+        }));
+    }
+
     MOCK_METHOD(void, finalize, (), (override));
     MOCK_METHOD(bool, isFinalized, (), (const, override));
     MOCK_METHOD(void,
@@ -141,6 +157,10 @@ public:
 
     MOCK_METHOD(hipdnnHandle_t, getHandle, (), (const, override));
     MOCK_METHOD(hipdnnPluginConstData_t, getSerializedGraph, (), (const, override));
+    MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
+    MOCK_METHOD(bool, hasRaggedTensors, (), (const, override));
+    MOCK_METHOD(bool, hasNonDefaultTensorAlignment, (), (const, override));
+    MOCK_METHOD(bool, isRuntimePassByValueEnabled, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()
     {
@@ -150,7 +170,23 @@ public:
 
 class MockExecutionPlanDescriptor : public ExecutionPlanDescriptor
 {
+private:
+    // Backing storage for the default `ReturnRef` behavior of the tensor uid /
+    // alignment accessors. Tests that exercise alignment enforcement program
+    // their own EXPECT_CALL / ON_CALL with their own backing vectors.
+    std::vector<int64_t> _emptyTensorStorage;
+
 public:
+    MockExecutionPlanDescriptor()
+    {
+        // Default the tensor uid / alignment accessors to empty vectors so tests
+        // that don't program them (e.g. legacy execute tests) skip alignment
+        // enforcement instead of dereferencing an unset reference return.
+        ON_CALL(*this, getTensorUids()).WillByDefault(::testing::ReturnRef(_emptyTensorStorage));
+        ON_CALL(*this, getTensorAlignments())
+            .WillByDefault(::testing::ReturnRef(_emptyTensorStorage));
+    }
+
     MOCK_METHOD(void, finalize, (), (override));
     MOCK_METHOD(bool, isFinalized, (), (const, override));
     MOCK_METHOD(void,
@@ -173,6 +209,10 @@ public:
                 getEngineConfig,
                 (),
                 (const, override));
+    MOCK_METHOD(int64_t, getEngineId, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getTensorUids, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getTensorAlignments, (), (const, override));
+    MOCK_METHOD(bool, isOverrideShapeEnabled, (), (const, override));
     MOCK_METHOD(hipdnnEnginePluginExecutionContext_t, getExecutionContext, (), (const, override));
 
     static hipdnnBackendDescriptorType_t getStaticType()
@@ -183,7 +223,28 @@ public:
 
 class MockVariantDescriptor : public VariantDescriptor
 {
+private:
+    // Backing storage for default `ReturnRef` behavior on the override accessors;
+    // tests that exercise the override-aware dispatch path program their own
+    // EXPECT_CALL / ON_CALL with their own backing vectors.
+    std::vector<int64_t> _emptyOverrideStorage;
+
 public:
+    MockVariantDescriptor()
+    {
+        // Make the override accessors return references to an empty vector by
+        // default so legacy tests that don't program the override APIs continue
+        // to take the non-override dispatch path.
+        ON_CALL(*this, getOverrideUniqueIds())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+        ON_CALL(*this, getOverrideShapes())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+        ON_CALL(*this, getOverrideStrides())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+        ON_CALL(*this, getOverrideLengths())
+            .WillByDefault(::testing::ReturnRef(_emptyOverrideStorage));
+    }
+
     MOCK_METHOD(void, finalize, (), (override));
     MOCK_METHOD(bool, isFinalized, (), (const, override));
     MOCK_METHOD(void,
@@ -206,6 +267,11 @@ public:
     MOCK_METHOD(const std::vector<const void*>&, getDataPointers, (), (const, override));
     MOCK_METHOD(const std::vector<int64_t>&, getTensorIds, (), (const, override));
 
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideUniqueIds, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideShapes, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideStrides, (), (const, override));
+    MOCK_METHOD(const std::vector<int64_t>&, getOverrideLengths, (), (const, override));
+
     static hipdnnBackendDescriptorType_t getStaticType()
     {
         return HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR;
@@ -215,6 +281,15 @@ public:
 ACTION_P(SetArg4ToInt64, value) // NOLINT
 {
     *static_cast<int64_t*>(arg4) = value;
+}
+
+/// Action helper: program `MockGraphDescriptor::getAttribute()` to write a
+/// boolean attribute value into the user-provided buffer (arg4) and report
+/// `count == 1` via the inout count pointer (arg3). Mirrors `SetArg4ToInt64`.
+ACTION_P(SetArg4ToBool, value) // NOLINT
+{
+    *static_cast<bool*>(arg4) = value;
+    *arg3 = int64_t{1};
 }
 
 } // namespace hipdnn_backend

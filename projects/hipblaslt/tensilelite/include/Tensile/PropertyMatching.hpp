@@ -41,6 +41,8 @@
 #include <Tensile/Properties.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -509,9 +511,16 @@ namespace TensileLite
                     streamJoin(std::cout, key, ", ");
                     std::cout << std::endl;
 
-                    std::cout << "Starting point: ";
-                    streamJoin(std::cout, origIter->key, ", ");
-                    std::cout << std::endl;
+                    if(origIter == table.end())
+                    {
+                        std::cout << "Starting point: <end>" << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "Starting point: ";
+                        streamJoin(std::cout, origIter->key, ", ");
+                        std::cout << std::endl;
+                    }
 
                     std::cout << "Rightward search..." << std::endl;
                 }
@@ -785,6 +794,11 @@ namespace TensileLite
             {
                 auto comp = [](Entry const& e, Key const& key) { return e.key < key; };
                 auto iter = std::lower_bound(table.begin(), table.end(), key, comp);
+
+                if(iter == table.end())
+                {
+                    return std::make_tuple(this->nullValue, std::numeric_limits<double>::max());
+                }
 
                 return (iter->key == key)
                            ? std::make_tuple(transform(iter->value), 0.0)
@@ -1419,3 +1433,4 @@ kd_tree_batch_1_again:
         };
     } // namespace Matching
 } // namespace TensileLite
+

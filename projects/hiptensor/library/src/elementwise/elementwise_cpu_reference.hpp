@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,52 +31,55 @@
 
 #include <hiptensor/hiptensor.h>
 
-hiptensorStatus_t hiptensorElementwisePermuteReference(const void*                       alpha,
-                                                const void*                       A,
-                                                const hiptensorTensorDescriptor_t descA,
-                                                const int32_t                     modeA[],
-                                                const hiptensorOperator_t         opA,
-                                                void*                             B,
-                                                const hiptensorTensorDescriptor_t descB,
-                                                const int32_t                     modeB[],
-                                                const hiptensorDataType_t         typeScalar,
-                                                const hipStream_t                 stream);
+HIPTENSOR_EXPORT hiptensorStatus_t
+    hiptensorElementwisePermuteReference(const void*                       alpha,
+                                         const void*                       A,
+                                         const hiptensorTensorDescriptor_t descA,
+                                         const int32_t                     modeA[],
+                                         const hiptensorOperator_t         opA,
+                                         void*                             B,
+                                         const hiptensorTensorDescriptor_t descB,
+                                         const int32_t                     modeB[],
+                                         const hiptensorDataType_t         typeScalar,
+                                         const hipStream_t                 stream);
 
-hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*                       alpha,
-                                                        const void*                       A,
-                                                        const hiptensorTensorDescriptor_t descA,
-                                                        const int32_t                     modeA[],
-                                                        const hiptensorOperator_t         opA,
-                                                        const void*                       gamma,
-                                                        const void*                       C,
-                                                        const hiptensorTensorDescriptor_t descC,
-                                                        const int32_t                     modeC[],
-                                                        const hiptensorOperator_t         opC,
-                                                        void*                             D,
-                                                        const hiptensorTensorDescriptor_t descD,
-                                                        const int32_t                     modeD[],
-                                                        hiptensorOperator_t               opAC,
-                                                        hiptensorDataType_t typeScalar,
-                                                        hipStream_t         stream);
-hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*                       alpha,
-                                                         const void*                       A,
-                                                         const hiptensorTensorDescriptor_t descA,
-                                                         const int32_t                     modeA[],
-                                                         const hiptensorOperator_t         opA,
-                                                         const void*                       beta,
-                                                         const void*                       B,
-                                                         const hiptensorTensorDescriptor_t descB,
-                                                         const int32_t                     modeB[],
-                                                         const hiptensorOperator_t         opB,
-                                                         const void*                       gamma,
-                                                         const void*                       C,
-                                                         const hiptensorTensorDescriptor_t descC,
-                                                         const int32_t                     modeC[],
-                                                         const hiptensorOperator_t         opC,
-                                                         void*                             D,
-                                                         const hiptensorTensorDescriptor_t descD,
-                                                         const int32_t                     modeD[],
-                                                         hiptensorOperator_t               opAB,
-                                                         hiptensorOperator_t               opABC,
-                                                         hiptensorDataType_t typeScalar,
-                                                         hipStream_t         stream);
+HIPTENSOR_EXPORT hiptensorStatus_t
+    hiptensorElementwiseBinaryOpReference(const void*                       alpha,
+                                          const void*                       A,
+                                          const hiptensorTensorDescriptor_t descA,
+                                          const int32_t                     modeA[],
+                                          const hiptensorOperator_t         opA,
+                                          const void*                       gamma,
+                                          const void*                       C,
+                                          const hiptensorTensorDescriptor_t descC,
+                                          const int32_t                     modeC[],
+                                          const hiptensorOperator_t         opC,
+                                          void*                             D,
+                                          const hiptensorTensorDescriptor_t descD,
+                                          const int32_t                     modeD[],
+                                          hiptensorOperator_t               opAC,
+                                          hiptensorDataType_t               typeScalar,
+                                          hipStream_t                       stream);
+HIPTENSOR_EXPORT hiptensorStatus_t
+    hiptensorElementwiseTrinaryOpReference(const void*                       alpha,
+                                           const void*                       A,
+                                           const hiptensorTensorDescriptor_t descA,
+                                           const int32_t                     modeA[],
+                                           const hiptensorOperator_t         opA,
+                                           const void*                       beta,
+                                           const void*                       B,
+                                           const hiptensorTensorDescriptor_t descB,
+                                           const int32_t                     modeB[],
+                                           const hiptensorOperator_t         opB,
+                                           const void*                       gamma,
+                                           const void*                       C,
+                                           const hiptensorTensorDescriptor_t descC,
+                                           const int32_t                     modeC[],
+                                           const hiptensorOperator_t         opC,
+                                           void*                             D,
+                                           const hiptensorTensorDescriptor_t descD,
+                                           const int32_t                     modeD[],
+                                           hiptensorOperator_t               opAB,
+                                           hiptensorOperator_t               opABC,
+                                           hiptensorDataType_t               typeScalar,
+                                           hipStream_t                       stream);

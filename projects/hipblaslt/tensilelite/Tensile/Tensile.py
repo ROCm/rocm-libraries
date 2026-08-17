@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,23 +26,29 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
+import ast
 import os
 import subprocess
 import sys
 import argparse
+import glob
+import json
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional
 
 from Tensile import __version__
 from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            DebugConfig, IsaVersion, coVersionMap
-from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
-from Tensile.Common.Capabilities import makeIsaInfoMap
+from Tensile.Common.Architectures import ARCH_COMPILER_TARGET, architectureMap, \
+                                         baseArchName, detectGlobalCurrentISA, \
+                                         gfxToIsa, isaToGfx
+from Tensile.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
+from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -50,6 +56,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -74,7 +81,10 @@ def executeStepsInConfig(
         cCompiler: str,
         debugConfig: DebugConfig,
         deviceId: int,
-        probSolDict: dict
+        probSolDict: dict,
+        buildOnly: bool = False,
+        solutionPoolFiles: list = None,
+        archNames: Optional[List[str]] = None,
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -92,29 +102,45 @@ def executeStepsInConfig(
         asmToolchain (AssemblyToolchain): The toolchain for making assembly kernels.
         srcToolchain (SourceToolchain): The toolchain for making source kernels.
         cCompiler (str): The C compiler to use.
+        buildOnly (bool): If True, generate and build kernels but skip benchmarking.
+        solutionPoolFiles (list): Resolved paths to library logic YAMLs to use as solution pools.
+        archNames (list): The gfx names this build was asked for, when the caller knows
+            them. Only the LibraryClient step needs them: it re-spawns
+            TensileCreateLibrary in a fresh process, and the ISA alone cannot say which
+            gfx1250 stepping to rebuild for.
     """
 
     buildTmpPath = outputPath / "build_tmp"
+
     ##############################################################################
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
-        BenchmarkProblems.main(
-            config["BenchmarkProblems"],
-            config["UseCache"],
-            asmToolchain,
-            srcToolchain,
-            cCompiler,
-            outputPath,
-            buildTmpPath,
-            debugConfig,
-            deviceId,
-            gfxName,
-            isaInfoMap,
-            probSolDict,
-        )
+    if "BenchmarkProblems" in config:       
+        with timing_context("python_benchmark_problems"):
+            BenchmarkProblems.main(
+                config.get("Backend", {}),
+                config["BenchmarkProblems"],
+                config["UseCache"],
+                asmToolchain,
+                srcToolchain,
+                cCompiler,
+                outputPath,
+                buildTmpPath,
+                debugConfig,
+                deviceId,
+                gfxName,
+                isaInfoMap,
+                probSolDict,
+                buildOnly,
+                solutionPoolFiles,
+            )
+        flush_timing_buffer()
         print1("")
+
+    if buildOnly:
+        print1("# Build-only mode: skipping LibraryLogic and LibraryClient.")
+        return
 
     ##############################################################################
     # Library Logic
@@ -130,15 +156,17 @@ def executeStepsInConfig(
                 libraryLogicConfig = config["LibraryLogic"]
             else:
                 libraryLogicConfig = {}
-            LibraryLogic.main(
-                libraryLogicConfig,
-                srcToolchain.compiler,
-                outputPath,
-                debugConfig.splitGSU,
-                debugConfig.printSolutionRejectionReason,
-                debugConfig.printIndexAssignmentInfo,
-                isaInfoMap,
-            )
+            with timing_context("python_library_logic"):
+                LibraryLogic.main(
+                    libraryLogicConfig,
+                    srcToolchain.compiler,
+                    outputPath,
+                    debugConfig.splitGSU,
+                    debugConfig.printSolutionRejectionReason,
+                    debugConfig.printIndexAssignmentInfo,
+                    isaInfoMap,
+                )
+            flush_timing_buffer()
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -152,15 +180,18 @@ def executeStepsInConfig(
             libraryClientConfig = config["LibraryClient"]
         else:
             libraryClientConfig = {}
-        ClientWriter.main(
-            libraryClientConfig,
-            asmToolchain.assembler,
-            cCompiler,
-            isaInfoMap,
-            outputPath,
-            deviceId,
-            gfxName,
-        )
+        with timing_context("python_client_writer"):
+            ClientWriter.main(
+                libraryClientConfig,
+                asmToolchain.assembler,
+                cCompiler,
+                isaInfoMap,
+                outputPath,
+                deviceId,
+                gfxName,
+                archNames=archNames,
+            )
+        flush_timing_buffer()
         print1("")
 
 
@@ -174,9 +205,19 @@ def addCommonArguments(argParser):
     def splitExtraParameters(par):
         """
         Allows the --global-parameters option to specify any parameters from the command line.
+
+        Each argument is a ``key=value`` pair. The value is parsed as a Python literal
+        (number, string, tuple, list, dict, bool, or None) via ``ast.literal_eval``.
+        Arbitrary expressions are rejected so a CLI/CI argument cannot execute code.
         """
-        (key, value) = par.split("=")
-        value = eval(value)
+        (key, value) = par.split("=", 1)
+        try:
+            value = ast.literal_eval(value)
+        except (ValueError, SyntaxError) as e:
+            raise argparse.ArgumentTypeError(
+                f"invalid --global-parameters value for '{key}': {value!r} must be a "
+                f"Python literal (e.g. 5, True, 'text', [1, 2])"
+            ) from e
         return (key, value)
 
     argParser.add_argument("-d", "--device", dest="device", default=0, type=int, \
@@ -206,9 +247,15 @@ def addCommonArguments(argParser):
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
         action="store", default="yaml", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH),
+    argParser.add_argument("--prebuilt-client", default=str(TENSILE_CLIENT_PATH), \
         type=os.path.abspath, help="Specify the full path to a pre-built tensilelite-client executable")
-
+    argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
+        help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
+    argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
+    argParser.add_argument("--cpu-only", dest="cpuOnly", action="store_true", default=False, \
+        help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
+             "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
+             "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
 
@@ -234,6 +281,9 @@ def argUpdatedGlobalParameters(args):
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
         rv["PrebuiltClient"] = args.prebuilt_client
+    if args.MXScaleFormat:
+        print1("# Command-line override: MXScaleFormat")
+        rv["MXScaleFormat"] = args.MXScaleFormat
 
     for key, value in args.global_parameters:
         rv[key] = value
@@ -249,37 +299,25 @@ def get_gpu_max_frequency_smi(device_id):
     Get the maximum frequency of the specified GPU device
     '''
     try:
-        # Run rocm-smi command and capture output
-        result = subprocess.run(['rocm-smi', '-s'], capture_output=True, text=True)
+        # Run amd-smi command and capture the GFX clock info as JSON
+        result = subprocess.run(
+            ['amd-smi', 'metric', '-g', str(device_id), '--clock', '--json'],
+            capture_output=True, text=True)
 
         if result.returncode != 0:
-           print(f"Error running rocm-smi: {result.stderr}")
+           print(f"Error running amd-smi: {result.stderr}")
            return None
 
-        # Parse the output
-        lines = result.stdout.split('\n')
-        sclk_section = False
+        data = json.loads(result.stdout)
+        clocks = data['gpu_data'][0]['clock']
+
+        # Collect the max GFX (sclk) clock across all gfx engines/partitions
         frequencies = []
-
-        # Look for the sclk section of the specified device
-        for line in lines:
-            line = line.split(" ")
-            if 'sclk' in line and f"GPU{device_id}" in line:
-                sclk_section = True
-                continue
-
-           # Parse frequencies in the sclk section
-            if sclk_section:
-                for part in line:
-                    if part.endswith("Mhz"):
-                        try:
-                            frequency = part.replace("Mhz", "")
-                            frequencies.append(int(frequency))
-                        except ValueError:
-                            print(f"Error parsing frequency: {part}")
-                        break
-                if "socclk" in line:
-                    break
+        for name, info in clocks.items():
+            if name.startswith('gfx'):
+                max_clk = info.get('max_clk', {}).get('value')
+                if isinstance(max_clk, int):
+                    frequencies.append(max_clk)
 
         # Return the maximum frequency found
         return max(frequencies) if frequencies else None
@@ -292,13 +330,12 @@ def get_gpu_max_frequency(device_id):
     try:
         from hip import hip
     except ImportError:
-        print("HIP module not found. Installing it now...")
-        # Install the HIP module using pip
-        subprocess.run("python3 -m pip install --upgrade pip", shell=True)
-        subprocess.run("python3 -m pip install --index-url https://test.pypi.org/simple/ hip-python", shell=True)
-
-        from hip import hip
-        print("HIP module successfully installed.")
+        # hip-python is optional and intentionally NOT auto-installed here.
+        # Auto-installing from a package index at build time is a supply-chain
+        # risk (ROCM-26748 / SEC-00581) and hip-python has no wheel on some
+        # platforms (e.g. Windows). Return None so the caller falls back to
+        # amd-smi (get_gpu_max_frequency_smi) and then the manual prompt.
+        return None
 
     def hip_check(call_result):
         err, result = call_result[0], call_result[1]
@@ -314,10 +351,22 @@ def get_gpu_max_frequency(device_id):
 
     return freq // 1000 if freq else None
 
-def get_user_max_frequency():
+def get_user_max_frequency() -> Optional[int]:
     '''
-    Get the maximum frequency from the user when the GPU frequency cannot be determined
+    Get the maximum frequency from the user when the GPU frequency cannot be determined.
+    Returns None if the GPU frequency cannot be determined.
     '''
+    # Non-interactive guard: when stdin is not a tty (CI, --build-only via
+    # pytest, etc.) we cannot prompt.  Returning None is safe because:
+    #   - The caller in Tensile() already handles None/<=0 with a warning and
+    #     skips store_max_frequency().
+    #   - The downstream consumer (LibraryLogic.read_max_freq) also handles a
+    #     missing MAX_FREQ env var gracefully (returns None, caller checks).
+    #   - The entire frequency block is gated on `not buildOnly`, so build-only
+    #     runs never reach this path.
+    if not sys.stdin.isatty():
+        printWarning("Cannot prompt for GPU frequency in non-interactive mode")
+        return None
     while True:
         try:
             user_input = input("Please enter the maximum frequency (MHz): ")
@@ -468,15 +517,28 @@ def Tensile(userArgs):
             help="Alternate format for config_file(s): first file is alternate config "
             "and optional second file is size list")
     argParser.add_argument("--use-cache", dest="useCache", action="store_true",
-            help="Ignore cache; redo parameter forking and solution generation")
+            help="Bypass redo parameter forking and solution generation and used existing solutions.")
+    argParser.add_argument("--build-only", dest="buildOnly", action="store_true",
+            help="Generate and compile kernels but skip benchmarking. "
+                 "Useful for splitting compilation and benchmarking across runs/nodes. "
+                 "First run using this flag, then rerun with --use-cache.")
     argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
             help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
+    argParser.add_argument("--solution-pool", dest="solutionPool", default=None,
+            help="Glob pattern matching library logic YAML file(s). Solutions from the "
+                 "matching file (by ProblemType) will be used as the solution pool instead "
+                 "of generating from ForkParameters. "
+                 "Example: '3_LibraryLogic/*.yaml'")
+    argParser.add_argument("--gpu-targets", dest="gpuTargets", default=None,
+            help="Semicolon-separated GPU targets (e.g. gfx942). "
+                 "Overrides ISA auto-detection and YAML config ISA.")
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
+    buildOnly = args.buildOnly
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
 
@@ -498,6 +560,18 @@ def Tensile(userArgs):
         for key,value in prob_sol_map.items():
             print1(f'#  Restored Prob-Solution From Log: [Prob:{key},Sol:{value}]')
 
+    solutionPoolFiles = None
+    if args.solutionPool:
+        pool = args.solutionPool
+        if os.path.isdir(pool):
+            globPattern = os.path.join(pool, "**", "*.yaml")
+        else:
+            globPattern = pool
+        solutionPoolFiles = sorted(f for f in glob.iglob(globPattern, recursive=True) if os.path.isfile(f))
+        if not solutionPoolFiles:
+            printExit("--solution-pool '{}' matched no files".format(args.solutionPool))
+        print1("#  Solution pool: {} files".format(len(solutionPoolFiles)))
+
     # 2nd half of splash
     if len(configPaths) == 1:
         print1("#  Config: {}".format(configPaths[0]))
@@ -510,6 +584,13 @@ def Tensile(userArgs):
 
     print1("# Restoring default globalParameters")
     restoreDefaultGlobalParameters()
+
+    # Stash the --cpu-only flag in undocumented internal plumbing so the deep seams
+    # (Architectures ISA spoof, frequency-probe skip, ClientWriter launch stub) can read
+    # it without threading a new parameter through executeStepsInConfig. Set AFTER
+    # restoreDefaultGlobalParameters() (which would otherwise clobber it back to the
+    # default False). Kept out of the documented --global-parameters surface.
+    globalParameters["CpuOnly"] = args.cpuOnly
 
     if args.LogicFormat:
         globalParameters['LogicFormat'] = args.LogicFormat
@@ -543,35 +624,50 @@ def Tensile(userArgs):
             }]
         }
         config["BenchmarkProblems"] = [[base["ProblemType"], solParams]]
-
+    
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
+
+    # Backend selection precedence:
+    # 1) YAML Backend (with strict validation)
+    # 2) tensile (default)
+    yaml_backend = config.get("Backend", None)
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
 
-    if 'LibraryLogic' in config and UseEffLike:
+    if 'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters["CpuOnly"]:
         max_frequency = get_gpu_max_frequency(device_id)
 
         if not max_frequency or max_frequency <= 0:
-            max_frequency = get_gpu_max_frequency_smi(device_id) # Using rocm-smi just in case
+            max_frequency = get_gpu_max_frequency_smi(device_id) # Using amd-smi just in case
 
         if not max_frequency or max_frequency <= 0:
             print(f"Could not detect valid GPU frequency for device {device_id}")
             max_frequency = get_user_max_frequency()
 
-        print(f"Successfully retrieve Max frequency: {max_frequency} for device {device_id}")
-        store_max_frequency(max_frequency)
+        if not max_frequency or max_frequency <= 0:
+            printWarning("Could not determine GPU frequency. "
+                         "Skipping frequency-dependent configuration.")
+        else:
+            print(f"Successfully retrieved max frequency: "
+                  f"{max_frequency} for device {device_id}")
+            store_max_frequency(max_frequency)
 
     cxxCompiler, \
     cCompiler, \
-    offloadBundler, \
-    enumerator = validateToolchain(args.CxxCompiler,
-                                   args.CCompiler,
-                                   args.OffloadBundler,
-                                   ToolchainDefaults.DEVICE_ENUMERATOR)
+    offloadBundler = validateToolchain(args.CxxCompiler,
+                                       args.CCompiler,
+                                       args.OffloadBundler)
+
+    if args.gpuTargets:
+        enumerator = None  # not needed — ISA comes from --gpu-targets
+    else:
+        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR if args.rocm_agent_enumerator is None else args.rocm_agent_enumerator)
+
     asmToolchain = makeAssemblyToolchain(
         cxxCompiler,
         offloadBundler,
@@ -583,18 +679,66 @@ def Tensile(userArgs):
         offloadBundler,
     )
 
-    if "ISA" in config["GlobalParameters"]:
+    # Requested gfx names, kept alongside the ISAs so architectures that share a
+    # compiler target (gfx1250's steppings) can still be told apart. The ISA and
+    # auto-detect paths identify hardware by ISA alone, which resolves to the
+    # shipping stepping; a config can name a stepping explicitly, see below.
+    archNames = []
+    if args.gpuTargets:
+        isaList = []
+        for arch in args.gpuTargets.split(";"):
+            arch = arch.strip()
+            if not arch:
+                raise ValueError(f"Invalid GPU target: '{arch}'")
+            isa = gfxToIsa(arch)
+            # The ISA alone is too weak a check: it comes from a regex that stops at
+            # the first non-hex character, so a name that merely looks like a stepping
+            # (gfx1250v1, gfx1250v) still resolves to (12,5,0) and would silently
+            # build the shipping stepping. Check the base name, so target IDs and
+            # predicates (gfx942:xnack-, gfx950[cu=64]) keep working as before.
+            if isa is None or baseArchName(arch) not in architectureMap:
+                raise ValueError(f"Unrecognized GPU target: '{arch}'")
+            isaList.append(isa)
+            archNames.append(arch)
+    elif "ISA" in config["GlobalParameters"]:
         isaList = [IsaVersion(isa[0], isa[1], isa[2]) for isa in config["GlobalParameters"]["ISA"]]
 
     else:
         isaList = [detectGlobalCurrentISA(device_id, enumerator)]
 
-    if IsaVersion(9,5,0) in isaList:
-        printWarning("HardwareMonitor currently disabled for gfx950")
+    # `Architecture:` predates the stepping split and was silently ignored here, so
+    # it is read for the one thing the ISA cannot express -- which stepping -- and
+    # deliberately not for ISA selection, which stays with `ISA:` and auto-detect.
+    # A name for an ISA this build does not cover is therefore ignored as before,
+    # rather than applying an unrelated architecture's capabilities; a stepping is
+    # the one name where ignoring it silently builds the other stepping instead.
+    if not archNames:
+        for arch in str(config["GlobalParameters"].get("Architecture", "")).split(";"):
+            arch = arch.strip()
+            if not arch:
+                continue
+            isa = gfxToIsa(arch)
+            if isa is None or baseArchName(arch) not in architectureMap:
+                raise ValueError(f"Unrecognized Architecture in config: '{arch}'")
+            if isa in isaList:
+                archNames.append(arch)
+            elif baseArchName(arch) in ARCH_COMPILER_TARGET:
+                raise ValueError(
+                    f"Architecture '{arch}' in config requests a stepping of ISA "
+                    f"{tuple(isa)}, which this build does not cover ({isaList}); "
+                    "align the config's ISA with it or drop the stepping."
+                )
+
+    if IsaVersion(9, 5, 0) in isaList or IsaVersion(12, 5, 0) in isaList:
+        printWarning("HardwareMonitor currently disabled for gfx950 and gfx1250")
         globalParameters["HardwareMonitor"] = False
 
     isaInfoMap = makeIsaInfoMap(isaList, cxxCompiler)
+    applyArchCapOverrides(isaInfoMap, archNames)
     assignGlobalParameters(config.get("GlobalParameters", {}), isaInfoMap)
+
+    # gfx1250 v0/v1 share ISA (12,5,0); pass the concrete stepping name so StinkyTofu picks the right cost table.
+    globalParameters["StinkyTofuArchName"] = "gfx1250v0" if any(baseArchName(a) == "gfx1250v0" for a in archNames) else ""
 
     overrideParameters = argUpdatedGlobalParameters(args)
 
@@ -607,7 +751,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly, solutionPoolFiles, archNames=archNames)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

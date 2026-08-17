@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,35 +37,19 @@ namespace rocsparse
         position_t();
         ~position_t();
 
-        rocsparse_status copy_value(rocsparse_pointer_mode mode,
-                                    int64_t                batch_index,
-                                    int64_t*               value,
-                                    hipStream_t            stream) const;
-
-        rocsparse_status copy_async(rocsparse_pointer_mode mode,
-                                    rocsparse_indextype    indextype,
-                                    void*                  value,
-                                    hipStream_t            stream) const;
-
         rocsparse_status create_position_async(int64_t             batch_count,
                                                rocsparse_indextype indextype,
                                                hipStream_t         stream);
-
         rocsparse_status free_position_async(hipStream_t stream);
-
-        rocsparse_indextype get_position_indextype() const;
-        const void*         get_position() const;
-        void*               get_position();
-        rocsparse_status    set_position_batch_count(int64_t, hipStream_t stream);
-        int64_t             get_position_batch_count() const;
-        int64_t             get_position_stride() const;
-        rocsparse_status    copy_position_async(rocsparse_pointer_mode pointer_mode,
-                                                rocsparse_indextype    position_indextype,
-                                                void*                  position,
-                                                hipStream_t            stream) const;
-
         rocsparse_status set_max_position_async(hipStream_t stream);
         rocsparse_status copy_position_async(const position_t* that, hipStream_t stream);
+
+    public:
+        int64_t             get_batch_count() const;
+        int64_t             get_stride() const;
+        rocsparse_indextype get_indextype() const;
+        const void*         get_position() const;
+        void*               get_position();
     };
 
 }

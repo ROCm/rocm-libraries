@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/Task.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -61,7 +63,9 @@ namespace TensileLite
            && solutions.problemType.cType == problem.c().dataType()
            && solutions.problemType.dType == problem.d().dataType()
            && solutions.problemType.computeType == problem.computeType()
-           && solutions.problemType.groupedGemm == problem.groupedGemm())
+           && solutions.problemType.groupedGemm == problem.groupedGemm()
+           && solutions.problemType.mxBlockA == problem.mxBlockA()
+           && solutions.problemType.mxBlockB == problem.mxBlockB())
             return true;
         return false;
     }
@@ -76,7 +80,13 @@ namespace TensileLite
         switch(searchType)
         {
         case SolutionLibrarySearchType::DEFAULT:
-            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task);
+            // streamKDynamicQueueSupported() excludes StreamK dynamic-queue /
+            // work-stealing solutions (SK4 and the dynamic sub-path of SK5) on
+            // devices whose XCD count is not a power of two, warning the user
+            // once. This is reject-and-continue: selection falls through to
+            // another (SK3-static / non-StreamK) solution for the GEMM.
+            return (*solutions.problemPredicate)(problem) && (*solutions.taskPredicate)(task)
+                   && solutions.streamKDynamicQueueSupported(problem, hardware);
             break;
         case SolutionLibrarySearchType::GEMM_TYPE_ONLY:
             return isGemmTypeSame(solutions, problem);
@@ -121,7 +131,7 @@ namespace TensileLite
  *
  */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    struct TENSILE_API SolutionLibrary
+    struct TENSILELITEHOST_EXPORT SolutionLibrary
     {
         virtual ~SolutionLibrary() = default;
 
@@ -207,6 +217,13 @@ namespace TensileLite
         {
             return SolutionVector<MySolution>();
         }
+
+        // Get the library filename for debug output (if available)
+        virtual std::string getLibraryFileName() const
+        {
+            return "";
+        }
     };
 
 } // namespace TensileLite
+

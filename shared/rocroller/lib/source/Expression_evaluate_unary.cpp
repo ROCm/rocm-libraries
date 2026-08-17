@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 
@@ -84,10 +61,13 @@ namespace rocRoller::Expression::EvaluateDetail
         uint32_t evaluate(uint32_t const& arg) const
         {
             assertNonNullPointer(arg);
-            AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
             if(arg == 0)
                 return std::numeric_limits<uint32_t>::max() / 2;
+
+            // When the divisor is 1, this constant has no use, so return 0.
+            if(arg == 1)
+                return 0;
 
             auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
@@ -359,7 +339,7 @@ namespace rocRoller::Expression::EvaluateDetail
                 mask = (static_cast<UnsignedARG>(1) << this->expr.width) - 1;
             }
 
-            UnsignedARG result = (arg >> this->expr.offset) & mask;
+            UnsignedARG result = (unsignedArg >> this->expr.offset) & mask;
 
             // Sign extend if needed
             if constexpr(std::is_signed_v<ARG>)
@@ -403,10 +383,14 @@ namespace rocRoller::Expression::EvaluateDetail
         int evaluate(uint32_t const& arg) const
         {
             assertNonNullPointer(arg);
-            AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
             if(arg == 0)
                 return 0;
+
+            // When the divisor is 1, we set the MSB of MagicShift to 1 so we can detect this case
+            // by checking the MSB.
+            if(arg == 1)
+                return 1 << 31;
 
             auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 

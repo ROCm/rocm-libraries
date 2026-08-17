@@ -2,7 +2,7 @@
  #
  # MIT License
  #
- # Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ # Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  #
  # Permission is hereby granted, free of charge, to any person obtaining a copy
  # of this software and associated documentation files (the "Software"), to deal
@@ -36,30 +36,30 @@ add_hiptensor_test(reduction_cpu_impl_test ${ReductionConfig} ${ReductionTestSou
 
 set (ReductionRank1TestSources ${ReductionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank1_reduction_test.cpp)
-set (ReductionRank1TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/rank1_test_params.yaml)
+set (ReductionRank1TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/rank1_test_params.yaml)
 add_hiptensor_test(rank1_reduction_test ${ReductionRank1TestConfig}  ${ReductionRank1TestSources})
 
 set (ReductionRank2TestSources ${ReductionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_reduction_test.cpp)
-set (ReductionRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/rank2_test_params.yaml)
+set (ReductionRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/rank2_test_params.yaml)
 add_hiptensor_test(rank2_reduction_test ${ReductionRank2TestConfig}  ${ReductionRank2TestSources})
 
 set (ReductionRank3TestSources ${ReductionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank3_reduction_test.cpp)
-set (ReductionRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/rank3_test_params.yaml)
+set (ReductionRank3TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/rank3_test_params.yaml)
 add_hiptensor_test(rank3_reduction_test ${ReductionRank3TestConfig}  ${ReductionRank3TestSources})
 
 set (ReductionRank4TestSources ${ReductionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank4_reduction_test.cpp)
-set (ReductionRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/rank4_test_params.yaml)
+set (ReductionRank4TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/rank4_test_params.yaml)
 add_hiptensor_test(rank4_reduction_test ${ReductionRank4TestConfig}  ${ReductionRank4TestSources})
 
 set (ReductionRank5TestSources ${ReductionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank5_reduction_test.cpp)
-set (ReductionRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/rank5_test_params.yaml)
+set (ReductionRank5TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/rank5_test_params.yaml)
 add_hiptensor_test(rank5_reduction_test ${ReductionRank5TestConfig}  ${ReductionRank5TestSources})
 
 set (ReductionRank6TestSources ${ReductionCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank6_reduction_test.cpp)
-set (ReductionRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/rank6_test_params.yaml)
+set (ReductionRank6TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/rank6_test_params.yaml)
 add_hiptensor_test(rank6_reduction_test ${ReductionRank6TestConfig}  ${ReductionRank6TestSources})

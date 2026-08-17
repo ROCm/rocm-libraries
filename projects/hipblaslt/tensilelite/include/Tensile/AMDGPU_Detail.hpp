@@ -29,6 +29,8 @@
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/Comparison.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace std
 {
     template <>
@@ -40,3 +42,4 @@ namespace std
         }
     };
 } // namespace std
+

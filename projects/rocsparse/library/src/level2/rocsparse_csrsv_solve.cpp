@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,8 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                                         rocsparse_dnvec_descr       y,
                                         rocsparse_solve_policy      policy,
                                         rocsparse_csrsv_info        csrsv_info,
-                                        void*                       temp_buffer)
+                                        void*                       temp_buffer,
+                                        bool                        force_conj)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -76,15 +77,14 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
     char* ptr = reinterpret_cast<char*>(temp_buffer);
 
     ptr += 256;
-
     // done array
     int32_t*     done_array = reinterpret_cast<int32_t*>(ptr);
     const size_t done_array_size_in_bytes
-        = ((sizeof(int32_t) * A->rows * A->batch_count - 1) / 256 + 1) * 256;
+        = ((sizeof(int32_t) * A->rows * batch_count - 1) / 256 + 1) * 256;
     ptr += done_array_size_in_bytes;
 
     // Initialize buffers
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, done_array_size_in_bytes, stream));
 
     const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
     if(csrsv == nullptr)
@@ -92,19 +92,53 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
 
-    csrsv_info->set_pivot_batch_count(batch_count, stream);
+    csrsv_info->create_singularity_numeric_exact(batch_count, A->col_type, handle->stream);
 
     // If diag type is unit, re-initialize zero pivot to remove structural zeros
+
     switch(diag_type)
     {
     case rocsparse_diag_type_unit:
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_max_async(
-            batch_count, A->col_type, csrsv_info->get_zero_pivot(), stream));
+        RETURN_IF_ROCSPARSE_ERROR(
+            rocsparse::assign_max_async(1, A->col_type, csrsv_info->get_position(), stream));
+        if(A->col_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+                batch_count,
+                (int32_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
+                (const int32_t*)csrsv_info->get_position(),
+                handle->stream));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+                batch_count,
+                (int64_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
+                (const int64_t*)csrsv_info->get_position(),
+                handle->stream));
+        }
+
         break;
     }
     case rocsparse_diag_type_non_unit:
     {
+        if(A->col_type == rocsparse_indextype_i32)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int32_t>(
+                batch_count,
+                (int32_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
+                (const int32_t*)csrsv_info->get_position(),
+                handle->stream));
+        }
+        else
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_device_async<int64_t>(
+                batch_count,
+                (int64_t*)csrsv_info->get_singularity_numeric_exact()->get_position(),
+                (const int64_t*)csrsv_info->get_position(),
+                handle->stream));
+        }
         break;
     }
     }
@@ -148,23 +182,48 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         local_row_data        = csrsv->get_transposed_row_ptr();
         local_col_data        = csrsv->get_transposed_col_ind();
         local_val_data        = csrt_val;
-        local_val_data_stride = A->nnz;
-        fill_mode             = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
-                                                                         : rocsparse_fill_mode_lower;
+        local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
+        switch(fill_mode)
+        {
+        case rocsparse_fill_mode_lower:
+            fill_mode = rocsparse_fill_mode_upper;
+            break;
+        case rocsparse_fill_mode_upper:
+            fill_mode = rocsparse_fill_mode_lower;
+            break;
+        }
+    }
+    else if(force_conj)
+    {
+        void*         conj_val        = ptr;
+        const int64_t conj_val_stride = A->nnz;
+        const size_t  sizeof_T        = rocsparse::datatype_sizeof(A->data_type);
+
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(conj_val,
+                                           A->const_val_data,
+                                           sizeof_T * A->nnz * A->batch_count,
+                                           hipMemcpyDeviceToDevice,
+                                           stream));
+
+        RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
+            handle, A->batch_count, A->nnz, A->data_type, conj_val, conj_val_stride)));
+
+        local_val_data        = conj_val;
+        local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
     }
 
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
     const int         asicRev       = handle->asic_rev;
-    const bool        sleep_  = (gcn_arch_name == rocpsarse_arch_names::gfx908 && asicRev < 2);
+    const bool        sleep_  = (gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2);
     const uint32_t    wfsize_ = sleep_ ? 64 : handle->wavefront_size;
     rocsparse::csrsv_launch_kernel_t csrsv_launch_kernel{};
     RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(
         &csrsv_launch_kernel, 1024, wfsize_, sleep_, A->row_type, A->col_type, A->data_type));
 
 #undef CSRSV_DIM
-
+    auto numeric_exact_position = csrsv_info->get_singularity_numeric_exact();
     csrsv_launch_kernel(handle,
-                        A->batch_count,
+                        batch_count,
                         A->rows,
                         alpha,
                         alpha_stride,
@@ -182,11 +241,11 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                         done_array,
                         csrsv->get_row_map(),
                         0,
-                        csrsv_info->get_zero_pivot(),
+                        numeric_exact_position->get_position(),
+                        1,
                         descr->base,
                         fill_mode,
                         descr->diag_type,
                         handle->pointer_mode == rocsparse_pointer_mode_host);
-
     return rocsparse_status_success;
 }

@@ -36,7 +36,8 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
-       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16))
+       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
+       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32))
     {
         return false;
     }
@@ -87,6 +88,43 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
 }
 
 /*******************************************************************************
+ * Validate the Matmul Arguments for General Batched GEMM Case
+ * In General Batched GEMM case:
+ * 1. Only Tensorwide scaling is supported.
+ * 2. Only HIPBLASLT_EPILOGUE_DEFAULT is supported.
+ ******************************************************************************/
+ inline rocblaslt_status validateMatmulArgsForGeneralBatchedGemm(RocblasltContractionProblem::ScalingFormat scaleAType,
+                                                                 RocblasltContractionProblem::ScalingFormat scaleBType,
+                                                                 const rocblaslt_epilogue& epilogue)
+{
+    rocblaslt_status status = rocblaslt_status_continue;
+    
+    if((scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleAType == RocblasltContractionProblem::ScalingFormat::None) &&
+       (scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleBType == RocblasltContractionProblem::ScalingFormat::None))
+        status = rocblaslt_status_continue;
+    else
+        status = rocblaslt_status_invalid_value;
+
+    if(epilogue != ROCBLASLT_EPILOGUE_DEFAULT)
+        status = rocblaslt_status_invalid_value;
+    
+    if(status != rocblaslt_status_continue)
+    {
+        log_error(__func__,
+                  "invalid args for General Batched GEMM",
+                  "scaleAType",
+                  rocblaslt_scaling_format_to_string(scaleAType),
+                  "scaleBtype",
+                  rocblaslt_scaling_format_to_string(scaleBType),
+                  "epilogue",
+                  rocblaslt_epilogue_to_string(epilogue));
+    }   
+    return status;
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -113,6 +151,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
                                            int64_t                       batch_stride_b = 0,
                                            int64_t                       batch_stride_c = 0,
                                            int64_t                       batch_stride_d = 0,
+                                           int64_t                       batch_offset_a = 0,
+                                           int64_t                       batch_offset_b = 0,
+                                           int64_t                       batch_offset_c = 0,
+                                           int64_t                       batch_offset_d = 0,
                                            const rocblaslt_pointer_mode& pointermode
                                            = rocblaslt_pointer_mode_host)
 {
@@ -173,17 +215,30 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(batch_stride_a < 0 || batch_stride_b < 0 || batch_stride_c < 0 || batch_stride_d < 0)
     {
 #ifndef CODE_COVERAGE
-        std::cerr << "matrix and stride size must be positive" << std::endl;
+        std::cerr << "matrix and stride size must be zero or positive" << std::endl;
 #endif
         return rocblaslt_status_invalid_size;
     }
 
-    // number of batches of matrics A,B,C,D must be the same and negative
+    // Batch offsets are expressed in elements and converted to bytes; sub-byte
+    // (MX) data types are not byte-addressable, so a nonzero offset is unsupported.
+    if((batch_offset_a != 0 && hip_datatype_is_mxtype(type_a))
+       || (batch_offset_b != 0 && hip_datatype_is_mxtype(type_b))
+       || (batch_offset_c != 0 && hip_datatype_is_mxtype(type_c))
+       || (batch_offset_d != 0 && hip_datatype_is_mxtype(type_d)))
+    {
+#ifndef CODE_COVERAGE
+        std::cerr << "matrix offset is not supported for sub-byte (MX) data types" << std::endl;
+#endif
+        return rocblaslt_status_not_implemented;
+    }
+
+    // number of batches of matrics A,B,C,D must be the same and positive
     if(num_batches_a != num_batches_b || num_batches_a != num_batches_c
        || num_batches_a != num_batches_d || num_batches_a < 1)
     {
 #ifndef CODE_COVERAGE
-        std::cerr << " number of batches of matrics A,B,C,D must be the same and negative"
+        std::cerr << " number of batches of matrics A,B,C,D must be the same and positive"
                   << std::endl;
 #endif
         return rocblaslt_status_invalid_size;
@@ -291,15 +346,19 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                     hipDataType&                a_type,
                                                     int64_t&                    lda,
                                                     int64_t&                    batch_stride_a,
+                                                    int64_t&                    batch_offset_a,
                                                     hipDataType&                b_type,
                                                     int64_t&                    ldb,
                                                     int64_t&                    batch_stride_b,
+                                                    int64_t&                    batch_offset_b,
                                                     hipDataType&                c_type,
                                                     int64_t&                    ldc,
                                                     int64_t&                    batch_stride_c,
+                                                    int64_t&                    batch_offset_c,
                                                     hipDataType&                d_type,
                                                     int64_t&                    ldd,
                                                     int64_t&                    batch_stride_d,
+                                                    int64_t&                    batch_offset_d,
                                                     int64_t&                    lde,
                                                     int64_t&                    batch_stride_e,
                                                     void*&                      bias,
@@ -317,7 +376,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     hipblasOperation_t opB = matmul_descr->op_B;
 
     auto matmul_swizzle_status
-        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, a_type, b_type, swizzleA, swizzleB);
+        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, matA->type, matB->type, swizzleA, swizzleB);
 
     if(matmul_swizzle_status != rocblaslt_status_continue)
         return matmul_swizzle_status;
@@ -329,18 +388,21 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     a_type                = matA->type;
     lda                   = matA->ld;
     batch_stride_a        = matA->batch_stride;
+    batch_offset_a        = matA->batch_offset;
 
     // matrix B
     int num_batches_b = matB->batch_count;
     b_type            = matB->type;
     ldb               = matB->ld;
     batch_stride_b    = matB->batch_stride;
+    batch_offset_b    = matB->batch_offset;
 
     // matrix C
     int num_batches_c = matC->batch_count;
     c_type            = matC->type;
     ldc               = matC->ld;
     batch_stride_c    = matC->batch_stride;
+    batch_offset_c    = matC->batch_offset;
 
     // matrix D
     int64_t num_rows_d    = matD->m;
@@ -349,12 +411,39 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     d_type                = matD->type;
     ldd                   = matD->ld;
     batch_stride_d        = matD->batch_stride;
+    batch_offset_d        = matD->batch_offset;
 
     compute_type = matmul_descr->compute_type;
 
     m = num_rows_d;
     n = num_cols_d;
     k = (opA == HIPBLAS_OP_N) ? num_cols_a : num_rows_a;
+
+    // Validate: batch offsets are only valid with POINTER_ARRAY mode (general batched)
+    bool hasNonZeroOffset = (batch_offset_a != 0) || (batch_offset_b != 0)
+                         || (batch_offset_c != 0) || (batch_offset_d != 0);
+
+    if(hasNonZeroOffset)
+    {
+        // Check that all matrices are using POINTER_ARRAY mode
+        if(matA->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matB->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matC->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+           || matD->batch_mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+        {
+            log_error(__func__,
+                      "Batch offsets require all matrices to use batch_mode=POINTER_ARRAY. ",
+                      "Current modes: A=", matA->batch_mode,
+                      ", B=", matB->batch_mode,
+                      ", C=", matC->batch_mode,
+                      ", D=", matD->batch_mode,
+                      ". Offsets: A=", batch_offset_a,
+                      ", B=", batch_offset_b,
+                      ", C=", batch_offset_c,
+                      ", D=", batch_offset_d);
+            return rocblaslt_status_invalid_value;
+        }
+    }
 
     auto matmul_status = validateMatmulArgs(m,
                                             n,
@@ -380,6 +469,10 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                             batch_stride_b,
                                             batch_stride_c,
                                             batch_stride_d,
+                                            batch_offset_a,
+                                            batch_offset_b,
+                                            batch_offset_c,
+                                            batch_offset_d,
                                             matmul_descr->pointermode);
 
     const void* alphaVecPtr     = matmul_descr->pointermode ? alpha : nullptr;
@@ -435,4 +528,39 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
         *dst              = onePtr;
     }
 }
+
+inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const void* ptr)
+{
+    if (!ptr) {
+        return {0.0, 0.0};
+    }
+
+    switch (type)
+    {
+        case HIP_R_32F:
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+        case HIP_R_64F:
+            return {*(reinterpret_cast<const double*>(ptr)), 0.0};
+        case HIP_R_32I:
+            return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
+        
+        case HIP_R_16F:
+        case HIP_R_16BF:
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+
+        case HIP_C_32F:
+        {
+            auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
+            return {static_cast<double>(val.real()), static_cast<double>(val.imag())};
+        }
+        case HIP_C_64F:
+        {
+            return *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
+        }
+            
+        default:
+            return {0.0, 0.0};
+    }
+}
+
 #endif

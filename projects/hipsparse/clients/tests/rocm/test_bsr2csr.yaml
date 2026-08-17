@@ -73,3 +73,15 @@ Tests:
              rma10,
              scircuit,
              sme3Dc]
+
+- name: bsr2csr_graph_test
+  category: pre_checkin
+  function: bsr2csr
+  precision: *single_double_precisions_complex_real
+  M: [1472]
+  N: [1976]
+  block_dim: [4]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  dirA: [HIPSPARSE_DIRECTION_ROW]
+  graph_test: true

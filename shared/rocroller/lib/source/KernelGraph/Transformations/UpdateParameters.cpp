@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /*
  * Update parameters and propagate tile information.
@@ -204,14 +181,24 @@ namespace rocRoller
             {
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
+
+                AssertFatal(lhs != LayoutType::Count && rhs != LayoutType::Count,
+                            "Invalid LayoutType::Count in expression");
+
                 if(lhs == rhs)
                     return lhs;
                 if(lhs == LayoutType::MATRIX_A && rhs == LayoutType::MATRIX_B)
                     return LayoutType::MATRIX_ACCUMULATOR;
                 if(lhs == LayoutType::MATRIX_ACCUMULATOR || rhs == LayoutType::MATRIX_ACCUMULATOR)
                     return LayoutType::MATRIX_ACCUMULATOR;
-                Throw<FatalError>(
-                    "Unhandled LayoutType combination: ", ShowValue(lhs), ShowValue(rhs));
+                if(lhs == LayoutType::None && rhs != LayoutType::None)
+                    return rhs;
+                if(lhs != LayoutType::None && rhs == LayoutType::None)
+                    return lhs;
+                Throw<FatalError>("Unhandled LayoutType combination: ",
+                                  ShowValue(lhs),
+                                  ShowValue(rhs),
+                                  ShowValue(expr));
             }
 
             template <CUnary UnaryExp>
@@ -360,6 +347,254 @@ namespace rocRoller
             std::map<Operations::OperationTag, Dimension> m_newDimensions;
         };
 
+        struct SetUserSizeVisitor
+        {
+            SetUserSizeVisitor(KernelGraph& graph, CommandParametersPtr params)
+                : m_graph(graph)
+                , m_params(params)
+            {
+            }
+
+            template <typename T>
+            Dimension visitDimension(int tag, T const& dim)
+            {
+                return dim;
+            }
+
+            Dimension visitDimension(int tag, MacroTile const& dim)
+            {
+                Log::debug("SetUserSizeVisitor: Processing MacroTile {}", tag);
+
+                if(dim.layoutType == LayoutType::Count)
+                {
+                    Log::debug("SetUserSizeVisitor: Skipping MacroTile {} with invalid layout type",
+                               tag);
+                    return dim;
+                }
+
+                // Find User by traversing the graph structure:
+                // For loads: MacroTile <- ConstructMacroTile <- SubDims <- Split <- User
+                // For stores: MacroTile -> DestructMacroTile -> SubDims -> Join -> User
+
+                // Pair of User tag and the list of subdimension tags along the path
+                std::vector<std::pair<std::optional<int>, std::vector<int>>> userPaths;
+
+                // Try load path
+                auto loadSubDims
+                    = m_graph.coordinates.getInputNodeIndices(tag, isEdge<ConstructMacroTile>)
+                          .to<std::vector>();
+                if(!loadSubDims.empty())
+                {
+                    auto loadUserTag = only(
+                        m_graph.coordinates.getInputNodeIndices(loadSubDims[0], isEdge<Split>));
+                    userPaths.push_back({loadUserTag, loadSubDims});
+                    Log::debug("SetUserSizeVisitor: Found load path for MacroTile {}", tag);
+                }
+
+                // Try store path
+                auto storeSubDims
+                    = m_graph.coordinates.getOutputNodeIndices(tag, isEdge<DestructMacroTile>)
+                          .to<std::vector>();
+                if(!storeSubDims.empty())
+                {
+                    auto storeUserTag = only(
+                        m_graph.coordinates.getOutputNodeIndices(storeSubDims[0], isEdge<Join>));
+                    userPaths.push_back({storeUserTag, storeSubDims});
+                    Log::debug("SetUserSizeVisitor: Found store path for MacroTile {}", tag);
+                }
+
+                if(userPaths.empty())
+                {
+                    Log::debug("SetUserSizeVisitor: No User found via ConstructMacroTile/Split or "
+                               "DestructMacroTile/Join for MacroTile {}",
+                               tag);
+                    return dim;
+                }
+
+                // Process each user path
+                for(const auto& [maybeUserTag, subDims] : userPaths)
+                {
+                    if(!maybeUserTag.has_value())
+                    {
+                        Log::debug("SetUserSizeVisitor: No User tag in path for MacroTile {}", tag);
+                        continue;
+                    }
+
+                    auto userTag   = maybeUserTag.value();
+                    auto maybeUser = m_graph.coordinates.get<User>(userTag);
+                    if(!maybeUser)
+                    {
+                        Log::debug(
+                            "SetUserSizeVisitor: Tag {} is not a User for MacroTile {} - skipping",
+                            userTag,
+                            tag);
+                        continue;
+                    }
+
+                    // Skip if this user already has a size set
+                    if(maybeUser->size)
+                    {
+                        Log::debug("SetUserSizeVisitor: User {} already has size, skipping",
+                                   userTag);
+                        continue;
+                    }
+
+                    auto hasDynamicSize = [&](int subDimTag) -> bool {
+                        auto size = getSize(m_graph.coordinates.getNode(subDimTag));
+                        return !rocRoller::Expression::evaluationTimes(
+                            size)[rocRoller::Expression::EvaluationTime::Translate];
+                    };
+
+                    // Filter subdimensions to keep only those with dynamic (non-literal) sizes
+                    std::vector<int> dynamicSubDims;
+                    for(auto subDimTag : subDims)
+                    {
+                        if(hasDynamicSize(subDimTag))
+                            dynamicSubDims.push_back(subDimTag);
+                    }
+
+                    // Current implementation assumes 2D Users (e.g., GEMM M×N, K×N, M×K)
+                    // or 4D Users with two fixed size dimensions and two dynamic subdimensions (pre-tiling)
+                    AssertFatal(
+                        dynamicSubDims.size() == 2,
+                        "SetUserSizeVisitor: Expected 2 dynamic subdimensions for MacroTile "
+                        "{}, got {}",
+                        tag,
+                        dynamicSubDims.size());
+
+                    // Determine which dimension has the largest stride based on memory layout
+                    // Column-major (rightmost fastest): leftmost dim has largest stride
+                    // Row-major (leftmost fastest): rightmost dim has largest stride
+                    bool rightmostFastest  = m_params->transposeMemoryAccess[dim.layoutType];
+                    int  maxStrideDimIndex = rightmostFastest ? 0 : 1;
+
+                    auto subDim
+                        = m_graph.coordinates.get<SubDimension>(dynamicSubDims[maxStrideDimIndex]);
+                    AssertFatal(
+                        subDim && subDim->size && subDim->stride,
+                        "SubDimension must have size and stride defined for User.size calculation");
+
+                    // User.size = maximum extent = (stride × size) of the slowest-changing dimension
+                    auto user = maybeUser.value();
+                    user.size = subDim->stride * subDim->size;
+                    m_graph.coordinates.setElement(userTag, user);
+
+                    Log::debug(
+                        "SetUserSizeVisitor: Set User {}.size to {} based on SubDimension {} "
+                        "for MacroTile {}",
+                        userTag,
+                        toString(user.size),
+                        dynamicSubDims[maxStrideDimIndex],
+                        tag);
+                }
+
+                return dim;
+            }
+
+            Dimension visitDimension(int tag, Linear const& dim)
+            {
+                Log::debug("SetUserSizeVisitor: Processing Linear {}", tag);
+
+                // Find User by traversing the graph structure:
+                // For loads: Linear <- Flatten <- SubDims <- Split <- User
+                // For stores: Linear -> Split -> SubDims -> Join -> User
+
+                // Pair of User tag and the list of subdimension tags along the path
+                std::vector<std::pair<std::optional<int>, std::vector<int>>> userPaths;
+
+                // Try load path
+                auto loadSubDims = m_graph.coordinates.getInputNodeIndices(tag, isEdge<Flatten>)
+                                       .to<std::vector>();
+                if(!loadSubDims.empty())
+                {
+                    auto loadUserTag = only(
+                        m_graph.coordinates.getInputNodeIndices(loadSubDims[0], isEdge<Split>));
+                    userPaths.push_back({loadUserTag, loadSubDims});
+                    Log::debug("SetUserSizeVisitor: Found load path for Linear {}", tag);
+                }
+
+                // Try store path
+                auto storeSubDims = m_graph.coordinates.getOutputNodeIndices(tag, isEdge<Split>)
+                                        .to<std::vector>();
+                if(!storeSubDims.empty())
+                {
+                    auto storeUserTag = only(
+                        m_graph.coordinates.getOutputNodeIndices(storeSubDims[0], isEdge<Join>));
+                    userPaths.push_back({storeUserTag, storeSubDims});
+                    Log::debug("SetUserSizeVisitor: Found store path for Linear {}", tag);
+                }
+
+                if(userPaths.empty())
+                {
+                    Log::debug("SetUserSizeVisitor: No User found via Flatten/Split or Split/Join "
+                               "for Linear {}",
+                               tag);
+                    return dim;
+                }
+
+                // Process each user path
+                for(const auto& [maybeUserTag, subDims] : userPaths)
+                {
+                    // This could be relaxed if needed, but the user size
+                    // computation will need to be updated
+                    AssertFatal(subDims.size() == 1,
+                                "Expected one SubDimension in path for Linear {}",
+                                tag);
+
+                    if(!maybeUserTag.has_value())
+                    {
+                        Log::debug("SetUserSizeVisitor: No User tag in path for Linear {}", tag);
+                        continue;
+                    }
+
+                    auto userTag   = maybeUserTag.value();
+                    auto maybeUser = m_graph.coordinates.get<User>(userTag);
+                    if(!maybeUser)
+                    {
+                        Log::debug(
+                            "SetUserSizeVisitor: Tag {} is not a User for Linear {} - skipping",
+                            userTag,
+                            tag);
+                        continue;
+                    }
+
+                    // Skip if this user already has a size set
+                    if(maybeUser->size)
+                    {
+                        Log::debug("SetUserSizeVisitor: User {} already has size, skipping",
+                                   userTag);
+                        continue;
+                    }
+
+                    auto subDim = m_graph.coordinates.get<SubDimension>(subDims[0]);
+                    AssertFatal(subDim && subDim->size && subDim->stride,
+                                "SubDimension must have size and stride defined for User.size");
+
+                    auto user = maybeUser.value();
+                    user.size = subDim->stride * subDim->size;
+                    ;
+                    m_graph.coordinates.setElement(userTag, user);
+
+                    Log::debug("SetUserSizeVisitor: Set User {}.size to {} for Linear {}",
+                               userTag,
+                               toString(user.size),
+                               tag);
+                }
+
+                return dim;
+            }
+
+            template <typename T>
+            Operation visitOperation(int tag, T const& op)
+            {
+                return op;
+            }
+
+        private:
+            KernelGraph&         m_graph;
+            CommandParametersPtr m_params;
+        };
+
         KernelGraph UpdateParameters::apply(KernelGraph const& original)
         {
             if(!m_params)
@@ -372,6 +607,10 @@ namespace rocRoller
             // rewriteDimensions walks the control graph.
             auto infoVisitor = PropagateTileInfoVisitor(kgraph);
             rewriteDimensions(kgraph, infoVisitor);
+
+            // Set User.size for tensor contraction inputs
+            auto userSizeVisitor = SetUserSizeVisitor(kgraph, m_params);
+            rewriteDimensions(kgraph, userSizeVisitor);
 
             return kgraph;
         }

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_geblttrf_npvt.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -44,6 +45,7 @@ rocblas_status rocsolver_geblttrf_npvt_strided_batched_impl(rocblas_handle handl
                                                             const rocblas_stride strideC,
                                                             rocblas_int* info,
                                                             const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("geblttrf_npvt_strided_batched", "--nb", nb, "--nblocks", nblocks, "--lda",
                         lda, "--strideA", strideA, "--ldb", ldb, "--strideB", strideB, "--ldc", ldc,
@@ -112,6 +114,10 @@ rocblas_status rocsolver_geblttrf_npvt_strided_batched_impl(rocblas_handle handl
         shiftC, incc, ldc, strideC, info, batch_count, (T*)scalars, work1, work2, work3, work4,
         (T*)pivotval, (rocblas_int*)pivotidx, (rocblas_int*)iipiv, (rocblas_int*)iinfo1,
         (rocblas_int*)iinfo2, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

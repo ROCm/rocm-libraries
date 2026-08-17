@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #include "program_options.hpp"
 
+#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_parse_data.hpp"
@@ -33,6 +34,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -303,6 +305,7 @@ try
     std::string algo_method_str = "";
 
     bool verify = 0;
+    bool ulp    = 0;
 
     bool                  grouped_gemm;
     std::vector<int64_t>  m, n, k;
@@ -383,10 +386,16 @@ try
          "Specific stride of strided_batched matrix E, second dimension * leading dimension.")
 
         ("alpha",
-          value<float>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
+          value<double>(&arg.alpha)->default_value(1.0), "specifies the scalar alpha")
+
+        ("alphai",
+          value<double>(&arg.alphai)->default_value(0.0), "specifies the scalar alphai")
 
         ("beta",
-         value<float>(&arg.beta)->default_value(0.0), "specifies the scalar beta")
+         value<double>(&arg.beta)->default_value(0.0), "specifies the scalar beta")
+
+        ("betai",
+          value<double>(&arg.betai)->default_value(0.0), "specifies the scalar betai")
 
         ("function,f",
          value<std::string>(&function)->default_value("matmul"), "BLASLt function to test. "
@@ -394,23 +403,23 @@ try
 
         ("precision,r",
          value<std::string>(&precision)->default_value("f16_r"), "Precision of matrix A,B,C,D  "
-         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r")
+         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("a_type",
          value<std::string>(&a_type), "Precision of matrix A. "
-        "Options: f32_r,f16_r,bf16_r,i8_r")
+        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("b_type",
          value<std::string>(&b_type), "Precision of matrix B. "
-        "Options: f32_r,f16_r,bf16_r,i8_r")
+        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("c_type",
          value<std::string>(&c_type), "Precision of matrix C. "
-         "Options: f32_r,f16_r,bf16_r,i8_r")
+         "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("d_type",
          value<std::string>(&d_type), "Precision of matrix D. "
-        "Options: f32_r,f16_r,bf16_r,i8_r")
+        "Options: f32_r,f16_r,bf16_r,f64_r,i32_r,i8_r,f32_c,f64_c")
 
         ("compute_type",
          value<std::string>(&compute_type)->default_value("f32_r"), "Precision of computation. "
@@ -426,20 +435,21 @@ try
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
-        "Options: f16_r,bf16_r")
+        "Options: f16_r,bf16_r,f32_c,f64_c")
 
         ("initialization",
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
-         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01")
+         "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
+         "fp16_accumulator_probe")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
-         "N = no transpose, T = transpose")
+         "N = no transpose, T = transpose, C = conjugate transpose")
 
         ("transB",
          value<char>(&arg.transB)->default_value('N'),
-         "N = no transpose, T = transpose")
+         "N = no transpose, T = transpose, C = conjugate transpose")
 
         ("swizzleA",
          value<bool>(&arg.swizzle_a)->default_value(false),
@@ -453,6 +463,10 @@ try
          value<int32_t>(&arg.batch_count)->default_value(1),
          "Number of matrices. Only applicable to batched and strided_batched routines")
 
+        ("batch_mode",
+         value<int32_t>(&arg.batch_mode)->default_value(0),
+         "Strided Batched GEMM or General Batched GEMM. 0 = Strided Batched GEMM, 1 = General Batched GEMM")         
+
         ("HMM",
          value<bool>(&arg.HMM)->default_value(false),
          "Parameter requesting the use of HipManagedMemory")
@@ -461,6 +475,10 @@ try
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
 
+        ("ulp",
+         value<bool>(&ulp)->default_value(false),
+         "Report ULP (unit in the last place) error vs CPU; reports max and average. Implies --verify.")
+
         ("iters,i",
          value<int32_t>(&arg.iters)->default_value(tuningEnv? 1000 : 10),
          "Iterations to run inside timing loop")
@@ -468,6 +486,65 @@ try
         ("cold_iters,j",
          value<int32_t>(&arg.cold_iters)->default_value(tuningEnv? 1000 : 2),
          "Cold Iterations to run before entering the timing loop")
+
+        ("adaptive",
+         value<bool>(&arg.adaptive)->default_value(false),
+         "Enable adaptive timing: collect timed samples and report the mean with "
+         "median/min/cv columns. Tune with the --adaptive_* options below. Not compatible "
+         "with --iters / --cold_iters.")
+
+        ("adaptive_warmup_time",
+         value<float>(&arg.warmup_time)->default_value(hipblaslt_bench::adaptive_defaults::warmup_time),
+         "Adaptive timing: warm up until this many ms have elapsed")
+
+        ("adaptive_sample_time",
+         value<float>(&arg.sample_time)->default_value(hipblaslt_bench::adaptive_defaults::sample_time),
+         "Adaptive timing: target wall-time (ms) of each timed sample; sets the back-to-back "
+         "batch size (larger = fewer, bigger samples; a value >= adaptive_measure_time makes "
+         "the whole measurement a single batch)")
+
+        ("adaptive_measure_time",
+         value<float>(&arg.measure_time)->default_value(hipblaslt_bench::adaptive_defaults::measure_time),
+         "Adaptive timing: minimum total measurement time in ms")
+
+        ("adaptive_max_measure_time",
+         value<float>(&arg.max_measure_time)->default_value(hipblaslt_bench::adaptive_defaults::max_measure_time),
+         "Adaptive timing: measurement ceiling in ms (0 = unbounded)")
+
+        ("adaptive_min_iters",
+         value<int32_t>(&arg.min_iters)->default_value(hipblaslt_bench::adaptive_defaults::min_iters),
+         "Adaptive timing: floor on total timed iterations (with adaptive_measure_time, the "
+         "minimum collected before convergence can end the run)")
+
+        ("adaptive_max_iters",
+         value<int32_t>(&arg.max_iters)->default_value(hipblaslt_bench::adaptive_defaults::max_iters),
+         "Adaptive timing: ceiling on total timed iterations (0 = unbounded)")
+
+        ("adaptive_noise_threshold",
+         value<float>(&arg.noise_threshold)->default_value(hipblaslt_bench::adaptive_defaults::noise_threshold),
+         "Adaptive timing: convergence target. Past the floor (adaptive_min_iters and "
+         "adaptive_measure_time) the run stops when the mean's relative standard error "
+         "(stddev/mean/sqrt(n)) falls below this fraction, e.g. 0.01 = 1% (status converged); "
+         "or, if it cannot, when the robust spread (IQR/median) plateaus (status stable); else "
+         "at the ceiling (adaptive_max_measure_time / adaptive_max_iters, status noisy). "
+         "0 disables both checks: the run goes to the ceiling")
+
+        ("adaptive_stability_threshold",
+         value<float>(&arg.stability_threshold)->default_value(hipblaslt_bench::adaptive_defaults::stability_threshold),
+         "Adaptive timing: noise-plateau fallback. When the precision target cannot be met, "
+         "stop anyway (status stable) once the robust spread (IQR/median) settles -- i.e. the "
+         "last adaptive_stability_window readings vary by less than this fraction. 0 disables "
+         "the fallback (a non-converging run then goes to the ceiling, status noisy)")
+
+        ("adaptive_stability_window",
+         value<int32_t>(&arg.stability_window)->default_value(hipblaslt_bench::adaptive_defaults::stability_window),
+         "Adaptive timing: number of recent rel_iqr readings the stability fallback tests "
+         "for a plateau (>= 2)")
+
+        ("adaptive_stability_interval",
+         value<int32_t>(&arg.stability_interval)->default_value(hipblaslt_bench::adaptive_defaults::stability_interval),
+         "Adaptive timing: record one rel_iqr reading for the stability fallback every N "
+         "samples (>= 1)")
 
         ("algo_method",
          value<std::string>(&algo_method_str)->default_value("heuristic"),
@@ -505,13 +582,17 @@ try
          bool_switch(&arg.bias_vector)->default_value(false),
          "Apply bias vector")
 
+        ("bias_stride",
+         value<int32_t>(&arg.bias_stride)->default_value(0),
+         "Stride within bias vector for strided batch cases where each batch has unique bias value.")
+
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = block, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -616,6 +697,19 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("sm_count_target",
+         value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
+         "Target compute-unit (CU) count for the matmul kernel selection and "
+         "persistent-grid sizing. 0 (default) means use all CUs the device exposes. "
+         "Negative values are rejected by the library.")
+
+        ("streamk_tile_scheduling",
+         value<std::string>(&hipblaslt_bench_options::streamk_tile_scheduling_mode_str())->default_value(""),
+         "Select the StreamK=5 tile scheduling sub-path via the "
+         "HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT extension attribute. "
+         "Accepts off|0, on|1, auto|2 (case-insensitive). When omitted the bench "
+         "leaves the attribute unset so the library default (auto) applies.")
+
         ("help,h", "produces this help message")
 
         ("version", "Prints the version number");
@@ -630,6 +724,62 @@ try
     {
         hipblaslt_cout << desc << std::endl;
         return 0;
+    }
+
+    // Reject misuse rather than silently ignore, so a misconfigured run never
+    // reports mislabeled numbers. The --adaptive_* options require --adaptive;
+    // conversely --iters/--cold_iters cannot be used with --adaptive (warmup and
+    // batch are sized adaptively) -- passing either is an error.
+    if(!arg.adaptive)
+    {
+        for(const char* opt : {"adaptive_warmup_time",
+                               "adaptive_sample_time",
+                               "adaptive_measure_time",
+                               "adaptive_max_measure_time",
+                               "adaptive_min_iters",
+                               "adaptive_max_iters",
+                               "adaptive_noise_threshold",
+                               "adaptive_stability_threshold",
+                               "adaptive_stability_window",
+                               "adaptive_stability_interval"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt << " requires --adaptive" << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    else
+    {
+        for(const char* opt : {"iters", "cold_iters"})
+        {
+            if(vm.count(opt) && !vm[opt].defaulted())
+            {
+                hipblaslt_cerr << "error: --" << opt
+                               << " cannot be used with --adaptive (use --adaptive_* options)"
+                               << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+        {
+            hipblaslt_bench::TimingConfig tmp;
+            tmp.warmup_time         = arg.warmup_time;
+            tmp.sample_time         = arg.sample_time;
+            tmp.min_iters           = arg.min_iters;
+            tmp.max_iters           = arg.max_iters;
+            tmp.measure_time        = arg.measure_time;
+            tmp.max_measure_time    = arg.max_measure_time;
+            tmp.noise_threshold     = arg.noise_threshold;
+            tmp.stability_threshold = arg.stability_threshold;
+            tmp.stability_window    = arg.stability_window;
+            tmp.stability_interval  = arg.stability_interval;
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(tmp); !err.empty())
+            {
+                hipblaslt_cerr << "error: " << err << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     hipblaslt_print_version();
@@ -722,6 +872,38 @@ try
         return 1;
     }
 
+    if(hipblaslt_bench_options::sm_count_target() < 0)
+    {
+        hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
+        return 1;
+    }
+
+    // Resolve --streamk_tile_scheduling (off|0, on|1, auto|2) into the tri-state mode
+    // forwarded to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. A negative result
+    // means "unset": leave the attribute untouched so the library default applies.
+    {
+        std::string mode = hipblaslt_bench_options::streamk_tile_scheduling_mode_str();
+        std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        int32_t resolved = -1;
+        if(mode.empty())
+            resolved = -1;
+        else if(mode == "off" || mode == "0")
+            resolved = 0;
+        else if(mode == "on" || mode == "1")
+            resolved = 1;
+        else if(mode == "auto" || mode == "2")
+            resolved = 2;
+        else
+        {
+            hipblaslt_cerr << "streamk_tile_scheduling must be one of off|0, on|1, auto|2."
+                           << std::endl;
+            return 1;
+        }
+        hipblaslt_bench_options::streamk_tile_scheduling_mode() = resolved;
+    }
+
     // transfer local variable state
     ArgumentModel_set_log_function_name(log_function_name);
 
@@ -794,8 +976,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
-    perf_monitor.set_device_id(device_id);
+    auto perf_monitor = EfficiencyMonitor::create();
+    perf_monitor->setDeviceId(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
@@ -839,7 +1021,7 @@ try
             + " is not equal to --d_type " + std::string(hip_datatype_to_string(arg.d_type)));
 
     bool is_f16 = arg.a_type == HIP_R_16F || arg.a_type == HIP_R_16BF;
-    bool is_f32 = arg.a_type == HIP_R_32F;
+    bool is_f32 = arg.a_type == HIP_R_32F || arg.a_type == HIP_C_32F;
     arg.compute_type
         = compute_type == "" ? (HIPBLAS_COMPUTE_32F) : string_to_hipblas_computetype(compute_type);
     if(arg.compute_type == HIPBLASLT_COMPUTE_TYPE_INVALID)
@@ -870,11 +1052,27 @@ try
     if(arg.initialization == static_cast<hipblaslt_initialization>(0))
         throw std::invalid_argument("Invalid value for --initialization " + initialization);
 
+    if(vm["initialization"].defaulted()
+       && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
+    {
+        arg.initialization = hipblaslt_initialization::uniform_low_precision;
+        hipblaslt_cerr << "Note: 'hpl' init produces ~50% zero rate for FP4. "
+                       << "Using 'uniform_low_precision' for FP4 by default. "
+                       << "Use '--initialization hpl' to override." << std::endl;
+    }
+
     arg.activation_type = string_to_hipblaslt_activation_type(activation_type);
     if(arg.activation_type == static_cast<hipblaslt_activation_type>(-1))
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
+
+    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride < arg.N[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= N when bias source is B and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is D and batch_mode is 0.");
 
     if(!(aux_type == "" || aux_type == "default" || arg.use_e))
         hipblaslt_cerr << "warning: --use_e not set but --aux_type is provided" << std::endl;
@@ -889,7 +1087,8 @@ try
            || (arg.a_type != string_to_hip_datatype("f16_r")
                && arg.a_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.a_type != string_to_hip_datatype("f8_r")
-               && arg.a_type != string_to_hip_datatype("bf16_r"))))
+               && arg.a_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
         hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
         return 1;
@@ -900,7 +1099,8 @@ try
            || (arg.b_type != string_to_hip_datatype("f16_r")
                && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.b_type != string_to_hip_datatype("f8_r")
-               && arg.b_type != string_to_hip_datatype("bf16_r"))))
+               && arg.b_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
         hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
         return 1;
@@ -915,6 +1115,16 @@ try
             return hipblaslt_scaling_format::Vector;
         if(s == 3)
             return hipblaslt_scaling_format::Block_32_UE8M0;
+        if(s == 4)
+            return hipblaslt_scaling_format::Block_16_UE8M0;
+        if(s == 5)
+            return hipblaslt_scaling_format::Block_32_UE4M3;
+        if(s == 6)
+            return hipblaslt_scaling_format::Block_16_UE4M3;
+        if(s == 7)
+            return hipblaslt_scaling_format::Block_32_UE5M3;
+        if(s == 8)
+            return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
         return hipblaslt_scaling_format::none;
@@ -923,35 +1133,45 @@ try
     arg.scaleB = scaleInt2Enum(scaleBFormat);
     arg.scaleC = scaleCFormat;
     arg.scaleD = scaleDFormat;
-
-    // Validation for F4 and F6
-    if(arg.a_type == HIP_R_4F_E2M1_EXT || arg.a_type == HIP_R_6F_E2M3_EXT
-       || arg.a_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleA))
-            throw std::invalid_argument("scaleA must be block format for F4 and F6 types");
-    }
-    if(arg.b_type == HIP_R_4F_E2M1_EXT || arg.b_type == HIP_R_6F_E2M3_EXT
-       || arg.b_type == HIP_R_6F_E3M2_EXT)
-    {
-        if(!isBlockScaling(arg.scaleB))
-            throw std::invalid_argument("scaleB must be block format for F4 and F6 types");
-    }
+    if(arg.batch_mode < 0 || arg.batch_mode > 1)
+        throw std::invalid_argument("Invalid value for --batch_mode " + std::to_string(arg.batch_mode));
+    /** Introduced this check to stay consistent with cublaslt behavior as documented at
+     *  https://docs.nvidia.com/cuda/cublas/#narrow-precision-data-types-usage under the 
+     *  Notes Section.
+     */
+    if(arg.batch_mode == 1 && (arg.scaleA == hipblaslt_scaling_format::Vector
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+        throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
+    if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE8M0
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+        throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4
     if(isBlockScaling(arg.scaleA))
     {
         if(arg.a_type != HIP_R_8F_E4M3 && arg.a_type != HIP_R_8F_E5M2
-           && arg.a_type != HIP_R_4F_E2M1_EXT && arg.a_type != HIP_R_6F_E2M3_EXT
-           && arg.a_type != HIP_R_6F_E3M2_EXT)
+           && arg.a_type != HIP_R_4F_E2M1 && arg.a_type != HIP_R_6F_E2M3
+           && arg.a_type != HIP_R_6F_E3M2)
             throw std::invalid_argument("Invalid a_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.a_type));
     }
     if(isBlockScaling(arg.scaleB))
     {
         if(arg.b_type != HIP_R_8F_E4M3 && arg.b_type != HIP_R_8F_E5M2
-           && arg.b_type != HIP_R_4F_E2M1_EXT && arg.b_type != HIP_R_6F_E2M3_EXT
-           && arg.b_type != HIP_R_6F_E3M2_EXT)
+           && arg.b_type != HIP_R_4F_E2M1 && arg.b_type != HIP_R_6F_E2M3
+           && arg.b_type != HIP_R_6F_E3M2)
             throw std::invalid_argument("Invalid b_type for block scaling format: "s
                                         + hip_datatype_to_string(arg.b_type));
     }
@@ -985,10 +1205,14 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify)
+    if(verify || ulp)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
+    }
+    if(ulp)
+    {
+        arg.ulp_check = 1;
     }
 
     switch(api_method)
@@ -1011,9 +1235,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    int status            = run_bench_test(arg, filter, any_stride, props);
-    freeEfficiencyMonitor();
-    return status;
+    return run_bench_test(arg, filter, any_stride, props);
 }
 catch(const std::invalid_argument& exp)
 {

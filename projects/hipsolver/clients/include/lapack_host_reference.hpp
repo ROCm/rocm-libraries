@@ -261,6 +261,18 @@ template <typename T>
 void cpu_potrs(hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, T* B, int ldb, int* info);
 
 template <typename T, typename S>
+void cpu_syev_heev(hipsolverEigMode_t  evect,
+                   hipsolverFillMode_t uplo,
+                   int                 n,
+                   T*                  A,
+                   int                 lda,
+                   S*                  W,
+                   T*                  work,
+                   int                 lwork,
+                   S*                  rwork,
+                   int*                info);
+
+template <typename T, typename S>
 void cpu_syevd_heevd(hipsolverEigMode_t  evect,
                      hipsolverFillMode_t uplo,
                      int                 n,
@@ -349,3 +361,7 @@ void cpu_sytrd_hetrd(
 template <typename T>
 void cpu_sytrf(
     hipsolverFillMode_t uplo, int n, T* A, int lda, int* ipiv, T* work, int lwork, int* info);
+
+template <typename T>
+void cpu_sytrs(
+    hipsolverFillMode_t uplo, int n, int nrhs, T* A, int lda, int* ipiv, T* B, int ldb, int* info);

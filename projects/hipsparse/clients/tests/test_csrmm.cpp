@@ -36,4 +36,5 @@ TEST_ROUTINE(csrmm,
              arg.transA,
              arg.transB,
              arg.dirA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);

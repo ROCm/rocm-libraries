@@ -47,7 +47,7 @@ bool BnFwdInference::IsApplicable(const ExecutionContext&,
         return false;
     if(!bn_problem.Is2D())
         return false;
-    if(!IsOCLInferTypeValid(bn_problem))
+    if(!IsInferTypeValid(bn_problem))
         return false;
 
     int activ_mode = bn_problem.GetActivationDesc().GetMode();
@@ -92,7 +92,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
                                    ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
                                    : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
 
-        if(problem.GetXDesc().GetLayout_t() == miopenTensorNHWC)
+        if(problem.GetXDesc().GetLayoutEnum() == miopenTensorNHWC)
         {
             xlocalsize = std::min(size_t{c / vectorsize}, max_localsize);
             xgridsize  = AlignUp(size_t{c / vectorsize}, xlocalsize);
@@ -108,13 +108,24 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             ylocalsize = max_localsize;
             ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
         }
-        zlocalsize = 1;
-        zgridsize  = 1;
 
         // HIP runtime does not support non-uniform blocks
         // Adjust the global worker sizes accordingly
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
+
+        zlocalsize                = 1;
+        size_t active_threads_xy  = xgridsize * ygridsize;
+        size_t max_active_threads = handle.GetMaxComputeUnits() * 32 *
+                                    handle.GetWavefrontWidth(); // considering max 32 waves per CU
+        if(active_threads_xy < max_active_threads)
+        {
+            zgridsize = std::min(size_t{(max_active_threads / active_threads_xy)}, size_t{n});
+        }
+        else
+        {
+            zgridsize = 1;
+        }
 
         auto kernel = KernelInfo{};
 
@@ -122,7 +133,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         kernel.kernel_name = "MIOpenBatchNormFwdInfer";
         if(problem.GetMode() == miopenBNSpatial)
         { // SPATIAL kernels
-            kernel.kernel_file += "SpatialHIP.cpp";
+            kernel.kernel_file += "Spatial.cpp";
             kernel.kernel_name += "SpatialEst";
             if(problem.isInverseVariance())
             {
@@ -131,7 +142,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         }
         else
         { // PER ACTIVATION
-            kernel.kernel_file += "PerActHIP.cpp";
+            kernel.kernel_file += "PerAct.cpp";
             kernel.kernel_name += "PerActivationEst";
             if(problem.isInverseVariance())
             {
@@ -149,8 +160,9 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GRP2", zlocalsize},
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
-            {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
             {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
+            {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
+            {"MIO_BN_GFX125X", (StartsWith(handle.GetDeviceName(), "gfx125") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
             {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
             {"MIO_BN_VEC_SIZE", vectorsize},
@@ -182,7 +194,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             float alpha_activ = problem.GetActivationDesc().GetAlpha();
             float beta_activ  = problem.GetActivationDesc().GetBeta();
 
-            if(params.xDesc->GetLayout_t() == miopenTensorNHWC)
+            if(params.xDesc->GetLayoutEnum() == miopenTensorNHWC)
             {
                 if(problem.isInverseVariance())
                 {

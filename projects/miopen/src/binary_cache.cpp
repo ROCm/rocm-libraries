@@ -54,9 +54,8 @@ static fs::path ComputeSysCachePath()
 {
     auto p = miopen::ExpandUser(GetSystemDbPath());
     if(!fs::exists(p))
-        return {};
-    else
-        return p;
+        p.clear();
+    return p;
 }
 
 static fs::path ComputeUserCachePath()

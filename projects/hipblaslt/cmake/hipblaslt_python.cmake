@@ -16,21 +16,14 @@ endmacro()
 # COMMAND lists.
 function(hipblaslt_configure_bundled_python_command python_binary_dir asan_options)
     # Set up a python command which sets PYTHONPATH and copies the current
-    # PATH to the build time invocation, invoking python with the -P option
-    # to enable additional environment protections.
+    # PATH to the build time invocation.
     if(WIN32)
         set(_ds "$<SEMICOLON>")
     else()
         set(_ds ":")
     endif()
     set(_python_path
-        # TODO: Order is important because the tensilelite directory incorrectly
-        # contains a "rocisa" directory which could be incorrectly inferred
-        # to be a namespace package. That tree should be re-organized to have
-        # a discrete python src dir.
         "${python_binary_dir}"
-        # TODO: This should not need to traverse to the parent directory once
-        # moved to the root.
         "${hipblaslt_SOURCE_DIR}/tensilelite"
     )
     list(JOIN _python_path "${_ds}" _python_path)

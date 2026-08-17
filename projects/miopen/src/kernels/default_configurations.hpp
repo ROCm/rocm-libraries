@@ -104,12 +104,16 @@
 #define MIO_BN_GFX110X 0
 #endif
 
+#ifndef MIO_BN_GFX115X
+#define MIO_BN_GFX115X 0
+#endif
+
 #ifndef MIO_BN_GFX120X
 #define MIO_BN_GFX120X 0
 #endif
 
-#ifndef MIO_BN_GFX115X
-#define MIO_BN_GFX115X 0
+#ifndef MIO_BN_GFX125X
+#define MIO_BN_GFX125X 0
 #endif
 
 #ifndef MIO_BN_VARIANT
@@ -128,6 +132,10 @@
 #define MIO_BN_VECTORIZE 0
 #endif
 
+#ifndef MIO_BN_VEC_SIZE
+#define MIO_BN_VEC_SIZE 1
+#endif
+
 #ifndef MIO_BN_STASH_METHOD
 #define MIO_BN_STASH_METHOD 0
 #endif
@@ -141,15 +149,12 @@
 #endif
 
 #ifndef MIO_BN_LDSGCN_SIZE
-#define MIO_BN_LDSGCN_SIZE 16
+// 4 SIMD with up to 16 wave each => at most 64 waves
+#define MIO_BN_LDSGCN_SIZE 64
 #endif
 
 #ifndef MIO_BN_LDS_SIZE
 #define MIO_BN_LDS_SIZE 256
-#endif
-
-#ifndef MIO_BN_NGRPS
-#define MIO_BN_NGRPS 1
 #endif
 
 #ifndef MIO_BN_C
@@ -158,6 +163,12 @@
 
 #ifndef MIO_BN_N
 #define MIO_BN_N 1
+#endif
+
+#ifndef MIO_BN_N_ELEMENTS
+#define MIO_BN_N_ELEMENTS MIO_BN_N
+// This is determined as such in the heuristics that select the kernels
+// (src/include/miopen/batchnorm/common_spatial.hpp: DefaultConfigSpatialMultiple)
 #endif
 
 #ifndef MIO_BN_NHW

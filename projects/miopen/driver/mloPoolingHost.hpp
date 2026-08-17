@@ -36,9 +36,11 @@
 #include <cmath>
 #include <cstring>
 #include <iomanip>
+#include <limits>
 #include <type_traits>
 
 #include "calcerr.hpp"
+#include <miopen/bfloat16.hpp>
 
 #if 0
 template<typename _T>
@@ -394,9 +396,7 @@ bool mloPoolingForwardRunHostAndVerify(PoolingConfig poolConf,
 
     bool match = true;
     Tcheck_ MAX_VAL(3.402823466e+38);
-    Tgpu_ G_MAX_VAL = (sizeof(Tgpu_) == 4 || sizeof(Tgpu_) == 8)
-                          ? static_cast<Tgpu_>(3.402823466e+38)
-                          : static_cast<Tgpu_>(65504);
+    Tgpu_ G_MAX_VAL = std::numeric_limits<Tgpu_>::max();
 
     for(int b = 0; b < bot_dims_strides.n_batchs && match; b++)
     {
@@ -458,9 +458,7 @@ bool mloPoolingForwardRunHostAndVerify_mt(PoolingConfig poolConf,
 
     std::atomic_bool match = true;
     Tcheck_ MAX_VAL(3.402823466e+38);
-    Tgpu_ G_MAX_VAL = (sizeof(Tgpu_) == 4 || sizeof(Tgpu_) == 8)
-                          ? static_cast<Tgpu_>(3.402823466e+38)
-                          : static_cast<Tgpu_>(65504);
+    Tgpu_ G_MAX_VAL = std::numeric_limits<Tgpu_>::max();
     std::mutex stats_mutex;
     miopen::par_ford(bot_dims_strides.n_batchs, bot_dims_strides.n_outputs)([&](int b, int o) {
         fwd_pooling_compute_verify<true>(bot_dims_strides,

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,12 +26,14 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
+#include "rocsparse_dense2bell.hpp"
 #include "rocsparse_dense2coo.hpp"
 #include "rocsparse_dense2csx_impl.hpp"
 #include "rocsparse_nnz_impl.hpp"
 
 #include <map>
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_dense_to_sparse_alg value_)
 {
@@ -43,10 +45,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_dense_to_sparse_alg value
         CASE(rocsparse_dense_to_sparse_alg_default);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_dense_to_sparse_alg value_)
@@ -87,6 +88,12 @@ namespace rocsparse
             else if(mat_B->format == rocsparse_format_csc)
             {
                 *buffer_size = sizeof(I) * mat_A->cols;
+            }
+            else if(mat_B->format == rocsparse_format_bell)
+            {
+                const int64_t mb = (mat_B->rows + mat_B->block_dim - 1) / mat_B->block_dim;
+
+                *buffer_size = sizeof(int64_t) * mb;
             }
             return rocsparse_status_success;
         }
@@ -135,6 +142,21 @@ namespace rocsparse
                                                               mat_A->ld,
                                                               (I*)temp_buffer,
                                                               (I*)&mat_B->nnz));
+                return rocsparse_status_success;
+            }
+            else if(mat_B->format == rocsparse_format_bell)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dense2bell_nnz_template(handle,
+                                                       mat_A->order,
+                                                       mat_A->rows,
+                                                       mat_A->cols,
+                                                       mat_B->descr,
+                                                       (const T*)mat_A->const_values,
+                                                       mat_A->ld,
+                                                       mat_B->block_dim,
+                                                       (int64_t*)temp_buffer,
+                                                       &mat_B->ell_cols));
                 return rocsparse_status_success;
             }
         }
@@ -192,7 +214,26 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
+        // BELL
+        if(mat_B->format == rocsparse_format_bell)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense2bell_template(handle,
+                                                                     mat_A->order,
+                                                                     mat_A->rows,
+                                                                     mat_A->cols,
+                                                                     mat_B->descr,
+                                                                     (const T*)mat_A->const_values,
+                                                                     mat_A->ld,
+                                                                     mat_B->block_dim,
+                                                                     mat_B->ell_cols,
+                                                                     (T*)mat_B->val_data,
+                                                                     (I*)mat_B->col_data));
+            return rocsparse_status_success;
+        }
+
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     typedef rocsparse_status (*dense_to_sparse_t)(rocsparse_handle              handle,

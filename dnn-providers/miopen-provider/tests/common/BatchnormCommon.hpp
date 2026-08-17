@@ -23,10 +23,10 @@ struct BatchnormTestCase
         : dims(std::move(dimsLocal))
         , seed(seedLocal)
     {
-        if(dims.size() != 4 && dims.size() != 5)
+        if(dims.size() < 3 || dims.size() > 5)
         {
             throw std::invalid_argument(
-                "dims must be either 4D (N, C, H, W) or 5D (N, C, D, H, W)");
+                "dims must be 3D (N, C, L), 4D (N, C, H, W), or 5D (N, C, D, H, W)");
         }
     }
 
@@ -40,6 +40,72 @@ struct BatchnormTestCase
         return ss;
     }
 };
+
+inline std::vector<BatchnormTestCase> getBnFwdInference1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 224}, seed},
+        {{2, 16, 512}, seed}, // Multi-batch
+        {{1, 64, 1024}, seed}, // Longer sequence
+        {{4, 3, 1}, seed}, // Minimal spatial (L=1)
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdInference1dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{8, 32, 2048}, seed}, // Large sequence
+        {{16, 128, 512}, seed}, // Many channels
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 224}, seed},
+        {{2, 16, 512}, seed},
+        {{1, 64, 1024}, seed},
+        {{4, 3, 1}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd1dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{8, 32, 2048}, seed},
+        {{16, 128, 512}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1}, seed}, // B=2, L=1 → B×L=2 > 1
+        {{1, 16, 14}, seed}, // B=1, L=14 → B×L=14 > 1
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingFull1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1}, seed}, // Minimal case
+        {{1, 3, 14}, seed}, // Small batch, moderate length
+        {{4, 8, 56}, seed}, // Medium size
+        {{2, 64, 128}, seed}, // Larger
+    };
+}
 
 // This is used for operation tests
 inline std::vector<BatchnormTestCase> getBatchnorm2dTestCases()

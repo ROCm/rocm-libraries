@@ -184,6 +184,33 @@ const auto& GetTestParams()
     return params;
 }
 
+// Subbatch chunking test case (3D convolution triggering 2-chunk processing)
+// MAX_GRID_SIZE = 16M, batch_chunk_size = 16M/k
+// n=17, k=1000000: batch_chunk_size=16, n>16 triggers 2-chunk processing
+auto GetSubbatchTestCase()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        TestCase{{17, 1, 1, 1, 1}, {1000000, 1, 1, 1, 1}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}, miopenHalf},
+        // clang-format on
+    };
+}
+
+// Subbatch chunking test case for 2D convolution (triggering 2-chunk processing)
+// MAX_GRID_SIZE = 16M, batch_chunk_size = 16M/k
+// n=1678, k=10000: batch_chunk_size=1677, n>1677 triggers 2-chunk processing
+// Using smaller k (10K) for faster weight allocation while still testing chunking
+auto GetSubbatchTestCase2D()
+{
+    using TestCase = miopen::unit_tests::ConvTestCase;
+    return std::vector{
+        // clang-format off
+        TestCase{{1678, 1, 1, 1}, {10000, 1, 1, 1}, {0, 0}, {1, 1}, {1, 1}, miopenHalf},
+        // clang-format on
+    };
+}
+
 } // namespace
 
 using GPU_UnitTestConvSolverDirectNaiveFwd_FP16  = GPU_UnitTestConvSolverFwd_FP16;
@@ -273,3 +300,17 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
+
+// Full: Subbatch chunking test (tests 2-chunk processing to prevent grid dimension overflow)
+INSTANTIATE_TEST_SUITE_P(FullSubbatch,
+                         GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetSubbatchTestCase())));
+
+// Full: Subbatch chunking test for 2D (tests 2-chunk processing to prevent grid dimension overflow)
+INSTANTIATE_TEST_SUITE_P(FullSubbatch2D,
+                         GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
+                         testing::Combine(testing::Values(GetTestParams()),
+                                          testing::Values(miopenConvolutionAlgoDirect),
+                                          testing::ValuesIn(GetSubbatchTestCase2D())));

@@ -18,6 +18,7 @@ Key features
 - **Autotuning (Incremental Autotuning):** Automatically benchmarks multiple kernel candidates to select the best-performing one.
 - **Thread-Safe Design:** The cache is safe for concurrent use and is shared across all threads operating under a single `hiptensorHandle_t  <../api-reference/api-reference.html#hiptensorHandle>`_.
 - **Persistence Support:** The cache state can be saved to disk and reloaded in future runs, avoiding repeated tuning.
+
 At its core, the plan cache maps a specific problem configuration (represented by `hiptensorOperationDescriptor_t <../api-reference/api-reference.html#hiptensorOperationDescriptor>`_) to an optimized execution plan (`hiptensorPlan_t <../api-reference/api-reference.html#hiptensorPlan>`_).
 
 ------------------------------------

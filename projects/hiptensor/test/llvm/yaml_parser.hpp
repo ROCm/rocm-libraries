@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,5 +39,10 @@ namespace hiptensor
         static std::optional<ConfigT> loadFromString(std::string const& yaml = "");
         static void storeToFile(std::string const& filePath, ConfigT const& config);
     };
-}
 
+    // Flush LLVM's buffered output streams and shut down LLVM's ManagedStatic
+    // objects. Must be called before returning from main() in any binary that
+    // uses LLVM YAML I/O, to prevent use-after-free at process exit when the
+    // DLL unload order differs from a direct run (e.g. under ctest on Windows).
+    void llvmShutdown();
+}

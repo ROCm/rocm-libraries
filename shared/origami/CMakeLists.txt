@@ -1,29 +1,7 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.24.4)
+cmake_minimum_required(VERSION 3.25.2)
 
 project(Origami VERSION 1.0.0 LANGUAGES CXX)
 
@@ -44,52 +22,84 @@ rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
-option(ORIGAMI_BUILD_TESTING "Enable Python binding tests." OFF)
-option(ORIGAMI_ENABLE_INSTALL "Configure origami installation" ON)
+option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
 find_package(hip REQUIRED)
 
 if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
-    add_library(origami SHARED)
+    set(ORIGAMI_LIBRARY_TYPE SHARED)
 else()
-    add_library(origami STATIC)
+    set(ORIGAMI_LIBRARY_TYPE STATIC)
 endif()
+add_library(origami ${ORIGAMI_LIBRARY_TYPE})
 
 rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
-set_target_properties(origami PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(origami PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+)
 target_compile_features(origami PUBLIC cxx_std_17)
+
+include(GenerateExportHeader)
+generate_export_header(origami
+    BASE_NAME ORIGAMI
+    EXPORT_MACRO_NAME ORIGAMI_EXPORT
+    EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
+    STATIC_DEFINE ORIGAMI_STATIC
+)
+if(ORIGAMI_LIBRARY_TYPE STREQUAL "STATIC")
+    target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
+endif()
 
 add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
 
 target_compile_features(origami-headers INTERFACE cxx_std_17)
 
+target_sources(origami-headers
+    INTERFACE
+    FILE_SET HEADERS
+    BASE_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${PROJECT_BINARY_DIR}/include"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/attention.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
+        "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
+)
 target_include_directories(
-    origami-headers INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    origami-headers INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_sources(
-    origami-headers
-    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp>
-)
+
+target_link_libraries(origami-headers INTERFACE hip::host)
+
+set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
 
+add_dependencies(origami origami-headers_verify_interface_header_sets)
+
 target_sources(
     origami
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/attention.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/logger.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
@@ -97,7 +107,7 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
 )
 
-target_link_libraries(origami PUBLIC hip::host)
+target_link_libraries(origami PRIVATE hip::host)
 
 if(ORIGAMI_ENABLE_PYTHON)
     add_subdirectory(python)
@@ -105,87 +115,52 @@ endif()
 
 if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     enable_testing()
-
     add_subdirectory(tests)
-
-    if(ORIGAMI_ENABLE_PYTHON)
-        find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-
-        add_test(NAME origami_python_test COMMAND "${Python3_EXECUTABLE}" "origami_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
-        )
-
-        add_test(NAME origami_python_grid_test COMMAND "${Python3_EXECUTABLE}"
-                                                       "origami_grid_test.py"
-                 WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python"
-        )
-
-        set_tests_properties(
-            origami_python_test origami_python_grid_test
-            PROPERTIES
-                ENVIRONMENT
-                "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}/python:${CMAKE_CURRENT_SOURCE_DIR}/python:$ENV{PYTHONPATH}"
-        )
-
-        set_tests_properties(
-            origami_python_test origami_python_grid_test PROPERTIES DEPENDS origami_python
-        )
-    endif()
 endif()
 
-if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
-    rocm_install(TARGETS origami origami-headers)
+rocm_install(TARGETS origami)
 
-    rocm_export_targets(
-        TARGETS
-        roc::origami
-        roc::origami-headers
-        DEPENDS
-        PACKAGE
-        hip
-        NAMESPACE
-        roc::
-    )
+install(TARGETS origami-headers
+    EXPORT origami-targets
+    FILE_SET HEADERS
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    COMPONENT devel
+)
 
-    if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
-        rocm_install(TARGETS origami-tests COMPONENT tests)
+rocm_export_targets(
+    TARGETS
+    roc::origami
+    roc::origami-headers
+    DEPENDS
+    PACKAGE
+    hip
+    NAMESPACE
+    roc::
+)
 
-    endif()
-
-    rocm_install(
-        DIRECTORY
-        include/
-        DESTINATION
-        "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT
-        devel
-        FILES_MATCHING
-        PATTERN
-        "*.hpp"
-        PATTERN
-        "*.h"
-    )
-
-    configure_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" @ONLY
-    )
-
-    rocm_install(
-        FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" DESTINATION
-        "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
-    )
-
-    set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
-    set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-        CACHE PATH "Path placed into ldconfig file"
-    )
-
-    rocm_create_package(
-        NAME origami
-        DESCRIPTION "Origami C++ library for analytical GEMM computations"
-        MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
-        LDCONFIG
-        LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
-    )
+if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(TARGETS origami-tests COMPONENT tests)
 endif()
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" @ONLY
+)
+
+rocm_install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/origami-config.cmake" DESTINATION
+    "${CMAKE_INSTALL_LIBDIR}/cmake/origami" COMPONENT devel
+)
+
+set(BUILD_SHARED_LIBS ${ORIGAMI_BUILD_SHARED_LIBS})
+set(ORIGAMI_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+    CACHE PATH "Path placed into ldconfig file"
+)
+
+rocm_create_package(
+    NAME origami
+    DESCRIPTION "Origami: Analytical Solution Selection for GEMM"
+    MAINTAINER "Origami Maintainer <origami-maintainer@amd.com>"
+    LDCONFIG
+    LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
+)

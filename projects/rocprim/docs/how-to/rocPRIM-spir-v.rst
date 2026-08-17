@@ -96,11 +96,11 @@ The wavefront size can be found using ``rocprim::arch::wavefront::get_target()``
         }
     };
 
-    .. note::
+.. note::
     
-        Developers who are modifying the rocPRIM code base can use ``rocprim::detail::dispatch_wave_size``. This function also manages exposed ``storage_type``- types to handle and map shared memory. Variadic templates are used to capture all signatures for a given member function.
+    Developers who are modifying the rocPRIM code base can use ``rocprim::detail::dispatch_wave_size``. This function also manages exposed ``storage_type``- types to handle and map shared memory. Variadic templates are used to capture all signatures for a given member function.
 
-        Developers who are only intending to use the rocPRIM library should not use ``dispatch_wave_size``.
+    Developers who are only intending to use the rocPRIM library should not use ``dispatch_wave_size``.
 
 
 ``rocprim::arch::wavefront::get_target()`` will resolve to ``target::dynamic`` and be handled through  partial specialization. A downside of this implementation is that more shared memory is allocated than is used. 

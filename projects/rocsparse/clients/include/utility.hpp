@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,11 +29,13 @@
 #pragma once
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
-
+#include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
+#ifdef ROCSPARSE_DEBUGGING
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+#endif
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
-
 #include <hip/hip_runtime_api.h>
 #include <vector>
 
@@ -46,12 +48,6 @@ template <typename T>
 inline rocsparse_datatype get_datatype(void);
 
 /*! \brief  Return \ref rocsparse_indextype */
-template <>
-inline rocsparse_indextype get_indextype<uint16_t>(void)
-{
-    return rocsparse_indextype_u16;
-}
-
 template <>
 inline rocsparse_indextype get_indextype<int32_t>(void)
 {
@@ -129,10 +125,6 @@ inline constexpr size_t rocsparse_indextype_sizeof(rocsparse_indextype indextype
 {
     switch(indextype_)
     {
-    case rocsparse_indextype_u16:
-    {
-        return sizeof(uint16_t);
-    }
     case rocsparse_indextype_i32:
     {
         return sizeof(int32_t);
@@ -191,12 +183,6 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     }
     }
     return static_cast<size_t>(0);
-}
-
-inline std::ostream& operator<<(std::ostream& os_, const _Float16& that_)
-{
-    os_ << (float)that_;
-    return os_;
 }
 
 /*! \brief  local handle which is automatically created and destroyed  */
@@ -261,6 +247,14 @@ public:
 
         CHECK_HIP_ERROR(hipStreamCreate(&this->graph_stream));
         CHECK_ROCSPARSE_ERROR(rocsparse_get_stream(*this, &this->old_stream));
+
+        // Flush any pending pre-capture work on the current stream before capturing
+        // on the fresh graph stream. A preprocess/analysis phase (e.g. SpMM/SpMV)
+        // runs on this stream and produces data the captured compute reads; since
+        // the graph is launched on a different stream, without this sync that setup
+        // work would race the graph and can be read stale/uninitialized.
+        CHECK_HIP_ERROR(hipStreamSynchronize(this->old_stream));
+
         CHECK_ROCSPARSE_ERROR(rocsparse_set_stream(*this, this->graph_stream));
 
         // BEGIN GRAPH CAPTURE
@@ -772,6 +766,24 @@ public:
         {
             throw(status);
         }
+    }
+
+    template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
+    explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        // bell_matrix stores scalar rows/cols and a scalar ell_cols, which are exactly what
+        // rocsparse_create_bell_descr expects (value array of length m*ell_cols, column index
+        // array of length (m/bdim)*(ell_cols/bdim)).
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                rocsparse_direction_row,
+                                h.bdim,
+                                h.ell_cols,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                h.base,
+                                get_datatype<T>())
+    {
     }
 
     rocsparse_local_spmat(int64_t              m,

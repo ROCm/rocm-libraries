@@ -39,6 +39,8 @@
 #include <Tensile/ScalarValueTypes.hpp>
 #include <Tensile/geom.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -412,3 +414,4 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+

@@ -24,6 +24,8 @@
 #include "rocsparse_clients_routine_trace.hpp"
 #include "utility.hpp"
 
+#include <rocsparse/rocsparse-config.h>
+
 #include <limits>
 
 #ifdef _OPENMP
@@ -1267,8 +1269,9 @@ void host_bsrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1286,9 +1289,8 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1306,6 +1308,7 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose)
@@ -1328,8 +1331,9 @@ void host_bsrsv(rocsparse_operation  trans,
                         base,
                         base);
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1347,9 +1351,8 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_lsolve(dir,
                             rocsparse_operation_none,
                             mb,
@@ -1367,6 +1370,7 @@ void host_bsrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -2190,8 +2194,9 @@ void host_csrsv(rocsparse_operation  trans,
 
     if(trans == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_lsolve(M,
                             alpha,
                             csr_row_ptr,
@@ -2204,9 +2209,8 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_usolve(M,
                             alpha,
                             csr_row_ptr,
@@ -2219,6 +2223,7 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(trans == rocsparse_operation_transpose
@@ -2249,8 +2254,9 @@ void host_csrsv(rocsparse_operation  trans,
             }
         }
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_csr_usolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -2263,9 +2269,8 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_csr_lsolve(M,
                             alpha,
                             csrt_row_ptr.data(),
@@ -2278,6 +2283,7 @@ void host_csrsv(rocsparse_operation  trans,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -2285,6 +2291,72 @@ void host_csrsv(rocsparse_operation  trans,
 
     *struct_pivot  = (*struct_pivot == M + 1) ? -1 : *struct_pivot;
     *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
+}
+
+template <typename I, typename J, typename T>
+void host_cscsv(rocsparse_operation  trans,
+                J                    M,
+                I                    nnz,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                const T*             x,
+                int64_t              x_inc,
+                T*                   y,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // A CSC matrix is the transpose of the CSR matrix sharing the same arrays,
+    // so a CSC triangular solve is a CSR triangular solve with the transpose
+    // operation and the fill mode flipped:
+    //   op=none          -> op'=transpose       (solve A*y=α*x via (A^T)^T=A)
+    //   op=transpose     -> op'=none            (data is already A^T)
+    //   op=conj_trans    -> op'=none on conj    (A^H = conj(A^T); pre-conjugate values)
+    //   fill=lower (A)   -> fill'=upper (A^T), and vice versa
+    const rocsparse_operation trans_csr = (trans == rocsparse_operation_none)
+                                              ? rocsparse_operation_transpose
+                                              : rocsparse_operation_none;
+    const rocsparse_fill_mode fill_csr  = (fill_mode == rocsparse_fill_mode_lower)
+                                              ? rocsparse_fill_mode_upper
+                                              : rocsparse_fill_mode_lower;
+
+    // For the conjugate transpose, pre-conjugate the values so the CSR solve with
+    // op'=none solves conj(A^T)*y = alpha*x = A^H*y = alpha*x.
+    const T*       val = csc_val;
+    std::vector<T> conj_val;
+    if(trans == rocsparse_operation_conjugate_transpose)
+    {
+        conj_val.resize(nnz);
+        for(I i = 0; i < nnz; ++i)
+        {
+            conj_val[i] = rocsparse_conj(csc_val[i]);
+        }
+        val = conj_val.data();
+    }
+
+    // The CSC column pointer / row index arrays act as the CSR row pointer /
+    // column index arrays of A^T.
+    host_csrsv<I, J, T>(trans_csr,
+                        M,
+                        nnz,
+                        alpha,
+                        csc_col_ptr,
+                        csc_row_ind,
+                        val,
+                        x,
+                        x_inc,
+                        y,
+                        diag_type,
+                        fill_csr,
+                        base,
+                        struct_pivot,
+                        numeric_pivot);
 }
 
 template <typename I, typename T>
@@ -2762,6 +2834,103 @@ void host_gebsrmm(rocsparse_handle          handle,
             else
             {
                 C[idx_C] = std::fma(*beta, C[idx_C], *alpha * sum);
+            }
+        }
+    }
+}
+
+template <typename T, typename I, typename A, typename B, typename C>
+void host_bellmm(I                     Mb,
+                 I                     N,
+                 I                     Kb,
+                 I                     ell_cols,
+                 I                     ell_block_size,
+                 rocsparse_operation   trans_A,
+                 rocsparse_operation   trans_B,
+                 T                     alpha,
+                 const std::vector<I>& bell_col_ind_A,
+                 const std::vector<A>& bell_val_A,
+                 const std::vector<B>& dense_B,
+                 int64_t               ldb,
+                 rocsparse_order       order_B,
+                 T                     beta,
+                 std::vector<C>&       dense_C,
+                 int64_t               ldc,
+                 rocsparse_order       order_C,
+                 rocsparse_index_base  base)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    if(trans_A != rocsparse_operation_none)
+    {
+        return;
+    }
+
+    bool conj_A     = (trans_A == rocsparse_operation_conjugate_transpose);
+    bool conj_B     = (trans_B == rocsparse_operation_conjugate_transpose);
+    bool do_trans_B = (trans_B != rocsparse_operation_none);
+
+    const I m = Mb * ell_block_size;
+
+    // Scale C by beta (or zero it out)
+    for(I i = 0; i < m; i++)
+    {
+        for(I j = 0; j < N; j++)
+        {
+            int64_t idx_C
+                = (order_C == rocsparse_order_column) ? i + (int64_t)j * ldc : (int64_t)i * ldc + j;
+            if(beta == static_cast<T>(0))
+                dense_C[idx_C] = static_cast<T>(0);
+            else
+                dense_C[idx_C] = beta * dense_C[idx_C];
+        }
+    }
+
+    // Accumulate alpha * op(A) * op(B) into C.
+    const I ell_block_width = ell_cols / ell_block_size;
+    for(I br = 0; br < Mb; br++)
+    {
+        for(I ei = 0; ei < ell_block_width; ei++)
+        {
+            const I bc = bell_col_ind_A[static_cast<size_t>(br) * ell_block_width + ei] - base;
+            if(bc < 0)
+                break;
+
+            // Access A_block[r, c] from the row-major value array.
+            auto a_val = [&](I r, I c) -> T {
+                int64_t idx = ((int64_t)br * ell_block_size + r) * ell_cols
+                              + (int64_t)ei * ell_block_size + c;
+                return conj_val(bell_val_A[idx], conj_A);
+            };
+
+            // Access B element at logical position (b_row, n)
+            auto b_val = [&](I b_row, I n) -> T {
+                int64_t idx;
+                if(!do_trans_B)
+                    idx = (order_B == rocsparse_order_column) ? b_row + (int64_t)n * ldb
+                                                              : (int64_t)b_row * ldb + n;
+                else
+                    idx = (order_B == rocsparse_order_column) ? n + (int64_t)b_row * ldb
+                                                              : (int64_t)n * ldb + b_row;
+                return conj_val(dense_B[idx], conj_B);
+            };
+
+            // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
+            for(I r = 0; r < ell_block_size; r++)
+            {
+                I C_row = br * ell_block_size + r;
+                for(I n = 0; n < N; n++)
+                {
+                    int64_t idx_C = (order_C == rocsparse_order_column) ? C_row + (int64_t)n * ldc
+                                                                        : (int64_t)C_row * ldc + n;
+                    T       sum   = static_cast<T>(0);
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        sum = std::fma(a_val(r, c), b_val(bc * ell_block_size + c, n), sum);
+                    }
+
+                    dense_C[idx_C] = std::fma(alpha, sum, dense_C[idx_C]);
+                }
             }
         }
     }
@@ -3736,8 +3905,9 @@ void host_csrsm(J                    M,
 
         if(transA == rocsparse_operation_none)
         {
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 host_lssolve(M,
                              nrhs,
                              transB,
@@ -3752,9 +3922,8 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 host_ussolve(M,
                              nrhs,
                              transB,
@@ -3769,6 +3938,7 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
+                break;
             }
         }
         else if(transA == rocsparse_operation_transpose
@@ -3799,8 +3969,9 @@ void host_csrsm(J                    M,
                 }
             }
 
-            if(fill_mode == rocsparse_fill_mode_lower)
+            switch(fill_mode)
             {
+            case rocsparse_fill_mode_lower:
                 host_ussolve(M,
                              nrhs,
                              transB,
@@ -3815,9 +3986,8 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
-            }
-            else
-            {
+                break;
+            case rocsparse_fill_mode_upper:
                 host_lssolve(M,
                              nrhs,
                              transB,
@@ -3832,6 +4002,7 @@ void host_csrsm(J                    M,
                              base,
                              struct_pivot,
                              numeric_pivot);
+                break;
             }
         }
 
@@ -3840,6 +4011,76 @@ void host_csrsm(J                    M,
         *struct_pivot  = (*struct_pivot == M + 1) ? -1 : *struct_pivot;
         *numeric_pivot = (*numeric_pivot == M + 1) ? -1 : *numeric_pivot;
     }
+}
+
+template <typename I, typename J, typename T>
+void host_cscsm(J                    M,
+                J                    nrhs,
+                I                    nnz,
+                rocsparse_operation  transA,
+                rocsparse_operation  transB,
+                T                    alpha,
+                const I*             csc_col_ptr,
+                const J*             csc_row_ind,
+                const T*             csc_val,
+                T*                   B,
+                int64_t              ldb,
+                rocsparse_order      order_B,
+                rocsparse_diag_type  diag_type,
+                rocsparse_fill_mode  fill_mode,
+                rocsparse_index_base base,
+                J*                   struct_pivot,
+                J*                   numeric_pivot)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    // A CSC matrix is the transpose of the CSR matrix sharing the same arrays, so
+    // a CSC triangular solve is a CSR triangular solve on A^T with the transpose
+    // operation and the fill mode flipped (transB acts on B and is unchanged):
+    //   opA=none       -> opA'=transpose       (solve A*C=α*op_B(B) via (A^T)^T=A)
+    //   opA=transpose  -> opA'=none            (data is already A^T)
+    //   opA=conj_trans -> opA'=none on conj    (A^H = conj(A^T); pre-conjugate values)
+    //   fill=lower (A) -> fill'=upper (A^T), and vice versa
+    const rocsparse_operation transA_csr = (transA == rocsparse_operation_none)
+                                               ? rocsparse_operation_transpose
+                                               : rocsparse_operation_none;
+    const rocsparse_fill_mode fill_csr   = (fill_mode == rocsparse_fill_mode_lower)
+                                               ? rocsparse_fill_mode_upper
+                                               : rocsparse_fill_mode_lower;
+
+    // For the conjugate transpose, pre-conjugate the values so the CSR solve with
+    // opA'=none solves conj(A^T)*C = alpha*op_B(B) = A^H*C = alpha*op_B(B).
+    const T*       val = csc_val;
+    std::vector<T> conj_val;
+    if(transA == rocsparse_operation_conjugate_transpose)
+    {
+        conj_val.resize(nnz);
+        for(I i = 0; i < nnz; ++i)
+        {
+            conj_val[i] = rocsparse_conj(csc_val[i]);
+        }
+        val = conj_val.data();
+    }
+
+    // The CSC column pointer / row index arrays act as the CSR row pointer /
+    // column index arrays of A^T.
+    host_csrsm<I, J, T>(M,
+                        nrhs,
+                        nnz,
+                        transA_csr,
+                        transB,
+                        alpha,
+                        csc_col_ptr,
+                        csc_row_ind,
+                        val,
+                        B,
+                        ldb,
+                        order_B,
+                        diag_type,
+                        fill_csr,
+                        base,
+                        struct_pivot,
+                        numeric_pivot);
 }
 
 template <typename I, typename T>
@@ -3943,8 +4184,9 @@ void host_bsrsm(rocsparse_int       mb,
 
     if(transA == rocsparse_operation_none)
     {
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_lsolve(dir,
                             transX,
                             mb,
@@ -3962,9 +4204,8 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_usolve(dir,
                             transX,
                             mb,
@@ -3982,6 +4223,7 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
     else if(transA == rocsparse_operation_transpose)
@@ -4004,8 +4246,9 @@ void host_bsrsm(rocsparse_int       mb,
                         base,
                         base);
 
-        if(fill_mode == rocsparse_fill_mode_lower)
+        switch(fill_mode)
         {
+        case rocsparse_fill_mode_lower:
             host_bsr_usolve(dir,
                             transX,
                             mb,
@@ -4023,9 +4266,8 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
-        }
-        else
-        {
+            break;
+        case rocsparse_fill_mode_upper:
             host_bsr_lsolve(dir,
                             transX,
                             mb,
@@ -4043,6 +4285,7 @@ void host_bsrsm(rocsparse_int       mb,
                             base,
                             struct_pivot,
                             numeric_pivot);
+            break;
         }
     }
 
@@ -4437,8 +4680,11 @@ void host_bsrgemm(rocsparse_direction  dir,
     std::vector<J> col(nnzb);
     std::vector<T> val(block_dim * block_dim * nnzb);
 
-    memcpy(col.data(), bsr_col_ind_C, sizeof(J) * nnzb);
-    memcpy(val.data(), bsr_val_C, sizeof(T) * block_dim * block_dim * nnzb);
+    if(nnzb > 0 && bsr_col_ind_C != nullptr && bsr_val_C != nullptr)
+    {
+        memcpy(col.data(), bsr_col_ind_C, sizeof(J) * nnzb);
+        memcpy(val.data(), bsr_val_C, sizeof(T) * block_dim * block_dim * nnzb);
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
@@ -5236,8 +5482,11 @@ void host_csrgemm(J                    M,
     std::vector<J> col(nnz);
     std::vector<T> val(nnz);
 
-    memcpy(col.data(), csr_col_ind_C, sizeof(J) * nnz);
-    memcpy(val.data(), csr_val_C, sizeof(T) * nnz);
+    if(nnz > 0 && csr_col_ind_C != nullptr && csr_val_C != nullptr)
+    {
+        memcpy(col.data(), csr_col_ind_C, sizeof(J) * nnz);
+        memcpy(val.data(), csr_val_C, sizeof(T) * nnz);
+    }
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
@@ -5735,17 +5984,19 @@ void host_bsric0(rocsparse_direction               direction,
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * local_row_j + m],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l
+                                                           + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * m + local_row_j],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                           + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }
@@ -5817,6 +6068,22 @@ void host_bsric0(rocsparse_direction               direction,
             }
         }
     }
+}
+
+template <typename T>
+static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
+{
+#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
+    // Apply the boost magnitude (>= 0) along the direction of the original pivot
+    // so its sign (real) or phase (complex) is preserved and a negative boost can
+    // never swap the pivot sign, matching the device kernels.
+    const auto abs_value = std::abs(value);
+    const auto abs_boost = std::abs(boost_val);
+    return (abs_value > 0) ? (static_cast<T>(abs_boost) * (value / abs_value))
+                           : static_cast<T>(abs_boost);
+#else
+    return boost_val;
+#endif
 }
 
 template <typename T, typename U>
@@ -5969,7 +6236,9 @@ void host_bsrilu0(rocsparse_direction               dir,
 
                 if(boost)
                 {
-                    diag = (boost_tol >= std::abs(diag)) ? boost_val : diag;
+                    diag                             = (boost_tol >= std::abs(diag))
+                                                           ? host_assign_ilu0_boost_value(diag, boost_val)
+                                                           : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
@@ -6262,7 +6531,9 @@ void host_csrilu0(rocsparse_int                     M,
 
                 if(boost)
                 {
-                    diag_val        = (boost_tol >= std::abs(diag_val)) ? boost_val : diag_val;
+                    diag_val        = (boost_tol >= std::abs(diag_val))
+                                          ? host_assign_ilu0_boost_value(diag_val, boost_val)
+                                          : diag_val;
                     csr_val[diag_j] = diag_val;
                 }
                 else
@@ -6331,7 +6602,7 @@ void host_csrilu0(rocsparse_int                     M,
             {
                 if(std::abs(csr_val[diag_pos]) <= boost_tol)
                 {
-                    csr_val[diag_pos] = boost_val;
+                    csr_val[diag_pos] = host_assign_ilu0_boost_value(csr_val[diag_pos], boost_val);
                 }
             }
             else
@@ -6765,7 +7036,7 @@ void host_gtsv_interleaved_batch_lu(rocsparse_int m,
 #endif
         for(rocsparse_int j = 0; j < batch_count; j++)
         {
-            if(p[batch_count * i + j] <= i) // no pivoting occured, sum up result
+            if(p[batch_count * i + j] <= i) // no pivoting occurred, sum up result
             {
                 T temp = static_cast<T>(0);
                 for(rocsparse_int s = start[j]; s < i; s++)
@@ -7240,8 +7511,8 @@ rocsparse_status host_nnz(rocsparse_direction dirA,
 }
 
 template <typename T>
-void host_prune_dense2csr(rocsparse_int               m,
-                          rocsparse_int               n,
+void host_prune_dense2csr(int64_t                     m,
+                          int64_t                     n,
                           const std::vector<T>&       A,
                           int64_t                     lda,
                           rocsparse_index_base        base,
@@ -7259,9 +7530,9 @@ void host_prune_dense2csr(rocsparse_int               m,
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
 #endif
-    for(rocsparse_int i = 0; i < m; i++)
+    for(int64_t i = 0; i < m; i++)
     {
-        for(rocsparse_int j = 0; j < n; j++)
+        for(int64_t j = 0; j < n; j++)
         {
             if(std::abs(A[lda * j + i]) > threshold)
             {
@@ -7270,7 +7541,7 @@ void host_prune_dense2csr(rocsparse_int               m,
         }
     }
 
-    for(rocsparse_int i = 1; i <= m; i++)
+    for(int64_t i = 1; i <= m; i++)
     {
         csr_row_ptr[i] += csr_row_ptr[i - 1];
     }
@@ -7280,10 +7551,10 @@ void host_prune_dense2csr(rocsparse_int               m,
     csr_col_ind.resize(nnz);
     csr_val.resize(nnz);
 
-    rocsparse_int index = 0;
-    for(rocsparse_int i = 0; i < m; i++)
+    int64_t index = 0;
+    for(int64_t i = 0; i < m; i++)
     {
-        for(rocsparse_int j = 0; j < n; j++)
+        for(int64_t j = 0; j < n; j++)
         {
             if(std::abs(A[lda * j + i]) > threshold)
             {
@@ -7297,8 +7568,8 @@ void host_prune_dense2csr(rocsparse_int               m,
 }
 
 template <typename T>
-void host_prune_dense2csr_by_percentage(rocsparse_int               m,
-                                        rocsparse_int               n,
+void host_prune_dense2csr_by_percentage(int64_t                     m,
+                                        int64_t                     n,
                                         const std::vector<T>&       A,
                                         int64_t                     lda,
                                         rocsparse_index_base        base,
@@ -7310,15 +7581,15 @@ void host_prune_dense2csr_by_percentage(rocsparse_int               m,
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-    rocsparse_int nnz_A = m * n;
-    rocsparse_int pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
-    pos                 = std::min(pos, nnz_A - 1);
-    pos                 = std::max(pos, static_cast<rocsparse_int>(0));
+    int64_t nnz_A = m * n;
+    int64_t pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
+    pos           = std::min(pos, nnz_A - 1);
+    pos           = std::max(pos, static_cast<int64_t>(0));
 
     std::vector<T> sorted_A(m * n);
-    for(rocsparse_int i = 0; i < n; i++)
+    for(int64_t i = 0; i < n; i++)
     {
-        for(rocsparse_int j = 0; j < m; j++)
+        for(int64_t j = 0; j < m; j++)
         {
             sorted_A[m * i + j] = std::abs(A[lda * i + j]);
         }
@@ -7609,6 +7880,231 @@ void host_coo_to_dense(I                     m,
         else
         {
             A[ld * row + col] = val;
+        }
+    }
+}
+
+template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    const I mb = (m + ell_block_size - 1) / ell_block_size;
+    const I nb = (n + ell_block_size - 1) / ell_block_size;
+
+    ell_cols = 0;
+
+    if(order == rocsparse_order_row)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
+        for(I i = 0; i < mb; i++)
+        {
+            I slot = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gr + gc] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
+                }
+            }
+
+            for(I s = slot; s < ell_block_width; s++)
+            {
+                bell_col_ind[i * ell_block_width + s] = base - 1;
+            }
+        }
+    }
+    else if(order == rocsparse_order_column)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
+        for(I i = 0; i < mb; i++)
+        {
+            I slot = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gc + gr] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
+                }
+            }
+
+            for(I s = slot; s < ell_block_width; s++)
+            {
+                bell_col_ind[i * ell_block_width + s] = base - 1;
+            }
         }
     }
 }
@@ -8533,8 +9029,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
 
         for(rocsparse_int j = start; j < end; j++)
         {
-            if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > std::real(tol))
             {
                 count++;
             }
@@ -8575,8 +9070,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
 
         for(rocsparse_int j = start; j < end; j++)
         {
-            if(std::abs(csr_val_A[j]) > std::real(tol)
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > std::real(tol))
             {
                 csr_col_ind_C[index] = csr_col_ind_A[j];
                 csr_val_C[index]     = csr_val_A[j];
@@ -8614,8 +9108,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
         for(rocsparse_int j = csr_row_ptr_A[i] - csr_base_A; j < csr_row_ptr_A[i + 1] - csr_base_A;
             j++)
         {
-            if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > threshold)
             {
                 csr_row_ptr_C[i + 1]++;
             }
@@ -8638,8 +9131,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
         for(rocsparse_int j = csr_row_ptr_A[i] - csr_base_A; j < csr_row_ptr_A[i + 1] - csr_base_A;
             j++)
         {
-            if(std::abs(csr_val_A[j]) > threshold
-               && std::abs(csr_val_A[j]) > std::numeric_limits<float>::min())
+            if(std::abs(csr_val_A[j]) > threshold)
             {
                 csr_col_ind_C[index] = (csr_col_ind_A[j] - csr_base_A) + csr_base_C;
                 csr_val_C[index]     = csr_val_A[j];
@@ -9406,8 +9898,8 @@ template struct rocsparse_host<rocsparse_double_complex,
         rocsparse_index_base              csr_base_A,                                          \
         rocsparse_index_base              csr_base_C,                                          \
         TYPE                              percentage);                                                                      \
-    template void host_prune_dense2csr<TYPE>(rocsparse_int               m,                    \
-                                             rocsparse_int               n,                    \
+    template void host_prune_dense2csr<TYPE>(int64_t                     m,                    \
+                                             int64_t                     n,                    \
                                              const std::vector<TYPE>&    A,                    \
                                              int64_t                     lda,                  \
                                              rocsparse_index_base        base,                 \
@@ -9417,8 +9909,8 @@ template struct rocsparse_host<rocsparse_double_complex,
                                              std::vector<rocsparse_int>& csr_row_ptr,          \
                                              std::vector<rocsparse_int>& csr_col_ind);         \
     template void host_prune_dense2csr_by_percentage<TYPE>(                                    \
-        rocsparse_int               m,                                                         \
-        rocsparse_int               n,                                                         \
+        int64_t                     m,                                                         \
+        int64_t                     n,                                                         \
         const std::vector<TYPE>&    A,                                                         \
         int64_t                     lda,                                                       \
         rocsparse_index_base        base,                                                      \
@@ -9449,17 +9941,27 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   std::vector<TTYPE>&       A,           \
                                                   int64_t                   ld,          \
                                                   rocsparse_order           order);
-#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                              \
-    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,           \
-                                                  ITYPE                     n,           \
-                                                  rocsparse_index_base      base,        \
-                                                  const std::vector<TTYPE>& A,           \
-                                                  int64_t                   ld,          \
-                                                  rocsparse_order           order,       \
-                                                  const std::vector<ITYPE>& nnz_per_row, \
-                                                  std::vector<TTYPE>&       coo_val,     \
-                                                  std::vector<ITYPE>&       coo_row_ind, \
-                                                  std::vector<ITYPE>&       coo_col_ind);
+#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                                  \
+    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,               \
+                                                  ITYPE                     n,               \
+                                                  rocsparse_index_base      base,            \
+                                                  const std::vector<TTYPE>& A,               \
+                                                  int64_t                   ld,              \
+                                                  rocsparse_order           order,           \
+                                                  const std::vector<ITYPE>& nnz_per_row,     \
+                                                  std::vector<TTYPE>&       coo_val,         \
+                                                  std::vector<ITYPE>&       coo_row_ind,     \
+                                                  std::vector<ITYPE>&       coo_col_ind);          \
+    template void host_dense_to_bell<ITYPE, TTYPE>(ITYPE                     m,              \
+                                                   ITYPE                     n,              \
+                                                   rocsparse_index_base      base,           \
+                                                   const std::vector<TTYPE>& A,              \
+                                                   int64_t                   ld,             \
+                                                   rocsparse_order           order,          \
+                                                   ITYPE                     ell_block_size, \
+                                                   ITYPE&                    ell_cols,       \
+                                                   std::vector<TTYPE>&       bell_val,       \
+                                                   std::vector<ITYPE>&       bell_col_ind);
 
 #define INSTANTIATE_IJ(ITYPE, JTYPE)                                                       \
     template void host_csr_to_coo<ITYPE, JTYPE>(JTYPE                     M,               \
@@ -9557,6 +10059,21 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   rocsparse_index_base base,                 \
                                                   JTYPE*               struct_pivot,         \
                                                   JTYPE*               numeric_pivot);                     \
+    template void host_cscsv<ITYPE, JTYPE, TTYPE>(rocsparse_operation  trans,                \
+                                                  JTYPE                M,                    \
+                                                  ITYPE                nnz,                  \
+                                                  TTYPE                alpha,                \
+                                                  const ITYPE*         csc_col_ptr,          \
+                                                  const JTYPE*         csc_row_ind,          \
+                                                  const TTYPE*         csc_val,              \
+                                                  const TTYPE*         x,                    \
+                                                  int64_t              x_inc,                \
+                                                  TTYPE*               y,                    \
+                                                  rocsparse_diag_type  diag_type,            \
+                                                  rocsparse_fill_mode  fill_mode,            \
+                                                  rocsparse_index_base base,                 \
+                                                  JTYPE*               struct_pivot,         \
+                                                  JTYPE*               numeric_pivot);                     \
     template void host_csrsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
                                                   JTYPE                nrhs,                 \
                                                   ITYPE                nnz,                  \
@@ -9566,6 +10083,23 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   const ITYPE*         csr_row_ptr,          \
                                                   const JTYPE*         csr_col_ind,          \
                                                   const TTYPE*         csr_val,              \
+                                                  TTYPE*               B,                    \
+                                                  int64_t              ldb,                  \
+                                                  rocsparse_order      order_B,              \
+                                                  rocsparse_diag_type  diag_type,            \
+                                                  rocsparse_fill_mode  fill_mode,            \
+                                                  rocsparse_index_base base,                 \
+                                                  JTYPE*               struct_pivot,         \
+                                                  JTYPE*               numeric_pivot);                     \
+    template void host_cscsm<ITYPE, JTYPE, TTYPE>(JTYPE                M,                    \
+                                                  JTYPE                nrhs,                 \
+                                                  ITYPE                nnz,                  \
+                                                  rocsparse_operation  transA,               \
+                                                  rocsparse_operation  transB,               \
+                                                  TTYPE                alpha,                \
+                                                  const ITYPE*         csc_col_ptr,          \
+                                                  const JTYPE*         csc_row_ind,          \
+                                                  const TTYPE*         csc_val,              \
                                                   TTYPE*               B,                    \
                                                   int64_t              ldb,                  \
                                                   rocsparse_order      order_B,              \
@@ -9858,7 +10392,25 @@ template struct rocsparse_host<rocsparse_double_complex,
                                      ITYPE                batch_count_C,  \
                                      int64_t              batch_stride_C, \
                                      rocsparse_order      order_C,        \
-                                     rocsparse_index_base base);
+                                     rocsparse_index_base base);          \
+    template void host_bellmm(ITYPE                     Mb,               \
+                              ITYPE                     N,                \
+                              ITYPE                     Kb,               \
+                              ITYPE                     ell_cols,         \
+                              ITYPE                     ell_block_size,   \
+                              rocsparse_operation       trans_A,          \
+                              rocsparse_operation       trans_B,          \
+                              TTYPE                     alpha,            \
+                              const std::vector<ITYPE>& bell_col_ind_A,   \
+                              const std::vector<ATYPE>& bell_val_A,       \
+                              const std::vector<BTYPE>& dense_B,          \
+                              int64_t                   ldb,              \
+                              rocsparse_order           order_B,          \
+                              TTYPE                     beta,             \
+                              std::vector<CTYPE>&       dense_C,          \
+                              int64_t                   ldc,              \
+                              rocsparse_order           order_C,          \
+                              rocsparse_index_base      base)
 
 #define INSTANTIATE_IJABCT(ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE)                     \
     template void host_csrmm(JTYPE                M,                                     \

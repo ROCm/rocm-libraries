@@ -1,0 +1,50 @@
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+// X-macro definition for register types
+// Usage: REGISTER_TYPE(EnumName, StringLiteral, Description)
+
+#ifndef REGISTER_TYPE
+#error "REGISTER_TYPE must be defined before including RegisterType.def"
+#endif
+
+REGISTER_TYPE(V,           "v",           "Vector register")
+REGISTER_TYPE(S,           "s",           "Scalar register")
+REGISTER_TYPE(A,           "a",           "Accumulator register")
+REGISTER_TYPE(M,           "m",           "Memory descriptor register")
+REGISTER_TYPE(ACC,         "acc",         "Accumulator register (alternative name)")
+REGISTER_TYPE(AGPR,        "AGPR",        "Accumulator GPR")
+REGISTER_TYPE(SCC,         "SCC",         "Scalar Condition Code")
+REGISTER_TYPE(VCC,         "vcc",         "Vector Condition Code")
+REGISTER_TYPE(VCC_LO,      "vcc_lo",      "Vector Condition Code (low)")
+REGISTER_TYPE(VCC_HI,      "vcc_hi",      "Vector Condition Code (high)")
+REGISTER_TYPE(EXEC,        "exec",        "Execution mask")
+REGISTER_TYPE(EXEC_LO,     "exec_lo",     "Execution mask (low)")
+REGISTER_TYPE(EXEC_HI,     "exec_hi",     "Execution mask (high)")
+
+// Below are pseudo register definition.
+REGISTER_TYPE(PSEUDO_START,"PSEUDO_START","The beginning of all pseudo-register types")
+REGISTER_TYPE(LDS,         "LDS",         "LDS dependency tracking pseudo-register")
+REGISTER_TYPE(UNKNOWN,     "UNKNOWN",     "Unknown/invalid register type")
+
+#undef REGISTER_TYPE

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <numeric>
@@ -118,10 +119,8 @@ int main(int argc, char* argv[])
     {
         TmpFileWrapper()
         {
-            // use std C function to create tmp file since filesystem is not supported on some platforms
-            char tmpFilenameBuf[L_tmpnam];
-            std::tmpnam(tmpFilenameBuf);
-            tmpFilename.assign(tmpFilenameBuf);
+            // Use cross-platform filesystem approach for temporary file
+            tmpFilename = hiptensor::test::generateTempFilename("hiptensor_yaml_test_");
         }
         ~TmpFileWrapper()
         {
@@ -140,10 +139,19 @@ int main(int argc, char* argv[])
     hiptensor::YamlConfigLoader<hiptensor::ContractionTestParams>::storeToFile(tmpFile, yee);
     auto yee1
         = hiptensor::YamlConfigLoader<hiptensor::ContractionTestParams>::loadFromFile(tmpFile);
-    if(!yee1)
-    {
-        return -1;
-    }
 
-    return 0;
+    int result = yee1 ? 0 : -1;
+
+    // Remove temp file explicitly before quick_exit() bypasses the destructor.
+    ::remove(tmpFile.c_str());
+
+    // Flush LLVM's buffered streams and destroy ManagedStatic objects while all
+    // libraries are still loaded, before post-main cleanup runs.
+    hiptensor::llvmShutdown();
+
+    // Use quick_exit() to bypass C++ static destructors and atexit() handlers.
+    // Post-main cleanup in linked DLLs (hiptensor, HIP runtime) crashes under
+    // ctest due to DLL unload order differences vs a direct run. Our cleanup is
+    // already complete via llvmShutdown() above.
+    std::quick_exit(result);
 }

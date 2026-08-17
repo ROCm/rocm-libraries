@@ -1,0 +1,650 @@
+# serializer version: 1
+# name: test_f32_xdl_math_op_enabled
+  dict({
+    'EnableF32XdlMathOp': True,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=0,
+      patch=10,
+    ),
+    'MFMA_BF16_1K': True,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_mfma_bf16_branch_gfx90a
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=0,
+      patch=10,
+    ),
+    'MFMA_BF16_1K': True,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_mfma_gfx90a_half
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=0,
+      patch=10,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_mfma_gfx942_half
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=4,
+      patch=2,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_mx_blocks_gfx950_workaround
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=5,
+      patch=0,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMXSA': 0,
+    'MIInputPerThreadMXSB': 0,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_mx_blocks_non_gfx950
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=4,
+      patch=2,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMXSA': 0,
+    'MIInputPerThreadMXSB': 0,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_navi_wmma_gfx1100
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=11,
+      minor=0,
+      patch=0,
+    ),
+    'MFMA_BF16_1K': 0,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 16,
+    'MIInputPerThreadA': 16,
+    'MIInputPerThreadB': 16,
+    'MIInputPerThreadMetadata': 16,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_no_workgroup_skips_workgroup_field
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=0,
+      patch=10,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+  })
+# ---
+# name: test_sparse_a_gfx942
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=4,
+      patch=2,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 2,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 0,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_sparse_and_mx_combo_gfx950
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=5,
+      patch=0,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 2,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMXSA': 0,
+    'MIInputPerThreadMXSB': 0,
+    'MIInputPerThreadMetadata': 0,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_sparse_b_gfx942
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=9,
+      minor=4,
+      patch=2,
+    ),
+    'MFMA_BF16_1K': False,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 2,
+    'MIInputPerThreadMetadata': 0,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---
+# name: test_swmmac_isa_gfx1200
+  dict({
+    'EnableF32XdlMathOp': False,
+    'EnableMatrixInstruction': True,
+    'ISA': SemanticVersion(
+      major=12,
+      minor=0,
+      patch=0,
+    ),
+    'MFMA_BF16_1K': 0,
+    'MIBlock': list([
+      16,
+      16,
+      16,
+      1,
+      1,
+      1,
+    ]),
+    'MIInputPerThread': 4,
+    'MIInputPerThreadA': 4,
+    'MIInputPerThreadB': 4,
+    'MIInputPerThreadMetadata': 4,
+    'MIWaveGroup': list([
+      2,
+      2,
+    ]),
+    'MIWaveTile': list([
+      2,
+      2,
+    ]),
+    'MatrixInstB': 1,
+    'MatrixInstBM': 1,
+    'MatrixInstBN': 1,
+    'MatrixInstK': 16,
+    'MatrixInstM': 16,
+    'MatrixInstN': 16,
+    'MatrixInstruction': list([
+      16,
+      16,
+      16,
+      1,
+    ]),
+    'ThreadTile': list([
+      1,
+      1,
+    ]),
+    'WavefrontSize': 64,
+    'WorkGroup': list([
+      32,
+      8,
+      1,
+    ]),
+  })
+# ---

@@ -24,6 +24,10 @@
 ---
 include: hipsparse_common.yaml
 
+Known bugs:
+  - function: csrsv2
+    filename: nos7
+
 Tests:
 - name: csrsv2_bad_arg
   category: pre_checkin
@@ -77,3 +81,18 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO]
   filename: [bmwcra_1,
              shipsec1]
+
+- name: csrsv2
+  category: pre_checkin
+  function: csrsv2
+  precision: *double_only_precisions_complex_real
+  M: 1
+  alpha: [2.3]
+  alphai: [-0.2]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  solve_policy: [HIPSPARSE_SOLVE_POLICY_NO_LEVEL, HIPSPARSE_SOLVE_POLICY_USE_LEVEL]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  filename: [nos7]
+  graph_test: [true]

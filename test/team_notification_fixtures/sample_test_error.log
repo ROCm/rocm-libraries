@@ -1,0 +1,36 @@
+[==========] Running 150 tests from 12 test suites.
+[----------] Global test environment set-up.
+[----------] 15 tests from ConvolutionTest
+[ RUN      ] ConvolutionTest.Forward_NCHW_FP32
+[       OK ] ConvolutionTest.Forward_NCHW_FP32 (234 ms)
+[ RUN      ] ConvolutionTest.Forward_NCHW_FP16
+[       OK ] ConvolutionTest.Forward_NCHW_FP16 (198 ms)
+[ RUN      ] ConvolutionTest.Backward_Data_Large_Batch
+/workspace/rocm-libraries/projects/miopen/test/conv_test.cpp:458: Failure
+Expected equality of these values:
+  output_data[i]
+    Which is: 3.14159
+  expected_data[i]
+    Which is: 3.14162
+Error in backward convolution: Numerical mismatch at index 1024
+Maximum absolute error: 3.5e-05 exceeds tolerance: 1e-05
+[  FAILED  ] ConvolutionTest.Backward_Data_Large_Batch (1245 ms)
+[ RUN      ] ConvolutionTest.Winograd_Filter_Size_3x3
+[       OK ] ConvolutionTest.Winograd_Filter_Size_3x3 (567 ms)
+[ RUN      ] ConvolutionTest.Direct_Stride_2x2
+/workspace/rocm-libraries/projects/miopen/test/conv_test.cpp:523: Failure
+Fatal assertion failed: HIP error detected
+hipMemcpy failed with error: out of memory (GPU 0)
+Available GPU memory: 2048 MB
+Required GPU memory: 4096 MB
+[  FAILED  ] ConvolutionTest.Direct_Stride_2x2 (89 ms)
+[----------] 15 tests from ConvolutionTest (3456 ms total)
+
+[----------] Global test environment tear-down
+[==========] 150 tests from 12 test suites ran. (45678 ms total)
+[  PASSED  ] 148 tests.
+[  FAILED  ] 2 tests, listed below:
+[  FAILED  ] ConvolutionTest.Backward_Data_Large_Batch
+[  FAILED  ] ConvolutionTest.Direct_Stride_2x2
+
+ 2 FAILED TESTS

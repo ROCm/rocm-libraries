@@ -49,6 +49,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_const_dnvec_descr.cpp
     test_const_spmat_descr.cpp
     test_const_spvec_descr.cpp
+    test_dense_to_sparse_bell_no_set_pointers.cpp
     test_dense_to_sparse_coo.cpp
     test_dense_to_sparse_csc.cpp
     test_dense_to_sparse_csr.cpp
@@ -61,6 +62,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_sddmm_coo_aos.cpp
     test_sddmm_csc.cpp
     test_sddmm_csr.cpp
+    test_sddmm_csr_reuse_descr.cpp
     test_sparse_to_dense_coo.cpp
     test_sparse_to_dense_csc.cpp
     test_sparse_to_dense_csr.cpp
@@ -74,14 +76,18 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_coo.cpp
     test_spmm_csc.cpp
     test_spmm_csr.cpp
+    test_spmm_csr_reuse_descr.cpp
+    test_spmm_bsr.cpp
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
+    test_spmv_csr_reuse_descr.cpp
     test_spmv_sell.cpp
     test_spsm_coo.cpp
     test_spsm_csr.cpp
     test_spsv_coo.cpp
     test_spsv_csr.cpp
+    test_spsv_csr_reuse_descr.cpp
     test_spvec_descr.cpp
     test_spvv.cpp
 )
@@ -91,6 +97,7 @@ set(HIPSPARSE_TEST_YAML_INCLUDE cuda/12.8/hipsparse_test.yaml)
 set(HIPSPARSE_TEST_YAMLS 
     # Level 2
     cuda/12.8/test_bsrmv.yaml
+    cuda/12.8/test_bsrxmv.yaml
     cuda/12.8/test_bsrsv2.yaml
     cuda/12.8/test_gemvi.yaml
     # Level 3
@@ -133,6 +140,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_prune_dense2csr_by_percentage.yaml
     # Generic
     cuda/12.8/test_axpby.yaml
+    cuda/12.8/test_dense_to_sparse_bell_no_set_pointers.yaml
     cuda/12.8/test_dense_to_sparse_coo.yaml
     cuda/12.8/test_dense_to_sparse_csc.yaml
     cuda/12.8/test_dense_to_sparse_csr.yaml
@@ -143,6 +151,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_sddmm_coo_aos.yaml
     cuda/12.8/test_sddmm_csc.yaml
     cuda/12.8/test_sddmm_csr.yaml
+    cuda/12.8/test_sddmm_csr_reuse_descr.yaml
     cuda/12.8/test_sparse_to_dense_coo.yaml
     cuda/12.8/test_sparse_to_dense_csc.yaml
     cuda/12.8/test_sparse_to_dense_csr.yaml
@@ -151,15 +160,20 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/12.8/test_spmm_batched_coo.yaml
     cuda/12.8/test_spmm_batched_csc.yaml
     cuda/12.8/test_spmm_batched_csr.yaml
+    cuda/12.8/test_spmm_bell.yaml
     cuda/12.8/test_spmm_coo.yaml
     cuda/12.8/test_spmm_csc.yaml
     cuda/12.8/test_spmm_csr.yaml
+    cuda/12.8/test_spmm_csr_reuse_descr.yaml
+    cuda/12.8/test_spmm_bsr.yaml
     cuda/12.8/test_spmv_coo.yaml
     cuda/12.8/test_spmv_coo_aos.yaml
     cuda/12.8/test_spmv_csr.yaml
+    cuda/12.8/test_spmv_csr_reuse_descr.yaml
     cuda/12.8/test_spmv_sell.yaml
     cuda/12.8/test_spsm_coo.yaml
     cuda/12.8/test_spsm_csr.yaml
     cuda/12.8/test_spsv_coo.yaml
     cuda/12.8/test_spsv_csr.yaml
+    cuda/12.8/test_spsv_csr_reuse_descr.yaml
     cuda/12.8/test_spvv.yaml)

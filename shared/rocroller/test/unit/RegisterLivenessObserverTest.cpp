@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
@@ -244,39 +221,39 @@ namespace rocRollerTest
             m_context->schedule(gen());
         }
 
-        std::string expected1 = R"( ^^________|__________|.3..setupv.v0,.v1;
-                                    ::________|^^________|.4..setups.s0,.s1;
-                                    ::________|::________|.5..LOOP_TOP:;;
-                                    v:________|::________|.7..readv.v0;
-                                    _:________|v:________|.8..reads.s0;
-                                    _v________|_:________|.9..unrelated.v1;
-                                    _:________|_v________|.10..unrelated.s1;
-                                    ^:________|_:________|.11..writev.v0;
-                                    ::________|^:________|.12..writes.s0;
-                                    ::________|::________|.13..s_cbranch_vccnz.LOOP_TOP;
-                                    :_________|:_________|.14..LOOP_BOTTOM:;;
-                                    v_________|:_________|.16..readv.v0;
-                                    __________|v_________|.17..reads.s0;
+        std::string expected1 = R"( ^^________|__________|.2..setupv.v0,.v1;
+                                    ::________|^^________|.3..setups.s0,.s1;
+                                    ::________|::________|.4..LOOP_TOP:;
+                                    v:________|::________|.5..readv.v0;
+                                    _:________|v:________|.6..reads.s0;
+                                    _v________|_:________|.7..unrelated.v1;
+                                    _:________|_v________|.8..unrelated.s1;
+                                    ^:________|_:________|.9..writev.v0;
+                                    ::________|^:________|.10..writes.s0;
+                                    ::________|::________|.11..s_cbranch_vccnz.LOOP_TOP;
+                                    :_________|:_________|.12..LOOP_BOTTOM:;
+                                    v_________|:_________|.13..readv.v0;
+                                    __________|v_________|.14..reads.s0;
                                 )";
 
-        std::string expected2 = R"( ____^^____|__________|.18..setupv.v4,.v5;
-                                    ____::____|____^^____|.19..setups.s4,.s5;
-                                    ____:v____|____::____|.20..unrelated.v5;
-                                    ____::____|____:v____|.21..unrelated.s5;
-                                    ____::____|____::____|.22..s_cbranch_vccnz.LOOP_BOTTOM2;
-                                    _____:____|_____:____|.23..LOOP_TOP2:;;
+        std::string expected2 = R"( ____^^____|__________|.15..setupv.v4,.v5;
+                                    ____::____|____^^____|.16..setups.s4,.s5;
+                                    ____:v____|____::____|.17..unrelated.v5;
+                                    ____::____|____:v____|.18..unrelated.s5;
+                                    ____::____|____::____|.19..s_cbranch_vccnz.LOOP_BOTTOM2;
+                                    _____:____|_____:____|.20..LOOP_TOP2:;
+                                    _____v____|_____:____|.21..unrelated.v5;
+                                    _____:____|_____v____|.22..unrelated.s5;
+                                    ____^:____|_____:____|.23..writev.v4;
+                                    _____:____|____^:____|.24..writes.s4;
                                     _____v____|_____:____|.25..unrelated.v5;
                                     _____:____|_____v____|.26..unrelated.s5;
                                     ____^:____|_____:____|.27..writev.v4;
-                                    _____:____|____^:____|.28..writes.s4;
-                                    _____v____|_____:____|.29..unrelated.v5;
-                                    _____:____|_____v____|.30..unrelated.s5;
-                                    ____^:____|_____:____|.31..writev.v4;
-                                    ____::____|____^:____|.32..writes.s4;
-                                    ____::____|____::____|.33..s_cbranch_vccnz.LOOP_TOP2;
-                                    ____:_____|____:_____|.34..LOOP_BOTTOM2:;;
-                                    ____v_____|____:_____|.36..readv.v4;
-                                    __________|____v_____|.37..reads.s4;
+                                    ____::____|____^:____|.28..writes.s4;
+                                    ____::____|____::____|.29..s_cbranch_vccnz.LOOP_TOP2;
+                                    ____:_____|____:_____|.30..LOOP_BOTTOM2:;
+                                    ____v_____|____:_____|.31..readv.v4;
+                                    __________|____v_____|.32..reads.s4;
                                 )";
 
         std::string expected_file = Settings::getInstance()->get(Settings::AssemblyFile) + ".live";

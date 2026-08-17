@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -43,13 +43,14 @@ from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefau
 from Tensile.Common.Types import IsaVersion
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
-def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
+def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int, xnack: bool = False):
     vgpr = ((vgpr+7)//8)*8
     sgpr = ((sgpr+7)//8)*8
     lds  = ((lds+31)//32)*32
 
+    target_id = f'{gfx_arch}:xnack+' if xnack else gfx_arch
     header = ""
-    header += f'.amdgcn_target "amdgcn-amd-amdhsa--{gfx_arch}"\n'
+    header += f'.amdgcn_target "amdgcn-amd-amdhsa--{target_id}"\n'
     header += f'.text\n'
     header += f'.protected {name}\n'
     header += f'.globl {name}\n'
@@ -59,7 +60,7 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
     header += f'.p2align 6\n'
     header += f'.amdhsa_kernel {name}\n'
     header += f'  .amdhsa_user_sgpr_kernarg_segment_ptr 1\n'
-    if (gfx_arch not in ("gfx900", "gfx908", "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201")):
+    if (gfx_arch not in ("gfx900", "gfx908", "gfx1030", "gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153", "gfx1200", "gfx1201", "gfx1250")):
         header += f'  .amdhsa_accum_offset {vgpr} // accvgpr offset\n'
     header += f'  .amdhsa_next_free_vgpr {vgpr} // vgprs\n'
     header += f'  .amdhsa_next_free_sgpr {sgpr} // sgprs\n'
@@ -121,7 +122,7 @@ class LayerNormKernelGenerator:
                  arch: str,
                  isa: IsaVersion):
         self.io_type = io_type
-        self.bpe = io_type.numBytes()
+        self.bpe = int(io_type.numBytes())
         self.num_workitems = num_workitems
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size
@@ -137,6 +138,7 @@ class LayerNormKernelGenerator:
         self.vgpr_pool.add(0, 39) #TODO: estimate this
         self.debug_label = True
         self.arch = arch
+        self.isa = isa
         self.op = 'LayerNorm'
         self.sgprs  = collections.OrderedDict()
         self.vgprs  = collections.OrderedDict()
@@ -275,6 +277,18 @@ class LayerNormKernelGenerator:
         mod.addSpaceLine()
         return mod
 
+    def shiftSrd(self, srdStr):
+        module = Module()
+        if self.isa[0] == 12 and self.isa[1] == 5:
+            stmp = self.sgpr_pool.checkOutAligned(1, 1)
+            module.add(ri.SAndB32(sgpr(stmp), sgpr(srdStr+"+2"), 0x7F))
+            module.add(ri.SLShiftLeftB32(sgpr(stmp), 25, sgpr(stmp)))
+            module.add(ri.SAndB32(sgpr(srdStr+"+1"), sgpr(srdStr+"+1"), 0x1FFFFFF))
+            module.add(ri.SOrB32(sgpr(srdStr+"+1"), sgpr(srdStr+"+1"), sgpr(stmp)))
+            module.add(ri.SLShiftRightB32(sgpr(srdStr+"+2"), 7, sgpr(srdStr+"+2")))
+            self.sgpr_pool.checkIn(stmp)
+        return module
+
     def init_param(self) -> Module:
         mod = Module("defineVariables")
         mod.addComment0("defineVariables")
@@ -311,6 +325,10 @@ class LayerNormKernelGenerator:
         mod.add(ri.SMovB32(sgpr("SrcGamma+2"), sgpr("Tmp")))
         mod.add(ri.SMovB32(sgpr("SrcBeta+2"), sgpr("Tmp")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), sgpr("Tmp")))
+        mod.add(self.shiftSrd("Src"))
+        mod.add(self.shiftSrd("SrcGamma"))
+        mod.add(self.shiftSrd("SrcBeta"))
+        mod.add(self.shiftSrd("Dst"))
         mod.addSpaceLine()
 
         mod.add(ri.VMovB32(vgpr("Count"), 0.0))
@@ -817,6 +835,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.SMovB32(sgpr("Dst+1"), sgpr("AddressMean+1")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), "BufferLimit"))
         mod.add(ri.SMovB32(sgpr("Dst+3"), "Srd127_96"))
+        mod.add(self.shiftSrd("Dst"))
         mod.add(ri.BufferStoreB32(vgpr("Mean"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
 
@@ -824,6 +843,7 @@ class LayerNormKernelGenerator:
         mod.add(ri.SMovB32(sgpr("Dst+1"), sgpr("AddressInvvar+1")))
         mod.add(ri.SMovB32(sgpr("Dst+2"), "BufferLimit"))
         mod.add(ri.SMovB32(sgpr("Dst+3"), "Srd127_96"))
+        mod.add(self.shiftSrd("Dst"))
         mod.add(ri.BufferStoreB32(vgpr("Invvar"), vgpr("Offset"), sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
         return mod
@@ -929,6 +949,7 @@ if __name__ == '__main__':
     ap.add_argument('--debug-build', action='store_true', dest='debug_build', help='Build with debug information')
     ap.set_defaults(debug_build=False)
     ap.add_argument('--arch', type=str, default='gfx90a', help='Target architecture for assembler, e.g. gfx908. Default is gfx90a')
+    ap.add_argument('--xnack', action='store_true', help='Append :xnack+ to the .amdgcn_target code-object id (arch logic still uses the base arch)')
     args = ap.parse_args()
     output_path: str = args.output
     w: int = args.w
@@ -937,6 +958,7 @@ if __name__ == '__main__':
     toolchain_path: str = validateToolchain(args.toolchain)
     debug_build: bool = args.debug_build
     arch: str = args.arch
+    xnack: bool = args.xnack
     isa = gfxToIsa(arch)
 
     if any([not i for i in (arch, toolchain_path, isa)]):
@@ -956,7 +978,7 @@ if __name__ == '__main__':
     func_name = layernorm.func_name
     meta = KernelMeta(func_name, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), 0, layernorm.lds_usage_byte, waveFrontSize, w, 8, args)
     meta.update_args_offsets()
-    k_str = '\n'.join([kernel_header(func_name, arch, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), layernorm.lds_usage_byte),
+    k_str = '\n'.join([kernel_header(func_name, arch, layernorm.vgpr_pool.size(), layernorm.sgpr_pool.size(), layernorm.lds_usage_byte, xnack),
                        meta_str((meta,)),
                        str(kernel_body)])
 

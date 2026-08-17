@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@ namespace rocsparse
 
     template <typename T>
     rocsparse_status assign_async(int64_t n, T* dest, T value, hipStream_t stream);
+    template <typename T>
+    rocsparse_status assign_device_async(int64_t n, T* dest, const T* value, hipStream_t stream);
 
     rocsparse_status
         assign_max_async(int64_t n, rocsparse_indextype indextype, void* dest, hipStream_t stream);

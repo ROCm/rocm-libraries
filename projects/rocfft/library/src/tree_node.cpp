@@ -1,4 +1,4 @@
-// Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 
 #include <limits>
 #include <sstream>
+#include <thread>
 
 SchemeTreeVec EmptySchemeTreeVec;
 SchemeVec     EmptySchemeVec;
@@ -71,11 +72,11 @@ NodeMetaData::NodeMetaData(TreeNode* refNode)
 {
     if(refNode != nullptr)
     {
-        precision  = refNode->precision;
-        batch      = refNode->batch;
-        direction  = refNode->direction;
-        rootIsC2C  = refNode->IsRootPlanC2CTransform();
-        deviceProp = refNode->deviceProp;
+        precision         = refNode->precision;
+        batch             = refNode->batch;
+        direction         = refNode->direction;
+        rootTransformType = refNode->GetRootPlanTransformType();
+        deviceProp        = refNode->deviceProp;
     }
 }
 
@@ -398,72 +399,114 @@ void TreeNode::CollapseContiguousDims()
     for(auto& child : childNodes)
         child->CollapseContiguousDims();
 
-    const auto collapsibleDims = CollapsibleDims();
-    if(collapsibleDims.empty())
+    auto collapsible_axes = CollapsibleDims();
+    if(collapsible_axes.empty())
         return;
+    // add batch dimension (implicitly understood herein as length.size())
+    collapsible_axes.push_back(length.size());
 
-    // utility function to collect the dims to collapse
-    auto collectCollapse = [&collapsibleDims](const size_t               dist,
-                                              size_t&                    newBatch,
-                                              const std::vector<size_t>& length,
-                                              const std::vector<size_t>& stride) {
-        std::vector<size_t> dimsToCollapse;
-        // start with batch dim and go backwards through collapsible dims
-        // so we can collapse them without invalidating remaining indexes
-        auto curStride = dist;
-        for(auto i = collapsibleDims.rbegin(); i != collapsibleDims.rend(); ++i)
-        {
-            if(stride[*i] == 0)
-                break;
-            if(curStride % stride[*i] != 0)
-                break;
-            if(curStride / stride[*i] != length[*i])
-                break;
-            dimsToCollapse.push_back(*i);
-            newBatch *= length[*i];
-            curStride = stride[*i];
-        }
-        return dimsToCollapse;
-    };
+    // TODO: replace members TreeNode::length, TreeNode::outputLength, TreeNode::inStride,
+    // TreeNode::outStride, etc. by data_layout_t instances and introduce a (static)
+    //    data_layout_t::compress_batch_axes_consistently_in(data_layout_t& layout_0,
+    //                                                       data_layout_t& layout_1
+    //                                                       [, ...]);
+    // which handle compression of batch axes consistently across two (or more) data layouts.
 
-    // utility function to actually do the collapsing -
-    // dimsToCollapse must be in reverse order so we erase dims from
-    // highest to lowest
-    auto doCollapse = [](size_t&                    dist,
-                         const std::vector<size_t>& dimsToCollapse,
-                         std::vector<size_t>&       lengthToCollapse,
-                         std::vector<size_t>&       strideToCollapse) {
-        for(auto i : dimsToCollapse)
-        {
-            dist /= lengthToCollapse[i];
-            lengthToCollapse.erase(lengthToCollapse.begin() + i);
-            strideToCollapse.erase(strideToCollapse.begin() + i);
-        }
-    };
-
-    size_t              newInputBatch = batch;
-    std::vector<size_t> inputDimsToCollapse
-        = collectCollapse(iDist, newInputBatch, length, inStride);
-    auto                outputLengthTemp = GetOutputLength();
-    size_t              newOutputBatch   = batch;
-    std::vector<size_t> outputDimsToCollapse
-        = collectCollapse(oDist, newOutputBatch, outputLengthTemp, outStride);
-    if(inputDimsToCollapse != outputDimsToCollapse || newInputBatch != newOutputBatch)
-        return;
-
-    if(!inputDimsToCollapse.empty())
+    // Go over all couples of entries in collapsible_axes and collapse axis of smaller index
+    // into axis of larger index (so that batch dimension is never removed), iff collapsing
+    // is valid for both the input and output node's data layouts for the considered couple
+    // of axes
+    auto outputLengthTemp = GetOutputLength();
+    auto first_axis_it    = collapsible_axes.begin();
+    while(first_axis_it != collapsible_axes.end())
     {
-        std::stringstream msg;
-        msg << "collapsed contiguous high length(s)";
-        for(auto i = inputDimsToCollapse.rbegin(); i != inputDimsToCollapse.rend(); ++i)
-            msg << " " << length[*i];
-        msg << " into batch";
-        comments.push_back(msg.str());
-    }
+        auto second_axis_it = collapsible_axes.begin();
+        bool collapsed_some = false;
+        while(!collapsed_some && second_axis_it != collapsible_axes.end())
+        {
+            if(second_axis_it == first_axis_it)
+            {
+                second_axis_it++;
+                continue;
+            }
+            // batch (along with iDist and oDist) cannot be erased ever, so the logic below
+            // always compresses collapsible couples of axes by removing the axis of lower
+            // dimension index (i.e., not "batch", "iDist", "oDist", etc.) by design, even
+            // if "natural" compression would be the other way around...
+            const auto keep_idx = std::max(*first_axis_it, *second_axis_it);
+            const auto del_idx  = std::min(*first_axis_it, *second_axis_it);
+            // note: del_idx < length.size() by construction
 
-    doCollapse(iDist, inputDimsToCollapse, length, inStride);
-    doCollapse(oDist, outputDimsToCollapse, outputLengthTemp, outStride);
-    batch = newInputBatch;
+            auto& keep_ilength      = keep_idx < length.size() ? length[keep_idx] : batch;
+            auto& keep_istride      = keep_idx < length.size() ? inStride[keep_idx] : iDist;
+            auto& keep_olength      = keep_idx < length.size() ? outputLengthTemp[keep_idx] : batch;
+            auto& keep_ostride      = keep_idx < length.size() ? outStride[keep_idx] : oDist;
+            const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
+            const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;
+            const auto& del_olength = del_idx < length.size() ? outputLengthTemp[del_idx] : batch;
+            const auto& del_ostride = del_idx < length.size() ? outStride[del_idx] : oDist;
+            const bool  keep_is_multiple_of_del
+                = (keep_ilength == 1 || keep_istride == del_istride * del_ilength)
+                  && (keep_olength == 1 || keep_ostride == del_ostride * del_olength);
+            const bool del_is_multiple_of_keep
+                = (del_ilength == 1 || del_istride == keep_istride * keep_ilength)
+                  && (del_olength == 1 || del_ostride == keep_ostride * keep_olength);
+            if(!keep_is_multiple_of_del && !del_is_multiple_of_keep)
+            {
+                second_axis_it++;
+                continue;
+            }
+            if(keep_idx == length.size() && del_ilength != del_olength)
+            {
+                // batch size to keep (unique variable) but multipliers differ...
+                // no can/should do compression
+                second_axis_it++;
+                continue;
+            }
+
+            // add to comment list:
+            std::stringstream msg;
+            msg << "collapsing contiguous high length " << del_ilength << " into "
+                << (keep_idx == length.size() ? "batch " : "other high length ") << keep_ilength;
+            // do the collapse
+            if(keep_is_multiple_of_del)
+            {
+                keep_istride = del_istride;
+                keep_ostride = del_ostride;
+            }
+            keep_ilength *= del_ilength;
+            if(keep_idx < length.size())
+                keep_olength *= del_olength;
+            // effectively erase the axis of index del_idx
+            length.erase(length.begin() + del_idx);
+            inStride.erase(inStride.begin() + del_idx);
+            outputLengthTemp.erase(outputLengthTemp.begin() + del_idx);
+            outStride.erase(outStride.begin() + del_idx);
+            if(del_idx == *first_axis_it)
+                collapsible_axes.erase(first_axis_it);
+            else
+                collapsible_axes.erase(second_axis_it);
+            for(auto& axis_idx : collapsible_axes)
+            {
+                if(axis_idx > del_idx)
+                    axis_idx--;
+            }
+            msg << ". Resulting lengths and batch are: ";
+            for(const auto& len : length)
+                msg << len << ", ";
+            msg << batch;
+            comments.push_back(msg.str());
+            collapsed_some = true;
+        }
+        if(collapsed_some)
+        {
+            // some compression of axes did happen, which may enable
+            // new compressions... restart from scratch
+            first_axis_it = collapsible_axes.begin();
+        }
+        else
+            first_axis_it++;
+    }
 
     if(!outputLength.empty())
         outputLength = outputLengthTemp;
@@ -540,28 +583,31 @@ MPI_Comm MultiPlanItem::ActiveMPIComm(rocfft_plan plan) const
     if(subcomm)
         return *subcomm;
     else
-        return plan->mpi_comm;
+        return plan->desc.mpi_comm;
 }
 #endif
 
-void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
-                                    void*                 in_buffer[],
-                                    void*                 out_buffer[],
-                                    rocfft_execution_info info,
-                                    size_t                multiPlanIdx,
+void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
+                                    void*                                 in_buffer[],
+                                    void*                                 out_buffer[],
+                                    const rocfft_execution_info_internal& info,
+                                    size_t                                multiPlanIdx,
                                     const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
 
     if(LOG_PLAN_ENABLED())
     {
-        log_plan("CommPointToPoint\n");
+        log_plan("CommPointToPoint: " + std::to_string(numElems) + " elems, src "
+                 + srcLocation.str() + " -> dst " + destLocation.str() + "\n");
     }
 
     auto srcWithOffset = ptr_offset(
-        srcPtr.get(in_buffer, out_buffer, local_comm_rank), srcOffset, precision, arrayType);
-    auto destWithOffset = ptr_offset(
-        destPtr.get(in_buffer, out_buffer, local_comm_rank), destOffset, precision, arrayType);
+        srcPtr.get(in_buffer, out_buffer, local_comm_rank, info), srcOffset, precision, arrayType);
+    auto destWithOffset = ptr_offset(destPtr.get(in_buffer, out_buffer, local_comm_rank, info),
+                                     destOffset,
+                                     precision,
+                                     arrayType);
 
     if(srcLocation.comm_rank == destLocation.comm_rank)
     {
@@ -603,7 +649,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                           rocfft_type_to_mpi_type(precision, arrayType),
                                           destLocation.comm_rank,
                                           multiPlanIdx,
-                                          plan->mpi_comm,
+                                          plan->desc.mpi_comm,
                                           &request);
             if(mpiret != MPI_SUCCESS)
             {
@@ -620,7 +666,7 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                           rocfft_type_to_mpi_type(precision, arrayType),
                                           srcLocation.comm_rank,
                                           multiPlanIdx,
-                                          plan->mpi_comm,
+                                          plan->desc.mpi_comm,
                                           &request);
             if(mpiret != MPI_SUCCESS)
             {
@@ -643,7 +689,7 @@ void CommPointToPoint::Wait()
 
 void CommPointToPoint::Print(rocfft_ostream& os, const int indent) const
 {
-    const std::string indentStr("    ", indent);
+    const std::string indentStr(indent * 4, ' ');
 
     os << indentStr << "CommPointToPoint " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":"
@@ -658,11 +704,220 @@ void CommPointToPoint::Print(rocfft_ostream& os, const int indent) const
     os << std::endl;
 }
 
-void CommScatter::ExecuteAsync(const rocfft_plan     plan,
-                               void*                 in_buffer[],
-                               void*                 out_buffer[],
-                               rocfft_execution_info info,
-                               size_t                multiPlanIdx,
+#ifdef ROCFFT_RCCL_ENABLE
+// RCCL AllToAll implementation
+void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
+                                    void*                                 in_buffer[],
+                                    void*                                 out_buffer[],
+                                    const rocfft_execution_info_internal& info,
+                                    size_t                                multiPlanIdx,
+                                    const std::map<int, device_callback_t>&)
+{
+    const auto devices = rccl.get_devices();
+
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommRCCLAllToAll: count_per_rank=" + std::to_string(count_per_rank)
+                 + ", ndevices=" + std::to_string(devices.size()) + ", " + precision_name(precision)
+                 + " " + PrintArrayType(arrayType) + "\n");
+    }
+
+    // collect per-rank send/recv pointers and streams.  the wrapper
+    // requires each vector to be sized num_ranks() and indexed by
+    // RCCL rank; agents[] is already in that order (see constructor).
+    //
+    // Buffer layout (disjoint send/recv):
+    //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
+    //                (populated by the pack step antecedents)
+    //   recvBuffer:  slot[src_rank] at offset src_rank * count_per_rank
+    //                (populated by the collective; read by unpack step)
+    std::vector<const void*> send_ptrs(agents.size(), nullptr);
+    std::vector<void*>       recv_ptrs(agents.size(), nullptr);
+    std::vector<hipStream_t> streams(agents.size(), nullptr);
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+        streams[r]   = agents[r].stream;
+    }
+
+    // wrapper owns the ncclGroupStart/End scope and per-call
+    // hipSetDevice, so a single call fires the whole collective.
+    rccl.alltoall(send_ptrs, recv_ptrs, streams, count_per_rank, precision, arrayType);
+
+    // collective work is now enqueued on each agent's stream.
+    // record a completion event per agent so Wait() can synchronize
+    // on events (matching every other MultiPlanItem) rather than on
+    // streams directly.
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        if(agents[r].event && hipEventRecord(agents[r].event, agents[r].stream) != hipSuccess)
+            throw std::runtime_error("hipEventRecord failed for RCCL AllToAll on device "
+                                     + std::to_string(devices[r]));
+    }
+}
+
+void CommRCCLAllToAll::Wait()
+{
+    // poll each completion event until the collective finishes
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        if(!agents[r].event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(agents[r].event)) == hipErrorNotReady)
+            std::this_thread::yield();
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL AllToAll");
+    }
+}
+
+void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
+{
+    const std::string indentStr(indent * 4, ' ');
+    const auto        devices = rccl.get_devices();
+
+    os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
+       << PrintArrayType(arrayType) << ":\n";
+    os << indentStr << "  count_per_rank: " << count_per_rank << "\n";
+    os << indentStr << "  num_ranks: " << agents.size() << "\n";
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        os << indentStr << "  rank " << r << ": device=" << devices[r]
+           << " sendBuf=" << PrintBufferPtrOffset(agents[r].sendBuffer, 0)
+           << " recvBuf=" << PrintBufferPtrOffset(agents[r].recvBuffer, 0) << "\n";
+    }
+    os << std::endl;
+}
+
+// RCCL grouped send/recv implementation
+void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
+                                   void*                                 in_buffer[],
+                                   void*                                 out_buffer[],
+                                   const rocfft_execution_info_internal& info,
+                                   size_t                                multiPlanIdx,
+                                   const std::map<int, device_callback_t>&)
+{
+    if(LOG_PLAN_ENABLED())
+    {
+        size_t nsends = 0, nrecvs = 0;
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::send)
+                ++nsends;
+            else
+                ++nrecvs;
+        }
+        log_plan("CommRCCLGrouped: " + std::to_string(nsends) + " sends, " + std::to_string(nrecvs)
+                 + " recvs, " + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
+    }
+
+    if(transfers.empty())
+        return;
+
+    // batch all send/recv into one RCCL group; group.end() (ncclGroupEnd)
+    // is what enqueues the work, so event recording must happen after it
+    rocfft_rccl_group_t group;
+
+    for(auto& t : transfers)
+    {
+        if(t.local_location.comm_rank == local_comm_rank)
+        {
+            rocfft_scoped_device dev(t.local_location.device);
+
+            void* data_ptr = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                                        t.offset,
+                                        precision,
+                                        arrayType);
+
+            // endpoints are addressed by device id; the wrapper maps
+            // the peer device to its RCCL rank internally
+            switch(t.op)
+            {
+            case rccl_op::send:
+                rccl.send(data_ptr,
+                          t.count,
+                          t.peer_location.device,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
+                break;
+            case rccl_op::recv:
+                rccl.recv(data_ptr,
+                          t.count,
+                          t.peer_location.device,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
+                break;
+            }
+        }
+    }
+
+    // close the group explicitly so a launch failure throws before events record
+    group.end();
+
+    // record a completion event per local transfer so Wait() can
+    // synchronize on events (matching every other MultiPlanItem)
+    // rather than on streams directly.
+    for(auto& t : transfers)
+    {
+        if(t.event)
+        {
+            rocfft_scoped_device dev(t.local_location.device);
+            if(hipEventRecord(t.event, t.stream) != hipSuccess)
+                throw std::runtime_error("hipEventRecord failed for RCCL Grouped on device "
+                                         + std::to_string(t.local_location.device));
+        }
+    }
+}
+
+void CommRCCLGrouped::Wait()
+{
+    // poll each completion event until the transfer finishes
+    for(auto& t : transfers)
+    {
+        if(!t.event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(t.event)) == hipErrorNotReady)
+            std::this_thread::yield();
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL Grouped");
+    }
+}
+
+void CommRCCLGrouped::Print(rocfft_ostream& os, const int indent) const
+{
+    const std::string indentStr(indent * 4, ' ');
+
+    os << indentStr << "CommRCCLGrouped " << precision_name(precision) << " "
+       << PrintArrayType(arrayType) << ":\n";
+    os << indentStr << "  num_transfers: " << transfers.size() << "\n";
+    for(size_t i = 0; i < transfers.size(); ++i)
+    {
+        const auto& t       = transfers[i];
+        const bool  is_send = (t.op == rccl_op::send);
+        os << indentStr << "  " << (is_send ? "Send" : "Recv") << " " << t.count << " elems "
+           << (is_send ? "to" : "from") << " (comm_rank=" << t.peer_location.comm_rank
+           << ", device=" << t.peer_location.device << ")"
+           << " on device " << t.local_location.device << "\n";
+    }
+    os << std::endl;
+}
+#endif // ROCFFT_RCCL_ENABLE
+
+void CommScatter::ExecuteAsync(const rocfft_plan                     plan,
+                               void*                                 in_buffer[],
+                               void*                                 out_buffer[],
+                               const rocfft_execution_info_internal& info,
+                               size_t                                multiPlanIdx,
                                const std::map<int, device_callback_t>&)
 {
     rocfft_scoped_device dev(srcLocation.device);
@@ -676,12 +931,15 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
     {
         const auto& op = ops[opIdx];
 
-        auto srcWithOffset = ptr_offset(
-            srcPtr.get(in_buffer, out_buffer, local_comm_rank), op.srcOffset, precision, arrayType);
-        auto destWithOffset = ptr_offset(op.destPtr.get(in_buffer, out_buffer, local_comm_rank),
-                                         op.destOffset,
-                                         precision,
-                                         arrayType);
+        auto srcWithOffset = ptr_offset(srcPtr.get(in_buffer, out_buffer, local_comm_rank, info),
+                                        op.srcOffset,
+                                        precision,
+                                        arrayType);
+        auto destWithOffset
+            = ptr_offset(op.destPtr.get(in_buffer, out_buffer, local_comm_rank, info),
+                         op.destOffset,
+                         precision,
+                         arrayType);
 
         hipError_t err = hipSuccess;
         if(op.destLocation.comm_rank == srcLocation.comm_rank)
@@ -718,7 +976,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                               rocfft_type_to_mpi_type(precision, arrayType),
                                               op.destLocation.comm_rank,
                                               GetOperationCommTag(multiPlanIdx, opIdx),
-                                              plan->mpi_comm,
+                                              plan->desc.mpi_comm,
                                               &request);
                 if(mpiret != MPI_SUCCESS)
                 {
@@ -735,7 +993,7 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                               rocfft_type_to_mpi_type(precision, arrayType),
                                               srcLocation.comm_rank,
                                               GetOperationCommTag(multiPlanIdx, opIdx),
-                                              plan->mpi_comm,
+                                              plan->desc.mpi_comm,
                                               &request);
                 if(mpiret != MPI_SUCCESS)
                 {
@@ -787,11 +1045,11 @@ void CommScatter::Print(rocfft_ostream& os, const int indent) const
     }
 }
 
-void CommGather::ExecuteAsync(const rocfft_plan     plan,
-                              void*                 in_buffer[],
-                              void*                 out_buffer[],
-                              rocfft_execution_info info,
-                              size_t                multiPlanIdx,
+void CommGather::ExecuteAsync(const rocfft_plan                     plan,
+                              void*                                 in_buffer[],
+                              void*                                 out_buffer[],
+                              const rocfft_execution_info_internal& info,
+                              size_t                                multiPlanIdx,
                               const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
@@ -807,11 +1065,11 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
 
         rocfft_scoped_device dev(op.srcLocation.device);
 
-        auto srcWithOffset  = ptr_offset(op.srcPtr.get(in_buffer, out_buffer, local_comm_rank),
+        auto srcWithOffset = ptr_offset(op.srcPtr.get(in_buffer, out_buffer, local_comm_rank, info),
                                         op.srcOffset,
                                         precision,
                                         arrayType);
-        auto destWithOffset = ptr_offset(destPtr.get(in_buffer, out_buffer, local_comm_rank),
+        auto destWithOffset = ptr_offset(destPtr.get(in_buffer, out_buffer, local_comm_rank, info),
                                          op.destOffset,
                                          precision,
                                          arrayType);
@@ -856,7 +1114,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                                        rocfft_type_to_mpi_type(precision, arrayType),
                                        destLocation.comm_rank,
                                        GetOperationCommTag(multiPlanIdx, opIdx),
-                                       plan->mpi_comm,
+                                       plan->desc.mpi_comm,
                                        &request);
                 if(rcmpi != MPI_SUCCESS)
                     throw std::runtime_error("MPI_Isend failed: " + std::to_string(rcmpi));
@@ -870,7 +1128,7 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                                        rocfft_type_to_mpi_type(precision, arrayType),
                                        op.srcLocation.comm_rank,
                                        GetOperationCommTag(multiPlanIdx, opIdx),
-                                       plan->mpi_comm,
+                                       plan->desc.mpi_comm,
                                        &request);
                 if(rcmpi != MPI_SUCCESS)
                     throw std::runtime_error("MPI_Irecv failed: " + std::to_string(rcmpi));
@@ -922,11 +1180,11 @@ void CommGather::Print(rocfft_ostream& os, const int indent) const
     }
 }
 
-void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
-                                void*                 in_buffer[],
-                                void*                 out_buffer[],
-                                rocfft_execution_info info,
-                                size_t                multiPlanIdx,
+void CommAllToAll::ExecuteAsync(const rocfft_plan                     plan,
+                                void*                                 in_buffer[],
+                                void*                                 out_buffer[],
+                                const rocfft_execution_info_internal& info,
+                                size_t                                multiPlanIdx,
                                 const std::map<int, device_callback_t>&)
 {
     if(LOG_PLAN_ENABLED())
@@ -939,7 +1197,7 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 
     MPI_Request  request;
     MPI_Datatype elem_type       = rocfft_type_to_mpi_type(precision, arrayType);
-    const int    local_comm_rank = plan->get_local_comm_rank();
+    const int    local_comm_rank = plan->desc.get_local_comm_rank();
 
     if(uniform_counts)
     {
@@ -957,10 +1215,10 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 
         const int send_count = static_cast<int>(send_count_elems);
 
-        const auto mpiret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
+        const auto mpiret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank, info),
                                           send_count,
                                           elem_type,
-                                          recvBuf.get(in_buffer, out_buffer, local_comm_rank),
+                                          recvBuf.get(in_buffer, out_buffer, local_comm_rank, info),
                                           send_count,
                                           elem_type,
                                           mpi_comm,
@@ -1015,16 +1273,17 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
             return;
         }
 
-        const auto mpiret = MPI_Ialltoallv(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                           intSendCounts.data(),
-                                           intSendOffsets.data(),
-                                           elem_type,
-                                           recvBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                           intRecvCounts.data(),
-                                           intRecvOffsets.data(),
-                                           elem_type,
-                                           mpi_comm,
-                                           &request);
+        const auto mpiret
+            = MPI_Ialltoallv(sendBuf.get(in_buffer, out_buffer, local_comm_rank, info),
+                             intSendCounts.data(),
+                             intSendOffsets.data(),
+                             elem_type,
+                             recvBuf.get(in_buffer, out_buffer, local_comm_rank, info),
+                             intRecvCounts.data(),
+                             intRecvOffsets.data(),
+                             elem_type,
+                             mpi_comm,
+                             &request);
 
         if(mpiret != MPI_SUCCESS)
         {
@@ -1106,6 +1365,8 @@ void ExecPlan::Print(rocfft_ostream& os, const int indent) const
         os << indentStr << "  inputPtr: " << inputPtr.str() << std::endl;
     if(outputPtr)
         os << indentStr << "  outputPtr: " << outputPtr.str() << std::endl;
+    if(workPtr)
+        os << indentStr << "  workPtr: " << workPtr.str() << std::endl;
 
     PrintNode(os, *this, indent);
 }

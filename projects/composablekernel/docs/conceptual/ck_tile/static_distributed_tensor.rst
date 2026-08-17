@@ -17,9 +17,9 @@ Each thread in a workgroup owns a portion of the overall tensor data, stored in 
 
 This design enables three critical optimizations:
 
-    * It maximizes register utilization by keeping frequently accessed data in the fastest memory hierarchy. 
-    * It eliminates redundant memory accesses since each thread maintains its own working set. 
-    * It provides a clean abstraction for complex algorithms like matrix multiplication where each thread accumulates partial results that eventually combine into the final output.
+* It maximizes register utilization by keeping frequently accessed data in the fastest memory hierarchy. 
+* It eliminates redundant memory accesses since each thread maintains its own working set. 
+* It provides a clean abstraction for complex algorithms like matrix multiplication where each thread accumulates partial results that eventually combine into the final output.
 
 Thread-Local Storage Model
 ==========================
@@ -89,29 +89,18 @@ Understanding how static distributed tensors organize memory is important for pe
 
 The memory layout follows a hierarchical pattern:
 
-.. 
-   Original mermaid diagram (edit here, then run update_diagrams.py)
-   
-      .. mermaid::
-      
-         graph TD
-             A[Global Tensor 64x64] --> B[Thread Block 16x16]
-             B --> C[Thread 0,0<br/>Elements 0:3,0:3]
-             B --> D[Thread 0,1<br/>Elements 0:3,4:7]
-             B --> E[Thread 1,0<br/>Elements 4:7,0:3]
-             B --> F[...]
-             
-             C --> G[Local Array<br/>16 elements]
-             D --> H[Local Array<br/>16 elements]
-             E --> I[Local Array<br/>16 elements]
-      
-      
-   
-   
+.. mermaid::
 
-.. image:: diagrams/static_distributed_tensor.svg
-   :alt: Diagram
-   :align: center
+   graph TD
+       A[Global Tensor 64x64] --> B[Thread Block 16x16]
+       B --> C[Thread 0,0<br/>Elements 0:3,0:3]
+       B --> D[Thread 0,1<br/>Elements 0:3,4:7]
+       B --> E[Thread 1,0<br/>Elements 4:7,0:3]
+       B --> F[...]
+
+       C --> G[Local Array<br/>16 elements]
+       D --> H[Local Array<br/>16 elements]
+       E --> I[Local Array<br/>16 elements]
 
 Element Access and Indexing
 ===========================
@@ -384,8 +373,7 @@ Static distributed tensors integrate seamlessly with other CK Tile components:
         // Main GEMM loop
         for(index_t k_tile = 0; k_tile < K; k_tile += kTileK) {
         // Create tile windows for this iteration
-        // See :ref:`ck_tile_tile_window` for details
-        auto a_window = make_tile_window(
+            auto a_window = make_tile_window(
             a_ptr, ALayout{M, K}, 
             ATileDist{}, 
             {blockIdx.y * kTileM, k_tile}
@@ -398,7 +386,6 @@ Static distributed tensors integrate seamlessly with other CK Tile components:
             );
             
             // Load tiles to distributed tensors
-            // See :ref:`ck_tile_load_store_traits` for optimized loading
             auto a_tile = a_window.load();
             auto b_tile = b_window.load();
             

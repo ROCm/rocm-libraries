@@ -1,0 +1,68 @@
+{#- Shared Jinja2 macros for DescriptorGenerator templates. -#}
+
+{#- Derives the constant name for a vector data field's test value.
+    Uses test_constant_name if set, otherwise derives from the field name
+    using the operation's tensor_const_prefix for consistent naming.
+
+    Usage: {{ vector_const_name(df, op) }}
+-#}
+{%- macro vector_const_name(df, op) -%}
+{%- if df.test_constant_name -%}
+{{ df.test_constant_name }}
+{%- else -%}
+{{ op.tensor_const_prefix }}{{ df.name | upper }}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Emits an assignment for a frontend DataField. Existing handwritten
+    attribute classes expose some fields as public members rather than setter
+    methods, so generated tests must mirror the configured access pattern. -#}
+{%- macro assign_frontend_data_field(object_name, field, value) -%}
+{%- if field.frontend_uses_member_access -%}
+{{ object_name }}.{{ field.frontend_member_name }} = {{ value }};
+{%- else -%}
+{{ object_name }}.{{ field.frontend_setter_name }}({{ value }});
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Renders YAML scalar values as C++ literals for generated test setup. -#}
+{%- macro cpp_literal(value) -%}
+{%- if value is sameas true -%}
+true
+{%- elif value is sameas false -%}
+false
+{%- else -%}
+{{ value }}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Canonical baseline mode for generic tests. Mode-rule operations use the
+    rule without optional tensors so baseline tests do not depend on routing
+    inputs. -#}
+{%- macro baseline_mode_name(op, field) -%}
+{%- if op.mode_rules -%}
+{{ op.mode_rule_without_optional_tensors.mode }}
+{%- else -%}
+{{ field.test_enum_value }}
+{%- endif -%}
+{%- endmacro -%}
+
+{#- Canonical baseline scalar for generic tests. An equality constraint on the
+    no-optional-input rule wins over generic test data. -#}
+{%- macro baseline_scalar_value(op, field) -%}
+{%- if op.mode_rules -%}
+{%- set rule = op.mode_rule_without_optional_tensors -%}
+{%- set constraints = rule.scalar_constraints | selectattr("field", "equalto", field.name) | list -%}
+{%- if constraints and constraints[0].equals is not none -%}
+{{ constraints[0].equals }}
+{%- elif field.test_value is not none -%}
+{{ field.test_value }}
+{%- else -%}
+{{ op.test_data.field_values.get(field.name, 0) }}
+{%- endif -%}
+{%- elif field.test_value is not none -%}
+{{ field.test_value }}
+{%- else -%}
+{{ op.test_data.field_values.get(field.name, 0) }}
+{%- endif -%}
+{%- endmacro -%}

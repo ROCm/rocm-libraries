@@ -27,6 +27,7 @@
 #include "BenchmarkTimer.hpp"
 #include "PerformanceReporter.hpp"
 #include "ResultReporter.hpp"
+#include "TimingInstrumentation.hpp"
 
 #include "Reference.hpp"
 
@@ -35,6 +36,84 @@
 #include <csignal>
 #include <cstddef>
 #include <thread>
+
+namespace {
+    // Computes total bytes read/written for a GEMM problem instance (A/B reads + D writes),
+    // plus additional traffic from optional tensors (C when beta!=0, E, bias, scaling tensors, MX scales).
+    // Used for approximate bandwidth reporting in the client logger.
+    using namespace TensileLite;
+    double computeByteRWForGEMM(const ContractionProblemGemm& gemm)
+    {
+        double totalBytes = 0.0;
+
+        size_t M = gemm.freeSizeA(0);
+        size_t N = gemm.freeSizeB(0);
+        size_t K = gemm.boundSize(0);
+
+        // Compute total batch size.
+        size_t numBatches = 1;
+        for(size_t i = 0; i < gemm.batchIndices().size(); ++i)
+            numBatches *= gemm.batchSize(i);
+
+        auto aDtypeInfo = DataTypeInfo::Get(gemm.a().dataType());
+        auto bDtypeInfo = DataTypeInfo::Get(gemm.b().dataType());
+        auto dDtypeInfo = DataTypeInfo::Get(gemm.d().dataType());
+
+        auto bytesA = multiplyElementSize(M * K * numBatches, aDtypeInfo.elementSize);
+        auto bytesB = multiplyElementSize(K * N * numBatches, bDtypeInfo.elementSize);
+        auto bytesD = multiplyElementSize(M * N * numBatches, dDtypeInfo.elementSize);
+
+        // Add bytesC if beta is enabled.
+        if(gemm.beta() != 0.0)
+        {
+            auto cDtypeInfo = DataTypeInfo::Get(gemm.c().dataType());
+            // Accumulate read bytes from C into totalBytes.
+            totalBytes += multiplyElementSize(M * N * numBatches, cDtypeInfo.elementSize);
+        }
+
+        // Add E tensor bytes if enabled.
+        if(gemm.useE())
+        {
+          auto eDtypeInfo = DataTypeInfo::Get(gemm.e().dataType());
+          totalBytes += multiplyElementSize(M * N * numBatches, eDtypeInfo.elementSize);
+        }
+
+        // Add bias vector bytes if enabled.
+        if(gemm.useBias() != 0)
+            totalBytes += gemm.bias().totalAllocatedBytes();
+
+        // Add scale tensor bytes if enabled.
+        if(!gemm.useScaleAB().empty())
+        {
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEA].totalAllocatedBytes();
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEB].totalAllocatedBytes();
+        }
+
+        if(gemm.useScaleCD())
+        {
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALEC].totalAllocatedBytes();
+            totalBytes += gemm.tensors()[ContractionProblemGemm::TENSOR::SCALED].totalAllocatedBytes();
+        }
+
+        if(gemm.useScaleAlphaVec() != 0)
+            totalBytes += gemm.scaleAlphaVec().totalAllocatedBytes();
+
+
+        // Add MX scale tensor bytes if dtype is MX.
+        if(gemm.mxTypeA() != rocisa::DataType::None && gemm.mxBlockA() > 0)
+        {
+            bytesA += gemm.mxsa().totalAllocatedBytes();
+        }
+        if(gemm.mxTypeB() != rocisa::DataType::None && gemm.mxBlockB() > 0)
+        {
+            bytesB += gemm.mxsb().totalAllocatedBytes();
+        }
+
+        totalBytes += bytesA + bytesB + bytesD;
+        return totalBytes;
+    }
+}
+
 
 namespace TensileLite
 {
@@ -160,38 +239,72 @@ namespace TensileLite
 
         void BenchmarkTimer::postSolution()
         {
-            bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
-            double timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
-                                                                 / m_numEnqueuesInSolution
-                                                             - m_flushTimeUs
-                                                       : std::numeric_limits<double>::quiet_NaN();
+            double timePerEnqueue_us;
+            double gflops;
+            double gflopsPerCu;
+            double bandwidthGbps = 0.0;
 
-            ContractionSolution::ProjectedPerformance pp;
-            double                                    flopCount = 0;
-            if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
             {
-                pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
-                flopCount = problem->gemms[0].flopCount();
-            }
-            else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
-            {
-                pp        = m_solution->projectedPerformance(*problem, m_hardware);
-                flopCount = problem->flopCount();
-            }
-            else
-            {
-                throw std::runtime_error(
-                    "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                ScopedTimer timer("post_solution_perf_calc");
+                bool   sol_is_skipped    = (m_skiprun_from_map || m_skip_slow_solution);
+                timePerEnqueue_us = !sol_is_skipped ? double_micros(m_timeInSolution).count()
+                                                                     / m_numEnqueuesInSolution
+                                                                 - m_flushTimeUs
+                                                           : std::numeric_limits<double>::quiet_NaN();
+
+                ContractionSolution::ProjectedPerformance pp;
+                double                                    flopCount = 0;
+                if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                {
+                    pp        = m_solution->projectedPerformance(problem->gemms[0], m_hardware);
+                    flopCount = problem->gemms[0].flopCount();
+                }
+                else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                {
+                    pp        = m_solution->projectedPerformance(*problem, m_hardware);
+                    flopCount = problem->flopCount();
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                }
+
+                gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
+                int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
+                int    usedCus     = std::min(tiles, perf.CUs);
+                gflopsPerCu = gflops / usedCus;
+
+                if(!sol_is_skipped)
+                {
+                    double totalBytes = 0.0;
+                    if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
+                    {
+                        totalBytes = computeByteRWForGEMM(*problem);
+                    }
+                    else if(auto problem = dynamic_cast<ContractionProblemGroupedGemm*>(m_problem))
+                    {
+                        for (const auto &gemm : problem->gemms)
+                            totalBytes += computeByteRWForGEMM(gemm);
+                    }
+                    else
+                    {
+                        throw std::runtime_error(
+                            "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
+                    }
+
+                    // Calculate total GB/s bandwidth from timePerEnqueue_us and update the report.
+                    bandwidthGbps = (totalBytes / timePerEnqueue_us) / (double)1e3;
+                }
             }
 
-            double gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
-            int    tiles       = pp.granularities.tilesPerCu * perf.CUs;
-            int    usedCus     = std::min(tiles, perf.CUs);
-            double gflopsPerCu = gflops / usedCus;
-
-            m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
-            m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
-            m_reporter->report(ResultKey::SpeedGFlops, gflops);
+            {
+                ScopedTimer timer("post_solution_reporting");
+                m_reporter->report(ResultKey::TimeUS, timePerEnqueue_us);
+                m_reporter->report(ResultKey::SpeedGFlopsPerCu, gflopsPerCu);
+                m_reporter->report(ResultKey::SpeedGFlops, gflops);
+                m_reporter->report(ResultKey::GbpsBW, bandwidthGbps);
+            }
 
             m_timeInSolution        = double_millis::zero();
             m_numEnqueuesInSolution = 0;
@@ -234,9 +347,11 @@ namespace TensileLite
 
             double_millis totalTime(0.0);
 
+            // Skip the first warmup event (cold start) when multiple warmups are available
+            size_t warmupStartIdx = startEvents->size() == 1 ? 0 : 1;
             float enqTime = 0.0f;
             HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
-            for(size_t i = 0; i < startEvents->size(); i++)
+            for(size_t i = warmupStartIdx; i < startEvents->size(); i++)
             {
                 HIP_CHECK_EXC(hipEventElapsedTime(
                     &enqTime, startEvents->at(i).front(), stopEvents->at(i).back()));
@@ -259,7 +374,10 @@ namespace TensileLite
                                              TimingEvents const&            stopEvents)
         {
             if(m_syncAfterWarmups && (stopEvents->size() > 0) && (stopEvents->back().size() > 0))
+            {
+                ScopedTimer timer("validate_gpu_sync");
                 HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
+            }
         }
 
         size_t BenchmarkTimer::numSyncs()

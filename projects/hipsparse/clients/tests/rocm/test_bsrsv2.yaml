@@ -24,6 +24,12 @@
 ---
 include: hipsparse_common.yaml
 
+# Known bugs - tests matching these criteria will be moved to known_bug category
+# These tests fail due to rounding errors with large matrices
+Known bugs:
+  - function: bsrsv2
+    filename: nos7
+
 Tests:
 - name: bsrsv2_bad_arg
   category: pre_checkin
@@ -141,6 +147,7 @@ Tests:
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   filename: [nos7]
+  graph_test: [true]
 
 - name: bsrsv2
   category: nightly

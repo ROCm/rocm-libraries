@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,14 @@
  * *************************************************************************/
 
 #include "roclapack_geqrf.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename I, typename U>
 rocblas_status
     rocsolver_geqrf_impl(rocblas_handle handle, const I m, const I n, U A, const I lda, T* ipiv)
+try
 {
     ROCSOLVER_ENTER_TOP("geqrf", "-m", m, "-n", n, "--lda", lda);
 
@@ -95,6 +97,10 @@ rocblas_status
         handle, m, n, A, shiftA, lda, strideA, ipiv, stridep, batch_count, (T*)scalars,
         work_workArr_work1, work2, work3, work4, (T*)Abyx_norms_trfact, (T*)diag_tmptr,
         (T**)workArr, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

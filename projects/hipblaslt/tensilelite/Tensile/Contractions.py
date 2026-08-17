@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
 from Tensile.SolutionStructs import Solution as OriginalSolution
-from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault
+from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from Tensile.Toolchain.Component import Assembler
 from math import ceil
 
@@ -67,11 +67,12 @@ class BoundIndex:
 
 
 class ProblemType:
-    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputType', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
-                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
+    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
+                 'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB']
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -132,14 +133,24 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
+
+        if 'MacDataTypeA' in d: #it will either be set as d['MacDataType'] or a specified input
+            rv.computeInputTypeA = DataType(d['MacDataTypeA'])
+        else:
+            rv.computeInputTypeA = srcType
+        if 'MacDataTypeB' in d:
+            rv.computeInputTypeB = DataType(d['MacDataTypeB'])
+        else:
+            rv.computeInputTypeB = srcType
+
         if 'DataTypeA' in d: #it will either be set as d['DataType'] or a specified input
             rv.aType = DataType(d['DataTypeA'])
         else:
-            rv.aType = srcType
+            rv.aType = rv.computeInputTypeA
         if 'DataTypeB' in d:
             rv.bType = DataType(d['DataTypeB'])
         else:
-            rv.bType = srcType
+            rv.bType = rv.computeInputTypeB
 
         if rv.aType.isFloat8BFloat8() or rv.bType.isFloat8BFloat8():
             rv.aType = DataType("F8")
@@ -164,7 +175,6 @@ class ProblemType:
         else:
             rv.amaxDType = computeType
 
-        rv.computeInputType = srcType
         rv.cType = dstType
         rv.dType = dstType
         # we already checked the src/dst/compute types are supported and well-assigned in SolutionStruct
@@ -227,6 +237,19 @@ class ProblemType:
         if 'UseE' in d:
             rv.useE = d['UseE']
 
+        rv.useGateResidual = False
+        rv.gateResidualDataTypeWhiteList = []
+        rv.setConstStrideGate = []
+        if 'UseGateResidual' in d:
+            rv.useGateResidual = bool(d['UseGateResidual'])
+            if 'GateResidualDataTypeList' in d:
+                d["GateResidualDataTypeList"].sort()  # Sort to make sure names are unique
+                rv.gateResidualDataTypeWhiteList = d['GateResidualDataTypeList']
+            else:
+                rv.gateResidualDataTypeWhiteList = getGateResidualDataTypeListDefault(d)
+            if 'SetConstStrideGate' in d:
+                rv.setConstStrideGate = d['SetConstStrideGate']
+
         rv.useGradient = False
         if 'Gradient' in d:
             rv.useGradient = d["Gradient"]
@@ -269,6 +292,17 @@ class ProblemType:
 
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+
+        rv.mxBlockA = d.get('MXBlockA', 0)
+        rv.mxBlockB = d.get('MXBlockB', 0)
+        rv.mxTypeA = DataType(d['DataTypeMXSA']) if 'DataTypeMXSA' in d else DataType(0)
+        rv.mxTypeB = DataType(d['DataTypeMXSB']) if 'DataTypeMXSB' in d else DataType(0)
+        # mxScaleFormat is a Solution-level parameter and is populated by
+        # Solution.FromOriginalState, which has access to the parent dict.
+
+        rv.metadataLayout = 0
+        if 'MetadataLayout' in d:
+            rv.metadataLayout = d['MetadataLayout']
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -359,6 +393,7 @@ class ProblemType:
             if not self.useBeta:
                 predicates.append(ProblemPredicate("BetaZero"))
             predicates.append(ProblemPredicate("BiasDataTypeWhiteList", value=self.biasDataTypeWhiteList))
+            predicates.append(ProblemPredicate("GateResidualDataTypeWhiteList", value=self.gateResidualDataTypeWhiteList))
             predicates.append(ProblemPredicate("BiasSrcWhiteList", value=self.biasSrcWhiteList))
             predicates.append(ProblemPredicate("AmaxDCheck", value=self.outputAmaxD))
             if self.activationType in ['all', 'hipblaslt_all']:
@@ -370,7 +405,7 @@ class ProblemType:
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
         if includeType:
-            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputType)))
+            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputTypeA, self.computeInputTypeB)))
             predicates.append(ProblemPredicate("HighPrecisionAccumulate", value=self.highPrecisionAccumulate))
             predicates.append(ProblemPredicate("Activation", value=self.activationType))
             predicates.append(ProblemPredicate("ActivationComputeType", value=self.activationComputeDataType))
@@ -378,6 +413,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("UseGradient", value=self.useGradient))
             predicates.append(ProblemPredicate("UseBias", value=self.useBias))
             predicates.append(ProblemPredicate("UseE", value=self.useE))
+            predicates.append(ProblemPredicate("UseGateResidual", value=self.useGateResidual))
             predicates.append(ProblemPredicate("DataTypeE", value=self.eType))
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
@@ -389,7 +425,12 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
-
+            predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
+            if self.mxBlockA:
+                predicates.append(ProblemPredicate("DataTypeMXSA", value=self.mxTypeA))
+            predicates.append(ProblemPredicate("MXBlockB", value=self.mxBlockB))
+            if self.mxBlockB:
+                predicates.append(ProblemPredicate("DataTypeMXSB", value=self.mxTypeB))
         return predicates
 
 def extractDimPredicate(cls, key, value, predicateName):
@@ -591,9 +632,12 @@ class SizeMapping:
                  'packBatchDims',
                  'magicDivAlg',
                  'streamK',
+                 'streamKForceDPOnly',
                  'streamKAtomic',
+                 'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
+                 'adaptiveGemmGSUA',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
                  'activationFused',
@@ -608,15 +652,33 @@ class SizeMapping:
                  'synchronizerSizePerWG',
                  'nonTemporalA',
                  'nonTemporalB',
+                 'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
+                 'useSubtileImpl',
+                 'NonTemporalD',
+                 'WaveSeparateGlobalReadA',
+                 'WaveSeparateGlobalReadB',
+                 'UnrollLoopSwapGlobalReadOrder',
+                 'DirectToVgprA',
+                 'DirectToVgprB',
+                 'NumLoadsCoalescedA',
+                 'NumLoadsCoalescedB',
+                 'WaveGroup',
+                 'VectorWidthA',
+                 'VectorWidthB',
+                 'LocalSplitU',
+                 'DirectToLdsA',
+                 'DirectToLdsB',
+                 'ExpertSchedulingMode',
+                 'clusterDim'
                  ]
 
     @classmethod
     def FromOriginalState(cls, d):
         globalAccum = 0
-        if d['GlobalSplitUAlgorithm'] == 'SingleBuffer':
+        if d['_GlobalAccumulation'] == 'SingleBuffer':
             globalAccum = 1
-        if d['GlobalSplitUAlgorithm'] == 'MultipleBuffer':
+        if d['_GlobalAccumulation'] == 'MultipleBuffer':
             globalAccum = 2
         if d['_GlobalAccumulation'] == 'MultipleBufferSingleKernel':
             globalAccum = 3
@@ -641,6 +703,10 @@ class SizeMapping:
             # WGM kernel param is interpreted as int so, 32bit output to 32b int
             return ctypes.c_int(output & 0xFFFFFFFF).value
 
+        dtva = bool(d['DirectToVgprA'])
+        dtvb = bool(d['DirectToVgprB'])
+        dtlA = bool(d['DirectToLdsA'])
+        dtlB = bool(d['DirectToLdsB'])
 
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
@@ -660,10 +726,13 @@ class SizeMapping:
                    staggerStrideShift       = d['_staggerStrideShift'] if '_staggerStrideShift' in d else 0,
                    packBatchDims            = 0,
                    streamK                  = d['StreamK'] if 'StreamK' in d else 0,
+                   streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
+                   prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
                    globalAccumulation       = globalAccum,
+                   adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    workspaceSizePerElemC    = d['_WorkspaceSizePerElemC'],
                    workspaceSizePerElemBias = d['_WorkspaceSizePerElemBias'],
                    activationFused          = d['ActivationFused'],
@@ -678,7 +747,25 @@ class SizeMapping:
                    synchronizerSizePerWG    = synchronizerSizePerWG,
                    nonTemporalA             = d['NonTemporalA'],
                    nonTemporalB             = d['NonTemporalB'],
+                   adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
+                   useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
+                   NonTemporalD             = d['NonTemporalD'],
+                   WaveSeparateGlobalReadA  = d['WaveSeparateGlobalReadA'],
+                   WaveSeparateGlobalReadB  = d['WaveSeparateGlobalReadB'],
+                   UnrollLoopSwapGlobalReadOrder = d['UnrollLoopSwapGlobalReadOrder'],
+                   DirectToVgprA            = dtva,
+                   DirectToVgprB            = dtvb,
+                   NumLoadsCoalescedA       = d['NumLoadsCoalescedA'],
+                   NumLoadsCoalescedB       = d['NumLoadsCoalescedB'],
+                   WaveGroup                = d["MIWaveGroup"],
+                   VectorWidthA             = d["VectorWidthA"],
+                   VectorWidthB             = d["VectorWidthB"],
+                   LocalSplitU              = d["LocalSplitU"],
+                   DirectToLdsA             = dtlA,
+                   DirectToLdsB             = dtlB,
+                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   clusterDim               = d['ClusterDim']
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
@@ -702,12 +789,15 @@ class InternalArgsSupport:
 
     @classmethod
     def FromOriginalState(cls, d):
+        # Set useSFC to True if SpaceFillingAlgo is non-empty, regardless of
+        # the explicit InternalSupportParams setting
+        useSFC = d['InternalSupportParams']['UseSFC'] or len(d.get('SpaceFillingAlgo', [])) > 0
         return cls(version = d['InternalSupportParams']['KernArgsVersion'],
                    gsu = d['InternalSupportParams']['SupportUserGSU'],
                    wgm = d['InternalSupportParams']['SupportCustomWGM'],
                    staggerU = d['InternalSupportParams']['SupportCustomStaggerU'],
                    useUniversalArgs = d['InternalSupportParams']['UseUniversalArgs'],
-                   useSFC = d['InternalSupportParams']['UseSFC'])
+                   useSFC = useSFC)
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
@@ -746,7 +836,8 @@ class Solution:
                    printIndexAssignmentInfo,
                    assembler,
                    isaInfoMap,
-                   solution.srcName
+                   solution.srcName,
+                   raiseProblemTypeOnTypeMismatch=False,
                )
 
     @classmethod
@@ -760,7 +851,9 @@ class Solution:
             assembler,
             isaInfoMap,
             srcName = "",
-            deviceInfo=None
+            deviceInfo=None,
+            *,
+            raiseProblemTypeOnTypeMismatch: bool = True,
         ):
         rv = cls()
 
@@ -771,6 +864,14 @@ class Solution:
             rv.kernelName = d['KernelNameMin']
 
         rv.problemType = ProblemType.FromOriginalState(d['ProblemType'])
+
+        # MXScaleFormat is a Solution-level knob (lives in d, not d['ProblemType']),
+        # but it describes the in-device MX scale layout the kernel expects, which
+        # the host (DataInitialization) needs to know to pick an upload layout.
+        # Plumb it onto problemType so the host can read it post-solution-pick.
+        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
+                                        "HostPreSwizzle": 1,
+                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)
@@ -805,7 +906,9 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
-        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(d['ISA'], d['CUCount'])
+        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+        )
         rv.originalSolution = OriginalSolution(
                                   d,
                                   splitGSU,
@@ -813,7 +916,8 @@ class Solution:
                                   printIndexAssignmentInfo,
                                   assembler,
                                   isaInfoMap,
-                                  srcName
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
                               )
         rv.srcName = srcName
 

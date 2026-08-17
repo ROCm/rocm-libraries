@@ -1,0 +1,128 @@
+# serializer version: 1
+# name: test_arch_source_default_partition[gfx900][gfx900]
+  dict({
+    'arch': list([
+    ]),
+    'default': list([
+    ]),
+    'source': list([
+    ]),
+  })
+# ---
+# name: test_arch_source_default_partition[gfx942][gfx942]
+  dict({
+    'arch': list([
+      'id=74a0',
+      'id=74a1',
+      'id=74a2',
+      'id=74a3',
+      'id=74a5',
+      'id=74a9',
+    ]),
+    'default': list([
+      'id=74a0',
+      'id=74a1',
+      'id=74a2',
+      'id=74a3',
+      'id=74a5',
+      'id=74a9',
+    ]),
+    'source': list([
+    ]),
+  })
+# ---
+# name: test_arch_source_default_partition[gfx950][gfx950]
+  dict({
+    'arch': list([
+      'id=75a0',
+      'id=75a2',
+      'id=75a3',
+      'id=75a8',
+      'id=75b0',
+      'id=75b2',
+      'id=75b3',
+      'id=75b8',
+    ]),
+    'default': list([
+      'id=75a0',
+    ]),
+    'source': list([
+      'id=75a2',
+      'id=75a3',
+      'id=75a8',
+      'id=75b0',
+      'id=75b2',
+      'id=75b3',
+      'id=75b8',
+    ]),
+  })
+# ---
+# name: test_chip_id_dir_from_path[base_arch_dir-gfx950/gfx950/Equality/logic.yaml][base_arch_dir]
+  dict({
+    'chipId': None,
+    'dirName': 'gfx950',
+    'hasChipIdDir': False,
+    'isValidFormat': True,
+  })
+# ---
+# name: test_chip_id_dir_from_path[malformed_id_dir-gfx950/gfx950_75a3/Equality/logic.yaml][malformed_id_dir]
+  dict({
+    'chipId': 'id=75a3',
+    'dirName': 'gfx950_75a3',
+    'hasChipIdDir': True,
+    'isValidFormat': False,
+  })
+# ---
+# name: test_chip_id_dir_from_path[nearest_wins-gfx950/checkout/gfx950/gfx950_id75a3/Equality/logic.yaml][nearest_wins]
+  dict({
+    'chipId': 'id=75a3',
+    'dirName': 'gfx950_id75a3',
+    'hasChipIdDir': True,
+    'isValidFormat': True,
+  })
+# ---
+# name: test_chip_id_dir_from_path[no_arch_component-some/random/place/logic.yaml][no_arch_component]
+  dict({
+    'chipId': None,
+    'dirName': None,
+    'hasChipIdDir': False,
+    'isValidFormat': True,
+  })
+# ---
+# name: test_chip_id_dir_from_path[variant_id_dir-gfx950/gfx950_id75a3/Equality/logic.yaml][variant_id_dir]
+  dict({
+    'chipId': 'id=75a3',
+    'dirName': 'gfx950_id75a3',
+    'hasChipIdDir': True,
+    'isValidFormat': True,
+  })
+# ---
+# name: test_chip_id_key
+  dict({
+    'lower': 'id=75a3',
+    'upper': 'id=75a3',
+  })
+# ---
+# name: test_fallback_family_cross_arch_skip_arm
+  list([
+    'id=75a0',
+    'id=75a3',
+  ])
+# ---
+# name: test_fallback_family_default_is_singleton
+  list([
+    'id=75a0',
+  ])
+# ---
+# name: test_fallback_family_source_includes_siblings
+  list([
+    'id=75a0',
+    'id=75a2',
+    'id=75a3',
+    'id=75a8',
+    'id=75b0',
+    'id=75b2',
+    'id=75b3',
+    'id=75b8',
+  ])
+# ---

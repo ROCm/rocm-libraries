@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -39,80 +16,7 @@ namespace GEMMTests
     using namespace rocRoller;
     namespace SolutionParams = rocRoller::Parameters::Solution;
 
-    // Params are: A & B type, K tile size, (transA, transB), load A path, load B path
-    class GEMMF8F6F4TestGPU
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                   int,
-                                                   std::pair<std::string, std::string>,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath>>
-    {
-    };
-
-    // Params are: A type, B type, K tile size, (transA, transB), load A path, load B path
-    class MixedGEMMF8F6F4TestGPU
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                   rocRoller::DataType,
-                                                   int,
-                                                   std::pair<std::string, std::string>,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath>>
-    {
-    };
-
-    // Params are: A type, B type, K tile size, load A path, load B path,
-    //   scale A mode, scale B mode, Load A scale path, Load B scale path, (transA, transB)
-    class ScaledMixedGEMMF8F6F4TestGPU
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
-                                                   rocRoller::DataType,
-                                                   int,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath,
-                                                   rocRoller::Operations::ScaleMode,
-                                                   rocRoller::Operations::ScaleMode,
-                                                   SolutionParams::LoadPath,
-                                                   SolutionParams::LoadPath,
-                                                   std::pair<std::string, std::string>>>
-    {
-    };
-
-    using ScaledMixedGEMMF8F6F4TestParamGenerator
-        = ::testing::internal::ParamGenerator<ScaledMixedGEMMF8F6F4TestGPU::ParamType>;
-    static auto FilterValidScalePathAndScaleModeParams(
-        ScaledMixedGEMMF8F6F4TestParamGenerator&& inputParamGenerator)
-    {
-        using LP = SolutionParams::LoadPath;
-        using SM = rocRoller::Operations::ScaleMode;
-
-        std::vector<ScaledMixedGEMMF8F6F4TestGPU::ParamType> filtered;
-        for(auto const& inputParam : inputParamGenerator)
-        {
-            auto const& params = std::get<1>(inputParam);
-
-            auto const& scaleAMode     = std::get<5>(params);
-            auto const& scaleBMode     = std::get<6>(params);
-            auto const& loadScalePathA = std::get<7>(params);
-            auto const& loadScalePathB = std::get<8>(params);
-
-            if((loadScalePathA != LP::BufferToVGPR or loadScalePathA != LP::GlobalToVGPR)
-               && (scaleAMode == SM::None || scaleAMode == SM::SingleScale))
-            {
-                continue;
-            }
-
-            if((loadScalePathB != LP::BufferToVGPR or loadScalePathB != LP::GlobalToVGPR)
-               && (scaleBMode == SM::None || scaleBMode == SM::SingleScale))
-            {
-                continue;
-            }
-
-            filtered.push_back(inputParam);
-        }
-
-        return ::testing::ValuesIn(filtered);
-    }
-
-    void checkGEMMF8F6F4(rocRoller::ContextPtr m_context,
+    void CheckGEMMF8F6F4(rocRoller::ContextPtr m_context,
                          std::string           mfma,
                          std::string           modifiers,
                          uint                  numMFMAs,
@@ -189,7 +93,215 @@ namespace GEMMTests
         }
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMM)
+    void CheckMFMAF8F6F4(rocRoller::ContextPtr m_context,
+                         std::string           f8f6f4_inst,
+                         std::string           modifier)
+    {
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            auto generatedCode = m_context->instructions()->toString();
+
+            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
+            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
+            auto modifier_count = countSubstring(generatedCode, modifier);
+
+            // All mfma instructions should be f8f6f4
+            EXPECT_EQ(mfma_count, f8f6f4_count);
+            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
+            EXPECT_EQ(f8f6f4_count, modifier_count);
+        }
+    }
+
+    // ========================================================================
+    // GEMMF8F6F4TestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), load A path, load B path
+    class GEMMF8F6F4TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
+    {
+    };
+
+    // ========================================================================
+    // StreamKGEMMMXF8F6F4TestSuite
+    // ========================================================================
+
+    // Params are: A & B type, K tile size, (transA, transB), loadPathA, loadPathB, StreamKMode
+    class StreamKGEMMMXF8F6F4TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath,
+                                                   rocRoller::StreamKMode>>
+    {
+    };
+
+    TEST_P(StreamKGEMMMXF8F6F4TestSuite, GPU_StreamKUnrollPrefetchSwizzleScaledGEMMMX)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp, loadPathA, loadPathB, mode] = std::get<1>(GetParam());
+
+        // Note: The following cases are filtered out by FilterValidStreamKGEMMMXF8F6F4Params:
+        // - Direct2LDS not yet supported for FP6/BF6
+
+        AssertFatal(loadPathA == SolutionParams::LoadPath::BufferToLDSViaVGPR
+                        || loadPathA == SolutionParams::LoadPath::BufferToLDS,
+                    "Unexpected load path for A : ",
+                    ShowValue(loadPathA));
+
+        AssertFatal(loadPathB == SolutionParams::LoadPath::BufferToLDSViaVGPR
+                        || loadPathB == SolutionParams::LoadPath::BufferToLDS,
+                    "Unexpected load path for B : ",
+                    ShowValue(loadPathB));
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = GEMMProblemF8F6F4{waveM, waveN, waveK};
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        problem.numWGs = deviceProperties.multiProcessorCount;
+
+        problem.macM = 128;
+        problem.macN = 128;
+        problem.macK = 128;
+
+        problem.workgroupSizeX = 2 * problem.wavefrontSize;
+        problem.workgroupSizeY = 2;
+
+        problem.m = problem.macM * 4;
+        problem.n = problem.macN * problem.numWGs / 2 + problem.macN * 2;
+
+        ASSERT_GE(problem.m * problem.n / problem.macM / problem.macN, problem.numWGs);
+
+        problem.streamK = mode;
+        problem.k       = problem.macK * 8;
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.loadPathA = loadPathA;
+        problem.loadPathB = loadPathB;
+
+        problem.unrollK           = 2;
+        problem.prefetch          = true;
+        problem.prefetchInFlight  = 2;
+        problem.prefetchLDSFactor = 2;
+
+        // TODO: remove the if condition when SwizzleScale supports non-TN data layout
+        if(problem.transA == "T" && problem.transB == "N")
+        {
+            problem.loadScalePathA = SolutionParams::LoadPath::BufferToVGPR;
+            problem.loadScalePathB = SolutionParams::LoadPath::BufferToVGPR;
+
+            problem.scaleAMode = Operations::ScaleMode::Separate;
+            problem.scaleBMode = Operations::ScaleMode::Separate;
+
+            problem.scaleTypeA = DataType::E8M0;
+            problem.scaleTypeB = DataType::E8M0;
+
+            problem.swizzleScale  = true;
+            problem.swizzleM      = 64;
+            problem.swizzleN      = 64;
+            problem.swizzleK      = 8;
+            problem.prefetchScale = true;
+
+            problem.scaleBlockSize = m_context->targetArchitecture().GetCapability(
+                GPUCapability::DefaultScaleBlockSize);
+        }
+
+        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(problem);
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(problem);
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+    }
+
+    using StreamKGEMMMXF8F6F4TestParamGenerator
+        = ::testing::internal::ParamGenerator<StreamKGEMMMXF8F6F4TestSuite::ParamType>;
+    static auto FilterValidStreamKGEMMMXF8F6F4Params(
+        StreamKGEMMMXF8F6F4TestParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using DT = rocRoller::DataType;
+
+        std::vector<StreamKGEMMMXF8F6F4TestSuite::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& typeAB    = std::get<0>(params);
+            auto const& loadPathA = std::get<3>(params);
+            auto const& loadPathB = std::get<4>(params);
+
+            // Direct2LDS not yet supported for FP6/BF6
+            if((typeAB == DT::FP6 || typeAB == DT::BF6)
+               && (loadPathA == LP::BufferToLDS || loadPathB == LP::BufferToLDS))
+            {
+                continue;
+            }
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        StreamKGEMMMXF8F6F4Test,
+        StreamKGEMMMXF8F6F4TestSuite,
+        FilterValidStreamKGEMMMXF8F6F4Params(::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::FP8,
+                                  rocRoller::DataType::BF8,
+                                  rocRoller::DataType::FP6,
+                                  rocRoller::DataType::BF6,
+                                  rocRoller::DataType::FP4),
+                ::testing::Values(64, 128),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::BufferToLDS),
+                ::testing::Values(rocRoller::StreamKMode::Standard,
+                                  rocRoller::StreamKMode::TwoTile,
+                                  rocRoller::StreamKMode::TwoTileDPFirst))))); // StreamKMode
+
+    // ========================================================================
+    // GEMMF8F6F4TestSuite (tests)
+    // ========================================================================
+
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_DataType_F8F6F4_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
@@ -284,7 +396,7 @@ namespace GEMMTests
 
         auto const mfma{fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
-        checkGEMMF8F6F4(m_context,
+        CheckGEMMF8F6F4(m_context,
                         mfma,
                         modifiers,
                         numMFMAs,
@@ -296,7 +408,7 @@ namespace GEMMTests
                         isF6);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMM)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -407,7 +519,7 @@ namespace GEMMTests
 
         auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
-        checkGEMMF8F6F4(m_context,
+        CheckGEMMF8F6F4(m_context,
                         mfma,
                         modifiers,
                         numMFMAs,
@@ -422,26 +534,7 @@ namespace GEMMTests
                         numScaleDSLoads);
     }
 
-    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
-                           std::string           f8f6f4_inst,
-                           std::string           modifier)
-    {
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
-        {
-            auto generatedCode = m_context->instructions()->toString();
-
-            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
-            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
-            auto modifier_count = countSubstring(generatedCode, modifier);
-
-            // All mfma instructions should be f8f6f4
-            EXPECT_EQ(mfma_count, f8f6f4_count);
-            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
-            EXPECT_EQ(f8f6f4_count, modifier_count);
-        }
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_DwordScaledGEMM)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Dword)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -509,7 +602,7 @@ namespace GEMMTests
         }
 
         auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
-        check_mfma_f8f6f4(m_context, mfma, modifiers);
+        CheckMFMAF8F6F4(m_context, mfma, modifiers);
 
         uint const totalWorkitems = gemm.workgroupSizeX * gemm.workgroupSizeY;
         // Example A:256x128 => scaleA:256x4 => 1024 values/256 workitems => 4 values per workitem
@@ -534,7 +627,7 @@ namespace GEMMTests
         EXPECT_EQ(countSubstring(generatedCode, dsWrite), 2);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch2)
+    TEST_P(GEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Swizzle_Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -624,7 +717,42 @@ namespace GEMMTests
         EXPECT_GE(countSubstring(generatedCode, "buffer_load_dwordx2 "), 6);
     }
 
-    TEST_P(MixedGEMMF8F6F4TestGPU, GPU_MixedBasicGEMMF8F6F4)
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF8F6F4Test,
+        GEMMF8F6F4TestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(64, 128),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
+    // ========================================================================
+    // MixedGEMMF8F6F4TestSuite
+    // ========================================================================
+
+    // Params are: A type, B type, K tile size, (transA, transB), load A path, load B path
+    class MixedGEMMF8F6F4TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath>>
+    {
+    };
+
+    TEST_P(MixedGEMMF8F6F4TestSuite, GPU_GEMM_DataType_F8F6F4_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto [typeA, typeB, MFMAK, transOp, loadPathA, loadPathB] = std::get<1>(GetParam());
@@ -676,10 +804,48 @@ namespace GEMMTests
         else
             Throw<FatalError>("Unhandled data type for mixed GEMM.", ShowValue(typeB));
 
-        check_mfma_f8f6f4(m_context, mfma, modifierA + " " + modifierB);
+        CheckMFMAF8F6F4(m_context, mfma, modifierA + " " + modifierB);
     }
 
-    TEST_P(ScaledMixedGEMMF8F6F4TestGPU, GPU_ScaledMixedBasicGEMMF8F6F4)
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF8F6F4Test,
+        MixedGEMMF8F6F4TestSuite,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(
+                ::testing::Values(rocRoller::DataType::FP8, rocRoller::DataType::BF8),
+                ::testing::Values(rocRoller::DataType::FP8, rocRoller::DataType::BF8),
+                ::testing::Values(64, 128),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR),
+                ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
+                                  SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
+
+    // ========================================================================
+    // ScaledMixedGEMMF8F6F4TestSuite
+    // ========================================================================
+
+    // Params are: A type, B type, K tile size, load A path, load B path,
+    //   scale A mode, scale B mode, Load A scale path, Load B scale path, (transA, transB)
+    class ScaledMixedGEMMF8F6F4TestSuite
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   rocRoller::DataType,
+                                                   int,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath,
+                                                   rocRoller::Operations::ScaleMode,
+                                                   rocRoller::Operations::ScaleMode,
+                                                   SolutionParams::LoadPath,
+                                                   SolutionParams::LoadPath,
+                                                   std::pair<std::string, std::string>>>
+    {
+    };
+
+    TEST_P(ScaledMixedGEMMF8F6F4TestSuite, GPU_GEMM_Scaled_F8F6F4_Mixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
@@ -729,54 +895,45 @@ namespace GEMMTests
         basicGEMMMixed(typeA, typeB, problem);
     }
 
+    using ScaledMixedGEMMF8F6F4TestParamGenerator
+        = ::testing::internal::ParamGenerator<ScaledMixedGEMMF8F6F4TestSuite::ParamType>;
+    static auto FilterValidScalePathAndScaleModeParams(
+        ScaledMixedGEMMF8F6F4TestParamGenerator&& inputParamGenerator)
+    {
+        using LP = SolutionParams::LoadPath;
+        using SM = rocRoller::Operations::ScaleMode;
+
+        std::vector<ScaledMixedGEMMF8F6F4TestSuite::ParamType> filtered;
+        for(auto const& inputParam : inputParamGenerator)
+        {
+            auto const& params = std::get<1>(inputParam);
+
+            auto const& scaleAMode     = std::get<5>(params);
+            auto const& scaleBMode     = std::get<6>(params);
+            auto const& loadScalePathA = std::get<7>(params);
+            auto const& loadScalePathB = std::get<8>(params);
+
+            if((loadScalePathA != LP::BufferToVGPR or loadScalePathA != LP::GlobalToVGPR)
+               && (scaleAMode == SM::None || scaleAMode == SM::SingleScale))
+            {
+                continue;
+            }
+
+            if((loadScalePathB != LP::BufferToVGPR or loadScalePathB != LP::GlobalToVGPR)
+               && (scaleBMode == SM::None || scaleBMode == SM::SingleScale))
+            {
+                continue;
+            }
+
+            filtered.push_back(inputParam);
+        }
+
+        return ::testing::ValuesIn(filtered);
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         GEMMF8F6F4Test,
-        GEMMF8F6F4TestGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
-                                                 rocRoller::DataType::BF8,
-                                                 rocRoller::DataType::FP6,
-                                                 rocRoller::DataType::BF6,
-                                                 rocRoller::DataType::FP4),
-                               ::testing::Values(64, 128),
-                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                                 std::pair<std::string, std::string>("N", "T"),
-                                                 std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
-    INSTANTIATE_TEST_SUITE_P(
-        MixedGEMMTest,
-        MixedGEMMF8F6F4TestGPU,
-        ::testing::Combine(
-            currentGPUISA(),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
-                                                 rocRoller::DataType::BF8,
-                                                 rocRoller::DataType::FP6,
-                                                 rocRoller::DataType::BF6,
-                                                 rocRoller::DataType::FP4),
-                               ::testing::Values(rocRoller::DataType::FP8,
-                                                 rocRoller::DataType::BF8,
-                                                 rocRoller::DataType::FP6,
-                                                 rocRoller::DataType::BF6,
-                                                 rocRoller::DataType::FP4),
-                               ::testing::Values(64, 128),
-                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                                 std::pair<std::string, std::string>("N", "T"),
-                                                 std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR),
-                               ::testing::Values(SolutionParams::LoadPath::BufferToLDSViaVGPR,
-                                                 SolutionParams::LoadPath::GlobalToLDSViaVGPR))));
-
-    INSTANTIATE_TEST_SUITE_P(
-        ScaledMixedGEMMTest,
-        ScaledMixedGEMMF8F6F4TestGPU,
+        ScaledMixedGEMMF8F6F4TestSuite,
         FilterValidScalePathAndScaleModeParams(::testing::Combine(
             currentGPUISA(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,

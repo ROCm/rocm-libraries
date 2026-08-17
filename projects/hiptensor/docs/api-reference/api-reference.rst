@@ -38,10 +38,11 @@ List of supported RDNA architectures:
 * gfx1153
 * gfx1200
 * gfx1201
+* gfx1250
 
 .. note::
     gfx11 = gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153
-    gfx12 = gfx1200, gfx1201
+    gfx12 = gfx1200, gfx1201, gfx1250
 
 .. _hiptensor-supported-data-types:
 
@@ -74,15 +75,19 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |   API context       | Datatype Support             |GPU Support          |Tensor Rank Support  |
 |                     | <Ti / To / Tc>               |                     |                     |
 +=====================+==============================+=====================+=====================+
-|                     |     f32 / f32 / f16          |  gfx9 gfx11 gfx12   | 2m2n2k (Rank4)      |
+|                     |     f16 / f16 / f16          |  gfx11 gfx12        | 1m1n1k (Rank2)      |
 | Contraction         +------------------------------+                     |                     |
-| (Scale, bilinear)   |     f32 / f32 / bf16         |                     | 3m3n3k (Rank6)      |
+| (Scale, bilinear)   |     bf16 / bf16 / bf16       |                     | 2m2n2k (Rank4)      |
 |                     +------------------------------+---------------------+                     |
-|                     |     f16 / f16 / f32          |  gfx9               | 4m4n4k (Rank8)      |
+|                     |     f32 / f32 / f16          |  gfx9 gfx11 gfx12   | 3m3n3k (Rank6)      |
 |                     +------------------------------+                     |                     |
-|                     |     bf16 / bf16 / f32        |                     | 5m5n5k (Rank10)     |
+|                     |     f32 / f32 / bf16         |                     | 4m4n4k (Rank8)      |
+|                     +------------------------------+---------------------+                     |
+|                     |     f16 / f16 / f32          |  gfx9 gfx1250       | 5m5n5k (Rank10)     |
 |                     +------------------------------+                     |                     |
-|                     |     f32 / f32 / f32          |                     | 6m6n6k (Rank12)     |
+|                     |     bf16 / bf16 / f32        |                     | 6m6n6k (Rank12)     |
+|                     +------------------------------+                     |                     |
+|                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+                     |                     |
 |                     |     cf32 / cf32 / cf32       |                     |                     |
 |                     +------------------------------+---------------------+                     |
@@ -98,7 +103,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / \-           |                     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
-|                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank2 - Rank6       |
+|                     |     f16 / f16 / f16          |  gfx9 gfx11 gfx12   | Rank1 - Rank6       |
 | Reduction           +------------------------------+                     |                     |
 |                     |     f16 / f16 / f32          |                     |                     |
 |                     +------------------------------+                     |                     |
@@ -344,6 +349,16 @@ hiptensorContract
 -----------------
 
 .. doxygenfunction::  hiptensorContract
+
+hiptensorCreateContractionTrinary
+---------------------------------
+
+.. doxygenfunction::  hiptensorCreateContractionTrinary
+
+hiptensorContractTrinary
+------------------------
+
+.. doxygenfunction::  hiptensorContractTrinary
 
 
 Element-wise operations

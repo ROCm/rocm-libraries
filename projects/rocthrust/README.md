@@ -84,10 +84,11 @@ mkdir build; cd build
 # On ROCm platform set C++ compiler to HipCC. You can do it by adding 'CXX=<path-to-hipcc>'
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' with the path to the HipCC compiler.
 #
+# The package and install scripts require Make, but otherwise passing -GNinja is recommended for faster building.
 [CXX=hipcc] cmake ../. # or cmake-gui ../.
 
 # Build
-make -j4
+make -j4 # or `ninja`
 
 # Optionally, run tests if they're enabled.
 ctest --output-on-failure

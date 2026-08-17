@@ -22,14 +22,14 @@
 #include <iostream>
 #include <iterator>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
 #endif
 
 int main(int argc, const char* const* argv)
 {
-#ifdef WIN32
+#ifdef _WIN32
     // stdout on Windows defaults to text mode and will mangle our code objects
     _setmode(_fileno(stdout), _O_BINARY);
 #endif

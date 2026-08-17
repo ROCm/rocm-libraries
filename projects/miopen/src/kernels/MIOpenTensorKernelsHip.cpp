@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#ifndef MIOPEN_DONT_USE_HIP_RUNTIME_HEADERS
+#ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
@@ -160,8 +160,8 @@ extern "C" __global__ void Op2dTensorGeneric(const MIOPEN_TYPE* a,
 #ifdef USE_2D_TENSOR_SQUASH
 extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
                                             const MIOPEN_TYPE* b,
-                                            const int b_c,
-                                            const int b_nstride,
+                                            const DIM_TYPE b_c,
+                                            const DIM_TYPE b_nstride,
                                             MIOPEN_TYPE* c,
                                             const MIOPEN_TYPE alpha0,
                                             const MIOPEN_TYPE alpha1,
@@ -192,7 +192,7 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
     MIOPEN_TYPE b_dat15[RD_BLCK];
     MIOPEN_TYPE b_dat16[RD_BLCK];
     MIOPEN_TYPE c_dat[RD_BLCK];
-    int g_RD_BLCK;
+    DIM_TYPE g_RD_BLCK;
 
     for(int i = 0; i < RD_BLCK; ++i)
     {
@@ -214,9 +214,9 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
         b_dat16[i] = (MIOPEN_TYPE)0;
     }
 
-    const int gid_        = blockIdx.x * blockDim.x + threadIdx.x;
-    const int global_size = gridDim.x * blockDim.x;
-    for(int gid = gid_; gid < total_work; gid += global_size)
+    const DIM_TYPE gid_        = blockIdx.x * blockDim.x + threadIdx.x;
+    const DIM_TYPE global_size = gridDim.x * blockDim.x;
+    for(DIM_TYPE gid = gid_; gid < total_work; gid += global_size)
     {
         for(int i = 0; i < RD_BLCK; ++i)
         {
@@ -224,7 +224,7 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
             c_dat[i] = (MIOPEN_TYPE)0;
         }
 
-        int io_index = gid * RD_BLCK;
+        DIM_TYPE io_index = gid * RD_BLCK;
         if(use_apl0 == 1)
         {
             *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + io_index));
@@ -249,22 +249,22 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
             for(int bid = 0; bid < ((b_c / 16) * 16); bid += 16)
             {
 
-                int b_index1           = (bid * b_nstride) + g_RD_BLCK;
-                int b_index2           = ((bid + 1) * b_nstride) + g_RD_BLCK;
-                int b_index3           = ((bid + 2) * b_nstride) + g_RD_BLCK;
-                int b_index4           = ((bid + 3) * b_nstride) + g_RD_BLCK;
-                int b_index5           = ((bid + 4) * b_nstride) + g_RD_BLCK;
-                int b_index6           = ((bid + 5) * b_nstride) + g_RD_BLCK;
-                int b_index7           = ((bid + 6) * b_nstride) + g_RD_BLCK;
-                int b_index8           = ((bid + 7) * b_nstride) + g_RD_BLCK;
-                int b_index9           = ((bid + 8) * b_nstride) + g_RD_BLCK;
-                int b_index10          = ((bid + 9) * b_nstride) + g_RD_BLCK;
-                int b_index11          = ((bid + 10) * b_nstride) + g_RD_BLCK;
-                int b_index12          = ((bid + 11) * b_nstride) + g_RD_BLCK;
-                int b_index13          = ((bid + 12) * b_nstride) + g_RD_BLCK;
-                int b_index14          = ((bid + 13) * b_nstride) + g_RD_BLCK;
-                int b_index15          = ((bid + 14) * b_nstride) + g_RD_BLCK;
-                int b_index16          = ((bid + 15) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index1      = (bid * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index2      = ((bid + 1) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index3      = ((bid + 2) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index4      = ((bid + 3) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index5      = ((bid + 4) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index6      = ((bid + 5) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index7      = ((bid + 6) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index8      = ((bid + 7) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index9      = ((bid + 8) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index10     = ((bid + 9) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index11     = ((bid + 10) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index12     = ((bid + 11) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index13     = ((bid + 12) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index14     = ((bid + 13) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index15     = ((bid + 14) * b_nstride) + g_RD_BLCK;
+                DIM_TYPE b_index16     = ((bid + 15) * b_nstride) + g_RD_BLCK;
                 *((READ_TYPE*)b_dat1)  = *((const READ_TYPE*)(b + Boffset + b_index1));
                 *((READ_TYPE*)b_dat2)  = *((const READ_TYPE*)(b + Boffset + b_index2));
                 *((READ_TYPE*)b_dat3)  = *((const READ_TYPE*)(b + Boffset + b_index3));
@@ -304,7 +304,7 @@ extern "C" __global__ void Op2dTensorSquash(const MIOPEN_TYPE* a,
             }
             for(int bid = ((b_c / 16) * 16); bid < b_c; bid++)
             {
-                int b_index           = bid * b_nstride + g_RD_BLCK;
+                DIM_TYPE b_index      = bid * b_nstride + g_RD_BLCK;
                 *((READ_TYPE*)b_dat1) = *((const READ_TYPE*)(b + Boffset + b_index));
 
                 for(int i = 0; i < RD_BLCK; ++i)
@@ -358,23 +358,23 @@ extern "C" __global__ void Op3dTensorGeneric(const MIOPEN_TYPE* a,
                                              const uint64_t Aoffset,
                                              const uint64_t Boffset,
                                              const uint64_t Coffset,
-                                             const uint32_t b_c,
-                                             const uint32_t b_h,
-                                             const uint32_t c_c,
-                                             const uint32_t c_h,
-                                             const uint32_t a_nstride,
-                                             const uint32_t a_cstride,
-                                             const uint32_t a_hstride,
-                                             const uint32_t b_nstride,
-                                             const uint32_t b_cstride,
-                                             const uint32_t b_hstride,
-                                             const uint32_t c_nstride,
-                                             const uint32_t c_cstride,
-                                             const uint32_t c_hstride,
+                                             const DIM_TYPE b_c,
+                                             const DIM_TYPE b_h,
+                                             const DIM_TYPE c_c,
+                                             const DIM_TYPE c_h,
+                                             const DIM_TYPE a_nstride,
+                                             const DIM_TYPE a_cstride,
+                                             const DIM_TYPE a_hstride,
+                                             const DIM_TYPE b_nstride,
+                                             const DIM_TYPE b_cstride,
+                                             const DIM_TYPE b_hstride,
+                                             const DIM_TYPE c_nstride,
+                                             const DIM_TYPE c_cstride,
+                                             const DIM_TYPE c_hstride,
                                              const MIOPEN_TYPE alpha0,
                                              const MIOPEN_TYPE alpha1,
                                              const MIOPEN_TYPE beta,
-                                             const uint32_t total_work,
+                                             const DIM_TYPE total_work,
                                              const bool use_beta)
 {
     const MIOPEN_TYPE* a_off = a + Aoffset;
@@ -426,34 +426,34 @@ extern "C" __global__ void Op3dTensorGeneric(const MIOPEN_TYPE* a,
 #ifdef USE_4D_TENSOR_GENERIC
 // NCHW
 extern "C" __global__ void Op4dTensorGeneric(MIOPEN_TYPE* a,
-                                             const int a_nstride,
-                                             const int a_cstride,
-                                             const int a_hstride,
+                                             const DIM_TYPE a_nstride,
+                                             const DIM_TYPE a_cstride,
+                                             const DIM_TYPE a_hstride,
                                              MIOPEN_TYPE* b,
-                                             const int b_c,
-                                             const int b_h,
-                                             const int b_w,
-                                             const int b_nstride,
-                                             const int b_cstride,
-                                             const int b_hstride,
+                                             const DIM_TYPE b_c,
+                                             const DIM_TYPE b_h,
+                                             const DIM_TYPE b_w,
+                                             const DIM_TYPE b_nstride,
+                                             const DIM_TYPE b_cstride,
+                                             const DIM_TYPE b_hstride,
                                              MIOPEN_TYPE* c,
-                                             const int c_c,
-                                             const int c_h,
-                                             const int c_w,
-                                             const int c_nstride,
-                                             const int c_cstride,
-                                             const int c_hstride,
+                                             const DIM_TYPE c_c,
+                                             const DIM_TYPE c_h,
+                                             const DIM_TYPE c_w,
+                                             const DIM_TYPE c_nstride,
+                                             const DIM_TYPE c_cstride,
+                                             const DIM_TYPE c_hstride,
                                              const MIOPEN_TYPE alpha0,
                                              const MIOPEN_TYPE alpha1,
                                              const MIOPEN_TYPE beta,
                                              const unsigned int bitmap,
-                                             const int work_per_wg,
+                                             const DIM_TYPE work_per_wg,
                                              const int64_t Aoffset,
                                              const int64_t Boffset,
                                              const int64_t Coffset,
-                                             const int num_wg)
+                                             const DIM_TYPE num_wg)
 {
-    int gid = blockIdx.x;
+    DIM_TYPE gid = blockIdx.x;
 
     MIOPEN_TYPE* a_off = a + Aoffset;
     MIOPEN_TYPE* b_off = b + Boffset;
@@ -469,31 +469,31 @@ extern "C" __global__ void Op4dTensorGeneric(MIOPEN_TYPE* a,
     {
         for(; gid < num_wg; gid += MAX_NUM_WG)
         {
-            int lid = threadIdx.x;
+            DIM_TYPE lid = threadIdx.x;
 
-            int o_h_div = (bitmap & (1 << 0)) ? 1 : c_w;
-            int o_c_div = o_h_div * ((bitmap & (1 << 1)) ? 1 : c_h);
-            int o_n_div = o_c_div * ((bitmap & (1 << 2)) ? 1 : c_c);
+            DIM_TYPE o_h_div = (bitmap & (1 << 0)) ? 1 : c_w;
+            DIM_TYPE o_c_div = o_h_div * ((bitmap & (1 << 1)) ? 1 : c_h);
+            DIM_TYPE o_n_div = o_c_div * ((bitmap & (1 << 2)) ? 1 : c_c);
 
-            int o_w_gid_off = gid % b_w;
-            int o_h_gid_off = (gid / b_w) % b_h;
-            int o_c_gid_off = (gid / b_w / b_h) % b_c;
-            int o_n_gid_off = (gid / b_w / b_h) / b_c;
+            DIM_TYPE o_w_gid_off = gid % b_w;
+            DIM_TYPE o_h_gid_off = (gid / b_w) % b_h;
+            DIM_TYPE o_c_gid_off = (gid / b_w / b_h) % b_c;
+            DIM_TYPE o_n_gid_off = (gid / b_w / b_h) / b_c;
 
-            int bindex = o_n_gid_off * b_nstride + o_c_gid_off * b_cstride +
-                         o_h_gid_off * b_hstride + o_w_gid_off;
+            DIM_TYPE bindex = o_n_gid_off * b_nstride + o_c_gid_off * b_cstride +
+                              o_h_gid_off * b_hstride + o_w_gid_off;
             MIOPEN_TYPE operand = b_off[bindex] * alpha1;
 
             while(lid < work_per_wg)
             {
-                int o_w = (bitmap & (1 << 0)) ? o_w_gid_off : lid % c_w;
-                int o_h = (bitmap & (1 << 1)) ? o_h_gid_off : (lid / o_h_div) % c_h;
-                int o_c = (bitmap & (1 << 2)) ? o_c_gid_off : (lid / o_c_div) % c_c;
-                int o_n = (bitmap & (1 << 3)) ? o_n_gid_off : lid / o_n_div;
+                DIM_TYPE o_w = (bitmap & (1 << 0)) ? o_w_gid_off : lid % c_w;
+                DIM_TYPE o_h = (bitmap & (1 << 1)) ? o_h_gid_off : (lid / o_h_div) % c_h;
+                DIM_TYPE o_c = (bitmap & (1 << 2)) ? o_c_gid_off : (lid / o_c_div) % c_c;
+                DIM_TYPE o_n = (bitmap & (1 << 3)) ? o_n_gid_off : lid / o_n_div;
 
-                int aindex    = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
-                int cindex    = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
-                c_off[cindex] = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
+                DIM_TYPE aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                c_off[cindex]   = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
 
                 lid += blockDim.x;
             }
@@ -503,30 +503,30 @@ extern "C" __global__ void Op4dTensorGeneric(MIOPEN_TYPE* a,
     {
         for(; gid < num_wg; gid += MAX_NUM_WG)
         {
-            int lid = threadIdx.x;
+            DIM_TYPE lid = threadIdx.x;
 
-            int o_h_div = (bitmap & (1 << 0)) ? 1 : c_w;
-            int o_c_div = o_h_div * ((bitmap & (1 << 1)) ? 1 : c_h);
-            int o_n_div = o_c_div * ((bitmap & (1 << 2)) ? 1 : c_c);
+            DIM_TYPE o_h_div = (bitmap & (1 << 0)) ? 1 : c_w;
+            DIM_TYPE o_c_div = o_h_div * ((bitmap & (1 << 1)) ? 1 : c_h);
+            DIM_TYPE o_n_div = o_c_div * ((bitmap & (1 << 2)) ? 1 : c_c);
 
-            int o_w_gid_off = gid % b_w;
-            int o_h_gid_off = (gid / b_w) % b_h;
-            int o_c_gid_off = (gid / b_w / b_h) % b_c;
-            int o_n_gid_off = (gid / b_w / b_h) / b_c;
+            DIM_TYPE o_w_gid_off = gid % b_w;
+            DIM_TYPE o_h_gid_off = (gid / b_w) % b_h;
+            DIM_TYPE o_c_gid_off = (gid / b_w / b_h) % b_c;
+            DIM_TYPE o_n_gid_off = (gid / b_w / b_h) / b_c;
 
-            int bindex = o_n_gid_off * b_nstride + o_c_gid_off * b_cstride +
-                         o_h_gid_off * b_hstride + o_w_gid_off;
+            DIM_TYPE bindex = o_n_gid_off * b_nstride + o_c_gid_off * b_cstride +
+                              o_h_gid_off * b_hstride + o_w_gid_off;
             MIOPEN_TYPE operand = b_off[bindex] * alpha1;
 
             while(lid < work_per_wg)
             {
-                int o_w = (bitmap & (1 << 0)) ? o_w_gid_off : lid % c_w;
-                int o_h = (bitmap & (1 << 1)) ? o_h_gid_off : (lid / o_h_div) % c_h;
-                int o_c = (bitmap & (1 << 2)) ? o_c_gid_off : (lid / o_c_div) % c_c;
-                int o_n = (bitmap & (1 << 3)) ? o_n_gid_off : lid / o_n_div;
+                DIM_TYPE o_w = (bitmap & (1 << 0)) ? o_w_gid_off : lid % c_w;
+                DIM_TYPE o_h = (bitmap & (1 << 1)) ? o_h_gid_off : (lid / o_h_div) % c_h;
+                DIM_TYPE o_c = (bitmap & (1 << 2)) ? o_c_gid_off : (lid / o_c_div) % c_c;
+                DIM_TYPE o_n = (bitmap & (1 << 3)) ? o_n_gid_off : lid / o_n_div;
 
-                int aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
-                int cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                DIM_TYPE aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
                 c_off[cindex] =
                     MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
 
@@ -550,8 +550,8 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
                                           const int64_t total_work,
                                           const int use_beta)
 {
-    int gid0        = blockIdx.x * blockDim.x + threadIdx.x;
-    int global_size = gridDim.x * blockDim.x;
+    DIM_TYPE gid0        = blockIdx.x * blockDim.x + threadIdx.x;
+    DIM_TYPE global_size = gridDim.x * blockDim.x;
 
     MIOPEN_TYPE a_dat[RD_BLCK];
     MIOPEN_TYPE b_dat[RD_BLCK];
@@ -564,7 +564,7 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
     {
         for(; gid0 < total_work; gid0 += global_size)
         {
-            int index = gid0 * RD_BLCK;
+            DIM_TYPE index = gid0 * RD_BLCK;
 
             for(int i = 0; i < RD_BLCK; ++i)
             {
@@ -598,7 +598,7 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
     {
         for(; gid0 < total_work; gid0 += global_size)
         {
-            int index = gid0 * RD_BLCK;
+            DIM_TYPE index = gid0 * RD_BLCK;
 
             for(int i = 0; i < RD_BLCK; ++i)
             {
@@ -634,26 +634,26 @@ extern "C" __global__ void Op4dTensorLite(const MIOPEN_TYPE* a,
 #ifdef USE_FWD_BIAS
 extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
                                            MIOPEN_TYPE* b,
-                                           const int b_c,
+                                           const DIM_TYPE b_c,
                                            MIOPEN_TYPE* c,
-                                           const int c_n,
-                                           const int c_nstride,
-                                           const int c_cstride,
-                                           const int work_per_wg,
+                                           const DIM_TYPE c_n,
+                                           const DIM_TYPE c_nstride,
+                                           const DIM_TYPE c_cstride,
+                                           const DIM_TYPE work_per_wg,
                                            const MIOPEN_TYPE alpha0,
                                            const MIOPEN_TYPE alpha1,
                                            const MIOPEN_TYPE beta,
                                            const uint64_t Aoffset,
                                            const uint64_t Boffset,
                                            const uint64_t Coffset,
-                                           const int num_wg,
-                                           const int incr_wg)
+                                           const DIM_TYPE num_wg,
+                                           const DIM_TYPE incr_wg)
 {
     MIOPEN_TYPE* a_off = a + Aoffset;
     MIOPEN_TYPE* b_off = b + Boffset;
     MIOPEN_TYPE* c_off = c + Coffset;
 
-    int gid = blockIdx.x;
+    DIM_TYPE gid = blockIdx.x;
 
     // num_wg: the number of workgroups should be launched
     // MAX_NUM_WG: the maximum number of workgroups actually launched
@@ -665,19 +665,19 @@ extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
     {
         for(; gid < num_wg; gid += MAX_NUM_WG)
         {
-            int lid = threadIdx.x;
+            DIM_TYPE lid = threadIdx.x;
 
-            int o_c             = incr_wg == 1 ? (gid % b_c) : gid;
+            DIM_TYPE o_c        = incr_wg == 1 ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c] * alpha1;
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
             while(lid < work_per_wg)
             {
-                int o_hw     = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
-                int o_n      = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
-                int index    = o_n * c_nstride + o_c * c_cstride + o_hw;
-                c_off[index] = MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand);
+                DIM_TYPE o_hw  = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
+                DIM_TYPE o_n   = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
+                DIM_TYPE index = o_n * c_nstride + o_c * c_cstride + o_hw;
+                c_off[index]   = MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand);
 
                 lid += blockDim.x;
             }
@@ -687,18 +687,18 @@ extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
     {
         for(; gid < num_wg; gid += MAX_NUM_WG)
         {
-            int lid = threadIdx.x;
+            DIM_TYPE lid = threadIdx.x;
 
-            int o_c             = incr_wg == 1 ? (gid % b_c) : gid;
+            DIM_TYPE o_c        = incr_wg == 1 ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c] * alpha1;
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
             while(lid < work_per_wg)
             {
-                int o_hw  = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
-                int o_n   = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
-                int index = o_n * c_nstride + o_c * c_cstride + o_hw;
+                DIM_TYPE o_hw  = incr_wg == 0 ? (lid % (work_per_wg / c_n)) : lid;
+                DIM_TYPE o_n   = incr_wg == 0 ? (lid / (work_per_wg / c_n)) : (gid / b_c);
+                DIM_TYPE index = o_n * c_nstride + o_c * c_cstride + o_hw;
                 c_off[index] =
                     MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand) + beta * c_off[index];
 
@@ -711,29 +711,29 @@ extern "C" __global__ void OpTensorFwdBias(MIOPEN_TYPE* a,
 
 #ifdef USE_FWD_BIAS_GENERIC
 extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
-                                                  const int a_nstride,
-                                                  const int a_cstride,
-                                                  const int a_hstride,
+                                                  const DIM_TYPE a_nstride,
+                                                  const DIM_TYPE a_cstride,
+                                                  const DIM_TYPE a_hstride,
                                                   MIOPEN_TYPE* b,
-                                                  const int b_c,
-                                                  const int b_cstride,
+                                                  const DIM_TYPE b_c,
+                                                  const DIM_TYPE b_cstride,
                                                   MIOPEN_TYPE* c,
-                                                  const int c_n,
-                                                  const int c_w,
-                                                  const int c_nstride,
-                                                  const int c_cstride,
-                                                  const int c_hstride,
+                                                  const DIM_TYPE c_n,
+                                                  const DIM_TYPE c_w,
+                                                  const DIM_TYPE c_nstride,
+                                                  const DIM_TYPE c_cstride,
+                                                  const DIM_TYPE c_hstride,
                                                   const MIOPEN_TYPE alpha0,
                                                   const MIOPEN_TYPE alpha1,
                                                   const MIOPEN_TYPE beta,
-                                                  const int work_per_wg,
+                                                  const DIM_TYPE work_per_wg,
                                                   const uint64_t Aoffset,
                                                   const uint64_t Boffset,
                                                   const uint64_t Coffset,
-                                                  const int num_wg,
-                                                  const int incr_wg)
+                                                  const DIM_TYPE num_wg,
+                                                  const DIM_TYPE incr_wg)
 {
-    int gid = blockIdx.x;
+    DIM_TYPE gid = blockIdx.x;
 
     MIOPEN_TYPE* a_off = a + Aoffset;
     MIOPEN_TYPE* b_off = b + Boffset;
@@ -749,21 +749,21 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
     {
         for(; gid < num_wg; gid += MAX_NUM_WG)
         {
-            int lid = threadIdx.x;
+            DIM_TYPE lid = threadIdx.x;
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
-            int o_c             = (incr_wg == 1) ? (gid % b_c) : gid;
+            DIM_TYPE o_c        = (incr_wg == 1) ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c * b_cstride] * alpha1;
 
             while(lid < work_per_wg)
             {
-                int o_n       = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
-                int o_h       = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
-                int o_w       = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
-                int aindex    = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
-                int cindex    = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
-                c_off[cindex] = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
+                DIM_TYPE o_n    = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
+                DIM_TYPE o_h    = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
+                DIM_TYPE o_w    = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
+                DIM_TYPE aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                c_off[cindex]   = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
 
                 lid += blockDim.x;
             }
@@ -773,20 +773,20 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
     {
         for(; gid < num_wg; gid += MAX_NUM_WG)
         {
-            int lid = threadIdx.x;
+            DIM_TYPE lid = threadIdx.x;
 
             // each workgroup computes N*H*W for each C (bias-term)
             // number of workgroups = c_c (b_c)
-            int o_c             = (incr_wg == 1) ? (gid % b_c) : gid;
+            DIM_TYPE o_c        = (incr_wg == 1) ? (gid % b_c) : gid;
             MIOPEN_TYPE operand = b_off[o_c * b_cstride] * alpha1;
 
             while(lid < work_per_wg)
             {
-                int o_n    = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
-                int o_h    = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
-                int o_w    = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
-                int aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
-                int cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                DIM_TYPE o_n    = (incr_wg == 1) ? (gid / b_c) : (lid % c_n);
+                DIM_TYPE o_h    = (incr_wg == 1) ? (lid / c_w) : ((lid / c_n) / c_w);
+                DIM_TYPE o_w    = (incr_wg == 1) ? (lid % c_w) : ((lid / c_n) % c_w);
+                DIM_TYPE aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
                 c_off[cindex] =
                     MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
 
@@ -799,11 +799,11 @@ extern "C" __global__ void OpTensorFwdBiasGeneric(MIOPEN_TYPE* a,
 
 #ifdef USE_2D_TENSOR_LITE
 extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
-                                          const int a_nstride,
+                                          const DIM_TYPE a_nstride,
                                           const MIOPEN_TYPE* b,
-                                          const int b_nstride,
+                                          const DIM_TYPE b_nstride,
                                           MIOPEN_TYPE* c,
-                                          const int c_nstride,
+                                          const DIM_TYPE c_nstride,
                                           const MIOPEN_TYPE alpha0,
                                           const MIOPEN_TYPE alpha1,
                                           const MIOPEN_TYPE beta,
@@ -815,8 +815,8 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
                                           const int use_beta,
                                           const int use_bias)
 {
-    int gid0 = blockIdx.x * blockDim.x + threadIdx.x;
-    int gid1 = blockIdx.y * blockDim.y + threadIdx.y;
+    DIM_TYPE gid0 = blockIdx.x * blockDim.x + threadIdx.x;
+    DIM_TYPE gid1 = blockIdx.y * blockDim.y + threadIdx.y;
 
     MIOPEN_TYPE a_dat[RD_BLCK];
     MIOPEN_TYPE b_dat[RD_BLCK];
@@ -826,7 +826,7 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
     {
         if(use_bias == 1)
         {
-            int b_index          = gid0 * RD_BLCK;
+            DIM_TYPE b_index     = gid0 * RD_BLCK;
             *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
         }
 
@@ -842,8 +842,8 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
                     c_dat[i] = (MIOPEN_TYPE)0;
                 }
 
-                int a_index = gid1 * a_nstride + gid0 * RD_BLCK;
-                int c_index = gid1 * c_nstride + gid0 * RD_BLCK;
+                DIM_TYPE a_index = gid1 * a_nstride + gid0 * RD_BLCK;
+                DIM_TYPE c_index = gid1 * c_nstride + gid0 * RD_BLCK;
 
                 *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + a_index));
                 if(use_beta == 1)
@@ -853,7 +853,7 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
 
                 if(use_bias == 0)
                 {
-                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
+                    DIM_TYPE b_index     = gid1 * b_nstride + gid0 * RD_BLCK;
                     *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
                 }
 
@@ -878,8 +878,8 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
                     c_dat[i] = (MIOPEN_TYPE)0;
                 }
 
-                int a_index = gid1 * a_nstride + gid0 * RD_BLCK;
-                int c_index = gid1 * c_nstride + gid0 * RD_BLCK;
+                DIM_TYPE a_index = gid1 * a_nstride + gid0 * RD_BLCK;
+                DIM_TYPE c_index = gid1 * c_nstride + gid0 * RD_BLCK;
 
                 *((READ_TYPE*)a_dat) = *((const READ_TYPE*)(a + Aoffset + a_index));
                 if(use_beta == 1)
@@ -889,7 +889,7 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
 
                 if(use_bias == 0)
                 {
-                    int b_index          = gid1 * b_nstride + gid0 * RD_BLCK;
+                    DIM_TYPE b_index     = gid1 * b_nstride + gid0 * RD_BLCK;
                     *((READ_TYPE*)b_dat) = *((const READ_TYPE*)(b + Boffset + b_index));
                 }
 
@@ -903,6 +903,335 @@ extern "C" __global__ void Op2dTensorLite(const MIOPEN_TYPE* a,
                 }
 
                 *((READ_TYPE*)(c + Coffset + c_index)) = *((READ_TYPE*)c_dat);
+            }
+        }
+    }
+}
+#endif
+
+#ifdef USE_LEADING_ONES
+extern "C" __global__ void OpTensorLeadingOnes(const MIOPEN_TYPE* a,
+                                               const MIOPEN_TYPE* b,
+                                               MIOPEN_TYPE* c,
+                                               const DIM_TYPE c_c,
+                                               const DIM_TYPE c_h,
+                                               const DIM_TYPE c_w,
+                                               const DIM_TYPE c_nstride,
+                                               const DIM_TYPE c_cstride,
+                                               const DIM_TYPE work_per_wg,
+                                               const MIOPEN_TYPE alpha0,
+                                               const MIOPEN_TYPE alpha1,
+                                               const MIOPEN_TYPE beta,
+                                               const int64_t Aoffset,
+                                               const int64_t Boffset,
+                                               const int64_t Coffset,
+                                               const DIM_TYPE num_wg,
+                                               const unsigned int bitmap)
+{
+    const MIOPEN_TYPE* a_off = a + Aoffset;
+    const MIOPEN_TYPE* b_off = b + Boffset;
+    MIOPEN_TYPE* c_off       = c + Coffset;
+
+    DIM_TYPE gid = (bitmap == 0xF) ? (blockIdx.x * blockDim.x + threadIdx.x) : blockIdx.x;
+
+    if(beta == (MIOPEN_TYPE)0)
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            DIM_TYPE lid        = (bitmap == 0xF) ? 0 : threadIdx.x;
+            DIM_TYPE lcl_sz     = (bitmap == 0xF) ? work_per_wg : blockDim.x;
+            MIOPEN_TYPE operand = b_off[gid] * alpha1;
+
+            DIM_TYPE o_w = (bitmap & (1 << 0)) ? (gid % c_w) : 0;
+            DIM_TYPE o_h =
+                (bitmap & (1 << 1)) ? ((gid / ((bitmap & (1 << 0)) ? c_w : 1)) % c_h) : 0;
+            DIM_TYPE o_c =
+                (bitmap & (1 << 2))
+                    ? ((gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1))) %
+                       c_c)
+                    : 0;
+            DIM_TYPE o_n =
+                gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1) *
+                       ((bitmap & (1 << 2)) ? c_c : 1));
+
+            while(lid < work_per_wg)
+            {
+                DIM_TYPE index = o_n * c_nstride + o_c * c_cstride + o_h * c_w + o_w + lid;
+                c_off[index]   = MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand);
+                lid += lcl_sz;
+            }
+        }
+    }
+    else
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            DIM_TYPE lid        = (bitmap == 0xF) ? 0 : threadIdx.x;
+            DIM_TYPE lcl_sz     = (bitmap == 0xF) ? work_per_wg : blockDim.x;
+            MIOPEN_TYPE operand = b_off[gid] * alpha1;
+
+            DIM_TYPE o_w = (bitmap & (1 << 0)) ? (gid % c_w) : 0;
+            DIM_TYPE o_h =
+                (bitmap & (1 << 1)) ? ((gid / ((bitmap & (1 << 0)) ? c_w : 1)) % c_h) : 0;
+            DIM_TYPE o_c =
+                (bitmap & (1 << 2))
+                    ? ((gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1))) %
+                       c_c)
+                    : 0;
+            DIM_TYPE o_n =
+                gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1) *
+                       ((bitmap & (1 << 2)) ? c_c : 1));
+
+            while(lid < work_per_wg)
+            {
+                DIM_TYPE index = o_n * c_nstride + o_c * c_cstride + o_h * c_w + o_w + lid;
+                c_off[index] =
+                    MIOPEN_TENSOR_OP(a_off[index] * alpha0, operand) + beta * c_off[index];
+                lid += lcl_sz;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef USE_LEADING_ONES_GENERIC
+extern "C" __global__ void OpTensorLeadingOnesGeneric(const MIOPEN_TYPE* a,
+                                                      const DIM_TYPE a_nstride,
+                                                      const DIM_TYPE a_cstride,
+                                                      const DIM_TYPE a_hstride,
+                                                      const MIOPEN_TYPE* b,
+                                                      const DIM_TYPE b_nstride,
+                                                      const DIM_TYPE b_cstride,
+                                                      const DIM_TYPE b_hstride,
+                                                      MIOPEN_TYPE* c,
+                                                      const DIM_TYPE c_c,
+                                                      const DIM_TYPE c_h,
+                                                      const DIM_TYPE c_w,
+                                                      const DIM_TYPE c_nstride,
+                                                      const DIM_TYPE c_cstride,
+                                                      const DIM_TYPE c_hstride,
+                                                      const MIOPEN_TYPE alpha0,
+                                                      const MIOPEN_TYPE alpha1,
+                                                      const MIOPEN_TYPE beta,
+                                                      const DIM_TYPE work_per_wg,
+                                                      const int64_t Aoffset,
+                                                      const int64_t Boffset,
+                                                      const int64_t Coffset,
+                                                      const DIM_TYPE num_wg,
+                                                      const unsigned int bitmap)
+{
+    const MIOPEN_TYPE* a_off = a + Aoffset;
+    const MIOPEN_TYPE* b_off = b + Boffset;
+    MIOPEN_TYPE* c_off       = c + Coffset;
+
+    DIM_TYPE gid = (bitmap == 0xF) ? (blockIdx.x * blockDim.x + threadIdx.x) : blockIdx.x;
+
+    if(beta == (MIOPEN_TYPE)0)
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            DIM_TYPE lid    = (bitmap == 0xF) ? 0 : threadIdx.x;
+            DIM_TYPE lcl_sz = (bitmap == 0xF) ? work_per_wg : blockDim.x;
+
+            DIM_TYPE o_w = (bitmap & (1 << 0)) ? (gid % c_w) : 0;
+            DIM_TYPE o_h =
+                (bitmap & (1 << 1)) ? ((gid / ((bitmap & (1 << 0)) ? c_w : 1)) % c_h) : 0;
+            DIM_TYPE o_c =
+                (bitmap & (1 << 2))
+                    ? ((gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1))) %
+                       c_c)
+                    : 0;
+            DIM_TYPE o_n =
+                gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1) *
+                       ((bitmap & (1 << 2)) ? c_c : 1));
+
+            DIM_TYPE bindex     = o_n * b_nstride + o_c * b_cstride + o_h * b_hstride + o_w;
+            MIOPEN_TYPE operand = b_off[bindex] * alpha1;
+
+            while(lid < work_per_wg)
+            {
+                o_c             = (bitmap & (1 << 2)) ? o_c : (lid % c_c);
+                o_h             = (bitmap & (1 << 1))
+                                      ? o_h
+                                      : ((bitmap & (1 << 2)) ? (lid / c_w) : ((lid / c_c) % c_h));
+                o_w             = (bitmap & (1 << 0))
+                                      ? o_w
+                                      : ((bitmap & (1 << 1))
+                                             ? lid
+                                             : ((bitmap & (1 << 2)) ? (lid % c_w) : ((lid / c_c) / c_h)));
+                DIM_TYPE aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                c_off[cindex]   = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
+
+                lid += lcl_sz;
+            }
+        }
+    }
+    else
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            DIM_TYPE lid    = (bitmap == 0xF) ? 0 : threadIdx.x;
+            DIM_TYPE lcl_sz = (bitmap == 0xF) ? work_per_wg : blockDim.x;
+
+            DIM_TYPE o_w = (bitmap & (1 << 0)) ? (gid % c_w) : 0;
+            DIM_TYPE o_h =
+                (bitmap & (1 << 1)) ? ((gid / ((bitmap & (1 << 0)) ? c_w : 1)) % c_h) : 0;
+            DIM_TYPE o_c =
+                (bitmap & (1 << 2))
+                    ? ((gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1))) %
+                       c_c)
+                    : 0;
+            DIM_TYPE o_n =
+                gid / (((bitmap & (1 << 0)) ? c_w : 1) * ((bitmap & (1 << 1)) ? c_h : 1) *
+                       ((bitmap & (1 << 2)) ? c_c : 1));
+
+            DIM_TYPE bindex     = o_n * b_nstride + o_c * b_cstride + o_h * b_hstride + o_w;
+            MIOPEN_TYPE operand = b_off[bindex] * alpha1;
+
+            while(lid < work_per_wg)
+            {
+                o_c             = (bitmap & (1 << 2)) ? o_c : (lid % c_c);
+                o_h             = (bitmap & (1 << 1))
+                                      ? o_h
+                                      : ((bitmap & (1 << 2)) ? (lid / c_w) : ((lid / c_c) % c_h));
+                o_w             = (bitmap & (1 << 0))
+                                      ? o_w
+                                      : ((bitmap & (1 << 1))
+                                             ? lid
+                                             : ((bitmap & (1 << 2)) ? (lid % c_w) : ((lid / c_c) / c_h)));
+                DIM_TYPE aindex = o_n * a_nstride + o_c * a_cstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex = o_n * c_nstride + o_c * c_cstride + o_h * c_hstride + o_w;
+                c_off[cindex] =
+                    MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
+
+                lid += lcl_sz;
+            }
+        }
+    }
+}
+#endif
+
+#ifdef USE_5D_TENSOR_GENERIC
+extern "C" __global__ void Op5dTensorGeneric(const MIOPEN_TYPE* a,
+                                             const DIM_TYPE a_nstride,
+                                             const DIM_TYPE a_cstride,
+                                             const DIM_TYPE a_dstride,
+                                             const DIM_TYPE a_hstride,
+                                             const MIOPEN_TYPE* b,
+                                             const DIM_TYPE b_c,
+                                             const DIM_TYPE b_d,
+                                             const DIM_TYPE b_h,
+                                             const DIM_TYPE b_w,
+                                             const DIM_TYPE b_nstride,
+                                             const DIM_TYPE b_cstride,
+                                             const DIM_TYPE b_dstride,
+                                             const DIM_TYPE b_hstride,
+                                             MIOPEN_TYPE* c,
+                                             const DIM_TYPE c_c,
+                                             const DIM_TYPE c_d,
+                                             const DIM_TYPE c_h,
+                                             const DIM_TYPE c_w,
+                                             const DIM_TYPE c_nstride,
+                                             const DIM_TYPE c_cstride,
+                                             const DIM_TYPE c_dstride,
+                                             const DIM_TYPE c_hstride,
+                                             const MIOPEN_TYPE alpha0,
+                                             const MIOPEN_TYPE alpha1,
+                                             const MIOPEN_TYPE beta,
+                                             const unsigned int bitmap,
+                                             const DIM_TYPE work_per_wg,
+                                             const int64_t Aoffset,
+                                             const int64_t Boffset,
+                                             const int64_t Coffset,
+                                             const DIM_TYPE num_wg)
+{
+    DIM_TYPE gid = blockIdx.x;
+
+    const MIOPEN_TYPE* a_off = a + Aoffset;
+    const MIOPEN_TYPE* b_off = b + Boffset;
+    MIOPEN_TYPE* c_off       = c + Coffset;
+
+    if(beta == (MIOPEN_TYPE)0)
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            DIM_TYPE lid = threadIdx.x;
+
+            DIM_TYPE o_h_div = (bitmap & (1 << 0)) ? 1 : c_w;
+            DIM_TYPE o_d_div = o_h_div * ((bitmap & (1 << 1)) ? 1 : c_h);
+            DIM_TYPE o_c_div = o_d_div * ((bitmap & (1 << 2)) ? 1 : c_d);
+            DIM_TYPE o_n_div = o_c_div * ((bitmap & (1 << 3)) ? 1 : c_c);
+
+            DIM_TYPE o_w_gid_off = gid % b_w;
+            DIM_TYPE o_h_gid_off = (gid / b_w) % b_h;
+            DIM_TYPE o_d_gid_off = (gid / b_w / b_h) % b_d;
+            DIM_TYPE o_c_gid_off = (gid / b_w / b_h / b_d) % b_c;
+            DIM_TYPE o_n_gid_off = (gid / b_w / b_h / b_d) / b_c;
+
+            DIM_TYPE bindex = o_n_gid_off * b_nstride + o_c_gid_off * b_cstride +
+                              o_d_gid_off * b_dstride + o_h_gid_off * b_hstride + o_w_gid_off;
+
+            MIOPEN_TYPE operand = b_off[bindex] * alpha1;
+
+            while(lid < work_per_wg)
+            {
+                DIM_TYPE o_w = (bitmap & (1 << 0)) ? o_w_gid_off : lid % c_w;
+                DIM_TYPE o_h = (bitmap & (1 << 1)) ? o_h_gid_off : (lid / o_h_div) % c_h;
+                DIM_TYPE o_d = (bitmap & (1 << 2)) ? o_d_gid_off : (lid / o_d_div) % c_d;
+                DIM_TYPE o_c = (bitmap & (1 << 3)) ? o_c_gid_off : (lid / o_c_div) % c_c;
+                DIM_TYPE o_n = (bitmap & (1 << 4)) ? o_n_gid_off : lid / o_n_div;
+
+                DIM_TYPE aindex =
+                    o_n * a_nstride + o_c * a_cstride + o_d * a_dstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex =
+                    o_n * c_nstride + o_c * c_cstride + o_d * c_dstride + o_h * c_hstride + o_w;
+
+                c_off[cindex] = MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand);
+
+                lid += blockDim.x;
+            }
+        }
+    }
+    else
+    {
+        for(; gid < num_wg; gid += MAX_NUM_WG)
+        {
+            DIM_TYPE lid = threadIdx.x;
+
+            DIM_TYPE o_h_div = (bitmap & (1 << 0)) ? 1 : c_w;
+            DIM_TYPE o_d_div = o_h_div * ((bitmap & (1 << 1)) ? 1 : c_h);
+            DIM_TYPE o_c_div = o_d_div * ((bitmap & (1 << 2)) ? 1 : c_d);
+            DIM_TYPE o_n_div = o_c_div * ((bitmap & (1 << 3)) ? 1 : c_c);
+
+            DIM_TYPE o_w_gid_off = gid % b_w;
+            DIM_TYPE o_h_gid_off = (gid / b_w) % b_h;
+            DIM_TYPE o_d_gid_off = (gid / b_w / b_h) % b_d;
+            DIM_TYPE o_c_gid_off = (gid / b_w / b_h / b_d) % b_c;
+            DIM_TYPE o_n_gid_off = (gid / b_w / b_h / b_d) / b_c;
+
+            DIM_TYPE bindex = o_n_gid_off * b_nstride + o_c_gid_off * b_cstride +
+                              o_d_gid_off * b_dstride + o_h_gid_off * b_hstride + o_w_gid_off;
+
+            MIOPEN_TYPE operand = b_off[bindex] * alpha1;
+
+            while(lid < work_per_wg)
+            {
+                DIM_TYPE o_w = (bitmap & (1 << 0)) ? o_w_gid_off : lid % c_w;
+                DIM_TYPE o_h = (bitmap & (1 << 1)) ? o_h_gid_off : (lid / o_h_div) % c_h;
+                DIM_TYPE o_d = (bitmap & (1 << 2)) ? o_d_gid_off : (lid / o_d_div) % c_d;
+                DIM_TYPE o_c = (bitmap & (1 << 3)) ? o_c_gid_off : (lid / o_c_div) % c_c;
+                DIM_TYPE o_n = (bitmap & (1 << 4)) ? o_n_gid_off : lid / o_n_div;
+
+                DIM_TYPE aindex =
+                    o_n * a_nstride + o_c * a_cstride + o_d * a_dstride + o_h * a_hstride + o_w;
+                DIM_TYPE cindex =
+                    o_n * c_nstride + o_c * c_cstride + o_d * c_dstride + o_h * c_hstride + o_w;
+
+                c_off[cindex] =
+                    MIOPEN_TENSOR_OP(a_off[aindex] * alpha0, operand) + beta * c_off[cindex];
+
+                lid += blockDim.x;
             }
         }
     }

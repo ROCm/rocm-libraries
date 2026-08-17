@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -191,6 +191,18 @@ try
             "                           Leading dimension of matrices V.\n"
             "                           ")
 
+        ("ldvl",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices VL.\n"
+            "                           ")
+
+        ("ldvr",
+         value<rocblas_int>(),
+            "Matrix size parameter.\n"
+            "                           Leading dimension of matrices VR.\n"
+            "                           ")
+
         // ("ldw",
         //  value<rocblas_int>(),
         //     "Matrix size parameter.\n"
@@ -295,6 +307,19 @@ try
         //     "Last index for row interchange.\n"
         //     "                           Only applicable to laswp.\n"
         //     "                           ")
+
+        // geev options
+        ("jobvl",
+         value<char>()->default_value('N'),
+            "N = none, V = compute eigenvectors/singular vectors of the matrix,\n"
+            "                           Indicates how the eigenvectors/singular vectors are to be calculated and stored.\n"
+            "                           ")
+
+        ("jobvr",
+         value<char>()->default_value('N'),
+            "N = none, V = compute eigenvectors/singular vectors of the matrix,\n"
+            "                           Indicates how the eigenvectors/singular vectors are to be calculated and stored.\n"
+            "                           ")
 
         // gesvd options
         ("jobu",
@@ -486,6 +511,8 @@ try
     // argus.validate_workmode("fast_alg");
     argus.validate_itype("itype");
     argus.validate_evect("jobz");
+    argus.validate_evect("jobvl");
+    argus.validate_evect("jobvr");
     argus.validate_erange("range");
 
     // select and dispatch function test/benchmark

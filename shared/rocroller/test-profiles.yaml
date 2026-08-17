@@ -1,0 +1,68 @@
+# rocRoller Test profiles
+#
+# See scripts/lib/rrtest for Python utilities.
+
+profiles:
+  smoke:
+    description: "Smoke tests (TheRock CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
+      include:
+      - "*BasicGEMM*"
+      exclude: []
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include:
+      - "[kernel-graph]"
+      exclude:
+      - "[gpu]"
+
+  precheckin:
+    description: "Test suite for pre-commit validation (TheRock CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
+      include: []
+      exclude: []
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include: []
+      exclude: []
+    - executable: "ctest"
+      framework: "ctest"
+      include: []
+      exclude: [["-LE", "GTEST|CATCH"]]
+
+  codecov-mci:
+    description: "Reduced test suite for code coverage analysis (Math CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
+      include: []
+      exclude:
+        - "*GEMM*"
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include: []
+      exclude: []
+    - executable: "ctest"
+      framework: "ctest"
+      include: []
+      exclude: [["-LE", "GTEST|CATCH"]]
+
+  precheckin-mci:
+    description: "Test suite for pre-commit validation (Math CI)."
+    tests:
+    - executable: "test/rocroller-tests"
+      framework: "gtest"
+      include: []
+      exclude: []
+    - executable: "test/rocroller-tests-catch"
+      framework: "catch2"
+      include: []
+      exclude: []
+    - executable: "ctest"
+      framework: "ctest"
+      include: []
+      exclude: [["-LE", "GTEST|CATCH"]]

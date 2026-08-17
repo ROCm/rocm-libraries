@@ -27,18 +27,19 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     template <typename PipelineProblem_, typename GemmPolicy_>
     struct GemmTraits_
     {
-        using Problem         = remove_cvref_t<PipelineProblem_>;
-        using Policy          = remove_cvref_t<GemmPolicy_>;
-        using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-        using AQDataType      = remove_cvref_t<typename Problem::AQDataType>;
-        using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-        using BQDataType      = remove_cvref_t<typename Problem::BQDataType>;
-        using BQLayout        = remove_cvref_t<typename Problem::BQLayout>;
-        using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
-        using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-        using BlockGemmShape  = remove_cvref_t<typename Problem::BlockGemmShape>;
-        using AQuantGroupSize = remove_cvref_t<typename Problem::AQuantGroupSize>;
-        using BQuantGroupSize = remove_cvref_t<typename Problem::BQuantGroupSize>;
+        using Problem          = remove_cvref_t<PipelineProblem_>;
+        using Policy           = remove_cvref_t<GemmPolicy_>;
+        using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+        using AQDataType       = remove_cvref_t<typename Problem::AQDataType>;
+        using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+        using BQDataType       = remove_cvref_t<typename Problem::BQDataType>;
+        using BQLayout         = remove_cvref_t<typename Problem::BQLayout>;
+        using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+        using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+        using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+        using BlockGemmShape   = remove_cvref_t<typename Problem::BlockGemmShape>;
+        using AQuantGroupSize  = remove_cvref_t<typename Problem::AQuantGroupSize>;
+        using BQuantGroupSize  = remove_cvref_t<typename Problem::BQuantGroupSize>;
 
         static constexpr index_t kBlockSize = Problem::kBlockSize;
         static constexpr auto Scheduler     = Problem::Scheduler;
@@ -75,7 +76,8 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * WarpGemm::kN);
         static constexpr index_t KIterPerWarp = KPerBlock / WarpGemm::kK;
 
-        static constexpr bool PreshuffleQuant = Problem::Traits::PreshuffleQuant;
+        static constexpr bool APreshuffleQuant = Problem::Traits::APreshuffleQuant;
+        static constexpr bool BPreshuffleQuant = Problem::Traits::BPreshuffleQuant;
 
         static constexpr index_t QScalesPerBlockRow =
             integer_divide_ceil(KPerBlock, BQuantGroupSize::kK);
@@ -106,19 +108,23 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         // 4. i4,  bf8, (fp8/fp32) -> f32
         static_assert(
             (std::is_same_v<ADataType, fp8_t> || std::is_same_v<ADataType, bf8_t> ||
-             std::is_same_v<ADataType, ck_tile::pk_int4_t>) &&
+             std::is_same_v<ADataType, ck_tile::pk_int4_t> ||
+             std::is_same_v<ADataType, ck_tile::pk_fp4_t>) &&
             (std::is_same_v<BDataType, fp8_t> || std::is_same_v<BDataType, bf8_t> ||
-             std::is_same_v<BDataType, ck_tile::pk_int4_t>) &&
+             std::is_same_v<BDataType, ck_tile::pk_int4_t> ||
+             std::is_same_v<BDataType, ck_tile::pk_fp4_t>) &&
             (std::is_same_v<AQDataType, float> || std::is_same_v<AQDataType, ck_tile::fp8_t> ||
              std::is_same_v<AQDataType, ck_tile::bf8_t>) &&
             (std::is_same_v<BQDataType, float> || std::is_same_v<BQDataType, ck_tile::fp8_t> ||
              std::is_same_v<BQDataType, ck_tile::bf8_t>) &&
-            (std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t>) &&
+            (std::is_same_v<AComputeDataType, fp8_t> || std::is_same_v<AComputeDataType, bf8_t>) &&
+            (std::is_same_v<BComputeDataType, fp8_t> || std::is_same_v<BComputeDataType, bf8_t>) &&
             std::is_same_v<CDataType, fp32_t>);
 
         static constexpr index_t InterWaveSchedulingMacClusters = 1;
 
-        static constexpr index_t KPack      = WarpGemm::kKPerThread;
+        static constexpr index_t KPackA     = WarpGemm::kKPerThread;
+        static constexpr index_t KPackB     = WarpGemm::kKPerThread;
         static constexpr index_t KPerThread = KIterPerWarp * WarpGemm::kKPerThread;
         static constexpr bool TransposeC    = Problem::TransposeC;
     };
@@ -126,16 +132,18 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     public:
     using Traits = GemmTraits_<Problem_, Policy_>;
 
-    using ADataType       = remove_cvref_t<typename Traits::ADataType>;
-    using AQDataType      = remove_cvref_t<typename Traits::AQDataType>;
-    using BDataType       = remove_cvref_t<typename Traits::BDataType>;
-    using BQDataType      = remove_cvref_t<typename Traits::BQDataType>;
-    using ComputeDataType = remove_cvref_t<typename Traits::ComputeDataType>;
-    using CDataType       = remove_cvref_t<typename Traits::CDataType>;
+    using ADataType        = remove_cvref_t<typename Traits::ADataType>;
+    using AQDataType       = remove_cvref_t<typename Traits::AQDataType>;
+    using BDataType        = remove_cvref_t<typename Traits::BDataType>;
+    using BQDataType       = remove_cvref_t<typename Traits::BQDataType>;
+    using AComputeDataType = remove_cvref_t<typename Traits::AComputeDataType>;
+    using BComputeDataType = remove_cvref_t<typename Traits::BComputeDataType>;
+    using CDataType        = remove_cvref_t<typename Traits::CDataType>;
 
-    // BDataType gets converted from PkInt4 during loading
-    using OverrideBDataType =
-        std::conditional_t<std::is_same_v<BDataType, pk_int4_t>, ADataType, BDataType>;
+    // A/B DataType get converted from PkInt4/PkFp4 during loading
+    using OverrideADataType = AComputeDataType;
+    using OverrideBDataType = BComputeDataType;
+
     using Base     = BlockGemmQuantBase;
     using WarpGemm = remove_cvref_t<typename Traits::WarpGemm>;
 
@@ -156,7 +164,8 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
     using BWarpTensor = typename WarpGemm::BWarpTensor;
     using CWarpTensor = typename WarpGemm::CWarpTensor;
 
-    static constexpr bool PreshuffleQuant = Traits::PreshuffleQuant;
+    static constexpr bool APreshuffleQuant = Traits::APreshuffleQuant;
+    static constexpr bool BPreshuffleQuant = Traits::BPreshuffleQuant;
 
     static_assert(std::is_same_v<typename WarpGemm::CDataType, float>);
 
@@ -246,8 +255,8 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
         static constexpr auto BLdsTileDistr =
             decltype(make_static_tile_distribution(MakeBBlockDistributionEncode())){};
 
-        using ALdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(ALdsTileDistr));
-        using BLdsTile = decltype(make_static_distributed_tensor<ComputeDataType>(BLdsTileDistr));
+        using ALdsTile = decltype(make_static_distributed_tensor<AComputeDataType>(ALdsTileDistr));
+        using BLdsTile = decltype(make_static_distributed_tensor<BComputeDataType>(BLdsTileDistr));
 
         ALdsTile a_warp_tile_;
         BLdsTile b_warp_tile_;
@@ -261,11 +270,9 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
                                           bool_constant<ALoadTranspose> = {},
                                           bool_constant<BLoadTranspose> = {})
         {
-            load_int4_tile<ADataType, ComputeDataType, UnaryOpSize_, ALoadTranspose>(
-                a_warp_tile_, a_block_window);
-            // If B datatype were pkint4 it would be converted prior to storing in LDS
-            load_int4_tile<OverrideBDataType, ComputeDataType, UnaryOpSize_, BLoadTranspose>(
-                b_warp_tile_, b_block_window);
+            // If A/B datatype were pkint4/pkfp4 it would be converted prior to storing in LDS
+            load_and_convert_tile<UnaryOpSize_, ALoadTranspose>(a_warp_tile_, a_block_window);
+            load_and_convert_tile<UnaryOpSize_, BLoadTranspose>(b_warp_tile_, b_block_window);
         }
 
         // C += A * B
@@ -286,108 +293,115 @@ struct ABQuantBlockUniversalGemmAsBsCr : public BlockGemmQuantBase
             constexpr auto warp_size = get_warp_size();
 
             // hot loop:
-            static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    CWarpTensor c_warp_tensor;
+            static_ford<sequence<MIterPerWarp, NIterPerWarp>>{}([&](auto mn) {
+                constexpr auto mIter = number<mn[number<0>{}]>{};
+                constexpr auto nIter = number<mn[number<1>{}]>{};
+                CWarpTensor c_warp_tensor;
 
-                    static_for<0, Traits::QScalesPerBlockRow, 1>{}([&](auto kQScale) {
-                        static_for<0, Traits::KIterPerQScale, 1>{}([&](auto kIterInQScale) {
-                            constexpr auto kIter = kQScale * Traits::KIterPerQScale + kIterInQScale;
+                static_for<0, Traits::QScalesPerBlockRow, 1>{}([&](auto kQScale) {
+                    static_for<0, Traits::KIterPerQScale, 1>{}([&](auto kIterInQScale) {
+                        constexpr auto kIter = kQScale * Traits::KIterPerQScale + kIterInQScale;
 
-                            AWarpTensor a_warp_tensor;
-                            a_warp_tensor.get_thread_buffer() =
-                                a_warp_tile_.get_y_sliced_thread_data(
-                                    merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
-                                    merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+                        AWarpTensor a_warp_tensor;
+                        a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
+                            merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
 
-                            BWarpTensor b_warp_tensor;
-                            b_warp_tensor.get_thread_buffer() =
-                                b_warp_tile_.get_y_sliced_thread_data(
-                                    merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
-                                    merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+                        BWarpTensor b_warp_tensor;
+                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
+                            merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
 
-                            if constexpr(kIterInQScale == 0)
-                            {
-                                c_warp_tensor = WarpGemm{}(a_warp_tensor, b_warp_tensor);
-                            }
-                            else
-                            {
-                                WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
-                            }
-                        });
-
-                        constexpr auto tbuf_offset =
-                            number<typename CBlockTensor::ThreadTensorDesc{}.calculate_offset(
-                                       merge_sequences(sequence<mIter, nIter>{},
-                                                       c_warp_y_index_zeros)) /
-                                   CBlockTensor::PackedSize>{};
-                        // a_scale
-                        AQPickerCommon<AQBlockTensor, Traits, mIter, kQScale> aq_picker(
-                            aq_block_tensor);
-
-                        if constexpr(PreshuffleQuant)
+                        if constexpr(kIterInQScale == 0)
                         {
-                            constexpr index_t reg_offset = nIter;
-                            auto pull_from_lane =
-                                (__lane_id() & (WarpGemm::kN - 1)) * Traits::KQPerBlock + kQScale;
-                            auto& scale_reg = bq_block_tensor.get_thread_buffer()[reg_offset];
-                            // cross lane ops
-                            uint32_t scale_reg_dword;
-
-                            if constexpr(std::is_same_v<BQDataType, float>)
-                            {
-                                scale_reg_dword = ck_tile::bit_cast<uint32_t>(scale_reg);
-                            }
-                            else
-                            {
-                                scale_reg_dword = static_cast<uint32_t>(scale_reg);
-                            }
-
-                            // cross lane ops to get the value of scale_reg.
-                            int gathered_scale_reg = __builtin_amdgcn_ds_bpermute(
-                                pull_from_lane << 2, __builtin_bit_cast(int, scale_reg_dword));
-
-                            float b_scale_reg_f =
-                                Base::cvt_scale_to_fp32<typename Traits::BQDataType>(
-                                    gathered_scale_reg);
-
-                            static_for<0, WarpGemm::kM * WarpGemm::kN / warp_size, 1>{}(
-                                [&](auto c_row) {
-                                    float a_scale_reg_f = aq_picker.template pick<c_row>();
-                                    c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
-                                        (c_warp_tensor.get_thread_buffer()[c_row] * a_scale_reg_f *
-                                         b_scale_reg_f);
-                                });
+                            c_warp_tensor = WarpGemm{}(a_warp_tensor, b_warp_tensor);
                         }
                         else
                         {
-                            // Multiply bquant with accumulated C
-                            constexpr index_t reg_offset = [&]() {
-                                if constexpr(GemmTraits::BQuantGroupSize::kN >=
-                                             (NWarp * WarpGemm::kN))
-                                    return (nIter * NWarp * WarpGemm::kN) /
-                                               GemmTraits::BQuantGroupSize::kN *
-                                               Traits::KQPerBlock +
-                                           kQScale;
-                                else
-                                {
-                                    return nIter * Traits::KQPerBlock + kQScale;
-                                }
-                            }();
-
-                            auto& scale_reg = bq_block_tensor.get_thread_buffer()[reg_offset];
-                            float b_scale_reg_f =
-                                Base::cvt_scale_to_fp32<typename Traits::BQDataType>(scale_reg);
-
-                            static_for<0, WarpGemm::kM * WarpGemm::kN / warp_size, 1>{}(
-                                [&](auto c_row) {
-                                    float a_scale_reg_f = aq_picker.template pick<c_row>();
-                                    c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
-                                        (c_warp_tensor.get_thread_buffer()[c_row] * a_scale_reg_f *
-                                         b_scale_reg_f);
-                                });
+                            WarpGemm{}(c_warp_tensor, a_warp_tensor, b_warp_tensor);
                         }
                     });
+
+                    constexpr auto tbuf_offset =
+                        number<typename CBlockTensor::ThreadTensorDesc{}.calculate_offset(
+                                   merge_sequences(sequence<mIter, nIter>{},
+                                                   c_warp_y_index_zeros)) /
+                               CBlockTensor::PackedSize>{};
+                    // a_scale
+                    AQPickerCommon<AQBlockTensor, Traits, mIter, kQScale> aq_picker(
+                        aq_block_tensor);
+
+                    if constexpr(BPreshuffleQuant)
+                    {
+                        constexpr index_t reg_offset = [&]() {
+                            if constexpr(GemmTraits::BQuantGroupSize::kN > (NWarp * WarpGemm::kN) &&
+                                         Traits::NPerBlock == GemmTraits::BQuantGroupSize::kN)
+                            {
+                                return kQScale;
+                            }
+                            else
+                            {
+                                return nIter;
+                            }
+                        }();
+
+                        auto pull_from_lane =
+                            (__lane_id() & (WarpGemm::kN - 1)) * Traits::KQPerBlock + kQScale;
+
+                        auto& scale_reg = bq_block_tensor.get_thread_buffer()[reg_offset];
+                        // cross lane ops
+                        uint32_t scale_reg_dword;
+
+                        if constexpr(std::is_same_v<BQDataType, float>)
+                        {
+                            scale_reg_dword = ck_tile::bit_cast<uint32_t>(scale_reg);
+                        }
+                        else
+                        {
+                            scale_reg_dword = static_cast<uint32_t>(scale_reg);
+                        }
+
+                        // cross lane ops to get the value of scale_reg.
+                        int gathered_scale_reg = __builtin_amdgcn_ds_bpermute(
+                            pull_from_lane << 2, __builtin_bit_cast(int, scale_reg_dword));
+
+                        float b_scale_reg_f = Base::cvt_scale_to_fp32<typename Traits::BQDataType>(
+                            gathered_scale_reg);
+
+                        static_for<0, WarpGemm::kM * WarpGemm::kN / warp_size, 1>{}(
+                            [&](auto c_row) {
+                                float a_scale_reg_f = aq_picker.template pick<c_row>();
+                                c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
+                                    (c_warp_tensor.get_thread_buffer()[c_row] * a_scale_reg_f *
+                                     b_scale_reg_f);
+                            });
+                    }
+                    else
+                    {
+                        // Multiply bquant with accumulated C
+                        constexpr index_t reg_offset = [&]() {
+                            if constexpr(GemmTraits::BQuantGroupSize::kN >= (NWarp * WarpGemm::kN))
+                                return (nIter * NWarp * WarpGemm::kN) /
+                                           GemmTraits::BQuantGroupSize::kN * Traits::KQPerBlock +
+                                       kQScale;
+                            else
+                            {
+                                return nIter * Traits::KQPerBlock + kQScale;
+                            }
+                        }();
+
+                        auto& scale_reg = bq_block_tensor.get_thread_buffer()[reg_offset];
+                        float b_scale_reg_f =
+                            Base::cvt_scale_to_fp32<typename Traits::BQDataType>(scale_reg);
+
+                        static_for<0, WarpGemm::kM * WarpGemm::kN / warp_size, 1>{}(
+                            [&](auto c_row) {
+                                float a_scale_reg_f = aq_picker.template pick<c_row>();
+                                c_block_tensor.get_thread_buffer()[tbuf_offset + c_row] +=
+                                    (c_warp_tensor.get_thread_buffer()[c_row] * a_scale_reg_f *
+                                     b_scale_reg_f);
+                            });
+                    }
                 });
             });
         }

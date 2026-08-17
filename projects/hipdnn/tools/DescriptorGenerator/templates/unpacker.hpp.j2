@@ -1,0 +1,260 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#pragma once
+
+#include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/{{ op.frontend.effective_attributes_include }}.hpp>
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+#include <hipdnn_frontend/detail/{{ op.data_fields_helper.include }}.hpp>
+{% endif %}
+#include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
+#include <memory>
+#include <optional>
+#include <unordered_map>
+
+namespace hipdnn_frontend::detail
+{
+
+[[nodiscard]] inline Error {{ op.frontend.unpacker_function }}(
+    hipdnnBackendDescriptor_t opDesc,
+    std::unordered_map<int64_t, std::shared_ptr<graph::TensorAttributes>>& tensorMap,
+    graph::{{ op.frontend.attributes_class }}& attributes)
+{
+{% set mode_field = op.mode_rule_mode_field %}
+{% if op.mode_rules %}
+{% set tensors_to_unpack = op.required_tensor_fields %}
+{% else %}
+{% set tensors_to_unpack = op.tensor_fields %}
+{% endif %}
+{% for tf in tensors_to_unpack %}
+{% set ft = op.tensor_field_frontend_map.get(tf.name) %}
+{% if ft %}
+    // Unpack {{ ft.name }} tensor
+    std::shared_ptr<graph::TensorAttributes> {{ ft.camel_name }}Tensor;
+{% if tf.required %}
+    HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+        opDesc, {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, tensorMap, {{ ft.camel_name }}Tensor, "{{ op.effective_error_label }} {{ tf.attr_suffix }} tensor"));
+    attributes.{{ ft.effective_setter_name }}({{ ft.camel_name }}Tensor);
+{% else %}
+    HIPDNN_CHECK_ERROR(unpackOptionalTensor(
+        opDesc, {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, tensorMap, {{ ft.camel_name }}Tensor, "{{ op.effective_error_label }} {{ tf.attr_suffix }} tensor"));
+    if({{ ft.camel_name }}Tensor)
+    {
+        attributes.{{ ft.effective_setter_name }}({{ ft.camel_name }}Tensor);
+    }
+{% endif %}
+
+{% endif %}
+{% endfor %}
+{% if op.mode_rules %}
+{% set tf_by_name = op.tensor_field_by_name %}
+{% set df_by_name = op.data_field_by_name %}
+    // The mode determines which routing attributes are present.
+    {{ mode_field.test_c_type }} {{ mode_field.camel_name }}{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
+        opDesc, {{ mode_field.attr_name }}, {{ mode_field.backend_type }},
+        {{ mode_field.camel_name }}, "{{ op.effective_error_label }} {{ mode_field.name }}"));
+    auto [{{ mode_field.camel_name }}Result, {{ mode_field.camel_name }}Err]
+        = {{ mode_field.frontend_inverse_converter }}({{ mode_field.camel_name }});
+    if({{ mode_field.camel_name }}Err.is_bad())
+    {
+        return {{ mode_field.camel_name }}Err;
+    }
+    attributes.{{ mode_field.frontend_setter_name }}({{ mode_field.camel_name }}Result);
+
+    switch({{ mode_field.camel_name }}Result)
+    {
+{% for rule in op.mode_rules %}
+    case {{ mode_field.effective_frontend_type }}::{{ rule.mode }}:
+{% for tensor_name in rule.required_optional_tensors %}
+{% set tf = tf_by_name[tensor_name] %}
+{% set ft = op.tensor_field_frontend_map[tf.name] %}
+        {
+            std::shared_ptr<graph::TensorAttributes> {{ ft.camel_name }}Tensor;
+            HIPDNN_CHECK_ERROR(unpackAndRegisterTensor(
+                opDesc, {{ op.operation_attr_prefix }}_{{ tf.attr_suffix }}, tensorMap,
+                {{ ft.camel_name }}Tensor,
+                "{{ op.effective_error_label }} {{ tf.attr_suffix }} tensor"));
+            attributes.{{ ft.effective_setter_name }}({{ ft.camel_name }}Tensor);
+        }
+{% endfor %}
+{% for scalar_name in rule.serialized_scalars %}
+{% set field = df_by_name[scalar_name] %}
+        {
+{% if field.type == "scalar_float" %}
+            float {{ field.camel_name }} = 0.0f;
+{% elif field.type == "bool" %}
+            bool {{ field.camel_name }} = false;
+{% else %}
+            {{ field.cpp_type }} {{ field.camel_name }} = 0;
+{% endif %}
+            HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(
+                opDesc, {{ field.attr_name }}, {{ field.backend_type }},
+                {{ field.camel_name }},
+                "{{ op.effective_error_label }} {{ field.name }}"));
+{% if field.frontend_uses_member_access %}
+            attributes.{{ field.frontend_member_name }} = {{ field.camel_name }};
+{% else %}
+            attributes.{{ field.frontend_setter_name }}({{ field.camel_name }});
+{% endif %}
+        }
+{% endfor %}
+        break;
+{% endfor %}
+    default:
+        return {ErrorCode::INVALID_VALUE, "{{ op.effective_error_label }} has an unknown routing mode"};
+    }
+{% endif %}
+
+{% if op.data_fields_helper is defined and op.data_fields_helper %}
+    // Unpack shared {{ op.data_fields_helper.label }} parameters
+    HIPDNN_CHECK_ERROR({{ op.data_fields_helper.unpack_function }}(opDesc, attributes, "{{ op.effective_error_label }}"));
+
+{% else %}
+{% for df in op.data_fields if not op.mode_rules or (df.name != mode_field.name and df.name not in op.mode_rule_controlled_scalar_names) %}
+{% if df.is_vector %}
+    // Unpack {{ df.name }}
+    std::vector<int64_t> {{ df.camel_name }};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrVec(
+        opDesc, {{ df.attr_name }}, {{ df.camel_name }}, "{{ op.effective_error_label }} {{ df.name }}"));
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = std::move({{ df.camel_name }});
+{% else %}
+    attributes.{{ df.frontend_setter_name }}(std::move({{ df.camel_name }}));
+{% endif %}
+
+{% elif df.is_mode %}
+    // Unpack {{ df.name }}
+    {{ df.test_c_type }} {{ df.camel_name }}{};
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
+                                               {{ df.attr_name }},
+                                               {{ df.backend_type }},
+                                               {{ df.camel_name }},
+                                               "{{ op.effective_error_label }} {{ df.name }}"));
+    auto [{{ df.camel_name }}Result, {{ df.camel_name }}Err] = {{ df.frontend_inverse_converter }}({{ df.camel_name }});
+    if({{ df.camel_name }}Err.is_bad())
+    {
+        return {{ df.camel_name }}Err;
+    }
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = {{ df.camel_name }}Result;
+{% else %}
+    attributes.{{ df.frontend_setter_name }}({{ df.camel_name }}Result);
+{% endif %}
+
+{% elif df.is_enum %}
+    // Unpack {{ df.name }}
+    int64_t {{ df.camel_name }}Raw = 0;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
+                                               {{ df.attr_name }},
+                                               HIPDNN_TYPE_INT64,
+                                               {{ df.camel_name }}Raw,
+                                               "{{ op.effective_error_label }} {{ df.name }}"));
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = static_cast<{{ df.cpp_enum }}>({{ df.camel_name }}Raw);
+{% else %}
+    attributes.{{ df.frontend_setter_name }}(static_cast<{{ df.cpp_enum }}>({{ df.camel_name }}Raw));
+{% endif %}
+
+{% elif df.is_optional_scalar %}
+    // Unpack {{ df.name }} (optional)
+    {
+        std::optional<{{ df.cpp_type }}> {{ df.camel_name }};
+        HIPDNN_CHECK_ERROR(getDescriptorAttrOptionalScalar(opDesc,
+                                                           {{ df.attr_name }},
+                                                           {{ df.backend_type }},
+                                                           {{ df.camel_name }},
+                                                           "{{ op.effective_error_label }} {{ df.name }}"));
+        if({{ df.camel_name }}.has_value())
+        {
+{% if df.frontend_uses_member_access %}
+            attributes.{{ df.frontend_member_name }} = *{{ df.camel_name }};
+{% else %}
+            attributes.{{ df.frontend_setter_name }}(*{{ df.camel_name }});
+{% endif %}
+        }
+    }
+
+{% elif df.is_scalar %}
+    // Unpack {{ df.name }}
+{% if df.type == "scalar_float" %}
+    float {{ df.camel_name }} = 0.0f;
+{% elif df.type == "bool" %}
+    bool {{ df.camel_name }} = false;
+{% else %}
+    {{ df.cpp_type }} {{ df.camel_name }} = 0;
+{% endif %}
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(opDesc,
+                                               {{ df.attr_name }},
+                                               {{ df.backend_type }},
+                                               {{ df.camel_name }},
+                                               "{{ op.effective_error_label }} {{ df.name }}"));
+{% if df.frontend_uses_member_access %}
+    attributes.{{ df.frontend_member_name }} = {{ df.camel_name }};
+{% else %}
+    attributes.{{ df.frontend_setter_name }}({{ df.camel_name }});
+{% endif %}
+
+{% endif %}
+{% endfor %}
+{% if op.has_compute_data_type %}
+    // Unpack compute data type
+    auto [dt, dtErr]
+        = unpackGraphDataType(opDesc, {{ op.compute_data_type_attr }}, "{{ op.effective_error_label }} compute data type");
+    if(dtErr.is_bad())
+    {
+        return dtErr;
+    }
+    attributes.set_compute_data_type(dt);
+
+{% endif %}
+{% endif %}
+{% for edt in op.extra_data_type_fields %}
+    // Unpack {{ edt.name }}
+    {
+{% if edt.sentinel %}
+        // Packer omits this attribute when the value is {{ edt.sentinel }}; the
+        // backend reports count=0 in that case and unpackGraphDataType returns
+        // DataType::NOT_SET, which is the default we want to keep. Real
+        // backend failures (descriptor errors, type-conversion failures) still
+        // propagate via the explicit Err check.
+{% endif %}
+        auto [{{ edt.camel_name }}, {{ edt.camel_name }}Err] = unpackGraphDataType(
+            opDesc, {{ edt.attr_name }}, "{{ op.effective_error_label }} {{ edt.effective_error_label }}");
+        if({{ edt.camel_name }}Err.is_bad())
+        {
+            return {{ edt.camel_name }}Err;
+        }
+{% if edt.frontend_uses_member_access %}
+        attributes.{{ edt.frontend_member_name }} = {{ edt.camel_name }};
+{% else %}
+        attributes.{{ edt.frontend_setter_name }}({{ edt.camel_name }});
+{% endif %}
+    }
+
+{% endfor %}
+{% for taf in op.tensor_array_fields %}
+    // Unpack {{ taf.name }} tensor array
+    {
+        std::vector<std::shared_ptr<graph::TensorAttributes>> {{ taf.camel_name }}Attrs;
+        HIPDNN_CHECK_ERROR(unpackAndRegisterTensorArray(
+            opDesc, {{ taf.attr_name }}, tensorMap, {{ taf.camel_name }}Attrs,
+            "{{ op.effective_error_label }} {{ taf.name }}"));
+        if(!{{ taf.camel_name }}Attrs.empty())
+        {
+            attributes.{{ taf.frontend_setter_name }}({{ taf.camel_name }}Attrs);
+        }
+    }
+
+{% endfor %}
+    // Unpack operation name
+    std::string opName;
+    HIPDNN_CHECK_ERROR(
+        getDescriptorAttrString(opDesc, HIPDNN_ATTR_OPERATION_NAME_EXT, opName, "operation name"));
+    attributes.set_name(opName);
+
+    return {};
+}
+
+} // namespace hipdnn_frontend::detail

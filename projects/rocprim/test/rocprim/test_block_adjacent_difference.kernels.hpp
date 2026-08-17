@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -617,8 +617,10 @@ template<unsigned int First,
          class Type,
          class FlagType,
          class FlagOpType,
-         TestBlockAdjacentDifferenceMethod Method,
-         unsigned int                      BlockSize = 256U>
+         TestBlockAdjacentDifferenceMethod            Method,
+         unsigned int                                 BlockSize = 256U,
+         rocprim::block_adjacent_difference_algorithm Algorithm
+         = rocprim::block_adjacent_difference_algorithm::default_algorithm>
 struct static_for
 {
     static void run()
@@ -636,7 +638,8 @@ struct static_for
                                            BlockSize,
                                            items[First]>();
         }
-        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize>::run();
+        static_for<First + 1, Last, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>::
+            run();
     }
 };
 
@@ -644,9 +647,10 @@ template<unsigned int N,
          class Type,
          class FlagType,
          class FlagOpType,
-         TestBlockAdjacentDifferenceMethod Method,
-         unsigned int                      BlockSize>
-struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize>
+         TestBlockAdjacentDifferenceMethod            Method,
+         unsigned int                                 BlockSize,
+         rocprim::block_adjacent_difference_algorithm Algorithm>
+struct static_for<N, N, Type, FlagType, FlagOpType, Method, BlockSize, Algorithm>
 {
     static void run() {}
 };

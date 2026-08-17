@@ -22,7 +22,7 @@
 #define HIPFFTW_HELPER_H
 
 #include "../shared/array_validator.h"
-#include "../shared/data_layout.h"
+#include "../shared/client_data_layout_helpers.h"
 #include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>
@@ -34,7 +34,7 @@
 #include <string>
 #include <type_traits>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 // psapi.h requires windows.h to be included first
 #include <psapi.h>
@@ -85,7 +85,7 @@ private:
 #else
         const std::string lib_basename = "cufftw";
 #endif
-#ifdef WIN32
+#ifdef _WIN32
         const std::string lib_fullame = lib_basename + ".dll";
         lib_handle                    = LoadLibraryA(lib_fullame.c_str());
 #else
@@ -96,7 +96,7 @@ private:
         if(!lib_handle)
         {
             load_error_info << "failed to open library " << lib_fullame;
-#ifdef WIN32
+#ifdef _WIN32
             load_error_info << ". System's error code = " << GetLastError();
 #else
             load_error_info << ". System's error message = " << dlerror();
@@ -129,7 +129,7 @@ public:
     {
         if(lib_handle)
         {
-#ifdef WIN32
+#ifdef _WIN32
             (void)FreeLibrary(lib_handle);
 #else
             (void)dlclose(lib_handle);
@@ -210,7 +210,7 @@ public:
             func_ptr = nullptr;
             return;
         }
-#ifdef WIN32
+#ifdef _WIN32
         func_ptr = reinterpret_cast<func_type*>(GetProcAddress(hipfftw_lib, func_symbol.c_str()));
 #else
         func_ptr = reinterpret_cast<func_type*>(dlsym(hipfftw_lib, func_symbol.c_str()));
@@ -2111,6 +2111,37 @@ public:
                       == default_distances(
                           dft_kind, plan_placement, fft_io::fft_io_out, lengths, batches);
     }
+
+    operator fft_params() const
+    {
+        fft_params ret;
+        ret.length         = convert_vector_to<decltype(ret.length)::value_type>(lengths);
+        ret.precision      = prec;
+        ret.placement      = plan_placement;
+        ret.transform_type = dft_kind;
+        if(batch_rank != 1 || batches[0] < 0)
+            throw std::runtime_error(
+                "Conversion to fft_params impossible for batch_rank != 1 or negative batch sizes");
+        ret.nbatch        = batches[0];
+        ret.run_callbacks = fft_callback_type_none;
+        ret.scale_factor  = 1.0;
+        ret.istride       = convert_vector_to<decltype(ret.istride)::value_type>(istrides);
+        ret.ostride       = convert_vector_to<decltype(ret.ostride)::value_type>(ostrides);
+        if(idist[0] < 0 || odist[0] < 0)
+            throw std::runtime_error("Conversion to fft_params impossible for negative distances");
+        ret.idist = idist[0];
+        ret.odist = odist[0];
+        ret.validate(); // sets itype, otype, isize, osize, etc. from the above
+        // other ret's members should be irrelevant/fine with default values
+        return ret;
+    }
+
+    fft_params make_params_for_reference_cpu() const
+    {
+        fft_params converted = *this;
+        return converted.make_params_for_reference_cpu();
+    }
+
     // public ad-hoc exceptions, specific to hipfftw_helper
     struct type_conversion_exception : std::runtime_error
     {

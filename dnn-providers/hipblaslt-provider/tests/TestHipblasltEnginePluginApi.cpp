@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <HipblasltPlugin.hpp>
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginGraphTestUtils.hpp>
@@ -291,14 +291,15 @@ TEST(TestGpuHipblasltEnginePluginApi, GetEngineDetailsValid)
 
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
-    hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
+    hipdnnPluginConstData_t const opGraph
+        = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
     hipdnnPluginConstData_t engineDetailsOut;
 
     auto status = hipdnnEnginePluginGetEngineDetailsImpl(
         handle, HIPBLASLT_ENGINE_ID, &opGraph, &engineDetailsOut);
 
-    hipdnn_plugin_sdk::EngineDetailsWrapper engineDetails(engineDetailsOut.ptr,
-                                                          engineDetailsOut.size);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper const engineDetails(
+        engineDetailsOut.ptr, engineDetailsOut.size);
 
     EXPECT_EQ(status, HIPDNN_PLUGIN_STATUS_SUCCESS);
     EXPECT_EQ(engineDetails.engineId(), HIPBLASLT_ENGINE_ID);
@@ -318,12 +319,13 @@ TEST(TestGpuHipblasltEnginePluginApi, GetWorkspaceSizeValid)
     // Create a valid flatbuffer graph and engine config
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
-    hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
+    hipdnnPluginConstData_t const opGraph
+        = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
 
     auto engineConfigBuilder
         = hipdnn_test_sdk::utilities::createValidEngineConfig(HIPBLASLT_ENGINE_ID);
     auto serializedEngineConfig = engineConfigBuilder.Release();
-    hipdnnPluginConstData_t engineConfig
+    hipdnnPluginConstData_t const engineConfig
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
 
     size_t workspaceSize = 0;
@@ -344,12 +346,13 @@ TEST(TestGpuHipblasltEnginePluginApi, CreateExecutionContextValid)
 
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
     auto serializedGraph = builder.Release();
-    hipdnnPluginConstData_t opGraph = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
+    hipdnnPluginConstData_t const opGraph
+        = hipdnn_plugin_sdk::createValidConstDataGraph(serializedGraph);
 
     auto engineConfigBuilder
         = hipdnn_test_sdk::utilities::createValidEngineConfig(HIPBLASLT_ENGINE_ID);
     auto serializedEngineConfig = engineConfigBuilder.Release();
-    hipdnnPluginConstData_t engineConfig
+    hipdnnPluginConstData_t const engineConfig
         = hipdnn_plugin_sdk::createValidConstDataEngineConfig(serializedEngineConfig);
 
     hipdnnEnginePluginExecutionContext_t executionContext = nullptr;

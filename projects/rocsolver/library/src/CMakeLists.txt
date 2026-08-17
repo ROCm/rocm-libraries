@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -50,6 +50,9 @@ set(rocsolver_lapack_source
   lapack/roclapack_getrs.cpp
   lapack/roclapack_getrs_batched.cpp
   lapack/roclapack_getrs_strided_batched.cpp
+  lapack/roclapack_getrs_npvt.cpp
+  lapack/roclapack_getrs_npvt_batched.cpp
+  lapack/roclapack_getrs_npvt_strided_batched.cpp
   lapack/roclapack_gesv.cpp
   lapack/roclapack_gesv_batched.cpp
   lapack/roclapack_gesv_strided_batched.cpp
@@ -61,6 +64,13 @@ set(rocsolver_lapack_source
   lapack/roclapack_posv.cpp
   lapack/roclapack_posv_batched.cpp
   lapack/roclapack_posv_strided_batched.cpp
+  #- symmetric indefinite matrices
+  lapack/roclapack_sytrs.cpp
+  lapack/roclapack_sytrs_batched.cpp
+  lapack/roclapack_sytrs_strided_batched.cpp
+  lapack/roclapack_sytrs2.cpp
+  lapack/roclapack_sytrs2_batched.cpp
+  lapack/roclapack_sytrs2_strided_batched.cpp
   #- block-tridiagonal systems
   lapack/roclapack_geblttrs_npvt.cpp
   lapack/roclapack_geblttrs_npvt_batched.cpp
@@ -133,6 +143,10 @@ set(rocsolver_lapack_source
   lapack/roclapack_gerqf.cpp
   lapack/roclapack_gerqf_batched.cpp
   lapack/roclapack_gerqf_strided_batched.cpp
+  # - Cholesky QR
+  lapack/roclapack_cholqr.cpp
+  lapack/roclapack_cholqr_strided_batched.cpp
+  lapack/roclapack_cholqr_batched.cpp
   #### Problem and Matrix Reductions (Diagonalizations) ####
   ##########################################################
   #- bidiagonalization
@@ -237,6 +251,9 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_larf.cpp
   auxiliary/rocauxiliary_larft.cpp
   auxiliary/rocauxiliary_larfb.cpp
+  # norm and condition number
+  auxiliary/rocauxiliary_lange.cpp
+  auxiliary/rocauxiliary_gecon.cpp
   # plane rotations
   auxiliary/rocauxiliary_lasr.cpp
   # orthonormal/unitary matrices
@@ -269,6 +286,9 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_stedcx.cpp
   auxiliary/rocauxiliary_stein.cpp
   auxiliary/rocauxiliary_latrd.cpp
+  auxiliary/rocauxiliary_latrd_forsytrd.cpp
+  # Hessenberg reduction auxiliary
+  auxiliary/rocauxiliary_lahr2.cpp
   # symmetric matrices
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
@@ -499,6 +519,14 @@ if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
 endif()
 
+# Feature flags
+if(ROCSOLVER_ENABLE_CHOLQR)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_CHOLQR)
+endif()
+if(ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+  target_compile_definitions(rocsolver PUBLIC ROCSOLVER_ENABLE_EIGENSOLVERS_64)
+endif()
+
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
   ROCBLAS_INTERNAL_API
@@ -553,3 +581,4 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
+

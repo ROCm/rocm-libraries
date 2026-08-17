@@ -1,17 +1,22 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <memory>
+
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <miopen/miopen.h>
 
-#include "HipdnnEnginePluginHandle.hpp"
+#include "HipdnnMiopenHandle.hpp"
+#include "HipdnnMiopenSettings.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlan.hpp"
+#include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
+#include "tests/common/TestWorkarounds.hpp"
 
-using namespace miopen_legacy_plugin;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace miopen_plugin;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_data_sdk::utilities;
 
@@ -21,24 +26,21 @@ protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
-        ASSERT_EQ(miopenCreate(&_handle.miopenHandle), miopenStatusSuccess);
+        _handle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    void TearDown() override
-    {
-        if(_handle.miopenHandle != nullptr)
-        {
-            EXPECT_EQ(miopenDestroy(_handle.miopenHandle), miopenStatusSuccess);
-        }
-    }
-
-    HipdnnEnginePluginHandle _handle;
+    // Per ROCm/rocm-libraries#6979 these tests must skip when the device has
+    // no applicable CBA solver. Each test passes its own constructed graph so
+    // the skip check uses the same shape the test would actually exercise.
+    std::unique_ptr<HipdnnMiopenHandle> _handle;
+    MiopenConvFwdBiasActivPlanBuilder _planBuilder;
 };
 
 TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdActivGraph)
 {
     auto builder = createValidConvFwdActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -48,13 +50,14 @@ TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdActivGraph)
     const auto* activAttr = node1.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttr, nullptr);
 
-    ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
+    const ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 }
 
 TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdBiasActivGraph)
 {
     auto builder = createValidConvFwdBiasActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -68,7 +71,7 @@ TEST(TestConvFwdBiasActivParams, InitializeFromValidConvFwdBiasActivGraph)
     const auto* activAttr = node2.attributes_as_PointwiseAttributes();
     ASSERT_NE(activAttr, nullptr);
 
-    ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
+    const ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 }
 
 TEST(TestConvFwdBiasActivParams, ThrowOnWrongActivationMode)
@@ -91,7 +94,8 @@ TEST(TestConvFwdBiasActivParams, ThrowOnWrongActivationMode)
                                                     convStrides,
                                                     convDilation,
                                                     PointwiseMode::ADD); // Invalid activation mode
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -112,7 +116,9 @@ TEST(TestConvFwdBiasActivParams, ThrowOnWrongActivationMode)
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)
 {
     auto builder = createValidConvFwdActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -124,13 +130,16 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraph)
 
     ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params));
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdBiasActivPlan(*_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileOnly)
 {
     auto builder = createValidConvFwdActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -142,13 +151,16 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphCompileO
 
     ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), true, false);
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdBiasActivPlan(*_handle, std::move(params), executionSettings, true, false);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspaceOnly)
 {
     auto builder = createValidConvFwdActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -160,13 +172,16 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdActivGraphWorkspac
 
     ConvFwdBiasActivParams params(*convAttr, nullptr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), false, true);
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdBiasActivPlan(*_handle, std::move(params), executionSettings, false, true);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
 {
     auto builder = createValidConvFwdBiasActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -182,13 +197,16 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraph)
 
     ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params));
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdBiasActivPlan(*_handle, std::move(params), executionSettings);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphCompileOnly)
 {
     auto builder = createValidConvFwdBiasActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -204,13 +222,16 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphComp
 
     ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), true, false);
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdBiasActivPlan(*_handle, std::move(params), executionSettings, true, false);
 }
 
 TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphWorkspaceOnly)
 {
     auto builder = createValidConvFwdBiasActivGraph();
-    hipdnn_plugin_sdk::GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    SKIP_IF_NO_APPLICABLE_CBA_ENGINE(*_handle, _planBuilder, graph);
 
     const auto& node0 = graph.getNode(0);
     const auto* convAttr = node0.attributes_as_ConvolutionFwdAttributes();
@@ -226,5 +247,6 @@ TEST_F(TestGpuConvFwdBiasActivPlan, CreatePlanWithValidConvFwdBiasActivGraphWork
 
     ConvFwdBiasActivParams params(*convAttr, biasAttr, *activAttr, graph.getTensorMap());
 
-    ConvFwdBiasActivPlan(_handle, std::move(params), false, true);
+    const HipdnnMiopenSettings executionSettings;
+    ConvFwdBiasActivPlan(*_handle, std::move(params), executionSettings, false, true);
 }

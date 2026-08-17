@@ -34,5 +34,6 @@ TEST_ROUTINE(csrsv2,
              arg.fill_mode,
              arg.solve_policy,
              arg.transA,
-             arg.baseA);
+             arg.baseA,
+             arg.graph_test);
 #endif

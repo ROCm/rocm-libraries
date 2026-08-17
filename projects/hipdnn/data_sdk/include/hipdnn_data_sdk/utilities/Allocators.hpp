@@ -93,8 +93,6 @@ public:
     virtual void deallocate(T* p, std::size_t n) noexcept = 0;
 };
 
-// NOLINTEND(portability-template-virtual-member-function)
-
 /// @brief Standard host allocator using malloc/free
 template <typename T>
 class HostAllocator : public IHostAllocator<T>
@@ -196,7 +194,7 @@ public:
         }
 
         void* ptr = nullptr;
-        hipError_t err = hipHostMalloc(&ptr, n * sizeof(T));
+        const hipError_t err = hipHostMalloc(&ptr, n * sizeof(T));
         if(err != hipSuccess)
         {
             throw std::bad_alloc();
@@ -261,7 +259,7 @@ public:
         }
 
         void* ptr = nullptr;
-        hipError_t err = hipMalloc(&ptr, n * sizeof(T));
+        const hipError_t err = hipMalloc(&ptr, n * sizeof(T));
         if(err != hipSuccess)
         {
             throw std::bad_alloc();
@@ -278,6 +276,8 @@ public:
     // as they would require host code to run on device memory addresses
     // which is not valid. Device memory should be initialized using kernels.
 };
+
+// NOLINTEND(portability-template-virtual-member-function)
 
 template <typename T, typename U>
 bool operator==([[maybe_unused]] const DeviceAllocator<T>& lhs,

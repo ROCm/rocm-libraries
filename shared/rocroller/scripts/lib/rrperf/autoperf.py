@@ -1,27 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """
 Run multiple performance tests against multiple commits and/or
@@ -36,7 +14,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
 
 import rrperf.args as args
 from rrperf import compare, git
@@ -100,16 +77,14 @@ def build_rocroller(
     return build_dir
 
 
-def ancestral_targets(targets: List[str]):
+def ancestral_targets(targets: list[str]):
     orig_project_dir = git.top()
     targets = git.rev_list(orig_project_dir, targets[0], targets[-1])
     targets.reverse()
     targets = [git.short_hash(orig_project_dir, x) for x in targets]
     if len(targets) == 0:
-        raise RuntimeError(
-            """No targets. Check `git rev-list` and make sure
-            commits are listed from oldest to newest."""
-        )
+        raise RuntimeError("""No targets. Check `git rev-list` and make sure
+            commits are listed from oldest to newest.""")
     return targets
 
 
@@ -166,10 +141,10 @@ def run(args):
 
 
 def autoperf(
-    commits: List[str],
+    commits: list[str],
     clonedir: str,
     rundir: str,
-    no_fail: List[str] = None,
+    no_fail: list[str] = None,
     current: bool = False,
     ancestral: bool = False,
     suite: str = None,

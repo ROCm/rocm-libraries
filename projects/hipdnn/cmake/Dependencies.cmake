@@ -13,6 +13,39 @@ if(HIPDNN_NO_DOWNLOAD)
     )
 endif()
 
+# _hipdnn_suppress_rocm_toolchain_checks()
+#
+# Replace ROCMChecks's watched-variable callback with a no-op while a
+# third-party CMake project configures. Some dependencies mutate compiler flag
+# variables internally, and ROCMChecks reports those writes from variable_watch()
+# regardless of ROCM_WARN_TOOLCHAIN_VAR.
+macro(_hipdnn_suppress_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+	# Dummy function
+	function(rocm_check_toolchain_var)
+        endfunction()
+    endif()
+endmacro()
+
+# _hipdnn_restore_rocm_toolchain_checks()
+#
+# Reinstall ROCMChecks's watched-variable callback after a suppression window.
+# The warning and error toggles are disabled only for the include that restores
+# the callback, so restoring does not emit the messages being suppressed.
+macro(_hipdnn_restore_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+        _save_var(ROCM_WARN_TOOLCHAIN_VAR)
+        _save_var(ROCM_ERROR_TOOLCHAIN_VAR)
+
+        set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+        set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
+        include(ROCMChecks)
+
+        _restore_var(ROCM_ERROR_TOOLCHAIN_VAR)
+        _restore_var(ROCM_WARN_TOOLCHAIN_VAR)
+    endif()
+endmacro()
+
 # Dependencies where the local version should be used, if available
 set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
 # Dependencies where we never look for a local version
@@ -39,8 +72,16 @@ function(hipdnn_add_dependency dep_name)
         else()
             message(
                 STATUS
-                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dependency_name}_VERSION}\")"
+                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dep_name}_VERSION}\")"
             )
+            set(${dep_name}_FOUND ${${dep_name}_FOUND} PARENT_SCOPE)
+            # Only export ${dep_name}_VERSION when the package config actually
+            # populated it. Some vendored or repackaged distributions skip
+            # setting it; exporting an empty string would mask the unset state
+            # in callers that branch on `if(DEFINED dep_VERSION)`.
+            if(DEFINED ${dep_name}_VERSION)
+                set(${dep_name}_VERSION "${${dep_name}_VERSION}" PARENT_SCOPE)
+            endif()
             foreach(VAR IN LISTS ${dep_name}_EXPORT_VARS)
                 set(${VAR} ${${VAR}} PARENT_SCOPE)
             endforeach()
@@ -56,6 +97,7 @@ endfunction()
 
 # Extract and use include directories from dependency targets instead of linking
 # Function to add include directories and optional compile definitions from dependency targets
+# Automatically detects target type and uses appropriate visibility (INTERFACE for interface libs, PUBLIC for others)
 function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
     # Parse optional arguments
     set(options "")
@@ -74,18 +116,24 @@ function(hipdnn_add_dependency_includes TARGET_NAME HEADER_LIB_TARGET_NAME)
         return()
     endif()
 
-    if(TARGET ${HEADER_LIB_TARGET_NAME})
-        get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
-        if(_dep_includes)
-            foreach(_include IN LISTS _dep_includes)
-                message(VERBOSE "${TARGET_NAME} adding include from ${HEADER_LIB_TARGET_NAME}: ${_include}")
-                target_include_directories(${TARGET_NAME} SYSTEM INTERFACE $<BUILD_INTERFACE:${_include}>)
-            endforeach()
-        endif()
+    # Determine visibility based on target type
+    get_target_property(_target_type ${TARGET_NAME} TYPE)
+    if(_target_type STREQUAL "INTERFACE_LIBRARY")
+        set(_visibility INTERFACE)
+    else()
+        set(_visibility PUBLIC)
+    endif()
 
-        if(ARG_COMPILE_DEFINITIONS)
-            target_compile_definitions(${TARGET_NAME} INTERFACE ${ARG_COMPILE_DEFINITIONS})
-        endif()
+    get_target_property(_dep_includes ${HEADER_LIB_TARGET_NAME} INTERFACE_INCLUDE_DIRECTORIES)
+    if(_dep_includes)
+        foreach(_include IN LISTS _dep_includes)
+            message(VERBOSE "${TARGET_NAME} adding include from ${HEADER_LIB_TARGET_NAME}: ${_include}")
+            target_include_directories(${TARGET_NAME} SYSTEM ${_visibility} $<BUILD_INTERFACE:${_include}>)
+        endforeach()
+    endif()
+
+    if(ARG_COMPILE_DEFINITIONS)
+        target_compile_definitions(${TARGET_NAME} ${_visibility} ${ARG_COMPILE_DEFINITIONS})
     endif()
 endfunction()
 
@@ -124,7 +172,9 @@ function(_fetch_gtest VERSION HASH)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ${HIPDNN_GTEST_SHARED} CACHE INTERNAL "")
     set(INSTALL_GTEST OFF)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(googletest)
+    _hipdnn_restore_rocm_toolchain_checks()
     _restore_var(BUILD_SHARED_LIBS)
 
     _exclude_from_all(${googletest_SOURCE_DIR})
@@ -135,7 +185,7 @@ endfunction()
 
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
-    _determine_git_tag(v 25.9.23)
+    _determine_git_tag(v "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
@@ -146,7 +196,7 @@ function(_fetch_flatbuffers VERSION HASH)
 
     set(FLATBUFFERS_BUILD_FLATC ON)
     set(FLATBUFFERS_INSTALL ON)
-    set(FLATBUFFERS_BUILD_FLATLIB OFF)
+    set(FLATBUFFERS_BUILD_FLATLIB ON)
     set(FLATBUFFERS_BUILD_TESTS OFF)
     set(FLATBUFFERS_BUILD_FLATHASH OFF)
     set(FLATBUFFERS_ENABLE_PCH ON)
@@ -155,6 +205,7 @@ function(_fetch_flatbuffers VERSION HASH)
         flatbuffers
         GIT_REPOSITORY https://github.com/google/flatbuffers.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
@@ -168,11 +219,6 @@ function(_fetch_flatbuffers VERSION HASH)
     _restore_var(FLATBUFFERS_BUILD_FLATHASH)
     _restore_var(FLATBUFFERS_ENABLE_PCH)
 
-    set(HIP_DNN_FLATBUFFERS_INCLUDE_DIR ${flatbuffers_SOURCE_DIR}/include
-        CACHE PATH "Path to flatbuffers include"
-    )
-
-    _exclude_from_all(${flatbuffers_SOURCE_DIR})
     _mark_targets_as_system(${flatbuffers_SOURCE_DIR})
 endfunction()
 
@@ -184,11 +230,14 @@ function(_fetch_spdlog VERSION HASH)
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
 
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(spdlog)
+    _hipdnn_restore_rocm_toolchain_checks()
 
     set(HIP_DNN_SPDLOG_INCLUDE_DIR ${spdlog_SOURCE_DIR}/include CACHE PATH "Path to spdlog include")
 
@@ -205,16 +254,18 @@ function(_fetch_nlohmann_json VERSION HASH)
         json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
     )
 
+    set(JSON_Install ON CACHE BOOL "Install nlohmann_json CMake package files" FORCE)
+
     fetchcontent_makeavailable(json)
 
     set(HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR ${json_SOURCE_DIR}/include
         CACHE PATH "Path to nlohmann::json include"
     )
 
-    _exclude_from_all(${json_SOURCE_DIR})
     _mark_targets_as_system(${json_SOURCE_DIR})
 
 endfunction()
+
 
 # Utility functions, pulled from rocroller repo
 #

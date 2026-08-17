@@ -154,6 +154,7 @@ struct perf_gemm_ex<
         static const func_map map = {
             {"gemm_ex", testing_gemm_ex<Ti, To, Tc>},
             {"gemm_batched_ex", testing_gemm_batched_ex<Ti, To, Tc>},
+            {"gemm_grouped_batched_ex", testing_gemm_grouped_batched_ex<Ti, To, Tc>},
         };
         run_function(map, arg);
     }
@@ -306,6 +307,7 @@ struct perf_blas<T, U, std::enable_if_t<std::is_same_v<T, float> || std::is_same
             // allow profiling with source gemms even without BUILD_WITH_TENSILE
             {"gemm", testing_gemm<T>},
             {"gemm_batched", testing_gemm_batched<T>},
+            {"gemm_grouped_batched", testing_gemm_grouped_batched<T>},
             {"gemm_strided_batched", testing_gemm_strided_batched<T>},
             {"syrkx", testing_syr2k<T, false>},
             {"syrkx_batched", testing_syr2k_batched<T, false>},
@@ -927,6 +929,42 @@ struct perf_syrk_ex<
 // unit check override
 int8_t g_unit_check = 0;
 
+inline bool int32_api_invalid(const int64_t& val)
+{
+    return ((int32_t)val != val);
+}
+
+bool api_arg_check(Arguments& arg, bool any_stride)
+{
+    // check if 64 bit arguments were passed to 32bit APIs
+    if(arg.api & c_API_64) // bitmask
+        return true;
+
+    auto invalid = [](const char* var) {
+        rocblas_cout << "rocblas-bench INFO: argument int32 overflow: " << var
+                     << ", did you indend to use --api 1 ?" << std::endl;
+        return false;
+    };
+
+    if(int32_api_invalid(arg.batch_count))
+    {
+        return invalid("batch_count");
+    }
+    if(int32_api_invalid(arg.M))
+    {
+        return invalid("m");
+    }
+    if(int32_api_invalid(arg.N))
+    {
+        return invalid("n");
+    }
+    if(int32_api_invalid(arg.K))
+    {
+        return invalid("k");
+    }
+    return true;
+}
+
 void gemm_arg_adjust(Arguments& arg, bool any_stride)
 {
     // adjust dimension for GEMM routines
@@ -992,6 +1030,16 @@ void gemm_arg_adjust(Arguments& arg, bool any_stride)
     }
 }
 
+void alpha_beta_stride_adjust(Arguments& arg)
+{
+    if(!arg.alpha_beta_stride)
+        return;
+
+    // only applicable to device pointer mode
+    arg.pointer_mode_host   = false;
+    arg.pointer_mode_device = true;
+}
+
 int run_bench_test(bool               init,
                    Arguments&         arg,
                    const std::string& filter,
@@ -1043,15 +1091,13 @@ int run_bench_test(bool               init,
             return 0;
     }
 
-    // argument modifications
-    if(!strcmp(function, "gemm") || !strcmp(function, "gemm_batched")
-       || !strcmp(function, "gemm_strided_batched"))
-    {
-        gemm_arg_adjust(arg, any_stride);
-    }
+    if(!api_arg_check(arg, any_stride))
+        return 0;
 
-    // dispatch
-    if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex"))
+    // argument modifications and dispatch
+
+    if(!strcmp(function, "gemm_ex") || !strcmp(function, "gemm_batched_ex")
+       || !strcmp(function, "gemm_grouped_batched_ex"))
     {
         gemm_arg_adjust(arg, any_stride);
 
@@ -1065,6 +1111,14 @@ int run_bench_test(bool               init,
     }
     else
     {
+        if(!strcmp(function, "gemm") || !strcmp(function, "gemm_batched")
+           || !strcmp(function, "gemm_strided_batched"))
+        {
+            gemm_arg_adjust(arg, any_stride);
+        }
+
+        alpha_beta_stride_adjust(arg);
+
         if(!strcmp(function, "scal") || !strcmp(function, "scal_batched")
            || !strcmp(function, "scal_strided_batched"))
             rocblas_blas1_dispatch<perf_blas_scal>(arg);
@@ -1216,6 +1270,7 @@ try
 {
     client_omp_manager::limit_by_processor_count();
     rocblas_client_init();
+    print_asan_kernel_warning("rocblas-bench");
 
     fix_batch(argc, argv);
     Arguments   arg;
@@ -1316,10 +1371,25 @@ try
          "Specific stride of strided_batched matrix D, is only applicable to strided batched"
          "BLAS_EX: second dimension * leading dimension.")
 
+        ("alpha_stride",
+         value<rocblas_stride>(&arg.stride_c),
+         "Batch alpha stride for gemv_batched and gemv_strided_batched in device pointer mode."
+         " Alias for stride_c when using batch alpha/beta arrays.")
+
+        ("beta_stride",
+         value<rocblas_stride>(&arg.stride_d),
+         "Batch beta stride for gemv_batched and gemv_strided_batched in device pointer mode."
+         " Alias for stride_d when using batch alpha/beta arrays.")
+
         ("stride_x",
          value<rocblas_stride>(&arg.stride_x)->default_value(128*128),
          "Specific stride of strided_batched vector x, is only applicable to strided batched"
          "BLAS_2: second dimension.")
+
+        ("group_count",
+         value<rocblas_stride>(&arg.stride_x),
+         "Number of groups for gemm_grouped_batched and gemm_grouped_batched_ex."
+         " Alias for stride_x when using grouped batched GEMM.")
 
         ("stride_y",
          value<rocblas_stride>(&arg.stride_y)->default_value(128*128),
@@ -1466,7 +1536,7 @@ try
 
         ("api",
          value<int32_t>(&api)->default_value(0),
-         "Use API, supercedes fortran flag (0==C, 1==C_64, ...)")
+         "Use API, supercedes fortran flag (0==C, 1==C_64 ILP64, ...)")
 
         ("workspace",
          value<size_t>(&arg.user_allocated_workspace)->default_value(0),
@@ -1555,6 +1625,13 @@ try
     if(vm.find("version") != vm.end() || vm.find("rocblas_tensile_commit_hash") != vm.end())
     {
         return 0;
+    }
+
+    if((vm.count("alpha_stride") || vm.count("beta_stride")) && (arg.stride_c || arg.stride_d))
+    {
+        arg.alpha_beta_stride   = true;
+        arg.pointer_mode_host   = false;
+        arg.pointer_mode_device = true;
     }
 
     // transfer local variable state

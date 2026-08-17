@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -44,6 +45,8 @@
 
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
+
+#include <tensilelitehost/export.h>
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
@@ -100,7 +103,7 @@ namespace TensileLite
         int    CUs              = 0;
     };
 
-    extern PerfModel perf;
+    extern TENSILELITEHOST_EXPORT PerfModel perf;
 
     struct BufferLoadCheckPacket
     {
@@ -113,6 +116,8 @@ namespace TensileLite
     struct SizeMapping
     {
         size_t waveNum;
+
+        dim3 clusterDim{1, 1, 1};
 
         dim3 workGroupSize;
         dim3 threadTile;
@@ -136,13 +141,16 @@ namespace TensileLite
         int    packSummationDims          = 0;
         int    magicDivAlg                = 1;
         int    streamK                    = 0;
+        int    streamKForceDPOnly         = 0;
         int    streamKAtomic              = 0;
+        int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;
 
         bool sourceKernel = false;
 
         int    globalAccumulation       = 0;
+        int    adaptiveGemmGSUA         = 0;
         size_t workspaceSizePerElemC    = 0;
         size_t workspaceSizePerElemBias = 0;
 
@@ -164,15 +172,48 @@ namespace TensileLite
         int nonTemporalA = 0;
         int nonTemporalB = 0;
 
-        bool customMainLoopScheduling = false;
+        int adaptiveGemmNTAB = 0;
+
+        int customMainLoopScheduling = 0;
+
+        // Whether the kernel uses the subtile implementation (UseSubtileImpl).
+        // Plumbed into the Origami config so heuristics can reason about subtile
+        // kernels (e.g. rejecting them for small K).
+        bool useSubtileImpl = false;
+
+        int NonTemporalD = 0;
+        int WaveSeparateGlobalReadA = 0;
+        int WaveSeparateGlobalReadB = 0;
+        int UnrollLoopSwapGlobalReadOrder = 0;
+        bool DirectToVgprA = false;
+        bool DirectToVgprB = false;
+        int NumLoadsCoalescedA = 0;
+        int NumLoadsCoalescedB = 0;
+        int VectorWidthA = 1;
+        int VectorWidthB = 1;
+        int LocalSplitU = 1;
+        bool DirectToLdsA = false;
+        bool DirectToLdsB = false;
+
+        int expertSchedulingMode = 0;
+
+        std::array<int, 2> waveGroup;
     };
 
     struct StreamKSettings
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
-        size_t grid = 0;
+        size_t               grid      = 0;
+        // StreamK=5 tri-state (0=OFF default/SK3, 1=ON/SK4, 2=AUTO); see
+        // hipblasLtStreamKTileSchedulingMode_t. Ignored when streamK != 5.
+        int                  streamKTileSchedulingMode = 0;
+        int                  smCountTarget = 0; // 0 = use all device CUs; >0 engages origami heuristic when mode is OFF
     };
 
+    struct GSUSettings
+    {
+        size_t globalAccumulation = 0;
+    };
     /**
      * Represents a single kernel or set of kernels that can perform a single
      * tensor contraction.
@@ -180,26 +221,27 @@ namespace TensileLite
      * Can generate `KernelInvocation` objects to solve a particular problem
      * given a set of `ContractionInputs`.
      */
-    class ContractionSolution : public Solution
+    class TENSILELITEHOST_EXPORT ContractionSolution : public Solution
     {
     public:
-        using Problem       = ContractionProblemGemm;
-        using Inputs        = ContractionInputs;
-        using GroupedInputs = ContractionGroupedInputs;
-        using ParamsCache   = CacheMap<std::tuple<int32_t, uint32_t, uint32_t>, Problem>;
+        using Problem             = ContractionProblemGemm;
+        using Inputs              = ContractionInputs;
+        using GroupedInputs       = ContractionGroupedInputs;
+        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
+        using StaggerUParamsCache = CacheMap<std::tuple<size_t, size_t, size_t>, Problem>;
 
         /**
          * Indicate a solution's matching type
          */
         enum class MatchingTag
         {
-            Equal,        // EqualityMatching
-            Range,        // RangeMatching
-            FreeSize,     // FreeSizeMatching
-            GridBased,    // GridBasedMatching
-            Prediction,   // PredictionMatching
+            Equal, // EqualityMatching
+            Range, // RangeMatching
+            FreeSize, // FreeSizeMatching
+            GridBased, // GridBasedMatching
+            Prediction, // PredictionMatching
             Experimental, // ExperimentalStreamK or ExperimentalMLP
-            Others,       // Default
+            Others, // Default
         };
 
         static std::string Type()
@@ -293,6 +335,15 @@ namespace TensileLite
             StaticPerformanceModel staticModel;
         };
 
+        // Result of host-side AdaptiveGemmNTAB dispatch.
+        // nta/ntb are either 0 (cached) or 4 (non-temporal).
+        // Packed into internalArg0 bits 12/13 when InternalArgsSupport.version >= 3.
+        struct AdaptiveGemmNTAB
+        {
+            uint32_t nta = 0;
+            uint32_t ntb = 0;
+        };
+
         bool checkInternalArgumentsSupport(ContractionProblem const& problem,
                                            std::ostream&             stream,
                                            bool                      debug = false) const;
@@ -301,7 +352,9 @@ namespace TensileLite
          * Calculate required workspace size.
          */
         size_t requiredWorkspaceSize(Problem const& problem, Hardware const& hardware) const;
-        size_t requiredWorkspaceSizeGsu(Problem const& problem, Hardware const& hardware, size_t gsu) const;
+        size_t requiredWorkspaceSizeGsu(Problem const&  problem,
+                                        Hardware const& hardware,
+                                        size_t          gsu) const;
         size_t requiredWorkspaceSizeGroupedGemm(std::vector<Problem> const& problems,
                                                 Hardware const&             hardware) const;
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
@@ -309,17 +362,47 @@ namespace TensileLite
 
         size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;
 
-        void calculateGrid(dim3& workGroupSize,
-                           dim3& numWorkGroups,
-                           ContractionSolution::Problem const& problem) const;
+        void                 calculateGrid(dim3&                               workGroupSize,
+                                           dim3&                               numWorkGroups,
+                                           ContractionSolution::Problem const& problem) const;
         origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
-        size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles, origami::reduction_t reductionStrat) const;
-        size_t partialTileSize(size_t skGrid) const;
+        size_t               getSKGrid(Problem const&       problem,
+                                       Hardware const&      hardware,
+                                       size_t               tiles,
+                                       origami::reduction_t reductionStrat) const;
+        // Resolve the effective StreamK=5 hybrid sub-mode for a launch: returns
+        // true for the dynamic (SK4) path, false for the static (SK3) path.
+        // Precedence (highest first): the TENSILE_STREAMK5_FORCE_MODE debug env
+        // override (0=force static, 1=force dynamic), then the problem tri-state
+        // streamKTileSchedulingMode (0=OFF/static unless smCountTarget()>0,
+        // 1=ON/dynamic), then AUTO (2) via the origami hybrid-mode heuristic.
+        // Only meaningful when
+        // sizeMapping.streamK == 5. This is the single source of truth shared by
+        // grid sizing (getSKGrid) and kernel-arg packing (generateSingleCall) so
+        // the launch grid and the packed args can never disagree.
+        bool                 streamK5EffectiveDynamic(Problem const&  problem,
+                                                      Hardware const& hardware) const;
+        // Selection-time predicate for the StreamK dynamic-queue / work-stealing
+        // path. The SK4 and dynamic sub-path of SK5 kernels hardcode a
+        // power-of-two per-XCD queue count and mask indices with (Q-1); that fast
+        // masking is only valid when the device exposes a power-of-two number of
+        // XCDs. Returns false (and warns once) when this solution would take the
+        // dynamic-queue path but the hardware's NUM_XCD is not a power of two
+        // (e.g. MI300A = 6), so the solution is EXCLUDED from selection rather
+        // than silently degraded to tree reduction. All other solutions return
+        // true. Wired into softwarePredicate() (SolutionLibrary.hpp).
+        bool                 streamKDynamicQueueSupported(Problem const&  problem,
+                                                          Hardware const& hardware) const;
+        size_t               partialTileSize(size_t skGrid) const;
 
         static float computeGranularity(float x);
 
-        Granularities computeGranularities(
-            Hardware const& hardware, double M, double N, double K, double NumBatches, uint32_t autoGsuVal) const;
+        Granularities computeGranularities(Hardware const& hardware,
+                                           double          M,
+                                           double          N,
+                                           double          K,
+                                           double          NumBatches,
+                                           uint32_t        autoGsuVal) const;
 
         StaticPerformanceModel staticPerformanceModel(double M,
                                                       double N,
@@ -408,9 +491,14 @@ namespace TensileLite
                         Hardware const*                     hardware,
                         const ContractionProblemParameters& param,
                         int32_t                             autoWGM,
-                        uint32_t                            autoWGMXCC,
-                        uint32_t                            autoWGMXCCCHUNK,
-                        uint32_t                            autoGsuVal) const;
+                        size_t                              autoWGMXCC,
+                        size_t                              autoWGMXCCCHUNK,
+                        size_t                              autoWGMXCCSPLITK,
+                        size_t                              autoStaggerUMapping,
+                        size_t                              autoStaggerU,
+                        size_t                              autoStaggerUStrideShift,
+                        uint32_t                            autoGsuVal,
+                        AdaptiveGemmNTAB                    ntab) const;
 
         template <typename KA>
         inline void calculateSingleCallWorkGroupItems(std::vector<Problem> const& problems,
@@ -418,13 +506,14 @@ namespace TensileLite
                                                       TensileLite::dim3&          numWorkGroups,
                                                       TensileLite::dim3&          numWorkItems,
                                                       KA&                         h_args,
-                                                      uint32_t                    autoGsuVal) const;
+                                                      uint32_t                    gsu) const;
 
         template <bool T_Debug>
         KernelInvocation generateSingleCall(Problem const&           problem,
                                             ContractionInputs const& inputs,
                                             Hardware const&          hardware,
-                                            StreamKSettings const&   sk) const;
+                                            StreamKSettings const&   sk,
+                                            GSUSettings const&       gsuSettings) const;
 
         template <bool T_Debug, typename KA>
         KernelInvocation generateSingleCallGroupedGemm(std::vector<Problem> const& problems,
@@ -449,7 +538,8 @@ namespace TensileLite
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
                                       StreamKSettings const&   sk,
-                                      uint32_t                 autoGsuVal) const;
+                                      uint32_t                 autoGsuVal,
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -514,7 +604,8 @@ namespace TensileLite
             rocisa::DataType cType                     = rocisa::DataType::Float;
             rocisa::DataType dType                     = rocisa::DataType::Float;
             rocisa::DataType eType                     = rocisa::DataType::Float;
-            rocisa::DataType computeInputType          = rocisa::DataType::Float;
+            rocisa::DataType computeInputTypeA         = rocisa::DataType::Float;
+            rocisa::DataType computeInputTypeB         = rocisa::DataType::Float;
             rocisa::DataType computeType               = rocisa::DataType::Float;
             rocisa::DataType f32XdlMathOp              = rocisa::DataType::Float;
             rocisa::DataType activationComputeDataType = rocisa::DataType::Float;
@@ -523,6 +614,7 @@ namespace TensileLite
             bool             useGradient               = false;
             int              useBias                   = 0;
             bool             useE                      = false;
+            bool             useGateResidual           = false;
             std::string      useScaleAB                = "";
             bool             useScaleCD                = false;
             int              useScaleAlphaVec          = 0;
@@ -537,12 +629,29 @@ namespace TensileLite
 
             std::vector<int>              biasSrcWhiteList;
             std::vector<rocisa::DataType> biasDataTypeWhiteList;
+            std::vector<rocisa::DataType> gateResidualDataTypeWhiteList;
 
             int  sparse                     = 0;
             bool stochasticRounding         = false;
             bool supportDeviceUserArguments = false;
             bool swizzleTensorA             = false;
             bool swizzleTensorB             = false;
+            int  metadataLayout             = 0;
+            int  mxBlockA                   = 0;
+            int  mxBlockB                   = 0;
+            rocisa::DataType mxTypeA        = rocisa::DataType::E8;
+            rocisa::DataType mxTypeB        = rocisa::DataType::E8;
+
+            // In-device MX scale layout expected by the kernel. Mirrors the
+            // MXScaleFormat solution parameter (see Tensile/Common/ValidParameters.py).
+            // Encoded as a small int so it round-trips through msgpack and YAML
+            // logic files without an explicit enum schema:
+            //   0 = NoSwizzle       (default; canonical row/column layout)
+            //   1 = HostPreSwizzle  (gfx950 subtile host-preswizzled layout)
+            //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
+            // The host (DataInitialization) consults this to decide whether to
+            // apply the K-dimension swizzle on the MX scale tensor before upload.
+            int mxScaleFormat = 0;
         };
 
         struct LinearModel
@@ -559,7 +668,10 @@ namespace TensileLite
         bool                         debugKernel     = false;
         bool                         kernelArgsLog   = false;
         mutable int                  isFallbackCUSol = -1; // -1:unset, 0:false, 1:true
-        mutable ParamsCache paramsCache = ParamsCache(std::make_tuple(0, 0, 0));
+        mutable WGMParamsCache       wgmParamsCache
+            = WGMParamsCache(std::make_tuple(INT32_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX));
+        mutable StaggerUParamsCache staggerUParamsCache
+            = StaggerUParamsCache(std::make_tuple(SIZE_MAX, SIZE_MAX, SIZE_MAX));
 
         std::shared_ptr<Predicates::Predicate<Task>> taskPredicate
             = std::make_shared<Predicates::True<Task>>();
@@ -589,20 +701,33 @@ namespace TensileLite
         uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
-        std::tuple<int32_t, uint32_t, uint32_t> calculateAutoWGM(Problem const&  problem, 
-                                                                Hardware const* hardware, 
-                                                                uint32_t        skgrid) const;
+        std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,
+                                                                     Hardware const* hardware,
+                                                                     uint32_t        skgrid) const;
+        std::tuple<size_t, size_t, size_t>  calculateAutoStaggerU(Problem const&  problem,
+                                                                  Hardware const* hardware,
+                                                                  uint32_t        skgrid,
+                                                                  int32_t         autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+
+        double calculateDimensionM(Problem const&  problem) const;
+        double calculateDimensionN(Problem const&  problem) const;
+        double calculateNumBatches(Problem const&  problem) const;
+        SizeMapping getSizeMapping(void) const {return sizeMapping;};
+        origami::data_type_t getOrigamiDatatype(Problem const&  problem) const;
+        AdaptiveGemmNTAB calculateAdaptiveGemmNTAB(Problem const&  problem,
+                                                   Hardware const* hardware) const;
     };
 
     template <typename TAct>
-    void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
+    TENSILELITEHOST_EXPORT void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args);
 
-    std::ostream& operator<<(std::ostream&                                      stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                      stream,
                              ContractionSolution::StaticPerformanceModel const& spm);
-    std::ostream& operator<<(std::ostream&                                    stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
-    std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
+

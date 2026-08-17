@@ -30,6 +30,8 @@
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     struct Task
@@ -47,3 +49,4 @@ namespace TensileLite
         ContractionSolution const& solution;
     };
 } // namespace TensileLite
+

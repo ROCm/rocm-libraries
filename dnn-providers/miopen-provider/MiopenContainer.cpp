@@ -2,17 +2,17 @@
 // SPDX-License-Identifier:  MIT
 
 #include "MiopenContainer.hpp"
-#include "EngineManager.hpp"
 #include "engines/MiopenEngine.hpp"
 #include "engines/plans/MiopenBatchnormFwdTrainingPlanBuilder.hpp"
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
-#include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-namespace miopen_legacy_plugin
+namespace miopen_plugin
 {
 
 // ============================================================================
@@ -25,11 +25,11 @@ namespace miopen_legacy_plugin
 // 2. Detect hash collisions with other formally-registered engines
 //
 // Example for new engines:
-// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE, "MY_CUSTOM_ENGINE")
-// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE, "MY_OTHER_ENGINE")
+// HIPDNN_REGISTER_ENGINE(MY_CUSTOM_ENGINE)
+// HIPDNN_REGISTER_ENGINE(MY_OTHER_ENGINE)
 //
 // Note: MIOPEN_ENGINE is already registered in EngineNames.hpp via
-// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE, "MIOPEN_ENGINE"), so we can use
+// HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE), so we can use
 // the MIOPEN_ENGINE_NAME and MIOPEN_ENGINE_ID constants directly from there.
 // ============================================================================
 
@@ -38,33 +38,37 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
     using namespace hipdnn_data_sdk::utilities;
 
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        // MIOPEN_ENGINE
+        // MIOPEN_ENGINE (non-deterministic, default)
         {MIOPEN_ENGINE_ID,
-         []() -> std::unique_ptr<IEngine> {
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                            HipdnnMiopenSettings,
+                                                            HipdnnMiopenContext>> {
              auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_ID);
+
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
+             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>());
+
+             return engine;
+         }},
+
+        // MIOPEN_ENGINE_DETERMINISTIC (convolution-only)
+        {MIOPEN_ENGINE_DETERMINISTIC_ID,
+         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<HipdnnMiopenHandle,
+                                                            HipdnnMiopenSettings,
+                                                            HipdnnMiopenContext>> {
+             auto engine = std::make_unique<MiopenEngine>(MIOPEN_ENGINE_DETERMINISTIC_ID);
+
+             // Only include conv plan builders - batchnorm doesn't support deterministic mode
+             engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(true));
+             engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(true));
              return engine;
          }}
 
         // ====================================================================
         // Additional engines would be added here
-        // ====================================================================
-        // Example:
-        // ,{MY_CUSTOM_ENGINE_ID, []() -> std::unique_ptr<IEngine> {
-        //     auto engine = std::make_unique<MyCustomEngine>(MY_CUSTOM_ENGINE_ID);
-        //     engine->addPlanBuilder(std::make_unique<CustomPlanBuilder>());
-        //     // ... configure plan builders for this engine
-        //     return engine;
-        // }}
-        // ,{MY_OTHER_ENGINE_ID, []() -> std::unique_ptr<IEngine> {
-        //     auto engine = std::make_unique<MyOtherEngine>(MY_OTHER_ENGINE_ID);
-        //     engine->addPlanBuilder(std::make_unique<OtherPlanBuilder>());
-        //     // ... configure plan builders for this engine
-        //     return engine;
-        // }}
         // ====================================================================
     };
 
@@ -84,14 +88,12 @@ uint32_t
         return totalEngines;
     }
 
-    // Copy up to maxEngines IDs using index-based loop
     auto enginesToCopy = std::min(maxEngines, totalEngines);
     for(uint32_t i = 0; i < enginesToCopy; ++i)
     {
         engineIds[i] = engineDefinitions[i].id;
     }
 
-    // When maxEngines > 0, set numEngines to number copied
     numEngines = enginesToCopy;
 
     return totalEngines;
@@ -99,9 +101,11 @@ uint32_t
 
 MiopenContainer::MiopenContainer()
 {
-    HIPDNN_LOG_INFO("Creating MiopenContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Creating MiopenContainer");
 
-    _engineManager = std::make_unique<EngineManager>();
+    _engineManager = std::make_unique<hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle,
+                                                                       HipdnnMiopenSettings,
+                                                                       HipdnnMiopenContext>>();
 
     for(const auto& engineDefinition : getEngineDefinitions())
     {
@@ -111,12 +115,13 @@ MiopenContainer::MiopenContainer()
 
 MiopenContainer::~MiopenContainer()
 {
-    HIPDNN_LOG_INFO("Destroying MiopenContainer");
+    HIPDNN_PLUGIN_LOG_INFO("Destroying MiopenContainer");
 }
 
-EngineManager& MiopenContainer::getEngineManager()
+hipdnn_plugin_sdk::EngineManager<HipdnnMiopenHandle, HipdnnMiopenSettings, HipdnnMiopenContext>&
+    MiopenContainer::getEngineManager()
 {
     return *_engineManager;
 }
 
-} // namespace miopen_legacy_plugin
+} // namespace miopen_plugin

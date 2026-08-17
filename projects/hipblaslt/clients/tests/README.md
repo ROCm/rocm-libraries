@@ -14,4 +14,7 @@ cd hipBLASLt; cd build/release
 
 # Demo: gtest tests with filter
 ./clients/hipblaslt-test --gtest_filter=*quick*
+
+# Demo: DRelu gradient matmul tests
+./clients/hipblaslt-test --gtest_filter=*drelu*
 ```

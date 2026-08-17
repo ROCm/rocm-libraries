@@ -31,15 +31,20 @@
 #include <vector>
 #include <iostream>
 #include <sstream>
+#include <source_location>
+#include <string_view>
 #include <type_traits>
 #include <chrono>
 
-#include <miopen/each_args.hpp>
-#include <miopen/object.hpp>
 #include <miopen/config.hpp>
+#include <miopen/object.hpp>
 
 #if MIOPEN_USE_ROCTRACER
 #include <roctracer/roctx.h>
+#endif
+
+#ifdef _WIN32
+#include <process.h> // for getpid
 #endif
 
 // See https://github.com/pfultz2/Cloak/wiki/C-Preprocessor-tricks,-tips,-and-idioms
@@ -160,13 +165,12 @@ std::array<T, sizeof...(Ts) + 1> make_array(T x, Ts... xs)
     return {{x, xs...}};
 }
 
-// MSVC's preprocessor and CPPCHECK seem unable
-// to properly handle some complex stuff. We have to disable
-// some debugging features to avoid build errors.
-#define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 0
-#if defined(_MSC_VER) || defined(CPPCHECK)
-#undef WORKAROUND_ISSUE_PP_TRANSFORM_ARGS
+// In case CPPCHECK we have to disable some
+// debugging features to avoid build errors.
+#if defined(CPPCHECK)
 #define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 1
+#else
+#define WORKAROUND_ISSUE_PP_TRANSFORM_ARGS 0
 #endif
 
 #define MIOPEN_LOG_ENUM_EACH(x) std::pair<std::string, decltype(x)>(#x, x)
@@ -221,6 +225,8 @@ MIOPEN_INTERNALS_EXPORT std::string LoggingLevelToCustomString(LoggingLevel leve
                                                                const char* custom);
 MIOPEN_INTERNALS_EXPORT const char* LoggingLevelToCString(LoggingLevel level);
 MIOPEN_INTERNALS_EXPORT std::string LoggingPrefix();
+MIOPEN_INTERNALS_EXPORT std::string LoggingPrefixMinimal();
+MIOPEN_INTERNALS_EXPORT std::ostringstream& GetThreadLocalLogStream();
 
 /// \return true if level is enabled.
 /// \param level - one of the values defined in LoggingLevel.
@@ -318,7 +324,7 @@ LogParam(std::ostream& os, std::string name, const std::vector<T>& vec, bool ind
     if(miopen::IsLoggingToRoctx())                                       \
     {                                                                    \
         std::ostringstream miopen_log_func_ss;                           \
-        miopen_log_func_ss << "s_api = " << __FUNCTION__ << " | ";       \
+        miopen_log_func_ss << "s_api = " << __func__ << " | ";           \
         MIOPEN_PP_EACH_ARGS(MIOPEN_LOG_FUNCTION_EACH_ROCTX, __VA_ARGS__) \
         logtx.logRange(miopen_log_func_ss.str());                        \
     }
@@ -327,22 +333,23 @@ LogParam(std::ostream& os, std::string name, const std::vector<T>& vec, bool ind
 #define MIOPEN_LOG_ROCTX_DO_LOGGING(...)
 #endif
 
-#define MIOPEN_LOG_FUNCTION(...)                                                        \
-    MIOPEN_LOG_ROCTX_DEFINE_OBJECT                                                      \
-    do                                                                                  \
-    {                                                                                   \
-        if(miopen::IsLoggingFunctionCalls())                                            \
-        {                                                                               \
-            std::ostringstream miopen_log_func_ss;                                      \
-            miopen_log_func_ss << miopen::LoggingPrefix() << __PRETTY_FUNCTION__ << "{" \
-                               << std::endl;                                            \
-            std::cerr << miopen_log_func_ss.str();                                      \
-            MIOPEN_PP_EACH_ARGS(MIOPEN_LOG_FUNCTION_EACH, __VA_ARGS__)                  \
-            std::ostringstream().swap(miopen_log_func_ss);                              \
-            miopen_log_func_ss << miopen::LoggingPrefix() << "}" << std::endl;          \
-            std::cerr << miopen_log_func_ss.str();                                      \
-        }                                                                               \
-        MIOPEN_LOG_ROCTX_DO_LOGGING(__VA_ARGS__)                                        \
+#define MIOPEN_LOG_FUNCTION(...)                                                         \
+    MIOPEN_LOG_ROCTX_DEFINE_OBJECT                                                       \
+    do                                                                                   \
+    {                                                                                    \
+        if(miopen::IsLoggingFunctionCalls())                                             \
+        {                                                                                \
+            std::ostringstream miopen_log_func_ss;                                       \
+            miopen_log_func_ss << miopen::LoggingPrefix()                                \
+                               << std::source_location::current().function_name() << "{" \
+                               << std::endl;                                             \
+            std::cerr << miopen_log_func_ss.str();                                       \
+            MIOPEN_PP_EACH_ARGS(MIOPEN_LOG_FUNCTION_EACH, __VA_ARGS__)                   \
+            std::ostringstream().swap(miopen_log_func_ss);                               \
+            miopen_log_func_ss << miopen::LoggingPrefix() << "}" << std::endl;           \
+            std::cerr << miopen_log_func_ss.str();                                       \
+        }                                                                                \
+        MIOPEN_LOG_ROCTX_DO_LOGGING(__VA_ARGS__)                                         \
     } while(false)
 #else
 #define MIOPEN_LOG_FUNCTION(...)
@@ -358,22 +365,41 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
     return pf_tail.substr(1 + pf_tail.find_last_of(':'));
 }
 
-#ifdef _MSC_VER
-#define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __FUNCSIG__)
-#else
-#define MIOPEN_GET_FN_NAME miopen::LoggingParseFunction(__func__, __PRETTY_FUNCTION__)
-#endif
+inline std::string_view LoggingGetFnName(std::string_view func_name,
+                                         std::source_location loc = std::source_location::current())
+{
+    return LoggingParseFunction(func_name, loc.function_name());
+}
 
-#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)                \
-    do                                                                                      \
-    {                                                                                       \
-        if(miopen::IsLogging(level, disableQuieting))                                       \
-        {                                                                                   \
-            std::ostringstream miopen_log_ss;                                               \
-            miopen_log_ss << miopen::LoggingPrefix() << category << " [" << fn_name << "] " \
-                          << __VA_ARGS__ << std::endl;                                      \
-            std::cerr << miopen_log_ss.str();                                               \
-        }                                                                                   \
+#define MIOPEN_GET_FN_NAME ::miopen::LoggingGetFnName(__func__)
+
+MIOPEN_INTERNALS_EXPORT bool IsLogBufferOn();
+
+MIOPEN_INTERNALS_EXPORT void ClearLogBuffer();
+
+MIOPEN_INTERNALS_EXPORT void BufferLog(std::string&& line);
+
+MIOPEN_INTERNALS_EXPORT void OutputBufferedLogs();
+
+/// Internal helper that contains all branching logic for MIOPEN_LOG_XQ_CUSTOM.
+/// Keeping the logic here (rather than inline in the macro) prevents the macro
+/// from inflating the cyclomatic complexity of every translation unit that uses it.
+MIOPEN_INTERNALS_EXPORT void LogXQCustomImpl(LoggingLevel level,
+                                             bool disableQuieting,
+                                             std::string_view category,
+                                             std::string_view fn_name,
+                                             std::string message);
+
+#define MIOPEN_LOG_XQ_CUSTOM(level, disableQuieting, category, fn_name, ...)     \
+    do                                                                           \
+    {                                                                            \
+        if(miopen::IsLogging(level, disableQuieting) || miopen::IsLogBufferOn()) \
+        {                                                                        \
+            auto& miopen_log_ss = miopen::GetThreadLocalLogStream();             \
+            miopen_log_ss << __VA_ARGS__;                                        \
+            miopen::LogXQCustomImpl(                                             \
+                level, disableQuieting, category, fn_name, miopen_log_ss.str()); \
+        }                                                                        \
     } while(false)
 
 #define MIOPEN_LOG_XQ_(level, disableQuieting, fn_name, ...) \
@@ -404,14 +430,13 @@ constexpr std::string_view LoggingParseFunction(const std::string_view func,
 // Warnings in installable builds, errors otherwise.
 #define MIOPEN_LOG_WE(...) MIOPEN_LOG(LogWELevel, __VA_ARGS__)
 
-#define MIOPEN_LOG_DRIVER_COMMAND(driver, ...)                                               \
-    do                                                                                       \
-    {                                                                                        \
-        std::ostringstream miopen_driver_cmd_ss;                                             \
-        miopen_driver_cmd_ss << miopen::LoggingPrefix() << "Command"                         \
-                             << " [" << MIOPEN_GET_FN_NAME << "] " driver " " << __VA_ARGS__ \
-                             << std::endl;                                                   \
-        std::cerr << miopen_driver_cmd_ss.str();                                             \
+#define MIOPEN_LOG_DRIVER_COMMAND(driver, ...)                                                     \
+    do                                                                                             \
+    {                                                                                              \
+        std::ostringstream miopen_driver_cmd_ss;                                                   \
+        miopen_driver_cmd_ss << miopen::LoggingPrefix() << "Command" << " [" << MIOPEN_GET_FN_NAME \
+                             << "] " driver " " << __VA_ARGS__ << std::endl;                       \
+        std::cerr << miopen_driver_cmd_ss.str();                                                   \
     } while(false)
 
 #ifdef _WIN32

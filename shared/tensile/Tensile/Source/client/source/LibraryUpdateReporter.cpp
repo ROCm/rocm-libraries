@@ -27,6 +27,7 @@
 #include <LibraryUpdateReporter.hpp>
 
 #include <cstddef>
+#include <sstream>
 
 namespace Tensile
 {
@@ -70,7 +71,9 @@ namespace Tensile
         template <typename T>
         void LibraryUpdateReporter::reportValue(std::string const& key, T const& value)
         {
-            std::string valueStr = boost::lexical_cast<std::string>(value);
+            std::ostringstream ss;
+            ss << value;
+            std::string valueStr = ss.str();
             //m_stream << key << " = " << valueStr << std::endl;
 
             if(key == ResultKey::Validation)

@@ -69,8 +69,6 @@ MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_COMGR_LOG_SOURCE_TEXT)
 /// \todo see issue #1222, PR #1316
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_SRAM_EDC_DISABLED)
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP)
-
 /// Base directory of ROCm
 MIOPEN_DECLARE_ENV_VAR_STR(ROCM_PATH)
 
@@ -155,58 +153,6 @@ static void RemoveOptionsUnwanted(OptionList& list)
 
 } // namespace gcnasm
 
-namespace ocl {
-
-#define OCL_EARLY_INLINE 1
-
-#define OCL_STANDARD 200
-
-#if !(OCL_STANDARD == 200 || OCL_STANDARD == 120)
-#error "Wrong OCL_STANDARD"
-#endif
-
-static void AddCompilerOptions(OptionList& list)
-{
-#if OCL_STANDARD == 200
-    list.push_back("-cl-std=CL2.0");
-#endif
-    list.push_back("-cl-kernel-arg-info");
-#if 0 // For experimients.
-    list.push_back("-cl-denorms-are-zero");
-    list.push_back("-cl-fast-relaxed-math");
-#endif
-    list.push_back("-D__IMAGE_SUPPORT__=1");
-    list.push_back("-D__OPENCL_VERSION__=" MIOPEN_STRINGIZE(OCL_STANDARD));
-#if OCL_EARLY_INLINE
-    list.push_back("-mllvm");
-    list.push_back("-amdgpu-early-inline-all");
-#endif
-    list.push_back("-mllvm");
-    list.push_back("-amdgpu-prelink");
-    if(env::enabled(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP))
-    {
-        list.push_back("-mwavefrontsize64");
-        list.push_back("-mcumode");
-    }
-    list.push_back("-O3");
-    list.push_back("-mllvm");
-    list.push_back("-amdgpu-internalize-symbols");
-}
-
-/// These are produced for offline compiler and not necessary at least
-/// (or even can be harmful) for building via comgr layer.
-///
-/// \todo Produce proper options in, er, proper places, and get rid of this.
-static void RemoveOptionsUnwanted(OptionList& list)
-{
-    list.erase(remove_if(list.begin(),
-                         list.end(),
-                         [&](const auto& option) { return StartsWith(option, "-mcpu="); }),
-               list.end());
-}
-
-} // namespace ocl
-
 /// \todo Get list of supported isa names from comgr and select.
 static std::string GetIsaName(const miopen::TargetProperties& target, const bool isHlcBuild)
 {
@@ -219,7 +165,6 @@ static std::string GetIsaName(const miopen::TargetProperties& target, const bool
 }
 
 } // namespace lc
-#undef OCL_EARLY_INLINE
 
 } // namespace compiler
 
@@ -239,42 +184,10 @@ static inline auto to_string(const std::size_t& v) { return std::to_string(v); }
 /// of code between different COMgr versions.
 ///
 /// \todo Request comgr to expose this stuff via API.
-static std::string to_string(const amd_comgr_language_t val)
+template <typename T>
+static std::string to_string(const T val)
 {
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_LANGUAGE_NONE,
-                    AMD_COMGR_LANGUAGE_OPENCL_1_2,
-                    AMD_COMGR_LANGUAGE_OPENCL_2_0,
-                    AMD_COMGR_LANGUAGE_HIP);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_data_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_DATA_KIND_UNDEF,
-                    AMD_COMGR_DATA_KIND_SOURCE,
-                    AMD_COMGR_DATA_KIND_INCLUDE,
-                    AMD_COMGR_DATA_KIND_LOG,
-                    AMD_COMGR_DATA_KIND_EXECUTABLE);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_action_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS,
-                    AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
-                    AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC);
-    return oss.str();
+    return (std::ostringstream() << val).str();
 }
 
 static bool PrintVersionImpl()
@@ -286,11 +199,7 @@ static bool PrintVersionImpl()
     return true;
 }
 
-static void PrintVersion()
-{
-    static const auto once = PrintVersionImpl();
-    std::ignore            = once;
-}
+static void PrintVersion() { std::ignore = PrintVersionImpl(); }
 
 static std::string GetStatusText(const amd_comgr_status_t status, const bool unknown_error = false)
 {
@@ -525,17 +434,26 @@ static std::string GetLog(const Dataset& dataset, const bool comgr_error_handlin
         /// \todo Clarify API and update implementation.
         const auto count = dataset.GetDataCount(AMD_COMGR_DATA_KIND_LOG);
         if(count < 1)
-            return {comgr_error_handling ? "comgr warning: error log not found" : ""};
+        {
+            text = comgr_error_handling ? "comgr warning: error log not found" : "";
+            return text;
+        }
 
         const auto data = dataset.GetData(AMD_COMGR_DATA_KIND_LOG, 0);
         text            = data.GetString();
         if(text.empty())
-            return {comgr_error_handling ? "comgr info: error log empty" : ""};
+        {
+            text = comgr_error_handling ? "comgr info: error log empty" : "";
+            return text;
+        }
     }
     catch(ComgrError&)
     {
         if(comgr_error_handling)
-            return {"comgr error: failed to get error log"};
+        {
+            text = "comgr error: failed to get error log";
+            return text;
+        }
         // deepcode ignore EmptyThrowOutsideCatch: false positive
         throw;
         /// \anchor catch_and_rethrow_in_getlog
@@ -566,59 +484,6 @@ static void SetIsaName(const ActionInfo& action,
     const auto isaName = compiler::lc::GetIsaName(target, isHlcBuild);
     MIOPEN_LOG_I2(isaName);
     action.SetIsaName(isaName);
-}
-
-void BuildOcl(const std::string& name,
-              std::string_view text,
-              const std::string& options,
-              const miopen::TargetProperties& target,
-              std::vector<char>& binary)
-{
-    PrintVersion(); // Nice to see in the user's logs.
-    try
-    {
-        const Dataset inputs;
-        inputs.AddData(name, text, AMD_COMGR_DATA_KIND_SOURCE);
-        const ActionInfo action;
-#if OCL_STANDARD == 200
-        action.SetLanguage(AMD_COMGR_LANGUAGE_OPENCL_2_0);
-#else
-        action.SetLanguage(AMD_COMGR_LANGUAGE_OPENCL_1_2);
-#endif
-        SetIsaName(action, target, true);
-        action.SetLogging(true);
-
-        auto optCompile = miopen::SplitSpaceSeparated(options);
-        compiler::lc::ocl::RemoveOptionsUnwanted(optCompile);
-        compiler::lc::ocl::AddCompilerOptions(optCompile);
-        action.SetOptionList(optCompile);
-
-        const Dataset addedPch;
-        action.Do(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, inputs, addedPch);
-        const Dataset linkedBc;
-        action.Do(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, addedPch, linkedBc);
-
-        action.SetOptionList(optCompile);
-        const Dataset relocatable;
-        action.Do(AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE, linkedBc, relocatable);
-
-        action.SetOptionList(OptionList());
-        const Dataset exe;
-        action.Do(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, relocatable, exe);
-
-        if(exe.GetDataCount(AMD_COMGR_DATA_KIND_EXECUTABLE) < 1)
-            throw ComgrError{AMD_COMGR_STATUS_ERROR, true, "Executable binary not found"};
-        // Assume that the first exec data contains the binary we need.
-        const auto data = exe.GetData(AMD_COMGR_DATA_KIND_EXECUTABLE, 0);
-        data.GetBytes(binary);
-    }
-    catch(ComgrError& ex)
-    {
-        binary.resize(0);
-        MIOPEN_LOG_E("comgr status = " << GetStatusText(ex));
-        if(!ex.text.empty())
-            MIOPEN_LOG_W(ex.text);
-    }
 }
 
 void BuildAsm(const std::string& name,
@@ -826,7 +691,7 @@ public:
         : src_name(src_name_), src_text(src_text_)
     {
         LogInputFile(src_name, src_text);
-        // For OCL and ASM sources, we do insert contents of include
+        // For ASM sources, we do insert contents of include
         // files directly into the source text during library build phase by means
         // of the addkernels tool. We don't do that for HIP sources, and, therefore
         // have to export include files prior compilation.
@@ -929,7 +794,7 @@ void BuildHip(const std::string& name,
 #endif
         opts.push_back("-D__HIP_PLATFORM_AMD__=1"); // Workaround?
         opts.push_back("-DHIP_PACKAGE_VERSION_FLAT=" + std::to_string(HIP_PACKAGE_VERSION_FLAT));
-        opts.push_back("-DMIOPEN_DONT_USE_HIP_RUNTIME_HEADERS");
+        opts.push_back("-DMIOPEN_HIP_RUNTIME_COMPILE");
 #if HIP_PACKAGE_VERSION_FLAT < 6001024000ULL && !defined(_WIN32)
         opts.push_back("-DWORKAROUND_DONT_USE_CUSTOM_LIMITS=1");
 #endif
