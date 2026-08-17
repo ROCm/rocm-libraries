@@ -1,6 +1,6 @@
-# hipDNN Test Plan
+# hipDNN Feature Readiness Plan
 
-This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../Testing.md) and its [Expectations During Development](../Testing.md#expectations-during-development).
+This document is the **hipDNN milestone / release verification** plan: the procedures and expectations for validating a release build and confirming it is ready to ship. It is **not** the per-PR development workflow; for the day-to-day testing bar during development, see [Testing](../TESTING.md) and its [Development Workflow](../TESTING.md#development-workflow).
 
 > [!IMPORTANT]
 > ⚠️ **All prerequisites and tests in this document must pass for a successful release.**
@@ -23,7 +23,7 @@ A verification run only has value if its outcome can be tied back to a specific 
 - **Reproducibility** - the exact commands and observed output let someone re-run the validation and get the same result, rather than trusting a summary.
 - **Auditability** - a release sign-off may be revisited weeks later (for a regression, a hotfix, or a compliance check). The record is the durable proof of what was done.
 
-Capture the run in a [Test Run Template](./TestRunTemplate.md) document, which provides the structure for the identifiers, evidence, and reproducible commands described below.
+Capture the run in a [Feature Readiness Run Template](./FeatureReadinessRunTemplate.md) document, which provides the structure for the identifiers, evidence, and reproducible commands described below.
 
 ---
 
@@ -31,14 +31,14 @@ Capture the run in a [Test Run Template](./TestRunTemplate.md) document, which p
 
 ### Test Case 1: CI Is Green 🟩
 
-Existing checks run automatically on all PRs pre-merge and on the `develop` branch post-merge.
+Confirm that the required checks reported for the release candidate commit are green. Workflow YAML defines the executable triggers and jobs; do not assume every check runs on every pull request or every push to `develop`.
 
 | CI Check | Description |
 |----------|-------------|
-| hipDNN Superbuild CI | Builds hipDNN and the providers via the superbuild on Linux and Windows (includes clang-tidy) |
-| TheRock multi-arch CI | Builds and tests across GPU families (e.g. gfx94X, gfx950, gfx1151), with per-component test shards for `hipdnn`, `hipdnn-integration-tests`, `hipdnn-samples`, `hipdnn_install`, and each provider |
-| pre-commit | Runs formatting and linting checks on changed files |
-| codecov | Checks code coverage requirements |
+| hipDNN Superbuild CI | Builds hipDNN and providers through the superbuild on its configured pull-request paths |
+| TheRock multi-arch CI | Builds and tests configured component shards across available GPU families |
+| pre-commit | Runs configured formatting and linting checks |
+| codecov | Reports coverage when configured; the 80% goal and required-status enforcement limitations are tracked in [Known Gaps](../KNOWN_GAPS.md) |
 
 ### Test Case 2: Documentation is Current 🕒
 
@@ -71,7 +71,7 @@ tar -C rocm-artifacts -zxf therock-dist-<platform>-<group>-tests-<version>.tar.g
 
 The commands below assume the tarball was extracted to `./rocm-artifacts`; adjust the paths if you used a different folder.
 
-**Record what was validated.** The tarball filename encodes the OS, GPU family, and ROCm version, but the authoritative record is the manifest inside the tree (`rocm-artifacts/share/therock/therock_manifest.json`), which also carries the exact source commit the build came from. Capture the ROCm version and the rocm-libraries source commit (`pin_sha`) in your test record; the [Test Run Template](./TestRunTemplate.md#4-replication-setup) gives the exact commands and confirms the delivery commit is contained in that commit's history.
+**Record what was validated.** The tarball filename encodes the OS, GPU family, and ROCm version, but the authoritative record is the manifest inside the tree (`rocm-artifacts/share/therock/therock_manifest.json`), which also carries the exact source commit the build came from. Capture the ROCm version and the rocm-libraries source commit (`pin_sha`) in your test record; the [Feature Readiness Run Template](./FeatureReadinessRunTemplate.md#4-replication-setup) gives the exact commands and confirms the delivery commit is contained in that commit's history.
 
 ### Running the hipDNN Tests
 
@@ -171,16 +171,12 @@ ctest --test-dir build/release
 ### Test Case 1: Build and Run the Automated Tests with ASAN Enabled 🚨
 
 > [!NOTE]
-> ASAN is a manual check today (not yet in CI). The ROCm build requirement differs by platform:
-> - **Linux**: requires an ASAN-enabled ROCm / TheRock build, so ASAN coverage extends into the shipped ROCm code, not just hipDNN and providers. Building TheRock with ASAN is possible but a large effort, so the Linux ASAN tests are only expected when an ASAN-enabled ROCm build is already available; building ROCm solely for ASAN testing is not expected.
-> - **Windows**: does not require (or use) an ASAN-enabled ROCm build; ASAN covers only the code compiled during this build, not the installed ROCm libraries.
->
-> See [Testing § Address Sanitizer](../Testing.md#address-sanitizer) for more.
+> Sanitizer CI coverage is partial: pull-request sanitizer workflows build host-ASAN artifacts but do not currently run hipDNN sanitizer tests, and scheduled device-ASAN test execution depends on suitable runner availability. See [Known Gaps](../KNOWN_GAPS.md) for current automation and platform limitations.
 
-Build with address sanitizer enabled following the [Address Sanitizer Build](../Building.md#address-sanitizer-build) instructions, then run the `standard` tier (`ctest --test-dir <build> -L standard`).
+For release verification, build and run the sanitizer suite directly using the canonical [Address Sanitizer Build](../Building.md#address-sanitizer-build) procedure. Use the `standard` tier specified there.
 
 #### Expected Results
 
 - **Test Status**: All tests either pass or are explicitly skipped (architectures that do not support ASAN are skipped via `SKIP_IF_ASAN()` or a disabled ctest registration).
 - **Memory Safety**: No memory leaks or violations should be detected.
-- **Platform**: On Linux the suite is expected to complete cleanly. On Windows a fully clean ASAN run is not yet available (known issues being resolved); do not treat the remaining Windows failures as a release blocker until that work lands.
+- **Platform**: Record the tested platform and any skips; consult [Known Gaps](../KNOWN_GAPS.md) for current automation and platform limitations.

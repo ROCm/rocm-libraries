@@ -194,7 +194,7 @@ The test file name should mirror the primary test suite it contains.  For exampl
 
 ### 11.3 Integration Tests
 
-See [TestingStrategy.md](testing/TestingStrategy.md) for more information on integration tests. Integration tests should be named to reflect the feature or component under test.
+See [TESTING_STRATEGY.md](TESTING_STRATEGY.md) for more information on integration tests. Integration tests should be named to reflect the feature or component under test.
 
 #### Naming Examples
 

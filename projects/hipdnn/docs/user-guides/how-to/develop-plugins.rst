@@ -408,66 +408,15 @@ This function uses a two-call pattern:
 Test plugins
 ============
 
-Testing is crucial for ensuring plugin reliability and correctness. Plugins should include both unit tests and integration tests to validate their functionality.
+Provider tests follow these canonical references:
 
-Test structure
---------------
+- `Testing <../../TESTING.md>`_ is the contributor action guide.
+- `Testing Strategy <../../TESTING_STRATEGY.md>`_ defines test layers and validation ownership.
+- `Coding Style and Naming Guidelines <../../CodingStyleAndNamingGuidelines.md#11-test-naming-guidelines>`_ defines test names.
 
-Following the `Testing Strategy <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/testing/TestingStrategy.md>`_, plugins should organize tests as follows:
+Keep provider-internal unit tests focused on provider implementation details. For graph execution and numerical correctness, use the shared cross-provider integration suite. New “run this graph and compare it with a reference” cases should be authored as data-driven bundles. Provider-local C++ integration tests are reserved for special cases that bundles cannot express, such as error paths, provider-specific API behavior, determinism, and benchmarking knobs.
 
-.. code::
-
-  your_kernel_plugin_project/
-  ├── tests/                    # Unit tests
-  │   ├── TestEngine.cpp
-  │   ├── TestKernels.cpp
-  │   └── TestUtilties.cpp
-  └── integration_tests/        # End-to-end integration tests
-      ├── Operation1Test.cpp
-      └── Operation2Test.cpp
-
-Unit tests
-----------
-
-Unit tests focus on the internal implementation of your plugin components:
-
-- **Location**: ``<plugin_name>/src/tests/``
-- **Purpose**: Test individual components in isolation (engines, utilities, kernel logic).
-- **Requirements**:
-
-  - Must be fast-running.
-  - Typically, unit tests should never access GPU hardware. If unit tests need to access the GPU hardware, use the ``SKIP_IF_NO_DEVICES()`` macro to automatically skip the test if no HIP devices are found.
-  - Use mocking/stubbing for dependencies where appropriate.
-  - Should work on both Windows and Linux.
-
-Integration tests
------------------
-
-Integration tests validate end-to-end functionality of your plugin. There are currently two categories of integration tests, internal and external.
-
-Internal integration tests are run as part of the plugin's own test suite:
-
-- **Location**: ``<plugin_name>/src/integration_tests/``
-- **Purpose**: Validate correctness of graph execution and accuracy of results.
-- **Requirements**:
-
-  - Test complete operation graphs.
-  - Validate against reference implementations.
-  - Test different data types, layouts, dimensions, and edge-cases for each.
-  - Enable tests for all supported ASICs.
-  - A GPU is typically required for meaningful validation. Use the ``SKIP_IF_NO_DEVICES()`` macro to automatically skip the test if no HIP devices are found.
-  - Tests are divided into two categories designated by the prefix argument passed to ``INSTANTIATE_TEST_SUITE_P``.
-
-The internal integration tests are typically simple tests to ensure that the plugin is able to properly load and run kernels on GPU hardware. Integrations tests for numerical accuracy are better handled using the external integration tests (below).
-
-    - **Smoke**: These tests are designed to test features using the smallest possible shape and run quickly (the combined smoke test run time must be under 5 mins).
-    - **Full**: These tests can contain regression shapes, large shapes, or slow shapes.
-
-External integrations tests use an external integration test executable written to load plugins and perform end-to-end verification of graph operations using the plugin. For details on how to use the external integration test harness see `Integration Tests <https://github.com/ROCm/rocm-libraries/blob/develop/dnn-providers/integration-tests/README.md>`_ in the hipDNN repo.
-
-.. note::
-
-  See `general testing requirements <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipdnn/docs/Testing.md#testing-requirements>`_.
+Bundle authoring is the default, but bundle execution remains opt-in and is not yet wired into provider CI. See the `provider integration test README <../../../../../dnn-providers/integration-tests/README.md>`_ for bundle formats, tier mechanics, local enablement, provider wiring, and current execution status. Related limitations are indexed in `Known Gaps <../../KNOWN_GAPS.md>`_.
 
 Example: MIOpen provider plugin
 ================================
