@@ -2,6 +2,8 @@
 
 #if defined(MIOPEN_USE_HIPCONV) && MIOPEN_USE_HIPCONV
 
+#include <miopen/batched_transpose_sol.hpp>
+#include <miopen/buffer_info.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/env.hpp>
@@ -87,7 +89,11 @@ static hipconv::Conv2dParams ToHipconvParams(const ProblemDescription& problem)
         MIOPEN_THROW("ConvHipConv: unsupported data type.");
     }
 
-    par.order = problem.IsLayoutNHWC() ? hipconv::TensorOrder::NHWC : hipconv::TensorOrder::NCHW;
+    // hipconv only implements NHWC kernels (every kernel family rejects
+    // `par.order != TensorOrder::NHWC`), so always request NHWC regardless of the
+    // problem's actual layout. GetSolution() transposes NCHW ("Default" layout)
+    // tensors to/from NHWC scratch buffers around the hipconv launch.
+    par.order = hipconv::TensorOrder::NHWC;
 
     return par;
 }
@@ -109,6 +115,44 @@ static hipconv::ConvKernelHandle ResolveKernel(hipconv::ArchHandle arch,
     if(hipconv::name(kernel) != config.kernel_name)
         return nullptr;
     return kernel;
+}
+
+static size_t GetPackedTensorBytes(const TensorDescriptor& td)
+{
+    return td.GetElementSize() * GetTypeSize(td.GetType());
+}
+
+// Workspace layout shared by GetWorkspaceSize() and GetSolution(), so the two
+// never disagree about where a given sub-buffer lives.
+//
+// Slots 0-2 are NCHW<->NHWC transpose scratch: zero-sized (and unused) unless
+// the problem layout is "Default" (NCHW).
+//   Fprop/Dgrad: 0 = in, 1 = weights, 2 = out
+//   Wgrad:       0 = x (forward input), 1 = dy (output gradient), 2 unused
+// Slot 3 is direction-specific:
+//   Fprop/Dgrad: hipconv's own per-kernel workspace (e.g. direct_l1 formats its
+//                weights into this before the conv)
+//   Wgrad:       fp32 cast buffer for fp16/bf16 dw; unused (0) for fp32/tf32,
+//                whose dw output needs no cast
+static MultiBufferWorkspaceTraits GetWorkspaceLayout(const ProblemDescription& problem,
+                                                     size_t hipconv_or_cast_sz)
+{
+    size_t buf0 = 0, buf1 = 0, buf2 = 0;
+    if(problem.IsLayoutDefault())
+    {
+        if(problem.IsDirectionBackwardWrW())
+        {
+            buf0 = GetPackedTensorBytes(problem.GetOut()); // x
+            buf1 = GetPackedTensorBytes(problem.GetIn());  // dy
+        }
+        else
+        {
+            buf0 = GetPackedTensorBytes(problem.GetIn());
+            buf1 = GetPackedTensorBytes(problem.GetWeights());
+            buf2 = GetPackedTensorBytes(problem.GetOut());
+        }
+    }
+    return MultiBufferWorkspaceTraits({buf0, buf1, buf2, hipconv_or_cast_sz});
 }
 
 // ===================== PerformanceConfigConvHipConv =====================
@@ -199,6 +243,14 @@ bool ConvHipConv::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(problem.IsDirectionBackwardWrW() && problem.GetConv().attribute.deterministic)
         return false;
 
+    if(!(problem.IsLayoutNHWC() || problem.IsLayoutDefault()))
+        return false;
+
+    // The NCHW path transposes through a packed NHWC scratch buffer; a
+    // non-packed tensor can't be handled by a flat-buffer transpose.
+    if(problem.IsLayoutDefault() && problem.HasNonPackedTensors())
+        return false;
+
     const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
     if(!arch.has_value())
         return false;
@@ -212,34 +264,26 @@ size_t ConvHipConv::GetWorkspaceSize(const ExecutionContext& ctx,
 {
     if(problem.IsDirectionBackwardWrW())
     {
-        // fp32 wgrad kernels do not use a workspace.
-        if(problem.IsFp32())
-            return 0;
-
-        // fp16/bf16 wgrad needs an fp32 scratch.
-        //
-        // The kernel returns the gradient as fp32 but MIOpen wants dw in the
-        // weight type, so stage the fp32 output in a workspace before converting.
-        const auto k           = ProblemInterpreter::GetOutputChannelK(problem);
-        const auto c           = ProblemInterpreter::GetInputChannelC(problem);
-        const auto y           = ProblemInterpreter::GetFilterHeightY(problem);
-        const auto x           = ProblemInterpreter::GetFilterWidthX(problem);
-        const auto group       = ProblemInterpreter::GetGroupCountG(problem);
-        const auto c_per_group = c / group;
-        return static_cast<size_t>(k) * y * x * c_per_group * sizeof(float);
+        // fp32 (tf32) wgrad kernels write their output directly into the
+        // weight-gradient tensor; fp16/bf16 wgrad needs an fp32 scratch to hold
+        // the kernel's fp32 output before it's cast down to the weight type.
+        const auto wgrad_cast_sz =
+            problem.IsFp32() ? size_t{0} : problem.GetWeights().GetElementSize() * sizeof(float);
+        return GetWorkspaceLayout(problem, wgrad_cast_sz).GetSize();
     }
 
-    // Max over configs: Find sizes one buffer here before picking a config, and
-    // the direct_l1 formatted-weights size varies by config (block_k padding).
-    const auto arch = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
-    if(!arch.has_value())
-        return 0;
-    const auto par  = ToHipconvParams(problem);
-    const auto cfgs = hipconv::get_valid_configs(*arch, par, MAX_CONFIGS);
-    size_t max_ws   = 0;
-    for(auto* kernel : cfgs)
-        max_ws = std::max(max_ws, hipconv::get_workspace_size(kernel, par));
-    return max_ws;
+    // Max over configs: hipconv's own per-kernel workspace (e.g. the direct_l1
+    // formatted-weights size) varies by config, and no config is chosen yet here.
+    const auto arch    = hipconv::resolve_arch(ctx.GetStream().GetDeviceName());
+    size_t hipconv_ws  = 0;
+    if(arch.has_value())
+    {
+        const auto par  = ToHipconvParams(problem);
+        const auto cfgs = hipconv::get_valid_configs(*arch, par, MAX_CONFIGS);
+        for(auto* kernel : cfgs)
+            hipconv_ws = std::max(hipconv_ws, hipconv::get_workspace_size(kernel, par));
+    }
+    return GetWorkspaceLayout(problem, hipconv_ws).GetSize();
 }
 
 // Estimated quality, consulted only on the immediate-mode fallback (no Find).
@@ -300,104 +344,257 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
 
     MIOPEN_LOG_I(hipconv::name(kernel) << ": " << hipconv::describe_config(kernel));
 
+    const bool need_transpose = problem.IsLayoutDefault();
+
+    // Transpose dimensions MUST come from the actual tensor descriptors, not
+    // from forward-convention ToHipconvParams()/ProblemInterpreter values.
+    // MIOpen swaps the in/out tensors for backward passes, so tensors.in /
+    // tensors.out carry different channel/spatial extents than the forward
+    // input/output.
+    //
+    //   Fprop: in = x,  out = y
+    //   Dgrad: in = dy, out = dx   (swapped)
+    //   Wgrad: in = dy, out = x    (swapped); weights = dw
+    //
+    // problem.GetIn()/GetOut()/GetWeights() are the exact descriptors of
+    // tensors.in / tensors.out / tensors.w for every direction, so their
+    // lengths and element types always match the tensor being transposed.
+    const auto& in_lens  = problem.GetIn().GetLengths();      // tensors.in
+    const auto& out_lens = problem.GetOut().GetLengths();     // tensors.out
+    const auto& wei_lens = problem.GetWeights().GetLengths(); // weights
+
+    const auto in_n = static_cast<int>(in_lens[0]);
+    const auto in_c = static_cast<int>(in_lens[1]);
+    const auto in_h = static_cast<int>(in_lens[2]);
+    const auto in_w = static_cast<int>(in_lens[3]);
+
+    const auto out_n = static_cast<int>(out_lens[0]);
+    const auto out_c = static_cast<int>(out_lens[1]);
+    const auto out_h = static_cast<int>(out_lens[2]);
+    const auto out_w = static_cast<int>(out_lens[3]);
+
+    const auto wei_k = static_cast<int>(wei_lens[0]);
+    const auto wei_c = static_cast<int>(wei_lens[1]);
+    const auto wei_y = static_cast<int>(wei_lens[2]);
+    const auto wei_x = static_cast<int>(wei_lens[3]);
+
+    // Build transpose kernels for NCHW <-> NHWC if needed. These go into
+    // construction_params so MIOpen compiles them; at runtime they are invoked
+    // via handle.Run(kernels[idx]).
+    //
+    // Fprop/Dgrad kernel indices:
+    //   0 = trans_in   (NCHW -> NHWC, tensors.in)
+    //   1 = trans_wei  (NCHW -> NHWC, weights)
+    //   2 = trans_out  (NHWC -> NCHW, tensors.out)
+    //
+    // Wgrad kernel indices:
+    //   0 = trans_x    (NCHW -> NHWC, forward input x  = problem.GetOut())
+    //   1 = trans_dy   (NCHW -> NHWC, output grad dy   = problem.GetIn())
+    //
+    // Wgrad's dw output needs no transpose back: hipconv writes it directly in
+    // the layout problem.GetWeights() describes, the same assumption the
+    // existing fp16/bf16 cast path below already relies on.
+    std::vector<std::vector<OpKernelArg>> trans_kernel_args;
+
+    if(need_transpose)
+    {
+        if(problem.IsDirectionBackwardWrW())
+        {
+            // x (forward input) == tensors.x == problem.GetOut()
+            TransposeSolutionDefault2Nhwc trans_x(
+                ctx, problem.GetOut().GetType(), out_n, out_c, out_h, out_w);
+            result.construction_params.push_back(trans_x.GetKernelInfo());
+            trans_kernel_args.push_back(trans_x.GetKernelArg());
+
+            // dy (output gradient) == tensors.dy == problem.GetIn()
+            TransposeSolutionDefault2Nhwc trans_dy(
+                ctx, problem.GetIn().GetType(), in_n, in_c, in_h, in_w);
+            result.construction_params.push_back(trans_dy.GetKernelInfo());
+            trans_kernel_args.push_back(trans_dy.GetKernelArg());
+        }
+        else
+        {
+            // Input (tensors.in): NCHW -> NHWC
+            TransposeSolutionDefault2Nhwc trans_in(
+                ctx, problem.GetIn().GetType(), in_n, in_c, in_h, in_w);
+            result.construction_params.push_back(trans_in.GetKernelInfo());
+            trans_kernel_args.push_back(trans_in.GetKernelArg());
+
+            // Weights: NCHW -> NHWC
+            TransposeSolutionDefault2Nhwc trans_wei(
+                ctx, problem.GetWeights().GetType(), wei_k, wei_c, wei_y, wei_x);
+            result.construction_params.push_back(trans_wei.GetKernelInfo());
+            trans_kernel_args.push_back(trans_wei.GetKernelArg());
+
+            // Output (tensors.out): NHWC -> NCHW
+            TransposeSolutionNhwc2Default trans_out(
+                ctx, problem.GetOut().GetType(), out_n, out_c, out_h, out_w);
+            result.construction_params.push_back(trans_out.GetKernelInfo());
+            trans_kernel_args.push_back(trans_out.GetKernelArg());
+        }
+    }
+
     if(problem.IsDirectionBackwardWrW())
     {
-        const auto workspace_size = GetWorkspaceSize(ctx, problem);
-        result.workspace_sz       = workspace_size;
-
-        // fp32 dw takes the kernel's fp32 output directly; no workspace.
+        // fp32 dw (tf32) takes the kernel's fp32 output directly; no cast.
         //
         // fp16/bf16 dw is narrower, so that path stages the fp32 output through
-        // a workspace and casts it down. Today fp32 reaches here only via tf32.
-        if(problem.IsFp32())
-        {
-            result.invoker_factory = [=](const std::vector<Kernel>&) {
-                return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
-                    decltype(auto) wrw_ctx =
-                        primitive_parameters.CastTo<miopen::conv::WrWInvokeParams>();
-                    const auto& tensors = wrw_ctx.tensors;
-
-                    const HipEventProfiler profiler(handle);
-                    if(const auto status = hipconv::launch(kernel,
-                                                           par,
-                                                           tensors.x,
-                                                           tensors.dy,
-                                                           tensors.dw,
-                                                           nullptr,
-                                                           handle.GetStream());
-                       status != hipSuccess)
-                        MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");
-                };
-            };
-            return result;
-        }
+        // a workspace buffer and casts it down. Today fp32 reaches here only
+        // via tf32.
+        const bool need_cast = !problem.IsFp32();
+        const auto cast_sz =
+            need_cast ? problem.GetWeights().GetElementSize() * sizeof(float) : size_t{0};
+        const auto wt        = GetWorkspaceLayout(problem, cast_sz);
+        result.workspace_sz  = wt.GetSize();
 
         const auto lowp_quant = problem.GetConv().lowp_quant;
         // fp32 intermediate buffer, same shape as the weights.
         const TensorDescriptor cast_desc(
             miopenFloat, problem.GetWeights().GetLengths(), problem.GetWeights().GetStrides());
 
-        result.invoker_factory = [=](const std::vector<Kernel>&) {
-            return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
-                decltype(auto) wrw_ctx =
-                    primitive_parameters.CastTo<miopen::conv::WrWInvokeParams>();
-                const auto& tensors       = wrw_ctx.tensors;
-                const auto& workSpace     = wrw_ctx.workSpace;
-                const auto& workSpaceSize = wrw_ctx.workSpaceSize;
+        const size_t x_sz  = need_transpose ? GetPackedTensorBytes(problem.GetOut()) : size_t{0};
+        const size_t dy_sz = need_transpose ? GetPackedTensorBytes(problem.GetIn()) : size_t{0};
 
-                if(workSpace == nullptr || workSpaceSize < workspace_size)
-                    MIOPEN_THROW("ConvHipConv: not enough workspace for wgrad.");
+        result.invoker_factory =
+            [=, trans_args = std::move(trans_kernel_args)](const std::vector<Kernel>& kernels) {
+                return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
+                    decltype(auto) wrw_ctx =
+                        primitive_parameters.CastTo<miopen::conv::WrWInvokeParams>();
+                    const auto& tensors       = wrw_ctx.tensors;
+                    const auto& workSpace     = wrw_ctx.workSpace;
+                    const auto& workSpaceSize = wrw_ctx.workSpaceSize;
 
-                const HipEventProfiler profiler(handle);
+                    if(result.workspace_sz > 0 &&
+                       (workSpace == nullptr || workSpaceSize < result.workspace_sz))
+                        MIOPEN_THROW("ConvHipConv: not enough workspace for wgrad.");
 
-                // wgrad kernel writes fp32 into the workspace...
-                if(const auto status = hipconv::launch(
-                       kernel, par, tensors.x, tensors.dy, workSpace, nullptr, handle.GetStream());
-                   status != hipSuccess)
-                    MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: wgrad launch failed.");
+                    const HipEventProfiler profiler(handle);
 
-                // ...then cast fp32 workspace -> fp16 dw.
-                CastTensor(handle,
-                           &lowp_quant,
-                           false,
-                           cast_desc,
-                           workSpace,
-                           tensors.dwDesc,
-                           tensors.dw,
-                           0,
-                           0);
+                    const void* launch_x  = tensors.x;
+                    const void* launch_dy = tensors.dy;
+
+                    if(need_transpose)
+                    {
+                        auto ws_x  = handle.CreateSubBuffer(workSpace, wt.GetOffset(0), x_sz);
+                        auto ws_dy = handle.CreateSubBuffer(workSpace, wt.GetOffset(1), dy_sz);
+
+                        // Transpose input (x): NCHW -> NHWC
+                        auto args_x = trans_args[0];
+                        args_x[0]   = OpKernelArg(ws_x.get());
+                        args_x[1]   = OpKernelArg(tensors.x);
+                        handle.Run(kernels[0])(args_x);
+
+                        // Transpose output-grad (dy): NCHW -> NHWC
+                        auto args_dy = trans_args[1];
+                        args_dy[0]   = OpKernelArg(ws_dy.get());
+                        args_dy[1]   = OpKernelArg(tensors.dy);
+                        handle.Run(kernels[1])(args_dy);
+
+                        launch_x  = ws_x.get();
+                        launch_dy = ws_dy.get();
+                    }
+
+                    void* dst = need_cast ? static_cast<char*>(workSpace) + wt.GetOffset(3)
+                                          : tensors.dw;
+
+                    auto hip_status = hipconv::launch(
+                        kernel, par, launch_x, launch_dy, dst, nullptr, handle.GetStream());
+                    if(hip_status != hipSuccess)
+                        MIOPEN_THROW_HIP_STATUS(hip_status, "ConvHipConv: wgrad launch failed.");
+
+                    if(need_cast)
+                    {
+                        // ...cast the fp32 workspace -> the weight type.
+                        CastTensor(handle,
+                                  &lowp_quant,
+                                  false,
+                                  cast_desc,
+                                  static_cast<char*>(workSpace) + wt.GetOffset(3),
+                                  tensors.dwDesc,
+                                  tensors.dw,
+                                  0,
+                                  0);
+                    }
+                };
             };
-        };
     }
     else
     {
         // direct_l1 (groups=1 fprop/dgrad) formats its weights into this
         // workspace before the conv; a null pointer faults at a low address.
-        const auto workspace_size = hipconv::get_workspace_size(kernel, par);
-        result.workspace_sz       = workspace_size;
+        const auto hipconv_ws_sz = hipconv::get_workspace_size(kernel, par);
+        const auto wt            = GetWorkspaceLayout(problem, hipconv_ws_sz);
+        result.workspace_sz      = wt.GetSize();
 
-        result.invoker_factory = [=](const std::vector<Kernel>&) {
-            return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
-                decltype(auto) data_ctx =
-                    primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
-                const auto& tensors = data_ctx.tensors;
+        const size_t in_sz  = need_transpose ? GetPackedTensorBytes(problem.GetIn()) : size_t{0};
+        const size_t wei_sz = need_transpose ? GetPackedTensorBytes(problem.GetWeights()) : size_t{0};
+        const size_t out_sz = need_transpose ? GetPackedTensorBytes(problem.GetOut()) : size_t{0};
 
-                if(workspace_size > 0 &&
-                   (data_ctx.workSpace == nullptr || data_ctx.workSpaceSize < workspace_size))
-                    MIOPEN_THROW("ConvHipConv: not enough workspace for direct kernel.");
+        result.invoker_factory =
+            [=, trans_args = std::move(trans_kernel_args)](const std::vector<Kernel>& kernels) {
+                return [=](const Handle& handle, const AnyInvokeParams& primitive_parameters) {
+                    decltype(auto) data_ctx =
+                        primitive_parameters.CastTo<miopen::conv::DataInvokeParams>();
+                    const auto& tensors = data_ctx.tensors;
 
-                const HipEventProfiler profiler(handle);
-                if(const auto status = hipconv::launch(kernel,
-                                                       par,
-                                                       tensors.in,
-                                                       tensors.w,
-                                                       tensors.out,
-                                                       data_ctx.workSpace,
-                                                       handle.GetStream());
-                   status != hipSuccess)
-                    MIOPEN_THROW_HIP_STATUS(status, "ConvHipConv: direct launch failed.");
+                    if(result.workspace_sz > 0 && (data_ctx.workSpace == nullptr ||
+                                                    data_ctx.workSpaceSize < result.workspace_sz))
+                        MIOPEN_THROW("ConvHipConv: not enough workspace for direct kernel.");
+
+                    const HipEventProfiler profiler(handle);
+
+                    void* hipconv_ws = hipconv_ws_sz > 0
+                                           ? static_cast<char*>(data_ctx.workSpace) + wt.GetOffset(3)
+                                           : nullptr;
+
+                    if(need_transpose)
+                    {
+                        auto ws_in  = handle.CreateSubBuffer(data_ctx.workSpace, wt.GetOffset(0), in_sz);
+                        auto ws_wei = handle.CreateSubBuffer(data_ctx.workSpace, wt.GetOffset(1), wei_sz);
+                        auto ws_out = handle.CreateSubBuffer(data_ctx.workSpace, wt.GetOffset(2), out_sz);
+
+                        // Transpose input: NCHW -> NHWC
+                        auto args_in = trans_args[0];
+                        args_in[0]   = OpKernelArg(ws_in.get());
+                        args_in[1]   = OpKernelArg(tensors.in);
+                        handle.Run(kernels[0])(args_in);
+
+                        // Transpose weights: NCHW -> NHWC
+                        auto args_wei = trans_args[1];
+                        args_wei[0]   = OpKernelArg(ws_wei.get());
+                        args_wei[1]   = OpKernelArg(tensors.w);
+                        handle.Run(kernels[1])(args_wei);
+
+                        auto hip_status = hipconv::launch(kernel,
+                                                          par,
+                                                          ws_in.get(),
+                                                          ws_wei.get(),
+                                                          ws_out.get(),
+                                                          hipconv_ws,
+                                                          handle.GetStream());
+                        if(hip_status != hipSuccess)
+                            MIOPEN_THROW_HIP_STATUS(hip_status, "ConvHipConv: direct launch failed.");
+
+                        // Transpose output: NHWC -> NCHW
+                        auto args_out = trans_args[2];
+                        args_out[0]   = OpKernelArg(tensors.out);
+                        args_out[1]   = OpKernelArg(ws_out.get());
+                        handle.Run(kernels[2])(args_out);
+                    }
+                    else
+                    {
+                        auto hip_status = hipconv::launch(kernel,
+                                                          par,
+                                                          tensors.in,
+                                                          tensors.w,
+                                                          tensors.out,
+                                                          hipconv_ws,
+                                                          handle.GetStream());
+                        if(hip_status != hipSuccess)
+                            MIOPEN_THROW_HIP_STATUS(hip_status, "ConvHipConv: direct launch failed.");
+                    }
+                };
             };
-        };
     }
 
     return result;
