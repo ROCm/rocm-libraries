@@ -2008,9 +2008,9 @@ class TestAttentionHelpers(unittest.TestCase):
             )
             self.assertTrue(ok_fnuz)
 
-    def test_gfx950_fp8_decode_accepts_ocp(self):
-        """gfx950 decodes OCP fp8 natively, so the G3 guard must not fire --
-        the tiled 3D gate accepts OCP fp8 K/V decode unchanged.
+    def test_gfx950_fp8_decode_accepts_ocp_rejects_fnuz(self):
+        """gfx950 decodes OCP fp8 natively: the guard accepts OCP K/V but must
+        reject fnuz-declared K/V, which would silently mis-decode on an OCP arch.
         """
         from kernels import supports_native_unified_attention_3d_tiled
 
@@ -2019,6 +2019,12 @@ class TestAttentionHelpers(unittest.TestCase):
                 self._fp8_decode_problem()
             )
             self.assertTrue(ok, msg=f"gfx950 decodes OCP fp8: {reason}")
+
+            ok_fnuz, reason_fnuz = supports_native_unified_attention_3d_tiled(
+                self._fp8_decode_problem(fp8_fnuz=True)
+            )
+            self.assertFalse(ok_fnuz, msg="gfx950 should reject fnuz-declared fp8")
+            self.assertIn("fnuz", reason_fnuz)
 
     def test_tiled_3d_spec_builder_constructs_per_arch(self):
         """Focused guard on the 3D spec builder that broke: a decode problem must
