@@ -140,8 +140,11 @@ namespace TensileLite
             ContractionProblem* m_problem         = nullptr;
             uint8_t*            m_staging         = nullptr;
             size_t              m_stagingBytes    = 0;
-            bool                m_dirtyInSolution = false;
-            int                 m_errorsReported  = 0;
+
+        protected:
+            // Protected so a test-only subclass can drive these without a GPU.
+            bool m_dirtyInSolution = false;
+            int  m_errorsReported  = 0;
         };
     } // namespace Client
 } // namespace TensileLite
