@@ -260,11 +260,11 @@ class TestSetup:
     def _run_setup_with_arch(self, files_by_arch, architecture):
         """Drive _setup over a temp dir of logic files with the given
         --architecture value; returns the surviving files."""
-        with patch('Tensile.TensileLogic.Run.validateToolchain') as mock_validate_toolchain, \
-             patch('Tensile.TensileLogic.Run.makeIsaInfoMap') as mock_make_isa_map, \
-             patch('Tensile.TensileLogic.Run.assignGlobalParameters'), \
-             patch('Tensile.TensileLogic.Run.setVerbosity'), \
-             patch('Tensile.TensileLogic.Run.parseArguments') as mock_parse_args:
+        with patch('tensilelite.tensilelite_logic.run.validateToolchain') as mock_validate_toolchain, \
+             patch('tensilelite.tensilelite_logic.run.makeIsaInfoMap') as mock_make_isa_map, \
+             patch('tensilelite.tensilelite_logic.run.assignGlobalParameters'), \
+             patch('tensilelite.tensilelite_logic.run.setVerbosity'), \
+             patch('tensilelite.tensilelite_logic.run.parseArguments') as mock_parse_args:
 
             mock_args = Mock()
             mock_args.Verbose = 1
