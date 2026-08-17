@@ -182,10 +182,15 @@ def backendCapsLoaded(isa) -> bool:
     for *isa*, such as a joblib/loky worker (handed globalParameters and nothing
     else), gets an empty map and names an instruction the emitter never emits, so
     a caller must not turn an answer from one into a rejection.
+
+    Ask via ``getData``, which copies the map out. ``getIsaInfo`` reads it with
+    ``operator[]``, so probing an ISA that is not there inserts an empty entry --
+    and ``rocIsa.init`` returns early once a key exists, which would leave the
+    capabilities permanently empty for the rest of the process.
     """
     try:
-        return bool(rocIsa.getInstance().getIsaInfo(tuple(isa)).asmCaps)
-    except (AttributeError, RuntimeError):
+        return any(tuple(known) == tuple(isa) for known in rocIsa.getInstance().getData())
+    except (AttributeError, RuntimeError, TypeError):
         # A backend that cannot be asked cannot be trusted to have answered either.
         return False
 
