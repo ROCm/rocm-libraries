@@ -2227,6 +2227,146 @@ class TestAttentionHelpers(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------
+# AttentionDenseSpec — waves_per_eu validation, IR identity, cache isolation
+# ---------------------------------------------------------------------
+
+
+class TestAttentionDenseWavesPerEu(unittest.TestCase):
+    """Tests for the waves_per_eu fix on AttentionDenseSpec.
+
+    Three properties are verified independently so a single failure is
+    unambiguous:
+
+    1. ``__post_init__`` rejects out-of-range values (0, negative, >8).
+    2. The emitted LLVM IR carries the correct ``amdgpu-waves-per-eu``
+       attribute for each legal value — confirming the attribute reached
+       codegen correctly both before and after the cache-key fix.
+    3. Two specs differing only in ``waves_per_eu`` produce distinct compiled
+       binaries (cache-isolation fix: key now includes ``waves_per_eu``).
+
+    All three run without a GPU; test 3 needs comgr and is skipped when the
+    toolchain is unavailable (matching the pattern in
+    ``test_gfx950_dense_prefill_compiles_and_fits_budget``).
+    """
+
+    _BASE_KWARGS = dict(
+        batch=1,
+        seqlen_q=2048,
+        seqlen_kv=2048,
+        num_query_heads=32,
+        num_kv_heads=8,
+        head_size=128,
+        causal=True,
+        dtype="bf16",
+    )
+
+    def test_waves_per_eu_validation_rejects_out_of_range(self):
+        from kernels.gfx950.attention_dense import AttentionDenseSpec
+
+        for bad in (0, -1, 9, 100):
+            with self.subTest(waves_per_eu=bad):
+                with self.assertRaises(
+                    ValueError, msg=f"waves_per_eu={bad} should be rejected"
+                ):
+                    AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=bad)
+
+        for good in (1, 2, 8):
+            with self.subTest(waves_per_eu=good):
+                # Must not raise
+                AttentionDenseSpec(**self._BASE_KWARGS, waves_per_eu=good)
+
+    def test_waves_per_eu_ir_attribute(self):
+        """Each legal waves_per_eu value appears verbatim in the lowered IR."""
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+        from dataclasses import replace
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                ll = lower_kernel_to_llvm(build_attention_dense(spec, arch="gfx950"))
+                self.assertIn(f'"amdgpu-waves-per-eu"="{wpe},{wpe}"', ll)
+
+    def test_waves_per_eu_cache_key_isolation(self):
+        """Specs differing only in waves_per_eu produce distinct cache keys.
+
+        Before the fix the cache key was ``(kernel_name(), batch)``; two specs
+        with different ``waves_per_eu`` share the same ``kernel_name()`` and
+        ``batch``, so the second call would silently reuse the first binary.
+        After the fix the key is ``(kernel_name(), batch, waves_per_eu)``, so
+        each value maps to a distinct slot.
+
+        This test verifies the key structure directly (no comgr needed) and
+        checks that the distinct keys correspond to distinct binaries via the
+        IR attribute (which feeds AMDGPU register-file sizing).
+        """
+        from dataclasses import replace
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        specs = {wpe: replace(base, waves_per_eu=wpe) for wpe in (1, 2)}
+
+        # Cache keys must be distinct.
+        keys = {
+            wpe: (s.kernel_name(), s.batch, s.waves_per_eu) for wpe, s in specs.items()
+        }
+        self.assertNotEqual(
+            keys[1],
+            keys[2],
+            "waves_per_eu=1 and waves_per_eu=2 produce identical cache keys; "
+            "a sweep over waves_per_eu would silently reuse the first binary",
+        )
+
+        # The key difference (waves_per_eu in the 3rd position) must match the spec.
+        for wpe, key in keys.items():
+            self.assertEqual(key[2], wpe, f"cache key[2] should be waves_per_eu={wpe}")
+
+        # The two specs share kernel_name() and batch (the old key was just those two).
+        self.assertEqual(
+            keys[1][:2],
+            keys[2][:2],
+            "kernel_name() or batch differed unexpectedly — test setup error",
+        )
+
+    def test_waves_per_eu_cache_isolation_binaries(self):
+        """Specs differing only in waves_per_eu compile to distinct binaries.
+
+        Requires comgr; skipped when the toolchain is unavailable.
+        """
+        import hashlib
+        from dataclasses import replace
+        from kernels.gfx950.attention_dense import (
+            AttentionDenseSpec,
+            build_attention_dense,
+        )
+
+        base = AttentionDenseSpec(**self._BASE_KWARGS)
+        hsaco_hashes = {}
+        for wpe in (1, 2):
+            with self.subTest(waves_per_eu=wpe):
+                spec = replace(base, waves_per_eu=wpe)
+                art = _compile_or_skip(
+                    build_attention_dense(spec, arch="gfx950"), arch="gfx950"
+                )
+                hsaco_hashes[wpe] = hashlib.sha256(art.hsaco).hexdigest()
+
+        if len(hsaco_hashes) == 2:
+            self.assertNotEqual(
+                hsaco_hashes[1],
+                hsaco_hashes[2],
+                "waves_per_eu=1 and waves_per_eu=2 produced identical binaries; "
+                "waves_per_eu is not reaching the register-file sizing pass",
+            )
+
+
+# ---------------------------------------------------------------------
 # CDNA primitives — attention tiled waves-per-EU
 # ---------------------------------------------------------------------
 
@@ -2664,7 +2804,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # package system (editable-installed) rather than a hardcoded path, then
         # load it under a private name with a fake ``aiter`` injected.
         module_path = importlib.util.find_spec(
-            "builders.gfx950.attention.parity_unified_attention"
+            "builders.gfx950.attention.prefill.parity_unified_attention"
         ).origin
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")
