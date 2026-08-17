@@ -40,7 +40,7 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
 from Tensile.Common.DataType import DataType
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
-                                               get_fp16_mt_config, get_fp32_mt_config
+                                               get_fp16_mt_config, get_fp32_mt_config, get_metadata_mt_config
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
 from Tensile.Common.ValidParameters import validParameters, \
@@ -2688,6 +2688,15 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
 
+    # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
+    # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
+    if state["TDMLoadWaveSync"]:
+      if state["ScheduleIterAlg"] != 4:
+        reject(state, printRejectionReason, "TDMLoadWaveSync requires ScheduleIterAlg=4 (StinkyTofu backend)")
+        return
+      if not ((state["enableTDMA"] or state["enableTDMB"]) and state["NumWaves"] > 1):
+        state["TDMLoadWaveSync"] = False
+
     # DepthU == -1?
     if state["DepthU"] == -1:
       depthuList = [1024,512,256,128,64,32,16]
@@ -2740,6 +2749,7 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
+      state["ExpandPointerSwap"] = False
       if state.get("PrefetchAcrossPersistent", 0):
         if state["StreamK"] != 3 or state["StreamKForceDPOnly"] != 1:
           reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent currently requires StreamK = 3 and StreamKForceDPOnly = 1")
@@ -3289,14 +3299,28 @@ class Solution(collections.abc.Mapping):
 
           if ldsPadM == -1:
             ldsPadM = 0
-            if not state["ProblemType"]["TLUMetadata"]:
-              if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"]:
-                ldsPadM = max(grvwM, optPadM)
-              else:
-                ldsPadM = vwM
-              ## turn-off padding for directToLds
-              if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
-                ldsPadM = 0
+            if state["EnableMatrixInstruction"] and state["UnrollMajorLDSMetadata"]:
+              ldsPadM = max(grvwM, optPadM)
+            elif wmmaV3 and state["EnableMatrixInstruction"] and state.get("enableLDSTrMetadata", False):
+              # TileMajor (UnrollMajorLDSMetadata=False): metadata is
+              # byte-typed and its TileMajor LDS read uses ds_load_tr8_b64.
+              # reuse FP8 bank-conflict search instead of the coarse vwM fallback.
+              mIdx = 0 if state["ProblemType"]["Sparse"] == 1 else 1
+              miwtM = state["MIWaveTile"][mIdx]
+              miwgM = state["MIWaveGroup"][mIdx]
+              lrvwBytesM = state.get("LocalReadVectorWidthMetadata", 0) // 4
+              miInputPerThreadBytesM = state.get("MIInputPerThreadMetadata", 0)
+              ldsPadM = get_metadata_mt_config(state["MacroTileMetadata"], "pad",
+                                               miwtM, miwgM, lrvwBytesM, miInputPerThreadBytesM)
+            elif not state["ProblemType"]["TLUMetadata"]:
+              # Legacy (MetadataLayout=0) TileMajor-without-LDSTr fallback (not UnrollMajorLDSMetadata).
+              ldsPadM = vwM
+            ## turn-off padding for directToLds
+            if state["EnableMatrixInstruction"] and state["TransposeLDSMetadata"] and state["DirectToLdsMetadata"]:
+              ldsPadM = 0
+            # TDM's pad_amount field is dword-granular
+            if state["TDMInst"] and ldsPadM != 0:
+              ldsPadM = roundUpToNearestMultiple(int(ldsPadM), 4)
           assert(ldsPadM >= 0)
 
         def removeLdsPadLogicForDTL(tc, ldsPad):
@@ -3338,21 +3362,28 @@ class Solution(collections.abc.Mapping):
 
         if state["TDMInst"]:
           pads = {"A": ldsPadA * state["ProblemType"]["MacDataTypeA"].numBytes(), "B": ldsPadB * state["ProblemType"]["MacDataTypeB"].numBytes(), "MXSA": ldsPadMXSA, "MXSB": ldsPadMXSB}
+          if state["ProblemType"]["Sparse"]:
+            pads["Metadata"] = ldsPadM  # already in bytes (metadata bpe=1)
           for tc, val in pads.items():
             if val == 0: continue
+            if tc == "Metadata" and val % 4 != 0:
+              reject(state, printRejectionReason, f"ldsPad{tc}={val} (bytes) must be a multiple of 4 for TDM hardware encoding (dword-granular pad_amount)")
+              continue
             pad_amount = TensorDataMoverLoad.calPadAmount(val)
             if pad_amount > 127:
               reject(state, printRejectionReason, f"pad_amount=(ldsPad//4-1)={pad_amount} should be smaller than or equal to 127 for ldsPad{tc}={val}")
 
         return ldsPadA, ldsPadB, ldsPadM, ldsPadMXSA, ldsPadMXSB
 
-      def checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA: int, ldsBlockSizePerPadB: int, ldsBlockSizePerPadMXSA: int, ldsBlockSizePerPadMXSB: int):
+      def checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA: int, ldsBlockSizePerPadB: int, ldsBlockSizePerPadMXSA: int, ldsBlockSizePerPadMXSB: int, ldsBlockSizePerPadMetadata: int = 0):
         if state["TDMInst"]:
           pads = {"A": ldsBlockSizePerPadA, "B": ldsBlockSizePerPadB, "MXSA": ldsBlockSizePerPadMXSA, "MXSB": ldsBlockSizePerPadMXSB}
+          if state["ProblemType"]["Sparse"]:
+            pads["Metadata"] = ldsBlockSizePerPadMetadata
           for tc, val in pads.items():
             # A/B in iterate-mode bypass the pad_interval encoding; skip their
-            # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
-            # must still satisfy the pad_interval constraints.
+            # check. MXSA/MXSB/Metadata do not support iterate-mode, so their
+            # LBSPP must still satisfy the pad_interval constraints.
             if tc in ("A", "B") and (state.get("_TDMIterateMode%s" % tc, False)
                                       or isSubtileIterateMode(state, tc)):
               if val == 0:
@@ -3388,9 +3419,44 @@ class Solution(collections.abc.Mapping):
       def getLdsBpe(tc: str) -> float:
         return state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["MacDataType%s"%tc].numBytes()
 
+      def calcMetadataLdsBlockSizePerPad() -> int:
+        """Auto-resolve LdsBlockSizePerPadMetadata when left on -1.
+          - UnrollMajorLDS (K-major): same roundUpToNearestMultiple(DepthU*bpe)
+            heuristic A/B use for their K-major layout (bpe=1, metadata is
+            byte-typed).
+          - TileMajor (UnrollMajorLDSMetadata=False; note
+            `state["UnrollMajorLDSMetadata"] = state["TransposeLDSMetadata"]`,
+            so this is also TransposeLDSMetadata=False) with enableLDSTrMetadata:
+            reuse the FP8 ds_load_tr8_b64 bank-conflict search
+            (get_metadata_mt_config), since enableLDSTrMetadata shares that
+            exact HW cap/instruction.
+        """
+        if not state["ProblemType"]["Sparse"] or state["DirectToVgprSparseMetadata"]:
+          return 0
+        LdsBlockSizePerPad = state["LdsBlockSizePerPadMetadata"]
+        if LdsBlockSizePerPad == -1:
+          LdsBlockSizePerPad = 0
+          if state["EnableMatrixInstruction"]:
+            multiple = 256 if wmmaV3 else 128
+            if state["UnrollMajorLDSMetadata"]:
+              LdsBlockSizePerPad = roundUpToNearestMultiple(int(state["_DepthUMetadata"]), multiple)
+            elif wmmaV3 and state.get("enableLDSTrMetadata", False):
+              mIdx = 0 if state["ProblemType"]["Sparse"] == 1 else 1
+              miwtM = state["MIWaveTile"][mIdx]
+              miwgM = state["MIWaveGroup"][mIdx]
+              lrvwBytesM = state.get("LocalReadVectorWidthMetadata", 0) // 4
+              miInputPerThreadBytesM = state.get("MIInputPerThreadMetadata", 0)
+              LdsBlockSizePerPad = get_metadata_mt_config(state["MacroTileMetadata"], "perBlock",
+                                                          miwtM, miwgM, lrvwBytesM, miInputPerThreadBytesM)
+        if state["DirectToLdsMetadata"]:
+          LdsBlockSizePerPad = 0
+        return int(LdsBlockSizePerPad)
+
       def calcLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
         if "MXS" in tc:
           return calcMXSLdsBlockSizePerPad(tc, lrvw)
+        if tc == "Metadata":
+          return calcMetadataLdsBlockSizePerPad()
         mt = state["MacroTile0"] if ("A" in tc) else state["MacroTile1"]
         LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]
         tmpBpe = getLdsBpe(tc)
@@ -3592,11 +3658,13 @@ class Solution(collections.abc.Mapping):
               ldsBlockSizePerPadB = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidthB"])
               ldsBlockSizePerPadMXSA = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
               ldsBlockSizePerPadMXSB = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
+              ldsBlockSizePerPadMetadata = calcLdsBlockSizePerPad("Metadata", 0)
               ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
               ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
               ldsBlockSizePerPadMXSA = 0 if padMXSA == 0 else ldsBlockSizePerPadMXSA
               ldsBlockSizePerPadMXSB = 0 if padMXSB == 0 else ldsBlockSizePerPadMXSB
-              checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA, ldsBlockSizePerPadB, ldsBlockSizePerPadMXSA, ldsBlockSizePerPadMXSB)
+              ldsBlockSizePerPadMetadata = 0 if padM == 0 else ldsBlockSizePerPadMetadata
+              checkLdsBlockSizePerPadForTDM(ldsBlockSizePerPadA, ldsBlockSizePerPadB, ldsBlockSizePerPadMXSA, ldsBlockSizePerPadMXSB, ldsBlockSizePerPadMetadata)
               (ldsNumBytesA, ldsNumBytesAlignedA) = calcLdsNumBytesAB("A", padA, ldsBlockSizePerPadA)
               (ldsNumBytesB, ldsNumBytesAlignedB) = calcLdsNumBytesAB("B", padB, ldsBlockSizePerPadB)
               (ldsNumBytesMXSA, ldsNumBytesAlignedMXSA) = calcLdsNumBytesAB("MXSA", padMXSA, ldsBlockSizePerPadMXSA) if state["ProblemType"]["MXBlockA"] else (0, 0)
@@ -4629,10 +4697,11 @@ class Solution(collections.abc.Mapping):
     state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidthB"])
     state["LdsBlockSizePerPadMXSA"] = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
     state["LdsBlockSizePerPadMXSB"] = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
-    checkLdsBlockSizePerPadForTDM(state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"], state["LdsBlockSizePerPadMXSA"], state["LdsBlockSizePerPadMXSB"])
-
-    if state["LdsBlockSizePerPadMetadata"] == -1:
-      state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
+    # Metadata has its own MacroTile/DepthU/bpe (byte-typed), so it cannot
+    # reuse A's block size; calcLdsBlockSizePerPad("Metadata", ...) derives it
+    # from Metadata's own dimensions instead (see calcMetadataLdsBlockSizePerPad).
+    state["LdsBlockSizePerPadMetadata"] = calcLdsBlockSizePerPad("Metadata", 0)
+    checkLdsBlockSizePerPadForTDM(state["LdsBlockSizePerPadA"], state["LdsBlockSizePerPadB"], state["LdsBlockSizePerPadMXSA"], state["LdsBlockSizePerPadMXSB"], state["LdsBlockSizePerPadMetadata"])
 
     if state["EnableMatrixInstruction"]:
       if state["LdsBlockSizePerPadA"] and not state["UseGeneralizedNLCOneA"]:
@@ -5224,6 +5293,21 @@ class Solution(collections.abc.Mapping):
       state["GuaranteeNoPartialB"] = True
 
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
+
+    # GuaranteeNoPartial skips graShift (KernelWriter.py, "global read addresses: shift")
+    # and permits _UseSgprForGRO, both on the assumption that BufferLoad gives a
+    # hardware bounds check. global_load_tr has no num_records field, so that
+    # assumption does not hold for it: the free-dim overhang then reads past the
+    # tensor (page fault), and the dropped soffset in chooseGlobalRead's tr branch
+    # makes every transpose load address the same element (wrong results).
+    # Reachable only by tuning with AssertFree{0,1}ElementMultiple >= GRVW; no
+    # shipped solution does. Reject rather than mis-generate.
+    for tc in ("A", "B"):
+      if state["enableGLTr%s"%tc] and state["GuaranteeNoPartial%s"%tc]:
+        reject(state, printRejectionReason, "enableGLTr%s with GuaranteeNoPartial%s: "
+               "global_load_tr has no hardware bounds check, so AssertFree%uElementMultiple "
+               "must not remove graShift"%(tc, tc, 0 if tc == "A" else 1))
+        return
 
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:
