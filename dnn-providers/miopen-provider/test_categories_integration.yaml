@@ -64,14 +64,14 @@ test_categories:
       - "full"
       - "all"
 
-  ffm_quick:
+  ffm-quick:
     description: "Fast-feedback mechanism (FFM) quick tier: one bundle case per operation for rapid signal"
     test_patterns:
       # One case per op, named exactly. These are sweep-case ids taken from
       # integration-test-bundles/quick/<Op>/Default/sweep.json (and the SDPA
       # single-graph bundle path); regenerating a sweep can rename them, in
       # which case this tier silently shrinks. Verify with:
-      #   ctest -L ffm_quick -N
+      #   ctest -L ffm-quick -N
       - "quick_ConvolutionFwd_Default.1_16_16_16_bfp16_nchw_dil1x1_postpad0x0_prepad0x0"
       - "quick_BatchnormInference_Default.1_3_224_bfp16_ncl"
       - "quick_Pointwise_Default.2_4_8_8_fp16_nchw"
@@ -80,8 +80,8 @@ test_categories:
       - "quick_SdpaFwd_bhsd_bf16_hd128_nomask_batch_Small.Small"
     exclude: *common_excludes
     labels:
-      - "ffm_quick"
-      - "ffm_full"
+      - "ffm-quick"
+      - "ffm-full"
 
 exclude_gpu:
   exclude_gpu_gfx110X_windows:
@@ -92,6 +92,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
+      - "ffm-quick"
       - "ex_gpu_gfx110X"
 
 execution_settings:
@@ -106,3 +107,4 @@ execution_settings:
     standard: 2700
     comprehensive: 25200
     full: 28800
+    ffm-quick: 7200  # 2 hours

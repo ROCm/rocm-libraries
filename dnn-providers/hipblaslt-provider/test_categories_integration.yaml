@@ -70,6 +70,16 @@ test_categories:
       - "full"
       - "all"
 
+  ffm-quick:
+    description: "Fast-feedback mechanism (FFM) quick tier: currently mirrors the quick tier's coverage, with a 2 hour timeout"
+    test_patterns:
+      - "Smoke/*"
+      - "TestCpu*GoldenReference*"
+    exclude: *common_excludes
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
@@ -78,3 +88,4 @@ execution_settings:
     standard: 2700
     comprehensive: 25200
     full: 28800
+    ffm-quick: 7200  # 2 hours
