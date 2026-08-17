@@ -158,10 +158,18 @@ def run(args) -> int:
             results.append({"name": cfg.name, "status": "run_fail",
                             "error": f"status={getattr(result, 'status', 'unknown')}"})
             continue
-        avg_ms = sum(times) / len(times) if times else result.time_ms
-        tflops = (2.0 * size * size * size / (avg_ms * 1e-3)) / 1e12
-        ref = _emulate(_emulate(A, cfg.dtype_a) @ _emulate(B, cfg.dtype_a), cfg.dtype_a)
-        mr = _max_rel(result.output, ref)
+        # Use avg TFLOPS from timed repeat runs; fall back to result.tflops (single run).
+        if times:
+            avg_ms = sum(times) / len(times)
+            tflops = (2.0 * size * size * size / (avg_ms * 1e-3)) / 1e12
+        else:
+            tflops = result.tflops
+        # Use max_rel from runner if already computed; otherwise compute it here.
+        if result.max_rel is not None:
+            mr = result.max_rel
+        else:
+            ref = _emulate(_emulate(A, cfg.dtype_a) @ _emulate(B, cfg.dtype_a), cfg.dtype_a)
+            mr = _max_rel(result.output, ref)
         ok = mr <= _RTOL
         n_pass += ok
         n_fail += not ok
