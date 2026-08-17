@@ -116,17 +116,38 @@ file's own statements, matching the bucket table above, so they run slightly hig
 branch-inclusive whole-project numbers in the card's headline. The row count is adjustable via
 `--top-files N` on `tools/coverage_split_summary.py` (default 20; `0` omits the table).
 
-Both floors are enforced in the `coverage-unit` tox environment (`tox -e coverage-unit`), which the
-TensileLite coverage GitHub Actions lane invokes.
+Both floors live in the `coverage-gate` tox environment, which judges the coverage data that
+`coverage-unit` produced:
 
 - **Whole-project floor** (AIHPBLAS-3877). The value lives in exactly one place: `fail_under` under
   `[tool.coverage.report]` in the top-level [`pyproject.toml`](../../../../pyproject.toml). The
-  combined-coverage `coverage report` step (in the env's `commands_post`) fails the run when the
-  combined total drops below it. The number is not duplicated in `tox.ini` or in CI YAML.
+  combined-coverage `coverage report` step fails the run when the combined total drops below it. The
+  number is not duplicated in `tox.ini` or in CI YAML.
 - **Per-file floors** (AIHPBLAS-3878). `coverage-baseline.json` (in this directory) holds each
-  file's floor. `tools/coverage_ratchet.py check` (also in the env's `commands_post`) fails the run
-  if any file drops below its floor by more than the tolerance (see below). The failure message
-  names every file that dropped and prints the one command that raises the floors on purpose.
+  file's floor. `tools/coverage_ratchet.py check` fails the run if any file drops below its floor by
+  more than the tolerance (see below). The failure message names every file that dropped and prints
+  the one command that raises the floors on purpose.
+
+#### Measuring and enforcing are separate envs
+
+```bash
+tox -e coverage-unit   # run both suites, union them, write the reports, print the table
+tox -e coverage-gate   # judge those reports: fail below either floor
+```
+
+The TensileLite coverage GitHub Actions job runs both, in that order, and owns the floors.
+
+The split exists because `coverage-unit` has a second caller. The Math CI Jenkins job
+`tensilelite-unit-codecov` runs `tox -e coverage-unit` to produce the `coverage.xml` it uploads to
+Codecov under the `TensileLite-Unit` flag. It predates these floors, it does not want them, and its
+config lives in `ROCm/rocJenkins`, which this repo cannot change. While enforcement lived inside
+`coverage-unit`, a floor miss failed that Jenkins stage too, and because the job runs under `set -e`
+it also took the C++ `coverage-cpp` pass and both Codecov uploads down with it. Putting the gate in
+its own env means a caller opts in by naming it and cannot trip it by accident.
+
+`coverage-gate` runs no tests and builds no rocisa; it only reads `.coverage` and `coverage.json`.
+So it takes seconds, and reproducing a CI floor failure locally does not mean re-running the suite:
+run `coverage-unit` once, then re-run `coverage-gate` as often as you like.
 
 #### The tolerance (noise buffer)
 
@@ -169,7 +190,7 @@ A floor-raising PR is a small, behavior-neutral maintenance change. It should to
 1. **Get fresh numbers.** Run the lane so it writes a current `coverage.json`:
 
    ```bash
-   tox -e coverage-unit    # writes coverage.json even if the per-file check then fails
+   tox -e coverage-unit    # writes coverage.json
    ```
 
 2. **Recompute the per-file floors.** Rewrite the baseline from that report:
@@ -248,4 +269,4 @@ The mutation slice is configured in `[tool.mutmut]` in `pyproject.toml` and run 
 tox -e mutation-unit
 ```
 
-It is currently a narrow **report-only pilot** (five files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).
+It is currently a narrow **report-only pilot** (ten files); widening across the critical modules is planned. Accepted equivalent mutants and every `# pragma: no mutate` are justified in `DECISIONS.md` (a mutant is "killed" only if the suite passes clean, fails on the mutant, and reverts cleanly).

@@ -123,6 +123,40 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
             b, ROCKE_ERR_VALUE, "invalid conv_igemm spec for %s: %s", ctx->arch, reason);
         return false;
     }
+    /* Forward-conv-only: reject default epilogue when vec_c > 1 (auto-derived from K).
+     * Python build_implicit_gemm_conv calls is_valid_spec which now checks:
+     *   _eff_vec_c = vector_size_c if set else default_vector_sizes(C,K,dtype_d)[2]
+     *   if _eff_vec_c > 1 and epilogue == "default": raise ValueError(...)
+     * This gate is NOT part of rocke_implicit_gemm_conv_is_valid_spec because
+     * wgrad calls that function with a dummy forward spec and uses a separate
+     * explicit-only vec_c check (its own is_valid_spec mirrors the old Python). */
+    if(spec->epilogue && strcmp(spec->epilogue, "default") == 0)
+    {
+        int _eff_vec_c;
+        if(spec->has_vector_size_c)
+        {
+            _eff_vec_c = spec->vector_size_c;
+        }
+        else
+        {
+            int _K = spec->problem.K;
+            bool _is_fp32_d = (spec->dtype_d && strcmp(spec->dtype_d, "fp32") == 0);
+            if(_is_fp32_d)
+                _eff_vec_c = (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
+            else
+                _eff_vec_c = (_K % 8 == 0) ? 8 : (_K % 4 == 0) ? 4 : (_K % 2 == 0) ? 2 : 1;
+        }
+        if(_eff_vec_c > 1)
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "invalid conv_igemm spec for %s: default epilogue is not "
+                            "supported with vector size c: %d",
+                            ctx->arch,
+                            _eff_vec_c);
+            return false;
+        }
+    }
 
     /* ---- b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu ---- (792-795)
      * The builder `b` is already constructed with spec.kernel_name() by the
@@ -332,6 +366,28 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
         ctx->block_n_off_v = ctx->grid.block_n_off;
     }
 
+    /* ---- grouped conv: group index + absolute output-filter base ---- (818-831)
+     * Python:
+     *   grouped = p.groups > 1
+     *   if grouped:
+     *       group_idx = b.block_id_z()
+     *       k_out_group_base = b.mul(group_idx, b.const_i32(p.kpg))
+     *   else: group_idx = None; k_out_group_base = None
+     * Both are NULL for groups == 1 (byte-identical ungrouped path). */
+    if(ctx->p->groups > 1)
+    {
+        /* Python: group_idx = b.block_id_z(); k_out_group_base = b.mul(group_idx, b.const_i32(kpg))
+         * Bind subexpressions in Python's left-to-right order to pin SSA ids. */
+        ctx->group_idx = rocke_b_block_id_z(b);
+        rocke_value_t* c_kpg = rocke_b_const_i32(b, rocke_conv_problem_kpg(ctx->p));
+        ctx->k_out_group_base = rocke_b_mul(b, ctx->group_idx, c_kpg);
+    }
+    else
+    {
+        ctx->group_idx = NULL;
+        ctx->k_out_group_base = NULL;
+    }
+
     /* ---- LDS plan ---- (894-896). lds_layout = spec.effective_lds_layout():
      * sync path pads each K-row by +8 halves (when tile_k >= 16) to dodge LDS
      * bank conflicts; the async / packed path uses +0 (lane-contiguous LDS).
@@ -419,15 +475,14 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     ctx->threads = rocke_implicit_gemm_conv_spec_block_size(spec);
     ctx->load_vec = rocke_conv_choose_load_vec(spec);
     /* Mirror Python default_vector_sizes: clamp the tile-geometry vec by the largest
-     * power-of-two that divides C (A and B both stride along C in NHWC/KYXC layouts).
-     * Python: sizes = [8,4,2,1] for fp16/bf16, [4,2,1] for fp32; vec = largest s in
-     * sizes where C % s == 0.  For C=3 this yields vec=1; without the clamp the
-     * tile-geometry picker returns a wider vec that Python never uses, causing MISMATCH
-     * (e.g. the ImageNet-stem N1H224W224C3K64Y7X7 conv). */
+     * power-of-two that divides the per-group channel count (A strides over cpg,
+     * B strides over cpg). For groups==1 cpg==C -> byte-identical. For C=3 this
+     * yields vec=1; without the clamp the tile-geometry picker returns a wider vec
+     * that Python never uses, causing MISMATCH (e.g. ImageNet-stem C3 conv). */
     {
         bool is_fp32 = (spec->dtype_a && strcmp(spec->dtype_a, "fp32") == 0);
         int max_elem = is_fp32 ? 4 : 8;
-        int c_dim = ctx->p->C;
+        int c_dim = rocke_conv_problem_cpg(ctx->p);
         int max_ab = (c_dim % max_elem == 0) ? max_elem
                      : (c_dim % 4 == 0)      ? 4
                      : (c_dim % 2 == 0)      ? 2
@@ -437,12 +492,50 @@ bool rocke_conv_build_ctx_init(rocke_conv_build_ctx_t* ctx,
     }
 
     /* ---- coordinate-transform descriptors ---- (935-936).
+     * Pointwise fast path: Y=X=1, stride=1, pad=0 -> descriptors are NULL and
+     * flat multiply+add arithmetic is used in a_descriptor/b_descriptor/epilogues.
      * A_desc decompose_m = (a_mhw_index_fn is None). */
     {
-        bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
-        ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
-        ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+        ctx->is_pointwise = rocke_conv_problem_is_pointwise(ctx->p);
+        ctx->c_wgK_pw = 0; /* forward conv: unused */
+        ctx->c_wgN_pw = 0; /* forward conv: unused */
+        ctx->b_descriptor_fn = NULL; /* forward conv: use default rocke_conv_b_descriptor */
+        if(ctx->is_pointwise)
+        {
+            ctx->c_M_pw = rocke_conv_problem_m(ctx->p);
+            ctx->c_C_pw = rocke_conv_problem_cpg(ctx->p);
+            ctx->c_K_pw = rocke_conv_problem_kpg(ctx->p);
+            ctx->A_desc = NULL;
+            ctx->B_desc = NULL;
+        }
+        else
+        {
+            ctx->c_M_pw = 0;
+            ctx->c_C_pw = 0;
+            ctx->c_K_pw = 0;
+            bool decompose_m = !(overrides != NULL && overrides->a_mhw_index_fn != NULL);
+            ctx->A_desc = rocke_conv_make_a_descriptor(b, ctx->p, decompose_m);
+            ctx->B_desc = rocke_conv_make_b_descriptor(b, ctx->p);
+        }
         ctx->D_desc = NULL; /* built lazily in the epilogue phase */
+    }
+
+    /* ---- pointwise IR constants (Python lines 987-990, before buffer resources).
+     * Python:  _c_C_ir = b.const_i32(cpg)    <- first
+     *          _c_K_ir = b.const_i32(kpg)    <- second
+     *          _c_M_ir = b.const_i32(M)      <- third
+     *          _always_valid = b.const_i32(1) <- fourth
+     * Emitted here (before buffer_rsrc) so the SSA sequence matches Python. */
+    if(ctx->is_pointwise)
+    {
+        ctx->ir_c_C_pw = rocke_b_const_i32(b, ctx->c_C_pw);
+        ctx->ir_c_K_pw = rocke_b_const_i32(b, ctx->c_K_pw);
+        ctx->ir_c_M_pw = rocke_b_const_i32(b, ctx->c_M_pw);
+        ctx->ir_always_valid = rocke_b_const_i32(b, 1);
+    }
+    else
+    {
+        ctx->ir_c_C_pw = ctx->ir_c_K_pw = ctx->ir_c_M_pw = ctx->ir_always_valid = NULL;
     }
 
     /* ---- buffer resources (CK-Tile views over A/B/D) ---- (946-951) */
@@ -562,12 +655,35 @@ rocke_kernel_def_t* rocke_build_implicit_gemm_conv(rocke_ir_builder_t* b,
     }
 
     /* ---- K-loop driver selection (1276-1347) ----
-     *   unroll_k            -> unroll
-     *   else not async_dma  -> simple (scf.for_iter)
-     *   else (async_dma)    -> async (SoftwarePipeline.run_ping_pong) */
+     *
+     * The driver is chosen by K-loop *structure*, not by pipeline name.
+     * "mem", "compv3", and "compv4" all use the same scf.for_iter shape
+     * (load->sync->mfma->sync per tile) and therefore share kloop_simple.
+     * Their behavioural differences (scheduling hints, double-buffering) are
+     * encoded in ctx->schedule and ctx->double_buffer, which are consulted
+     * inside emit_mfma_phase and the LDS allocation respectively -- no
+     * K-loop structural change is needed for those pipelines.
+     *
+     * A new driver is only justified when the K-loop itself has a different
+     * shape that cannot be expressed inside kloop_simple:
+     *
+     *   unroll_k     -> kloop_unroll  (Python-unrolled prologue+ping-pong;
+     *                                  2 LDS buffers; no scf.for_iter)
+     *   pipeline="basic"-> kloop_basic (split global_read/lds_write;
+     *                                   single LDS buffer; no scf.for_iter;
+     *                                   VMEM/compute overlap without double-buf)
+     *   else no async -> kloop_simple (scf.for_iter; mem/compv3/compv4 all
+     *                                  share this; pipeline string only
+     *                                  affects schedule hints inside mfma)
+     *   else (async)  -> kloop_async  (SoftwarePipeline.run_ping_pong over
+     *                                  AsyncTileLoader; no scf.for_iter) */
     if(spec->unroll_k)
     {
         rocke_conv_emit_kloop_unroll(&ctx);
+    }
+    else if(spec->pipeline != NULL && strcmp(spec->pipeline, "basic") == 0)
+    {
+        rocke_conv_emit_kloop_basic(&ctx);
     }
     else if(!ctx.async_dma)
     {

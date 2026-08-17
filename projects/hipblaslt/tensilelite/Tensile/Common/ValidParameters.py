@@ -384,20 +384,19 @@ validParameters = { # we need to make sure this matches develop
     "1LDSBuffer": [-1, 0, 1],
     # gfx1250 LDS segment interleave: raises LDS read bandwidth by putting operand A's
     # two halves in different 64KiB LDS segments so its two MFMA read ports stop conflicting.
-    # Supported: TDMInst=3 (TDM load for A and B), gfx1250, MIWaveGroup [2,2], dtype bf16 / fp16 /
-    # fp8 (incl. MXFP8). Not applied for 1LDSBuffer, subtile, sparse, or TDMSplit kernels.
-    # Mechanism: reorder LDS from the baseline [A0][A1][B0][B1] to [A0][B0][A1][B1]. Only operand A
-    # is helped -- B's halves move too, but both ports can still hit the same B segment.
-    # Two cases:
-    #   tight   (one A-half + one B-half >= 64KiB): [A0][B0] fills a segment, so [A1][B1] land in
-    #            the next one -- no extra LDS.
-    #   aligned (< 64KiB): pad [A0][B0] up to the segment boundary to push [A1][B1] over -- uses
-    #            more LDS, and needs PrefetchGlobalRead=2.
+    #
+    # Applies only to gfx1250 wave-separated TDM kernels, and requires:
+    #   - TDMInst=3, MIWaveGroup [2,2], UnrollMajorLDS
+    #   - dtype bf16 / fp16 / fp8 / fp4 (incl. MXFP8/MXFP4 and mixed narrow types such as F8xF4)
+    #   - VWA = WaveTileA (TDMSplit optional), or WaveTileA/2 (requires TDMSplit)
+    # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
+    #
     # Values:
-    #   -1 = auto: apply "tight" only (skip "aligned").
+    #   -1 = auto: enable only where it needs no extra LDS reserved.
     #    0 = off (default): baseline layout.
-    #    1 = force on: apply both "tight" and "aligned" wherever valid.
-    # Recommended: set [0, 1] when tuning, so both baseline and interleaved kernels are benchmarked.
+    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
+    #            boundary (needs PrefetchGlobalRead=2).
+    # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
@@ -1171,6 +1170,11 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    # Insert a barrier between an urgent and a deferrable tensor_load_to_lds group
+    # (different TDM wait groups) so every wave finishes the urgent group before any
+    # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
+    # gfx1250 / ScheduleIterAlg=4 path only, off by default.
+    "TDMLoadWaveSync": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

@@ -101,11 +101,13 @@ struct GridwiseGroupedConv2DFwd
     }
     static constexpr index_t NDimSpatial = 2;
 
-    static constexpr auto I0          = Number<0>{};
-    static constexpr auto I1          = Number<1>{};
-    static constexpr auto I2          = Number<2>{};
-    static constexpr auto I3          = Number<3>{};
-    static constexpr index_t WaveSize = 64;
+    static constexpr auto I0 = Number<0>{};
+    static constexpr auto I1 = Number<1>{};
+    static constexpr auto I2 = Number<2>{};
+    static constexpr auto I3 = Number<3>{};
+    // WaveSize tracks the launch BlockSize (64 on CDNA, 32 on RDNA) so the
+    // lane-partitioning math is correct for both wavefront widths.
+    static constexpr index_t WaveSize = BlockSize;
     static constexpr index_t Tile_H   = BlockTileSize{}.At(I0);
     static constexpr index_t Tile_W   = BlockTileSize{}.At(I1);
 

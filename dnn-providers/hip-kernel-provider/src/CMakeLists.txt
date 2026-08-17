@@ -67,6 +67,9 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     set(HIP_FLASH2_KERNEL_DIR_BUILD "${CMAKE_CURRENT_BINARY_DIR}/hip_flash2_kernels"
         CACHE STRING "Build-tree path for Flash2 .co kernels (for test runs)")
 endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    target_compile_definitions(hip_kernel_provider_private PUBLIC HIPDNN_ENABLE_KERNEL_INGESTOR=1)
+endif()
 
 # hip_kernel_provider - SHARED library (the actual plugin)
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
@@ -255,20 +258,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
-    # For standalone builds we need to install the ctest files.
-    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
-    # to bin/hip_kernel_provider/ so TheRock CI's test_runner.py can drive `ctest -L quick`
-    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
-    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
-            install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
-                    DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
-                    RENAME "CTestTestfile.cmake"
-            )
-        else()
-            install_provider_ctest_files("hip_kernel_provider")
-        endif()
+    # Install the ctest files. When YAML-based categorization is active, install the
+    # generated install_CTestTestfile.cmake to bin/hip_kernel_provider/ so TheRock CI's
+    # test_runner.py can drive `ctest -L quick` (etc.) from the artifact's install tree.
+    # Otherwise, fall back to the project's own install_provider_ctest_files() which
+    # emits an unlabeled CTestTestfile.cmake.
+    if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
+        install(FILES "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                DESTINATION "${CMAKE_INSTALL_BINDIR}/hip_kernel_provider"
+                RENAME "CTestTestfile.cmake"
+        )
+    else()
+        install_provider_ctest_files("hip_kernel_provider")
     endif()
 endif()
 

@@ -186,7 +186,7 @@ def expand_sweep(config: GemmSweepConfig) -> GemmSweepPlan:
     for shape in shapes:
         req = _request_for_shape(normalized, shape)
         for candidate in GEMM_FP16_REGISTRY.candidates():
-            ok, reason = candidate.supports(req)
+            ok, reason = candidate.admits(req)
             if not ok:
                 filtered.append(GemmFilteredVariant(shape, candidate.name, reason))
                 continue
