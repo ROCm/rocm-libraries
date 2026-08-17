@@ -4590,6 +4590,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if hasLiveLdsData and doNext and not self.states.lockLdsReadTokenSwap:
         # swap LR buffer
         self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+      # TDMSplit EPS0+PGR1+PLR0: the swap above never fires, so the read token
+      # stays fixed while the physical read address XORs every iter. Toggle it in
+      # phase with the XOR so each read's token points at its true producer.
+      if (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+          and not kernel["ExpandPointerSwap"] and kernel["PrefetchGlobalRead"] < 2
+          and self.states.numItersPLR == 0 and isSwapLroIter
+          and not self.states.lockLdsReadTokenSwap):
+        self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer1 if self.states.ldsReadTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
       if kernel["HalfPLR"]:
         self.states.halfPLRGroups = self.getHalfPLRGroups(kernel, lc, (u+pflr))
       for iui in range(0,kernel["InnerUnroll"]):
@@ -10952,6 +10960,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
+    # half0<->half1 token pairing per parity, used by the EPS0 loop-head check below.
+    splitPartner = {}
+    if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"] and not kernel["1LDSBuffer"]:
+      for row in self.states.memTokenLdsSplit:  # [half0, half1] per parity
+        a, b = row[0], row[1]
+        splitPartner.setdefault(a, set()).add(b)
+        splitPartner.setdefault(b, set()).add(a)
+
     removedCount = 0
     insertedCount = 0
 
@@ -11068,6 +11084,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
               info[token] = [access, phase]  # [firstAccess, tailState]
             else:
               info[token][1] = phase          # update tail to the last access
+        # A buffer token that is read-only in the body is still refilled
+        # cross-iteration; mark it "writing" so the loop head emits a read-release.
+        bufferReadTokens = {self.states.memTokenLdsBuffer0, self.states.memTokenLdsBuffer1}
+        bufferReadTokens |= set(splitPartner.keys())
+        bodyWriteTokens = {t for t, (fa, ts) in info.items() if fa == "write" or ts == "writing"}
+        if bodyWriteTokens:
+          for t, (fa, ts) in list(info.items()):
+            if fa == "read" and ts == "reading" and t in bufferReadTokens:
+              info[t][1] = "writing"
         headInfo[beginName] = info
       return headInfo
 
