@@ -6,6 +6,7 @@
 #include "SynchronizerValidator.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 using TensileLite::Client::scanSynchronizerResidue;
@@ -15,7 +16,7 @@ namespace
 {
     // Buffer of *ints* ints, all zero unless listed in *nonzero* as
     // (int index, value).
-    std::vector<uint8_t> makeBuffer(size_t                                        ints,
+    std::vector<uint8_t> makeBuffer(size_t                                          ints,
                                     std::vector<std::pair<size_t, uint32_t>> const& nonzero = {})
     {
         std::vector<uint8_t> buf(ints * sizeof(uint32_t), 0);
@@ -79,5 +80,3 @@ TEST(SynchronizerResidue, FindsResidueInTheLastInt)
     EXPECT_EQ(r.firstInt, 63u);
     EXPECT_EQ(r.nonzeroInts, 1u);
 }
-
-

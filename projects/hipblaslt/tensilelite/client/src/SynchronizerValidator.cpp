@@ -57,6 +57,7 @@ namespace TensileLite
         void SynchronizerValidator::preSolution(ContractionSolution* const solution)
         {
             m_dirtyInSolution = false;
+            m_checkedSolution = false;
         }
 
         void SynchronizerValidator::postSolution()
@@ -77,6 +78,7 @@ namespace TensileLite
                                                     TimingEvents const&            startEvents,
                                                     TimingEvents const&            stopEvents)
         {
+            m_checkedSolution = true;
             checkInputs(inputs, "warmup");
         }
 
