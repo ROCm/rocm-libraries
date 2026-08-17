@@ -53,6 +53,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
+    unit/asm/ModuleAdaptorsTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
     unit/asm/AccumulateInstructionSizePassTest.cpp
     unit/asm/SwInstructionPrefetchRelStaticPassTest.cpp
@@ -83,11 +84,15 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
     unit/asm/RemoveInstructionPassTest.cpp
+    unit/asm/RemoveDscntPassTest.cpp
     unit/asm/FlattenCalleesPassTest.cpp
+    unit/asm/Gfx1250HazardPassTest.cpp
+    unit/asm/Gfx1250HazardProfileTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyModulePassTest.cpp
     unit/asm/StinkySignatureTest.cpp
     unit/asm/RederiveExpertScopePassTest.cpp
+    unit/asm/HWModelTest.cpp
 )
 
 # High-Level IR Tests
@@ -112,6 +117,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/ComgrProbeTest.cpp
     unit/core/PassBuilderTest.cpp
     unit/core/BackendTest.cpp
+    unit/core/VersionTest.cpp
 )
 
 # Common/Shared Tests
@@ -201,6 +207,9 @@ if(BUILD_SHARED_LIBS)
     add_executable(api_tests
         ${TEST_MAIN}
         ${CMAKE_CURRENT_SOURCE_DIR}/api/ApiExportTest.cpp
+        # Address identity of the per-arch HWModel objects. Meaningful only against
+        # the shared lib; the unit_tests copy links statically and cannot fail.
+        ${CMAKE_CURRENT_SOURCE_DIR}/api/HWModelIdentityTest.cpp
     )
     target_link_libraries(api_tests PRIVATE stinkytofu-warnings)
     target_link_libraries(api_tests PUBLIC
@@ -225,6 +234,28 @@ if(BUILD_SHARED_LIBS)
             ${CMAKE_CURRENT_SOURCE_DIR}/../examples/plugins
         )
         add_dependencies(api_tests stinkytofu-plugin-helloworld)
+
+        # Test-only plugin that reports a deliberately wrong stinkytofu version,
+        # to assert loadPlugin() rejects a version mismatch before calling
+        # registerPlugin(). Headers-only, same DT_NEEDED rationale as the
+        # example plugin above (see examples/plugins/CMakeLists.txt).
+        add_library(stinkytofu-plugin-bad-version MODULE
+            ${CMAKE_CURRENT_SOURCE_DIR}/plugins/BadVersionPlugin.cpp
+        )
+        if(WIN32)
+            target_link_libraries(stinkytofu-plugin-bad-version PRIVATE stinkytofu)
+        else()
+            target_include_directories(stinkytofu-plugin-bad-version PRIVATE
+                $<TARGET_PROPERTY:stinkytofu,INTERFACE_INCLUDE_DIRECTORIES>
+            )
+        endif()
+        set_target_properties(stinkytofu-plugin-bad-version PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins"
+        )
+        target_compile_definitions(api_tests PRIVATE
+            STINKYTOFU_PLUGIN_BAD_VERSION_PATH="$<TARGET_FILE:stinkytofu-plugin-bad-version>"
+        )
+        add_dependencies(api_tests stinkytofu-plugin-bad-version)
     endif()
 
     gtest_discover_tests(api_tests
@@ -263,8 +294,11 @@ target_include_directories(test_gen_instructions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
+# Pass the configured arch list so the test checks the same set the build declares outputs for,
+# instead of a list of its own that would silently stop tracking it.
 add_test(NAME GenInstructionsTest
          COMMAND $<TARGET_FILE:test_gen_instructions> ${CMAKE_CURRENT_SOURCE_DIR}/..
+                 ${STINKYTOFU_ARCHS_TO_BUILD}
          WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set_tests_properties(GenInstructionsTest PROPERTIES
@@ -313,10 +347,14 @@ if(STINKYTOFU_BUILD_PYTHON)
                     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
                 )
 
-                # Set PYTHONPATH so pytest can find the module
+                # Set PYTHONPATH so pytest can find the module. The staleness-guard
+                # test briefly puts a probe .def in the scanned tree, which would
+                # make any concurrent `import stinkytofu` raise, so the Python tests
+                # share a lock rather than overlapping.
                 set_tests_properties(python.${TEST_NAME} PROPERTIES
                     ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/lib"
                     LABELS "python;unit_tests"
+                    RESOURCE_LOCK "stinkytofu_source_tree"
                 )
             endforeach()
 
@@ -343,6 +381,16 @@ file(GLOB FILECHECK_TESTS
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.stir"
     "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/*.s"
 )
+# v0-specific FileCheck tests invoke `--arch gfx1250v0`, so they are only valid
+# when the Gfx1250v0 stepping is built. Register them only then, keeping a
+# Gfx1250-only test build green.
+if("Gfx1250v0" IN_LIST STINKYTOFU_ARCHS_TO_BUILD)
+    file(GLOB FILECHECK_V0_TESTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.stir"
+        "${CMAKE_CURRENT_SOURCE_DIR}/filecheck/v0/*.s"
+    )
+    list(APPEND FILECHECK_TESTS ${FILECHECK_V0_TESTS})
+endif()
 foreach(test_file ${FILECHECK_TESTS})
     get_filename_component(test_name ${test_file} NAME_WE)
     add_test(
