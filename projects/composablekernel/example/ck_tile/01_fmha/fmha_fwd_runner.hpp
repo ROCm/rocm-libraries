@@ -717,8 +717,24 @@ fwd_result fmha_fwd_run(mode_enum mode,
        q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
        qscale.type != quant_scale_enum::mx)
     {
-        pack_gqa_nhead    = nhead_k;
-        pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;
+        if(qscale.type == quant_scale_enum::perhead)
+        {
+            std::cerr << "pack_gqa is not supported with the perhead quant scale. ignoring the "
+                         "'pack_gqa' option"
+                      << std::endl;
+        }
+        else if(qscale.type == quant_scale_enum::blockscale &&
+                shape_seqlen_q % block_scale_size_q_ != 0)
+        {
+            std::cerr << "pack_gqa needs seqlen_q to be a multiple of block_scale_size_q ("
+                      << shape_seqlen_q << " % " << block_scale_size_q_
+                      << "). ignoring the 'pack_gqa' option" << std::endl;
+        }
+        else
+        {
+            pack_gqa_nhead    = nhead_k;
+            pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;
+        }
     }
 
     const ck_tile::index_t num_block_scale_q =
@@ -1304,7 +1320,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
         const ck_tile::index_t nhead_stride_lse_acc = (num_splits * pack_gqa_seqlen_q_);
         const ck_tile::index_t nhead_stride_o_acc   = (num_splits * pack_gqa_seqlen_q_ * hdim_v);
         const ck_tile::index_t nhead_stride_o = (o_perm ? pack_gqa_seqlen_q_ * hdim_v : hdim_v);
-        const ck_tile::index_t nhead_stride_q_descale = num_block_scale_q;
+        const ck_tile::index_t nhead_stride_q_descale =
+            (nhead / pack_gqa_nhead_) * num_block_scale_q;
         const ck_tile::index_t nhead_stride_k_descale = num_block_scale_kv;
         const ck_tile::index_t nhead_stride_v_descale = num_block_scale_kv;
         // setup batch_stride_* arguments
