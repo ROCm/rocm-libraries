@@ -10,15 +10,17 @@
 #include <hip/library_types.h>
 #include <optional>
 #include <ostream>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/axpby.hpp>
 #include <roc/host_validation/comparison.hpp>
 #include <span>
 #include <stdexcept>
 #include <utility>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     struct MatrixTransformReferenceArguments
     {
         const void*          observed               = nullptr;
@@ -165,4 +167,4 @@ namespace roc::host_validation::hipblaslt_adapter
             .comparison = comparison,
         };
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

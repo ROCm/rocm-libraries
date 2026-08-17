@@ -28,7 +28,7 @@
 #include <functional>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/generation.hpp>
 
 #ifndef CHECK_HIP_ERROR
@@ -96,7 +96,7 @@ namespace hipblaslt_sample_detail
         options.real.parameter1 = 3;
         options.real.stream     = stream;
         roc::host_validation::generate(
-            roc::host_validation::hipblaslt_adapter::mutableTensorView(
+            hipblaslt::host_validation::mutableTensorView(
                 values,
                 elements,
                 roc::host_validation::Layout::contiguous(roc::host_validation::Shape{elements})),

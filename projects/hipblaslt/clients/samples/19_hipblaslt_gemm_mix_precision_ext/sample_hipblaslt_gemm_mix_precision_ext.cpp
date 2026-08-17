@@ -27,7 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <iostream>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 
@@ -67,7 +67,7 @@ int validate(const Runner<TypeA, TypeB, TypeCD, AlphaType, BetaType>& runner)
     for(int64_t b = 0; b < runner.batch_count; ++b)
     {
         using namespace roc::host_validation;
-        using namespace roc::host_validation::hipblaslt_adapter;
+        using namespace hipblaslt::host_validation;
 
         GemmRequest problem(GemmOperand(tensorView(aPtr + batchStrideA * b,
                                                    batchStrideA,

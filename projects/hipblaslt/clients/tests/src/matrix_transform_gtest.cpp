@@ -33,8 +33,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
 #include <numeric>
-#include <roc/host_validation/adapters/hipblaslt/MatrixTransformReference.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/MatrixTransformReference.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <sstream>
 #include <tuple>
@@ -142,7 +142,7 @@ namespace
             options.real.parameter1 = 3;
             options.real.stream     = static_cast<std::uint64_t>(stream);
             roc::host_validation::generate(
-                roc::host_validation::hipblaslt_adapter::mutableTensorView(
+                hipblaslt::host_validation::mutableTensorView(
                     ref.data(),
                     ref.size(),
                     roc::host_validation::Layout::contiguous(
@@ -214,7 +214,7 @@ namespace
                     bool        transA,
                     bool        transB)
     {
-        const auto   scalarType = roc::host_validation::hipblaslt_adapter::scalarType(datatype);
+        const auto   scalarType = hipblaslt::host_validation::scalarType(datatype);
         const size_t elementBytes
             = roc::host_validation::scalarTypeInfo(scalarType).storageBits / 8;
         const size_t           storageBytes = size_t(m) * n * batchSize * elementBytes;
@@ -237,7 +237,7 @@ namespace
 
         ASSERT_EQ(err, hipSuccess);
 
-        roc::host_validation::hipblaslt_adapter::MatrixTransformReferenceArguments arguments;
+        hipblaslt::host_validation::MatrixTransformReferenceArguments arguments;
         arguments.observed                     = hC.data();
         arguments.observedStorageBytes         = storageBytes;
         arguments.a                            = a ? hA.data() : nullptr;
@@ -262,10 +262,10 @@ namespace
         arguments.comparison.absoluteTolerance = 1e-5;
 
         const auto result
-            = roc::host_validation::hipblaslt_adapter::referenceMatrixTransform(arguments);
+            = hipblaslt::host_validation::referenceMatrixTransform(arguments);
         std::ostringstream diagnostics;
-        roc::host_validation::hipblaslt_adapter::reportMatrixTransformMismatches(diagnostics,
-                                                                                 result.comparison);
+        hipblaslt::host_validation::reportMatrixTransformMismatches(diagnostics,
+                                                                    result.comparison);
         ASSERT_TRUE(result.comparison.passed()) << diagnostics.str();
     }
 }

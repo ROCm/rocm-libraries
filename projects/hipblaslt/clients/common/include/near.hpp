@@ -3,4 +3,4 @@
 
 #pragma once
 
-#include <roc/host_validation/adapters/hipblaslt/near.hpp>
+#include <hipblaslt/host_validation/near.hpp>

@@ -39,7 +39,7 @@
 #include <cmath>
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
@@ -119,7 +119,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     aGeneration.real.remainderDivisor      = 7;
     aGeneration.real.valueOffset           = 1;
     roc::host_validation::generate(
-        roc::host_validation::hipblaslt_adapter::mutableTensorView(
+        hipblaslt::host_validation::mutableTensorView(
             h_A_full.data(),
             h_A_full.size(),
             roc::host_validation::Layout(
@@ -132,7 +132,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     bGeneration.real.dimensionCoefficients              = {1, -1, 1};
     bGeneration.real.remainderDivisor                   = 5;
     roc::host_validation::generate(
-        roc::host_validation::hipblaslt_adapter::mutableTensorView(
+        hipblaslt::host_validation::mutableTensorView(
             h_B_full.data(),
             h_B_full.size(),
             roc::host_validation::Layout(
@@ -146,7 +146,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
     cGeneration.real.remainderDivisor                   = 3;
     cGeneration.real.valueOffset                        = 0;
     roc::host_validation::generate(
-        roc::host_validation::hipblaslt_adapter::mutableTensorView(
+        hipblaslt::host_validation::mutableTensorView(
             h_C_full.data(),
             h_C_full.size(),
             roc::host_validation::Layout(
@@ -321,7 +321,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         const ptrdiff_t bColumnStride = transB == HIPBLAS_OP_N ? static_cast<ptrdiff_t>(ldb) : 1;
 
         using namespace roc::host_validation;
-        using namespace roc::host_validation::hipblaslt_adapter;
+        using namespace hipblaslt::host_validation;
         auto storageElements
             = [](size_t rows, size_t columns, ptrdiff_t rowStride, ptrdiff_t columnStride) {
                   if(rows == 0 || columns == 0)

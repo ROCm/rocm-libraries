@@ -1,16 +1,18 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <roc/host_validation/adapters/hipblaslt/Reduction.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Reduction.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 
 #include <cstddef>
 #include <span>
 #include <stdexcept>
 #include <string>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     namespace
     {
         std::span<const std::byte>
@@ -55,4 +57,4 @@ namespace roc::host_validation::hipblaslt_adapter
             accumulatorType,
             {1}));
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

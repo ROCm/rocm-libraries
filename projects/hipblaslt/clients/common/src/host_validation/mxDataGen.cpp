@@ -4,8 +4,8 @@
 // Product-private hipBLASLt translation and architecture-selected upload
 // transforms around component-owned MX tensor generation.
 
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
-#include <roc/host_validation/adapters/hipblaslt/mxDataGen.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
+#include <hipblaslt/host_validation/mxDataGen.hpp>
 #include <roc/host_validation/mx.hpp>
 
 #include <cmath>
@@ -49,7 +49,7 @@ namespace
     {
         if(scaleType == HIP_R_8F_E4M3)
             return ScalarType::E4M3;
-        return roc::host_validation::hipblaslt_adapter::scalarType(scaleType);
+        return hipblaslt::host_validation::scalarType(scaleType);
     }
 
     bool recipesEqual(const MxGenerationRecipe& first, const MxGenerationRecipe& second)
@@ -218,7 +218,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     if(blockRows > 1 && blockColumns > 1)
         throw std::invalid_argument("generateMXInput supports blocking along one tensor axis.");
 
-    const ScalarType hostDataType = roc::host_validation::hipblaslt_adapter::scalarType(dataType);
+    const ScalarType hostDataType = hipblaslt::host_validation::scalarType(dataType);
     MxGenerationProblem problem;
     problem.dataType  = hostDataType;
     problem.scaleType = scaleScalarType(scaleType);
