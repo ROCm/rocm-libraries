@@ -275,9 +275,6 @@ public:
 
             if(run_callbacks == fft_callback_type_jit)
             {
-                // - not implemented yet
-                throw unimplemented_exception("jit callbacks not implemented");
-#if 0
                 check_jit_callback_state();
                 fft_status = rocfft.plan_description_set_load_callback(
                     desc,
@@ -304,7 +301,6 @@ public:
                 {
                     throw std::runtime_error("rocfft_plan_description_set_store_callback failed");
                 }
-#endif
             }
         }
 
@@ -774,9 +770,8 @@ struct rocfft_funcs
     ROCFFT_API_WRAP(plan_description_set_comm);
     ROCFFT_API_WRAP(plan_description_set_data_layout);
     ROCFFT_API_WRAP(plan_description_set_scale_factor);
-    // - not implemented yet
-    // ROCFFT_API_WRAP(plan_description_set_load_callback);
-    // ROCFFT_API_WRAP(plan_description_set_store_callback);
+    ROCFFT_API_WRAP(plan_description_set_load_callback);
+    ROCFFT_API_WRAP(plan_description_set_store_callback);
     ROCFFT_API_WRAP(plan_destroy);
     ROCFFT_API_WRAP(plan_get_work_buffer_size);
     ROCFFT_API_WRAP(setup);
@@ -860,9 +855,8 @@ struct dyna_rocfft_funcs
     ROCFFT_DYNA_API_WRAP(plan_description_set_comm);
     ROCFFT_DYNA_API_WRAP(plan_description_set_data_layout);
     ROCFFT_DYNA_API_WRAP(plan_description_set_scale_factor);
-    // - not implemented yet
-    // ROCFFT_DYNA_API_WRAP(plan_description_set_load_callback);
-    // ROCFFT_DYNA_API_WRAP(plan_description_set_store_callback);
+    ROCFFT_DYNA_API_WRAP(plan_description_set_load_callback);
+    ROCFFT_DYNA_API_WRAP(plan_description_set_store_callback);
     ROCFFT_DYNA_API_WRAP(plan_destroy);
     ROCFFT_DYNA_API_WRAP(plan_get_work_buffer_size);
     ROCFFT_DYNA_API_WRAP(setup);
@@ -894,9 +888,8 @@ struct dyna_rocfft_funcs
         ROCFFT_DYNA_API_LOAD(plan_description_set_comm);
         ROCFFT_DYNA_API_LOAD(plan_description_set_data_layout);
         ROCFFT_DYNA_API_LOAD(plan_description_set_scale_factor);
-        // - not implemented yet
-        // ROCFFT_DYNA_API_LOAD(plan_description_set_store_callback);
-        // ROCFFT_DYNA_API_LOAD(plan_description_set_load_callback);
+        ROCFFT_DYNA_API_LOAD(plan_description_set_store_callback);
+        ROCFFT_DYNA_API_LOAD(plan_description_set_load_callback);
         ROCFFT_DYNA_API_LOAD(plan_destroy);
         ROCFFT_DYNA_API_LOAD(plan_get_work_buffer_size);
         ROCFFT_DYNA_API_LOAD(setup);
@@ -935,11 +928,10 @@ struct dyna_rocfft_funcs
         std::swap(this->plan_description_set_comm, other.plan_description_set_comm);
         std::swap(this->plan_description_set_data_layout, other.plan_description_set_data_layout);
         std::swap(this->plan_description_set_scale_factor, other.plan_description_set_scale_factor);
-        // - not implemented yet
-        // std::swap(this->plan_description_set_load_callback,
-        //           other.plan_description_set_load_callback);
-        // std::swap(this->plan_description_set_store_callback,
-        //           other.plan_description_set_store_callback);
+        std::swap(this->plan_description_set_load_callback,
+                  other.plan_description_set_load_callback);
+        std::swap(this->plan_description_set_store_callback,
+                  other.plan_description_set_store_callback);
         std::swap(this->plan_destroy, other.plan_destroy);
         std::swap(this->plan_get_work_buffer_size, other.plan_get_work_buffer_size);
         std::swap(this->setup, other.setup);
