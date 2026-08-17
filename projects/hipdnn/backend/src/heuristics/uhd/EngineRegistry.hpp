@@ -64,18 +64,56 @@ struct UhdConfig
 /// Represents an engine with its UHD configuration and registered kernels.
 /// In full RFC 0017 integration, this maps to the UED which owns the UHD
 /// and KMD, with KDPs joining the engine and contributing child UKDs.
+///
+/// RFC 0019 §3.1: An engine names up to three role-scoped UHDs, each mapped
+/// by architecture (gcnArchName). Resolution tries exact arch, then "default",
+/// then nullopt.
 struct EngineEntry
 {
     int64_t engineId;
     std::string engineName;
-    UhdConfig uhdConfig;
+
+    // RFC 0019 §3.1: Three role-scoped, arch-keyed UHDs
+    std::unordered_map<std::string, UhdConfig> sortKernelCatalog; // main: ranks catalog
+    std::unordered_map<std::string, UhdConfig> predictEngineTflops; // optional: engine estimate
+    std::unordered_map<std::string, UhdConfig> predictApplicableKernels; // future: JIT candidate gen
+
     std::vector<KernelCandidate> candidates;
 
-    // Loaded adapter (cached after first use)
-    mutable std::shared_ptr<IUhdAdapter> cachedAdapter;
+    // Loaded adapters (cached after first use, keyed by role + arch)
+    mutable std::unordered_map<std::string, std::shared_ptr<IUhdAdapter>> cachedAdapters;
 
-    // Cached feature extractor (built on first use from featuresSignature)
-    mutable std::shared_ptr<FeatureExtractor> cachedExtractor;
+    // Cached feature extractors (keyed by role + arch)
+    mutable std::unordered_map<std::string, std::shared_ptr<FeatureExtractor>> cachedExtractors;
+
+    /// Resolve UHD by arch (RFC 0019 §8.3).
+    /// Tries exact arch match, then "default", then returns nullopt.
+    std::optional<UhdConfig> resolveUhd(const std::unordered_map<std::string, UhdConfig>& roleMap,
+                                         const std::string& arch) const;
+
+    /// Helper: resolve sort_kernel_catalog UHD (the main one).
+    std::optional<UhdConfig> resolveSortKernelCatalog(const std::string& arch) const
+    {
+        return resolveUhd(sortKernelCatalog, arch);
+    }
+
+    /// Helper: resolve predict_engine_tflops UHD (optional).
+    std::optional<UhdConfig> resolvePredictEngineTflops(const std::string& arch) const
+    {
+        return resolveUhd(predictEngineTflops, arch);
+    }
+
+    /// Helper: resolve predict_applicable_kernels UHD (future).
+    std::optional<UhdConfig> resolvePredictApplicableKernels(const std::string& arch) const
+    {
+        return resolveUhd(predictApplicableKernels, arch);
+    }
+
+    // Backward compatibility: legacy single-UHD interface (deprecated)
+    // Maps to sortKernelCatalog["default"] for existing code
+    UhdConfig uhdConfig; // DEPRECATED: use sortKernelCatalog["default"] instead
+    mutable std::shared_ptr<IUhdAdapter> cachedAdapter; // DEPRECATED
+    mutable std::shared_ptr<FeatureExtractor> cachedExtractor; // DEPRECATED
 };
 
 /// @brief Mock engine registry for UHD selection testing.
@@ -172,15 +210,24 @@ private:
     /// Check a declared features_hash against its features_signature, and warn when a
     /// feature-bearing adapter ships without one.
     /// @throws std::invalid_argument on mismatch.
-    static void validateFeaturesHash(const EngineEntry& entry);
+    static void validateFeaturesHash(const UhdConfig& cfg,
+                                      int64_t engineId,
+                                      const std::string& role,
+                                      const std::string& arch);
 
     /// Check that a declared score.transform is one this runtime can invert.
     /// @throws std::invalid_argument on an unsupported transform name.
-    static void validateScoreTransform(const EngineEntry& entry);
+    static void validateScoreTransform(const UhdConfig& cfg,
+                                        int64_t engineId,
+                                        const std::string& role,
+                                        const std::string& arch);
 
     /// Check that a declared objective is one of the two RFC 0019 §5 values.
     /// @throws std::invalid_argument on any other value.
-    static void validateObjective(const EngineEntry& entry);
+    static void validateObjective(const UhdConfig& cfg,
+                                   int64_t engineId,
+                                   const std::string& role,
+                                   const std::string& arch);
 
     /// Entries are held by shared_ptr so a reader can outlive a re-registration that
     /// replaces the entry (see getEngine).

@@ -31,7 +31,37 @@ SelectionResult SelectionEngine::select(int64_t engineId,
     }
 
     const EngineEntry& engine = *enginePtr;
-    const UhdConfig& cfg = engine.uhdConfig;
+
+    // RFC 0019 §3.1 + §8.3: Resolve arch-keyed UHD for sort_kernel_catalog role
+    // Extract arch from deviceVars (try "arch", fallback to "default")
+    std::string arch = "default";
+    auto archIt = deviceVars.find(DEVICE_ARCH_KEY);
+    if(archIt != deviceVars.end())
+    {
+        if(const auto* archStr = std::get_if<std::string>(&archIt->second))
+        {
+            arch = *archStr;
+        }
+    }
+
+    // Resolve UHD by arch (tries exact match, then "default", then nullopt)
+    auto uhdOpt = engine.resolveSortKernelCatalog(arch);
+    if(!uhdOpt.has_value())
+    {
+        // Fall back to legacy uhdConfig if no role-scoped UHD found
+        if(!engine.uhdConfig.uhdId.empty())
+        {
+            uhdOpt = engine.uhdConfig;
+        }
+        else
+        {
+            result.fallbackReason = "no sort_kernel_catalog UHD for arch '" + arch + "'";
+            result.trace.fallbackReason = result.fallbackReason;
+            return result;
+        }
+    }
+
+    const UhdConfig& cfg = uhdOpt.value();
 
     // Populate trace with UHD config (RFC 0019 §13)
     result.trace.uhdId = cfg.uhdId;

@@ -19,6 +19,26 @@
 namespace hipdnn_backend::heuristics::uhd
 {
 
+std::optional<UhdConfig> EngineEntry::resolveUhd(
+    const std::unordered_map<std::string, UhdConfig>& roleMap,
+    const std::string& arch) const
+{
+    // RFC 0019 §8.3: Try exact arch match, then "default", then nullopt
+    auto it = roleMap.find(arch);
+    if(it != roleMap.end())
+    {
+        return it->second;
+    }
+
+    it = roleMap.find("default");
+    if(it != roleMap.end())
+    {
+        return it->second;
+    }
+
+    return std::nullopt;
+}
+
 EngineRegistry& EngineRegistry::instance()
 {
     static EngineRegistry s_instance;
@@ -27,64 +47,91 @@ EngineRegistry& EngineRegistry::instance()
 
 void EngineRegistry::registerEngine(EngineEntry entry)
 {
-    // Validate KMD field coverage: every $kernel.* in features_signature
-    // must exist in at least one candidate's metadata (RFC 0019 §7.3).
-    if(!entry.uhdConfig.featuresSignature.empty() && !entry.candidates.empty())
+    // Backward compatibility: migrate legacy uhdConfig to sortKernelCatalog["default"]
+    if(!entry.uhdConfig.uhdId.empty() && entry.sortKernelCatalog.empty())
     {
-        // Collect all metadata keys across candidates (the KMD field space)
-        std::unordered_set<std::string> kmdFields;
-        for(const auto& candidate : entry.candidates)
-        {
-            for(const auto& [key, _] : candidate.metadata)
-            {
-                kmdFields.insert(key);
-            }
-        }
-        // Also include implicit kernel fields that SelectionEngine adds
-        kmdFields.insert("priority");
-        kmdFields.insert("id");
-
-        // Build extractor to parse signature and extract $kernel.* refs.
-        // A malformed entry throws JsonLogicError; re-raise as invalid_argument so the
-        // exception type matches what registerEngine documents.
-        std::vector<std::string> missingFields;
-        try
-        {
-            const FeatureExtractor extractor(entry.uhdConfig.featuresSignature);
-            missingFields = extractor.getMissingKmdFields(kmdFields);
-        }
-        catch(const JsonLogicError& e)
-        {
-            std::ostringstream oss;
-            oss << "UHD features_signature contains an entry that is neither a bare $ref "
-                << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='"
-                << entry.uhdConfig.uhdId << "': " << e.what();
-            throw std::invalid_argument(oss.str());
-        }
-
-        if(!missingFields.empty())
-        {
-            std::ostringstream oss;
-            oss << "UHD features_signature references $kernel.* fields not present in "
-                << "candidate metadata: ";
-            for(size_t i = 0; i < missingFields.size(); ++i)
-            {
-                if(i > 0)
-                {
-                    oss << ", ";
-                }
-                oss << missingFields[i];
-            }
-            oss << ". Engine ID: " << entry.engineId
-                << ". Ensure all $kernel.* fields in features_signature are present in candidate "
-                   "metadata.";
-            throw std::invalid_argument(oss.str());
-        }
+        entry.sortKernelCatalog["default"] = entry.uhdConfig;
     }
 
-    validateFeaturesHash(entry);
-    validateScoreTransform(entry);
-    validateObjective(entry);
+    // Helper: validate one UHD config
+    auto validateUhdConfig = [&](const UhdConfig& cfg, const std::string& role, const std::string& arch) {
+        if(!cfg.featuresSignature.empty() && !entry.candidates.empty())
+        {
+            // Collect all metadata keys across candidates (the KMD field space)
+            std::unordered_set<std::string> kmdFields;
+            for(const auto& candidate : entry.candidates)
+            {
+                for(const auto& [key, _] : candidate.metadata)
+                {
+                    kmdFields.insert(key);
+                }
+            }
+            // Also include implicit kernel fields that SelectionEngine adds
+            kmdFields.insert("priority");
+            kmdFields.insert("id");
+
+            // Build extractor to parse signature and extract $kernel.* refs
+            std::vector<std::string> missingFields;
+            try
+            {
+                const FeatureExtractor extractor(cfg.featuresSignature);
+                missingFields = extractor.getMissingKmdFields(kmdFields);
+            }
+            catch(const JsonLogicError& e)
+            {
+                std::ostringstream oss;
+                oss << "UHD features_signature contains an entry that is neither a bare $ref "
+                    << "nor valid JsonLogic. Engine ID: " << entry.engineId
+                    << ", role='" << role << "', arch='" << arch << "', uhd='"
+                    << cfg.uhdId << "': " << e.what();
+                throw std::invalid_argument(oss.str());
+            }
+
+            if(!missingFields.empty())
+            {
+                std::ostringstream oss;
+                oss << "UHD features_signature references $kernel.* fields not present in "
+                    << "candidate metadata: ";
+                for(size_t i = 0; i < missingFields.size(); ++i)
+                {
+                    if(i > 0)
+                    {
+                        oss << ", ";
+                    }
+                    oss << missingFields[i];
+                }
+                oss << ". Engine ID: " << entry.engineId << ", role='" << role
+                    << "', arch='" << arch << "'. Ensure all $kernel.* fields in "
+                    << "features_signature are present in candidate metadata.";
+                throw std::invalid_argument(oss.str());
+            }
+        }
+    };
+
+    // Validate all configured UHDs across all three roles
+    for(const auto& [arch, cfg] : entry.sortKernelCatalog)
+    {
+        validateUhdConfig(cfg, "sort_kernel_catalog", arch);
+        validateFeaturesHash(cfg, entry.engineId, "sort_kernel_catalog", arch);
+        validateScoreTransform(cfg, entry.engineId, "sort_kernel_catalog", arch);
+        validateObjective(cfg, entry.engineId, "sort_kernel_catalog", arch);
+    }
+
+    for(const auto& [arch, cfg] : entry.predictEngineTflops)
+    {
+        validateUhdConfig(cfg, "predict_engine_tflops", arch);
+        validateFeaturesHash(cfg, entry.engineId, "predict_engine_tflops", arch);
+        validateScoreTransform(cfg, entry.engineId, "predict_engine_tflops", arch);
+        validateObjective(cfg, entry.engineId, "predict_engine_tflops", arch);
+    }
+
+    for(const auto& [arch, cfg] : entry.predictApplicableKernels)
+    {
+        validateUhdConfig(cfg, "predict_applicable_kernels", arch);
+        validateFeaturesHash(cfg, entry.engineId, "predict_applicable_kernels", arch);
+        validateScoreTransform(cfg, entry.engineId, "predict_applicable_kernels", arch);
+        validateObjective(cfg, entry.engineId, "predict_applicable_kernels", arch);
+    }
 
     const int64_t engineId = entry.engineId;
 
@@ -94,10 +141,11 @@ void EngineRegistry::registerEngine(EngineEntry entry)
     _engines[engineId] = std::make_shared<EngineEntry>(std::move(entry));
 }
 
-void EngineRegistry::validateObjective(const EngineEntry& entry)
+void EngineRegistry::validateObjective(const UhdConfig& cfg,
+                                        int64_t engineId,
+                                        const std::string& role,
+                                        const std::string& arch)
 {
-    const UhdConfig& cfg = entry.uhdConfig;
-
     // RFC 0019 §5 and §6 step 4 name exactly two values. sortByObjective computes
     // `maximize = (objective != "min")`, so anything unrecognized — a typo, a case
     // variant, "minimize" — silently maximizes. For a min-objective model that
@@ -107,16 +155,18 @@ void EngineRegistry::validateObjective(const EngineEntry& entry)
     {
         std::ostringstream oss;
         oss << "UHD declares an unrecognized objective '" << cfg.objective
-            << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+            << "'. Engine ID: " << engineId << ", role='" << role
+            << "', arch='" << arch << "', uhd='" << cfg.uhdId
             << R"('. Supported: "max", "min" (empty defaults to max).)";
         throw std::invalid_argument(oss.str());
     }
 }
 
-void EngineRegistry::validateScoreTransform(const EngineEntry& entry)
+void EngineRegistry::validateScoreTransform(const UhdConfig& cfg,
+                                             int64_t engineId,
+                                             const std::string& role,
+                                             const std::string& arch)
 {
-    const UhdConfig& cfg = entry.uhdConfig;
-
     // A transform this runtime cannot invert means the score cannot be reported in the
     // units the descriptor declares. Rejecting at load is the only honest option:
     // score_transform::applyInverse has no way to signal "unknown" at the point of
@@ -128,16 +178,18 @@ void EngineRegistry::validateScoreTransform(const EngineEntry& entry)
     {
         std::ostringstream oss;
         oss << "UHD declares an unsupported score.transform '" << cfg.scoreTransform
-            << "'. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+            << "'. Engine ID: " << engineId << ", role='" << role
+            << "', arch='" << arch << "', uhd='" << cfg.uhdId
             << "'. Supported: " << score_transform::supportedTransformList() << ".";
         throw std::invalid_argument(oss.str());
     }
 }
 
-void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
+void EngineRegistry::validateFeaturesHash(const UhdConfig& cfg,
+                                           int64_t engineId,
+                                           const std::string& role,
+                                           const std::string& arch)
 {
-    const UhdConfig& cfg = entry.uhdConfig;
-
     // A declared hash must describe the signature it ships with (RFC 0019 §7.3). The
     // load-time check in SelectionEngine only compares the model's embedded hash to
     // this one; without this check both could agree while neither matches the
@@ -160,8 +212,8 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
             // that only catches invalid_argument.
             std::ostringstream oss;
             oss << "UHD features_signature contains an entry that is neither a bare $ref "
-                << "nor valid JsonLogic. Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
-                << "': " << e.what();
+                << "nor valid JsonLogic. Engine ID: " << engineId << ", role='" << role
+                << "', arch='" << arch << "', uhd='" << cfg.uhdId << "': " << e.what();
             throw std::invalid_argument(oss.str());
         }
 
@@ -169,7 +221,8 @@ void EngineRegistry::validateFeaturesHash(const EngineEntry& entry)
         {
             std::ostringstream oss;
             oss << "UHD features_hash does not describe its own features_signature. "
-                << "Engine ID: " << entry.engineId << ", uhd='" << cfg.uhdId
+                << "Engine ID: " << engineId << ", role='" << role
+                << "', arch='" << arch << "', uhd='" << cfg.uhdId
                 << "', declared=" << cfg.featuresHash << ", computed=" << actual
                 << ". The signature and hash must be emitted together — regenerate the "
                    "descriptor rather than editing either by hand.";

@@ -145,27 +145,35 @@ int main()
     entry.engineId = 1000;
     entry.engineName = "ExampleConvEngine";
 
-    // UHD configuration
-    entry.uhdConfig.uhdId = "example_uhd_v1";
-    entry.uhdConfig.name = "Example GBDT Heuristic";
-    entry.uhdConfig.adapterType = "tree_data";
-    entry.uhdConfig.objective = "max"; // Maximize predicted TFLOPS
+    // RFC 0019 §3.1: UHD configuration for sort_kernel_catalog role
+    // Using "default" arch key for arch-independent heuristic
+    UhdConfig uhdConfig;
+    uhdConfig.uhdId = "example_uhd_v1";
+    uhdConfig.name = "Example GBDT Heuristic";
+    uhdConfig.adapterType = "tree_data";
+    uhdConfig.objective = "max"; // Maximize predicted TFLOPS
 
     // Features signature: [$kernel.tile_m, $q.batch]
-    entry.uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$q.batch\""};
+    uhdConfig.featuresSignature = {"\"$kernel.tile_m\"", "\"$q.batch\""};
 
     // Compute features hash (must match model)
-    entry.uhdConfig.featuresHash = FeatureExtractor::computeHash(entry.uhdConfig.featuresSignature);
+    uhdConfig.featuresHash = FeatureExtractor::computeHash(uhdConfig.featuresSignature);
 
     // Derived values (RFC 0019 §6.4): compute num_tiles from problem/kernel params
-    entry.uhdConfig.derived = {
+    uhdConfig.derived = {
         {"num_tiles", "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m\"]}"}
     };
 
     // Score metadata
-    entry.uhdConfig.scoreUnits = "tflops";
-    entry.uhdConfig.scoreCalibrated = true;
-    entry.uhdConfig.scoreTransform = "log1p"; // log1p(predicted_tflops)
+    uhdConfig.scoreUnits = "tflops";
+    uhdConfig.scoreCalibrated = true;
+    uhdConfig.scoreTransform = "log1p"; // log1p(predicted_tflops)
+
+    // Register as sort_kernel_catalog["default"] (arch-independent for this example)
+    entry.sortKernelCatalog["default"] = uhdConfig;
+
+    // Backward compatibility: also populate legacy field
+    entry.uhdConfig = uhdConfig;
 
     // Register 3 kernel candidates with different tile_m values
     KernelCandidate k1;
