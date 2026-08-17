@@ -66,7 +66,12 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: ROCm/rocm-systems
-          ref: bded72bb7d1fc7e25620dcf35e2cd11eade08b26
+          # Pin must be >= #9262 (0c7288aef8, 2026-07-27) which introduced the
+          # hsa_hotswap_rocjitsu CMake target the build script requires. The prior
+          # pin (bded72bb, 2026-07-23) predated it → "ninja: error: unknown target
+          # 'hsa_hotswap_rocjitsu'". This SHA is the one validated locally (40/126
+          # gfx1250 tensilelite tests passing).
+          ref: aa2fd80d141b5f5ab665ba21f0ee83458bbf9968
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
