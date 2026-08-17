@@ -124,7 +124,8 @@ def run(args) -> int:
           f"({len(configs)-build_ok} failed)")
 
     # --- Run ---
-    print(f"\nRunning {build_ok} kernels on GPU (M=N=K={size})...")
+    print(f"\nRunning {build_ok} kernels on GPU (M=N=K={size}, "
+          f"warmup={args.warmup}, repeat={args.repeat})...")
     problem = GemmProblem(M=size, N=size, K=size)
     rng = np.random.default_rng(seed)
     A = (rng.standard_normal((size, size)) * 0.1).astype(np.float32)
@@ -139,23 +140,33 @@ def run(args) -> int:
             results.append({"name": cfg.name, "status": "build_fail"})
             continue
         try:
-            result = GpuGemmRunner(lib_path=so).run(A, B, problem)
+            runner = GpuGemmRunner(lib_path=so)
+            for _ in range(args.warmup):
+                runner.run(A, B, problem)
+            times = []
+            result = None
+            for _ in range(max(1, args.repeat)):
+                result = runner.run(A, B, problem)
+                if result.success:
+                    times.append(result.time_ms)
         except Exception as exc:
             n_fail += 1
             results.append({"name": cfg.name, "status": "run_error", "error": str(exc)})
             continue
-        if not result.success:
+        if result is None or not result.success:
             n_fail += 1
             results.append({"name": cfg.name, "status": "run_fail",
-                            "error": f"status={result.status}"})
+                            "error": f"status={getattr(result, 'status', 'unknown')}"})
             continue
+        avg_ms = sum(times) / len(times) if times else result.time_ms
+        tflops = (2.0 * size * size * size / (avg_ms * 1e-3)) / 1e12
         ref = _emulate(_emulate(A, cfg.dtype_a) @ _emulate(B, cfg.dtype_a), cfg.dtype_a)
         mr = _max_rel(result.output, ref)
         ok = mr <= _RTOL
         n_pass += ok
         n_fail += not ok
         results.append({"name": cfg.name, "status": "pass" if ok else "fail",
-                        "tflops": round(result.tflops, 3), "max_rel": round(mr, 6)})
+                        "tflops": round(tflops, 3), "max_rel": round(mr, 6)})
 
     # --- Report ---
     print(f"\n{'='*60}")
@@ -194,6 +205,10 @@ def main() -> int:
                    help="Max configs to run; 0 = no cap (default: 500)")
     p.add_argument("--seed", type=int, default=None,
                    help="RNG seed; default = daily rotating seed")
+    p.add_argument("--warmup", type=int, default=5,
+                   help="Warmup iterations per kernel (default: 5)")
+    p.add_argument("--repeat", type=int, default=5,
+                   help="Timed iterations per kernel (default: 5)")
     p.add_argument("--size", type=int, default=1024,
                    help="M=N=K problem size (default: 1024)")
     p.add_argument("--json", default=None,

@@ -1503,7 +1503,6 @@ def runTileEngineGemmTests(String arch, String compiler) {
 
 def runDispatcherTests(String arch, String compiler) {
     def execute_cmd = """
-        cd build && \
         cmake -G Ninja -D CMAKE_PREFIX_PATH=/opt/rocm \
             -D CMAKE_CXX_COMPILER="${compiler}" \
             -D CMAKE_BUILD_TYPE=Release \
@@ -1517,9 +1516,12 @@ def runDispatcherTests(String arch, String compiler) {
             --dtypes fp16,bf16,fp8,bf8 \
             --layouts rcr,rrr,crr,ccr \
             --budget 500 \
+            --warmup 5 \
+            --repeat 5 \
             --size 1024 \
             --json dispatcher_gemm_results.json"""
     buildAndTest(setup_args: "NO_CK_BUILD", build_type: 'Release', execute_cmd: execute_cmd)
+    archiveArtifacts artifacts: "dispatcher_gemm_results.json", allowEmptyArchive: true
 }
 
 def runBuildCKAndTests(String arch) {
