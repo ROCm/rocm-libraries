@@ -170,7 +170,7 @@ typename ConvPtrsType::iterator FindConvPtrByID(ConvPtrsType& conv_ptrs,
 }
 
 // Returns true when any tensor stride/dim exceeds INT_MAX, or when a grouped
-// backward-weights tensor's flattened element count exceeds INT_MAX, so the problem
+// backward-weights tensor's addressable element extent exceeds INT_MAX, so the problem
 // must be dispatched to a CK instance whose argument types are int64 end-to-end.
 //
 // CK exposes both index_t (int32) and long_index_t (int64) MakeArgumentPointer
@@ -186,18 +186,23 @@ inline bool RequiresLargeTensorCKInstance(const ProblemDescriptionType& problem)
         return true;
 
     // AllTensorsDimsFitIntoInt() only checks that each individual length/stride fits in
-    // int32; it does NOT bound the flattened element count. A grouped backward-weights
-    // tensor whose total element count exceeds INT_MAX overflows a non-large CK instance's
-    // 32-bit element indexing and returns silently wrong results, so require a large-tensor
-    // (int64) instance for those too. Scoped to the backward-weights direction: forward and
-    // backward-data verify correctly on the int32 instances and must keep them (the
-    // large-tensor instances are measurably slower).
+    // int32; it does NOT bound the maximum flat element offset the kernel indexes. A grouped
+    // backward-weights tensor whose element extent exceeds INT_MAX overflows a non-large CK
+    // instance's 32-bit element indexing and returns silently wrong results, so require a
+    // large-tensor (int64) instance for those too. Use GetElementSpace() (the stride-aware
+    // max addressable offset, as GetNumBytes() does), not GetElementSize() (the packed
+    // element count): for a non-packed tensor the element space is larger and is the true
+    // bound on the int32 offset that overflows. Scoped to the backward-weights direction:
+    // forward and backward-data verify correctly on the int32 instances and must keep them
+    // (the large-tensor instances are measurably slower). This gate is rank-agnostic, so it
+    // covers both 2D (ConvHipImplicitGemmGroupWrwXdlops) and 3D
+    // (ConvHipImplicitGemm3DGroupWrwXdlops) grouped backward-weights.
     if(problem.IsDirectionBackwardWrW())
     {
         constexpr std::size_t max_int32 = static_cast<std::size_t>(std::numeric_limits<int>::max());
-        return problem.GetIn().GetElementSize() > max_int32 ||
-               problem.GetOut().GetElementSize() > max_int32 ||
-               problem.GetWeights().GetElementSize() > max_int32;
+        return problem.GetIn().GetElementSpace() > max_int32 ||
+               problem.GetOut().GetElementSpace() > max_int32 ||
+               problem.GetWeights().GetElementSpace() > max_int32;
     }
     return false;
 }
