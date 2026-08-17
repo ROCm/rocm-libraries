@@ -36,8 +36,8 @@
 #include <hipblaslt_vector.hpp>
 #include <iostream>
 #include <limits>
-#include <roc/host_validation/adapters/hipblaslt/GroupedGemmDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/GroupedGemmDataInitialization.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
 #include <span>
@@ -622,15 +622,15 @@ int test_hipblaslt(hipDataType                 in_datatype,
         h_bias[i].resize(size_bias[i]);
 
         // initial data on host
-        roc::host_validation::hipblaslt_adapter::initializeGroupedGemm(ha[i],
-                                                                       size_a[i],
-                                                                       hb[i],
-                                                                       size_b[i],
-                                                                       hc[i],
-                                                                       size_c[i],
-                                                                       h_bias[i],
-                                                                       size_bias[i],
-                                                                       initialization);
+        hipblaslt::host_validation::initializeGroupedGemm(ha[i],
+                                                          size_a[i],
+                                                          hb[i],
+                                                          size_b[i],
+                                                          hc[i],
+                                                          size_c[i],
+                                                          h_bias[i],
+                                                          size_bias[i],
+                                                          initialization);
 
         CHECK_HIP_ERROR(hipMalloc(&da[i], size_a[i] * sizeof(Tin)));
         CHECK_HIP_ERROR(hipMalloc(&db[i], size_b[i] * sizeof(Tin)));
@@ -889,7 +889,7 @@ int test_hipblaslt(hipDataType                 in_datatype,
                 for(int i3 = 0; i3 < batch_count[i]; i3++)
                 {
                     using namespace roc::host_validation;
-                    using namespace roc::host_validation::hipblaslt_adapter;
+                    using namespace hipblaslt::host_validation;
                     auto storageElements = [](size_t    rows,
                                               size_t    columns,
                                               ptrdiff_t rowStride,

@@ -29,8 +29,8 @@
 #include <hipblaslt/hipblaslt-ext-op.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/comparison.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 #include <roc/host_validation/validation.hpp>
@@ -141,7 +141,7 @@ void compare(const char* title, const std::vector<T>& cpuOutput, const std::vect
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    roc::host_validation::hipblaslt_adapter::initialize(data, numElements, initMethod);
+    hipblaslt::host_validation::initialize(data, numElements, initMethod);
 }
 
 template <typename Ti, typename To>
@@ -174,9 +174,9 @@ int AmaxTest(hipDataType type, hipDataType dtype, int m, int n, hipblaslt_initia
 
     using namespace roc::host_validation;
     referenceMaximumAbsolute(
-        hipblaslt_adapter::tensorView(
+        hipblaslt::host_validation::tensorView(
             cpuInput.data(), cpuInput.size(), Layout::contiguous(Shape{numElements})),
-        hipblaslt_adapter::mutableTensorView(
+        hipblaslt::host_validation::mutableTensorView(
             refOutput.data(), refOutput.size(), Layout::contiguous(Shape{})),
         ScalarType::Float32);
 

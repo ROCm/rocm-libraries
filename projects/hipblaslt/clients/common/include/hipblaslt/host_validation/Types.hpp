@@ -16,8 +16,10 @@
 #include <type_traits>
 #include <utility>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     inline ScalarType scalarType(hipDataType type)
     {
         switch(type)
@@ -144,4 +146,4 @@ namespace roc::host_validation::hipblaslt_adapter
                                  std::move(layout),
                                  std::span<std::byte>(static_cast<std::byte*>(data), storageBytes));
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

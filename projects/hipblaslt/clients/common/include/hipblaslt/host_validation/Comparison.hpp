@@ -10,15 +10,17 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/comparison.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 #include <span>
 #include <stdexcept>
 #include <vector>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     inline Layout comparisonLayout(int64_t rows,
                                    int64_t columns,
                                    int64_t leadingDimension,
@@ -110,4 +112,4 @@ namespace roc::host_validation::hipblaslt_adapter
                            options);
         }
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

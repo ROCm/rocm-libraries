@@ -4,7 +4,7 @@
 // Product-private translation from hipBLASLt initialization modes to
 // product-independent host-validation tensor generation recipes.
 
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -13,8 +13,10 @@
 #include <stdexcept>
 #include <vector>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     namespace
     {
         bool usesPackedBatchStride(const MatrixStorageInitialization& initialization)
@@ -265,4 +267,4 @@ namespace roc::host_validation::hipblaslt_adapter
             injectOneSpecial(view, initialization.specialValueType);
         return storage;
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

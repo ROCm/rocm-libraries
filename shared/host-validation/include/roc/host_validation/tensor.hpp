@@ -63,6 +63,29 @@ enum class ScalarType : uint16_t {
     Count,
 };
 
+enum class IntegerRounding : uint8_t {
+    TowardZero,
+    NearestEven,
+};
+
+enum class IntegerOverflow : uint8_t {
+    Reject,
+    Saturate,
+    // Reduce modulo 2^N, then interpret the N-bit result as two's complement when signed.
+    ModuloWrap,
+};
+
+struct ScalarConversionOptions {
+    // Explicit-options conversions reject overflow by default. Legacy overloads keep their
+    // destination-specific behavior for source compatibility.
+    IntegerRounding integerRounding = IntegerRounding::TowardZero;
+    IntegerOverflow integerOverflow = IntegerOverflow::Reject;
+};
+
+// Integer policies apply after validating any complex source and before writing destination bits.
+template <typename Target, typename Source>
+Target convertScalar(Source source, const ScalarConversionOptions& options = {});
+
 struct ScalarTypeInfo {
     std::string_view name;
     ScalarCategory category;
@@ -475,12 +498,228 @@ struct RuntimeIsComplex<std::complex<T>> : std::true_type {};
 template <typename T>
 inline constexpr bool RuntimeIsComplexV = RuntimeIsComplex<T>::value;
 
-template <typename T>
-auto realComponent(const T& value) {
-    if constexpr (RuntimeIsComplexV<T>)
-        return value.real();
-    else
-        return value;
+template <typename>
+inline constexpr bool AlwaysFalseV = false;
+
+inline constexpr uint64_t integerMask(uint32_t bits) {
+    return bits == 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << bits) - 1;
+}
+
+inline constexpr uint64_t signedIntegerMinimumRaw(uint32_t bits) {
+    return uint64_t{1} << (bits - 1);
+}
+
+inline constexpr uint64_t integerMaximumRaw(uint32_t bits, bool signedDestination) {
+    return signedDestination ? signedIntegerMinimumRaw(bits) - 1 : integerMask(bits);
+}
+
+inline constexpr ScalarConversionOptions legacyNativeScalarConversionOptions() {
+    return {IntegerRounding::TowardZero, IntegerOverflow::ModuloWrap};
+}
+
+inline constexpr ScalarConversionOptions legacyScalarConversionOptions(ScalarType destination) {
+    const IntegerOverflow overflow =
+        destination == ScalarType::Int4 || destination == ScalarType::Int12
+            ? IntegerOverflow::Saturate
+            : IntegerOverflow::ModuloWrap;
+    return {IntegerRounding::TowardZero, overflow};
+}
+
+template <typename Floating>
+Floating roundForIntegerConversion(Floating value, IntegerRounding rounding) {
+    static_assert(std::is_floating_point_v<Floating>);
+    switch (rounding) {
+        case IntegerRounding::TowardZero:
+            return std::trunc(value);
+        case IntegerRounding::NearestEven: {
+            Floating integral = 0;
+            const Floating fraction = std::modf(value, &integral);
+            const Floating magnitude = std::fabs(fraction);
+            if (magnitude < Floating{0.5}) return integral;
+
+            const Floating direction = std::signbit(fraction) ? Floating{-1} : Floating{1};
+            if (magnitude > Floating{0.5}) return integral + direction;
+
+            const Floating parity = std::fmod(std::fabs(integral), Floating{2});
+            return parity == Floating{0} ? integral : integral + direction;
+        }
+    }
+    throw std::invalid_argument("Invalid integer rounding policy.");
+}
+
+template <typename Integral>
+bool integralFitsIntegerDestination(Integral value, uint32_t bits, bool signedDestination) {
+    static_assert(std::is_integral_v<Integral>);
+    if (signedDestination) {
+        if (bits == 64) return std::in_range<int64_t>(value);
+        const int64_t minimum = -(int64_t{1} << (bits - 1));
+        const int64_t maximum = (int64_t{1} << (bits - 1)) - 1;
+        return !std::cmp_less(value, minimum) && !std::cmp_greater(value, maximum);
+    }
+
+    if (std::cmp_less(value, 0)) return false;
+    if (bits == 64) return std::in_range<uint64_t>(value);
+    return !std::cmp_greater(value, integerMask(bits));
+}
+
+template <typename Integral>
+bool integralIsBelowIntegerDestination(Integral value, uint32_t bits, bool signedDestination) {
+    static_assert(std::is_integral_v<Integral>);
+    if (!signedDestination) return std::cmp_less(value, 0);
+    if (bits == 64) return std::cmp_less(value, std::numeric_limits<int64_t>::min());
+    const int64_t minimum = -(int64_t{1} << (bits - 1));
+    return std::cmp_less(value, minimum);
+}
+
+template <typename Integral>
+uint64_t convertIntegralToIntegerBits(Integral value, uint32_t bits, bool signedDestination,
+                                      const ScalarConversionOptions& options) {
+    static_assert(std::is_integral_v<Integral>);
+    const uint64_t mask = integerMask(bits);
+    if (integralFitsIntegerDestination(value, bits, signedDestination)) {
+        if (signedDestination) return static_cast<uint64_t>(static_cast<int64_t>(value)) & mask;
+        return static_cast<uint64_t>(value) & mask;
+    }
+
+    switch (options.integerOverflow) {
+        case IntegerOverflow::Reject:
+            throw std::overflow_error("Integer value is outside the destination range.");
+        case IntegerOverflow::Saturate:
+            return integralIsBelowIntegerDestination(value, bits, signedDestination)
+                       ? (signedDestination ? signedIntegerMinimumRaw(bits) : 0)
+                       : integerMaximumRaw(bits, signedDestination);
+        case IntegerOverflow::ModuloWrap:
+            return static_cast<uint64_t>(value) & mask;
+    }
+    throw std::invalid_argument("Invalid integer overflow policy.");
+}
+
+template <typename Floating>
+uint64_t convertFloatingToIntegerBits(Floating value, uint32_t bits, bool signedDestination,
+                                      const ScalarConversionOptions& options) {
+    static_assert(std::is_floating_point_v<Floating>);
+    if (std::isnan(value))
+        throw std::domain_error("NaN cannot be converted to an integer destination.");
+
+    if (std::isinf(value)) {
+        if (options.integerOverflow == IntegerOverflow::Saturate) {
+            if (std::signbit(value)) return signedDestination ? signedIntegerMinimumRaw(bits) : 0;
+            return integerMaximumRaw(bits, signedDestination);
+        }
+        throw std::overflow_error("Infinity cannot be converted to an integer destination.");
+    }
+
+    const Floating rounded = roundForIntegerConversion(value, options.integerRounding);
+    const int rangeExponent =
+        signedDestination ? static_cast<int>(bits) - 1 : static_cast<int>(bits);
+    const Floating upperExclusive = std::ldexp(Floating{1}, rangeExponent);
+    const Floating lowerInclusive = signedDestination ? -upperExclusive : Floating{0};
+    if (rounded >= lowerInclusive && rounded < upperExclusive) {
+        if (signedDestination)
+            return static_cast<uint64_t>(static_cast<int64_t>(rounded)) & integerMask(bits);
+        return static_cast<uint64_t>(rounded) & integerMask(bits);
+    }
+
+    switch (options.integerOverflow) {
+        case IntegerOverflow::Reject:
+            throw std::overflow_error("Rounded value is outside the destination integer range.");
+        case IntegerOverflow::Saturate:
+            return rounded < lowerInclusive
+                       ? (signedDestination ? signedIntegerMinimumRaw(bits) : 0)
+                       : integerMaximumRaw(bits, signedDestination);
+        case IntegerOverflow::ModuloWrap: {
+            const Floating modulus = std::ldexp(Floating{1}, static_cast<int>(bits));
+            const Floating remainder = std::fmod(std::fabs(rounded), modulus);
+            uint64_t raw = static_cast<uint64_t>(remainder);
+            if (std::signbit(rounded)) raw = uint64_t{0} - raw;
+            return raw & integerMask(bits);
+        }
+    }
+    throw std::invalid_argument("Invalid integer overflow policy.");
+}
+
+template <typename Source>
+uint64_t convertToIntegerBits(Source source, uint32_t bits, bool signedDestination,
+                              const ScalarConversionOptions& options) {
+    using Value = std::remove_cvref_t<Source>;
+    if constexpr (RuntimeIsComplexV<Value>) {
+        if (source.imag() != typename Value::value_type{0})
+            throw std::domain_error(
+                "A complex value with a nonzero imaginary component cannot be converted to real.");
+        return convertToIntegerBits(source.real(), bits, signedDestination, options);
+    } else if constexpr (std::is_same_v<Value, bool>) {
+        return convertIntegralToIntegerBits(static_cast<uint8_t>(source), bits, signedDestination,
+                                            options);
+    } else if constexpr (std::is_enum_v<Value>) {
+        return convertToIntegerBits(static_cast<std::underlying_type_t<Value>>(source), bits,
+                                    signedDestination, options);
+    } else if constexpr (std::is_integral_v<Value>) {
+        return convertIntegralToIntegerBits(source, bits, signedDestination, options);
+    } else if constexpr (std::is_floating_point_v<Value>) {
+        return convertFloatingToIntegerBits(source, bits, signedDestination, options);
+    } else {
+        static_assert(AlwaysFalseV<Value>, "Scalar integer conversion requires a numeric source.");
+    }
+}
+
+template <typename Target>
+Target integerFromBits(uint64_t raw) {
+    using Value = std::remove_cv_t<Target>;
+    static_assert(std::is_integral_v<Value> && !std::is_same_v<Value, bool>);
+    using Unsigned = std::make_unsigned_t<Value>;
+    constexpr uint32_t bits = std::numeric_limits<Unsigned>::digits;
+    static_assert(bits > 0 && bits <= 64);
+    raw &= integerMask(bits);
+
+    if constexpr (std::is_unsigned_v<Value>) {
+        return static_cast<Value>(raw);
+    } else {
+        const uint64_t sign = signedIntegerMinimumRaw(bits);
+        if ((raw & sign) == 0) return static_cast<Value>(raw);
+
+        const uint64_t magnitude = (uint64_t{0} - raw) & integerMask(bits);
+        if (magnitude == sign) return std::numeric_limits<Value>::min();
+        return static_cast<Value>(-static_cast<int64_t>(magnitude));
+    }
+}
+
+template <typename Target, typename Source>
+Target convertToInteger(Source source, const ScalarConversionOptions& options) {
+    using Value = std::remove_cv_t<Target>;
+    static_assert(std::is_integral_v<Value> && !std::is_same_v<Value, bool>);
+    using Unsigned = std::make_unsigned_t<Value>;
+    constexpr uint32_t bits = std::numeric_limits<Unsigned>::digits;
+    static_assert(bits > 0 && bits <= 64);
+    const uint64_t raw =
+        convertToIntegerBits(std::move(source), bits, std::is_signed_v<Value>, options);
+    return integerFromBits<Value>(raw);
+}
+
+template <typename Target, typename Source>
+Target convertScalarValue(Source source, const ScalarConversionOptions& options) {
+    using Result = std::remove_cv_t<Target>;
+    using Value = std::remove_cvref_t<Source>;
+    static_assert(!std::is_reference_v<Target>);
+
+    if constexpr (RuntimeIsComplexV<Result>) {
+        using Component = typename Result::value_type;
+        if constexpr (RuntimeIsComplexV<Value>)
+            return Result(convertScalarValue<Component>(source.real(), options),
+                          convertScalarValue<Component>(source.imag(), options));
+        else
+            return Result(convertScalarValue<Component>(source, options), Component{0});
+    } else if constexpr (RuntimeIsComplexV<Value>) {
+        if (source.imag() != typename Value::value_type{0})
+            throw std::domain_error(
+                "A complex value with a nonzero imaginary component cannot be converted to real.");
+        return convertScalarValue<Result>(source.real(), options);
+    } else if constexpr (std::is_same_v<Result, bool>) {
+        return source != Value{0};
+    } else if constexpr (std::is_integral_v<Result>) {
+        return convertToInteger<Result>(std::move(source), options);
+    } else {
+        return static_cast<Result>(source);
+    }
 }
 
 inline std::pair<ptrdiff_t, ptrdiff_t> elementBounds(const Layout& layout) {
@@ -881,151 +1120,172 @@ inline int64_t signExtend(uint32_t value, uint32_t bits) {
 }
 
 template <ScalarType Type, typename Target>
-Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
+Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset,
+                         const ScalarConversionOptions& options) {
     static_assert(Type != ScalarType::Count);
     const uint64_t offsetBits = bitOffset(Type, logicalOffset);
     const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
 
     if constexpr (Type == ScalarType::Boolean)
-        return static_cast<Target>(readNative<uint8_t>(storage, offsetBytes) != 0);
+        return convertScalarValue<Target>(readNative<uint8_t>(storage, offsetBytes) != 0, options);
     else if constexpr (Type == ScalarType::UInt8)
-        return static_cast<Target>(readNative<uint8_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<uint8_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Int8)
-        return static_cast<Target>(readNative<int8_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<int8_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::UInt16)
-        return static_cast<Target>(readNative<uint16_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<uint16_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Int16)
-        return static_cast<Target>(readNative<int16_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<int16_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::UInt32)
-        return static_cast<Target>(readNative<uint32_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<uint32_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Int32)
-        return static_cast<Target>(readNative<int32_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<int32_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::UInt64)
-        return static_cast<Target>(readNative<uint64_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<uint64_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Int64)
-        return static_cast<Target>(readNative<int64_t>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<int64_t>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Float16)
-        return static_cast<Target>(decodeFloat16(readNative<uint16_t>(storage, offsetBytes)));
+        return convertScalarValue<Target>(decodeFloat16(readNative<uint16_t>(storage, offsetBytes)),
+                                          options);
     else if constexpr (Type == ScalarType::BFloat16)
-        return static_cast<Target>(decodeBFloat16(readNative<uint16_t>(storage, offsetBytes)));
+        return convertScalarValue<Target>(
+            decodeBFloat16(readNative<uint16_t>(storage, offsetBytes)), options);
     else if constexpr (Type == ScalarType::Float32)
-        return static_cast<Target>(readNative<float>(storage, offsetBytes));
+        return convertScalarValue<Target>(readNative<float>(storage, offsetBytes), options);
     else if constexpr (Type == ScalarType::Float64)
-        return static_cast<Target>(readNative<double>(storage, offsetBytes));
-    else if constexpr (Type == ScalarType::ComplexFloat32) {
-        if constexpr (!RuntimeIsComplexV<Target>)
-            throw std::invalid_argument("Complex tensor value requires a complex target.");
-        else {
-            const auto value = readNative<std::complex<float>>(storage, offsetBytes);
-            return Target(value.real(), value.imag());
-        }
-    } else if constexpr (Type == ScalarType::ComplexFloat64) {
-        if constexpr (!RuntimeIsComplexV<Target>)
-            throw std::invalid_argument("Complex tensor value requires a complex target.");
-        else {
-            const auto value = readNative<std::complex<double>>(storage, offsetBytes);
-            return Target(value.real(), value.imag());
-        }
-    } else if constexpr (Type == ScalarType::Int4)
-        return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4));
+        return convertScalarValue<Target>(readNative<double>(storage, offsetBytes), options);
+    else if constexpr (Type == ScalarType::ComplexFloat32)
+        return convertScalarValue<Target>(readNative<std::complex<float>>(storage, offsetBytes),
+                                          options);
+    else if constexpr (Type == ScalarType::ComplexFloat64)
+        return convertScalarValue<Target>(readNative<std::complex<double>>(storage, offsetBytes),
+                                          options);
+    else if constexpr (Type == ScalarType::Int4)
+        return convertScalarValue<Target>(signExtend(readPackedBits(storage, offsetBits, 4), 4),
+                                          options);
     else if constexpr (Type == ScalarType::Int12)
-        return static_cast<Target>(signExtend(readPackedBits(storage, offsetBits, 12), 12));
+        return convertScalarValue<Target>(signExtend(readPackedBits(storage, offsetBits, 12), 12),
+                                          options);
     else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
                        Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
                        Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
                        Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
                        Type == ScalarType::E4M3)
-        return static_cast<Target>(decodeBinaryFloat(
-            Type, readPackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits)));
+        return convertScalarValue<Target>(
+            decodeBinaryFloat(
+                Type, readPackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits)),
+            options);
     else if constexpr (Type == ScalarType::E8M0)
-        return static_cast<Target>(decodeE8M0(readNative<uint8_t>(storage, offsetBytes)));
+        return convertScalarValue<Target>(decodeE8M0(readNative<uint8_t>(storage, offsetBytes)),
+                                          options);
+}
+
+template <ScalarType Type, typename Target>
+Target decodeScalarKnown(std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
+    return decodeScalarKnown<Type, Target>(storage, logicalOffset,
+                                           legacyNativeScalarConversionOptions());
+}
+
+template <typename Target>
+Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset,
+                    const ScalarConversionOptions& options) {
+    return visitScalarType(type, [&]<typename Tag>() {
+        return decodeScalarKnown<Tag::type, Target>(storage, logicalOffset, options);
+    });
 }
 
 template <typename Target>
 Target decodeScalar(ScalarType type, std::span<const std::byte> storage, ptrdiff_t logicalOffset) {
-    return visitScalarType(type, [&]<typename Tag>() {
-        return decodeScalarKnown<Tag::type, Target>(storage, logicalOffset);
-    });
+    return decodeScalar<Target>(type, storage, logicalOffset,
+                                legacyNativeScalarConversionOptions());
+}
+
+template <ScalarType Type, typename Source>
+void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source,
+                       const ScalarConversionOptions& options) {
+    static_assert(Type != ScalarType::Count);
+    const uint64_t offsetBits = bitOffset(Type, logicalOffset);
+    const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
+
+    if constexpr (Type == ScalarType::Boolean)
+        writeNative<uint8_t>(storage, offsetBytes,
+                             convertScalarValue<bool>(source, options) ? uint8_t{1} : uint8_t{0});
+    else if constexpr (Type == ScalarType::UInt8)
+        writeNative<uint8_t>(storage, offsetBytes, convertScalarValue<uint8_t>(source, options));
+    else if constexpr (Type == ScalarType::Int8)
+        writeNative<int8_t>(storage, offsetBytes, convertScalarValue<int8_t>(source, options));
+    else if constexpr (Type == ScalarType::UInt16)
+        writeNative<uint16_t>(storage, offsetBytes, convertScalarValue<uint16_t>(source, options));
+    else if constexpr (Type == ScalarType::Int16)
+        writeNative<int16_t>(storage, offsetBytes, convertScalarValue<int16_t>(source, options));
+    else if constexpr (Type == ScalarType::UInt32)
+        writeNative<uint32_t>(storage, offsetBytes, convertScalarValue<uint32_t>(source, options));
+    else if constexpr (Type == ScalarType::Int32)
+        writeNative<int32_t>(storage, offsetBytes, convertScalarValue<int32_t>(source, options));
+    else if constexpr (Type == ScalarType::UInt64)
+        writeNative<uint64_t>(storage, offsetBytes, convertScalarValue<uint64_t>(source, options));
+    else if constexpr (Type == ScalarType::Int64)
+        writeNative<int64_t>(storage, offsetBytes, convertScalarValue<int64_t>(source, options));
+    else if constexpr (Type == ScalarType::Float16)
+        writeNative<uint16_t>(storage, offsetBytes,
+                              encodeFloat16(convertScalarValue<float>(source, options)));
+    else if constexpr (Type == ScalarType::BFloat16)
+        writeNative<uint16_t>(storage, offsetBytes,
+                              encodeBFloat16(convertScalarValue<float>(source, options)));
+    else if constexpr (Type == ScalarType::Float32)
+        writeNative<float>(storage, offsetBytes, convertScalarValue<float>(source, options));
+    else if constexpr (Type == ScalarType::Float64)
+        writeNative<double>(storage, offsetBytes, convertScalarValue<double>(source, options));
+    else if constexpr (Type == ScalarType::ComplexFloat32)
+        writeNative<std::complex<float>>(storage, offsetBytes,
+                                         convertScalarValue<std::complex<float>>(source, options));
+    else if constexpr (Type == ScalarType::ComplexFloat64)
+        writeNative<std::complex<double>>(
+            storage, offsetBytes, convertScalarValue<std::complex<double>>(source, options));
+    else if constexpr (Type == ScalarType::Int4)
+        writePackedBits(storage, offsetBits, 4,
+                        static_cast<uint32_t>(convertToIntegerBits(source, 4, true, options)));
+    else if constexpr (Type == ScalarType::Int12)
+        writePackedBits(storage, offsetBits, 12,
+                        static_cast<uint32_t>(convertToIntegerBits(source, 12, true, options)));
+    else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
+                       Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
+                       Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
+                       Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
+                       Type == ScalarType::E4M3)
+        writePackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits,
+                        encodeBinaryFloat(Type, convertScalarValue<float>(source, options)));
+    else if constexpr (Type == ScalarType::E8M0)
+        writeNative<uint8_t>(storage, offsetBytes,
+                             encodeE8M0(convertScalarValue<float>(source, options)));
 }
 
 template <ScalarType Type, typename Source>
 void encodeScalarKnown(std::span<std::byte> storage, ptrdiff_t logicalOffset, Source source) {
-    static_assert(Type != ScalarType::Count);
-    const uint64_t offsetBits = bitOffset(Type, logicalOffset);
-    const size_t offsetBytes = static_cast<size_t>(offsetBits / 8);
-    const auto scalar = realComponent(source);
+    encodeScalarKnown<Type>(storage, logicalOffset, std::move(source),
+                            legacyScalarConversionOptions(Type));
+}
 
-    if constexpr (Type == ScalarType::Boolean)
-        writeNative<uint8_t>(storage, offsetBytes, scalar != 0 ? 1U : 0U);
-    else if constexpr (Type == ScalarType::UInt8)
-        writeNative<uint8_t>(storage, offsetBytes, static_cast<uint8_t>(scalar));
-    else if constexpr (Type == ScalarType::Int8)
-        writeNative<int8_t>(storage, offsetBytes, static_cast<int8_t>(scalar));
-    else if constexpr (Type == ScalarType::UInt16)
-        writeNative<uint16_t>(storage, offsetBytes, static_cast<uint16_t>(scalar));
-    else if constexpr (Type == ScalarType::Int16)
-        writeNative<int16_t>(storage, offsetBytes, static_cast<int16_t>(scalar));
-    else if constexpr (Type == ScalarType::UInt32)
-        writeNative<uint32_t>(storage, offsetBytes, static_cast<uint32_t>(scalar));
-    else if constexpr (Type == ScalarType::Int32)
-        writeNative<int32_t>(storage, offsetBytes, static_cast<int32_t>(scalar));
-    else if constexpr (Type == ScalarType::UInt64)
-        writeNative<uint64_t>(storage, offsetBytes, static_cast<uint64_t>(scalar));
-    else if constexpr (Type == ScalarType::Int64)
-        writeNative<int64_t>(storage, offsetBytes, static_cast<int64_t>(scalar));
-    else if constexpr (Type == ScalarType::Float16)
-        writeNative<uint16_t>(storage, offsetBytes, encodeFloat16(static_cast<float>(scalar)));
-    else if constexpr (Type == ScalarType::BFloat16)
-        writeNative<uint16_t>(storage, offsetBytes, encodeBFloat16(static_cast<float>(scalar)));
-    else if constexpr (Type == ScalarType::Float32)
-        writeNative<float>(storage, offsetBytes, static_cast<float>(scalar));
-    else if constexpr (Type == ScalarType::Float64)
-        writeNative<double>(storage, offsetBytes, static_cast<double>(scalar));
-    else if constexpr (Type == ScalarType::ComplexFloat32) {
-        if constexpr (RuntimeIsComplexV<Source>)
-            writeNative<std::complex<float>>(
-                storage, offsetBytes,
-                std::complex<float>(static_cast<float>(source.real()),
-                                    static_cast<float>(source.imag())));
-        else
-            writeNative<std::complex<float>>(storage, offsetBytes,
-                                             std::complex<float>(static_cast<float>(scalar), 0.0f));
-    } else if constexpr (Type == ScalarType::ComplexFloat64) {
-        if constexpr (RuntimeIsComplexV<Source>)
-            writeNative<std::complex<double>>(
-                storage, offsetBytes,
-                std::complex<double>(static_cast<double>(source.real()),
-                                     static_cast<double>(source.imag())));
-        else
-            writeNative<std::complex<double>>(
-                storage, offsetBytes, std::complex<double>(static_cast<double>(scalar), 0.0));
-    } else if constexpr (Type == ScalarType::Int4) {
-        const int64_t value =
-            std::max<int64_t>(-8, std::min<int64_t>(7, static_cast<int64_t>(scalar)));
-        writePackedBits(storage, offsetBits, 4, static_cast<uint32_t>(value) & 0xfU);
-    } else if constexpr (Type == ScalarType::Int12) {
-        const int64_t value =
-            std::max<int64_t>(-2048, std::min<int64_t>(2047, static_cast<int64_t>(scalar)));
-        writePackedBits(storage, offsetBits, 12, static_cast<uint32_t>(value) & 0xfffU);
-    } else if constexpr (Type == ScalarType::Float4E2M1 || Type == ScalarType::Float6E2M3 ||
-                         Type == ScalarType::Float6E3M2 || Type == ScalarType::Float8E4M3 ||
-                         Type == ScalarType::Float8E5M2 || Type == ScalarType::Float8E4M3Fnuz ||
-                         Type == ScalarType::Float8E5M2Fnuz || Type == ScalarType::E5M3 ||
-                         Type == ScalarType::E4M3)
-        writePackedBits(storage, offsetBits, scalarTypeInfo(Type).storageBits,
-                        encodeBinaryFloat(Type, static_cast<float>(scalar)));
-    else if constexpr (Type == ScalarType::E8M0)
-        writeNative<uint8_t>(storage, offsetBytes, encodeE8M0(static_cast<float>(scalar)));
+template <typename Source>
+void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logicalOffset,
+                  Source source, const ScalarConversionOptions& options) {
+    visitScalarType(type, [&]<typename Tag>() {
+        encodeScalarKnown<Tag::type>(storage, logicalOffset, std::move(source), options);
+    });
 }
 
 template <typename Source>
 void encodeScalar(ScalarType type, std::span<std::byte> storage, ptrdiff_t logicalOffset,
                   Source source) {
-    visitScalarType(type, [&]<typename Tag>() {
-        encodeScalarKnown<Tag::type>(storage, logicalOffset, std::move(source));
-    });
+    encodeScalar(type, storage, logicalOffset, std::move(source),
+                 legacyScalarConversionOptions(type));
 }
 }  // namespace detail
+
+template <typename Target, typename Source>
+Target convertScalar(Source source, const ScalarConversionOptions& options) {
+    return detail::convertScalarValue<Target>(std::move(source), options);
+}
 
 inline size_t storageBytesForLayout(ScalarType type, const Layout& layout) {
     return detail::storageBytesForLayout(type, layout);
@@ -1085,6 +1345,11 @@ class Scalar {
     template <typename Target>
     Target as() const {
         return detail::decodeScalar<Target>(m_type, m_storage, 0);
+    }
+
+    template <typename Target>
+    Target as(const ScalarConversionOptions& options) const {
+        return detail::decodeScalar<Target>(m_type, m_storage, 0, options);
     }
 
     friend bool operator==(const Scalar& left, const Scalar& right) {
@@ -1192,11 +1457,25 @@ class TensorView {
     }
 
     template <typename Target>
+    Target loadAs(std::span<const size_t> indices, const ScalarConversionOptions& options) const {
+        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices),
+                                            options);
+    }
+
+    template <typename Target>
     Target loadAs(std::initializer_list<size_t> indices) const {
         return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()));
     }
 
+    template <typename Target>
+    Target loadAs(std::initializer_list<size_t> indices,
+                  const ScalarConversionOptions& options) const {
+        return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()), options);
+    }
+
     Tensor to(ScalarType type) const;
+
+    Tensor to(ScalarType type, const ScalarConversionOptions& options) const;
 
    private:
     ScalarType m_type;
@@ -1240,8 +1519,20 @@ class MutableTensorView {
     }
 
     template <typename Target>
+    Target loadAs(std::span<const size_t> indices, const ScalarConversionOptions& options) const {
+        return detail::decodeScalar<Target>(m_type, m_storage, m_layout.elementOffset(indices),
+                                            options);
+    }
+
+    template <typename Target>
     Target loadAs(std::initializer_list<size_t> indices) const {
         return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()));
+    }
+
+    template <typename Target>
+    Target loadAs(std::initializer_list<size_t> indices,
+                  const ScalarConversionOptions& options) const {
+        return loadAs<Target>(std::span<const size_t>(indices.begin(), indices.size()), options);
     }
 
     template <typename Source>
@@ -1250,8 +1541,22 @@ class MutableTensorView {
     }
 
     template <typename Source>
+    void storeFrom(std::span<const size_t> indices, Source value,
+                   const ScalarConversionOptions& options) const {
+        detail::encodeScalar(m_type, m_storage, m_layout.elementOffset(indices), std::move(value),
+                             options);
+    }
+
+    template <typename Source>
     void storeFrom(std::initializer_list<size_t> indices, Source value) const {
         storeFrom(std::span<const size_t>(indices.begin(), indices.size()), value);
+    }
+
+    template <typename Source>
+    void storeFrom(std::initializer_list<size_t> indices, Source value,
+                   const ScalarConversionOptions& options) const {
+        storeFrom(std::span<const size_t>(indices.begin(), indices.size()), std::move(value),
+                  options);
     }
 
     TensorView asConst() const {
@@ -1295,6 +1600,18 @@ class Tensor {
     }
 
     template <typename Source>
+    static Tensor fromValues(ScalarType type, Shape shape, std::span<const Source> values,
+                             const ScalarConversionOptions& options) {
+        if (values.size() != shape.elementCount())
+            throw std::invalid_argument("Tensor value count does not match shape.");
+        Tensor result(type, shape);
+        for (size_t index = 0; index < values.size(); ++index)
+            detail::encodeScalar(type, result.m_storage, static_cast<ptrdiff_t>(index),
+                                 values[index], options);
+        return result;
+    }
+
+    template <typename Source>
     static Tensor fromNativeValues(Shape shape, std::span<const Source> values) {
         return fromValues(nativeScalarType<Source>, std::move(shape), values);
     }
@@ -1333,6 +1650,8 @@ class Tensor {
 
     Tensor to(ScalarType type) const;
 
+    Tensor to(ScalarType type, const ScalarConversionOptions& options) const;
+
    private:
     ScalarType m_type;
     Layout m_layout;
@@ -1340,6 +1659,10 @@ class Tensor {
 };
 
 inline Tensor TensorView::to(ScalarType type) const {
+    return to(type, detail::legacyScalarConversionOptions(type));
+}
+
+inline Tensor TensorView::to(ScalarType type, const ScalarConversionOptions& options) const {
     const size_t requiredStorage = storageBytesForLayout(m_type, m_layout);
     if (type == m_type)
         return Tensor::fromStorage(
@@ -1358,24 +1681,24 @@ inline Tensor TensorView::to(ScalarType type) const {
                               sourceCategory == ScalarCategory::UnsignedInteger) {
                     const uint64_t value = detail::decodeScalarKnown<SourceTag::type, uint64_t>(
                         m_storage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
-                                                                    destinationOffset, value);
+                    detail::encodeScalarKnown<DestinationTag::type>(
+                        destination.storage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::SignedInteger) {
                     const int64_t value = detail::decodeScalarKnown<SourceTag::type, int64_t>(
                         m_storage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
-                                                                    destinationOffset, value);
+                    detail::encodeScalarKnown<DestinationTag::type>(
+                        destination.storage(), destinationOffset, value, options);
                 } else if constexpr (sourceCategory == ScalarCategory::Complex) {
                     const std::complex<double> value =
                         detail::decodeScalarKnown<SourceTag::type, std::complex<double>>(
                             m_storage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
-                                                                    destinationOffset, value);
+                    detail::encodeScalarKnown<DestinationTag::type>(
+                        destination.storage(), destinationOffset, value, options);
                 } else {
                     const double value =
                         detail::decodeScalarKnown<SourceTag::type, double>(m_storage, sourceOffset);
-                    detail::encodeScalarKnown<DestinationTag::type>(destination.storage(),
-                                                                    destinationOffset, value);
+                    detail::encodeScalarKnown<DestinationTag::type>(
+                        destination.storage(), destinationOffset, value, options);
                 }
             });
         });
@@ -1385,5 +1708,9 @@ inline Tensor TensorView::to(ScalarType type) const {
 
 inline Tensor Tensor::to(ScalarType type) const {
     return view().to(type);
+}
+
+inline Tensor Tensor::to(ScalarType type, const ScalarConversionOptions& options) const {
+    return view().to(type, options);
 }
 }  // namespace roc::host_validation

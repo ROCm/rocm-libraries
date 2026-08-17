@@ -6,7 +6,7 @@
 // Product-private hipBLASLt Frobenius acceptance policy.
 
 #include <algorithm>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 
 // These are product-level acceptance policies, not numerical mechanics.
 // Problem/architecture-specific callers may widen them.

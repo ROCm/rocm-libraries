@@ -3,4 +3,4 @@
 
 #pragma once
 
-#include <roc/host_validation/adapters/hipblaslt/hipblaslt_init.hpp>
+#include <hipblaslt/host_validation/hipblaslt_init.hpp>

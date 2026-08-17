@@ -10,8 +10,10 @@
 #include <hipblaslt/hipblaslt.h>
 #include <roc/host_validation/validation.hpp>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     struct EpilogueArguments
     {
         int64_t               rows                  = 0;
@@ -39,4 +41,4 @@ namespace roc::host_validation::hipblaslt_adapter
     };
 
     EpilogueRunInfo referenceEpilogue(const EpilogueArguments& arguments);
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

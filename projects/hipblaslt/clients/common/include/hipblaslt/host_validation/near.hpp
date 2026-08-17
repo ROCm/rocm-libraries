@@ -8,7 +8,7 @@
 #include "hipblaslt_ostream.hpp"
 
 #include <limits>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 
 template <class Tc, class Ti, class To>
 static constexpr double sum_error_tolerance_for_gfx11 = std::numeric_limits<Tc>::epsilon();

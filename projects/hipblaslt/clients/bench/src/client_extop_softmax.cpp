@@ -29,7 +29,7 @@
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt_datatype2string.hpp>
 #include <iostream>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
 #include <vector>
 
 void printUsage(char* programName)
@@ -96,7 +96,7 @@ int parseArgs(int argc, char** argv, size_t* m, size_t* n, hipblaslt_initializat
 template <typename DType>
 void initData(DType* data, std::size_t numElements, hipblaslt_initialization initMethod)
 {
-    roc::host_validation::hipblaslt_adapter::initialize(data, numElements, initMethod);
+    hipblaslt::host_validation::initialize(data, numElements, initMethod);
 }
 
 int main(int argc, char** argv)

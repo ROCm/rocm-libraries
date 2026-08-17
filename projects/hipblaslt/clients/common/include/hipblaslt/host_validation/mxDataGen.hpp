@@ -5,7 +5,7 @@
 
 // Product-private hipBLASLt adapter.
 
-// hipBLASLt MX generation adapter owned by shared host-validation.
+// hipBLASLt MX generation adapter over shared host-validation.
 
 enum class MXScaleLayout
 {

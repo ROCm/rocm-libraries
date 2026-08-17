@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 
-#include <roc/host_validation/adapters/hipblaslt/HostComparison.hpp>
+#include <hipblaslt/host_validation/HostComparison.hpp>
 #include <roc/host_validation/typed_comparison.hpp>
 
 #include <algorithm>
@@ -26,7 +26,7 @@ namespace
     inline int ulp_mantissa_bits(hipDataType type)
     {
         return roc::host_validation::ulpMantissaBits(
-            roc::host_validation::hipblaslt_adapter::scalarType(type));
+            hipblaslt::host_validation::scalarType(type));
     }
 
     template <typename T>
@@ -57,7 +57,7 @@ namespace
             return;
 
         using namespace roc::host_validation;
-        using namespace roc::host_validation::hipblaslt_adapter;
+        using namespace hipblaslt::host_validation;
 
         const Layout layout          = comparisonLayout(M, N, lda, stride, batchCount);
         const size_t storageElements = storageBytesForLayout(scalarType<T>(), layout) / sizeof(T);
@@ -91,7 +91,7 @@ namespace
                                   size_t&     count,
                                   hipDataType type)
     {
-        using namespace roc::host_validation::hipblaslt_adapter;
+        using namespace hipblaslt::host_validation;
 
         HostComparisonRequest request;
         request.rows                    = M;

@@ -44,8 +44,9 @@ contains a separate CPU-only module for constructing physical AMD GPU layouts.
     compute-input quantization, XFloat32, vector/scalar epilogue operands,
     bias, and activation.
 - `roc::host-validation-mx`
-  - Optional compiled block-scaled tensor data-generation implementation.
-  - Built with `HOST_VALIDATION_BUILD_MX_BACKEND=ON`.
+  - Compiled block-scaled tensor data-generation implementation.
+  - Built consistently with the component rather than hidden behind an
+    optional configuration.
   - Uses native coordinate-based generation with optional OpenMP parallelism
     and exports only component-owned scalar, tensor, block-axis, and recipe
     types.
@@ -132,6 +133,7 @@ Tensor::storage();
 Tensor::view();
 Tensor::mutableView();
 Tensor::to(ScalarType);
+Tensor::to(ScalarType, ScalarConversionOptions);
 
 TensorView::fromNative(Layout, nativeValues);
 TensorView::fromNative(nativeValues);
@@ -140,11 +142,14 @@ TensorView::shape();
 TensorView::layout();
 TensorView::storage();
 TensorView::loadAs<T>(indices);
+TensorView::loadAs<T>(indices, ScalarConversionOptions);
 TensorView::to(ScalarType);
+TensorView::to(ScalarType, ScalarConversionOptions);
 
 MutableTensorView::fromNative(Layout, nativeValues);
 MutableTensorView::loadAs<T>(indices);
 MutableTensorView::storeFrom(indices, value);
+MutableTensorView::storeFrom(indices, value, ScalarConversionOptions);
 
 TypedTensorView<T>::TypedTensorView(Layout, nativeValues);
 TypedTensorView<T>::TypedTensorView(nativeValues);
@@ -165,7 +170,12 @@ element-to-bit addressing internally.
 `to(ScalarType)` performs explicit runtime storage conversion while preserving
 shape, strides, and offset. Same-type conversion copies the layout's required
 raw storage without decoding; cross-type conversion decodes and re-encodes
-logical values through the core scalar codecs.
+logical values through the core scalar codecs. Option-bearing overloads make
+integer rounding (`TowardZero` or deterministic `NearestEven`) and overflow
+handling (`Reject`, `Saturate`, or `ModuloWrap`) explicit. NaN-to-integer and
+lossy complex-to-real conversions are rejected. The legacy overloads retain
+their established destination-specific behavior while consumers migrate to
+explicit policies.
 
 `visitScalarType` dispatches a runtime scalar type once to a unique semantic
 tag. Operations should dispatch at their boundary and run typed inner loops;
@@ -446,7 +456,7 @@ accumulation.
 
 ## Block-scaled tensor generation
 
-The optional MX target generates packed data, natural-layout scales, explicit
+The MX target generates packed data, natural-layout scales, explicit
 per-element scale indices, and the decoded F32 reference tensor:
 
 ```cpp
@@ -563,7 +573,7 @@ A slice is one logical combination of all coordinates except the sparsity
 axis. Product adapters may partition slices with OpenMP or another host
 executor without moving pruning, compression, random selection, or metadata
 arithmetic back into the product. The sparsity operation itself has no OpenMP,
-HIP, or AMDGPU dependency; optional MX generation uses the bounded OpenMP
+HIP, or AMDGPU dependency; MX generation uses the bounded OpenMP
 policy described above.
 
 `encodeTwoOfFourMetadata` remains available when retained indices already
@@ -580,14 +590,16 @@ Consumers should need one of only these focused includes:
 Installed consumers can use:
 
 ```cmake
-find_package(ROCHostValidation CONFIG REQUIRED)
+find_package(ROCHostValidation CONFIG REQUIRED COMPONENTS Core)
 target_link_libraries(app PRIVATE roc::host-validation-core)
 ```
 
-When the optional static BLAS backend is installed, its imported target carries
-`BLAS::BLAS` as a link-only dependency and the package config calls
-`find_dependency(BLAS)`. Consumers therefore do not manually repeat the
-OpenBLAS/CBLAS link line.
+The installed package exposes `Core`, `Operations`, `Tiled`, `BLAS`, `MX`, and
+`AMDGPULayout` components. Component dependencies are loaded transitively:
+`Tiled` and `BLAS` require `Operations`, while `Operations` and `MX` require
+`Core`. A component lookup loads only the requested closure, so `Core` does not
+search for BLAS or OpenMP. The `BLAS` component locates `BLAS::BLAS` when
+requested; consumers do not manually repeat the OpenBLAS/CBLAS link line.
 
 ## Python and NumPy oracle
 

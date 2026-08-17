@@ -13,12 +13,14 @@
 #include <cstdint>
 #include <hipblaslt/hipblaslt.h>
 #include <optional>
-#include <roc/host_validation/adapters/hipblaslt/Comparison.hpp>
+#include <hipblaslt/host_validation/Comparison.hpp>
 #include <span>
 #include <stdexcept>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     enum class HostPointwiseComparison
     {
         Disabled,
@@ -219,4 +221,4 @@ namespace roc::host_validation::hipblaslt_adapter
 
         return report;
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation
