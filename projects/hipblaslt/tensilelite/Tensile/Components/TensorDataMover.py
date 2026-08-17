@@ -524,6 +524,9 @@ class TensorDataMoverLoad(TensorDataMover):
         mod.add(SLShiftLeftB32(sgpr(f"{group2}+3"), hex(16), sgpr(f"{group2}+3")))
         return mod
 
+    # pad_interval is log2(LdsBlockSizePerPad//4)-1 and must fit in 3 bits (<=7).
+    MAX_NON_ITERATE_LBSPP_BYTES: int = 1024
+
     @staticmethod
     def calPadInterval(ldsBlockSizePerPad: int) -> int:
         ldsBlockDwordsPerPad = ldsBlockSizePerPad // 4 # bytes to dwords
@@ -537,3 +540,29 @@ class TensorDataMoverLoad(TensorDataMover):
         ldsPadDwords =  ldsPadSize // 4 # bytes to dwords
         assert ldsPadDwords > 0
         return ldsPadDwords - 1
+
+    @staticmethod
+    def needsIterateModeForPad(ldsBlockSizePerPad: int, depth_u: int, bpe: float) -> bool:
+        """Return True when pad_interval non-iterate TDM must not be used.
+
+        When the natural VW=8 LBSPP would exceed the 1024 B pad_interval cap, prefer
+        iterate mode instead of halving VectorWidth — halved-VW non-iterate TDM on
+        gfx1250 produces illegal global accesses (BBS_NN_426 class).
+
+        Args:
+            ldsBlockSizePerPad: Lds block size per pad in bytes (256-aligned).
+            depth_u: DepthU unroll depth for this tensor.
+            bpe: Bytes per element for the tensor mac/data type.
+
+        Returns:
+            True if iterate_enable should be set for this tensor.
+        """
+        if ldsBlockSizePerPad == 0:
+            return False
+        if ldsBlockSizePerPad > TensorDataMoverLoad.MAX_NON_ITERATE_LBSPP_BYTES:
+            return True
+        full_vw_bytes = int(depth_u * bpe * 8)
+        if full_vw_bytes <= 0:
+            return False
+        full_vw_lbspp = ((full_vw_bytes + 255) // 256) * 256
+        return full_vw_lbspp > TensorDataMoverLoad.MAX_NON_ITERATE_LBSPP_BYTES

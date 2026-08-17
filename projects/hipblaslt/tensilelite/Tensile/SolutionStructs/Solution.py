@@ -3223,8 +3223,12 @@ class Solution(collections.abc.Mapping):
               continue
             vw = state["VectorWidth%s" % tc]
             bpe_tc = state["ProblemType"]["MacDataType%s" % tc].numBytes()
-            lbspp = roundUpToNearestMultiple(int(state["_DepthU%s" % tc] * bpe_tc * vw), 256)
-            if lbspp > 1024:
+            lbspp_cfg = state["LdsBlockSizePerPad%s" % tc]
+            if lbspp_cfg == -1:
+              lbspp = roundUpToNearestMultiple(int(state["_DepthU%s" % tc] * bpe_tc * vw), 256)
+            else:
+              lbspp = lbspp_cfg
+            if TensorDataMoverLoad.needsIterateModeForPad(lbspp, state["_DepthU%s" % tc], bpe_tc):
               state["_TDMIterateMode%s" % tc] = True
           # Resolve -1 into the concrete mask for kernel naming. backupValues
           # restores -1 before each DepthU candidate, so this overwrite is safe.
@@ -3251,8 +3255,10 @@ class Solution(collections.abc.Mapping):
                    "TDMIterateMode %s requires TLU%s to be False" % (tc, tc))
             return
 
-        # Stage 2: for non-iterate tensors, halve auto-derived VW until LBSPP
-        # fits the pad_interval 1024 B limit.
+        # Stage 2: for non-iterate tensors with auto LBSPP, halve auto-derived VW until
+        # LBSPP fits pad_interval encoding. Skip when LdsBlockSizePerPad is explicit
+        # (halving VW there does not change LBSPP). When full VW=8 LBSPP would exceed
+        # the non-iterate cap, prefer iterate (needsIterateModeForPad) over halving.
         multiple = 256
         for tc in ["A", "B"]:
           if state.get("_TDMIterateMode%s" % tc, False):
@@ -3261,11 +3267,20 @@ class Solution(collections.abc.Mapping):
             continue
           if not state["UnrollMajorLDS%s" % tc]:
             continue
+          if state["LdsBlockSizePerPad%s" % tc] != -1:
+            continue
           vw = state["VectorWidth%s" % tc]
           if vw <= 1:
             continue
           tmpBpe = state["ProblemType"]["MacDataType%s" % tc].numBytes()
           depthU_tc = state["_DepthU%s" % tc]
+          lbspp = roundUpToNearestMultiple(int(depthU_tc * tmpBpe * vw), multiple)
+          # When TDMIterateMode is explicit (not -1), Stage 1 does not auto-select
+          # iterate; block VW halving and force iterate for the gfx1250 broken path.
+          if iterModeMask != -1 and TensorDataMoverLoad.needsIterateModeForPad(lbspp, depthU_tc, tmpBpe):
+            state["_TDMIterateMode%s" % tc] = True
+            state["TDMIterateMode"] = state["TDMIterateMode"] | (1 if tc == "A" else 2)
+            continue
           origVw = vw
           while vw > 1:
             candidate = roundUpToNearestMultiple(int(depthU_tc * tmpBpe * vw), multiple)
@@ -4360,7 +4375,8 @@ class Solution(collections.abc.Mapping):
                 extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
 
           # Subtile bypasses the 1024B pad_interval limit via iterate mode;
-          # non-subtile TDM handles it earlier via _TDMIterateMode + VW halving.
+          # non-subtile TDM handles it earlier via _TDMIterateMode and VW halving
+          # (iterate preferred over halving when needsIterateModeForPad applies).
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
