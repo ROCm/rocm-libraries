@@ -457,6 +457,35 @@ miopen::conv::ProblemDescription MakeElemCountConvProblem(miopen::conv::Directio
     return {y, weights, x, conv, dir};
 }
 
+// 3D (NDHWC) sibling of MakeElemCountConvProblem. The element-count gate is
+// rank-agnostic, so it must fire for 3D grouped wrw (ConvHipImplicitGemm3DGroupWrwXdlops)
+// on the same >INT_MAX-element-extent condition as the 2D case.
+miopen::conv::ProblemDescription MakeElemCount3DConvProblem(miopen::conv::Direction dir,
+                                                            std::size_t n,
+                                                            std::size_t c,
+                                                            std::size_t d,
+                                                            std::size_t h,
+                                                            std::size_t w,
+                                                            std::size_t k)
+{
+    const miopen::TensorDescriptor x{miopenHalf, miopenTensorNDHWC, {n, c, d, h, w}};
+    const miopen::TensorDescriptor weights{miopenHalf, miopenTensorNDHWC, {k, c, 3, 3, 3}};
+    const miopen::ConvolutionDescriptor conv{3,
+                                             miopenConvolution,
+                                             miopenPaddingDefault,
+                                             {1, 1, 1}, // pads (SAME for 3x3x3)
+                                             {1, 1, 1}, // strides
+                                             {1, 1, 1}, // dilations
+                                             {0, 0, 0}, // trans output pads
+                                             1,         // group count
+                                             1.0f};     // lowp quant
+    const miopen::TensorDescriptor y = conv.GetForwardOutputTensor(x, weights, miopenHalf);
+
+    if(dir == miopen::conv::Direction::Forward)
+        return {x, weights, y, conv, dir};
+    return {y, weights, x, conv, dir};
+}
+
 } // namespace
 
 TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate)
@@ -484,4 +513,32 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate
     // A small wrw problem (element count well within int32) stays on the int32 path.
     EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::BackwardWeights, 1, 64, 32, 32, 64)));
+}
+
+TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, Wrw3DElementCountOverflowGate)
+{
+    using miopen::conv::Direction;
+    using miopen::solver::RequiresLargeTensorCKInstance;
+
+    // N*C*D*H*W = 256*512*32*32*32 = 4.29e9 > INT_MAX, yet every length and stride
+    // (max stride = C*D*H*W = 16.78M) fits int32, so AllTensorsDimsFitIntoInt() is true
+    // and only the element-count gate can flag it. Mirrors WrwElementCountOverflowGate
+    // for the 3D (NDHWC) grouped wrw path.
+    constexpr std::size_t n = 256, c = 512, d = 32, hw = 32, k = 512;
+
+    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+        MakeElemCount3DConvProblem(Direction::BackwardWeights, n, c, d, hw, hw, k)))
+        << "3D grouped wrw with >INT_MAX element count must require a large-tensor instance";
+
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeElemCount3DConvProblem(Direction::Forward, n, c, d, hw, hw, k)))
+        << "3D forward must stay on the (faster) int32 instances";
+
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeElemCount3DConvProblem(Direction::BackwardData, n, c, d, hw, hw, k)))
+        << "3D backward-data must stay on the (faster) int32 instances";
+
+    // A small 3D wrw problem (element count well within int32) stays on the int32 path.
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
+        MakeElemCount3DConvProblem(Direction::BackwardWeights, 1, 64, 8, 16, 16, 64)));
 }
