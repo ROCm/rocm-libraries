@@ -28,6 +28,15 @@ namespace hipdnn_integration_tests::bundle
 namespace detail
 {
 
+inline std::filesystem::path sidecarPathFor(const DiscoveredBundle& disc)
+{
+    if(disc.isTemplateSweepCase())
+    {
+        return disc.jsonPath.parent_path() / "support.json";
+    }
+    return supportJsonPath(disc.diagnosticPath());
+}
+
 // A discovered bundle paired with its eagerly-loaded contents. The bundle is
 // loaded once at registration time (not per test run) and shared into the test
 // factory via shared_ptr so the factory lambda stays copyable.
@@ -140,15 +149,11 @@ inline LoadOutcome classifyBundle(const DiscoveredBundle& disc)
     }
 
     SupportClaimLocator locator;
+    locator.sidecarPath = sidecarPathFor(disc);
     locator.diagnosticPath = diagnosticPath.string();
     if(disc.isTemplateSweepCase())
     {
-        locator.sidecarPath = disc.jsonPath.parent_path() / "support.json";
-        locator.caseId      = disc.sweep->caseId;
-    }
-    else
-    {
-        locator.sidecarPath = supportJsonPath(diagnosticPath);
+        locator.caseId = disc.sweep->caseId;
     }
 
     return LoadedBundle{diagnosticPath,
@@ -174,21 +179,20 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
 {
     for(const auto& bundle : bundles)
     {
-        ::testing::RegisterTest(
-            bundle.suiteName.c_str(),
-            bundle.testName.c_str(),
-            nullptr,
-            nullptr,
-            __FILE__,
-            __LINE__,
-            [loaded = bundle.bundle,
-             path = bundle.jsonPath,
-             locator = bundle.claimLocator]() -> ::testing::Test* {
-                auto* test = new IntegrationBundleVerificationHarness(
-                    /*requiresDevice=*/true);
-                test->setBundle(loaded, path, locator);
-                return test;
-            });
+        ::testing::RegisterTest(bundle.suiteName.c_str(),
+                                bundle.testName.c_str(),
+                                nullptr,
+                                nullptr,
+                                __FILE__,
+                                __LINE__,
+                                [loaded = bundle.bundle,
+                                 path = bundle.jsonPath,
+                                 locator = bundle.claimLocator]() -> ::testing::Test* {
+                                    auto* test = new IntegrationBundleVerificationHarness(
+                                        /*requiresDevice=*/true);
+                                    test->setBundle(loaded, path, locator);
+                                    return test;
+                                });
     }
 }
 
@@ -258,11 +262,8 @@ inline void registerBundleTests()
     bundles.reserve(discovered.size());
     for(const auto& disc : discovered)
     {
-        const auto sidecarPath = disc.isTemplateSweepCase()
-                                     ? disc.jsonPath.parent_path() / "support.json"
-                                     : supportJsonPath(disc.diagnosticPath());
         SupportClaimReport::get().recordGraphFound();
-        if(std::filesystem::exists(sidecarPath))
+        if(std::filesystem::exists(detail::sidecarPathFor(disc)))
         {
             SupportClaimReport::get().recordGraphWithClaims();
         }
