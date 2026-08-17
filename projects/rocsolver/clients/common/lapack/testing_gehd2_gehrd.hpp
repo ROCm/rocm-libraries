@@ -150,9 +150,6 @@ void gehd2_gehrd_initData(const rocblas_handle handle,
                 {
                     if(i == j)
                         hA[b][i + j * lda] += 400;
-                    // set A to upper triangular outside of bounds
-                    else if(i > j && (j < ilo - 1 || j > ihi - 1))
-                        hA[b][i + j * lda] = 0;
                     else if(i == j + 1)
                         hA[b][i + j * lda] += 400;
                     else
