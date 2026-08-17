@@ -3088,6 +3088,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.calculateStagger(kernel,tPM))
         # Calculate stagger B(MXSB)
         module.add(self.calculateStagger(kernel, tensorParametersB))
+        # Wave-separated TDM picks WrapUA or WrapUB by wave parity. Both the parity
+        # (a function of Serial) and the two WrapU values are loop-invariant, so fold
+        # the choice into WrapUA once here instead of redoing it every unroll iteration.
+        module.add(self.hoistWaveParityWrapUSel(kernel, tensorParametersA, tensorParametersB))
 
       # WaveIdx sits at a very low physical index, and checkOutAligned scans the pool
       # from 0, so holding it past the prologue both removes a slot and fragments the
@@ -11327,7 +11331,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
     assert False, "Should be overrided"
 
-  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
+  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0,
+                                 hoistedWrapUSel=False) -> Module:
+    assert False, "Should be overrided"
+
+  def hoistWaveParityWrapUSel(self, kernel, tPA, tPB) -> Module:
     assert False, "Should be overrided"
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tPA, tPB) -> Module:
