@@ -68,7 +68,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ScheduleIterAlg: [0, 4]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1,2]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
@@ -95,6 +95,120 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 192]  #tail
           - Exact: [129, 128, 1, 128]  #edge-m
           - Exact: [128, 129, 1, 128]  #edge-n
+        - ActivationArgs:
+          - [Enum: none]
+    - # BenchmarkProblemSizeGroup - BF16 TDMSplit, straddling read (MIWaveTile 12, VW 4)
+      # numVectorsPerTile == 3 so vIdx=1's vector spans the M/2 LDS split boundary;
+      # exercises the both-half read token path (the byte-offset classifier alone
+      # would mis-tag it to a single half and leave one tensor_load un-waited).
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  12, 4,  2, 2]
+        - DepthU: [64]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False, True]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0, 4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [384, 128, 1, 128]
+          - Exact: [384, 128, 1, 192]  #tail
+          - Exact: [385, 128, 1, 128]  #edge-m
+          - Exact: [384, 129, 1, 128]  #edge-n
+        - ActivationArgs:
+          - [Enum: none]
+    - # BenchmarkProblemSizeGroup - BF16 TDMSplit, odd MIWaveTile straddle (7, VW 1)
+      # Odd MIWaveTile puts the M/2 split boundary mid-tile (7/2 = 3.5), so a
+      # single MI-tile's read straddles the two LDS halves. The reads split into
+      # separate half0 / half1 groups, producing TWO read-release barriers whose
+      # s_wait_tensorcnt each cover only one half; under EPS0 the pinned read
+      # token differs from the producing tensor_load token, so the barrier must
+      # fence the other buffer's same-half fill (crossBufferPartner) or the
+      # straddling read races an in-flight cross-buffer refill.
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  7, 4,  2, 2]
+        - DepthU: [64]
+        - TDMInst: [3]
+        - TDMIterateMode: [0]
+        - TDMSplit: [False, True]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [0, 4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [8]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [False]
+        - DirectToVgprSparseMetadata: [False]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [224, 128, 1, 128]
+          - Exact: [224, 128, 1, 192]  #tail
+          - Exact: [225, 128, 1, 128]  #edge-m
+          - Exact: [224, 129, 1, 128]  #edge-n
         - ActivationArgs:
           - [Enum: none]
   #######################################
@@ -134,7 +248,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - TDMInst: [3]
         - TDMIterateMode: [0]
-        - TDMSplit: [False]
+        - TDMSplit: [False, True]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -145,7 +259,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ScheduleIterAlg: [0, 4]
         - PrefetchLocalRead: [1]
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [1,2]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
