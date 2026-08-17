@@ -5409,19 +5409,70 @@ namespace TensileLite
             if(sizeMapping.streamKAtomic != 0)
                 reject("StreamKAtomic=1");
 
-            // Batch-inclusive tile count, matching the value the StreamK
-            // resolution and the kernel-arg packing both use. Unless the grid
-            // divides it, some output tiles have their K range split across
-            // workgroups and reduced by fixup while others do not.
-            const size_t tiles = problem.getNumTiles(sizeMapping, 1);
-            if(sk.grid == 0 || tiles % sk.grid != 0)
-                reject("StreamK grid " + std::to_string(sk.grid)
-                       + " does not divide the tile count " + std::to_string(tiles));
-
-            // The parallel path reinterprets the same kernel arguments and
-            // splits K across workgroups.
+            // Checked before the split arithmetic below, which models the tree
+            // packing specifically: the parallel path reinterprets the same
+            // kernel arguments and splits K across workgroups instead.
             if(sk.reduction != origami::reduction_t::tree)
                 reject("the resolved StreamK reduction is parallel, not tree");
+
+            // Load-bearing rather than defensive: the grouped-GEMM callers pass
+            // a default-constructed StreamKSettings, so this is what stands
+            // between them and a division by zero below.
+            if(sk.grid == 0)
+                reject("the resolved StreamK grid is 0");
+
+            // StreamK=5 hybrid runs the static (SK3) packing unless its
+            // sub-mode resolves to dynamic. generateSingleCall() decides this
+            // from the same problem and hardware, so the gate and the packer
+            // cannot disagree about which ABI is in play.
+            const bool effectiveDynamic = (sizeMapping.streamK == 5)
+                                              ? streamK5EffectiveDynamic(problem, hardware)
+                                              : false;
+            const bool staticTwoTilePacking
+                = (sizeMapping.streamK == 3) || (sizeMapping.streamK == 5 && !effectiveDynamic);
+
+            // Batch-inclusive tile count, matching the value the StreamK
+            // resolution and the kernel-arg packing both use.
+            const size_t tiles = problem.getNumTiles(sizeMapping, 1);
+
+            if(staticTwoTilePacking)
+            {
+                // Clamped exactly as generateSingleCall() clamps it, so K==0
+                // resolves the same way on both sides.
+                const size_t itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+                if(pAMDGPU == nullptr)
+                    reject("the StreamK split cannot be recomputed for this hardware");
+
+                // The same helper generateSingleCall() packs from, so the gate
+                // reasons about the split the kernel actually performs.
+                const StreamKStaticSplit split
+                    = streamKStaticSplit(tiles,
+                                         itersPerTile,
+                                         sk.grid,
+                                         pAMDGPU != nullptr ? pAMDGPU->skFullTiles : 1,
+                                         sizeMapping.streamKForceDPOnly != 0);
+
+                if(!streamKStaticSplitRowUniform(split, tiles, itersPerTile))
+                    reject("the StreamK split is not row-uniform: tiles=" + std::to_string(tiles)
+                           + " itersPerTile=" + std::to_string(itersPerTile)
+                           + " grid=" + std::to_string(sk.grid)
+                           + " skTiles=" + std::to_string(split.skTiles)
+                           + " skItersPerWG=" + std::to_string(split.skItersPerWG)
+                           + " extraIters=" + std::to_string(split.extraIters));
+            }
+            else if(tiles % sk.grid != 0)
+            {
+                // SK4 and SK5-dynamic pack SKTiles/SKSplit/SKItersPerWI, which
+                // the derivation above does not describe. They are additionally
+                // held to SKTiles == 0 below, so the divisibility test is
+                // redundant for them, but redundant and fail-closed is the
+                // right side to err on.
+                reject("StreamK grid " + std::to_string(sk.grid)
+                       + " does not divide the tile count " + std::to_string(tiles));
+            }
 
             // Mirrors the arg-packing condition: the ws/Flags pair is only
             // appended for these kernels, and the device reads AddressFlags == 0
@@ -5432,9 +5483,6 @@ namespace TensileLite
 
             // The dynamic-queue variants are row-uniform only while every output
             // tile stays data-parallel, i.e. the packed SKTiles is 0.
-            const bool effectiveDynamic = (sizeMapping.streamK == 5)
-                                              ? streamK5EffectiveDynamic(problem, hardware)
-                                              : false;
             if(sizeMapping.streamK == 4 || effectiveDynamic)
             {
                 AMDGPU const*  pAMDGPU       = dynamic_cast<AMDGPU const*>(&hardware);
