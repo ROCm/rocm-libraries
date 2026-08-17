@@ -19,17 +19,14 @@ namespace miopen {
 namespace ai {
 namespace lgbm {
 
-// A gradient-boosted decision-tree forest parsed from a LightGBM text model
-// (the native `.txt` dump). This replaces the Treelite-generated C that used
-// to be checked into the tree: the forest is loaded from a data asset at
-// runtime and walked here, rather than compiled to per-model C source.
+// A gradient-boosted decision-tree forest parsed from a LightGBM text (`.txt`)
+// model at runtime and walked here.
 //
-// Inference is intentionally minimal and exactly mirrors what the generated
-// predict() did: sum the reached leaf value across every tree. The training
-// objective (lambdarank) has no output transform, so the raw sum IS the score
-// (higher = predicted faster). Feature rows are the same LgbmEntry union the
-// callers already assemble (missing == -1 marks NaN/absent; otherwise the
-// numeric value -- or a categorical code cast to double -- lives in fvalue).
+// Inference sums the reached leaf value across every tree. The training
+// objective (lambdarank) has no output transform, so the raw sum is the score
+// (higher = predicted faster). Feature rows use the LgbmEntry union (missing ==
+// -1 marks NaN/absent; otherwise the numeric value, or a categorical code cast
+// to double, lives in fvalue).
 class MIOPEN_INTERNALS_EXPORT LgbmForest
 {
 public:

@@ -28,8 +28,7 @@ namespace {
 // The missing_type matters: only NaN-type nodes treat a NaN input as missing
 // and route it by the default-left bit. None/Zero-type nodes coerce a NaN input
 // to 0.0 first and then either send an exact zero via default-left (Zero type)
-// or fall through to the ordinary threshold compare. This exactly reproduces
-// the generated predict()'s per-node handling.
+// or fall through to the ordinary threshold compare.
 constexpr int kCategoricalMask  = 0x01;
 constexpr int kDefaultLeftMask  = 0x02;
 constexpr int kMissingTypeShift = 2;

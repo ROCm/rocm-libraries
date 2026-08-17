@@ -54,9 +54,9 @@
 /// Elevate log messages for Search to warnings.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_WARN_SEARCH)
 
-// Restore the legacy lgbm_pcfg walk behavior where a "" (solver-default) entry
-// ranked ahead of real configs terminates the ranked walk. Default (unset) uses
-// the first-valid walk that skips "" and keeps going -- see the hook below.
+// When set, a "" (solver-default) entry in the lgbm_pcfg ranked list terminates
+// the walk. When unset (default), "" is skipped and the walk continues to the
+// first valid config -- see the hook below.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT)
 
 namespace miopen {
@@ -185,23 +185,17 @@ auto FindSolutionImpl(rank<1>,
     // and no search ran — i.e. exactly where GetDefaultPerformanceConfig would
     // otherwise be used. Perf-db records remain authoritative ("perf-db wins").
     //
-    // First-valid ranked walk (FIRST_VALID_FIX.md): the picker returns candidates
-    // ordered best->worst by model score. We walk that order and take the first
-    // config that passes IsValidPerformanceConfig — the bucket-argmax is globally
-    // good but frequently invalid for a specific OOD shape, and committing to an
-    // invalid top-1 forced the whole Find down to ConvDirectNaive (10-24x slower).
+    // First-valid ranked walk: the picker returns candidates ordered best->worst
+    // by model score. We take the first config that passes IsValidPerformanceConfig;
+    // the top-ranked config is often invalid for a specific problem, and committing
+    // to an invalid one would drop the Find to ConvDirectNaive.
     //
-    // The "" (solver-default) sentinel is SKIPPED, not treated as a walk
-    // terminator: the model ranks "" #0 for ~40% of buckets, and on OOD shapes
-    // that call is unreliable -- an observed gfx1100 grouped-conv used the slow
-    // default (~49ms) while a valid Wmma_CShuffle_V3 config ranked just below ""
-    // was ~2.4x faster and already in the catalog. Since exactly one config per
-    // solver is benchmarked in Hybrid/DynamicHybrid Find, letting "" short-circuit
-    // denied that solver its best valid config. We instead keep walking to the
-    // first valid non-empty config; every candidate is still validated, and
-    // exhausting the walk falls through to GetDefaultPerformanceConfig below, so we
-    // never leave the solver on an invalid config. Set
-    // MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT=1 to restore the legacy stop-on-"".
+    // The "" (solver-default) sentinel is skipped rather than terminating the walk:
+    // only one config per solver is benchmarked in Hybrid/DynamicHybrid Find, so
+    // stopping on "" would deny that solver a valid, higher-ranked real config.
+    // Every candidate is still validated, and exhausting the walk falls through to
+    // GetDefaultPerformanceConfig below, so an invalid config is never used. Set
+    // MIOPEN_DEBUG_LGBM_PCFG_STOP_ON_DEFAULT=1 to make "" terminate the walk.
     if constexpr(std::is_same_v<Problem, ::miopen::conv::ProblemDescription>)
     {
         if(perf_cfg.empty() && !enforce.IsDbClean(context) &&

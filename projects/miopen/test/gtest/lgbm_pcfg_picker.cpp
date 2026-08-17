@@ -6,10 +6,9 @@
 //   * a self-contained ranking invariant: ScorePickForTest returns a
 //     deterministic permutation of the bucket's real candidate descriptors
 //     (nothing invented or dropped), driven off the shipped catalog+metadata, and
-//   * a golden-vector parity gate: the in-house LightGBM text-model walker
-//     (LgbmForest) reproduces LightGBM's own raw scores within a tight tolerance
-//     on committed (features -> score) vectors, for each per-solver model that
-//     replaced the Treelite-generated C.
+//   * a golden-vector parity gate: the LightGBM text-model walker (LgbmForest)
+//     reproduces LightGBM's own raw scores within a tight tolerance on committed
+//     (features -> score) vectors, for each per-solver model.
 
 #include <gtest/gtest.h>
 

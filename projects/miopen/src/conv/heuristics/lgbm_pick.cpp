@@ -36,12 +36,11 @@ namespace lgbm {
 
 namespace {
 
-// Indices into the v18 TunaNet+Align 61-feature row, matching model_meta.json
-// rank.feature_order. The 41 HIP-only base features are unchanged from v16/v17;
-// the 20 derived features (13 tn_* GEMM-geometry + 7 al_* tile-alignment) are
-// computed in C++ and inserted at 28..47, shifting the categorical + GPU blocks
-// down. No embedded GPU data: base GPU inputs are six hipDeviceProp_t fields +
-// gfx_id, and the derived features come from conv dims + cu_count only.
+// Indices into the 61-feature row, matching model_meta.json rank.feature_order:
+// 41 base features + 20 derived (13 tn_* GEMM-geometry + 7 al_* tile-alignment)
+// at 28..47, then the categorical and GPU blocks. GPU inputs are the six
+// hipDeviceProp_t fields + gfx_id; derived features come from conv dims +
+// cu_count.
 constexpr int kIdxNMiniBatchSize = 0;
 constexpr int kIdxChannels       = 1;
 constexpr int kIdxDepth          = 2;
@@ -126,12 +125,9 @@ common::ConvDirection ToEngineeredDirection(conv::Direction d)
     return common::ConvDirection::Forward;
 }
 
-// Fill the base problem feature block (indices 0..27). The 6 derived workload
-// features (flop_cnt/bytes_*/gflops/bandwidth_gbps) are fed as NaN: the perf-DB
-// instrumentation that produced them at training time is direction-aware in a
-// way a runtime textbook estimate cannot reproduce, and a prior validation
-// showed NaN reproduces more reference picks. LightGBM treats NaN as a real
-// branch direction.
+// Fill the base problem feature block (indices 0..27). The 6 workload features
+// (flop_cnt/bytes_*/gflops/bandwidth_gbps) are fed as NaN because they cannot be
+// reproduced at runtime; LightGBM routes NaN through the trained missing branch.
 void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
 {
     const double nan_v = std::numeric_limits<double>::quiet_NaN();
@@ -167,13 +163,10 @@ void FillProblemFeatures(LgbmEntry* row, const conv::ProblemDescription& p)
     SetNumeric(row[kIdxBandwidthGbps], nan_v);
 }
 
-// Fill the 13 tn_* TunaNet GEMM-geometry features (28..40) by reusing MIOpen's
-// production EngineeredConvFeatures verbatim -- this is the single source of
-// truth shared with the TunaNet/candidate-selection encoders, so the C++ and
-// the Python training pipeline cannot drift. H_out/W_out are taken from the
-// output descriptor (exact, incl. transpose/asym). 2D geometry is used for all
-// convs (matches the model's training); 3D extent is carried by the base
-// depth/spatial features.
+// Fill the 13 tn_* GEMM-geometry features (28..40) via common::EngineeredConvFeatures
+// (shared with the TunaNet/candidate-selection encoders). H_out/W_out come from
+// the output descriptor; 2D geometry is used for all convs, with 3D extent carried
+// by the base depth/spatial features.
 void FillTunaNetFeatures(LgbmEntry* row, const conv::ProblemDescription& p, std::size_t num_cu)
 {
     const auto feats = common::EngineeredConvFeatures(p.GetBatchSize(),
@@ -262,16 +255,14 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     // :sramecc+:xnack- suffix).
     const std::string gfx_id = handle.GetDeviceName();
 
-    // Architecture gating. For a gfx_id in the model's vocab we score normally.
-    // For an unknown arch, a model trained with gfx_id feature-dropout
-    // (AllowUnseenArch()) can still predict from the continuous GPU-numeric
-    // features by routing gfx_id through the missing branch -- so we score with
-    // gfx_id fed as the unseen sentinel rather than abstaining. FillGpuFeatures
-    // already encodes an out-of-vocab gfx_id as the missing marker (-1), which is
-    // the sentinel the model was trained to expect, so no special filling is
-    // needed here. Set MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH=1 to force the old
-    // abstain-on-unknown behavior. Older models (no unseen support) always
-    // abstain and fall through to TunaNet.
+    // Architecture gating. A gfx_id in the model's vocab is scored normally. An
+    // unknown arch is scored only when the model declares unseen-arch support
+    // (AllowUnseenArch(), i.e. trained with gfx_id feature-dropout): gfx_id is
+    // routed through the missing branch so the continuous GPU-numeric features
+    // carry the arch signal. FillGpuFeatures already encodes an out-of-vocab
+    // gfx_id as the missing marker (-1), so no special filling is needed here.
+    // Otherwise the picker abstains and falls through to TunaNet. Set
+    // MIOPEN_DEBUG_LGBM_DISABLE_OOD_ARCH=1 to force abstain on unknown arch.
     const int gfx_code = meta.CategoricalCode("gfx_id", gfx_id);
     MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (vocab code " << gfx_code
                                                 << "), groups=" << problem.GetGroupCount());
@@ -297,21 +288,14 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     FillGpuFeatures(row.data(), handle, gfx_id, meta);
 
     // Score every solver in the vocabulary (lambdarank: higher = predicted
-    // faster), then return the solver IDs sorted by score. MIOpen's downstream
-    // walk keeps every applicable solver in rank order (best-ranked wins), so
-    // there is no candidate masking or applicability check here.
+    // faster) and return the solver IDs sorted by score. The downstream walk
+    // applies IsApplicable, so no masking is done here.
     //
-    // The ConvDirectNaiveConv* fallbacks are ALWAYS applicable, and the model
-    // over-ranks them on out-of-distribution shapes -- ranking one #1 would make
-    // the walk pick it over a much faster real kernel. So for LOW-group convs we
-    // demote naive fallbacks below every non-naive solver (relative score order
-    // preserved), making a naive solver reachable only when nothing else does.
-    //
-    // The guard is group-count-aware: at groups >= naive_guard_max_groups naive
-    // is genuinely the fastest solver a large fraction of the time (an
-    // unconditional guard swaps in the slow grouped-XDLOPS solver and regresses
-    // badly), so above the threshold we leave the raw score order and let naive
-    // win on merit.
+    // The always-applicable ConvDirectNaiveConv* fallbacks are demoted below all
+    // non-naive solvers for low-group convs, so a naive solver is reachable only
+    // when nothing else applies. The demotion is gated by group count: at
+    // groups >= naive_guard_max_groups naive is often genuinely fastest, so the
+    // raw score order is kept there.
     const bool guard_naive =
         problem.GetGroupCount() < static_cast<unsigned>(meta.NaiveGuardMaxGroups());
     const auto& solvers = meta.Solvers();
@@ -353,10 +337,9 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
         else
             ++dropped;
     }
-    // Distinguish "scored fine but every name is unknown to this build" (empty
-    // result -> caller falls through to TunaNet/WTI, looking like an abstain)
-    // from a healthy ranked list. The demote flag is arch-independent, so a
-    // per-arch difference here points at solver-vocab drift, not the model.
+    // An empty result (every scored name unknown to this build) makes the caller
+    // fall through to TunaNet/WTI, indistinguishable from an abstain; log the
+    // counts so the two can be told apart.
     MIOPEN_LOG_I2("lgbm: scored " << scored.size() << " solvers, " << ranked.size()
                                   << " valid in this build, " << dropped
                                   << " dropped (unknown name), guard_naive=" << guard_naive);

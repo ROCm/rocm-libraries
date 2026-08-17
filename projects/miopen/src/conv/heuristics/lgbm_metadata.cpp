@@ -30,8 +30,6 @@ LgbmMetadata::LgbmMetadata()
     {
         auto meta = ai::common::LoadJSON(meta_path);
 
-        // The rank block holds the v10 feature schema: categorical_vocab +
-        // solvers. (v10 has no triple_vocab masking, so it is not loaded.)
         const auto& rank = meta.at("rank");
 
         for(auto it = rank.at("categorical_vocab").begin();

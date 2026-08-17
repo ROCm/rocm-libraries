@@ -18,21 +18,14 @@ namespace miopen {
 namespace ai {
 namespace lgbm {
 
-// Number of features the v18 rank model consumes per row. Matches
+// Number of features the rank model consumes per row. Matches
 // model_meta.json rank.feature_order length (41 base + 20 derived).
 inline constexpr int kNumFeatures = 61;
 
 // Singleton bundling the rank-model metadata (categorical vocabularies +
 // solver list). Constructed lazily on first call to Get(); thread-safe via the
-// Meyers idiom.
-//
-// Loaded via GetSystemDbPath() at runtime: <SystemDbPath>/lgbm_model_meta.json.
-// If the file is missing or invalid, IsReady() returns false and the picker
-// abstains (returning solver::Id{}).
-//
-// v10 is runtime-pure: no spec_id, no triple_vocab masking, no margin/appl
-// thresholds. The picker scores the full solver vocabulary and takes the
-// global argmax, so only the vocab + solver list are needed here.
+// Meyers idiom. Loaded from <GetSystemDbPath()>/lgbm_model_meta.json; if the
+// file is missing or invalid, IsReady() returns false and the picker abstains.
 class MIOPEN_INTERNALS_EXPORT LgbmMetadata
 {
 public:
@@ -51,8 +44,7 @@ public:
     const std::vector<std::string>& Solvers() const { return solvers; }
 
     // Helper: look up the integer code for a value in a categorical column.
-    // Returns -1 (Treelite missing sentinel) when the value is not in the
-    // vocab.
+    // Returns -1 (the missing sentinel) when the value is not in the vocab.
     int CategoricalCode(const std::string& column, const std::string& value) const;
 
     // Helper: look up the solver_name categorical code; -1 on miss.

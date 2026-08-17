@@ -7,12 +7,10 @@
 #include <miopen/config.h>
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
-// One feature cell fed to the LightGBM forest walker (lgbm_forest.hpp). The
-// layout mirrors the `union Entry` LightGBM/Treelite use: `missing == -1`
+// One feature cell fed to the forest walker (lgbm_forest.hpp): `missing == -1`
 // marks an absent/NaN feature; otherwise the value -- a real number, or a
-// categorical code cast to double -- lives in `fvalue`. (`qvalue` is the
-// legacy quantized slot; unused by the text-model walker but kept so callers
-// that still set it compile unchanged.)
+// categorical code cast to double -- lives in `fvalue`. `qvalue` is an unused
+// quantized slot retained for layout compatibility.
 union LgbmEntry
 {
     int missing;

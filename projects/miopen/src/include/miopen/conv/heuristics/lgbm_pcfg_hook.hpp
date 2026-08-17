@@ -29,9 +29,9 @@ namespace pcfg {
 
 // Returns the ranked (best->worst) serializable perf-config descriptors for
 // `solver_db_id` on this problem + GPU, for the caller's first-valid walk. A ""
-// element means "use the solver default config" (walk terminator). Returns an
-// empty vector to abstain (picker disabled, no model for the solver, or unknown
-// bucket). Env-gated internally (MIOPEN_DEBUG_LGBM_PCFG).
+// element denotes the solver default config. Returns an empty vector to abstain
+// (picker disabled, no model for the solver, or unknown bucket). Env-gated
+// internally (MIOPEN_DEBUG_LGBM_PCFG).
 MIOPEN_INTERNALS_EXPORT std::vector<std::string> MaybePickConfig(
     const std::string& solver_db_id, const conv::ProblemDescription& problem, const Handle& handle);
 

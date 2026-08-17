@@ -21,14 +21,15 @@ struct ProblemDescription;
 namespace ai {
 namespace lgbm {
 
-// Score the v18 rank model over the full solver vocabulary for `problem` on the
+// Score the rank model over the full solver vocabulary for `problem` on the
 // GPU described by `handle`, and return the solver IDs ranked by predicted speed
-// (best first). Returns an empty vector (== abstain / fall through) when the
-// metadata failed to load or the GPU's gfx_id is not in the trained vocab.
+// (best first). Returns an empty vector (abstain / fall through) when the
+// metadata failed to load or the GPU's gfx_id is not in the trained vocab (and
+// unseen-arch support is off).
 //
 // No candidate masking or applicability check is done here: the caller walks the
-// ranked list and applies IsApplicable lazily (the MIOpen TunaNet contract), so
-// the picker only needs the Handle, not an ExecutionContext.
+// ranked list and applies IsApplicable lazily, so the picker only needs the
+// Handle, not an ExecutionContext.
 MIOPEN_INTERNALS_EXPORT std::vector<uint64_t>
 PickSolverRanked(const conv::ProblemDescription& problem, const Handle& handle);
 

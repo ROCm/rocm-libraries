@@ -26,10 +26,9 @@ namespace pcfg {
 // described by `handle`. Scores every candidate config in the problem's
 // (gfx_id, direction, data_type) bucket with the solver's lambdarank model and
 // returns their verbatim descriptor strings ordered best->worst by predicted
-// speed (stable, so ties keep catalog order and element [0] is the argmax). Each
-// descriptor is ready for PerformanceConfig::Deserialize; a "" element means "use
-// the solver default config" (walk terminator — see FIRST_VALID_FIX.md). The
-// caller walks this order and takes the first config that passes
+// speed (stable, so ties keep catalog order). Each descriptor is ready for
+// PerformanceConfig::Deserialize; a "" element denotes the solver default
+// config. The caller walks this order and takes the first config that passes
 // IsValidPerformanceConfig, falling back to GetDefaultPerformanceConfig if none
 // is valid. Returns an empty vector (abstain, caller uses its default) when:
 //   - metadata failed to load,

@@ -31,8 +31,8 @@ struct Candidate
     std::vector<double> args;
 };
 
-// Per-solver model metadata + candidate catalog. The compiled Treelite predict()
-// for a solver indexes features by position over [prob_feat | arg_cols (N)];
+// Per-solver model metadata + candidate catalog. The model for a solver indexes
+// features by position over [prob_feat | arg_cols (N)];
 // prob_feat_count is the problem+GPU prefix length and feat_count ==
 // prob_feat_count + arg_count. The base prefix is kNumBaseProbFeatures; some
 // solvers append a trailing gfx_code categorical (has_gfx_code), making the

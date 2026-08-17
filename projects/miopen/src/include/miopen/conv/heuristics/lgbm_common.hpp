@@ -22,9 +22,8 @@ namespace lgbm {
 // and the layer-2 perf-config picker (lgbm_pcfg_pick.cpp). Kept in one place so
 // the on-the-wire encoding cannot drift between the two callers.
 
-// Write a numeric feature into an LgbmEntry, mirroring the Treelite/LightGBM
-// convention: missing == -1 marks a NaN/absent feature, otherwise the value
-// lives in fvalue.
+// Write a numeric feature into an LgbmEntry: missing == -1 marks a NaN/absent
+// feature, otherwise the value lives in fvalue.
 inline void SetNumeric(LgbmEntry& e, double v)
 {
     if(std::isnan(v))

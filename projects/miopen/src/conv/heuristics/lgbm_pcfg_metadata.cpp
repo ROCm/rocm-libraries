@@ -113,9 +113,8 @@ LgbmPcfgMetadata::LgbmPcfgMetadata()
                     cand.args.reserve(jargs.size());
                     for(const auto& a : jargs)
                     {
-                        // Exported args are ints, floats, or null (missing). The
-                        // Treelite predict() treats a missing feature via the
-                        // Entry.missing flag; the picker sets that for NaN, so map
+                        // Exported args are ints, floats, or null (missing).
+                        // A missing feature is encoded as NaN downstream, so map
                         // null -> NaN here.
                         cand.args.push_back(a.is_null() ? std::numeric_limits<double>::quiet_NaN()
                                                         : a.get<double>());

@@ -51,18 +51,11 @@ int DataTypeCode(miopenDataType_t t)
     return -1;
 }
 
-// Fixed gfx_code vocabulary, matching model_fields.build_X gfx_order in the
-// AutoResearchPerfConfig training pipeline. Unknown arch -> -1 (the model's
-// missing-category sentinel). Only used by solvers trained with PCFG_GFXID
-// (SolverModel::has_gfx_code).
-//
-// This is deliberately hardcoded rather than loaded from lgbm_pcfg_model_meta.json
-// because that metadata does not (yet) carry a gfx_code vocab, and the pcfg order
-// (gfx906,gfx90a,gfx942,gfx950,gfx1100,...) differs from the rank model's
-// alphabetical gfx_id vocab -- so the two cannot share a loader. Making this
-// data-driven requires the exporter to emit a gfx_code vocab and a rank retrain to
-// unify the ordering; see AutoResearchPerfConfig/DESIGN_cross_arch_gfx_and_generalization.md
-// (Change 1). Until then this list must stay in sync with model_fields.py by hand.
+// Fixed gfx_code vocabulary for solvers trained with a gfx_code feature
+// (SolverModel::has_gfx_code). Unknown arch -> -1 (the missing-category
+// sentinel). This ordering is not carried in the metadata and differs from the
+// rank model's gfx_id vocab, so it is hardcoded and must match the order the
+// pcfg models were trained with.
 int GfxCode(const std::string& gfx_id)
 {
     static const std::array<const char*, 10> kGfxOrder = {"gfx906",
@@ -157,10 +150,8 @@ void FillProblemPrefix(std::vector<double>& prefix,
 
 // Score every candidate in the bucket and return their descriptors ordered
 // best->worst by predicted speed (lambdarank: higher score = faster). The sort
-// is stable, so equal scores keep catalog order and element [0] is exactly the
-// argmax (today's single pick). A "" element = the solver default config, which
-// the caller treats as a walk terminator. Empty result iff the bucket is empty.
-// See FIRST_VALID_FIX.md: the caller walks this order and takes the first config
+// is stable, so equal scores keep catalog order. A "" element denotes the solver
+// default config. The caller walks this order and takes the first descriptor
 // that passes IsValidPerformanceConfig.
 std::vector<std::string> RankBucket(const LgbmForest& forest,
                                     const SolverModel& model,
