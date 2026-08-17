@@ -205,9 +205,7 @@ struct BlockGemmARegBRegCRegV2
     {
     };
 
-    // C += A * B, or C += (A * a_scale) * (B * b_scale) when the scales are
-    // supplied. They are queried per iteration as a_scale(mIter, kIter) /
-    // b_scale(nIter, kIter) and applied by the hardware scaled MMA.
+    // C += A * B
     template <typename CBlockTensor,
               typename ABlockTensor,
               typename BBlockTensor,

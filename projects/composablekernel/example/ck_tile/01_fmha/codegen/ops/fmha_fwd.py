@@ -158,8 +158,6 @@ float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_a
 #endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 """
 
-# Appended only to the instances whose pipeline resolves a BLOCKSCALE descale
-# finer than one N tile, so the host reads the pipeline's own constant.
 FMHA_FWD_KVSCALE_ALIGN_TEMPLATE = """
 #if !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
 
@@ -276,7 +274,6 @@ ck_tile::index_t fmha_fwd_block_scale_size_kv([[maybe_unused]] const std::string
 }}
 """
 
-# Rows are ordered as the dispatch orders its cases, so first match wins the same way.
 FMHA_FWD_API_KVSCALE_LOOKUP = """    struct row {{ const char* arch; const char* data_type; ck_tile::index_t hdim_q, hdim_v, align; }};
     static const row table[] = {{
 {F_rows}    }};
@@ -559,8 +556,6 @@ def api_trait_fmt_args(arch, dtype, hdim, trait: FmhaFwdApiTrait, max_bm0: int) 
     )
 
 
-# Pipelines that resolve a BLOCKSCALE descale finer than one N tile. Their
-# generated instances define fmha_fwd_kvscale_align_<>.
 KVSCALE_ALIGN_PIPELINE_TAGS = ("qr_tdm",)
 
 
@@ -674,7 +669,6 @@ class FmhaFwdApiPool:
                     ]
                     if not traits:
                         continue
-                    # Instances in the same group must share a tile, or the build fails here.
                     tiles = {
                         (t.bm0, t.bn0, t.bk0, t.bn1, t.bk1, t.bk0max) for t in traits
                     }
@@ -1450,10 +1444,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             return {
                 #                             bm0, bn0, bk0, bn1, bk1,
                 ( 64,  64) : [FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                # Two d=128 tiles, paired to a pipeline by check_gemm0_k below:
-                # wk0=128 -> qr_tdm (K=128 WMMA), wk0=64 -> qr. The qr_tdm tile is
-                # listed first because the dispatch table keeps this order and the
-                # first match wins.
                 (128, 128) : [FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
                               FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
                 #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
@@ -1473,8 +1463,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
         ) -> bool:
             # Only qr_tdm runs the K=128 WMMA; qr's k0 prefetch asserts k0_loops >= 2.
-            # Pair the two 8-bit d=128 tiles explicitly so neither leaks into the
-            # other pipeline.
             if problem_ctx.dtype not in cls._DT_FP8_FP8BF16 + cls._DT_FP8FP32:
                 return True
             if (problem_ctx.hdim, problem_ctx.hdim_v) != (128, 128):
@@ -1491,9 +1479,11 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         pipelines = []
         if dtype in cls._DT_FP16_BF16:
             qscale = "no"
-            # qr_tdm is emitted before qr so the dispatcher prefers it at d=128
-            # (dispatch order = list order). Dropout is not implemented in qr_tdm,
-            # so those workloads fall through to qr.
+            # qr_tdm: gfx1250 TDM pipeline, preferred for d=128.
+            # Emitted first so runtime dispatcher selects qr_tdm over qr
+            # when both match (dispatch order = list order in generated code).
+            # NOTE: dropout is not yet implemented in qr_tdm — only emit
+            # dropout="f" so dropout workloads fall through to qr.
             if hdim == 128 and hdim_v == 128:
                 for logits, mask, bias, lse, sink in itertools.product(
                     ["t", "f"],
@@ -1520,9 +1510,6 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, skip, "f", sink))  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16 or dtype in cls._DT_FP8FP32:
             # no need lse/dropout kernels
-            # qr_tdm is emitted before qr so the dispatcher prefers it at d=128
-            # (dispatch order = list order). Finer qscale granularities are not
-            # wired into qr_tdm, so those fall through to qr.
             if hdim == 128 and hdim_v == 128:
                 for logits, qscale, mask, bias in itertools.product(
                     ["f"],

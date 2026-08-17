@@ -286,8 +286,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     constexpr ck_tile::index_t kVScaleGranularity =
         ScalesConfig<TypeConfig, is_mx>::kVScaleGranularity;
 
-    // Note: block_scale_size_q_ should be greater than or equal to the compute
-    // block size.
+    // Note: block_scale_size_q_ and block_scale_size_kv_ should be greater than or equal to the
+    // compute block size
     constexpr ck_tile::index_t block_scale_size_q_ = 128;
 
     const std::string data_type = []() {
@@ -808,7 +808,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
     }
     else if(qscale.type == quant_scale_enum::perhead)
     {
-        // one descale per (batch, head); K/V are indexed by the KV head
         q_descale_host = ck_tile::HostTensor<QScaleDataType>(
             std::array<ck_tile::index_t, 2>{shape_batch, nhead});
         k_descale_host = ck_tile::HostTensor<KScaleDataType>(
@@ -967,8 +966,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
         q_descale_host(0) = qkv_max / q_dtype_max;
         k_descale_host(0) = qkv_max / k_dtype_max;
-        // v_descale is the only descale that reaches an MMA scale operand, and that
-        // operand is E8M0. Round-tripping picks the value the hardware will actually use.
+        // v_descale lands in an E8M0 MMA scale operand; round-trip to the value
+        // the hardware will actually use.
         v_descale_host(0) = ck_tile::type_convert<float>(ck_tile::e8m0_t(qkv_max / v_dtype_max));
     }
     else if(qscale.type == quant_scale_enum::blockscale)
@@ -1492,8 +1491,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     args.v_descale_ptr =
                         reinterpret_cast<const float*>(v_descale_buf.GetDeviceBuffer());
 
-                    // descale layout is {shape_batch, nhead}; group mode has
-                    // shape_batch == 1, so the kernel ignores the batch stride there
                     args.nhead_stride_q_descale = 1;
                     args.nhead_stride_k_descale = 1;
                     args.nhead_stride_v_descale = 1;
@@ -1948,11 +1945,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 scale_s_host = scale_s * q_descale_host(0) * k_descale_host(0);
                 scale_o_host = v_descale_host(0);
             }
-            // perhead / blockscale apply their varying descales inside the two
-            // reference GEMMs below instead.
         }
 
-        // P is quantized below, out of the softmax: its scale is not a constant.
         auto p_compute_element_func = ck_tile::identity{};
 
         auto oacc_element_func = [&]() {
@@ -1965,7 +1959,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 return ck_tile::identity{};
         }();
 
-        // The host reference must quantize P with the same per-32 scheme as the device.
         auto quantize_p_ref = [&](auto& p) {
             if constexpr(quantizes_p)
             {
@@ -1995,7 +1988,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
                             }
                             for(ck_tile::index_t n = n0; n < n1; ++n)
                             {
-                                // An all-zero group rounds to a zero scale.
                                 p(h, m, n) = scale == 0.0f
                                                  ? 0.0f
                                                  : ck_tile::type_convert<float>(
@@ -2274,7 +2266,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
             }
             else if(qscale.type == quant_scale_enum::perhead)
             {
-                // idx = (head, m, n); Q follows the Q head, K the KV head
                 ck_tile::reference_batched_quant_gemm<QDataType,
                                                       KDataType,
                                                       SaccDataType,
@@ -2630,8 +2621,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
             }
             else if(qscale.type == quant_scale_enum::perhead)
             {
-                // per-head scale_o = v_descale, applied on the accumulator
-                // (idx = (head, m, n)); mirrors oacc_element_func of the pertensor path
                 ck_tile::
                     reference_batched_quant_gemm<PDataType, VDataType, OaccDataType, ODataType>(
                         p_host_ref,

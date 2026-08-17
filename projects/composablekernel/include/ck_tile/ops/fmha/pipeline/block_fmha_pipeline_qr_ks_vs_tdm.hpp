@@ -68,33 +68,22 @@ struct BlockFmhaPipelineQRKSVSTdm
     static constexpr auto BiasEnum          = Problem::BiasEnum;
     static constexpr auto QScaleEnum        = Problem::QScaleEnum;
     static constexpr bool kBlockScale = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
-    // Granularities that take the descale arguments on the run() overload below,
-    // and whose P is dynamically quantized against gemm1's A-side scale operand.
-    static constexpr bool kQuantized = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
+    static constexpr bool kQuantized  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                                        QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
                                        kBlockScale;
     static constexpr bool kStoreLSE        = Problem::kStoreLSE;
     static constexpr bool kHasUnevenSplits = true;
     static constexpr bool kHasSink         = Problem::kHasSink;
 
-    // Only gemm1 runs the hardware scaled MMA, and only 8-bit warp tiles with
-    // K=128 have one (v_wmma_scale_f32_16x16x128_f8f6f4). No warp gemm trait
-    // reports that, hence the tile-K comparison.
     static constexpr bool kHwGemm1Scale = is_any_of<VDataType, fp8_t, bf8_t>::value &&
                                           BlockFmhaShape::Gemm1WarpTile::at(number<2>{}) == 128;
 
-    // Reduction-axis elements covered by one byte of the four-byte scale operand.
     static constexpr index_t kScaleBytes        = 4;
     static constexpr index_t kGemm1KPerByte     = kK1 / kScaleBytes;
     static constexpr index_t kPScaleGranularity = kGemm1KPerByte;
-    // Keys spanned by one warp N iteration of gemm0, and how many tile kN0.
-    static constexpr index_t kGemm0KVPerNIter = kNXdl * kNWarp;
-    static constexpr index_t kGemm0NIters     = kN0 / kGemm0KVPerNIter;
+    static constexpr index_t kGemm0KVPerNIter   = kNXdl * kNWarp;
+    static constexpr index_t kGemm0NIters       = kN0 / kGemm0KVPerNIter;
 
-    // Finest KV extent that has to share a single descale: a scale block
-    // straddling either unit would have part of itself silently ignored (gemm1)
-    // or applied to the wrong columns (gemm0). fmha_fwd_kernel.hpp checks
-    // block_scale_size_kv against this.
     static constexpr index_t kKVScaleAlign =
         kHwGemm1Scale ? (kGemm1KPerByte < kGemm0KVPerNIter ? kGemm0KVPerNIter : kGemm1KPerByte)
                       : kN0;
@@ -102,9 +91,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                      kKVScaleAlign % kGemm0KVPerNIter == 0),
                   "qr_tdm pipeline: the two KV scale resolutions must nest");
 
-    // Replicate one E8M0 code across all four K sub-block slots. Packed4Scale's
-    // variadic constructor cannot be used here: it assigns its *last* argument
-    // to byte 0.
+    // Packed4Scale's variadic constructor assigns its *last* argument to byte 0,
+    // so it cannot be used to replicate one code across all four sub-block slots.
     CK_TILE_HOST_DEVICE static int32_t to_e8m0_scale_broadcast(e8m0_t d)
     {
         Packed4Scale_E8M0 packed;
@@ -122,18 +110,13 @@ struct BlockFmhaPipelineQRKSVSTdm
     }
 
     // From an SGPR the hardware reads only bits[7:0] of the scale operand and
-    // broadcasts them to all four K sub-blocks, silently dropping the other
-    // three bytes. This operand carries a different exponent per sub-block, so
-    // it must sit in a VGPR even though every lane holds identical bits.
+    // broadcasts them, silently dropping the other three bytes - hence the VGPR pin.
     CK_TILE_DEVICE static int32_t pin_to_vgpr(int32_t v)
     {
         asm volatile("" : "+v"(v));
         return v;
     }
 
-    // gemm1's V-side operand: one E8M0 code per K sub-block, i.e. per
-    // kGemm1KPerByte consecutive keys starting at kv_base. kv_last is the last
-    // key that exists.
     CK_TILE_DEVICE static int32_t pack_v_scale(const float* v_descale_ptr,
                                                index_t kv_base,
                                                index_t kv_last,
@@ -171,24 +154,21 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
 
-    // MX and KV_BLOCKSCALE have no code path here: they would compile and run
-    // with every descale silently dropped.
+    // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
+    // Dropout requires kernel dispatch interface expansion (dropout object +
+    // randval window) and is deferred to a follow-up task.
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE,
                   "qr_tdm pipeline: unsupported quantization granularity");
 
-    // The descale index assumes a single-phase KV walk; sink makes it two-phase,
-    // so the index would drift away from the tile being consumed.
     static_assert(!(kBlockScale && kHasSink),
                   "qr_tdm pipeline: BLOCKSCALE + sink would read the wrong descale block");
 
     static_assert(!kBlockScale || kHwGemm1Scale,
                   "qr_tdm pipeline: BLOCKSCALE requires the scaled MMA in gemm1");
 
-    // One gemm1 call gets one packed V operand, so it must be exactly one
-    // warp-GEMM K iteration or the second would reuse the first one's bytes.
     static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                   "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
 
@@ -204,7 +184,9 @@ struct BlockFmhaPipelineQRKSVSTdm
     }();
 
     static constexpr index_t kAlignmentO = Policy::template GetAlignmentO<Problem>();
-    // Required by fmha_fwd_kernel.hpp's qr_async_trload-style branch.
+    // Required by fmha_fwd_kernel.hpp's qr_async_trload-style branch (the one we
+    // dispatch into via `kPipelineName != "qr_async_trload" && != "qr_tdm"`).
+    // Mirrors block_fmha_pipeline_qr_ks_vs_async_trload.hpp:90.
     static constexpr index_t kAlignmentOacc = Policy::template GetAlignmentO<Problem>();
 
     static constexpr index_t kAlignmentBias =
@@ -252,9 +234,7 @@ struct BlockFmhaPipelineQRKSVSTdm
 
     // Re-pack gemm_0 C into gemm_1 A: C is M-outer (MIter,KIter), A is K-outer.
     // Lanes already align (NWarp==1), so this is an in-thread block reorder;
-    // identity when MIterPerWarp==1. On the quantized granularities P is also
-    // converted to fp8 with a per-kPScaleGranularity E8M0 scale, returned in
-    // p_scale for gemm1's A-side scale operand.
+    // identity when MIterPerWarp==1.
     template <typename Gemm1, typename PComputeTensor>
     CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute, int32_t& p_scale)
     {
@@ -266,9 +246,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         if constexpr(kQuantized)
         {
-            // cast_tile_mx_wmma() cuts the thread buffer into K sub-blocks in
-            // order, so it must see P already in gemm1's A order; a permuting
-            // repack would attach every code to the wrong sub-block.
             static_assert(kPMI * kPKI == 1,
                           "qr_tdm pipeline: the dynamic P scale needs the (MIter,KIter) repack "
                           "to be the identity");
@@ -332,6 +309,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                          // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
+                          // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
                           kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -438,7 +417,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
+        // ---------------------------------------------------------------------
         {
+            // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+            // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+            // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
+            // as Q / K, with V dram dist switched to trivial tile-major and the
+            // V LDS read view kept plain row-major (matches the write view).
+            // ---------------------------------------------------------------------
             constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
             tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
@@ -459,8 +445,8 @@ struct BlockFmhaPipelineQRKSVSTdm
         auto q_dram_window = make_tile_window(
             q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
 
-        // Writer (TDM) and reader share a plain row-major desc: a TDM box-major
-        // write cannot produce an XOR'd layout, so no swizzle here.
+        // Q LDS writer (TDM) and reader share plain row-major desc; TDM
+        // box-major write cannot produce XOR'd layout, so no swizzle here.
         auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<QDataType*>(smem_ptr), Policy::template MakeQLdsBlockDescriptor<Problem>());
 
@@ -501,7 +487,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {kv_load_start, 0},
                              Policy::template MakeKDramTileDistribution<Problem>());
 
-        // Plain row-major desc, see the Q window above.
+        // K LDS writer (TDM) and reader share plain row-major desc; see Q
+        // comment above for the no-swizzle rationale.
         auto k_lds_write_view = make_tensor_view<address_space_enum::lds>(
             static_cast<KDataType*>(smem_ptr), Policy::template MakeKLdsBlockDescriptor<Problem>());
         auto k_lds_read_view = make_tensor_view<address_space_enum::lds>(
@@ -530,7 +517,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                              {0, 0},
                              Policy::template MakeSRegTileDistribution<Problem>());
 
-        // V tile in LDS
+        // V tile in LDS: loaded via load_tile_tdm (same TDM machinery as Q/K),
+        // with V's DRAM dist switched to trivial tile-major and the V LDS read
+        // view kept plain row-major (matches the write view).
         auto v_dram_window =
             make_tile_window(v_dram_block_window_tmp,
                              {kv_load_start, 0},
@@ -541,8 +530,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                                          Policy::template GetSmemSizeK<Problem>() +
                                          Policy::template GetSmemSizeS<Problem>()),
             Policy::template MakeVLdsBlockDescriptor<Problem>());
-        // V LDS read view shares the plain row-major desc of the write view,
-        // which is what the TDM box-major writer produces.
+        // V LDS read view uses the same plain row-major desc as the write
+        // view (Xor=false). This matches the TDM box-major writer (single
+        // plain box per V tile) and lets the existing MakeVRegTileDistribution
+        // outer-dist + QuadInputEncoding suffix (TransposedDstrEncode) drive
+        // ds_load_tr_b128 with per-lane VOFFSETs that satisfy the WMMA B
+        // operand expected pattern. Verified end-to-end on ABC + multi-stride
+        // GQA + d-sweep (d <= 128).
         auto v_lds_read_view = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<VDataType*>(static_cast<char*>(smem_ptr) +
                                          Policy::template GetSmemSizeK<Problem>() +
@@ -573,8 +567,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
 
-        // gemm1's scale operand where v_descale is constant over the whole KV
-        // loop; BLOCKSCALE replaces it per tile below.
         [[maybe_unused]] const int32_t const_v_scale =
             kHwGemm1Scale ? to_e8m0_scale_broadcast(v_descale) : e8m0_one();
 
@@ -583,7 +575,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
         do
         {
-            // First key of this KV tile; K and V descales are both indexed off it.
             [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
             [[maybe_unused]] const index_t kv_last       = physical_seqlen_k_end - 1;
 
@@ -592,6 +583,8 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             // move V tile windows
             move_tile_window(v_dram_window, {kN0, 0});
+            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
+            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -628,15 +621,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
-            // k_descale varies along gemm0's N axis, not its reduction axis, so
-            // it is applied in fp32 here, before the row max. One warp N
-            // iteration shares one table entry, which keeps the index and the
-            // multiply operand wave-uniform.
             if constexpr(kBlockScale)
             {
-                // Without the barrier the scheduler sinks gemm1's WMMAs into
-                // this sweep and the longer s_acc/o_acc live ranges cost enough
-                // VGPRs to drop a wave per SIMD.
+                // Without the barrier the scheduler sinks gemm1's WMMAs into this
+                // sweep; the longer live ranges cost a wave per SIMD.
                 __builtin_amdgcn_sched_barrier(0);
                 constexpr auto ks_spans = decltype(s_acc)::get_distributed_spans();
                 static_assert(remove_cvref_t<decltype(ks_spans[number<1>{}])>::Impl::at(0) ==
@@ -655,7 +643,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            // STAGE 2: scale_s, add bias
+            // STAGE 2: scale_s, add bias (mirrors baseline qr_ks_vs line 715-776)
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 // Pre-scale s_acc by scale_s before adding bias
@@ -871,15 +859,14 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             });
 
-            // V TDM write must fully commit before ds_load_tr reads it.
+            // V is on the tensorcnt counter (load_tile_tdm). Wait for V TDM
+            // write to fully commit before ds_load_tr reads.
             s_wait_tensorcnt_barrier<0>();
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
-            // gemm1's V-side operand for the K range one call reduces over; the
-            // coarser granularities reuse the constant.
             auto v_scale = [&](auto i_k1) {
                 if constexpr(kBlockScale)
                 {
@@ -1010,6 +997,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
+                          // Hybrid loaders: Q/K via TDM, V via async_load + ds_load_tr (same
+                          // as the single-buffer overload above; see notes there).
                           kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -1113,7 +1102,14 @@ struct BlockFmhaPipelineQRKSVSTdm
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
+        // ---------------------------------------------------------------------
         {
+            // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+            // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+            // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
+            // as Q / K, with V dram dist switched to trivial tile-major and the
+            // V LDS read view kept plain row-major (matches the write view).
+            // ---------------------------------------------------------------------
             constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
             tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
@@ -1244,8 +1240,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
 
-        // gemm1's scale operand where v_descale is constant over the whole KV
-        // loop; BLOCKSCALE replaces it per tile below.
         [[maybe_unused]] const int32_t const_v_scale =
             kHwGemm1Scale ? to_e8m0_scale_broadcast(v_descale) : e8m0_one();
         block_sync_lds<0>();
@@ -1269,7 +1263,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                             KDataType* __restrict__ k_lds_read_ptr,
                             KDataType* __restrict__ v_lds_write_ptr,
                             KDataType* __restrict__ v_lds_read_ptr) {
-            // First key of this KV tile; K and V descales are both indexed off it.
             [[maybe_unused]] const index_t kv_tile_start = kv_load_start + i_total_loops * kN0;
             [[maybe_unused]] const index_t kv_last       = physical_seqlen_k_end - 1;
 
@@ -1307,15 +1300,10 @@ struct BlockFmhaPipelineQRKSVSTdm
                                   sequence<kM0, k0_loops * kK0>{}),
                    k_tile);
 
-            // k_descale varies along gemm0's N axis, not its reduction axis, so
-            // it is applied in fp32 here, before the row max. One warp N
-            // iteration shares one table entry, which keeps the index and the
-            // multiply operand wave-uniform.
             if constexpr(kBlockScale)
             {
-                // Without the barrier the scheduler sinks gemm1's WMMAs into
-                // this sweep and the longer s_acc/o_acc live ranges cost enough
-                // VGPRs to drop a wave per SIMD.
+                // Without the barrier the scheduler sinks gemm1's WMMAs into this
+                // sweep; the longer live ranges cost a wave per SIMD.
                 __builtin_amdgcn_sched_barrier(0);
                 constexpr auto ks_spans = decltype(s_acc)::get_distributed_spans();
                 static_assert(remove_cvref_t<decltype(ks_spans[number<1>{}])>::Impl::at(0) ==
@@ -1334,7 +1322,7 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
-            // STAGE 2: scale_s, add bias
+            // STAGE 2: scale_s, add bias (prefill path, mirrors baseline)
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
@@ -1565,8 +1553,6 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             const auto p_scale_arg = make_gemm1_scale<decltype(gemm_1)>(p_scale);
 
-            // gemm1's V-side operand for the K range one call reduces over; the
-            // coarser granularities reuse the constant.
             auto v_scale = [&](auto i_k1) {
                 if constexpr(kBlockScale)
                 {
@@ -1693,8 +1679,6 @@ struct BlockFmhaPipelineQRKSVSTdm
         return o_acc;
     }
 
-    // Two overloads rather than defaulted descale arguments: a granularity that
-    // needs them can then never be invoked without them, and vice versa.
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,

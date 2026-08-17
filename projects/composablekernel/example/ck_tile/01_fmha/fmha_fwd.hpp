@@ -1559,8 +1559,6 @@ struct fmha_fwd_batch_prefill_traits_ : public fmha_fwd_traits_<HDim_,
 template <typename Traits_, typename Arch = void>
 float fmha_fwd_(const ck_tile::stream_config&, fmha_fwd_args);
 
-// Finest KV extent a single BLOCKSCALE descale may cover. Only specialised by the
-// generated instances whose pipeline resolves finer than an N tile.
 template <typename Traits_, typename Arch = void>
 ck_tile::index_t fmha_fwd_kvscale_align_();
 
@@ -1754,11 +1752,8 @@ struct fmha_fwd_traits
 };
 float fmha_fwd(fmha_fwd_traits, fmha_fwd_args, const ck_tile::stream_config&);
 
-// Largest N tile in use, so a scale block of this size always covers a whole tile.
 inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
 
-// Block size along seqlen_k that BLOCKSCALE descales must be laid out at for the
-// kernel fmha_fwd() would select on this device. Defined in fmha_fwd_api.cpp.
 ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
                                               ck_tile::index_t hdim_q,
                                               ck_tile::index_t hdim_v);

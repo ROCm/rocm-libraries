@@ -409,9 +409,6 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                             true,
                                             false,
                                             false,
-                                            // Default keeps kBK1PerLane as the terminal K
-                                            // sub-dim, which is all an 8-bit ds_read_tr
-                                            // (load_tile_transpose on V) can deliver per lane.
                                             WGAttrNumAccessEnum::Default>;
 
         using BlockGemmPolicy =

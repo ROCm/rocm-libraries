@@ -262,8 +262,6 @@ struct FmhaFwdKernel
         const void* v_descale_ptr = nullptr;
     };
 
-    // Descale table is {batch, nhead}. Group mode has no batch dimension, so the
-    // batch strides live in the batch-mode struct only.
     struct FmhaFwdCommonPerHeadKargs : public FmhaFwdCommonQScaleKargs
     {
         ck_tile::index_t nhead_stride_q_descale;
@@ -618,16 +616,10 @@ struct FmhaFwdKernel
             kargs.batch_stride_k_descale = batch_stride_k_descale;
             kargs.batch_stride_v_descale = batch_stride_v_descale;
 
-            // Both descale indices are derived from the tile's first row/column
-            // only, so a tile straddling two scale blocks would silently take
-            // the first block's scale for all of its elements.
             assert(block_scale_size_q % FmhaPipeline::kM0 == 0 &&
                    "BLOCKSCALE: block_scale_size_q must be a multiple of the M tile size");
             if constexpr(kPipelineName == "qr_tdm")
             {
-                // qr_tdm resolves the KV descales finer than an N tile, so a
-                // scale block may be smaller than one; what it may not do is
-                // straddle a K sub-block.
                 assert(block_scale_size_kv % FmhaPipeline::kKVScaleAlign == 0 &&
                        "BLOCKSCALE: block_scale_size_kv must be a multiple of the MMA scale "
                        "operand's KV resolution");
@@ -1102,14 +1094,10 @@ struct FmhaFwdKernel
             kargs.nhead_stride_k_descale = nhead_stride_k_descale;
             kargs.nhead_stride_v_descale = nhead_stride_v_descale;
 
-            // See the batch-mode MakeKargsImpl.
             assert(block_scale_size_q % FmhaPipeline::kM0 == 0 &&
                    "BLOCKSCALE: block_scale_size_q must be a multiple of the M tile size");
             if constexpr(kPipelineName == "qr_tdm")
             {
-                // qr_tdm resolves the KV descales finer than an N tile, so a
-                // scale block may be smaller than one; what it may not do is
-                // straddle a K sub-block.
                 assert(block_scale_size_kv % FmhaPipeline::kKVScaleAlign == 0 &&
                        "BLOCKSCALE: block_scale_size_kv must be a multiple of the MMA scale "
                        "operand's KV resolution");
@@ -3145,8 +3133,6 @@ struct FmhaFwdKernel
                 }
             }();
 
-            // Base element offsets into the descale tables; K/V follow the KV
-            // head under GQA.
             constexpr bool kPerHeadQScale = QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD;
             constexpr bool kBlockQScale   = QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE;
             [[maybe_unused]] long_index_t descale_offset_q = 0;
@@ -3177,21 +3163,12 @@ struct FmhaFwdKernel
                 }
             }
 
-            // This branch is shared with qr_async_trload, which does not take the
-            // descale arguments below and would silently drop v_descale.
             static_assert(kPipelineName == "qr_tdm" ||
                               QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
                           "only qr_tdm implements quantization descales in this branch");
 
-            // Granularities whose q/k descales are workgroup-constant and so fold
-            // into scale_s. BLOCKSCALE folds only q_descale; its k/v tables vary
-            // per KV tile and are handed to the pipeline instead. Nothing is
-            // passed for P -- qr_tdm quantizes it against gemm1's A-side scale
-            // operand, so there is no lift to undo in the O normalizer.
             constexpr bool kFoldedQScale =
                 QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR || kPerHeadQScale;
-            // Rides gemm1's hardware scale operand, so it is exponent-only: the
-            // narrowing happens here rather than out of sight in the pipeline.
             const e8m0_t v_descale = [&] {
                 if constexpr(kFoldedQScale)
                     return e8m0_t(
