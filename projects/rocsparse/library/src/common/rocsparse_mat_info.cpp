@@ -292,6 +292,16 @@ void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
     this->bsrmv_info = value;
 }
 
+rocsparse_coomv_info _rocsparse_mat_info::get_coomv_info()
+{
+    return this->coomv_info;
+}
+
+void _rocsparse_mat_info::set_coomv_info(rocsparse_coomv_info value)
+{
+    this->coomv_info = value;
+}
+
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
 {
     this->m_sorted_coo2csr_info = value;
@@ -334,6 +344,12 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     {
         delete this->bsrmv_info;
         this->bsrmv_info = nullptr;
+    }
+
+    if(this->coomv_info != nullptr)
+    {
+        delete this->coomv_info;
+        this->coomv_info = nullptr;
     }
 
     rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();

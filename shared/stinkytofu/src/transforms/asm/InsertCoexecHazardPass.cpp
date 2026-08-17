@@ -37,26 +37,15 @@
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HWModel.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 namespace {
 using namespace stinkytofu;
 
-// Per-arch co-execution hazard rules. WMMA V_NOP counts come from each producer's
-// coIssueWindow bitmask at runtime; only arch-level rules live here.
-struct CoexecHazardConfig {
-    // TRANS -> TRANS and TRANS -> XDL WMMA spacing.
-    int transToNonCoreSide = 0;
-    bool hwHandlesTransToCoreSide = false;
-};
-
-constexpr CoexecHazardConfig kGfx1250Config = {
-    /*transToNonCoreSide=*/1,
-    /*hwHandlesTransToCoreSide=*/true,
-};
-
-// Bounds the backward scan. Max count on gfx1250 is 9. 18 to match LLVM's MaxVALULookAhead.
-constexpr int kMaxSlotBudget = 18;
+// Per-arch co-execution hazard rules now live in HWModel::Coexec (see
+// stinkytofu/hardware/HWModel.hpp), reached via passCtx.getHWModel(). WMMA V_NOP
+// counts still come from each producer's coIssueWindow bitmask at runtime.
 
 enum class ProducerKind { WMMA, TRANS, DGEMM, PERM };
 
@@ -153,14 +142,14 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     void setupArch(PassContext& passCtx) {
         auto arch = passCtx.getGemmTileConfig().arch;
         archId_ = getGfxArchID(arch[0], arch[1], arch[2]);
-        config_ = kGfx1250Config;
+        hw_ = &passCtx.getHWModel();
         PASS_DEBUG(std::cerr << "[InsertCoexecHazard] run arch=gfx" << arch[0] << arch[1] << arch[2]
                              << "\n");
     }
 
     // V_NOPs a consumer needs behind a matched producer.
     int required(ProducerKind kind, int slots, bool consumerIsWmma) const {
-        if (kind == ProducerKind::TRANS) return config_.transToNonCoreSide;
+        if (kind == ProducerKind::TRANS) return hw_->coexec.transToNonCoreSide;
         // DGEMM/SGEMM -> WMMA: a single spacer.
         if (kind == ProducerKind::DGEMM) return 1;
         // Tensor-LUT (perm_pk16): coexec slots.
@@ -243,7 +232,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
             if (ctx.kind == ProducerKind::WMMA && isXDLWMMA(inst)) return best;
 
             if (isSlotFiller(inst)) ++existing;
-            if (existing > kMaxSlotBudget) return best;
+            if (existing > hw_->coexec.maxSlotBudget) return best;
         }
 
         // Reached the top of the BB with budget to spare: continue into every
@@ -314,7 +303,7 @@ class InsertCoexecHazardPass : public StinkyInstPass {
     }
 
     GfxArchID archId_ = GfxArchID{};
-    CoexecHazardConfig config_;
+    const HWModel* hw_ = nullptr;
 };
 
 char InsertCoexecHazardPass::ID = 0;
