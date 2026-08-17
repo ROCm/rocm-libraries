@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,7 @@ typedef enum rocsolver_inform_type_
     inform_invalid_size,
     inform_invalid_args,
     inform_mem_query,
+    inform_not_implemented,
 } rocsolver_inform_type;
 
 inline void rocsolver_bench_inform(rocsolver_inform_type it, size_t arg = 0)
@@ -88,6 +89,9 @@ inline void rocsolver_bench_inform(rocsolver_inform_type it, size_t arg = 0)
         break;
     case inform_mem_query:
         printf("%li bytes of device memory are required...\n", arg);
+        break;
+    case inform_not_implemented:
+        printf("Method returned not implemented...\n");
         break;
     }
     printf("No performance data to collect.\n");

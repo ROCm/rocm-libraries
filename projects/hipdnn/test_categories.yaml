@@ -27,12 +27,12 @@ test_categories:
     description: "Full hipDNN validation tier"
     test_patterns:
 
-  ffm_quick:
+  ffm-quick:
     description: "Fast-feedback mechanism (FFM) quick tier; currently mirrors the quick tier"
     test_patterns:
       - ".*"
     labels:
-      - "ffm_full"
+      - "ffm-full"
 
   unit:
     description: "Current hipDNN unit-check coverage"
