@@ -10,7 +10,7 @@
 7. [Engine Name Registration](#engine-name-registration)
 8. [Error Handling](#error-handling)
 9. [Examples](#examples)
-10. [Future Improvments](#future-improvments)
+10. [Future Improvements](#future-improvements)
 
 ## Executive Summary
 
@@ -56,10 +56,13 @@ int64_t engineId = 1;  // Same hardcoded value!
 
 ### Overview
 
-The solution consists of two main components:
+The solution consists of three main components:
 
 1. **Shared Header**: Central definition of known engine names
 2. **Hash Function**: Deterministic conversion from name to `int64_t`
+3. **Plugin Entry Point**: An optional ABI call through which a plugin names engines the
+   shared header does not know about, described in
+   [Plugin-Supplied Engine Names](#plugin-supplied-engine-names)
 
 ### System Architecture
 
@@ -90,20 +93,23 @@ The solution consists of two main components:
 
 ### Engine Names Header
 
-Create a shared header file in the plugin SDK that only requires a single line change to add a new engine name.  Below are 3 possible options that enable this functionality.  Ideally we would have the ability to create automation to detect duplicates/collisions when new names are added without needing to modify tests.
+Create a shared header file in the data SDK, so that the frontend, the backend and plugins can all reach it, that only requires a single line change to add a new engine name.  Below are 3 possible options that enable this functionality.  Ideally we would have the ability to create automation to detect duplicates/collisions when new names are added without needing to modify tests.
 
 #### Selected Header format: Simple Macros with Static Registration
 Easy to understand macro approach that runtime creates a set of all registered engine names for future automation
 
-Note: This shows the anticipated format but it is subject to change as we implement and test it out.
+As shipped this lives in `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`. The
+sketch below is condensed: the real header keeps the registries behind accessors in a
+`detail` namespace and reports which two names collided.
 
 ```cpp
 #pragma once
 
 #include <set>
 #include <string_view>
+#include <unordered_map>
 
-namespace hipdnn_plugin_sdk::engine_names {
+namespace hipdnn_data_sdk::utilities {
 
 // Forward declare the registration set
 inline std::set<std::string_view>& getAllEngineNames() {
@@ -116,29 +122,42 @@ inline std::unordered_map<int64_t, std::string_view>& getEngineIdToNameMap() {
     return engineIdToNameMap;
 }
 
-// Registration helper class
+// Registration helper class. Throws if the ID is already claimed, so a duplicate
+// registration or a hash collision between two in-tree engines fails at static
+// initialization rather than at load.
 struct EngineRegistrar {
     EngineRegistrar(std::string_view name) {
         getAllEngineNames().insert(name);
-        getEngineIdToNameMap()[hipdnn_data_sdk::engineNameToId(name.data())] = name;
+        getEngineIdToNameMap()[engineNameToId(name)] = name;
     }
 };
 
-// Macro that defines engine and automatically registers it
+// Macro that defines engine and automatically registers it.
 #define HIPDNN_REGISTER_ENGINE(name) \
-    inline constexpr const char* name##_NAME = value; \
+    inline constexpr const char* name##_NAME = #name; \
     inline const int64_t name##_ID = hipdnn_data_sdk::utilities::engineNameToId(#name); \
     inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{#name};
 
-// Define all engines using the macro, name and value should match.
-HIPDNN_REGISTER_ENGINE(MIOPEN_PLUGIN)
-HIPDNN_REGISTER_ENGINE(VENDOR_FAST_CONV)
-HIPDNN_REGISTER_ENGINE(CPU_REFERENCE_ENGINE)
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PLUGIN_RENAME_THIS)
+// Define all engines using the macro.
+HIPDNN_REGISTER_ENGINE(MIOPEN_ENGINE)
+HIPDNN_REGISTER_ENGINE(HIPBLASLT_ENGINE)
+HIPDNN_REGISTER_ENGINE(ROCKE_ENGINE)
 
-} // namespace hipdnn_plugin_sdk::engine_names
+} // namespace hipdnn_data_sdk::utilities
 
 ```
+
+The shipped macro also accepts an optional second argument, for the case where the engine
+string cannot be spelled as a C++ identifier or is meant to differ from it:
+
+```cpp
+HIPDNN_REGISTER_ENGINE(VENDOR_FAST_CONV, "Vendor.FastConv/v2")
+```
+
+Every in-tree engine currently uses the one-argument form, where the two coincide. Either
+form generates the same three names: `<name>_NAME`, `<name>_ID`, and a registrar object. All
+three matter — the ID constant is what a plugin returns, and the registrar is what makes the
+name visible to collision detection and to reverse lookup.
 
 #### Other Header Options Considered
 
@@ -148,15 +167,15 @@ Simple implementation with string constants.  Possible issues with creating auto
 ```cpp
 #pragma once
 
-namespace hipdnn_plugin_sdk::engine_names {
+namespace hipdnn_data_sdk::utilities {
 
 // Built-in AMD engines
-constexpr const char* MIOPEN_LEGACY = "MIOPEN_PLUGIN";
+constexpr const char* MIOPEN_ENGINE_NAME = "MIOPEN_ENGINE";
 
 // Vendor engines
-constexpr const char* VENDOR_EXAMPLE = "VENDOR_FAST_CONV";
+constexpr const char* VENDOR_EXAMPLE_NAME = "VENDOR_FAST_CONV";
 
-} // namespace hipdnn_plugin_sdk::engine_names
+} // namespace hipdnn_data_sdk::utilities
 ```
 
 ##### X-Macro Pattern
@@ -171,7 +190,7 @@ A downside to this approach is the complexity.
 #include <string_view>
 #include <unordered_set>
 
-namespace hipdnn_plugin_sdk::engine_names {
+namespace hipdnn_data_sdk::utilities {
 
 // X-Macro list of all engines, add all new engines here.
 #define HIPDNN_ENGINE_LIST(X) \
@@ -209,7 +228,7 @@ inline const std::unordered_set<std::string_view>& getAllEngineNamesSet() {
     return engineSet;
 }
 
-} // namespace hipdnn_plugin_sdk::engine_names
+} // namespace hipdnn_data_sdk::utilities
 
 ```
 
@@ -226,18 +245,43 @@ Hash function is implemented in the data_sdk so that it can be used anywhere
 #include <string>
 #include <cstdint>
 
-namespace hipdnn_data_sdk {
-inline int64_t engineNameToId(const char* engineName) {
+namespace hipdnn_data_sdk::utilities {
+inline int64_t engineNameToId(std::string_view engineName) {
     // Implementation of this hash function is an implementation detail and is
     // up to the developer who implements it.  The developer is expected to create a robust
     // test suite to ensure the function is deterministic and is made to have minimal collision possibilities.
 }
-} // namespace hipdnn_data_sdk
+} // namespace hipdnn_data_sdk::utilities
 ```
+
+Callers that need to accept either spelling of an engine — a name or a decimal/hexadecimal
+ID — should use `engineNameOrIdToId` instead, which parses an ID spelling and otherwise
+falls through to `engineNameToId`. That is what the frontend, the fallback ordering
+environment variable and the heuristics config file all resolve through, so any spelling
+`hipdnn_list_engines` prints can be pasted back into any of them.
 
 ### Plugin Implementation
 
-Plugins will use the hash function internally to convert their engine names to ids so they can communicate via the existing API.  The EnginePluginApi.h only addresses engines by `int64_t`, so no API changes are needed.
+Plugins use the hash function internally to convert their engine names to ids so they can communicate via the existing API.  Dispatch is unchanged: `hipdnnEnginePluginGetAllEngineIds`, `hipdnnEnginePluginGetApplicableEngineIds` and `hipdnnEnginePluginGetEngineDetails` still address engines only by `int64_t`.
+
+Two additive channels carry a name alongside that, and they are not interchangeable:
+
+| Channel | Available at | Confers a name? |
+|---|---|---|
+| `hipdnnEnginePluginGetEngineName` (EnginePluginApi.h) | Load, before any graph exists | Yes |
+| `EngineDetails.name` (engine_details.fbs) | Only once a graph has been supplied | No |
+
+The entry point is authoritative because it is the only one load-time admission can reach.
+Admission is graph-blind, so it cannot see `EngineDetails.name`; a name arriving only through
+the schema would reach a user without any gate having checked that it hashes to the engine's
+ID, which is the invariant the whole design rests on. The backend therefore treats
+`EngineDetails.name` as a record rather than a source: it logs a warning when the two
+disagree and resolves to the entry point, and logs a warning and falls back to the registry
+or the hex ID when the schema names an engine the entry point did not.
+
+A plugin that wants its name honored must export the entry point. Populating
+`EngineDetails.name` alone is a plugin defect. Both are optional and neither absence is an
+error; see [Plugin-Supplied Engine Names](#plugin-supplied-engine-names).
 
 ### Frontend Implementation
 
@@ -255,7 +299,7 @@ public:
 
     // New overload - accepts string name
     void set_preferred_engine_id_ext(const std::optional<std::string> engineName) {
-        int64_t engineId = hipdnn::engineNameToId(engineName);
+        int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(*engineName);
 
         // Log for debugging
         HIPDNN_LOG_DEBUG("Engine name '{}' mapped to ID: 0x{:016X}",
@@ -311,19 +355,27 @@ without colliding on the ID first.
 2. **Test Locally**: Use the name in your plugin without modifying the header. An unregistered name
    loads like any other, as long as the engine's ID is the hash of it.
 
-3. **Submit PR**: Add your engine name to `EngineNames.hpp`
+3. **Submit PR**: Register your engine name in
+   `data_sdk/include/hipdnn_data_sdk/utilities/EngineNames.hpp`
    ```cpp
-   constexpr const char* MY_VENDOR_ENGINE = "MY_VENDOR_FAST_CONV";
+   HIPDNN_REGISTER_ENGINE(MY_VENDOR_FAST_CONV)
    ```
+   Register through the macro, not through a bare `constexpr const char*`. The macro is what
+   generates the `_ID` constant and instantiates the `EngineRegistrar`; a plain constant
+   registers nothing, so the name stays invisible to collision detection and to reverse
+   lookup even though it compiles cleanly.
 
 4. **Document Capabilities**: Include documentation per the standards below
 
 ### Guidelines
 
 - Engine names should be UPPER_CASE with underscores
-- Include vendor/organization prefix to make it easier to identify author
+- Include a vendor/organization prefix. This identifies the author, and it is the only thing
+  keeping two vendors from independently shipping a `FAST_CONV`: names are unique keys now,
+  so the second one to load is dropped rather than renamed
 - Be descriptive about the engine's purpose
-- Once merged, names should not be changed (breaks compatibility)
+- Once merged, names should not be changed. A name is a user-referenceable key and it fixes
+  the engine's ID, so changing it breaks both
 
 ### Forward Compatibility
 
@@ -333,23 +385,40 @@ If a plugin name is not known (not in the shared header), the hash function can 
 
 ### Duplicate IDs
 
-Add a unit test to the repo that checks for duplicate engine IDs. This test should be setup to such that it doesnt need updates in order to test newly added engines.  This requires we pick a engine name registration option that allows us to query all known engine names at runtime without manually updating a list.
+Duplicate detection runs at two levels, because the two cases have different consequences.
+
+**In-tree engines** are caught at static initialization. `EngineRegistrar` throws if the ID
+it is registering is already claimed, distinguishing a duplicate registration (the same name
+twice) from a hash collision (two different names hashing to one ID). Because every in-tree
+engine goes through `HIPDNN_REGISTER_ENGINE`, this needs no hand-maintained list of engine
+names and no test update when an engine is added, which is what the registration option was
+selected for.
+
+**Plugin-supplied engines** are checked at load, where throwing would take down an otherwise
+usable plugin. The backend applies the first-wins rule described in
+[Backend Duplicate Detection](#backend-duplicate-detection): the later engine is dropped and
+an error is logged naming both plugins, the engine, and the colliding ID. The same rule
+covers an engine whose ID does not hash from its declared name, and an engine whose name
+collides with a registry entry.
 
 ## Examples
 
 ### Example 1: Custom Plugin Development
 
 ```cpp
-#include "hipdnn_plugin_sdk/EngineNames.hpp"
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 // MyCustomPlugin.cpp
 class MyCustomPlugin {
     void initialize() {
-        // Use the custom engine name defined in the shared header
-        const std::string engineName = hipdnn::engine_names::MY_CUSTOM_ENGINE;
+        // Constants generated by HIPDNN_REGISTER_ENGINE in the shared header
+        const std::string engineName = hipdnn_data_sdk::utilities::MY_CUSTOM_ENGINE_NAME;
+        const int64_t engineId = hipdnn_data_sdk::utilities::MY_CUSTOM_ENGINE_ID;
 
-        // Generate ID from name
-        int64_t engineId = hipdnn::data_sdk::engineNameToId(engineName);
+        // An engine absent from the shared header hashes its own name instead, and reports
+        // that name through hipdnnEnginePluginGetEngineName:
+        //   const int64_t engineId =
+        //       hipdnn_data_sdk::utilities::engineNameToId("MY_CUSTOM_ENGINE");
 
         // Log for debugging
         HIPDNN_LOG_INFO("Initializing engine '{}' with ID: 0x{:016X}",
@@ -367,23 +436,24 @@ class MyCustomPlugin {
 ```cpp
 // Application using the frontend
 void setupGraph() {
-    hipdnn::frontend::Graph graph;
+    hipdnn_frontend::graph::Graph graph;
 
     // Option 1: Use string name directly
-    graph.set_preferred_engine_id_ext("MIOPEN_LEGACY");
+    graph.set_preferred_engine_id_ext("MIOPEN_ENGINE");
 
-    // Option 2: Use constant from header
-    graph.set_preferred_engine_id_ext(hipdnn::engine_names::MIOPEN_LEGACY);
+    // Option 2: Use the constant generated by HIPDNN_REGISTER_ENGINE
+    graph.set_preferred_engine_id_ext(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_NAME);
 
-    // Option 3: Use custom engine name (not in header)
-    graph.set_preferred_engine_id_ext("MY_CUSTOM_ENGINE_V2");  // Works, no warning
+    // Option 3: Use a plugin-supplied name absent from the shared header. This resolves if a
+    // loaded plugin declares it; otherwise the preference falls back to the heuristics.
+    graph.set_preferred_engine_id_ext("MY_CUSTOM_ENGINE_V2");
 
     // Option 4: Still support int64_t for compatibility
     graph.set_preferred_engine_id_ext(0x123456789ABCDEF0LL);
 }
 ```
 
-## Future Improvments
+## Future Improvements
 
 ### Benchmarking Support
 
@@ -391,8 +461,6 @@ In the future we would like to be able to compare plugins against themselves ove
 
 ```cpp
 // Update EngineNames.hpp
-// Note: This will look differnent based on which option is chosen for engine name registration header
-...
 
 // Allow compile-time override for testing
 #ifdef HIPDNN_BENCHMARK_MODE
@@ -407,8 +475,11 @@ In the future we would like to be able to compare plugins against themselves ove
 // Macro that defines engine and automatically registers it
 // Applies benchmark prefix if defined
 #define HIPDNN_REGISTER_ENGINE(name) \
-    inline constexpr const char* name = HIPDNN_CONCAT_PREFIX(HIPDNN_ENGINE_PREFIX, name); \
-    inline const EngineRegistrar name##_registrar{HIPDNN_CONCAT_PREFIX(HIPDNN_ENGINE_PREFIX, name)};
-
-...
+    inline constexpr const char* name##_NAME = HIPDNN_CONCAT_PREFIX(HIPDNN_ENGINE_PREFIX, name); \
+    inline const int64_t name##_ID = \
+        hipdnn_data_sdk::utilities::engineNameToId(name##_NAME); \
+    inline const hipdnn_data_sdk::utilities::EngineRegistrar name##_registrar{name##_NAME};
 ```
+
+Note that this shifts an engine's ID, so a benchmark build and a normal build cannot share a
+plugin binary or a cached heuristics config.

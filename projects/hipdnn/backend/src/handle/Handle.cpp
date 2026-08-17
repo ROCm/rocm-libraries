@@ -49,6 +49,11 @@ std::optional<int64_t> hipdnnHandle::findEngineIdByName(std::string_view engineN
     return _pluginResourceManager->findEngineIdByName(engineName);
 }
 
+std::optional<std::string> hipdnnHandle::findEngineNameById(int64_t engineId) const
+{
+    return _pluginResourceManager->findEngineNameById(engineId);
+}
+
 std::string hipdnnHandle::toString() const
 {
     std::string str = "hipdnnHandle: {";

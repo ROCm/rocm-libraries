@@ -21,6 +21,7 @@
 #include <test_plugins/TestPluginEngineIdMap.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
@@ -647,6 +648,103 @@ TEST_F(IntegrationPluginLoading, GetEngineIdByNameRejectsNullArguments)
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, engineName, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+}
+
+// The ID -> name direction, which spares a caller holding only an id from enumerating.
+TEST_F(IntegrationPluginLoading, EngineIdResolvesToItsPluginSuppliedName)
+{
+    const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
+    ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engineId = hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>();
+    const auto* expectedName = hipdnn_tests::plugin_constants::K_GOOD_DEFAULT_PLUGIN_ENGINE_NAME;
+
+    // First call sizes the buffer.
+    size_t nameLen = 0;
+    ASSERT_EQ(hipdnnGetEngineNameById_ext(_handle, engineId, nullptr, &nameLen),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_EQ(nameLen, std::strlen(expectedName) + 1);
+
+    std::vector<char> name(nameLen);
+    EXPECT_EQ(hipdnnGetEngineNameById_ext(_handle, engineId, name.data(), &nameLen),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_STREQ(name.data(), expectedName);
+}
+
+// Both directions against the same listing, so a hexadecimal fallback name is covered alongside
+// the plugin-supplied ones.
+TEST_F(IntegrationPluginLoading, EveryReportedEngineIdResolvesBackToItsName)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testGoodPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engines = queryReportedEngines(_handle);
+    ASSERT_FALSE(engines.empty());
+
+    for(const auto& engine : engines)
+    {
+        size_t nameLen = 0;
+        ASSERT_EQ(hipdnnGetEngineNameById_ext(_handle, engine.engineId, nullptr, &nameLen),
+                  HIPDNN_STATUS_SUCCESS)
+            << "Unresolved id " << engine.engineId << ". Reported engines:\n"
+            << describeReportedEngines(engines);
+
+        std::vector<char> name(nameLen);
+        ASSERT_EQ(hipdnnGetEngineNameById_ext(_handle, engine.engineId, name.data(), &nameLen),
+                  HIPDNN_STATUS_SUCCESS);
+
+        // Agrees with the enumeration, and inverts the name -> id direction.
+        EXPECT_EQ(std::string(name.data()), engine.engineName);
+
+        auto resolvedId = int64_t{0};
+        EXPECT_EQ(hipdnnGetEngineIdByName_ext(_handle, name.data(), &resolvedId),
+                  HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(resolvedId, engine.engineId);
+    }
+}
+
+TEST_F(IntegrationPluginLoading, UnknownEngineIdIsNotSupported)
+{
+    ASSERT_NO_FATAL_FAILURE(
+        setSingleEnginePluginPath(hipdnn_tests::plugin_constants::testGoodPluginPath()));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    // No synthesized hexadecimal name for an id nothing provides; that would break the
+    // round trip.
+    size_t nameLen = 0;
+    EXPECT_EQ(hipdnnGetEngineNameById_ext(_handle, 0x7FFFFFFFFFFFFFFE, nullptr, &nameLen),
+              HIPDNN_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(IntegrationPluginLoading, GetEngineNameByIdRejectsBadArguments)
+{
+    const std::string pluginPath = hipdnn_tests::plugin_constants::testDefaultGoodPluginPath();
+    ASSERT_NO_FATAL_FAILURE(setSingleEnginePluginPath(pluginPath));
+
+    ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
+
+    const auto engineId = hipdnn_tests::plugin_constants::engineId<GoodDefaultPlugin>();
+
+    size_t nameLen = 0;
+    EXPECT_EQ(hipdnnGetEngineNameById_ext(nullptr, engineId, nullptr, &nameLen),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+    EXPECT_EQ(hipdnnGetEngineNameById_ext(_handle, engineId, nullptr, nullptr),
+              HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
+
+    // A buffer too small to hold the name is refused rather than truncated.
+    ASSERT_EQ(hipdnnGetEngineNameById_ext(_handle, engineId, nullptr, &nameLen),
+              HIPDNN_STATUS_SUCCESS);
+    ASSERT_GT(nameLen, 1U);
+
+    std::vector<char> name(nameLen);
+    size_t shortLen = nameLen - 1;
+    EXPECT_EQ(hipdnnGetEngineNameById_ext(_handle, engineId, name.data(), &shortLen),
+              HIPDNN_STATUS_BAD_PARAM);
 }
 
 // A plugin with no name from any source falls through to the hexadecimal rendering of its id.

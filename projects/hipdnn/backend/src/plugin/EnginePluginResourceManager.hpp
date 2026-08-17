@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -164,6 +165,17 @@ public:
     [[nodiscard]] virtual std::optional<int64_t>
         findEngineIdByName(std::string_view engineName) const;
 
+    /// @brief Resolves an engine ID to the name the enumeration reports for it.
+    ///
+    /// The exact inverse of findEngineIdByName(). Unlike resolveEngineName(),
+    /// which names any ID, this answers only for engines that survived load-time
+    /// admission, which is what makes the round trip total.
+    ///
+    /// @param engineId Engine ID to name.
+    /// @return The engine's name, or std::nullopt when no loaded engine carries
+    ///         the ID.
+    [[nodiscard]] virtual std::optional<std::string> findEngineNameById(int64_t engineId) const;
+
     // Inherited from base: getLoadedPluginFiles()
     using PluginResourceManagerBase::getLoadedPluginFiles;
 
@@ -202,10 +214,18 @@ private:
     ///
     /// Both memos are filled in the same pass so they can never disagree about
     /// which engine carries which name.
+    ///
+    /// Safe to call concurrently: the fill happens once under _engineIndexMutex
+    /// and is never invalidated, so the returned reference stays valid.
     const std::vector<EngineInfo>& buildEngineIndex() const;
 
     std::unordered_map<hipdnnEnginePluginHandle_t, const EnginePlugin*> _handleToPlugin;
     std::unordered_map<int64_t, hipdnnEnginePluginHandle_t> _engineIdToHandle;
+
+    /// Guards the one-time fill of the two memos below. Not the class-static
+    /// getMutex(), which is already held across getOrCreatePluginManager() and
+    /// would deadlock a future path that indexes while loading.
+    mutable std::mutex _engineIndexMutex;
     mutable std::optional<std::vector<EngineInfo>> _cachedEngineInfos;
     mutable std::optional<std::unordered_map<std::string, int64_t>> _cachedEngineIdsByName;
 

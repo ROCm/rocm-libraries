@@ -145,8 +145,32 @@ std::optional<int64_t>
     return it->second;
 }
 
+std::optional<std::string> EnginePluginResourceManager::findEngineNameById(int64_t engineId) const
+{
+    // Scanning rather than adding a third memo keeps the fill-both-together
+    // invariant intact, and the engine count is small.
+    const auto& infos = buildEngineIndex();
+
+    const auto it = std::find_if(infos.begin(), infos.end(), [engineId](const EngineInfo& info) {
+        return info.engineId == engineId;
+    });
+
+    if(it == infos.end())
+    {
+        return std::nullopt;
+    }
+
+    return it->engineName;
+}
+
 const std::vector<EngineInfo>& EnginePluginResourceManager::buildEngineIndex() const
 {
+    // Public entry points reach this concurrently, so the fill is
+    // serialized. Neither memo is invalidated afterwards, which is what lets
+    // callers hold the returned reference past the lock; a future reset path
+    // would have to return copies instead.
+    const std::lock_guard<std::mutex> lock(_engineIndexMutex);
+
     // Both memos are filled together on every path, so requiring both here keeps
     // findEngineIdByName() from ever seeing a half-built index.
     if(_cachedEngineInfos.has_value() && _cachedEngineIdsByName.has_value())

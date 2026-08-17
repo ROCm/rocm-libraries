@@ -188,6 +188,12 @@ Other requirements:
 
 ``getEngineName`` is optional. The entry point is emitted whether or not your container defines the member; when the member is absent, it reports ``HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE`` and hipDNN names the engine itself.
 
+Detection is by exact signature, so a near-miss reads as opting out: the engine falls back to a hex ID and the plugin logs ``API not applicable: [hipdnnEnginePluginGetEngineName]`` at INFO. To have the compiler confirm the member is seen, assert the trait the SDK uses:
+
+.. code:: cpp
+
+  static_assert(hipdnn_plugin_sdk::HasGetEngineName<MyContainer>::value);
+
 The entry point is available to build against from Plugin SDK engine API version 1.4.0 onward. hipDNN calls it whenever the symbol is exported, regardless of the API version your plugin reports.
 
 Name resolution
@@ -214,9 +220,13 @@ Because names hash to IDs and IDs are unique, engine names are unique across loa
 Addressing an engine by name
 ----------------------------
 
-``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under. Each resolves to at most one engine.
+``hipdnnGetEngineIdByName_ext`` resolves any name the enumeration reports back to its engine ID, and ``hipdnnGetEngineNameById_ext`` resolves an engine ID back to that same name without needing the engine's index. The two are exact inverses over the loaded engines, so an ID read from a log line, a serialized plan, or ``HIPDNN_ATTR_ENGINE_GLOBAL_INDEX`` can be turned into a name and back. An ID that no loaded engine provides reports ``HIPDNN_STATUS_NOT_SUPPORTED`` rather than a synthesized name.
 
-A name matching no candidate engine changes nothing: ``deselect_engines`` reports it once as a warning when the plans are built, and ``set_preferred_engine_id_ext`` falls back silently to the heuristics' top pick. A string that appears only in ``EngineDetails.name`` never becomes an engine's name, so it matches nothing on these surfaces either.
+``Graph::set_preferred_engine_id_ext(name)`` and ``Graph::deselect_engines(names)`` match a requested name against the names the graph's candidate engines display under. Each resolves to at most one engine.
+
+A name matching no candidate engine is not the end of the search. Both surfaces then resolve the string through ``engineNameOrIdToId`` and retry against the candidates' IDs, so a hexadecimal ID pasted from ``hipdnn_list_engines`` selects or bars the engine it identifies even though it matches no display name. Only when that ID also matches no candidate does the string select nothing: ``deselect_engines`` bars nothing and reports the name once as a warning when the plans are built, and ``set_preferred_engine_id_ext`` falls back silently to the heuristics' top pick. A string that appears only in ``EngineDetails.name`` never becomes an engine's name, so it selects nothing on these surfaces either.
+
+Both surfaces retain the resolved ID whether or not it selected anything. That ID is what ``Graph::get_preferred_engine_id_ext()`` reports back and what a serialized graph descriptor carries, so a preference set from a string that matched nothing reads back as the hash of that string rather than as "unset".
 
 A policy is handed bare engine IDs through ``hipdnnHeuristicPolicySetEngineIds`` and no handle, so the ``HIPDNN_HEUR_FALLBACK_ENGINE_ORDER`` environment variable and the engine override rules in the heuristic config file turn an operator's string into an ID without the resolver. They can do so exactly: a declared name hashes to the engine's ID, and an engine that declares none is displayed as its ID in hexadecimal, which both surfaces also parse. Either spelling can be pasted from the enumeration.
 

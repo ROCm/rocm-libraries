@@ -940,6 +940,8 @@ private:
 
         std::unordered_set<std::string> consideredNames;
         consideredNames.reserve(consideredEngineIds.size());
+        const std::unordered_set<int64_t> consideredIds(consideredEngineIds.begin(),
+                                                        consideredEngineIds.end());
         for(const int64_t engineId : consideredEngineIds)
         {
             consideredNames.insert(engineNameFor(engineId));
@@ -948,6 +950,13 @@ private:
         for(const auto& barredName : _barredEngineNames)
         {
             if(consideredNames.count(barredName) > 0)
+            {
+                continue;
+            }
+            // A spelling that matches no display name can still have barred an
+            // engine through the ID branch of isEngineBarred(), a hex ID pasted
+            // from hipdnn_list_engines being the common case.
+            if(consideredIds.count(hipdnn_data_sdk::utilities::engineNameOrIdToId(barredName)) > 0)
             {
                 continue;
             }

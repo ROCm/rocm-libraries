@@ -61,6 +61,40 @@ class TestHandle:
         with pytest.raises(IndexError, match="Engine ID is not loaded"):
             handle.get_engine_info(9223372036854775807)
 
+    def test_engine_id_to_name_for_loaded_engine(self):
+        """The handle resolves a loaded engine ID to the name it carries."""
+        graph = hipdnn.Graph().set_preferred_engine_id_ext("MIOPEN_ENGINE")
+        engine_id = graph.get_preferred_engine_id_ext()
+
+        assert hipdnn.create_handle().engine_id_to_name(engine_id) == "MIOPEN_ENGINE"
+
+    def test_engine_id_to_name_agrees_with_get_engine_info(self):
+        """Both handle-scoped lookups report the same name for an engine."""
+        graph = hipdnn.Graph().set_preferred_engine_id_ext("MIOPEN_ENGINE")
+        engine_id = graph.get_preferred_engine_id_ext()
+        handle = hipdnn.create_handle()
+
+        assert (
+            handle.engine_id_to_name(engine_id)
+            == handle.get_engine_info(engine_id).engine_name
+        )
+
+    def test_engine_id_to_name_for_unknown_engine_raises(self):
+        """An ID absent from the loaded plugins raises IndexError."""
+        handle = hipdnn.create_handle()
+
+        with pytest.raises(IndexError, match="Engine ID is not loaded"):
+            handle.engine_id_to_name(9223372036854775807)
+
+    def test_engine_id_to_name_agrees_with_the_registry_where_it_answers(self):
+        """The registry is a strict subset: where it names an engine, the handle agrees."""
+        graph = hipdnn.Graph().set_preferred_engine_id_ext("MIOPEN_ENGINE")
+        engine_id = graph.get_preferred_engine_id_ext()
+
+        registry_name = hipdnn.engine_id_to_name(engine_id)
+        assert registry_name == "MIOPEN_ENGINE"
+        assert hipdnn.create_handle().engine_id_to_name(engine_id) == registry_name
+
     def test_destroy_handle(self):
         """destroy_handle() invalidates the handle (repr shows destroyed)."""
         handle = hipdnn.create_handle()
@@ -88,3 +122,11 @@ class TestHandle:
 
         with pytest.raises(RuntimeError, match="Handle has been destroyed"):
             handle.get_engine_info(0)
+
+    def test_engine_id_to_name_after_destroy_raises(self):
+        """Name lookup on a destroyed handle raises RuntimeError."""
+        handle = hipdnn.create_handle()
+        hipdnn.destroy_handle(handle)
+
+        with pytest.raises(RuntimeError, match="Handle has been destroyed"):
+            handle.engine_id_to_name(0)

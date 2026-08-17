@@ -819,6 +819,32 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineIdByName_ext(hipdnnHandle_t 
                                                                  int64_t* engineId);
 
 /**
+ * @brief Resolves an engine ID to the name that engine carries.
+ *
+ * This is the inverse of hipdnnGetEngineIdByName_ext, and reports the same name as
+ * hipdnnGetEngineInfo_ext without needing the engine's index. Only loaded engines
+ * resolve; any other ID reports HIPDNN_STATUS_NOT_SUPPORTED rather than a synthesized name.
+ *
+ * Uses the same two-call pattern as hipdnnGetEngineInfo_ext: pass `engineName` as `nullptr`
+ * to query the required size, then call again with an allocated buffer.
+ *
+ * @param[in]     handle         A valid hipDNN handle.
+ * @param[in]     engineId       Engine ID to resolve.
+ * @param[out]    engineName     Buffer for the engine name, or `nullptr` to query size.
+ * @param[in,out] engineNameLen  Pointer to buffer size; updated with required size.
+ *
+ * @retval HIPDNN_STATUS_SUCCESS                  Success.
+ * @retval HIPDNN_STATUS_BAD_PARAM_NULL_POINTER   Null handle or null `engineNameLen`.
+ * @retval HIPDNN_STATUS_BAD_PARAM                Supplied buffer is too small.
+ * @retval HIPDNN_STATUS_NOT_SUPPORTED            No loaded engine carries the given ID.
+ * @retval HIPDNN_STATUS_INTERNAL_ERROR           Internal error.
+ */
+HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnGetEngineNameById_ext(hipdnnHandle_t handle,
+                                                                 int64_t engineId,
+                                                                 char* engineName,
+                                                                 size_t* engineNameLen);
+
+/**
  * @brief Gets the count of loaded heuristic policies.
  *
  * Returns the number of heuristic policy plugins that have been successfully loaded
