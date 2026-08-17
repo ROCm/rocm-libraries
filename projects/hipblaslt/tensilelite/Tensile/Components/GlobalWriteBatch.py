@@ -343,23 +343,17 @@ class GlobalWriteBatchWriter:
     assert self._checkAtomicPreconditions()
     module = Module(self.moduleName)
     self._prolog(module)
-    # bias/SAV drain barrier ordering, DU-gated (EpiloguePreStoreBarrierRelax).
-    # The drain (SWaitCnt dscnt=0) + workgroup SBarrier orders the pre-loop
-    # bias/SAV column-vector LDS staging against the subtile store path. In
-    # SINGLE-DU (isSubtileMultiDU == False) the _emitAdd subtile stores are
-    # emitted BEFORE this barrier and the store region is LDS-write-free, so the
-    # pre-store barrier is redundant for cross-wave LDS ordering (Stage-1 Action
-    # C) and is DU-gated OUT (elided). In MULTI-DU the 2nd epilogue-vector
-    # barrier (KernelWriterAssembly) coexists and _emitAdd is emitted AFTER the
-    # barrier, so the barrier is RETAINED for that regime (barrier emitted only
-    # when isMultiDU) pending a joint-structural + multi-DU bit-diff re-derivation.
+    # The bias/SAV drain barrier ordering is a multi-DU-only hardening that
+    # prevents cross-wave LDS corruption from ds_bpermute. Multi-DU emits the
+    # drain+barrier before the _emitAdd subtile stores; non-multi-DU emits
+    # _emitAdd first.
     isMultiDU = isSubtileMultiDU(self.kernel)
     drainBiasSav = self.kernel.get("UseSubtileImpl") and \
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
     if not isMultiDU:
       self._emitAdd(module)
-    if drainBiasSav and isMultiDU:
+    if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
       module.add(SBarrier(comment="sync waves before subtile paired stores"))
     if isMultiDU:
