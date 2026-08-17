@@ -219,6 +219,18 @@ class _SetupNewTilePapTdmWriter:
     def isTdmWaveSeparated(self, kernel):
         return kwa_module.KernelWriterAssembly.isTdmWaveSeparated(self, kernel)
 
+    def tdmDealiasAB(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmDealiasAB(self, kernel)
+
+    def tdmFuseAMx(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmFuseAMx(self, kernel)
+
+    def tdmSeparateABDescriptors(self, kernel):
+        return kwa_module.KernelWriterAssembly.tdmSeparateABDescriptors(self, kernel)
+
+    def isTdmWaveIdxLive(self, kernel):
+        return kwa_module.KernelWriterAssembly.isTdmWaveIdxLive(self, kernel)
+
     def undefineSgpr(self, name):
         # Mirror the real undefineSgpr: return the slot to the pool but keep the name
         # in self.sgprs, so the latch stays the only guard against a double check-in.
