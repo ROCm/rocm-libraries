@@ -10,8 +10,10 @@
 #include <hipblaslt/hipblaslt.h>
 #include <roc/host_validation/validation.hpp>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     struct ReductionArguments
     {
         int64_t     rows            = 0;
@@ -27,4 +29,4 @@ namespace roc::host_validation::hipblaslt_adapter
     };
 
     ReductionRunInfo referenceSum(const ReductionArguments& arguments);
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation
