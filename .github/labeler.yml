@@ -183,3 +183,26 @@ github actions:
     - .github/scripts/**/*
     - .github/*.json
     - .github/*.yml
+
+# These labels help distinguish which subteams are responsible for reviews for changes made in CK
+"ck: convolution-legacy":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/composablekernel/{include/ck,library,codegen,profiler,python,script}/**/*{conv_,conv.,convnd,conv1d,conv2d,conv3d,convolution,convscale,convinvscale}*'
+    - 'projects/composablekernel/{include/ck,library,codegen,profiler,python,script}/**/*{im2col,img2col,col2im,image_to_column,column_to_image}*'
+    - 'projects/composablekernel/{include/ck,library,codegen,profiler,python,script}/**/*{conv_,convnd,conv1d,conv2d,conv3d,convolution,convscale,convinvscale}*/**'
+    - 'projects/composablekernel/{include/ck,library,codegen,profiler,python,script}/**/*{im2col,img2col,col2im,image_to_column,column_to_image}*/**'
+    - 'projects/composablekernel/{example,test,client_example}/*{conv_,convnd,conv1d,conv2d,conv3d,convolution,convscale,convinvscale}*/**'
+    - 'projects/composablekernel/{example,test,client_example}/*{im2col,img2col,col2im,image_to_column,column_to_image}*/**'
+    - 'projects/composablekernel/{example,test,client_example}/*/*{conv_,conv.,convnd,conv1d,conv2d,conv3d,convolution,convscale,convinvscale}*'
+    - 'projects/composablekernel/{example,test,client_example}/*/*{im2col,img2col,col2im,image_to_column,column_to_image}*'
+
+"ck: fmha":
+- changed-files:
+  - any-glob-to-any-file:
+    - 'projects/composablekernel/**/*{fmha,mha,attention,attn,softmax_gemm}*'
+    - 'projects/composablekernel/**/*{fmha,mha,attention,attn,softmax_gemm}*/**'
+    # Attention-only files whose names carry none of the tokens above.
+    - 'projects/composablekernel/include/ck/tensor_operation/gpu/device/masking_specialization.hpp'
+    - 'projects/composablekernel/test/position_embedding/**'
+    - 'projects/composablekernel/rocm_ck/tests/compile_fail/{convert_dq,dqdkdv,ograd_dot_o}_*'
