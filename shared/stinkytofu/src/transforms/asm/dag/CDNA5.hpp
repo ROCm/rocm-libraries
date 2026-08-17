@@ -44,6 +44,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/transforms/asm/dag/HazardRules.hpp"
 
 namespace {
 using namespace stinkytofu;
@@ -58,36 +59,10 @@ enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 // CDNA5ReadyQueue::hazardGates_) is unconditional regardless of scheduling order;
 // producer-side hoisting (CDNA5ReadyQueue::decidePromote(), via DAGNode::hazardDeadline)
 // is a throughput heuristic layered on top, never required for correctness.
+//
+// HazardRule itself, and the family-wide kCdna5HazardRules table, live in HazardRules.hpp
+// (included above) so HazardGapAnalysisPass can share them without duplicating this logic.
 // -------------------------------------------------------------------------
-struct HazardRule {
-    const char* name;
-    bool (*isProducer)(const StinkyInstruction&);
-    bool (*isConsumer)(const StinkyInstruction&);
-    RegType regType;
-    int cycles;
-};
-
-// SALU sgpr -> any SMEM/tensor_load/VMEM address (s_load, tensor_load, global_read...).
-// isGlobalMemLoad already covers SMemLoad + MUBUF/FLAT/GLOBAL loads; tensor_load is a
-// separate flag (IF_TENSORLoadToLds). Tensor_load and SMEM addresses are sgpr-only;
-// VMEM addresses can also carry a vgpr offset, covered separately below.
-static inline bool isSaluHazardConsumer(const StinkyInstruction& inst) {
-    return isGlobalMemLoad(inst) || isTensorLoad(inst);
-}
-
-// VMEM vgpr-address consumers: buffer/flat/global loads plus global_prefetch_b8, whose
-// vaddr is a vgpr. The prefetch is not a load (no dest, not IF_GLOBALLoad), so it is
-// listed explicitly rather than folded into isBufferMemLoad.
-static inline bool isVmemAddrHazardConsumer(const StinkyInstruction& inst) {
-    return isBufferMemLoad(inst) || isGlobalPrefetch(inst);
-}
-
-static constexpr HazardRule kGfx1250HazardRules[] = {
-    {"SaluSgprToMemAddr", isScalarALU, isSaluHazardConsumer, RegType::S, 8},
-    // VALU vgpr -> VMEM address (global_read/MUBUF/FLAT/GLOBAL). Excludes SMEM/tensor_load:
-    // those addresses are sgpr-only, never vgpr.
-    {"ValuVgprToVmemAddr", isVectorALU, isVmemAddrHazardConsumer, RegType::V, 32},
-};
 
 // -------------------------------------------------------------------------
 // Per-arch CDNA5 scheduling config. CDNA5.hpp is the CDNA5 *family* ready queue: both
@@ -119,9 +94,8 @@ constexpr CDNA5Config kGfx1250Config = {
     /*dsReadThrottleLatency=*/72,
     /*dsReadPerWmma=*/3,
     /*globalReadPerWmma=*/1,
-    /*hazardRules=*/kGfx1250HazardRules,
-    /*numHazardRules=*/
-    static_cast<int>(sizeof(kGfx1250HazardRules) / sizeof(kGfx1250HazardRules[0])),
+    /*hazardRules=*/kCdna5HazardRules,
+    /*numHazardRules=*/kNumCdna5HazardRules,
 };
 
 // gfx1250v0: starts from the gfx1250 values. TODO(tuning): fill in gfx1250v0's real queue

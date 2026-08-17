@@ -1585,6 +1585,30 @@ RawAsmParseResult parseRawAsmString(const std::string& asmText, GfxArchID arch,
             return makeTextBlock(withComment);
         };
 
+        // Local/compiler-generated labels are dot-prefixed (e.g. ".LBB0_1:",
+        // ".Ltmp5:"). Detect these before the general directive branch below,
+        // since a bare "<dotted-identifier>:" line is a label, not a directive.
+        if (line[0] == '.' && line.back() == ':') {
+            std::string body = line.substr(1, line.size() - 2);
+            bool isLabelBody =
+                !body.empty() &&
+                (std::isalpha(static_cast<unsigned char>(body[0])) || body[0] == '_');
+            for (char c : body) {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '$' &&
+                    c != '.') {
+                    isLabelBody = false;
+                    break;
+                }
+            }
+            if (isLabelBody) {
+                std::string labelName = line.substr(0, line.size() - 1);
+                auto labelInst = std::make_unique<ParsedInstruction>(labelName, true);
+                labelInst->comment = lineComment;
+                block->instructions.push_back(std::move(labelInst));
+                continue;
+            }
+        }
+
         // Directives: lines starting with '.'
         if (line[0] == '.') {
             // Special case: .set symbol, value → proper AsmDirective SET
