@@ -54,6 +54,12 @@ add_executable(
     descriptors/TestMatmulOperationDescriptor.cpp
     descriptors/TestMatmulOperationFromNode.cpp
     descriptors/TestGraphDescriptorMatmul.cpp
+    descriptors/TestMoeGroupedMatmulOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmul.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationDescriptor.cpp
+    descriptors/TestMoeGroupedMatmulBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorMoeGroupedMatmulBwd.cpp
     descriptors/TestGraphDescriptorBatchnormBackward.cpp
     descriptors/TestGraphDescriptorConvolutionBwd.cpp
     descriptors/TestBatchnormInferenceVarianceExtOperationDescriptor.cpp
@@ -89,6 +95,9 @@ add_executable(
     descriptors/TestResampleFwdOperationDescriptor.cpp
     descriptors/TestResampleFwdOperationFromNode.cpp
     descriptors/TestGraphDescriptorResampleFwd.cpp
+    descriptors/TestResampleBwdOperationDescriptor.cpp
+    descriptors/TestResampleBwdOperationFromNode.cpp
+    descriptors/TestGraphDescriptorResampleBwd.cpp
     descriptors/TestDescriptorAttributeUtils.cpp
     descriptors/TestDataTypeConversion.cpp
     descriptors/TestDescriptorFromFlatBuffer.cpp

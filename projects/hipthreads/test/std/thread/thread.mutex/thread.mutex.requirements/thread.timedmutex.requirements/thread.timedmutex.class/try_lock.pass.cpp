@@ -35,7 +35,7 @@ int main(int, char**) {
     ::std::timed_mutex m;
     m.lock();
 
-    hip::thread t = support::make_test_thread([&] {
+    hip::wthread t = support::make_test_thread([&] {
       for (int i = 0; i != 10; ++i) {
         bool succeeded = m.try_lock();
         assert(!succeeded);

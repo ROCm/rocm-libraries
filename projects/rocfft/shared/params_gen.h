@@ -66,6 +66,15 @@ inline double hash_prob(const int seed, const std::string& token)
     return roll;
 }
 
+// Macro to probabilistically skip a unit test based on hash_prob.
+// Uses random_seed and unittest_prob from test_params.h.
+#define PROB_SKIP_UNITTEST()                                                                   \
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name()) \
+       > unittest_prob)                                                                        \
+    {                                                                                          \
+        GTEST_SKIP();                                                                          \
+    }
+
 template <typename T, std::enable_if_t<std::is_arithmetic_v<T>, bool> = true>
 std::vector<T> merge_and_sort_values(const std::vector<std::vector<T>>& set_of_vecs,
                                      size_t max_num_elem = std::numeric_limits<size_t>::max())

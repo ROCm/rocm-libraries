@@ -24,7 +24,7 @@
 #ifndef HIPSPARSE_GENERIC_AUXILIARY_H
 #define HIPSPARSE_GENERIC_AUXILIARY_H
 
-#include "hipsparse-version.h"
+#include "hipsparse-config.h"
 
 #ifdef __cplusplus
 extern "C" {

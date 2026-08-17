@@ -38,6 +38,7 @@
 #include "common/auxiliary/testing_gecon.hpp"
 #include "common/auxiliary/testing_labrd.hpp"
 #include "common/auxiliary/testing_lacgv.hpp"
+#include "common/auxiliary/testing_lahr2.hpp"
 #include "common/auxiliary/testing_lange.hpp"
 #include "common/auxiliary/testing_larf.hpp"
 #include "common/auxiliary/testing_larfb.hpp"
@@ -69,6 +70,7 @@
 #include "common/auxiliary/testing_sy2sb_he2hb.hpp"
 
 // lapack
+#include "common/lapack/testing_cholqr.hpp"
 #include "common/lapack/testing_gebd2_gebrd.hpp"
 #include "common/lapack/testing_geblttrf_npvt.hpp"
 #include "common/lapack/testing_geblttrs_npvt.hpp"
@@ -163,6 +165,7 @@ class rocsolver_dispatcher
             {"latrd", testing_latrd<T>},
             {"latrd_forsytrd", testing_latrd_forsytrd<T>},
             {"labrd", testing_labrd<T>},
+            {"lahr2", testing_lahr2<T>},
             {"bdsqr", testing_bdsqr<T>},
             {"steqr", testing_steqr<T>},
             {"stedc", testing_stedc<T>},
@@ -234,6 +237,13 @@ class rocsolver_dispatcher
             {"geqrf_batched_64", testing_geqr2_geqrf<true, true, 1, T, int64_t>},
             {"geqrf_strided_batched_64", testing_geqr2_geqrf<false, true, 1, T, int64_t>},
             {"geqrf_ptr_batched_64", testing_geqr2_geqrf<true, false, 1, T, int64_t>},
+            // cholqr
+            {"cholqr", testing_cholqr<false, false, T, rocblas_int>},
+            {"cholqr_batched", testing_cholqr<true, true, T, rocblas_int>},
+            {"cholqr_strided_batched", testing_cholqr<false, true, T, rocblas_int>},
+            {"cholqr_64", testing_cholqr<false, false, T, int64_t>},
+            {"cholqr_batched_64", testing_cholqr<true, true, T, int64_t>},
+            {"cholqr_strided_batched_64", testing_cholqr<false, true, T, int64_t>},
             // gerqf
             {"gerq2", testing_gerq2_gerqf<false, false, 0, T>},
             {"gerq2_batched", testing_gerq2_gerqf<true, true, 0, T>},

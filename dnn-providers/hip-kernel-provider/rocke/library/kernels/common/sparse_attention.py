@@ -343,7 +343,7 @@ def _stage_jenga_mask_to_lds(
 
     def _body(slot: Value) -> None:
         mask_off = b.add(mask_row_base, slot)
-        mask_byte = b.global_load(mask_global, mask_off, I8)
+        mask_byte = b.global_load_i8(mask_global, mask_off)
         b.smem_store_vN(mask_lds, [slot], mask_byte, 1)
 
     _cooperative_iter(b, tid=tid, total=num_k_blocks, body=_body)

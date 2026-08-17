@@ -14,7 +14,9 @@ Tests are organised mirror-of-layer:
 
 These run in-process (no subprocess, no GPU); they test the static
 IR/lowering pipeline only. End-to-end runtime tests live in
-`test_rocke_examples.py`.
+`test_rocke_examples.py`. The one exception is opt-in: setting
+`ROCKE_TEST_VERIFY_IR=1` assembles emitted IR with `llvm-as` (still no
+GPU), so the default run keeps the no-subprocess contract.
 """
 
 from __future__ import annotations
@@ -25,8 +27,15 @@ from unittest.mock import patch, Mock
 import pytest
 
 from rocke import (
+    BF16,
+    BF8E5M2,
     F16,
+    F32,
+    FP8E4M3,
+    I8,
+    I16,
     I32,
+    F32,
     I64,
     IRBuilder,
     PtrType,
@@ -198,6 +207,35 @@ class TestCoreIR(unittest.TestCase):
         b.s_waitcnt(vmcnt=16, lgkmcnt=16)
         ll = lower_kernel_to_llvm(b.kernel)
         self.assertIn("call void @llvm.amdgcn.s.waitcnt(i32 20336)", ll)
+
+    def test_global_load_typed_wrappers(self):
+        """Test all typed global_load_* wrappers lower correctly."""
+        test_cases = [
+            # (Type, wrapper_fn, llvm_type, align)
+            (I8, "global_load_i8", "i8", 1),
+            (I16, "global_load_i16", "i16", 2),
+            (I32, "global_load_i32", "i32", 4),
+            (I64, "global_load_i64", "i64", 8),
+            (F16, "global_load_f16", "half", 2),
+            (BF16, "global_load_bf16", "bfloat", 2),
+            (F32, "global_load_f32", "float", 4),
+            (FP8E4M3, "global_load_fp8e4m3", "i8", 1),  # fp8 lowers to i8
+            (BF8E5M2, "global_load_bf8e5m2", "i8", 1),  # bf8 lowers to i8
+        ]
+
+        for ir_type, wrapper_name, llvm_type, align in test_cases:
+            with self.subTest(wrapper=wrapper_name):
+                b = IRBuilder(f"test_{wrapper_name}")
+                X = b.param("X", PtrType(ir_type, "global"))
+                tid = b.thread_id_x()
+                # Call global_load_{ir_type}(X, tid)
+                getattr(b, wrapper_name)(X, tid)
+                ll = lower_kernel_to_llvm(b.kernel)
+                self.assertIn(
+                    f"getelementptr inbounds {llvm_type}, ptr addrspace(1)", ll
+                )
+                self.assertIn(f"load {llvm_type}, ptr addrspace(1)", ll)
+                self.assertIn(f"align {align}", ll)
 
 
 # ---------------------------------------------------------------------
@@ -1299,6 +1337,32 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         # produce conflicting declarations in the same module.
         self.assertNotIn("@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1)", ll)
 
+    def test_buffer_rsrc_llvm23_emits_p8_p1_with_i64_num_records(self):
+        from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
+
+        ll = lower_kernel_to_llvm(
+            self._buffer_rsrc_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23
+        )
+        self.assertIn(
+            "declare ptr addrspace(8) @llvm.amdgcn.make.buffer.rsrc.p8.p1("
+            "ptr addrspace(1) nocapture readnone, i16, i64, i32)",
+            ll,
+        )
+        self.assertIn("zext i32 %N_bytes to i64", ll)
+        self.assertNotIn("@llvm.amdgcn.make.buffer.rsrc.p1(ptr addrspace(1)", ll)
+
+    def test_buffer_rsrc_llvm23_passes_i64_num_bytes_without_zext(self):
+        from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
+
+        b = IRBuilder("flavor_buf_rsrc_i64_llvm23")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        X = b.param("X", PtrType(F16, "global"), align=16)
+        N_bytes = b.param("N_bytes", I64)
+        b.buffer_rsrc(X, N_bytes)
+        ll = lower_kernel_to_llvm(b.kernel, llvm_flavor=LLVM_FLAVOR_LLVM23)
+        self.assertNotIn("zext", ll)
+        self.assertIn("i64 %N_bytes, i32 159744)", ll)
+
     def test_buffer_rsrc_llvm22_passes_i64_num_bytes_without_zext(self):
         """``i64`` ``num_bytes`` must reach the intrinsic directly --
         buffers larger than 4 GiB rely on it; a silent zext-then-trunc
@@ -1349,11 +1413,466 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
         )
         self.assertNotIn("mfma.f32.16x16x32.fp8.fp8(<2 x i32>", ll)
 
+    def test_mfma_fp8_llvm23_uses_i64_operands(self):
+        from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM23
+
+        ll = lower_kernel_to_llvm(
+            self._fp8_mfma_kernel(), llvm_flavor=LLVM_FLAVOR_LLVM23
+        )
+        self.assertIn(
+            "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8("
+            "i64, i64, <4 x float>, "
+            "i32 immarg, i32 immarg, i32 immarg)",
+            ll,
+        )
+        self.assertIn("bitcast <8 x i8>", ll)
+        self.assertIn(
+            " = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x32.fp8.fp8(i64 ",
+            ll,
+        )
+        self.assertNotIn("mfma.f32.16x16x32.fp8.fp8(<2 x i32>", ll)
+
     def test_unknown_flavor_raises(self):
         with self.assertRaises(ValueError):
             lower_kernel_to_llvm(
                 self._buffer_rsrc_kernel(), llvm_flavor="not-a-real-flavor"
             )
+
+
+class TestLlvmFlavorEnumeration(unittest.TestCase):
+    """The flavor set is enumerated once and every check goes through it.
+
+    Flavors used to be re-listed by hand at each membership test, which is how
+    ``llvm23`` ended up accepted by the Python lowerer but rejected by the C++
+    backend path. These tests pin the single enumeration
+    (:data:`LLVM_FLAVORS`), its partition into datalayout generations, and the
+    version-ladder policy, so adding a flavor cannot half-land again.
+    """
+
+    def test_datalayout_kinds_partition_every_flavor(self):
+        """Every flavor belongs to exactly one datalayout generation."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVORS,
+            LlvmDatalayoutKind,
+            _DATALAYOUT_KIND_FLAVORS,
+            _datalayout_kind_for_flavor,
+        )
+
+        # Exhaustive over the enum: a new member without a mapping fails here
+        # (the check a language-level ``match`` would do statically).
+        self.assertEqual(
+            set(_DATALAYOUT_KIND_FLAVORS), set(LlvmDatalayoutKind), "kind coverage"
+        )
+        # ...and exhaustive over the flavors, with no flavor in two kinds.
+        buckets = list(_DATALAYOUT_KIND_FLAVORS.values())
+        union = frozenset().union(*buckets)
+        self.assertEqual(union, frozenset(LLVM_FLAVORS), "flavor coverage")
+        self.assertEqual(
+            sum(len(b) for b in buckets), len(union), "flavor in multiple kinds"
+        )
+        for flavor in LLVM_FLAVORS:
+            self.assertIsNotNone(_datalayout_kind_for_flavor(flavor), flavor)
+        self.assertIsNone(_datalayout_kind_for_flavor("not-a-real-flavor"))
+
+    def test_datalayout_kind_markers_match_datalayouts(self):
+        """The p8 sniff markers must match what the flavors actually emit."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVORS,
+            LlvmDatalayoutKind,
+            _datalayout_for_flavor,
+            _datalayout_kind_for_flavor,
+            _datalayout_kind_from_ir,
+        )
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                ir = f'target datalayout = "{_datalayout_for_flavor(flavor)}"'
+                self.assertIs(
+                    _datalayout_kind_from_ir(ir),
+                    _datalayout_kind_for_flavor(flavor),
+                    "sniffing a flavor's own datalayout must recover its generation",
+                )
+        # The indexed marker must not match the legacy layout: "p8:128:128" is a
+        # prefix of "p8:128:128:128:48", so ordering/anchoring matters.
+        legacy = f'target datalayout = "{_datalayout_for_flavor("llvm20")}"'
+        self.assertIs(_datalayout_kind_from_ir(legacy), LlvmDatalayoutKind.P8_PLAIN)
+        self.assertIsNone(_datalayout_kind_from_ir("define void @k() {}"))
+
+    def test_llvm23_datalayout_is_llvm22_plus_me_mangling(self):
+        """llvm23 is no longer an alias of llvm22: it is the llvm22 layout with
+        the ELF ``m:e`` symbol-mangling spec spliced in after the leading
+        endianness field.
+
+        The toolchain drift guard proves this only on a ROCm 7.13+ host with
+        hipcc; this pins the same contract on the bare CI gate, so an accidental
+        re-alias (or a stray edit to either constant) fails here with a precise
+        message instead of surfacing as an opaque byte-identity golden diff.
+        """
+        from rocke.core.lower_llvm import _DATALAYOUT_LLVM22, _DATALAYOUT_LLVM23
+
+        self.assertNotEqual(
+            _DATALAYOUT_LLVM23,
+            _DATALAYOUT_LLVM22,
+            "llvm23 is no longer an alias of llvm22 (it adds the m:e spec)",
+        )
+        self.assertEqual(
+            _DATALAYOUT_LLVM23,
+            _DATALAYOUT_LLVM22.replace("e-", "e-m:e-", 1),
+            "llvm23 datalayout must be the llvm22 layout plus the m:e "
+            "symbol-mangling spec",
+        )
+
+    def test_flavor_for_rocm_clamps_at_both_ends(self):
+        """Version mapping is clamped, never raising: newest above, oldest below."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVOR_LLVM20,
+            LLVM_FLAVOR_LLVM22,
+            LLVM_FLAVOR_LLVM23,
+            LLVM_FLAVORS,
+            _flavor_for_rocm,
+        )
+
+        # Exact boundaries.
+        self.assertEqual(_flavor_for_rocm(7, 1), LLVM_FLAVOR_LLVM20)
+        self.assertEqual(_flavor_for_rocm(7, 2), LLVM_FLAVOR_LLVM22)
+        self.assertEqual(_flavor_for_rocm(7, 12), LLVM_FLAVOR_LLVM22)
+        self.assertEqual(_flavor_for_rocm(7, 13), LLVM_FLAVOR_LLVM23)
+        # Clamped: a ROCm newer than anything we know resolves to the newest
+        # flavor, and one older than every row to the oldest.
+        self.assertEqual(_flavor_for_rocm(99, 9), LLVM_FLAVORS[-1])
+        self.assertEqual(_flavor_for_rocm(0, 0), LLVM_FLAVORS[0])
+        self.assertEqual(_flavor_for_rocm(6, 4), LLVM_FLAVOR_LLVM20)
+        # Never raises, and always returns a member of the enumeration.
+        for major, minor in ((0, 0), (-1, 0), (5, 7), (7, 2), (12, 0)):
+            self.assertIn(_flavor_for_rocm(major, minor), LLVM_FLAVORS)
+
+    def test_is_modern_flavor_tracks_datalayout_kind(self):
+        """The mfma-packing predicate is derived from the generation table."""
+        from rocke.core.lower_llvm import (
+            LLVM_FLAVORS,
+            LlvmDatalayoutKind,
+            _datalayout_kind_for_flavor,
+            _is_modern_flavor,
+        )
+
+        for flavor in LLVM_FLAVORS:
+            with self.subTest(flavor=flavor):
+                self.assertEqual(
+                    _is_modern_flavor(flavor),
+                    _datalayout_kind_for_flavor(flavor)
+                    is LlvmDatalayoutKind.P8_INDEXED,
+                )
+        # An unrecognised flavor is not "modern" (it must not silently pick the
+        # i64 mfma operand packing).
+        self.assertFalse(_is_modern_flavor("not-a-real-flavor"))
+
+    def test_cpp_backend_path_accepts_every_known_flavor(self):
+        """Regression: the C++ backend rejected ``llvm23`` while Python took it.
+
+        ``_lower_via_cpp_engine`` validated against its own hand-written flavor
+        tuple, so a newly added flavor raised ``ValueError`` on backend="cpp"
+        even though the engine itself supported it.
+        """
+        from rocke.core import backend as backend_mod
+        from rocke.core.lower_llvm import LLVM_FLAVORS
+
+        engine = type(
+            "_FakeEngine",
+            (),
+            {"lower_serialized_ir": staticmethod(lambda *a, **k: "lowered")},
+        )()
+        orig = backend_mod._import_engine
+        backend_mod._import_engine = lambda: engine
+        try:
+            for flavor in LLVM_FLAVORS:
+                with self.subTest(flavor=flavor):
+                    self.assertEqual(
+                        backend_mod._lower_via_cpp_engine(
+                            "ir", arch="gfx950", llvm_flavor=flavor
+                        ),
+                        "lowered",
+                    )
+            with self.assertRaises(ValueError):
+                backend_mod._lower_via_cpp_engine(
+                    "ir", arch="gfx950", llvm_flavor="not-a-real-flavor"
+                )
+        finally:
+            backend_mod._import_engine = orig
+
+    def test_comgr_guard_compares_datalayout_generation_not_flavor(self):
+        """The comgr mismatch guard keys on generation, so llvm22/llvm23 mix.
+
+        A module's ``p8`` field cannot tell llvm22 from llvm23, and codegen only
+        aborts across the *generation* boundary. Comparing flavors instead would
+        false-positive on llvm22 IR fed to an llvm23 comgr.
+        """
+        from rocke.core.lower_llvm import _datalayout_for_flavor
+        from rocke.runtime import comgr as comgr_mod
+
+        def ir_for(flavor):
+            return f'target datalayout = "{_datalayout_for_flavor(flavor)}"\n'
+
+        orig_ver = comgr_mod.resolved_lib_rocm_version
+        orig_path = comgr_mod.resolved_lib_path
+        comgr_mod.resolved_lib_path = lambda: "/fake/libamd_comgr.so"
+        try:
+            # Same generation on both sides (including the llvm22-IR/llvm23-comgr
+            # cross pair) must pass.
+            for lib_ver, flavor in (
+                ((7, 0), "llvm20"),
+                ((7, 2), "llvm22"),
+                ((7, 13), "llvm23"),
+                ((7, 13), "llvm22"),
+                ((7, 2), "llvm23"),
+            ):
+                with self.subTest(lib=lib_ver, ir=flavor):
+                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
+            # Crossing the generation boundary must raise either way.
+            for lib_ver, flavor in (((7, 0), "llvm22"), ((7, 13), "llvm20")):
+                with self.subTest(lib=lib_ver, ir=flavor, expect="raise"):
+                    comgr_mod.resolved_lib_rocm_version = lambda v=lib_ver: v
+                    with self.assertRaises(comgr_mod.ComgrError) as cm:
+                        comgr_mod._assert_ir_flavor_matches_lib(ir_for(flavor))
+                    # The message must name both generations, not just "modern".
+                    self.assertIn("p8_", str(cm.exception))
+            # Unknown IR (no datalayout) never blocks compilation.
+            comgr_mod.resolved_lib_rocm_version = lambda: (7, 0)
+            comgr_mod._assert_ir_flavor_matches_lib("define void @k() {}")
+        finally:
+            comgr_mod.resolved_lib_rocm_version = orig_ver
+            comgr_mod.resolved_lib_path = orig_path
+
+    def test_no_hand_rolled_flavor_membership_lists(self):
+        """Flavor membership must go through :data:`LLVM_FLAVORS`.
+
+        A tuple/set literal naming two or more ``LLVM_FLAVOR_*`` constants is
+        the exact shape that drifted out of date; the enumeration exists so
+        such a list never needs writing again.
+        """
+        import ast
+        from pathlib import Path
+
+        import rocke
+
+        # The two definitions that are *supposed* to list flavors: the
+        # enumeration itself and its partition by datalayout generation.
+        allowed_targets = {"LLVM_FLAVORS", "_DATALAYOUT_KIND_FLAVORS"}
+        root = Path(rocke.__file__).parent
+        offenders = []
+        for path in sorted(root.rglob("*.py")):
+            # Sources are UTF-8 regardless of the host locale; on Windows the
+            # default codec is cp1252 and chokes on the non-ASCII in a few
+            # example/heuristics modules.
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            allowed_spans = []
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                    continue
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                if {t.id for t in targets if isinstance(t, ast.Name)} & allowed_targets:
+                    allowed_spans.append((node.lineno, node.end_lineno or node.lineno))
+            # A tuple/set/list literal naming 2+ flavor constants. Using the AST
+            # (not a regex) keeps prose in docstrings from tripping this.
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Tuple, ast.Set, ast.List)):
+                    continue
+                named = [
+                    e.id
+                    for e in node.elts
+                    if isinstance(e, ast.Name) and e.id.startswith("LLVM_FLAVOR_")
+                ]
+                if len(named) < 2:
+                    continue
+                if any(lo <= node.lineno <= hi for lo, hi in allowed_spans):
+                    continue
+                offenders.append(
+                    f"{path.relative_to(root)}:{node.lineno}: {', '.join(named)}"
+                )
+        self.assertEqual(
+            offenders,
+            [],
+            "use LLVM_FLAVORS (or the datalayout-kind table) instead of "
+            "re-listing flavors:\n  " + "\n  ".join(offenders),
+        )
+
+    def test_cpp_engine_accepts_exactly_the_python_flavor_set(self):
+        """The C++ ladder and :data:`LLVM_FLAVORS` must agree, in order.
+
+        The engine has its own copy of the enumeration, so the two can drift
+        into a state where a flavor lowers on one side and is rejected on the
+        other. Reading the engine's list back is what makes its table an
+        actual mirror rather than a second, independent source.
+        """
+        try:
+            import rocke_engine
+        except ImportError:
+            self.skipTest("rocke_engine extension not built")
+        from rocke.core.lower_llvm import LLVM_FLAVORS
+
+        self.assertEqual(tuple(rocke_engine.llvm_flavors()), LLVM_FLAVORS)
+
+
+# Probe run in a child process: print the datalayout the Python resolver picks
+# for AUTO, and the one the C++ engine picks for AUTO (flavor=""). Must be a
+# child because the flavor depends on process environment and Python memoises
+# its answer per comgr path.
+_FLAVOR_AUTO_PROBE = """
+import sys
+from rocke.core.ir import IRBuilder
+from rocke.core.ir_serialize import serialize
+from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
+import rocke_engine
+
+b = IRBuilder("probe")
+b.kernel.attrs["max_workgroup_size"] = 64
+b.const_i32(1)
+cpp = rocke_engine.lower_serialized_ir(serialize(b.kernel), arch="gfx950", flavor="")
+cpp_dl = next(
+    ln.split('"')[1] for ln in cpp.splitlines() if ln.startswith("target datalayout")
+)
+print(_datalayout_for_flavor(_resolve_llvm_flavor()))
+print(cpp_dl)
+"""
+
+
+class TestCrossEngineFlavorAutoResolution(unittest.TestCase):
+    """The two engines must pick the SAME flavor when asked to auto-detect.
+
+    Both sides answer "which LLVM flavor is this host?" independently: Python in
+    ``_detect_llvm_flavor``, the engine in ``ll_resolve_flavor``. If they answer
+    differently they emit different IR from the same kernel while each looks
+    self-consistent, and no byte-identity run can see it -- the gate pins a
+    flavor explicitly, and ``backend.py`` resolves in Python before calling the
+    engine, so the engine's own resolver is never exercised on the paths the
+    suite covers. The C++ resolver used to read a single hardcoded
+    ``/opt/rocm/.info/version`` while Python located the comgr library that will
+    actually compile the IR and took *that* tree's ROCm version, so the two
+    disagreed on every host where /opt/rocm is absent, stale, or not the install
+    ``$ROCM_PATH`` names.
+
+    The layouts below are the ones that actually distinguish the resolvers; each
+    is checked through the emitted datalayout, which is the observable the
+    flavor controls.
+    """
+
+    def _probe(self, env_overrides):
+        import os
+        import subprocess
+        import sys
+
+        env = dict(os.environ)
+        env.pop("ROCKE_LLVM_FLAVOR", None)
+        for k in ("ROCM_PATH", "ROCM_HOME", "ROCKE_COMGR_LIB"):
+            env.pop(k, None)
+        env.update(env_overrides)
+        env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
+        out = subprocess.run(
+            [sys.executable, "-c", _FLAVOR_AUTO_PROBE],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        py_dl, cpp_dl = out.stdout.strip().splitlines()[-2:]
+        return py_dl, cpp_dl
+
+    def _fake_rocm_tree(self):
+        """A packaged install: release 7.0.0 at the root, component 7.13.0 in
+        ``core-7.13/lib`` where comgr lives.
+
+        The two versions map to *different* flavors (llvm20 vs llvm23), which is
+        what makes this fixture worth having: a resolver that stops at the first
+        ``.info/version`` it meets while climbing out of the lib dir reads the
+        component version and picks llvm23 for a ROCm 7.0 toolchain.
+        """
+        import os
+        import shutil
+        import tempfile
+
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        rocm = os.path.join(root, "rocm-7.0.0")
+        core_lib = os.path.join(rocm, "core-7.13", "lib")
+        os.makedirs(os.path.join(rocm, ".info"))
+        os.makedirs(os.path.join(rocm, "core-7.13", ".info"))
+        os.makedirs(core_lib)
+        os.makedirs(os.path.join(rocm, "lib"))
+        with open(os.path.join(rocm, ".info", "version"), "w") as fh:
+            fh.write("7.0.0-1234\n")
+        with open(os.path.join(rocm, "core-7.13", ".info", "version"), "w") as fh:
+            fh.write("7.13.0\n")
+        for d in (core_lib, os.path.join(rocm, "lib")):
+            open(os.path.join(d, "libamd_comgr.so"), "w").close()
+        return rocm
+
+    def _assert_agree(self, env_overrides):
+        py_dl, cpp_dl = self._probe(env_overrides)
+        self.assertEqual(
+            py_dl,
+            cpp_dl,
+            f"python and cpp AUTO flavor resolution disagree for {env_overrides}: "
+            f"python picked a datalayout the engine did not",
+        )
+        return py_dl
+
+    def setUp(self):
+        try:
+            import rocke_engine  # noqa: F401
+        except ImportError:
+            self.skipTest("rocke_engine extension not built")
+
+    def test_agree_on_the_bare_host(self):
+        """No env pointing anywhere: whatever this machine has, both must see it."""
+        self._assert_agree({})
+
+    def test_agree_when_rocm_path_names_an_older_install(self):
+        """``$ROCM_PATH`` outranks /opt/rocm on both sides, or they split."""
+        rocm = self._fake_rocm_tree()
+        dl = self._assert_agree({"ROCM_PATH": rocm})
+        # 7.0.0 is pre-7.2, i.e. the LLVM 20 plain-p8 datalayout. Pinning the
+        # value (not just agreement) is what proves the env root was honoured
+        # rather than both engines ignoring it and agreeing on the host default.
+        self.assertIn("-p8:128:128-", dl)
+
+    def test_agree_when_rocm_home_names_an_older_install(self):
+        rocm = self._fake_rocm_tree()
+        dl = self._assert_agree({"ROCM_HOME": rocm})
+        self.assertIn("-p8:128:128-", dl)
+
+    def test_agree_when_comgr_lib_is_pinned_in_a_component_subdir(self):
+        """The RELEASE version wins over the component version next to comgr.
+
+        ``$ROCKE_COMGR_LIB`` points into ``core-7.13/lib``, whose own
+        ``.info/version`` says 7.13.0 (-> llvm23) while the install root says
+        7.0.0 (-> llvm20). Both engines must climb to the root.
+        """
+        import os
+
+        rocm = self._fake_rocm_tree()
+        lib = os.path.join(rocm, "core-7.13", "lib", "libamd_comgr.so")
+        dl = self._assert_agree({"ROCKE_COMGR_LIB": lib})
+        self.assertIn("-p8:128:128-", dl)
+
+    def test_agree_when_the_named_root_has_no_comgr(self):
+        """A root with a version file but no comgr is NOT a flavor signal.
+
+        Python only takes the version of a tree it can actually find comgr in;
+        a C-side resolver that read ``$ROCM_PATH/.info/version`` directly would
+        honour this root and diverge.
+        """
+        import os
+        import shutil
+        import tempfile
+
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        os.makedirs(os.path.join(root, ".info"))
+        with open(os.path.join(root, ".info", "version"), "w") as fh:
+            fh.write("7.0.0\n")
+        self._assert_agree({"ROCM_PATH": root})
 
 
 class TestTransformsBridge(unittest.TestCase):
@@ -2433,6 +2952,801 @@ class TestCdnaPrimitives(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "unsupported bf16 warp_tile"):
             build_universal_gemm(spec)
+
+
+# ---------------------------------------------------------------------
+# Emitted-IR validation (opt-in)
+# ---------------------------------------------------------------------
+#
+# A substring assertion cannot tell well-formed IR from IR that merely
+# contains the right text: several intrinsic lowerings named a pointer of the
+# wrong address space, or an i64 where a pointer was declared, and every
+# assertion still matched. Assembling the module answers that directly.
+#
+# This is the one place in the file that shells out, which the module docstring
+# otherwise rules out, so it is opt-in: unset ROCKE_TEST_VERIFY_IR and the
+# suite stays in-process. Opting in without llvm-as reachable is an error
+# rather than a silent skip -- a verification lane that quietly verifies
+# nothing is worse than no lane.
+_ENV_VERIFY_IR = "ROCKE_TEST_VERIFY_IR"
+
+
+def _llvm_as_path():
+    """Locate ``llvm-as``: PATH first, then a ROCm-bundled LLVM.
+
+    The ROCm tiers mirror ``runtime_coexistence._rocm_root_libdirs`` -- the
+    operator override first, then the globbed install layouts, newest first --
+    so the tool is found on the same boxes the runtime finds comgr on.
+    """
+    import glob
+    import os
+    import shutil
+    from pathlib import Path
+
+    found = shutil.which("llvm-as")
+    if found:
+        return found
+    roots = [os.environ.get(v) for v in ("ROCM_PATH", "ROCM_HOME")]
+    roots += sorted(glob.glob("/opt/rocm*"), reverse=True)
+    for root in roots:
+        if not root:
+            continue
+        cand = Path(root) / "llvm" / "bin" / "llvm-as"
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
+def _llvm_as_major(path):
+    """Major version llvm-as reports, or None if it cannot be parsed."""
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run([path, "--version"], capture_output=True, text=True).stdout
+    except OSError:
+        return None
+    m = re.search(r"LLVM version (\d+)", out)
+    return int(m.group(1)) if m else None
+
+
+def _newest_llvm_major():
+    """LLVM major of the newest flavor rocke emits (``llvm23`` -> 23)."""
+    from rocke.core.lower_llvm import LLVM_FLAVORS
+
+    return int(LLVM_FLAVORS[-1][len("llvm") :])
+
+
+def _assert_ir_assembles(test, ir_text, kernel_name):
+    """Assemble ``ir_text`` with llvm-as when ROCKE_TEST_VERIFY_IR is set.
+
+    llvm-as runs the same parser and verifier comgr does, so a malformed
+    declare, or a call whose operand type contradicts it, fails here with the
+    exact diagnostic the toolchain would give.
+
+    The tool has to be at least as new as the newest flavor rocke emits. These
+    cases exist to cover intrinsics that only exist in that generation, so an
+    older llvm-as reports them as defects for the sole reason that it predates
+    them -- ``s.prefetch.inst``, ``av.load.b128`` and
+    ``raw.ptr.buffer.load.async.lds`` are all absent from LLVM 22. Both "no
+    tool" and "tool too old" are failures rather than silent skips: whoever
+    set the variable asked for verification, and a lane that quietly verifies
+    nothing is worse than no lane.
+    """
+    import os
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    if os.environ.get(_ENV_VERIFY_IR, "").strip() in ("", "0"):
+        return
+    llvm_as = _llvm_as_path()
+    if llvm_as is None:
+        test.fail(
+            f"{_ENV_VERIFY_IR} is set but 'llvm-as' was not found on PATH, "
+            "under $ROCM_PATH/llvm/bin, or in a /opt/rocm* install; install "
+            "it or unset the variable"
+        )
+    want = _newest_llvm_major()
+    have = _llvm_as_major(llvm_as)
+    if have is None or have < want:
+        test.fail(
+            f"{_ENV_VERIFY_IR} is set but {llvm_as} reports LLVM "
+            f"{have if have is not None else '?'}; these cases emit LLVM "
+            f"{want} intrinsics, so an older assembler cannot judge them. "
+            "Point PATH or $ROCM_PATH at a newer LLVM, or unset the variable."
+        )
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / f"{kernel_name}.ll"
+        src.write_text(ir_text)
+        proc = subprocess.run(
+            [llvm_as, str(src), "-o", str(Path(td) / "out.bc")],
+            capture_output=True,
+            text=True,
+        )
+    if proc.returncode != 0:
+        test.fail(
+            f"llvm-as rejected the IR for kernel '{kernel_name}':\n"
+            f"{proc.stderr.strip()}\n--- emitted IR ---\n{ir_text}"
+        )
+
+
+def _assert_engines_agree(test, kernel, python_ir, **kw):
+    """Byte-compare the C++ engine against ``python_ir``.
+
+    Never falls back to the Python result. If the extension is not importable
+    the test *skips* -- visibly, and counted in the run summary -- rather than
+    returning and letting the case pass as though parity had been checked. Any
+    other engine outcome (it failed, or it produced different bytes) is a
+    failure: a built engine that disagrees is a divergence, not a gap.
+    """
+    from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
+    from rocke.core.ir_serialize import serialize
+
+    try:
+        cpp_ir = _lower_via_cpp_engine(
+            serialize(kernel), kw.get("arch") or "gfx950", kw.get("llvm_flavor")
+        )
+    except BackendError as e:
+        test.skipTest(f"C++ engine unavailable, cross-engine check not run: {e}")
+    if cpp_ir != python_ir:
+        test.fail(
+            f"python vs cpp engine disagree for kernel "
+            f"'{getattr(kernel, 'name', '?')}':\n"
+            + _text_diff("lowered AMDGPU .ll", python_ir, cpp_ir)
+        )
+
+
+class TestNewTargetIntrinsics(unittest.TestCase):
+    """One case per intrinsic added for the LLVM 23 / future-operator surface.
+
+    Each test emits exactly one intrinsic from the smallest possible kernel and
+    pins the full ``declare`` plus call-site text. Asserting the whole call --
+    operand order, types, and immediate encoding -- is what catches a signature
+    regression; merely asserting the mangled name appears somewhere in the
+    module cannot tell a correct call from a malformed one, and gives no signal
+    about which intrinsic broke.
+    """
+
+    def _builder(self, name):
+        from rocke.core.ir import IRBuilder
+
+        b = IRBuilder(name)
+        b.kernel.attrs["max_workgroup_size"] = 64
+        return b
+
+    def _lower(self, name, build, **kw):
+        """Build a single-intrinsic kernel and return its lowered LLVM IR.
+
+        Pins the NATIVE Python lowerer rather than going through
+        ``lower_kernel_to_llvm``, whose engine comes from ``ROCKE_BACKEND``
+        with a silent cpp->python fallback: an unpinned call makes these
+        assertions describe C++ on a machine where the engine is built and
+        Python on one where it is not, so the same suite means two different
+        things. The C++ engine is then byte-compared against that result
+        whenever it is importable, which covers it without the ambiguity.
+        """
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        b = self._builder(name)
+        build(b)
+        ll = _lower_kernel_to_llvm_python(b.kernel, **kw)
+        _assert_engines_agree(self, b.kernel, ll, **kw)
+        _assert_ir_assembles(self, ll, name)
+        return ll
+
+    # ---- ds_swizzle (raw offset + XOR-butterfly encoding) ----
+    def test_ds_swizzle_passes_raw_offset_immediate(self):
+        ll = self._lower("dssw", lambda b: b.ds_swizzle(b.const_i32(1), 0x041F))
+        self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
+        # The raw immediate reaches the call verbatim (0x041F == 1055).
+        self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 1055)", ll)
+
+    def test_ds_swizzle_xor_encodes_swap_mode_offset(self):
+        # offset = (xor_mask << 10) | 0x1F -> (2 << 10) | 31 == 2079 (0x081F).
+        ll = self._lower("dsswx", lambda b: b.ds_swizzle_xor(b.const_i32(1), 2))
+        self.assertIn("call i32 @llvm.amdgcn.ds.swizzle(i32 1, i32 2079)", ll)
+        # Regression: the handler used to request a decl key ("ds.swizzle") that
+        # does not exist, so the declare was silently omitted.
+        self.assertIn("declare i32 @llvm.amdgcn.ds.swizzle(i32, i32 immarg)", ll)
+
+    # ---- mov_dpp8 ----
+    def test_mov_dpp8_i32_emits_typed_intrinsic(self):
+        ll = self._lower("dpp8i", lambda b: b.mov_dpp8(b.const_i32(1), 0x765432))
+        self.assertIn("declare i32 @llvm.amdgcn.mov.dpp8.i32(i32, i32 immarg)", ll)
+        # 0x765432 == 7754802, passed through as the 24-bit lane-select imm.
+        self.assertIn("call i32 @llvm.amdgcn.mov.dpp8.i32(i32 1, i32 7754802)", ll)
+
+    def test_mov_dpp8_f32_emits_typed_intrinsic(self):
+        ll = self._lower("dpp8f", lambda b: b.mov_dpp8(b.const_f32(1.0), 0x765432))
+        self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(float, i32 immarg)", ll)
+        self.assertIn("call float @llvm.amdgcn.mov.dpp8.f32(float", ll)
+
+    def test_mov_dpp8_both_types_coexist_in_one_module(self):
+        """i32 and f32 mov_dpp8 must not collide on one overloaded symbol.
+
+        Both used to declare bare ``@llvm.amdgcn.mov.dpp8``, so a kernel using
+        each type emitted two conflicting declares for the same name.
+        """
+
+        def build(b):
+            b.mov_dpp8(b.const_i32(1), 0x11)
+            b.mov_dpp8(b.const_f32(1.0), 0x11)
+
+        ll = self._lower("dpp8_both", build)
+        self.assertIn("declare i32 @llvm.amdgcn.mov.dpp8.i32(", ll)
+        self.assertIn("declare float @llvm.amdgcn.mov.dpp8.f32(", ll)
+        # No bare (untyped) declare, which is what caused the duplicate symbol.
+        self.assertNotIn("@llvm.amdgcn.mov.dpp8(", ll)
+
+    def test_mov_dpp8_rejects_oversized_sel_and_bad_type(self):
+        b = self._builder("dpp8_bad")
+        with self.assertRaises(ValueError):
+            b.mov_dpp8(b.const_i32(1), 0x1000000)  # 25 bits
+        with self.assertRaises(ValueError):
+            b.mov_dpp8(b.const_i64(1), 0x11)
+
+    # ---- wave_reduce ----
+    def test_wave_reduce_emits_typed_reduction_per_op(self):
+        for reduce_op, ty in (
+            ("fmax", "float"),
+            ("fadd", "float"),
+            ("add", "i32"),
+            ("max", "i32"),
+            ("min", "i32"),
+        ):
+            with self.subTest(reduce_op=reduce_op):
+                suffix = "f32" if ty == "float" else "i32"
+
+                def build(b, reduce_op=reduce_op, suffix=suffix):
+                    v = b.const_f32(1.0) if suffix == "f32" else b.const_i32(1)
+                    b.wave_reduce(v, reduce_op)
+
+                ll = self._lower(f"wred_{reduce_op}", build)
+                name = f"@llvm.amdgcn.wave.reduce.{reduce_op}.{suffix}"
+                self.assertIn(f"declare {ty} {name}({ty}, i32 immarg)", ll)
+                # Trailing i32 is the strategy immediate (0 == default).
+                self.assertIn(f"call {ty} {name}({ty}", ll)
+                self.assertIn(", i32 0)", ll)
+
+    def test_wave_reduce_propagates_strategy_immediate(self):
+        ll = self._lower(
+            "wred_strat",
+            lambda b: b.wave_reduce(b.const_f32(1.0), "fmax", strategy=2),
+        )
+        self.assertIn("@llvm.amdgcn.wave.reduce.fmax.f32(float", ll)
+        self.assertIn(", i32 2)", ll)
+
+    def test_wave_reduce_rejects_op_type_mismatch(self):
+        b = self._builder("wred_bad")
+        with self.assertRaises(ValueError):
+            b.wave_reduce(b.const_f32(1.0), "add")  # integer op on f32
+        with self.assertRaises(ValueError):
+            b.wave_reduce(b.const_i32(1), "fmax")  # float op on i32
+
+    # ---- readlane / writelane ----
+    def test_readlane_emits_typed_call_with_i32_lane(self):
+        for suffix, ty, mk in (
+            ("i32", "i32", "const_i32"),
+            ("f32", "float", "const_f32"),
+        ):
+            with self.subTest(suffix=suffix):
+                ll = self._lower(
+                    f"rlane_{suffix}",
+                    lambda b, mk=mk: b.readlane(getattr(b, mk)(1), b.const_i32(0)),
+                )
+                name = f"@llvm.amdgcn.readlane.{suffix}"
+                self.assertIn(f"declare {ty} {name}({ty}, i32)", ll)
+                self.assertIn(f"call {ty} {name}({ty}", ll)
+
+    def test_writelane_emits_value_lane_passthrough_order(self):
+        ll = self._lower(
+            "wlane",
+            lambda b: b.writelane(b.const_i32(7), b.const_i32(0), b.const_i32(9)),
+        )
+        self.assertIn("declare i32 @llvm.amdgcn.writelane.i32(i32, i32, i32)", ll)
+        # Operand order is (uniform_val, lane, passthrough).
+        self.assertIn("call i32 @llvm.amdgcn.writelane.i32(i32 7, i32 0, i32 9)", ll)
+
+    def test_lane_ops_reject_non_i32_lane_index(self):
+        b = self._builder("lane_bad")
+        with self.assertRaises(ValueError):
+            b.readlane(b.const_i32(1), b.const_i64(0))
+        with self.assertRaises(ValueError):
+            b.writelane(b.const_i32(1), b.const_i64(0), b.const_i32(1))
+        with self.assertRaises(ValueError):
+            # passthrough type must match the uniform value's type
+            b.writelane(b.const_i32(1), b.const_i32(0), b.const_f32(1.0))
+
+    # ---- permlane16 / permlane64 / permlane32_swap ----
+    def test_permlane16_emits_four_sources_and_bool_flags(self):
+        ll = self._lower(
+            "pl16",
+            lambda b: b.permlane16(*[b.const_i32(i) for i in range(4)]),
+        )
+        # The data type is an overloaded position, so the mangled name carries
+        # its suffix. LLVM accepts the bare "permlane16" and auto-upgrades it,
+        # but rewrites it to this on the way out, so the bare form is the one
+        # that would not survive a round trip.
+        self.assertIn(
+            "declare i32 @llvm.amdgcn.permlane16.i32"
+            "(i32, i32, i32, i32, i1 immarg, i1 immarg)",
+            ll,
+        )
+        self.assertIn(
+            "call i32 @llvm.amdgcn.permlane16.i32"
+            "(i32 0, i32 1, i32 2, i32 3, i1 false, i1 false)",
+            ll,
+        )
+
+    def test_permlane16_propagates_fi_and_bound_ctrl(self):
+        ll = self._lower(
+            "pl16_flags",
+            lambda b: b.permlane16(
+                *[b.const_i32(i) for i in range(4)], fi=True, bound_ctrl=True
+            ),
+        )
+        self.assertIn(
+            "call i32 @llvm.amdgcn.permlane16.i32"
+            "(i32 0, i32 1, i32 2, i32 3, i1 true, i1 true)",
+            ll,
+        )
+
+    def test_permlane64_emits_single_operand_call(self):
+        ll = self._lower("pl64", lambda b: b.permlane64(b.const_i32(1)))
+        self.assertIn("declare i32 @llvm.amdgcn.permlane64.i32(i32)", ll)
+        self.assertIn("call i32 @llvm.amdgcn.permlane64.i32(i32 1)", ll)
+
+    def test_permlane32_swap_unpacks_struct_result(self):
+        ll = self._lower(
+            "psw", lambda b: b.permlane32_swap(b.const_i32(1), b.const_i32(2))
+        )
+        # Regression: the handler used to request a decl key without the
+        # "amdgcn." prefix, so this declare went missing.
+        # No name suffix: unlike its permlane siblings this one is not
+        # overloaded. The flags are still immarg.
+        self.assertIn(
+            "declare { i32, i32 } @llvm.amdgcn.permlane32.swap"
+            "(i32, i32, i1 immarg, i1 immarg)",
+            ll,
+        )
+        self.assertIn(
+            "call { i32, i32 } @llvm.amdgcn.permlane32.swap"
+            "(i32 1, i32 2, i1 false, i1 false)",
+            ll,
+        )
+        # Both halves are extracted from the returned struct.
+        self.assertIn("extractvalue { i32, i32 }", ll)
+        self.assertEqual(ll.count("extractvalue { i32, i32 }"), 2)
+
+    # ---- alignbyte / s_wqm ----
+    def test_alignbyte_emits_three_operand_call(self):
+        ll = self._lower(
+            "algn",
+            lambda b: b.alignbyte(b.const_i32(1), b.const_i32(2), b.const_i32(8)),
+        )
+        self.assertIn("declare i32 @llvm.amdgcn.alignbyte(i32, i32, i32)", ll)
+        self.assertIn("call i32 @llvm.amdgcn.alignbyte(i32 1, i32 2, i32 8)", ll)
+
+    def test_s_wqm_emits_width_matched_intrinsic(self):
+        for suffix, ty, mk in (
+            ("i32", "i32", "const_i32"),
+            ("i64", "i64", "const_i64"),
+        ):
+            with self.subTest(suffix=suffix):
+                ll = self._lower(
+                    f"wqm_{suffix}",
+                    lambda b, mk=mk: b.s_wqm(getattr(b, mk)(0xF)),
+                )
+                # Result and operand are separately overloaded, so the
+                # canonical name repeats the type: s.wqm.i32.i32.
+                self.assertIn(
+                    f"declare {ty} @llvm.amdgcn.s.wqm.{suffix}.{suffix}({ty})", ll
+                )
+                self.assertIn(
+                    f"call {ty} @llvm.amdgcn.s.wqm.{suffix}.{suffix}({ty} 15)", ll
+                )
+
+    def test_s_wqm_rejects_narrow_mask(self):
+        b = self._builder("wqm_bad")
+        with self.assertRaises(ValueError):
+            b.s_wqm(b.const_f32(1.0))
+
+    # ---- av.load / av.store (agent-scope 128-bit vector mem) ----
+    def test_av_load_b128_emits_agent_scope_metadata(self):
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            p = b.param("p", PtrType(I32, "global"), align=16)
+            b.av_load_b128(p)
+
+        ll = self._lower("avld", build)
+        # A global pointer param is ptr addrspace(1) in the header, so the
+        # overload -- declare and call -- has to be the p1 one.
+        self.assertIn(
+            "declare <4 x i32> @llvm.amdgcn.av.load.b128.p1(ptr addrspace(1), metadata)",
+            ll,
+        )
+        self.assertIn(
+            "call <4 x i32> @llvm.amdgcn.av.load.b128.p1("
+            "ptr addrspace(1) %p, metadata !3)",
+            ll,
+        )
+        # The scope operand must be backed by a real metadata node.
+        self.assertIn('!3 = !{!"agent"}', ll)
+
+    def test_av_store_b128_emits_agent_scope_metadata(self):
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            p = b.param("p", PtrType(I32, "global"), align=16)
+            b.av_store_b128(p, b.av_load_b128(p))
+
+        ll = self._lower("avst", build)
+        self.assertIn(
+            "declare void @llvm.amdgcn.av.store.b128.p1("
+            "ptr addrspace(1), <4 x i32>, metadata)",
+            ll,
+        )
+        self.assertIn(
+            "call void @llvm.amdgcn.av.store.b128.p1(ptr addrspace(1) %p, <4 x i32>", ll
+        )
+        self.assertIn("metadata !3)", ll)
+        self.assertIn('!3 = !{!"agent"}', ll)
+
+    def test_av_b128_rejects_lds_pointer(self):
+        """LDS is not one of the spaces the intrinsic is defined for."""
+        from rocke.core.ir import I32, PtrType
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        b = self._builder("av_lds")
+        p = b.param("p", PtrType(I32, "lds"), align=16)
+        b.av_load_b128(p)
+        with self.assertRaises(ValueError):
+            lower_kernel_to_llvm(b.kernel)
+
+    def test_av_store_b128_requires_v4i32_data(self):
+        from rocke.core.ir import I32, PtrType
+
+        b = self._builder("avst_bad")
+        p = b.param("p", PtrType(I32, "global"), align=16)
+        # Right vector length, wrong element type: the ABI expects <4 x i32>.
+        with self.assertRaises(ValueError):
+            b.av_store_b128(p, b.zero_vec_f32(4))
+        with self.assertRaises(ValueError):
+            b.av_store_b128(p, b.const_i32(0))
+
+    # ---- s_alloc_vgpr ----
+    def test_s_alloc_vgpr_zexts_i1_result_to_i32(self):
+        ll = self._lower("valloc", lambda b: b.s_alloc_vgpr(8))
+        self.assertIn("declare i1 @llvm.amdgcn.s.alloc.vgpr(i32)", ll)
+        self.assertIn("call i1 @llvm.amdgcn.s.alloc.vgpr(i32 8)", ll)
+        # The intrinsic returns i1; the IR value is an i32, so a zext is required.
+        self.assertIn("zext i1 ", ll)
+
+    def test_s_alloc_vgpr_rejects_non_positive_count(self):
+        b = self._builder("valloc_bad")
+        with self.assertRaises(ValueError):
+            b.s_alloc_vgpr(0)
+
+    # ---- async markers / event waits / prefetch ----
+    def test_asyncmark_emits_void_call(self):
+        ll = self._lower("amark", lambda b: b.asyncmark())
+        self.assertIn("declare void @llvm.amdgcn.asyncmark()", ll)
+        self.assertIn("call void @llvm.amdgcn.asyncmark()", ll)
+
+    def test_wait_asyncmark_passes_i16_count(self):
+        ll = self._lower("await", lambda b: b.wait_asyncmark(3))
+        self.assertIn("declare void @llvm.amdgcn.wait.asyncmark(i16 immarg)", ll)
+        self.assertIn("call void @llvm.amdgcn.wait.asyncmark(i16 3)", ll)
+
+    def test_s_wait_event_passes_i16_bitmask(self):
+        ll = self._lower("sevt", lambda b: b.s_wait_event(1))
+        self.assertIn("declare void @llvm.amdgcn.s.wait.event(i16 immarg)", ll)
+        self.assertIn("call void @llvm.amdgcn.s.wait.event(i16 1)", ll)
+
+    def test_s_prefetch_inst_emits_ptr_and_length(self):
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            code = b.param("code", PtrType(I32, "global"), align=4)
+            b.s_prefetch_inst(code, b.const_i32(64))
+
+        ll = self._lower("sprefetch", build)
+        # The operand is llvm_anyptr_ty, so the call and its declare have to
+        # name the pointer's real space. Emitting a bare ``ptr`` for this
+        # addrspace(1) param is what LLVM rejects with "'%code' defined with
+        # type 'ptr addrspace(1)' but expected 'ptr'".
+        self.assertIn(
+            "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
+        )
+        self.assertIn(
+            "call void @llvm.amdgcn.s.prefetch.inst.p1("
+            "ptr addrspace(1) %code, i32 64)",
+            ll,
+        )
+
+    def test_s_prefetch_inst_spaces_coexist_in_one_module(self):
+        """Two spaces in one kernel must not collide on one declare.
+
+        LLVM's own ``llvm.amdgcn.s.prefetch.inst.ll`` test prefetches through
+        addrspace(4), so instruction memory really is reached through more than
+        one space. Since the overload is keyed on that space, an unmangled
+        declare would have to name one symbol twice with two signatures --
+        the same failure mode as ``mov_dpp8`` above.
+        """
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            glob = b.param("glob", PtrType(I32, "global"), align=4)
+            const = b.param("const_", PtrType(I32, "constant"), align=4)
+            n = b.const_i32(64)
+            b.s_prefetch_inst(glob, n)
+            b.s_prefetch_inst(const, n)
+
+        ll = self._lower("sprefetch_spaces", build)
+        self.assertIn(
+            "declare void @llvm.amdgcn.s.prefetch.inst.p1(ptr addrspace(1), i32)", ll
+        )
+        self.assertIn(
+            "declare void @llvm.amdgcn.s.prefetch.inst.p4(ptr addrspace(4), i32)", ll
+        )
+        self.assertIn("s.prefetch.inst.p1(ptr addrspace(1) %glob, i32 64)", ll)
+        self.assertIn("s.prefetch.inst.p4(ptr addrspace(4) %const_, i32 64)", ll)
+
+    def test_s_prefetch_inst_rejects_lds_pointer(self):
+        from rocke.core.ir import I32, PtrType
+        from rocke.core.lower_llvm import lower_kernel_to_llvm
+
+        b = self._builder("sprefetch_lds")
+        p = b.param("p", PtrType(I32, "lds"), align=4)
+        b.s_prefetch_inst(p, b.const_i32(64))
+        with self.assertRaises(ValueError):
+            lower_kernel_to_llvm(b.kernel)
+
+    # ---- async buffer / global -> LDS ----
+    def test_buffer_load_lds_async_converts_dwords_to_bytes(self):
+        from rocke.core.ir import CACHE_STREAM, F16, I32, PtrType
+
+        def build(b):
+            X = b.param("X", PtrType(F16, "global"))
+            N = b.param("N_bytes", I32)
+            rsrc = b.buffer_rsrc(X, N)
+            lds = b.smem_alloc(F16, [64, 8], name_hint="stage")
+            b.buffer_load_lds_async(
+                rsrc,
+                b.smem_addr_of(lds),
+                b.const_i32(0),
+                b.const_i32(0),
+                dwords=4,
+                coherency=CACHE_STREAM,
+            )
+
+        ll = self._lower("buf_async", build)
+        self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.async.lds", ll)
+        # dwords=4 -> 16 bytes per lane; trailing imm is coherency (CACHE_STREAM=2).
+        self.assertIn("i32 16, i32 0, i32 0, i32 0, i32 2)", ll)
+        # smem_addr_of yields an i64 LDS address, but the intrinsic declares
+        # ptr addrspace(3); passing the i64 through is what LLVM rejects with
+        # "defined with type 'i64' but expected 'ptr addrspace(3)'".
+        self.assertIn("= inttoptr i64 ", ll)
+        self.assertRegex(
+            ll,
+            r"buffer\.load\.async\.lds\(ptr addrspace\(8\) \S+, "
+            r"ptr addrspace\(3\) %lds_ptr",
+        )
+
+    def test_buffer_load_lds_async_rejects_bad_dwords_and_coherency(self):
+        from rocke.core.ir import F16, I32, PtrType
+
+        b = self._builder("buf_async_bad")
+        X = b.param("X", PtrType(F16, "global"))
+        N = b.param("N_bytes", I32)
+        rsrc = b.buffer_rsrc(X, N)
+        lds_addr = b.smem_addr_of(b.smem_alloc(F16, [64, 8], name_hint="stage"))
+        with self.assertRaises(ValueError):
+            b.buffer_load_lds_async(
+                rsrc, lds_addr, b.const_i32(0), b.const_i32(0), dwords=2
+            )
+        with self.assertRaises(ValueError):
+            b.buffer_load_lds_async(
+                rsrc, lds_addr, b.const_i32(0), b.const_i32(0), dwords=4, coherency=7
+            )
+
+    def test_global_load_async_to_lds_supports_b8_width(self):
+        """width_bytes=1 selects the LLVM 23 ``.b8`` async copy.
+
+        The opcode is a gfx1250 one, but its lowering is arch-independent, so
+        this runs on the default backend to keep the expected text identical to
+        the C++ parity gate (which has no gfx1250 ISA backend).
+        """
+        from rocke.core.ir import I32, PtrType
+
+        def build(b):
+            src = b.param("src", PtrType(I32, "global"), align=4)
+            lds = b.smem_alloc(I32, [64], name_hint="stage")
+            b.global_load_async_to_lds(
+                src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=1
+            )
+
+        ll = self._lower("gl_async_b8", build)
+        self.assertIn(
+            "declare void @llvm.amdgcn.global.load.async.to.lds.b8("
+            "ptr addrspace(1) nocapture, ptr addrspace(3) nocapture, "
+            "i32 immarg, i32 immarg)",
+            ll,
+        )
+        self.assertIn("call void @llvm.amdgcn.global.load.async.to.lds.b8(", ll)
+        # Per-lane source/destination addresses are computed with GEPs.
+        self.assertIn("getelementptr inbounds", ll)
+
+    def test_global_load_async_to_lds_rejects_unsupported_width(self):
+        from rocke.core.ir import I32, PtrType
+
+        b = self._builder("gl_async_bad")
+        src = b.param("src", PtrType(I32, "global"), align=4)
+        lds = b.smem_alloc(I32, [64], name_hint="stage")
+        with self.assertRaises(ValueError):
+            b.global_load_async_to_lds(
+                src, b.const_i32(0), lds, [b.const_i32(0)], width_bytes=2
+            )
+
+
+class TestBothBackendDifferentialGate(unittest.TestCase):
+    """``backend="both"`` must never answer with IR it did not compare.
+
+    This mode exists to catch the two engines emitting different bytes, so the
+    one thing it may not do is return the Python result when the C++ engine
+    failed: that reports an *uncompared* kernel as parity-verified, and it is
+    invisible -- the caller gets plausible IR and the suite goes green. So
+    every cpp-side failure propagates here. A failure on an arch named in
+    ``CPP_UNPORTED_ARCHES`` is relabelled ``BackendCoverageGap`` (the test layer
+    turns those into visible skips, see tests/conftest.py); anything else
+    surfaces as-is. That list is empty today -- gfx1250, the last entry, is
+    ported -- so the tests that need a gap install a stand-in arch.
+    """
+
+    def setUp(self):
+        from rocke.core import backend
+
+        self.backend = backend
+        backend.reset_cpp_fallbacks()
+        self._env = patch.dict("os.environ", {"ROCKE_BACKEND": "both"})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        self.addCleanup(backend.reset_cpp_fallbacks)
+
+    def _kernel(self):
+        b = IRBuilder("both_gate")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        b.ret()
+        return b.kernel
+
+    def _run(self, cpp_result, arch=None):
+        """Dispatch with the cpp engine stubbed to ``cpp_result``."""
+
+        def python_lower(kernel, *, llvm_flavor=None, arch=None):
+            return "PYTHON IR\n"
+
+        def fake_cpp(ir_text, arch, llvm_flavor=None):
+            if isinstance(cpp_result, BaseException):
+                raise cpp_result
+            return cpp_result
+
+        with patch.object(self.backend, "_lower_via_cpp_engine", fake_cpp):
+            return self.backend.lower_kernel_via_backend(
+                self._kernel(), python_lower=python_lower, arch=arch
+            )
+
+    def test_agreement_returns_the_shared_text(self):
+        self.assertEqual(self._run("PYTHON IR\n"), "PYTHON IR\n")
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_differing_ir_raises_backend_mismatch(self):
+        with self.assertRaises(self.backend.BackendMismatch):
+            self._run("CPP IR\n")
+
+    def _with_gap(self, arch):
+        """Put ``arch`` on the gap list for one test.
+
+        The list is empty now that every arch is ported, so the relabelling
+        mechanism has to be exercised against a stand-in. Patching it here also
+        keeps these tests from having to change again the next time the list
+        does.
+        """
+        p = patch.object(self.backend, "CPP_UNPORTED_ARCHES", (arch,))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_unported_arch_raises_a_coverage_gap_not_python_ir(self):
+        """A listed gap is still an exception -- never a substituted result."""
+        self._with_gap("gfxfuture")
+        gap = RuntimeError("unknown arch backend gfxfuture")
+        with self.assertRaises(self.backend.BackendCoverageGap) as ctx:
+            self._run(gap, arch="gfxfuture")
+        # The message has to name the arch and the underlying failure, since
+        # this is what the skip line in the run summary shows.
+        self.assertIn("gfxfuture", str(ctx.exception))
+        self.assertIn("unknown arch backend gfxfuture", str(ctx.exception))
+        # And nothing was logged as a fallback: no Python IR was handed out.
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_failure_on_a_ported_arch_is_not_excused_as_a_gap(self):
+        """Only arches on the named list get the gap treatment.
+
+        A gfx950 lowering failure is a regression in a path the C++ engine is
+        supposed to serve, so it must surface as the engine's own error rather
+        than be relabelled into something the suite skips.
+        """
+        boom = RuntimeError("internal engine failure")
+        with self.assertRaises(RuntimeError) as ctx:
+            self._run(boom, arch="gfx950")
+        self.assertNotIsInstance(ctx.exception, self.backend.BackendCoverageGap)
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_coverage_gap_is_a_backend_error(self):
+        """So a caller outside pytest can catch it with the normal base class."""
+        self.assertTrue(
+            issubclass(self.backend.BackendCoverageGap, self.backend.BackendError)
+        )
+
+    def test_every_arch_is_ported(self):
+        """The gap list is empty, so no kernel can reach the skip path.
+
+        gfx1250 was the last entry. With the list empty, every arch the Python
+        engine lowers is held to byte-identity by this lane -- a re-entry here
+        would silently convert a divergence into a skip, so the emptiness is
+        the property worth asserting.
+        """
+        self.assertEqual(self.backend.CPP_UNPORTED_ARCHES, ())
+
+    def test_cpp_engine_lowers_every_arch_python_wires(self):
+        """The invariant that replaced the gap list, checked against the engine.
+
+        With ``CPP_UNPORTED_ARCHES`` empty, "no gaps" is only an assertion about
+        a tuple. This checks the thing the tuple stands for: for every arch the
+        Python ISA registry wires, the C++ engine resolves a backend and emits
+        the same bytes. Wiring a new arch in Python without adding the two C++
+        backend rows (``rocke_ll_backend_for`` and the ISA ``REGISTRY``) fails
+        here instead of silently reintroducing a skip.
+        """
+        from rocke.core.backend import BackendError, _lower_via_cpp_engine, _text_diff
+        from rocke.core.ir_serialize import serialize
+        from rocke.core.isa.backend import wired_arches
+        from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+
+        arches = wired_arches()
+        self.assertIn("gfx1250", arches)
+        for arch in arches:
+            with self.subTest(arch=arch):
+                kernel = self._kernel()
+                # The reference side is the native lowerer, not the dispatching
+                # chokepoint: setUp puts the class in backend="both", so going
+                # through it here would demand the C++ extension before the
+                # skip below can excuse its absence.
+                py_ir = _lower_kernel_to_llvm_python(kernel, arch=arch)
+                try:
+                    cpp_ir = _lower_via_cpp_engine(serialize(kernel), arch, None)
+                except BackendError as e:
+                    self.skipTest(f"C++ engine unavailable: {e}")
+                self.assertEqual(
+                    cpp_ir,
+                    py_ir,
+                    f"engines disagree on {arch}:\n"
+                    + _text_diff("lowered AMDGPU .ll", py_ir, cpp_ir),
+                )
+
+    def test_flavor_rejection_is_never_swallowed(self):
+        """One engine rejecting a flavor the other took is a defect, not a gap."""
+        with self.assertRaises(ValueError):
+            self._run(ValueError("unknown LLVM flavor 'llvm24'"))
+        self.assertEqual(self.backend.cpp_fallbacks(), [])
+
+    def test_flavor_rejection_is_not_excused_on_an_unported_arch(self):
+        """Even on a listed arch a ValueError is a defect, not a coverage gap."""
+        self._with_gap("gfxfuture")
+        with self.assertRaises(ValueError):
+            self._run(ValueError("unknown LLVM flavor 'llvm24'"), arch="gfxfuture")
 
 
 class TestFusionPlanner(unittest.TestCase):

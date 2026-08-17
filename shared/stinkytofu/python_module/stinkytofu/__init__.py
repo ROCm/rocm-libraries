@@ -95,12 +95,33 @@ if _bi is not None:
         if _child.is_dir() and (_child / "CMakeCache.txt").exists():
             _build_dirs.add(_child.resolve())
 
-    # Only scan directories that are actually compiled into the Python bindings.
-    # tests/, tools/, examples/ etc. are never part of _stinkytofu.so so they
-    # are not valid staleness signals — a new test file should not force a rebuild.
+    # Only scan sources actually compiled into _stinkytofu.so, so its scan set
+    # matches exactly what the binary is built from:
+    #   - python_module/src/  the nanobind binding TUs of _stinkytofu.so itself
+    #   - src/                libstinkytofu core (linked into _stinkytofu.so),
+    #                         EXCEPT src/conversion/ (see _skip_dirs below)
+    #   - include/            headers used by the above
+    #   - hardware/, tools/tablegen/  build-time generators whose generated
+    #                         output is compiled into libstinkytofu; editing
+    #                         them must invalidate the binding too
+    # tests/, examples/ and the standalone tools/ (stinkytofu-opt, -check, -cfg,
+    # intrinsic-compiler, waitcnt-check) are never compiled into _stinkytofu.so,
+    # so a change there is not a valid staleness signal.
     _scan_dirs = [
-        d for d in (_source_root / "src", _source_root / "include") if d.is_dir()
+        d
+        for d in (
+            _source_root / "python_module" / "src",
+            _source_root / "src",
+            _source_root / "include",
+            _source_root / "hardware",
+            _source_root / "tools" / "tablegen",
+        )
+        if d.is_dir()
     ]
+    # src/conversion/ holds the rocisa<->stinkytofu glue compiled into _rocisa.so
+    # only (not libstinkytofu, not _stinkytofu.so); exclude it so editing the glue
+    # does not falsely mark the standalone binding stale.
+    _skip_dirs = {(_source_root / "src" / "conversion").resolve()}
     _stale = [
         str(p)
         for _dir in _scan_dirs
@@ -109,6 +130,7 @@ if _bi is not None:
         if p.stat().st_mtime > _so_mtime
         and "_deps" not in p.parts
         and not any(p.resolve().is_relative_to(_b) for _b in _build_dirs)
+        and not any(p.resolve().is_relative_to(_s) for _s in _skip_dirs)
     ]
     if _stale:
         _preview = _stale[:3] + (["..."] if len(_stale) > 3 else [])
@@ -117,4 +139,14 @@ if _bi is not None:
             f"  Modified: {', '.join(_preview)}\n"
             "  Rebuild:  cmake --build <build_dir> --target stinkytofu_python"
         )
-    del _bi, _so, _so_mtime, _stale, _build_dirs, _source_root, _scan_dirs, Path
+    del (
+        _bi,
+        _so,
+        _so_mtime,
+        _stale,
+        _build_dirs,
+        _source_root,
+        _scan_dirs,
+        _skip_dirs,
+        Path,
+    )

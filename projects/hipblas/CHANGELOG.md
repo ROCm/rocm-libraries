@@ -3,6 +3,12 @@
 Documentation for hipBLAS is available at
 [https://rocm.docs.amd.com/projects/hipBLAS/en/latest/](https://rocm.docs.amd.com/projects/hipBLAS/en/latest/).
 
+## hipBLAS 3.7.0
+
+### Added
+
+* Level 3 grouped batched GEMM functions `hipblasSgemmGroupedBatched`, `hipblasDgemmGroupedBatched`, `hipblasGemmGroupedBatchedEx`, and `hipblasGemmGroupedBatchedExWithFlags` for both C and FORTRAN, including ILP64 API (`_64` name suffix).
+
 ## hipBLAS 3.6.0
 
 ### Added

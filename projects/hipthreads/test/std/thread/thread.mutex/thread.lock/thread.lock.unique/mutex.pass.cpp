@@ -49,7 +49,7 @@ int main(int, char**) {
 #ifdef __HIP_DEVICE_COMPILE__
   {
     mux.lock();
-    hip::thread t        = support::make_test_thread(lock_thread);
+    hip::wthread t        = support::make_test_thread(lock_thread);
     main_thread_unlocked = true;
     mux.unlock();
     t.join();
@@ -60,7 +60,7 @@ int main(int, char**) {
     child_thread_unlocked = false;
     child_thread_locked   = false;
     keep_waiting          = true;
-    hip::thread t         = support::make_test_thread(try_lock_thread);
+    hip::wthread t         = support::make_test_thread(try_lock_thread);
     while (!child_thread_locked)
       hip::this_thread::sleep_for(cuda::std::chrono::milliseconds(10));
     assert(!mux.try_lock());

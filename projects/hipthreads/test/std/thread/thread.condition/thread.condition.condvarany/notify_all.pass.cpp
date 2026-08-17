@@ -49,7 +49,7 @@ int main(int, char**)
 #ifdef __HIP_DEVICE_COMPILE__
   const unsigned threadCount = 2;
   notReady = threadCount;
-  hip::thread threads[threadCount];
+  hip::wthread threads[threadCount];
   for (unsigned i = 0; i < threadCount; i++)
     threads[i] = support::make_test_thread(helper);
   {

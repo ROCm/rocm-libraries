@@ -10,9 +10,9 @@
 
 // <thread>
 
-// class thread
+// class wthread
 
-// thread();
+// wthread();
 
 #include <hip/thread>
 #include <cassert>
@@ -23,8 +23,8 @@
 
 int main(int, char**)
 {
-    hip::thread t;
-    assert(t.get_id() == hip::thread::id());
+    hip::wthread t;
+    assert(t.get_id() == hip::wthread::id());
 
   return 0;
 }

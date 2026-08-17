@@ -79,7 +79,7 @@ int main(int, char**) {
     ::std::optional<::std::stop_source> ss{::std::in_place};
     const auto st = ss->get_token();
 
-    hip::thread t = support::make_test_thread([&]() {
+    hip::wthread t = support::make_test_thread([&]() {
       ss->request_stop();
       ss.reset();
     });

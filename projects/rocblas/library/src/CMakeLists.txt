@@ -156,6 +156,7 @@ set(rocblas_ex_source_no_tensile
     # these require may use Tensile or source gemm
     blas_ex/rocblas_gemm_ex.cpp
     blas_ex/rocblas_gemm_batched_ex.cpp
+    blas_ex/rocblas_gemm_grouped_batched_ex.cpp
     blas_ex/rocblas_gemm_strided_batched_ex.cpp
     blas_ex/rocblas_gemm_ex_kernels.cpp
     blas_ex/rocblas_trsv_ex.cpp
@@ -213,6 +214,7 @@ set( rocblas_blas3_source
     blas3/rocblas_syr2k_strided_batched.cpp
     blas3/rocblas_gemm.cpp
     blas3/rocblas_gemm_batched.cpp
+    blas3/rocblas_gemm_grouped_batched.cpp
     blas3/rocblas_gemm_strided_batched.cpp
     blas3/Tensile/gemm_templates.cpp
     blas3/rocblas_syrkx.cpp
@@ -424,6 +426,7 @@ set(rocblas64_ex_source_no_tensile
 set( rocblas64_ex_source
   src64/blas_ex/rocblas_gemm_ex_64.cpp
   src64/blas_ex/rocblas_gemm_batched_ex_64.cpp
+  src64/blas_ex/rocblas_gemm_grouped_batched_ex_64.cpp
   src64/blas_ex/rocblas_gemm_strided_batched_ex_64.cpp
   src64/blas_ex/rocblas_gemm_ex_kernels_64.cpp
 )
@@ -468,6 +471,7 @@ set( rocblas64_blas3_source
     src64/blas3/rocblas_gemm_64.cpp
     src64/blas3/rocblas_gemm_kernels_64.cpp
     src64/blas3/rocblas_gemm_batched_64.cpp
+    src64/blas3/rocblas_gemm_grouped_batched_64.cpp
     src64/blas3/rocblas_gemm_strided_batched_64.cpp
     src64/blas3/rocblas_syrkx_64.cpp
     src64/blas3/rocblas_syrkx_herkx_kernels_64.cpp
