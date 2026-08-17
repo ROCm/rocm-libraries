@@ -116,10 +116,10 @@
         },
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 466836,
+          "bytes": 466916,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "84ce0eaeddd692826ee85103f7c505786e963722a457ccff899bb72ec622db05",
+          "sha256": "9782e0b9c509a14066371e68492a29f8e0985e0f8d8b9b3eef7085a4c0c941d7",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {
@@ -800,10 +800,10 @@
         },
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 466843,
+          "bytes": 466923,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "4cd0855b9ab6c2171dd49448b75992eebcfba31b8ad586fde80ece53f6cb7aae",
+          "sha256": "4ade674a76e53d6555c5513e2570df262bf27d0594ad838f79c64fc6255e15a7",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {
@@ -1484,10 +1484,10 @@
         },
         "attention_d256/gfx942/4warp_gqa": {
           "arch": "gfx942",
-          "bytes": 466847,
+          "bytes": 466927,
           "family": "attention_d256",
           "kernel_name": "rocke_uattn2d_tiled_d256_b16_t32_h16kv2_bf16_wpe2_mw32_regpv_4wgqa",
-          "sha256": "c2b546605348afc53538218b0b3a07f37ba7735b27e14ae1237261a192828d70",
+          "sha256": "6ab135907509139a2e82959287854198edbe6c7dd4ac4e07184c0348ffbfa973",
           "status": "ok"
         },
         "attention_d256/gfx950/pad_interleave": {

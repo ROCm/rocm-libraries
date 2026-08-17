@@ -5826,6 +5826,7 @@ def _build_gfx942_4warp_gqa_d256_lean(
         m_old = carry[0]
         l_old = carry[1]
         accs = list(carry[2:])
+        b.sync()  # WAR: prev iter's PV reads of V_lds must finish before this tile overwrites it
         for c in range(8):
             lin = b.add(b.mul(tid, b.const_i32(64)), b.const_i32(c * 8))
             key = b.div(lin, b.const_i32(256))
