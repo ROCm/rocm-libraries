@@ -5,7 +5,7 @@
 // docs/algorithms/direct/direct-wgrad.md is the algorithm these configure, and
 // docs/algorithms/direct/direct-wgrad-config-table.md the set of them the table holds.
 
-#include <numeric>
+#include "mathutil.h"
 
 namespace hipconv::cdna4::direct_wgrad
 {
@@ -98,7 +98,7 @@ struct Config
     //
     // Slots are keyed on the iteration, so a slot index folds once the unroll is a multiple of
     // the ring depth; the register ring adds a factor of kh.
-    constexpr int unroll() const { return std::lcm(row_buffers(), kh); }
+    constexpr int unroll() const { return lcm(row_buffers(), kh); }
 
     // Whether two table entries name the same kernel.
     //
