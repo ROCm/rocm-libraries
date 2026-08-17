@@ -374,12 +374,12 @@ class Gfx942DenseTuning:
         return bool(self.use_cfvst)
 
     def resolved_v_row_pad(self, spec: AttentionDenseSpec) -> int:
-        """Resolved V^T row pad (``None`` -> :func:`_v_row_pad`): 64 on the cfvst path
-        (fp16-D128) so V_lds is a pow2 128 wide and the bank-conflict swizzle engages,
-        else 8. Read by the builder's ``V_lds`` alloc AND the ``_lds_bytes`` budget so
-        the two cannot drift."""
+        """Resolved V^T row pad (``None`` -> :func:`_v_row_pad`, derived from ``block_n``
+        so ``V_lds`` is a pow2 >= 128 wide and the bank-conflict swizzle engages at any
+        tile width on the cfvst path; 8 else). Read by the builder's ``V_lds`` alloc AND
+        the ``_lds_bytes`` budget so the two cannot drift."""
         if self.v_row_pad is None:
-            return _v_row_pad(spec.head_size, spec.dtype)
+            return _v_row_pad(spec.head_size, spec.dtype, spec.block_n)
         return int(self.v_row_pad)
 
     def resolved_use_exp2_fast(self, spec: AttentionDenseSpec) -> bool:
@@ -445,7 +445,7 @@ def _tuning_name_tags(spec: AttentionDenseSpec, tuning: "Gfx942DenseTuning") -> 
     if tuning.lds_row_pad != _DEFAULT_TUNING.lds_row_pad:
         parts.append(f"krowpad{tuning.lds_row_pad}")
     vp = tuning.resolved_v_row_pad(spec)
-    if vp != _v_row_pad(spec.head_size, spec.dtype):
+    if vp != _v_row_pad(spec.head_size, spec.dtype, spec.block_n):
         parts.append(f"vrowpad{vp}")
     cfvst = tuning.resolved_use_cfvst(spec)
     if cfvst != _use_cfvst(spec.head_size, spec.dtype):
@@ -564,14 +564,20 @@ def _use_cfvst(head_size: int, dtype: str) -> bool:
     return _rows_per_instr(head_size) == 1 and dtype == "fp16"
 
 
-def _v_row_pad(head_size: int, dtype: str) -> int:
-    """V^T row (token-axis) pad, in elements. 64 on the cfvst path (fp16-D128) makes the
-    ``V_lds`` row width a pow2 128 so the XOR bank-conflict swizzle (``col' = key ^
-    ((dim&31)<<2)``) stays in-bounds and engages; 8 (no swizzle, original layout)
-    everywhere else, where the transposed-V path is off. The swizzle halves the V-read
-    LDS bank conflicts; measured net-positive for fp16-D128 across Sq/GQA with no
-    regression, so it rides the same gate as :func:`_use_cfvst`."""
-    return 64 if _use_cfvst(head_size, dtype) else 8
+def _v_row_pad(head_size: int, dtype: str, block_n: int) -> int:
+    """V^T row (token-axis) pad, in elements, on the cfvst path (fp16-D128); 8 (no
+    swizzle, original layout) everywhere else. Derived from ``block_n`` so the ``V_lds``
+    row width ``block_n + pad`` is the smallest pow2 >= max(128, block_n) -- the XOR
+    bank-conflict swizzle (``col' = key ^ ((dim&31)<<2)``) then stays in-bounds and
+    engages at EVERY tile width (block_n 64->64, 32->96, 128->0), not only block_n=64.
+    A constant pad would silently drop the swizzle -- while still charging the widened
+    LDS -- at any other tile width. Rides the :func:`_use_cfvst` gate. Side effect: the V
+    footprint is a constant ``head_size * width * 2`` (32 KB at D128), block_n-invariant.
+    """
+    if not _use_cfvst(head_size, dtype):
+        return 8
+    width = max(128, 1 << (block_n - 1).bit_length())
+    return width - block_n
 
 
 def _tuned_waves_per_eu(head_size: int, dtype: str) -> int:
@@ -1080,9 +1086,9 @@ def _build_attention_dense_single_buffer(
         # resolved struct, so the budget cannot under-count this allocation.
         V_LDROW = BN + tuning.resolved_v_row_pad(spec)
         V_lds = b.smem_alloc(dtype, [1, D, V_LDROW], name_hint="VldsT")
-        # V^T bank-conflict swizzle (col' = key ^ ((dim&31)<<2)): needs a pow2 row
-        # width >= 128 so the XOR stays in-bounds. Gated OFF otherwise (default
-        # v_row_pad=8 -> width 72 -> no swizzle, original behavior preserved).
+        # V^T bank-conflict swizzle (col' = key ^ ((dim&31)<<2)): the resolved pad makes
+        # V_LDROW the smallest pow2 >= max(128, block_n) on the cfvst path, so it engages
+        # at every tile width. Off only on the non-cfvst path (pad 8 -> width not pow2).
         SWZ_V = (V_LDROW & (V_LDROW - 1)) == 0 and V_LDROW >= 128
     else:
         # V keeps the natural [token, dim] async-DMA layout (D64: VGPR-bound, cfvst

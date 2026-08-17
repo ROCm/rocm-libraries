@@ -23,6 +23,7 @@ it via ``-m "not gpu"``. Run standalone:
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import pytest
@@ -159,6 +160,41 @@ def test_dense_numeric_vs_fp32_sdpa(dtype, d, hq, hkv, persistent):
         f"{dtype} D{d} GQA{hq}/{hkv} "
         f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
     )
+
+
+@requires_gfx942_gpu
+@pytest.mark.gpu
+@pytest.mark.parametrize("block_n", [32])
+def test_dense_fp16_d128_cfvst_swizzle_correct_at_other_tile_widths(block_n):
+    """The fp16-D128 cfvst V^T swizzle must stay CORRECT at tile widths other than the
+    shipped block_n=64. The derived v_row_pad keeps V_LDROW a pow2 128 so the XOR
+    swizzle engages here too (block_n=32 is the active small-tile double-K direction);
+    before the derived pad it silently fell back to no-swizzle. On-silicon guard vs
+    fp32 SDPA for the tile-width axis the policy tests only cover structurally."""
+    import torch
+    import torch.nn.functional as F
+
+    d, hq, hkv, tol = 128, 16, 4, 2e-2
+    B, S, scale = 1, 512, 1.0 / math.sqrt(128)
+    torch.manual_seed(0)
+    q = torch.randn(B, S, hq, d, device="cuda", dtype=torch.float16)
+    k = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.float16)
+    v = torch.randn(B, S, hkv, d, device="cuda", dtype=torch.float16)
+    out = torch.empty(B, S, hq, d, device="cuda", dtype=torch.float16)
+    spec = dataclasses.replace(
+        _spec("fp16", d, hq, hkv, False, batch=B, sq=S), block_n=block_n
+    )
+    run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=scale)
+    torch.cuda.synchronize()
+    rep = hq // hkv
+    qf = q.transpose(1, 2).float()
+    kf = k.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    vf = v.transpose(1, 2).float().repeat_interleave(rep, dim=1)
+    ref = F.scaled_dot_product_attention(
+        qf, kf, vf, is_causal=True, scale=scale
+    ).transpose(1, 2)
+    max_abs = (ref - out.float()).abs().max().item()
+    assert max_abs < tol, f"fp16 D128 block_n={block_n}: max_abs={max_abs:.3e} >= {tol}"
 
 
 if __name__ == "__main__":
