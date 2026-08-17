@@ -7,7 +7,7 @@
  * StreamK kernels share one Synchronizer allocation across launches and must
  * leave it at zero on exit so the next launch starts clean. Residue is silent
  * -- it corrupts a later launch, not the one that left it -- so this listener
- * reads the buffer back and fails the run on any nonzero byte, clearing the
+ * reads the buffer back and fails the run on any nonzero int, clearing the
  * residue so it is reported once rather than by every solution that follows.
  * It also fails when the buffer is declared too narrow to scan in full.
  *
@@ -51,18 +51,21 @@ namespace TensileLite
             {
                 return false;
             }
-            virtual void preBenchmarkRun() override { }
-            virtual void postBenchmarkRun() override { }
+            virtual void preBenchmarkRun() override {}
+            virtual void postBenchmarkRun() override {}
 
             virtual void preProblem(ContractionProblem* const problem) override;
-            virtual void postProblem() override { }
+            virtual void postProblem() override {}
 
             virtual void preSolution(ContractionSolution* const solution) override;
             virtual void postSolution() override;
 
+            // The loop hosting the warmup only turns if some listener asks for a
+            // run, and with NumElementsToValidate 0 and SyncsPerBenchmark 0 none
+            // does. One pass, so it never extends a loop someone else drives.
             virtual bool needMoreRunsInSolution() const override
             {
-                return false;
+                return m_enabled && !m_checkedSolution;
             }
 
             // Request one warmup so validateWarmups always has a launch to
@@ -71,8 +74,8 @@ namespace TensileLite
             {
                 return m_enabled ? 1 : 0;
             }
-            virtual void setNumWarmupRuns(size_t count) override { }
-            virtual void preWarmup() override { }
+            virtual void setNumWarmupRuns(size_t count) override {}
+            virtual void preWarmup() override {}
             virtual void postWarmup(TimingEvents const& startEvents,
                                     TimingEvents const& stopEvents,
                                     hipStream_t const&  stream) override
@@ -89,16 +92,16 @@ namespace TensileLite
             {
                 return 0;
             }
-            virtual void setNumSyncs(size_t count) override { }
-            virtual void preSyncs() override { }
-            virtual void postSyncs() override { }
+            virtual void setNumSyncs(size_t count) override {}
+            virtual void preSyncs() override {}
+            virtual void postSyncs() override {}
 
             virtual size_t numEnqueuesPerSync() override
             {
                 return 0;
             }
-            virtual void setNumEnqueuesPerSync(size_t count) override { }
-            virtual void preEnqueues(hipStream_t const& stream) override { }
+            virtual void setNumEnqueuesPerSync(size_t count) override {}
+            virtual void preEnqueues(hipStream_t const& stream) override {}
             virtual void postEnqueues(TimingEvents const& startEvents,
                                       TimingEvents const& stopEvents,
                                       hipStream_t const&  stream) override
@@ -113,7 +116,7 @@ namespace TensileLite
             {
             }
 
-            virtual void finalizeReport() override { }
+            virtual void finalizeReport() override {}
 
             virtual int error() const override
             {
@@ -136,15 +139,18 @@ namespace TensileLite
             /// and reused across launches.
             uint8_t* stagingBuffer(size_t bytes);
 
-            bool                m_enabled         = false;
-            ContractionProblem* m_problem         = nullptr;
-            uint8_t*            m_staging         = nullptr;
-            size_t              m_stagingBytes    = 0;
+            bool                m_enabled      = false;
+            ContractionProblem* m_problem      = nullptr;
+            uint8_t*            m_staging      = nullptr;
+            size_t              m_stagingBytes = 0;
 
         protected:
             // Protected so a test-only subclass can drive these without a GPU.
             bool m_dirtyInSolution = false;
             int  m_errorsReported  = 0;
+            // Set once validateWarmups has run, so needMoreRunsInSolution stops
+            // asking. Reset per solution in preSolution.
+            bool m_checkedSolution = false;
         };
     } // namespace Client
 } // namespace TensileLite
