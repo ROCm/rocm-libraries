@@ -21,7 +21,9 @@ constexpr HWModel kGfx1250Model = {
     .lds =
         {
             .readQueueDepth = 16,
-            .readDrainLatency = 72,
+            // 0 => derive barrier-timing drain latency dynamically from
+            // matching ds_read count and the latest ds_read's own latency.
+            .readDrainLatency = 0,
             .readThrottleLatency = 72,
         },
     .barrier =

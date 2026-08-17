@@ -137,6 +137,7 @@ inline void to_json(nlohmann::json& nodeJson, const data_objects::Node& node)
         break;
     case data_objects::NodeAttributes::ResampleBwdAttributes:
         nodeJson = *node.attributes_as_ResampleBwdAttributes();
+        break;
     case data_objects::NodeAttributes::MoeGroupedMatmulAttributes:
         nodeJson = *node.attributes_as_MoeGroupedMatmulAttributes();
         break;
