@@ -12,10 +12,9 @@
 # (e.g. cdna3 config with gfx950 code objects) aborts with "invalid device function".
 # MIOPEN_DEVICE_ARCH selects which arch's DBs are validated.
 #
-# Supported set = arches TheRock builds AND rocjitsu has a KMD config for AND the run
-# actually completes (see gfx942 status below). Adding more (gfx90a=cdna2, gfx125X=RDNA,
-# ...) requires a rocjitsu arch config in ROCm/rocm-systems first (and, for gfx90a, a
-# TheRock build too).
+# Supported set = arches TheRock builds AND rocjitsu has a KMD config for. Today that is
+# gfx942 (cdna3) and gfx950 (cdna4). Adding more (gfx90a=cdna2, gfx125X=RDNA, ...) requires
+# a rocjitsu arch config in ROCm/rocm-systems first (and, for gfx90a, a TheRock build too).
 #
 # VALIDATED 2026-08-15 (gfx950, run 31865606916): fetch works with no AWS creds; the dist
 # carries libMIOpenCKGroupedConv_gfx950.so + gfx950100 DBs; with the cdna4 config
@@ -23,37 +22,48 @@
 # real "invalid perf config" ConvHipImplicitGemmGroupWrwXdlops entries (the stale gfx950
 # grouped-wrw class PR #10043 predicted -- i.e. the #2266 material).
 #
-# gfx942 EXCLUDED from the matrix (2026-08-15, run 31890772516): with the matching cdna3
-# config, StaticFDBSync/3 (gfx942, 304 CU) STALLED -- ~200/many-thousand find-db lines
-# processed in 6 HOURS before the job was force-cancelled (vs 13s for the same DB locally
-# on real hardware). db_sync.cpp spawns min(hardware_concurrency(), 32) threads
-# (db_sync.cpp:1009-1010), each making a HIP device call per CK grouped-conv entry through
-# the rocjitsu interposer; something about that concurrency (or gfx942's much larger FDB)
-# stalls under rocjitsu/cdna3 specifically -- not root-caused, not a code bug in MIOpen.
-# gfx942 dbsync is ALREADY covered by TheRock's real GPU test job (gfx94X-dcgpu), so this
-# GPU-free path isn't needed there; not worth the CI cost until the stall is understood.
-# A next diagnostic step (not attempted): re-run with the runner's CPU affinity constrained
-# (e.g. taskset -c 0-3) to force fewer threads and see whether that avoids the stall.
+# gfx942 history: run 31890772516 (2026-08-15) STALLED at StaticFDBSync/3 (304 CU) -- ~200
+# find-db lines processed in 6 HOURS before force-cancelled (vs 13s locally on real
+# hardware). Root cause was never confirmed. Re-validated 2026-08-17 against a fresh
+# artifact (TheRock multi_arch_ci.yml run 31972143345, rocm-libraries pinned to
+# b03bb83931b) across 4 separate dispatches -- default (32-thread, the exact config that
+# stalled before), 4-thread, and 1-thread -- and NONE stalled: 15-199s each, scaling
+# sensibly with thread count. The original stall did not reproduce and is presumed a
+# one-off (possibly tied to the specific earlier build pipeline/artifact, PR #10838's
+# therock-ci.yml run, rather than anything inherent to gfx942 or rocjitsu). gfx942 dbsync
+# now reliably surfaces a real, reproducible finding: the same 3
+# ConvHipImplicitGemmGroupWrwXdlops/ConvHipImplicitGemm3DGroupWrwXdlops "invalid perf
+# config" entries in gfx942130.db.txt regardless of CK build (old container CK, this fresh
+# source CK) -- genuinely stale SystemDB entries, same class as gfx950's #2266 issue, not a
+# CK-version-skew artifact. MIOPEN_DBSYNC_MAX_THREADS (db_sync.cpp) remains available as a
+# diagnostic knob if a future stall needs bisecting, but is not required for gfx942 to pass.
 #
-# The fetch depends on ROCm/TheRock's `setup_test_environment` action + the MIOpen
-# component's `fetch_artifact_args`. Both `artifact_run_id` and `fetch_artifact_args` come
-# from a real TheRock CI run (one build run produces all families; only ARTIFACT_GROUP
-# differs per matrix leg).
+# The fetch depends on ROCm/TheRock's `install_rocm_from_artifacts.py` (called directly,
+# not via the `setup_test_environment` composite action -- that action has no way to pass
+# `--run-github-repo`, and defaults to querying `artifact_run_id` against the CURRENT repo).
+# `artifact_run_id` may be a run on ROCm/rocm-libraries (a PR's own TheRock CI, the common
+# case) OR on ROCm/TheRock directly (e.g. from a `multiarch-ci-sweep`/multi_arch_ci.yml
+# dispatch, e.g. to pin to a specific commit) -- set `artifact_repo` accordingly. MIOpen's
+# `fetch_artifact_args` comes from TheRock's `fetch_test_configurations.py`.
 name: "Prototype: TheRock dbsync (rocjitsu)"
 
 on:
   workflow_dispatch:
     inputs:
       artifact_run_id:
-        description: "TheRock build run id that produced the MIOpen artifacts (all families)"
+        description: "Run id that produced the MIOpen artifacts (all families)"
         type: string
         required: true
+      artifact_repo:
+        description: "Repo hosting artifact_run_id -- ROCm/rocm-libraries (a PR's TheRock CI run) or ROCm/TheRock (a direct multi_arch_ci.yml dispatch)"
+        type: string
+        default: "ROCm/rocm-libraries"
       fetch_artifact_args:
         description: "MIOpen component fetch_artifact_args (from TheRock fetch_test_configurations.py)"
         type: string
         default: "--blas --miopen --rand --tests"
       therock_ref:
-        description: "ROCm/TheRock ref providing setup_test_environment + build_tools"
+        description: "ROCm/TheRock ref providing build_tools"
         type: string
         default: "main"
 
@@ -70,9 +80,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Supported + validated set only. gfx942 deliberately excluded -- see header note
-        # (stalls under rocjitsu/cdna3; also redundant with TheRock's real gfx94X GPU test).
+        # Supported + validated set: TheRock builds it AND rocjitsu has a matching KMD config.
         include:
+          - { arch: gfx942, family: gfx94X-dcgpu, rj_config: amdgpu_cdna3_kmd.json }
           - { arch: gfx950, family: gfx950-dcgpu, rj_config: amdgpu_cdna4_kmd.json }
     # Same runtime image TheRock's test-component uses for running the fetched dist, but
     # WITHOUT GPU device mounts (rocjitsu fakes the device). --user 0: the image defaults to
@@ -90,7 +100,7 @@ jobs:
       AMDGPU_FAMILIES: ${{ matrix.family }}
       VENV_DIR: ${{ github.workspace }}/.venv
     steps:
-      - name: Checkout ROCm/TheRock (setup_test_environment action + build_tools)
+      - name: Checkout ROCm/TheRock (build_tools)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
@@ -110,16 +120,37 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
 
-      - name: Fetch TheRock artifact (source-CK build for ${{ matrix.family }})
-        timeout-minutes: 15
-        uses: './.github/actions/setup_test_environment'
+      # Calls install_rocm_from_artifacts.py directly (not via the setup_test_environment
+      # composite action) so we can pass --run-github-repo -- the action has no such input
+      # and defaults to querying artifact_run_id against the CURRENT repo (rocm-libraries),
+      # which is wrong when artifact_repo is ROCm/TheRock.
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          ARTIFACT_GROUP: ${{ matrix.family }}
-          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
-          VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: ${{ inputs.fetch_artifact_args }}
-          IS_PR_FROM_FORK: "false"
+          python-version: "3.12"
+
+      - name: Install UV
+        run: pip install uv
+
+      - name: Create Python venv
+        run: python build_tools/setup_venv.py "${VENV_DIR}" --activate-in-future-github-actions-steps --use-uv
+
+      - name: Install test requirements
+        run: |
+          uv pip install -r requirements-test.txt
+          uv pip freeze
+
+      - name: Fetch artifact (source-CK build for ${{ matrix.family }}) from ${{ inputs.artifact_repo }}
+        timeout-minutes: 15
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python ./build_tools/install_rocm_from_artifacts.py \
+            --run-id="${ARTIFACT_RUN_ID}" \
+            --run-github-repo="${{ inputs.artifact_repo }}" \
+            --artifact-group="${AMDGPU_FAMILIES}" \
+            --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+            ${{ inputs.fetch_artifact_args }}
 
       - name: Inspect artifact (key check — CK plugin + DBs must be present)
         run: |
