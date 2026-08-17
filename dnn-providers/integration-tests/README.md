@@ -260,6 +260,10 @@ Run the command above to produce your own copy; it is git-ignored, so it will
 not show up in `git status`. The matrix is a pure view of the sidecars, so two
 people rendering the same checkout get byte-identical files.
 
+`SUPPORT_MATRIX_OVERVIEW.md` **is committed** — it is the compact (~4 KB)
+overview-only variant produced by `--overview-only`, small enough to render on
+GitHub. A nightly CI job regenerates it automatically.
+
 Useful flags:
 
 | Flag | Effect |
@@ -268,6 +272,7 @@ Useful flags:
 | `--format json` | the flat per-graph index instead of the document — read this, not the rendered tables, if you are building tooling on top |
 | `--bundles-dir PATH` | render a tree other than `integration-test-bundles/` |
 | `--max-case-ids N` | inline up to N sweep case ids per bundle in the provenance comments (0 = none, the default) |
+| `--overview-only` | emit only the per-target overview tables — no collapsible details, no per-variant drilldowns; writes to `SUPPORT_MATRIX_OVERVIEW.md` by default |
 | `--check` | compare against an existing file and exit 1 if they differ; for keeping a local copy in sync |
 
 Nothing is filtered: every `(arch, platform)` target gets its own section, and
