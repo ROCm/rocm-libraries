@@ -705,9 +705,10 @@ function(install_kdb FILE_NAME COMPONENT_NAME)
         # Guard against a placeholder standing in for the real artifact: a git-LFS
         # pointer ("version https://git-lfs...") or a DVC stub is a small text file
         # that would otherwise be handed to bzip2 and fail the build. Real bzip2
-        # archives start with the magic "BZh".
-        file(READ "${FILE_NAME}" __magic LIMIT 3)
-        if(NOT __magic STREQUAL "BZh")
+        # archives start with the magic "BZh" (0x425a68). Compare in HEX: a plain
+        # file(READ) of these artifacts does not always yield the raw 3 bytes.
+        file(READ "${FILE_NAME}" __magic LIMIT 3 HEX)
+        if(NOT __magic STREQUAL "425a68")
             list(APPEND DVC_MISSING_FILES ${FILE_NAME})
             set(DVC_MISSING_FILES ${DVC_MISSING_FILES} PARENT_SCOPE)
             return()
