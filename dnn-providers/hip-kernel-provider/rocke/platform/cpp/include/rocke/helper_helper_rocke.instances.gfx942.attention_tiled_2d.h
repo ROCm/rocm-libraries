@@ -163,6 +163,14 @@ typedef struct rocke_attention_tiled_2d_spec
     bool use_conflict_free_v_ck_vlds; /* True  */
     bool use_k_single_buffer; /* False */
     bool use_k_sliced_ring; /* False */
+    /* Sliced-K ring geometry, in Python dataclass field order. ring_depth is how
+     * many LDS slots the ring stages K into; k_slice_hd is the head-dim width of
+     * one slice, so k_groups = head_size / k_slice_hd and k_slice_hd is also the
+     * K_lds row stride the QK read's LDS bank spread follows. Both are meaningful
+     * only when use_k_sliced_ring is set, and both are validated there (mirrors
+     * the Python __post_init__). */
+    int ring_depth; /* 3  */
+    int k_slice_hd; /* 32 */
     bool use_k_sliced_ldsseq; /* False */
     bool use_iglp_opt; /* False */
     bool use_qk_pv_sched_group_barrier; /* False */
