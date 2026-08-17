@@ -12,12 +12,18 @@
 name: TheRock Multi-Arch CI ASAN
 
 on:
+  # The `labeled`/`unlabeled` types exist for the label-gated cmake flags
+  # resolved by the label_flags job: adding a gated label must rebuild with the
+  # flag on and removing one must rebuild with it off. Every other label change
+  # stops at label_flags, which reports label_relevant=false and skips the
+  # expensive jobs.
   pull_request:
     types:
       - opened
       - synchronize
       - reopened
       - labeled
+      - unlabeled
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -52,7 +58,60 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Builds the external_repo payload handed to TheRock, adding
+  # `extra_cmake_options` when this pull request carries a label listed in
+  # .github/scripts/therock_multiarch_label_flags.py. With no such label the
+  # payload is byte-identical to the literal this job replaced.
+  #
+  # This job carries no `if:` of its own: it is the thing that decides whether
+  # the rest of the workflow runs on a label event, so it always runs. Keep it
+  # dependency-free (stdlib, sparse checkout, no network) - if it fails or is
+  # cancelled, label_relevant is empty and label events skip the build.
+  #
+  # The map here is independent of the one the release workflow reads - it is
+  # the same map in the same file, but a label only drives this workflow if the
+  # `labeled`/`unlabeled` trigger above fires it.
+  label_flags:
+    name: Resolve label-gated cmake flags
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      external_repo: ${{ steps.flags.outputs.external_repo }}
+      flags_active: ${{ steps.flags.outputs.flags_active }}
+      label_relevant: ${{ steps.flags.outputs.label_relevant }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Resolve label-gated cmake flags
+        id: flags
+        env:
+          # The event payload, not a live `gh pr view`: this is the label state
+          # the run was triggered for, so logs and artifacts cannot disagree
+          # with it, and it needs no token and works for forks.
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          # Only set on labeled/unlabeled; gates the run, does not inject.
+          CHANGED_LABEL: ${{ github.event.label.name }}
+          EXTERNAL_REPO_REPOSITORY: ${{ github.repository }}
+          EXTERNAL_REPO_REF: ${{ github.sha }}
+          PREBUILT_STAGES: ${{ inputs.prebuilt_stages || '' }}
+          BASELINE_RUN_ID: ${{ inputs.baseline_run_id || '' }}
+        run: python .github/scripts/therock_multiarch_label_flags.py
+
   setup:
+    needs: label_flags
+    # A label change that injects nothing changes nothing about the build, so
+    # it must not start one. Non-label events short-circuit the first clause
+    # and run as before; everything expensive hangs off this job. This workflow
+    # previously re-ran on every `labeled` with no filter at all, so the gate is
+    # an improvement even ignoring the flag feature.
+    if: >-
+      ${{ (github.event.action != 'labeled' && github.event.action != 'unlabeled')
+          || needs.label_flags.outputs.label_relevant == 'true' }}
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
       build_variant: "asan"
@@ -60,9 +119,16 @@ jobs:
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
+      # No `stage_reuse_mode` here on purpose: this workflow leaves it at the
+      # `dry-run` default, so there is no reuse for a flag-on run to inherit
+      # stages from and nothing to force off.
       repository: ROCm/TheRock
       ref: main
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      # Pass external repo info for stage-impact analysis. Built by label_flags
+      # rather than written literally here, because it also carries the
+      # `extra_cmake_options` any gated label injected. With no such label the
+      # value is byte-identical to the literal it replaced.
+      external_repo: ${{ needs.label_flags.outputs.external_repo }}
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}

@@ -1,0 +1,85 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Unit tests for the CI helper scripts in .github/scripts.
+#
+# Until this workflow existed, .github/scripts/tests ran in nothing - only
+# `black` via pre-commit ever touched that directory - so a broken helper was
+# only discovered by a failing CI run that used it.
+#
+# The suites are plain stdlib `unittest`, but two of them reach further:
+# therock_configure_ci imports `amdgpu_family_matrix` from a TheRock checkout at
+# the relative path `TheRock/build_tools/github_actions`, and several modules
+# import `requests` / `pydantic`. Hence the TheRock checkout and the pip step,
+# mirroring the `configure` job in therock-ci.yml. Discovery runs from the
+# repository root so that relative path resolves.
+
+name: CI Scripts Test
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/ci-scripts-test.yml"
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/ci-scripts-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  unittest:
+    name: Run .github/scripts unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      # Pins the same TheRock commit the rest of CI uses, so a test failure
+      # here means our script changed rather than upstream drifting.
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          path: TheRock
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests
+
+      # Each test module puts .github/scripts on sys.path itself, so no
+      # --top-level-directory is needed (and passing one fails, as the tests
+      # directory is not a package). The working directory stays at the
+      # repository root so therock_configure_ci finds
+      # TheRock/build_tools/github_actions.
+      - name: Run unit tests
+        run: |
+          python -m unittest discover \
+            --start-directory .github/scripts/tests \
+            --pattern '*_test.py' \
+            --verbose
