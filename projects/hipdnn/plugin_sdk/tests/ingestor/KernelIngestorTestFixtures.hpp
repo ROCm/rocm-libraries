@@ -643,7 +643,7 @@ private:
 
 struct StubSettings
 {
-    KnobFilter ingestorKnobFilter;
+    IngestorSettings ingestorSettings;
 };
 
 struct StubContext

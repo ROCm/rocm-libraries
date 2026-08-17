@@ -133,7 +133,10 @@ TEST(TestIngestorGenericEngine, GetDetailsReportsTheEnginesKnobs)
                                                                                      details.size);
     ASSERT_TRUE(wrapper.isValid());
     EXPECT_EQ(wrapper.engineId(), engine.id());
-    ASSERT_EQ(wrapper.knobCount(), 1U);
+    // GenericEngine::getDetails() always prepends the out-of-band benchmarking knob
+    // (Task 1.4), so a UED declaring one knob of its own advertises two; looked up by
+    // name, since the prepend fixes a position Phase 2 must not assume by index either.
+    ASSERT_EQ(wrapper.knobCount(), 2U);
     EXPECT_EQ(wrapper.getKnobByName(BLOCK_SIZE).knobId(), BLOCK_SIZE);
 }
 

@@ -74,7 +74,7 @@ public:
 
 struct KnobFilterSettings
 {
-    KnobFilter ingestorKnobFilter;
+    IngestorSettings ingestorSettings;
 };
 
 struct KnobFilterContext
