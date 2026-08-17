@@ -434,9 +434,10 @@ def main():
         default=[],
         dest="fixtures_required",
         help=(
-            "CTest FIXTURES_REQUIRED entry applied to every generated suite. May "
-            "be repeated. Used e.g. to require a setup fixture that clears the "
-            "MIOpen kernel cache before the suite runs."
+            "CTest FIXTURES_REQUIRED entry applied to every generated suite (e.g. "
+            "a setup fixture that must run before the suite). May be repeated. "
+            "Currently applied only to the build tree; not emitted into the install "
+            "tree, since no use case requires it there yet."
         ),
     )
     parser.add_argument(
@@ -692,6 +693,8 @@ def main():
                         if env_mod_string
                         else ""
                     )
+                    # FIXTURES_REQUIRED currently applies only to the build tree; no
+                    # use case requires it in the install tree yet.
                     install_file_handle.write(
                         f"set_tests_properties({name_prefix}_{category_name}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
                     )
@@ -872,6 +875,8 @@ def main():
                             if env_mod_string
                             else ""
                         )
+                        # FIXTURES_REQUIRED currently applies only to the build tree; no
+                        # use case requires it in the install tree yet.
                         install_file_handle.write(
                             f"set_tests_properties({name_prefix}_{category_name}_{gpu_arch}_suite PROPERTIES LABELS {label_string} TIMEOUT {timeout}{env_prop}{env_mod_prop}{resource_groups_prop})\n\n"
                         )

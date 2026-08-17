@@ -124,7 +124,9 @@ if(Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE}
                 ${CMAKE_CURRENT_SOURCE_DIR}/reference-data-scripts/tests/test_verify_golden_bundles.py
     )
-    set_tests_properties(hipdnn_bundle_verifier_python_tests PROPERTIES LABELS "unit_test;quick")
+    # Labels are applied via the shared YAML category path below (test_categories_external.yaml)
+    # so this pre-registered test gets the tier labels.
+    set(HIPDNN_IT_BUNDLE_VERIFIER_TEST hipdnn_bundle_verifier_python_tests)
 endif()
 
 # Install integration test bundles so installed tests can find them at
@@ -171,13 +173,20 @@ clang_tidy_check(${INTEGRATION_TESTS_EXE})
 # engine and selects tests via that provider's test_categories_integration.yaml.
 
 set(HIPDNN_IT_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+set(HIPDNN_IT_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
 set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED FALSE)
 if(EXISTS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}"
    AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
     set(DNN_PROVIDER_TEST_CATEGORY_YAMLS "${HIPDNN_IT_GTEST_CATEGORIES_YAML}")
+    set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPDNN_IT_CTEST_CATEGORIES_YAML}")
     set(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED TRUE)
     message(STATUS "hipdnn-integration-tests: YAML-based CTest categorization enabled")
+    # Label the pre-registered bundle-verifier ctest test via the shared YAML path
+    # (it is registered directly above, not by _create_test_name_validation_target_internal).
+    if(HIPDNN_IT_BUNDLE_VERIFIER_TEST)
+        _apply_provider_ctest_category_labels(${HIPDNN_IT_BUNDLE_VERIFIER_TEST})
+    endif()
 else()
     message(STATUS "hipdnn-integration-tests: shared/ctest or test_categories.yaml not found, using legacy CTest labels")
 endif()
@@ -219,18 +228,13 @@ if(HIPDNN_IT_YAML_CATEGORIZATION_ENABLED)
         )
     endforeach()
 
-    # Standalone: install the generated (category-labeled) CTestTestfile so
+    # Install the generated (category-labeled) CTestTestfile so
     # `ctest -L quick|standard|...` works from the installed tree.
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
-                DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest"
-                RENAME "CTestTestfile.cmake")
-    endif()
+    install(FILES "${HIPDNN_IT_CTEST_INSTALL_FILE}"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/hipdnn_integration_tests_ctest"
+            RENAME "CTestTestfile.cmake")
 else()
-    # For standalone builds we need to install the ctest files
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        install_provider_ctest_files("hipdnn_integration_tests_ctest")
-    endif()
+    install_provider_ctest_files("hipdnn_integration_tests_ctest")
 endif()
 
 include(CMakePackageConfigHelpers)
