@@ -5878,12 +5878,12 @@ def _build_gfx942_4warp_gqa_d256_lean(
             for i in range(CPL):
                 local = b.fmax(local, b.fmul(Sm[kt][i], sc))
         m_new = b.fmax(m_old, b.fmax(local, bperm(local)))
-        alpha = b.exp2(b.fsub(m_old, m_new))
+        alpha = b.exp2_fast(b.fsub(m_old, m_new))
         P = [[None] * CPL for _ in range(NKEYT)]
         lsum = zf
         for kt in range(NKEYT):
             for i in range(CPL):
-                p = b.exp2(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
+                p = b.exp2_fast(b.fsub(b.fmul(Sm[kt][i], sc), m_new))
                 lsum = b.fadd(lsum, p)
                 P[kt][i] = b.cast_f32_to(p, dtype)
         l_new = b.fadd(b.fmul(l_old, alpha), b.fadd(lsum, bperm(lsum)))
