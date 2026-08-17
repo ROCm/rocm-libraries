@@ -108,7 +108,7 @@ Run TSAN for changes involving threads, shared state, callbacks, logging concurr
 
 ASAN and TSAN are separate, mutually exclusive build configurations.
 TSAN is supported only on Linux and checks host-side races; ASAN support depends on platform and GPU architecture, so some GPU tests are skipped in ASAN builds.
-For ASAN, use [Building hipDNN: Address Sanitizer Build](./Building.md#address-sanitizer-build). For TSAN, use [Building hipDNN: Thread Sanitizer Build](./Building.md#thread-sanitizer-build). Run the applicable `standard` label from the sanitizer build.
+For ASAN, use [Building hipDNN: Address Sanitizer Build](./Building.md#address-sanitizer-build). For TSAN, configure a standalone Linux build with `-DBUILD_THREAD_SANITIZER=ON`. Build the sanitizer tree, then run its applicable `standard` label.
 
 A clean sanitizer run supplements functional assertions; it does not prove numerical correctness or replace provider integration coverage.
 See [Known Gaps](./KNOWN_GAPS.md) for current sanitizer automation and coverage limitations.
