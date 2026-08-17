@@ -1,24 +1,22 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --RemoveDefUseAnalysisPass --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --RemoveDefUseAnalysisPass --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
 #
 # LiftAsmRegistersToSSAPass: the def-use analysis is discarded first.
 #
 # BuildUseDefChainPass inserts GFX::PHI pseudo-instructions and records def-use
 # edges, both keyed by physical register. Those cannot describe SSA values, so
-# RemoveDefUseAnalysisPass clears them before the graph is built.
-# Leaving them would let a later consumer trust stale, physically-keyed data,
-# and lifting rejects a function that still carries them rather than repairing
-# it, because construction reads the function without modifying it.
+# RemoveDefUseAnalysisPass clears them before SSA is attached. Leaving them would
+# let a later consumer trust stale, physically-keyed data, and lifting rejects a
+# function that still carries them rather than repairing it, because construction
+# reads the instruction stream without modifying it.
 #
-# The merge that the analysis PHI approximated reappears as a canonical PHI in
-# the graph instead.
+# The merge that the analysis PHI approximated reappears as a block argument.
 #
-# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_after_defuse
-# CHECK: ^join:
-# CHECK-NEXT: phi(^left:
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_after_defuse
+# CHECK: ^join(%7:v):
+# CHECK-NEXT: %7:v = phi(^left:
 # CHECK-SAME: ^right:
 #
-# The physical stream that follows has no PHI pseudo-instruction left in it.
-# CHECK-LABEL: @lift_asm_registers_to_ssa_after_defuse
+# No PHI pseudo-instruction is left in the stream.
 # CHECK-NOT: st.PHI
 
 st.func @lift_asm_registers_to_ssa_after_defuse() {

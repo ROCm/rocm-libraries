@@ -2,5 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu_objs PRIVATE
-    CanonicalSSAPrinter.cpp
+    AttachedSSAVerifier.cpp
+    StinkySSAValue.cpp
 )

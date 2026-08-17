@@ -65,12 +65,11 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/StinkyModifiersTest.cpp
     unit/asm/LegalizationUtilsTest.cpp
     unit/asm/VirtualRegisterTest.cpp
-    unit/ssa/CanonicalSSATest.cpp
-    unit/ssa/CanonicalSSAVerifierTest.cpp
-    unit/ssa/CanonicalSSAPrinterTest.cpp
+    unit/ssa/AttachedSSATest.cpp
+    unit/ssa/AsmPrinterSSAFormTest.cpp
     unit/ssa/LiftAsmRegistersToSSATest.cpp
     unit/asm/DefUseAnalysisCleanupTest.cpp
-    unit/ssa/CanonicalSSADestructionTest.cpp
+    unit/ssa/SSADestructionTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
     unit/asm/IRLexerTest.cpp
     unit/asm/IRParserTest.cpp

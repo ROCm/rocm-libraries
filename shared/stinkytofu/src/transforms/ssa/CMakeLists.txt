@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu_objs PRIVATE
+    AsmRegisterLifting.cpp
     LiftAsmRegistersToSSAPass.cpp
-    DumpCanonicalSSAPass.cpp
-    CanonicalSSADestruction.cpp
+    SSADestruction.cpp
     ReplayLegacyColoringPass.cpp
 )

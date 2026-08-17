@@ -32,7 +32,7 @@
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSAAllocation.hpp"
+#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
 
 namespace stinkytofu {
 class Function;
@@ -48,29 +48,25 @@ struct STINKYTOFU_EXPORT SSADestructionResult {
     std::string toString() const;
 };
 
-/// Rewrite \p function's physical operands from \p allocation, as described by
-/// \p ssa.
+/// Rewrite \p function's physical operands from \p allocation.
 ///
 /// This is the single lowering path shared by every allocation result, so
 /// legacy replay and a real allocator differ only in the colouring they are
 /// given, never in how it is applied.
 ///
-/// The graph is passed in rather than read off the function: SSA value IDs mean
-/// something only relative to one graph, so the caller has to name the graph its
-/// allocation was computed against. A graph that no longer describes \p function,
-/// or an allocation computed against a different graph, is reported instead of
-/// being applied. Discarding the graph afterwards is the caller's job.
+/// A function whose attached SSA no longer matches its physical shape, or an
+/// allocation computed against a different lift, is reported instead of being
+/// applied. On success, attached SSA is cleared after the rewrite.
 ///
 /// The rewrite is atomic: every operand is validated before any is modified, so
-/// a rejected function keeps its original registers.
+/// a rejected function keeps its original registers and its attached SSA.
 ///
-/// A PHI whose inputs and result do not all land on the same register needs a
-/// copy on the incoming edge. Copy insertion, parallel-copy sequencing, and
-/// critical-edge splitting are not implemented, so that case is reported rather
-/// than mis-lowered. Legacy replay never hits it: every version of a register
-/// colours back to that same register.
-STINKYTOFU_EXPORT SSADestructionResult destroyCanonicalSSA(Function& function,
-                                                           const CanonicalSSA& ssa,
-                                                           const AllocationResult& allocation);
+/// A block argument whose inputs and result do not all land on the same
+/// register needs a copy on the incoming edge. Copy insertion, parallel-copy
+/// sequencing, and critical-edge splitting are not implemented, so that case is
+/// reported rather than mis-lowered. Legacy replay never hits it: every version
+/// of a register colours back to that same register.
+STINKYTOFU_EXPORT SSADestructionResult destroyAttachedSSA(Function& function,
+                                                          const AllocationResult& allocation);
 
 }  // namespace stinkytofu

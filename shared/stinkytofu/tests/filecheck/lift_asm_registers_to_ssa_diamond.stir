@@ -1,44 +1,44 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
 #
-# LiftAsmRegistersToSSAPass: values merging at a join become canonical PHIs.
+# LiftAsmRegistersToSSAPass: values merging at a join become block arguments.
 #
-# v5 is defined on both arms of the branch, so the join needs a PHI. v9 is
-# defined only in the entry, which dominates the join, so it needs none. PHIs
-# live in the graph; no GFX::PHI instruction is added to the stream.
+# v5 is defined on both arms of the branch, so the join needs a merge. v9 is
+# defined only in the entry, which dominates the join, so it needs none. Merges
+# are block arguments; no GFX::PHI instruction is added to the stream.
 #
-#   ^entry:  v9 = ...            (dominates everything, no PHI)
+#   ^entry:  v9 = ...            (dominates everything, no merge)
 #          /        \.
 #   ^left: v5 = ...   ^right: v5 = ...
 #          \        /
-#   ^join:  PHI(v5); uses v5 and v9
+#   ^join:  phi(v5); uses v5 and v9
 #
-# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_diamond
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_diamond
 #
-# The entry defines v9 once; it dominates the join, so no PHI is placed for it.
-# CHECK: ^entry:
-# CHECK-NEXT: %10:v = "st.v_add_f32"(src0 = [%3:v], src1 = [%4:v]) { inst = #0, origin = [v9] }
+# The entry defines v9 once; it dominates the join, so no block argument is
+# placed for it. The entry's own arguments are the eight live-in registers.
+# CHECK-NEXT: ^entry(%1:v, %2:v, %3:v, %4:v, %5:v, %6:v, %7:v, %8:v):
+# CHECK-NEXT: %10:v = "st.v_add_f32"(%3:v, %4:v)
 #
-# The branch operands are a label and SCC, neither of which is allocatable, so
-# they bind nothing.
-# CHECK: "st.s_cbranch_scc1"(src0 = [], src1 = []) { inst = #2 }
+# SCC is not an allocatable class, so the compare's destination and the branch's
+# operands keep their physical spelling.
+# CHECK-NEXT: SCC0 = "st.v_cmp_eq_u32"(%1:v, %2:v)
+# CHECK-NEXT: "st.s_cbranch_scc1"(right, SCC0)
 #
 # CHECK: ^left:
-# CHECK-NEXT: %12:v = "st.v_add_f32"(src0 = [%5:v], src1 = [%6:v]) { inst = #3, origin = [v5] }
+# CHECK-NEXT: %12:v = "st.v_add_f32"(%5:v, %6:v)
 # CHECK: ^right:
-# CHECK-NEXT: %11:v = "st.v_add_f32"(src0 = [%7:v], src1 = [%8:v]) { inst = #5, origin = [v5] }
+# CHECK-NEXT: %11:v = "st.v_add_f32"(%7:v, %8:v)
 #
-# The PHI's inputs follow predecessor order, each carrying the value defined on
-# that arm.
-# CHECK: ^join:
-# CHECK-NEXT: %9:v = phi(^left: %12:v, ^right: %11:v) { origin = v5 }
+# The join takes one argument, whose inputs follow predecessor order and each
+# carry the value defined on that arm.
+# CHECK: ^join(%9:v):
+# CHECK-NEXT: %9:v = phi(^left: %12:v, ^right: %11:v)
 #
-# The join reads the PHI result for v5, and the entry's definition for v9.
-# CHECK-NEXT: %13:v = "st.v_add_f32"(src0 = [%9:v], src1 = [%10:v]) { inst = #6, origin = [v6] }
-# CHECK-NEXT: // physical: v6 = "st.v_add_f32"(v5, v9)
+# The join reads the merged value for v5, and the entry's definition for v9.
+# CHECK-NEXT: %13:v = "st.v_add_f32"(%9:v, %10:v)
 #
-# A canonical PHI lives in the graph, never in the instruction stream.
+# A merge lives on the block, never in the instruction stream.
 # CHECK-NOT: st.PHI
-# CHECK-NOT: unprinted_values
 
 st.func @lift_asm_registers_to_ssa_diamond() {
 ^entry:

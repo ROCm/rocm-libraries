@@ -235,58 +235,6 @@ TEST_F(AnalysisManagerTest, GetCachedResultHit) {
 }
 
 // -----------------------------------------------------------------------
-// Seeding results computed outside the factory
-// -----------------------------------------------------------------------
-
-TEST_F(AnalysisManagerTest, InsertResultIsVisibleWithoutRunningTheFactory) {
-    AnalysisManager AM;
-    AM.registerPass<CountingAnalysis>();
-
-    AM.insertResult<CountingAnalysis>(CountingAnalysis::Result{7});
-
-    auto* cached = AM.getCachedResult<CountingAnalysis>();
-    ASSERT_NE(cached, nullptr);
-    EXPECT_EQ(cached->value, 7);
-    EXPECT_EQ(CountingAnalysis::runCount, 0);
-}
-
-TEST_F(AnalysisManagerTest, InsertResultReplacesAComputedResult) {
-    AnalysisManager AM;
-    AM.registerPass<CountingAnalysis>();
-
-    EXPECT_EQ(AM.getResult<CountingAnalysis>(func).value, 42);
-    AM.insertResult<CountingAnalysis>(CountingAnalysis::Result{7});
-
-    // A later getResult must see the seeded value, not recompute over it.
-    EXPECT_EQ(AM.getResult<CountingAnalysis>(func).value, 7);
-    EXPECT_EQ(CountingAnalysis::runCount, 1);
-}
-
-TEST_F(AnalysisManagerTest, InsertedResultsAreEvictedLikeAnyOther) {
-    AnalysisManager AM;
-    AM.registerPass<CountingAnalysis>();
-
-    AM.insertResult<CountingAnalysis>(CountingAnalysis::Result{7});
-    AM.invalidate(func, PreservedAnalyses::none());
-
-    EXPECT_EQ(AM.getCachedResult<CountingAnalysis>(), nullptr);
-}
-
-TEST_F(AnalysisManagerTest, InsertedResultsSurviveWhenPreserved) {
-    AnalysisManager AM;
-    AM.registerPass<CountingAnalysis>();
-
-    AM.insertResult<CountingAnalysis>(CountingAnalysis::Result{7});
-    PreservedAnalyses PA;
-    PA.preserve<CountingAnalysis>();
-    AM.invalidate(func, PA);
-
-    auto* cached = AM.getCachedResult<CountingAnalysis>();
-    ASSERT_NE(cached, nullptr);
-    EXPECT_EQ(cached->value, 7);
-}
-
-// -----------------------------------------------------------------------
 // Invalidation
 // -----------------------------------------------------------------------
 

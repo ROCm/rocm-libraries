@@ -1,23 +1,28 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass=allowMissing --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
 #
 # LiftAsmRegistersToSSAPass: unsupported input leaves the function untouched.
 #
 # Accumulator registers are not lifted yet: on some architectures an AGPR and a
 # VGPR name the same storage, and building two SSA values over one physical
-# register would be unsound. So this function gets no canonical SSA.
+# register would be unsound. So nothing is attached to this function.
 #
 # That is the fallback contract: lifting reports a missed optimization rather
-# than failing the compilation, and consumers check the cached
-# CanonicalSSAAnalysis result before using a graph. The physical instruction
-# stream must survive unchanged so the legacy path still works.
+# than failing the compilation, and a function with no attached SSA is a valid
+# pre-lift function. The physical instruction stream must survive unchanged so
+# the legacy path still works, which is also why an ssaForm dump of an unlifted
+# function is just the physical program.
 #
-# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_unsupported
-# CHECK-NEXT: <no canonical SSA attached>
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_unsupported
 #
-# The physical program is still intact, accumulator operand included.
-# CHECK-LABEL: @lift_asm_registers_to_ssa_unsupported
-# CHECK: a[10:17]
-# CHECK: "st.v_add_f32"
+# No block arguments, because nothing was lifted.
+# CHECK-NEXT: ^entry:
+#
+# The physical program is intact, accumulator operand included.
+# CHECK-NEXT: a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[30:37], a[10:17])
+# CHECK-NEXT: v3 = "st.v_add_f32"(v2, v1)
+#
+# Nothing partial was attached: no SSA value names appear at all.
+# CHECK-NOT: %
 
 st.func @lift_asm_registers_to_ssa_unsupported() {
 ^entry:

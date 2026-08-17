@@ -61,25 +61,4 @@ struct DominanceInfo {
 /// Returns an empty DominanceInfo if the function has no blocks.
 STINKYTOFU_EXPORT DominanceInfo computeDominanceInfo(Function& func);
 
-/// True when \p a dominates \p b, walking the immediate-dominator chain.
-/// Dominance is reflexive, so a block dominates itself. Returns false when
-/// either block is unreachable from the entry, since dominance is undefined
-/// there.
-inline bool dominates(const DominanceInfo& info, const BasicBlock* a, const BasicBlock* b) {
-    auto aIt = info.rpoIndex.find(a);
-    auto bIt = info.rpoIndex.find(b);
-    if (aIt == info.rpoIndex.end() || bIt == info.rpoIndex.end()) return false;
-
-    const unsigned target = aIt->second;
-    unsigned current = bIt->second;
-    while (current != target) {
-        // idom[0] == 0 by convention, so the entry terminates the walk.
-        if (current == 0 || current >= info.idom.size()) return false;
-        const unsigned next = info.idom[current];
-        if (next == current || next == DominanceInfo::kUndef) return false;
-        current = next;
-    }
-    return true;
-}
-
 }  // namespace stinkytofu

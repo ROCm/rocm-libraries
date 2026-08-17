@@ -28,12 +28,17 @@
 #include <vector>
 
 #include "stinkytofu/analysis/controlflow/Dominance.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSA.hpp"
+#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
+#include "stinkytofu/ir/asm/ssa/AttachedSSAVerifier.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
+#include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -54,17 +59,6 @@ struct OperandClass {
     std::string reason;
 };
 
-/// Classes whose registers become SSA values.
-///
-/// VCC and EXEC are their own register types here rather than SGPR indices, so
-/// widening to SGPRs cannot make a scalar operand alias a special register.
-/// Accumulators stay out until their VGPR aliasing rules are modelled: on some
-/// architectures an AGPR and a VGPR name the same storage, and two SSA values
-/// over one physical register would be unsound.
-bool isLiftableClass(RegType type) {
-    return type == RegType::V || type == RegType::S;
-}
-
 OperandClass classifyOperand(const StinkyRegister& reg) {
     if (!reg.isRegister()) return {OperandKind::Ignored, 0, {}};
     if (reg.isVirtualReg())
@@ -72,11 +66,11 @@ OperandClass classifyOperand(const StinkyRegister& reg) {
                 "unresolved template virtual register; resolve it before lifting"};
     if (isPseudoReg(reg)) return {OperandKind::Ignored, 0, {}};
     if (!isAllocatableReg(reg.reg.type)) return {OperandKind::Ignored, 0, {}};
-    if (!isLiftableClass(reg.reg.type))
+    if (!isLiftableRegClass(reg.reg.type))
         return {OperandKind::Unsupported, 0,
                 "register class '" + regTypeToString(reg.reg.type) +
                     "' is not lifted yet; VGPRs and SGPRs are supported"};
-    return {OperandKind::AllocatableRange, reg.reg.num, {}};
+    return {OperandKind::AllocatableRange, liftedSSAUnits(reg), {}};
 }
 
 /// True when any operand selects a True16 half, which needs sub-DWORD units.
@@ -105,16 +99,67 @@ std::vector<RegKey> sortedKeys(const RegKeySet& keys) {
     return sorted;
 }
 
+std::string formatPhysicalRegister(const StinkyRegister& reg) {
+    if (!reg.isRegister()) return "<non-register>";
+    std::string text = regTypeToString(reg.reg.type) + std::to_string(reg.reg.idx);
+    if (reg.reg.num > 1) {
+        const uint32_t last = reg.reg.idx + reg.reg.num - 1;
+        text += ":" + std::to_string(last);
+    }
+    if (reg.reg.offset != 0) text += "@" + std::to_string(reg.reg.offset);
+    if (reg.reg.isAbs) text = "|" + text + "|";
+    if (reg.reg.isMinus) text = "-" + text;
+    return text;
+}
+
+LegacyImmPayload asImmediateOperand(const StinkyRegister& reg) {
+    switch (reg.dataType) {
+        case StinkyRegister::Type::LiteralInt:
+            return static_cast<int32_t>(reg.getLiteralInt());
+        case StinkyRegister::Type::LiteralDouble:
+            return reg.getLiteralDouble();
+        case StinkyRegister::Type::LiteralString:
+            return reg.getLiteralString();
+        case StinkyRegister::Type::HwReg:
+            return HwRegPayload{reg.hwreg.id, reg.hwreg.offset, reg.hwreg.size};
+        case StinkyRegister::Type::Register:
+            return formatPhysicalRegister(reg);
+        case StinkyRegister::Type::Invalid:
+            return std::monostate{};
+    }
+    return std::monostate{};
+}
+
+StinkySSAValue::PhysicalBinding bindingFromReg(const StinkyRegister& reg, uint32_t unit) {
+    StinkySSAValue::PhysicalBinding binding;
+    binding.type = reg.reg.type;
+    binding.idx = reg.reg.idx + unit;
+    binding.num = 1;
+    binding.offset = reg.reg.offset;
+    binding.isVirtual = reg.isVirtualReg();
+    binding.isMinus = reg.reg.isMinus;
+    binding.isAbs = reg.reg.isAbs;
+    return binding;
+}
+
+StinkySSAValue::PhysicalBinding bindingFromKey(const RegKey& key) {
+    StinkySSAValue::PhysicalBinding binding;
+    binding.type = key.type;
+    binding.idx = key.idx;
+    binding.num = 1;
+    return binding;
+}
+
 class Lifter {
    public:
     Lifter(Function& function, const DominanceInfo& dominance,
            const LiftAsmRegistersToSSAOptions& options)
         : function_(function), dominance_(dominance), options_(options) {}
 
-    Expected<CanonicalSSA> run();
+    Expected<LiftAttachedSSAResult> run();
 
    private:
-    using Result = Expected<CanonicalSSA>;
+    using Result = Expected<LiftAttachedSSAResult>;
 
     /// Per-block register facts gathered before any SSA value exists.
     struct BlockFacts {
@@ -131,6 +176,11 @@ class Lifter {
         uint32_t operand = 0;
     };
 
+    struct PhiPlacement {
+        StinkySSAValue* value = nullptr;
+        size_t argIndex = 0;
+    };
+
     // Setup and validation.
     void indexInstructions();
     bool checkReachability();
@@ -139,10 +189,18 @@ class Lifter {
 
     // SSA construction.
     void computeLiveness();
-    bool createEntryLiveIns(CanonicalSSABuilder& builder);
-    void placePhis(CanonicalSSABuilder& builder);
-    bool rename(CanonicalSSABuilder& builder);
-    void renameBlock(CanonicalSSABuilder& builder, unsigned block, std::vector<RegKey>& pushedKeys);
+    bool createEntryLiveIns();
+    void placePhis();
+    bool rename();
+    void renameBlock(unsigned block, std::vector<RegKey>& pushedKeys);
+
+    LiftAttachedSSAResult counts() const {
+        LiftAttachedSSAResult result;
+        result.valueCount = function_.ssaArena().valueCount();
+        for (const BasicBlock& bb : function_)
+            result.blockArgumentCount += bb.ssaArguments().size();
+        return result;
+    }
 
     // Diagnostics.
     bool fail(const std::string& location, const std::string& message) {
@@ -166,7 +224,7 @@ class Lifter {
     std::vector<RegKey> sortedPhiKeys(unsigned slot) const {
         std::vector<RegKey> keys;
         keys.reserve(phisAt_[slot].size());
-        for (const auto& [key, phiID] : phisAt_[slot]) keys.push_back(key);
+        for (const auto& [key, phi] : phisAt_[slot]) keys.push_back(key);
         std::sort(keys.begin(), keys.end(), regKeyLess);
         return keys;
     }
@@ -200,9 +258,9 @@ class Lifter {
     std::unordered_map<const StinkyInstruction*, uint32_t> instructionIndex_;
     std::vector<BlockFacts> facts_;
     std::vector<std::vector<unsigned>> domChildren_;
-    std::vector<RegKeyMap<SSAPhiID>> phisAt_;
+    std::vector<RegKeyMap<PhiPlacement>> phisAt_;
     RegKeyMap<ExposedUse> firstExposedUse_;
-    RegKeyMap<std::vector<SSAValueID>> stacks_;
+    RegKeyMap<std::vector<StinkySSAValue*>> stacks_;
 
     std::string error_;
 };
@@ -247,8 +305,8 @@ bool Lifter::validateInstruction(const StinkyInstruction& instruction, uint32_t 
 
     if (instruction.getUnifiedOpcode() == GFX::PHI) {
         return failAt(index,
-                      "analysis PHIs must be removed before lifting; canonical "
-                      "PHIs live in the graph, not the instruction stream");
+                      "analysis PHIs must be removed before lifting; SSA merges "
+                      "are block arguments, not the instruction stream");
     }
     if (isCall(instruction)) {
         return failAt(index,
@@ -347,7 +405,7 @@ void Lifter::computeLiveness() {
     }
 }
 
-bool Lifter::createEntryLiveIns(CanonicalSSABuilder& builder) {
+bool Lifter::createEntryLiveIns() {
     const std::vector<RegKey> keys = sortedKeys(facts_[0].liveIn);
     if (!keys.empty() && !options_.allowInferredLiveIns) {
         const RegKey& key = keys.front();
@@ -359,18 +417,20 @@ bool Lifter::createEntryLiveIns(CanonicalSSABuilder& builder) {
         return fail(where, "reads " + regKeyToString(key) + " with no reaching definition");
     }
 
+    BasicBlock& entry = *function_.begin();
+    SSAArena& arena = function_.ssaArena();
     for (const RegKey& key : keys) {
-        SSAValue liveIn;
-        liveIn.kind = SSAValueKind::LiveIn;
-        liveIn.origin = key;
-        stacks_[key].push_back(builder.addValue(std::move(liveIn)));
+        StinkySSAValue* liveIn = arena.createBlockArgument(key.type, 1);
+        liveIn->setPhysicalBinding(bindingFromKey(key));
+        entry.addSSAArgument(liveIn);
+        stacks_[key].push_back(liveIn);
     }
     return true;
 }
 
-void Lifter::placePhis(CanonicalSSABuilder& builder) {
+void Lifter::placePhis() {
     const unsigned blockCount = static_cast<unsigned>(facts_.size());
-    phisAt_.assign(blockCount, RegKeyMap<SSAPhiID>{});
+    phisAt_.assign(blockCount, RegKeyMap<PhiPlacement>{});
 
     // Definition sites per key, including the entry for live-in keys so their
     // value participates in merges.
@@ -386,6 +446,7 @@ void Lifter::placePhis(CanonicalSSABuilder& builder) {
     RegKeySet allKeys;
     for (const auto& [key, sites] : defSites) allKeys.insert(key);
 
+    SSAArena& arena = function_.ssaArena();
     std::vector<unsigned> worklist;
     std::unordered_set<unsigned> queued;
     for (const RegKey& key : sortedKeys(allKeys)) {
@@ -402,22 +463,12 @@ void Lifter::placePhis(CanonicalSSABuilder& builder) {
                 if (phisAt_[frontier].count(key) != 0) continue;
                 // Pruned SSA: a merge only matters where the value is live.
                 if (facts_[frontier].liveIn.contains(key)) {
-                    SSAValue result;
-                    result.kind = SSAValueKind::Phi;
-                    result.origin = key;
-                    const SSAValueID resultID = builder.addValue(std::move(result));
-
-                    SSAPhi phi;
-                    phi.block = dominance_.rpo[frontier];
-                    phi.origin = key;
-                    phi.result = resultID;
-                    for (BasicBlock* predecessor : phi.block->getPredecessors())
-                        phi.incoming.push_back(SSAPhiIncoming{predecessor, kInvalidSSAValueID});
-
-                    const SSAPhiID phiID = builder.addPhi(std::move(phi));
-                    builder.value(resultID).definingPhi = phiID;
-                    builder.addPhiToBlock(*dominance_.rpo[frontier], phiID);
-                    phisAt_[frontier].emplace(key, phiID);
+                    BasicBlock* join = dominance_.rpo[frontier];
+                    StinkySSAValue* result = arena.createBlockArgument(key.type, 1);
+                    result->setPhysicalBinding(bindingFromKey(key));
+                    const size_t argIndex = join->ssaArguments().size();
+                    join->addSSAArgument(result);
+                    phisAt_[frontier].emplace(key, PhiPlacement{result, argIndex});
                 }
                 if (queued.insert(frontier).second) worklist.push_back(frontier);
             }
@@ -425,63 +476,55 @@ void Lifter::placePhis(CanonicalSSABuilder& builder) {
     }
 }
 
-void Lifter::renameBlock(CanonicalSSABuilder& builder, unsigned slot,
-                         std::vector<RegKey>& pushedKeys) {
+void Lifter::renameBlock(unsigned slot, std::vector<RegKey>& pushedKeys) {
     BasicBlock* block = dominance_.rpo[slot];
+    SSAArena& arena = function_.ssaArena();
 
     // PHI results are the values arriving at block entry.
-    for (const auto& [key, phiID] : phisAt_[slot]) {
-        stacks_[key].push_back(builder.phi(phiID).result);
+    for (const auto& [key, phi] : phisAt_[slot]) {
+        stacks_[key].push_back(phi.value);
         pushedKeys.push_back(key);
     }
 
     for (StinkyInstruction* instruction : dataflowInstructions(*block)) {
-        SSAInstructionInfo info;
+        AttachedSSA attached;
 
         // Sources first, so a read-modify-write operand reads the old value.
         const std::vector<StinkyRegister>& srcRegs = instruction->getSrcRegs();
-        info.sources.resize(srcRegs.size());
         for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
             const OperandClass operandClass = classifyOperand(srcRegs[operand]);
+            if (operandClass.kind != OperandKind::AllocatableRange) {
+                attached.operands.push_back(
+                    makeSSAImmOperand(asImmediateOperand(srcRegs[operand])));
+                continue;
+            }
             for (size_t unit = 0; unit < operandClass.units; ++unit) {
                 const RegKey key = toRegKey(srcRegs[operand], static_cast<unsigned>(unit));
-                std::vector<SSAValueID>& stack = stacks_[key];
+                std::vector<StinkySSAValue*>& stack = stacks_[key];
                 // Liveness guaranteed an entry value for anything read without a
                 // definition, so the stack cannot be empty here.
-                const SSAValueID id = stack.empty() ? kInvalidSSAValueID : stack.back();
-                info.sources[operand].units.push_back(id);
-                if (id == kInvalidSSAValueID) continue;
-
-                SSAUse use;
-                use.instruction = instruction;
-                use.operand = static_cast<uint32_t>(operand);
-                use.unit = static_cast<uint32_t>(unit);
-                builder.value(id).uses.push_back(use);
+                StinkySSAValue* value = stack.empty() ? nullptr : stack.back();
+                attached.operands.push_back(makeSSAValueOperand(value));
             }
         }
 
         const std::vector<StinkyRegister>& destRegs = instruction->getDestRegs();
-        info.destinations.resize(destRegs.size());
         for (size_t operand = 0; operand < destRegs.size(); ++operand) {
             const OperandClass operandClass = classifyOperand(destRegs[operand]);
             for (size_t unit = 0; unit < operandClass.units; ++unit) {
                 const RegKey key = toRegKey(destRegs[operand], static_cast<unsigned>(unit));
-
-                SSAValue defined;
-                defined.kind = SSAValueKind::InstructionDef;
-                defined.origin = key;
-                defined.definingInstruction = instruction;
-                defined.definingOperand = static_cast<uint32_t>(operand);
-                defined.definingUnit = static_cast<uint32_t>(unit);
-                const SSAValueID id = builder.addValue(std::move(defined));
-
-                info.destinations[operand].units.push_back(id);
-                stacks_[key].push_back(id);
+                StinkySSAValue* defined = arena.createRegister(key.type, 1);
+                defined->setPhysicalBinding(
+                    bindingFromReg(destRegs[operand], static_cast<uint32_t>(unit)));
+                if (destRegs[operand].hasSymbolicName())
+                    defined->setSymbol(destRegs[operand].getSymbolicName());
+                attached.results.push_back(defined);
+                stacks_[key].push_back(defined);
                 pushedKeys.push_back(key);
             }
         }
 
-        builder.setInstructionInfo(*instruction, std::move(info));
+        instruction->attachSSA(std::move(attached));
     }
 
     // Hand this block's exit values to the PHIs of every successor edge. A block
@@ -489,28 +532,30 @@ void Lifter::renameBlock(CanonicalSSABuilder& builder, unsigned slot,
     for (const BasicBlock* successor : block->getSuccessors()) {
         const unsigned successorSlot = slotOf(successor);
         if (successorSlot == DominanceInfo::kUndef) continue;
+        BasicBlock* successorBlock = dominance_.rpo[successorSlot];
 
-        for (const auto& [key, phiID] : phisAt_[successorSlot]) {
-            const std::vector<SSAValueID>& stack = stacks_[key];
+        size_t edgeCount = 0;
+        for (const BasicBlock* predecessor : successorBlock->getPredecessors()) {
+            if (predecessor == block) ++edgeCount;
+        }
+        if (edgeCount == 0) continue;
+
+        for (const auto& [key, phi] : phisAt_[successorSlot]) {
+            const std::vector<StinkySSAValue*>& stack = stacks_[key];
             if (stack.empty()) continue;
-            const SSAValueID id = stack.back();
-
-            SSAPhi& phi = builder.phi(phiID);
-            for (size_t edge = 0; edge < phi.incoming.size(); ++edge) {
-                if (phi.incoming[edge].predecessor != block) continue;
-                if (phi.incoming[edge].value != kInvalidSSAValueID) continue;
-                phi.incoming[edge].value = id;
-
-                SSAUse use;
-                use.phi = phiID;
-                use.predecessor = block;
-                builder.value(id).uses.push_back(use);
+            StinkySSAValue* value = stack.back();
+            const SSABlockArgument& arg = successorBlock->ssaArguments()[phi.argIndex];
+            size_t already = 0;
+            for (const SSABlockIncoming& incoming : arg.incoming) {
+                if (incoming.predecessor == block) ++already;
             }
+            for (size_t edge = already; edge < edgeCount; ++edge)
+                successorBlock->setSSAArgumentIncoming(phi.argIndex, block, value);
         }
     }
 }
 
-bool Lifter::rename(CanonicalSSABuilder& builder) {
+bool Lifter::rename() {
     const unsigned blockCount = static_cast<unsigned>(facts_.size());
     domChildren_.assign(blockCount, {});
     for (unsigned slot = 1; slot < blockCount; ++slot) {
@@ -528,7 +573,7 @@ bool Lifter::rename(CanonicalSSABuilder& builder) {
 
     std::vector<Frame> frames;
     frames.push_back(Frame{0});
-    renameBlock(builder, 0, frames.back().pushedKeys);
+    renameBlock(0, frames.back().pushedKeys);
 
     while (!frames.empty()) {
         const size_t top = frames.size() - 1;
@@ -536,7 +581,7 @@ bool Lifter::rename(CanonicalSSABuilder& builder) {
         if (frames[top].nextChild < domChildren_[block].size()) {
             const unsigned child = domChildren_[block][frames[top].nextChild++];
             frames.push_back(Frame{child});
-            renameBlock(builder, child, frames.back().pushedKeys);
+            renameBlock(child, frames.back().pushedKeys);
             continue;
         }
 
@@ -548,26 +593,25 @@ bool Lifter::rename(CanonicalSSABuilder& builder) {
     // Every reachable predecessor edge is visited exactly once, so an unfilled
     // slot would mean the dominator walk missed a block.
     for (unsigned slot = 0; slot < blockCount; ++slot) {
+        BasicBlock* block = dominance_.rpo[slot];
+        const size_t predCount = block->getPredecessors().size();
         for (const RegKey& key : sortedPhiKeys(slot)) {
-            const SSAPhi& phi = builder.phi(phisAt_[slot].at(key));
-            for (size_t edge = 0; edge < phi.incoming.size(); ++edge) {
-                if (phi.incoming[edge].value != kInvalidSSAValueID) continue;
-                return fail("phi for " + regKeyToString(key) + " in ^" +
-                            dominance_.rpo[slot]->getLabel() + " has no value on edge " +
-                            std::to_string(edge));
-            }
+            const PhiPlacement& phi = phisAt_[slot].at(key);
+            const size_t incoming = block->ssaArguments()[phi.argIndex].incoming.size();
+            if (incoming == predCount) continue;
+            return fail("phi for " + regKeyToString(key) + " in ^" + block->getLabel() +
+                        " has no value on edge " + std::to_string(incoming));
         }
     }
     return true;
 }
 
-Expected<CanonicalSSA> Lifter::run() {
-    // Stamped even when empty, so every lifted graph can be checked against the
-    // program it came from and only hand-built graphs are exempt.
+Expected<LiftAttachedSSAResult> Lifter::run() {
+    function_.clearAttachedSSA();
+
     if (function_.empty()) {
-        CanonicalSSABuilder empty;
-        empty.setShape(computeFunctionShape(function_));
-        return empty.take();
+        function_.ssaArena().setShape(computeFunctionShape(function_));
+        return counts();
     }
 
     indexInstructions();
@@ -575,36 +619,40 @@ Expected<CanonicalSSA> Lifter::run() {
     if (!gatherBlockFacts()) return Result::Error(error_);
 
     computeLiveness();
+    if (!createEntryLiveIns()) {
+        function_.clearAttachedSSA();
+        return Result::Error(error_);
+    }
+    placePhis();
+    if (!rename()) {
+        function_.clearAttachedSSA();
+        return Result::Error(error_);
+    }
 
-    CanonicalSSABuilder builder;
-    if (!createEntryLiveIns(builder)) return Result::Error(error_);
-    placePhis(builder);
-    if (!rename(builder)) return Result::Error(error_);
-    builder.setShape(computeFunctionShape(function_));
-
-    CanonicalSSA ssa = builder.take();
+    function_.ssaArena().setShape(computeFunctionShape(function_));
     if (options_.verify) {
-        const CanonicalSSAVerificationResult verification =
-            verifyCanonicalSSA(function_, ssa, dominance_);
+        const AttachedSSAVerificationResult verification = verifyAttachedSSA(function_);
         if (!verification.ok()) {
-            fail("canonical SSA verification failed:\n" + verification.toString());
+            fail("attached SSA verification failed:\n" + verification.toString());
+            function_.clearAttachedSSA();
             return Result::Error(error_);
         }
     }
-    return ssa;
+    return counts();
 }
 
 }  // namespace
 
-Expected<CanonicalSSA> liftAsmRegistersToSSA(Function& function, const DominanceInfo& dominance,
-                                             const LiftAsmRegistersToSSAOptions& options) {
+Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
+    Function& function, const DominanceInfo& dominance,
+    const LiftAsmRegistersToSSAOptions& options) {
     return Lifter(function, dominance, options).run();
 }
 
-Expected<CanonicalSSA> liftAsmRegistersToSSA(Function& function,
-                                             const LiftAsmRegistersToSSAOptions& options) {
+Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
+    Function& function, const LiftAsmRegistersToSSAOptions& options) {
     const DominanceInfo dominance = computeDominanceInfo(function);
-    return liftAsmRegistersToSSA(function, dominance, options);
+    return liftAsmRegistersToAttachedSSA(function, dominance, options);
 }
 
 }  // namespace stinkytofu

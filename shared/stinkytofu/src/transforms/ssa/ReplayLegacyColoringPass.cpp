@@ -26,13 +26,11 @@
 #include <string>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSA.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSAAllocation.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSAAnalysis.hpp"
+#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/support/OptimizationRemark.hpp"
-#include "stinkytofu/transforms/ssa/CanonicalSSADestruction.hpp"
+#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
 
 #define DEBUG_TYPE "ReplayLegacyColoringPass"
 
@@ -53,21 +51,14 @@ class ReplayLegacyColoringPassImpl : public Pass {
         return &ReplayLegacyColoringPassImpl::ID;
     }
 
-    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& AM) override {
-        // The cached result only: lowering must apply the graph an allocator
-        // already saw, so lifting one here on demand would be answering a
-        // different question.
-        const CanonicalSSAAnalysis::Result* cached = AM.getCachedResult<CanonicalSSAAnalysis>();
-        if (cached == nullptr || cached->hasError()) {
-            const std::string why = cached == nullptr
-                                        ? "no canonical SSA attached; nothing to lower"
-                                        : "not lifted: " + cached->getError();
-            emitRemark(passCtx, {OptimizationRemark::Kind::Missed, kPassName, "NoCanonicalSSA",
-                                 "@" + func.getName() + ": " + why});
+    PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager&) override {
+        if (!func.hasAttachedSSA()) {
+            emitRemark(passCtx, {OptimizationRemark::Kind::Missed, kPassName, "NoAttachedSSA",
+                                 "@" + func.getName() + ": no attached SSA; nothing to lower"});
             return preserveCFGAnalyses();
         }
 
-        const SSADestructionResult result = replayLegacyColoring(func, **cached);
+        const SSADestructionResult result = replayLegacyColoring(func);
         if (!result.ok()) {
             PASS_DEBUG(std::cerr << "ReplayLegacyColoring: " << result.toString() << "\n");
             emitRemark(passCtx, {OptimizationRemark::Kind::Missed, kPassName, "NotLowered",
@@ -77,9 +68,7 @@ class ReplayLegacyColoringPassImpl : public Pass {
 
         emitRemark(passCtx, {OptimizationRemark::Kind::Passed, kPassName, "ReplayedLegacyColoring",
                              "@" + func.getName() +
-                                 ": lowered canonical SSA back to its original registers"});
-        // The graph describes pre-rewrite operands, so not preserving it here is
-        // what discards it.
+                                 ": lowered attached SSA back to its original registers"});
         return preserveCFGAnalyses();
     }
 };
@@ -88,8 +77,8 @@ char ReplayLegacyColoringPassImpl::ID = 0;
 
 }  // namespace
 
-SSADestructionResult replayLegacyColoring(Function& function, const CanonicalSSA& ssa) {
-    return destroyCanonicalSSA(function, ssa, createLegacyColoring(ssa));
+SSADestructionResult replayLegacyColoring(Function& function) {
+    return destroyAttachedSSA(function, createLegacyColoring(function));
 }
 
 std::unique_ptr<Pass> createReplayLegacyColoringPass() {

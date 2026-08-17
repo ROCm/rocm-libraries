@@ -1,25 +1,24 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpCanonicalSSAPass=uses
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass --DumpStinkyModulePass=ssaForm,stdout
 #
-# LiftAsmRegistersToSSAPass: every use is recorded at its exact position.
+# LiftAsmRegistersToSSAPass: one value per physical unit, shared by every read.
 #
-# Uses are per operand and per DWORD, and they are not deduplicated: an
-# instruction reading one value through two operands records two uses. That
-# precision is what lets allocation compute live ranges without re-deriving
-# anything from physical register numbers.
+# Reads are not merged into a single operand and not deduplicated: an instruction
+# reading one value through two operands binds it twice, so its use-list gains
+# two entries. That precision is what lets allocation compute live ranges without
+# re-deriving anything from physical register numbers. The use-list counts
+# themselves are checked in AttachedSSATest; what the dump shows is the sharing.
 #
-# CHECK-LABEL: ssa.func @lift_asm_registers_to_ssa_uses
+# CHECK-LABEL: st.func @lift_asm_registers_to_ssa_uses
 #
-# v0 is read twice by the first instruction and once by the second, so it has
-# three use records, ordered by instruction then operand.
-# CHECK: %1:v = livein { origin = v0 }
-# CHECK-NEXT: uses = [{ inst = #0, src = 0, unit = 0 }, { inst = #0, src = 1, unit = 0 }, { inst = #1, src = 0, unit = 0 }]
+# v0 and v1 are live-ins, created in register order.
+# CHECK-NEXT: ^entry(%1:v, %2:v):
 #
-# CHECK: %2:v = livein { origin = v1 }
-# CHECK-NEXT: uses = [{ inst = #1, src = 1, unit = 0 }]
+# v0 is read through both operands of the first instruction, so the same value
+# appears in both positions rather than becoming two live-ins.
+# CHECK-NEXT: %3:v = "st.v_add_f32"(%1:v, %1:v)
 #
-# The first result is never read, so its use list is empty.
-# CHECK: %3:v = "st.v_add_f32"(src0 = [%1:v], src1 = [%1:v]) { inst = #0, origin = [v2] }
-# CHECK: %3:v uses = []
+# The second instruction reads the same v0 value again, plus v1.
+# CHECK-NEXT: %4:v = "st.v_add_f32"(%1:v, %2:v)
 
 st.func @lift_asm_registers_to_ssa_uses() {
 ^entry:

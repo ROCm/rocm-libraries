@@ -22,41 +22,32 @@
  * ************************************************************************ */
 #pragma once
 
-#include <memory>
 #include <string>
+#include <vector>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/serialization/ssa/CanonicalSSAPrinter.hpp"
 
 namespace stinkytofu {
-class Pass;
 
-struct DumpCanonicalSSAConfig {
-    /// Destination file. Empty writes to standard output, which is what the
-    /// FileCheck harness captures.
-    std::string outputPath;
+class Function;
 
-    CanonicalSSAPrinterOptions printerOptions;
+/// All attached-SSA invariant violations found in one function, in
+/// deterministic order.
+struct STINKYTOFU_EXPORT AttachedSSAVerificationResult {
+    std::vector<std::string> errors;
 
-    /// Report a function with no canonical SSA as an error. Set false to print
-    /// the "no canonical SSA attached" placeholder instead, which is useful for
-    /// checking that an unsupported function was left alone.
-    bool requireCanonicalSSA = true;
+    bool ok() const {
+        return errors.empty();
+    }
+
+    std::string toString() const;
 };
 
-/// Creates a read-only pass that prints a function's canonical SSA graph.
+/// Check attached SSA on \p function.
 ///
-/// The graph comes from the cached CanonicalSSAAnalysis result rather than being
-/// lifted here, so the dump reports whether the function was lifted instead of
-/// answering a different question.
-///
-/// It is verified before printing, with dominance included, so a dump is never
-/// quietly taken as evidence that the SSA is well formed. Verification failures
-/// are printed as comments ahead of the dump, and the dump still happens so a
-/// malformed graph can be inspected.
-///
-/// The pass never mutates the function.
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createDumpCanonicalSSAPass(
-    DumpCanonicalSSAConfig config = {});
+/// A function with no attached SSA is valid (pre-lift). Instructions without
+/// attached SSA are skipped. Values in the Function arena are always checked
+/// for use-list symmetry when any SSA is present.
+STINKYTOFU_EXPORT AttachedSSAVerificationResult verifyAttachedSSA(const Function& function);
 
 }  // namespace stinkytofu

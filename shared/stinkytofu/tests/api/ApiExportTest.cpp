@@ -49,7 +49,6 @@
 // --- stinkytofu-opt consumer headers ---
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSAAnalysis.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
 #include "stinkytofu/ir/DumpStinkyModulePass.hpp"
@@ -86,10 +85,9 @@
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/TDMLoadWaveSyncPass.hpp"
 #include "stinkytofu/transforms/asm/WaitAwareScheduleRepairPass.hpp"
-#include "stinkytofu/transforms/ssa/CanonicalSSADestruction.hpp"
-#include "stinkytofu/transforms/ssa/DumpCanonicalSSAPass.hpp"
 #include "stinkytofu/transforms/ssa/LiftAsmRegistersToSSAPass.hpp"
 #include "stinkytofu/transforms/ssa/ReplayLegacyColoringPass.hpp"
+#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
 
 using namespace stinkytofu;
 
@@ -260,7 +258,6 @@ TEST(ApiExport, PassFactories) {
     EXPECT_NE(createCFGBuilderPass(), nullptr);
     EXPECT_NE(createLiftAsmRegistersToSSAPass(), nullptr);
     EXPECT_NE(createRemoveDefUseAnalysisPass(), nullptr);
-    EXPECT_NE(createDumpCanonicalSSAPass(), nullptr);
     EXPECT_NE(createReplayLegacyColoringPass(), nullptr);
     EXPECT_NE(createDumpStinkyModulePass({}), nullptr);
     EXPECT_NE(createPeepholeOptimizationPass(), nullptr);

@@ -22,15 +22,66 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSA.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 class Function;
 class Pass;
+struct DominanceInfo;
+
+struct LiftAsmRegistersToSSAOptions {
+    /// Verify attached SSA before handing the function back.
+    bool verify = true;
+
+    /// Treat a read with no reaching definition as a function live-in.
+    ///
+    /// Physical input does not say which registers are genuine kernel inputs,
+    /// so this conservative default preserves the meaning of the original
+    /// program. Set false to require that every read is defined, which is the
+    /// strict mode used once entry metadata is available.
+    bool allowInferredLiveIns = true;
+};
+
+struct LiftAttachedSSAResult {
+    size_t valueCount = 0;
+    size_t blockArgumentCount = 0;
+};
+
+/// Attach SSA directly onto \p function from its physical register operands.
+///
+/// Physical registers are treated as mutable variables: every reaching
+/// definition of a register unit becomes its own SSA value, and each value
+/// keeps a PhysicalBinding for legacy replay.
+///
+/// Values that merge at a control-flow join become block arguments, placed at
+/// iterated dominance frontiers and pruned by liveness so no dead argument is
+/// created. Reducible and irreducible CFGs are both supported.
+///
+/// Current scope is deliberately narrow. Operands must be full-DWORD VGPRs or
+/// SGPRs, and every block must be reachable from the entry. Literals, special
+/// registers such as EXEC or SCC, and pseudo registers become immediate SSA
+/// operands rather than values. Anything else - accumulator classes, unresolved
+/// template virtual registers, True16 halves, calls, or leftover analysis PHIs
+/// - is reported as an error instead of being silently mishandled.
+///
+/// The function must already be free of def-use analysis state; a leftover
+/// `GFX::PHI` is an error rather than something to clean up. Run
+/// RemoveDefUseAnalysisPass first.
+///
+/// On success, the function's SSAArena, instruction AttachedSSA payloads, and
+/// BasicBlock arguments are rebuilt. On failure, attached SSA is left empty.
+STINKYTOFU_EXPORT Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
+    Function& function, const LiftAsmRegistersToSSAOptions& options = {});
+
+/// As above, reusing dominance information the caller already computed.
+STINKYTOFU_EXPORT Expected<LiftAttachedSSAResult> liftAsmRegistersToAttachedSSA(
+    Function& function, const DominanceInfo& dominance,
+    const LiftAsmRegistersToSSAOptions& options = {});
 
 /// True when any function in \p functions contains a call site.
 ///
@@ -42,12 +93,11 @@ class Pass;
 /// than deciding function by function.
 STINKYTOFU_EXPORT bool kernelHasCallSites(const std::vector<const Function*>& functions);
 
-/// Creates a pass that lifts a function's physical registers to canonical SSA
-/// and seeds the result into CanonicalSSAAnalysis.
+/// Creates a pass that lifts a function's physical registers to attached SSA
+/// on the IR.
 ///
-/// Running this rather than letting the analysis compute lazily is what applies
-/// LiftAsmRegistersToSSAOptions and what produces the located
-/// missed-optimization remark, neither of which an analysis factory can express.
+/// Running this pass applies LiftAsmRegistersToSSAOptions and emits located
+/// missed-optimization remarks for unsupported input.
 ///
 /// The pass is function-wide: PHI placement and renaming need every block, so
 /// it refuses to run at all when basic-block filtering excludes any block.
@@ -55,11 +105,7 @@ STINKYTOFU_EXPORT bool kernelHasCallSites(const std::vector<const Function*>& fu
 /// The function must already be free of def-use analysis state; run
 /// RemoveDefUseAnalysisPass first.
 ///
-/// Failure is seeded too, as an error rather than a graph, so a consumer finds
-/// the reason instead of a result describing an earlier version of the IR.
-/// Unsupported input is a missed-optimization remark, not a hard error, so
-/// consumers read getCachedResult<CanonicalSSAAnalysis>() and fall back to the
-/// physical path when it is absent or holds an error.
+/// Unsupported input is a missed-optimization remark, not a hard error.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createLiftAsmRegistersToSSAPass(
     const LiftAsmRegistersToSSAOptions& options = {});
 

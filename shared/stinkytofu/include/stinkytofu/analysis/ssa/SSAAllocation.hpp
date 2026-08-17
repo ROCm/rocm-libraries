@@ -23,14 +23,35 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSA.hpp"
+#include "stinkytofu/ir/asm/RegisterKey.hpp"
 
 namespace stinkytofu {
 
-/// Physical register chosen for each canonical SSA value.
+class Function;
+
+using SSAValueID = uint32_t;
+inline constexpr SSAValueID kInvalidSSAValueID = 0;
+
+/// Shape of SSA that was built by hand rather than lifted, and whose
+/// agreement with a function therefore cannot be checked.
+inline constexpr uint64_t kUnstampedShape = 0;
+
+/// Structural fingerprint of everything attached SSA depends on: block count,
+/// CFG edge counts, instruction count and order, opcodes, and every register
+/// operand.
+///
+/// Attached SSA is only valid for the program it was built from, and no
+/// revision counter exists because mutation happens on BasicBlock and on
+/// instruction operands, neither of which notifies the Function. Comparing
+/// fingerprints at the boundaries that matter catches stale SSA without
+/// instrumenting every mutation site. Never returns kUnstampedShape.
+STINKYTOFU_EXPORT uint64_t computeFunctionShape(const Function& function);
+
+/// Physical register chosen for each attached SSA value.
 ///
 /// This is the interface between allocation policy and SSA destruction: any
 /// allocator produces one of these, and the same lowering path consumes it.
@@ -41,8 +62,10 @@ class STINKYTOFU_EXPORT AllocationResult {
    public:
     AllocationResult() = default;
 
-    /// Sizes the result for a graph. Values start unassigned.
-    explicit AllocationResult(const CanonicalSSA& ssa);
+    /// Sizes the result for the function's current SSA arena. Values start
+    /// unassigned. Copies the arena shape so destruction can reject a result
+    /// computed against a different lift.
+    explicit AllocationResult(const Function& function);
 
     void assign(SSAValueID id, RegKey physical);
 
@@ -57,9 +80,7 @@ class STINKYTOFU_EXPORT AllocationResult {
     /// Values still without a physical register.
     size_t unassignedCount() const;
 
-    /// Fingerprint of the graph this result was computed against. SSA value IDs
-    /// only mean something relative to one graph, so SSA destruction compares
-    /// this rather than trusting the caller to pair them correctly.
+    /// Fingerprint of the attached SSA this result was computed against.
     uint64_t shape() const;
 
    private:
@@ -75,6 +96,6 @@ class STINKYTOFU_EXPORT AllocationResult {
 /// destruction must together be an identity transform on the physical program.
 /// Any difference is a defect in that machinery rather than in allocation
 /// policy, which is why this gate runs before any real allocator is evaluated.
-STINKYTOFU_EXPORT AllocationResult createLegacyColoring(const CanonicalSSA& ssa);
+STINKYTOFU_EXPORT AllocationResult createLegacyColoring(const Function& function);
 
 }  // namespace stinkytofu

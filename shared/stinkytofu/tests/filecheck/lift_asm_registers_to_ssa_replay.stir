@@ -8,8 +8,8 @@
 # difference in emitted code can be attributed to allocation policy rather than
 # to the lifting and lowering machinery.
 #
-# Every version of v4 below colours back to v4, so the PHI at the join needs no
-# copy and the ranges stay consecutive.
+# Every version of v4 below colours back to v4, so the block argument at the join
+# needs no copy on either edge and the ranges stay consecutive.
 #
 # CHECK-LABEL: @lift_asm_registers_to_ssa_replay
 #
@@ -22,9 +22,10 @@
 # CHECK: ^join:
 # CHECK-NEXT: "st.ds_store_b64"(v0, v[4:5])
 #
-# Nothing was inserted to lower the merge, and no SSA leaked into the output.
+# Nothing was inserted to lower the merge, and no SSA leaked into the output:
+# destruction clears the attached SSA, so the printer has nothing to substitute.
 # CHECK-NOT: st.PHI
-# CHECK-NOT: ssa.func
+# CHECK-NOT: %
 
 st.func @lift_asm_registers_to_ssa_replay() {
 ^entry:

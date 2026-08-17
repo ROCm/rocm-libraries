@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/transforms/ssa/CanonicalSSADestruction.hpp"
+#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
 
 #include <sstream>
 #include <string>
@@ -28,10 +28,12 @@
 #include <utility>
 #include <vector>
 
-#include "stinkytofu/analysis/ssa/CanonicalSSA.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/SSAOperandUnits.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkyOpOperand.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
@@ -47,22 +49,21 @@ struct OperandRewrite {
 
 class Destroyer {
    public:
-    Destroyer(Function& function, const CanonicalSSA& ssa, const AllocationResult& allocation)
-        : function_(function), ssa_(ssa), allocation_(allocation) {}
+    Destroyer(Function& function, const AllocationResult& allocation)
+        : function_(function), allocation_(allocation) {}
 
     SSADestructionResult run() {
-        // Nothing else may touch the graph until it is known to describe this
-        // program: a stale graph's instruction pointers may already be dangling.
         if (!checkShape()) return std::move(result_);
 
         indexInstructions();
         planOperandRewrites();
         checkPhis();
         // Applying only after every check keeps a rejected function exactly as
-        // it was.
+        // it was, including its attached SSA.
         if (!result_.ok()) return std::move(result_);
 
         for (const OperandRewrite& rewrite : rewrites_) apply(rewrite);
+        function_.clearAttachedSSA();
         return std::move(result_);
     }
 
@@ -90,20 +91,18 @@ class Destroyer {
         result_.errors.push_back(message);
     }
 
-    /// Rejects a graph that no longer describes this function, or an allocation
-    /// computed against a different graph. A hand-built graph carries no
-    /// fingerprint and is exempt from both checks.
     bool checkShape() {
         const std::string prefix = "@" + function_.getName() + ": ";
-        if (ssa_.shape() == kUnstampedShape) return true;
+        const uint64_t attachedShape = function_.ssaArena().shape();
+        if (attachedShape == kUnstampedShape) return true;
 
-        if (computeFunctionShape(function_) != ssa_.shape()) {
+        if (computeFunctionShape(function_) != attachedShape) {
             error(prefix +
-                  "the function changed after it was lifted, so the canonical SSA describes a "
+                  "the function changed after it was lifted, so the attached SSA describes a "
                   "different program and cannot be lowered");
             return false;
         }
-        if (allocation_.shape() != kUnstampedShape && allocation_.shape() != ssa_.shape()) {
+        if (allocation_.shape() != kUnstampedShape && allocation_.shape() != attachedShape) {
             error(prefix +
                   "the allocation was computed against a different graph, so its SSA value IDs do "
                   "not mean the same thing here");
@@ -112,17 +111,17 @@ class Destroyer {
         return true;
     }
 
-    /// Validates one operand's units and stages its new base register.
-    void planBinding(StinkyInstruction& instruction, bool isDestination, size_t operand,
-                     const SSAOperandBinding& binding) {
-        if (binding.units.empty()) return;
+    void planUnits(StinkyInstruction& instruction, bool isDestination, size_t operand,
+                   const std::vector<StinkySSAValue*>& units) {
+        if (units.empty()) return;
 
         const std::string where = locate(&instruction, isDestination, operand);
         RegKey first{RegType::UNKNOWN, 0, RegHalf::NONE};
 
-        for (size_t unit = 0; unit < binding.units.size(); ++unit) {
-            const SSAValueID id = binding.units[unit];
-            if (!allocation_.isAssigned(id)) {
+        for (size_t unit = 0; unit < units.size(); ++unit) {
+            StinkySSAValue* value = units[unit];
+            const SSAValueID id = value == nullptr ? kInvalidSSAValueID : value->valueId();
+            if (value == nullptr || !allocation_.isAssigned(id)) {
                 error(where + " unit " + std::to_string(unit) + ": %" + std::to_string(id) +
                       " has no physical register");
                 return;
@@ -157,47 +156,84 @@ class Destroyer {
         for (BasicBlock& bb : function_) {
             for (IRBase& ir : bb) {
                 auto* instruction = dyn_cast<StinkyInstruction>(&ir);
-                if (instruction == nullptr) continue;
+                if (instruction == nullptr || !instruction->hasAttachedSSA()) continue;
 
-                const SSAInstructionInfo* info = ssa_.findInstructionInfo(*instruction);
-                if (info == nullptr) continue;
+                size_t resultCursor = 0;
+                const std::vector<StinkyRegister>& destRegs = instruction->getDestRegs();
+                for (size_t operand = 0; operand < destRegs.size(); ++operand) {
+                    const size_t units = liftedSSAUnits(destRegs[operand]);
+                    if (units == 0) continue;
+                    if (resultCursor + units > instruction->getNumSSAResults()) {
+                        error(locate(instruction, /*isDestination=*/true, operand) +
+                              ": attached SSA is missing destination units");
+                        return;
+                    }
+                    std::vector<StinkySSAValue*> values;
+                    values.reserve(units);
+                    for (size_t unit = 0; unit < units; ++unit)
+                        values.push_back(instruction->getSSAResult(resultCursor++));
+                    planUnits(*instruction, /*isDestination=*/true, operand, values);
+                }
 
-                for (size_t operand = 0; operand < info->sources.size(); ++operand)
-                    planBinding(*instruction, /*isDestination=*/false, operand,
-                                info->sources[operand]);
-                for (size_t operand = 0; operand < info->destinations.size(); ++operand)
-                    planBinding(*instruction, /*isDestination=*/true, operand,
-                                info->destinations[operand]);
+                size_t operandCursor = 0;
+                const std::vector<StinkyRegister>& srcRegs = instruction->getSrcRegs();
+                for (size_t operand = 0; operand < srcRegs.size(); ++operand) {
+                    const size_t units = liftedSSAUnits(srcRegs[operand]);
+                    if (units == 0) {
+                        if (operandCursor < instruction->getNumSSAOperands()) ++operandCursor;
+                        continue;
+                    }
+                    if (operandCursor + units > instruction->getNumSSAOperands()) {
+                        error(locate(instruction, /*isDestination=*/false, operand) +
+                              ": attached SSA is missing source units");
+                        return;
+                    }
+                    std::vector<StinkySSAValue*> values;
+                    values.reserve(units);
+                    for (size_t unit = 0; unit < units; ++unit)
+                        values.push_back(instruction->getSSAOperandValue(operandCursor++));
+                    planUnits(*instruction, /*isDestination=*/false, operand, values);
+                }
             }
         }
     }
 
     void checkPhis() {
-        for (const SSAPhi& phi : ssa_.phis()) {
-            if (!allocation_.isAssigned(phi.result)) {
-                error("@" + function_.getName() + " phi#" + std::to_string(phi.id) + ": result %" +
-                      std::to_string(phi.result) + " has no physical register");
-                continue;
-            }
+        for (const BasicBlock& block : function_) {
+            for (size_t argIndex = 0; argIndex < block.ssaArguments().size(); ++argIndex) {
+                const SSABlockArgument& arg = block.ssaArguments()[argIndex];
+                if (arg.incoming.empty()) continue;
+                if (arg.value == nullptr) continue;
 
-            const RegKey resultPhysical = allocation_.assignmentOf(phi.result);
-            for (size_t edge = 0; edge < phi.incoming.size(); ++edge) {
-                const SSAValueID incoming = phi.incoming[edge].value;
-                if (!allocation_.isAssigned(incoming)) {
-                    error("@" + function_.getName() + " phi#" + std::to_string(phi.id) + " edge " +
-                          std::to_string(edge) + ": %" + std::to_string(incoming) +
-                          " has no physical register");
+                const SSAValueID resultId = arg.value->valueId();
+                if (!allocation_.isAssigned(resultId)) {
+                    error("@" + function_.getName() + " phi#%" + std::to_string(resultId) +
+                          ": result %" + std::to_string(resultId) + " has no physical register");
                     continue;
                 }
-                const RegKey incomingPhysical = allocation_.assignmentOf(incoming);
-                if (incomingPhysical == resultPhysical) continue;
 
-                error("@" + function_.getName() + " phi#" + std::to_string(phi.id) + " edge " +
-                      std::to_string(edge) + ": %" + std::to_string(incoming) + " is " +
-                      regKeyToString(incomingPhysical) + " but the result is " +
-                      regKeyToString(resultPhysical) +
-                      "; lowering that needs a copy on the incoming edge, which is not "
-                      "implemented yet");
+                const RegKey resultPhysical = allocation_.assignmentOf(resultId);
+                for (size_t edge = 0; edge < arg.incoming.size(); ++edge) {
+                    const StinkyOpOperand* use = arg.incoming[edge].use.get();
+                    StinkySSAValue* incoming = use == nullptr ? nullptr : use->value();
+                    const SSAValueID incomingId =
+                        incoming == nullptr ? kInvalidSSAValueID : incoming->valueId();
+                    if (incoming == nullptr || !allocation_.isAssigned(incomingId)) {
+                        error("@" + function_.getName() + " phi#%" + std::to_string(resultId) +
+                              " edge " + std::to_string(edge) + ": %" + std::to_string(incomingId) +
+                              " has no physical register");
+                        continue;
+                    }
+                    const RegKey incomingPhysical = allocation_.assignmentOf(incomingId);
+                    if (incomingPhysical == resultPhysical) continue;
+
+                    error("@" + function_.getName() + " phi#%" + std::to_string(resultId) +
+                          " edge " + std::to_string(edge) + ": %" + std::to_string(incomingId) +
+                          " is " + regKeyToString(incomingPhysical) + " but the result is " +
+                          regKeyToString(resultPhysical) +
+                          "; lowering that needs a copy on the incoming edge, which is not "
+                          "implemented yet");
+                }
             }
         }
     }
@@ -219,7 +255,6 @@ class Destroyer {
     }
 
     Function& function_;
-    const CanonicalSSA& ssa_;
     const AllocationResult& allocation_;
 
     std::unordered_map<const StinkyInstruction*, uint32_t> instructionIndex_;
@@ -238,9 +273,8 @@ std::string SSADestructionResult::toString() const {
     return out.str();
 }
 
-SSADestructionResult destroyCanonicalSSA(Function& function, const CanonicalSSA& ssa,
-                                         const AllocationResult& allocation) {
-    return Destroyer(function, ssa, allocation).run();
+SSADestructionResult destroyAttachedSSA(Function& function, const AllocationResult& allocation) {
+    return Destroyer(function, allocation).run();
 }
 
 }  // namespace stinkytofu

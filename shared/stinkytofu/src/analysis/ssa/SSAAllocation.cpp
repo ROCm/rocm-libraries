@@ -20,19 +20,59 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/analysis/ssa/CanonicalSSAAllocation.hpp"
+#include "stinkytofu/analysis/ssa/SSAAllocation.hpp"
 
 #include <cassert>
+
+#include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/ssa/StinkySSAValue.hpp"
+#include "stinkytofu/support/Casting.hpp"
 
 namespace stinkytofu {
 namespace {
 
 const RegKey kUnassigned{RegType::UNKNOWN, 0, RegHalf::NONE};
 
+void mixWord(uint64_t& hash, uint64_t word) {
+    hash ^= word + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+}
+
+void mixOperand(uint64_t& hash, const StinkyRegister& reg) {
+    if (!reg.isRegister()) {
+        mixWord(hash, 0);
+        return;
+    }
+    mixWord(hash, 1);
+    mixWord(hash, static_cast<uint64_t>(reg.reg.type));
+    mixWord(hash, reg.reg.idx);
+    mixWord(hash, reg.reg.num);
+}
+
 }  // namespace
 
-AllocationResult::AllocationResult(const CanonicalSSA& ssa)
-    : byValue_(ssa.valueCount() + 1, kUnassigned), shape_(ssa.shape()) {}
+uint64_t computeFunctionShape(const Function& function) {
+    uint64_t hash = 0x27d4eb2f165667c5ULL;
+    for (const BasicBlock& bb : function) {
+        mixWord(hash, bb.getPredecessors().size());
+        mixWord(hash, bb.getSuccessors().size());
+        for (const IRBase& ir : bb) {
+            const auto* instruction = dyn_cast<StinkyInstruction>(&ir);
+            if (instruction == nullptr) continue;
+            mixWord(hash, instruction->getUnifiedOpcode());
+            for (const StinkyRegister& reg : instruction->getSrcRegs()) mixOperand(hash, reg);
+            // Separator, so moving one operand from sources to destinations
+            // cannot produce the same hash.
+            mixWord(hash, 0);
+            for (const StinkyRegister& reg : instruction->getDestRegs()) mixOperand(hash, reg);
+        }
+    }
+    return hash == kUnstampedShape ? 1 : hash;
+}
+
+AllocationResult::AllocationResult(const Function& function)
+    : byValue_(function.ssaArena().valueCount() + 1, kUnassigned),
+      shape_(function.ssaArena().shape()) {}
 
 void AllocationResult::assign(SSAValueID id, RegKey physical) {
     assert(id != kInvalidSSAValueID && id < byValue_.size() && "invalid SSA value ID");
@@ -65,9 +105,13 @@ size_t AllocationResult::unassignedCount() const {
     return unassigned;
 }
 
-AllocationResult createLegacyColoring(const CanonicalSSA& ssa) {
-    AllocationResult result(ssa);
-    for (const SSAValue& value : ssa.values()) result.assign(value.id, value.origin);
+AllocationResult createLegacyColoring(const Function& function) {
+    AllocationResult result(function);
+    for (StinkySSAValue* value : function.ssaArena().values()) {
+        if (value == nullptr || !value->hasPhysicalBinding()) continue;
+        const StinkySSAValue::PhysicalBinding& binding = value->physical();
+        result.assign(value->valueId(), RegKey{binding.type, binding.idx, RegHalf::NONE});
+    }
     return result;
 }
 

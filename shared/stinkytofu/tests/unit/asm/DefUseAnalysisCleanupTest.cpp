@@ -27,7 +27,6 @@
 #include "PhiTestFixtures.hpp"
 #include "TestHelpers.hpp"
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
-#include "stinkytofu/analysis/ssa/CanonicalSSA.hpp"
 #include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
@@ -121,11 +120,11 @@ TEST_F(DefUseAnalysisCleanupTest, PassClearsAnalysesAndLetsLiftingSucceed) {
     EXPECT_EQ(countPhis(*func), 0u);
     EXPECT_FALSE(anyChains(*func));
     EXPECT_TRUE(cfg.hUse->getSources().empty());
-    // The merges the analysis PHIs approximated are canonical PHIs now.
-    const auto* lifted = pm.getAnalysisManager().getCachedResult<CanonicalSSAAnalysis>();
-    ASSERT_NE(lifted, nullptr);
-    ASSERT_TRUE(lifted->hasValue()) << lifted->getError();
-    EXPECT_GT((*lifted)->phiCount(), 0u);
+    // The merges the analysis PHIs approximated are block arguments now.
+    EXPECT_TRUE(func->hasAttachedSSA());
+    size_t blockArgs = 0;
+    for (const BasicBlock& bb : *func) blockArgs += bb.ssaArguments().size();
+    EXPECT_GT(blockArgs, 0u);
 }
 
 TEST_F(DefUseAnalysisCleanupTest, CleanupKeepsBlocksEdgesAndRealInstructions) {

@@ -32,22 +32,21 @@
 #include <memory>
 
 #include "stinkytofu/Export.hpp"
-#include "stinkytofu/transforms/ssa/CanonicalSSADestruction.hpp"
+#include "stinkytofu/transforms/ssa/SSADestruction.hpp"
 
 namespace stinkytofu {
 class Function;
 class Pass;
-class CanonicalSSA;
 
-/// Rewrite \p function using \p ssa's own origins, undoing the lift exactly.
-STINKYTOFU_EXPORT SSADestructionResult replayLegacyColoring(Function& function,
-                                                            const CanonicalSSA& ssa);
+/// Rewrite \p function using each value's PhysicalBinding, undoing the lift
+/// exactly.
+STINKYTOFU_EXPORT SSADestructionResult replayLegacyColoring(Function& function);
 
-/// Creates a pass that lowers the cached canonical SSA graph back to the
-/// registers it was lifted from.
+/// Creates a pass that lowers attached SSA back to the registers it was lifted
+/// from.
 ///
-/// It takes the graph from CanonicalSSAAnalysis and then declines to preserve
-/// it, which is what discards a graph describing pre-rewrite operands.
+/// After a successful rewrite it clears attached SSA, which is what discards
+/// value identity that described the pre-rewrite operands.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createReplayLegacyColoringPass();
 
 }  // namespace stinkytofu

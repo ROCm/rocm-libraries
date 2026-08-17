@@ -214,20 +214,6 @@ class STINKYTOFU_EXPORT AnalysisManager {
         return static_cast<ModelT&>(*it->second).Result;
     }
 
-    /// Seed a result computed elsewhere, replacing any cached one.
-    ///
-    /// For a pass that must produce the result itself, because it applies
-    /// options the analysis has no way to receive or because it rebuilds the
-    /// result after mutating the function. Without this the only way into the
-    /// cache is the registered factory, and a pass-computed result would be
-    /// invisible to getCachedResult().
-    template <typename AnalysisT>
-    void insertResult(typename AnalysisT::Result R) {
-        using ModelT = AnalysisResultModel<AnalysisT, typename AnalysisT::Result>;
-        if (debugLogging_) debugLog("Inserting", AnalysisT::name());
-        results_[AnalysisT::ID()] = std::make_unique<ModelT>(std::move(R));
-    }
-
     /// Get cached result only. Returns nullptr if not computed.
     template <typename AnalysisT>
     const typename AnalysisT::Result* getCachedResult() const {
