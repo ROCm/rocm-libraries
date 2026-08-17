@@ -29,9 +29,11 @@ public:
     {
     }
 
-    std::vector<ConvKernel*> get_valid_configs(const hipconv::Conv2dParams& par) const
+    // This algorithm's configs for `par`, best first, at most `max_ranked` of them.
+    std::vector<ScoredKernel> get_valid_configs(const hipconv::Conv2dParams& par,
+                                                std::size_t max_ranked) const
     {
-        std::vector<ConvKernel*> result;
+        std::vector<ScoredKernel> result;
         if(!is_applicable_(par))
             return result;
         for(const ConvKernelSpan* group_ptr : kernel_groups_)
@@ -42,12 +44,13 @@ public:
             // All kernels in a family share the same is_applicable result.
             if(!group.front()->is_applicable(par))
                 continue;
-            for(auto* k : group)
+            for(ConvKernel* kernel : group)
             {
-                if(k->is_valid_config(par))
-                    result.push_back(k);
+                if(kernel->is_valid_config(par))
+                    result.push_back({kernel, kernel->get_weighted_throughput_index(par)});
             }
         }
+        keep_top_ranked(result, max_ranked);
         return result;
     }
 

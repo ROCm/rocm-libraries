@@ -971,7 +971,7 @@ constexpr Config configs[] = {
     },
 };
 
-constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
+constexpr int num_configs = sizeof(configs) / sizeof(configs[0]);
 
 // Index of the config matching the given key, or -1 if none exists.
 //
@@ -987,7 +987,7 @@ constexpr int config_index(int wave_k16,
                            int waves_k                  = 2,
                            bool large_tensor            = false)
 {
-    for(int i = 0; i < NUM_CONFIGS; ++i)
+    for(int i = 0; i < num_configs; ++i)
     {
         if(configs[i].wave_k16 == wave_k16 && configs[i].kh == kh && configs[i].kw == kw &&
            configs[i].k_divisible == k_divisible && configs[i].single_c == single_c &&
@@ -998,27 +998,6 @@ constexpr int config_index(int wave_k16,
         }
     }
     return -1;
-}
-
-// Partition the kernel template instances across files for parallel compilation.
-//
-// The shards split [0, NUM_CONFIGS) into kShardCount contiguous ascending ranges,
-// so concatenating them in shard-id order reproduces global configs[] order.
-// Ranges derive from NUM_CONFIGS, so adding configs rebalances automatically; the
-// first (NUM_CONFIGS % kShardCount) shards get one extra.
-constexpr int kShardCount = 8;
-
-constexpr int shard_begin(int id)
-{
-    const int base = NUM_CONFIGS / kShardCount;
-    const int rem  = NUM_CONFIGS % kShardCount;
-    // Shards [0, rem) hold base+1; the rest hold base. Begin is the running sum.
-    return id * base + (id < rem ? id : rem);
-}
-
-constexpr int shard_end(int id)
-{
-    return shard_begin(id + 1);
 }
 
 } // namespace hipconv::cdna4::direct_l1

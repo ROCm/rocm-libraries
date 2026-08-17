@@ -7,7 +7,7 @@
 // waves hit L1 (the "l1"), a second staging tier beyond what LDS holds. A separate
 // launch formats the weights into MFMA tile order.
 //
-// The device kernel and its host helpers live here, included by the shardN.cpp TUs
+// The device kernel and its host helpers live here, included by the autoshard,
 // so the configs[] table builds in parallel. Everything is template/inline.
 
 #include "balanced_l2_grid.h"
@@ -969,37 +969,41 @@ __global__ __launch_bounds__(cfg.num_threads(),
                                                             MagicDiv magic_q,
                                                             MagicDiv magic_n)
 {
-    conv2d_direct_l1_impl<cfg, DT>(in,
-                                   wei,
-                                   alpha,
-                                   beta,
-                                   out,
-                                   N,
-                                   groups,
-                                   c_per_group,
-                                   k_per_group,
-                                   hi,
-                                   wi,
-                                   ho,
-                                   wo,
-                                   fy,
-                                   fx,
-                                   sy,
-                                   sx,
-                                   dy,
-                                   dx,
-                                   py,
-                                   px,
-                                   per_xcd,
-                                   kparts,
-                                   xgroups,
-                                   blocks_p,
-                                   blocks_q,
-                                   n_blocks,
-                                   magic_per_xcd,
-                                   magic_p,
-                                   magic_q,
-                                   magic_n);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_16x16x32_bf16))
+    {
+        conv2d_direct_l1_impl<cfg, DT>(in,
+                                       wei,
+                                       alpha,
+                                       beta,
+                                       out,
+                                       N,
+                                       groups,
+                                       c_per_group,
+                                       k_per_group,
+                                       hi,
+                                       wi,
+                                       ho,
+                                       wo,
+                                       fy,
+                                       fx,
+                                       sy,
+                                       sx,
+                                       dy,
+                                       dx,
+                                       py,
+                                       px,
+                                       per_xcd,
+                                       kparts,
+                                       xgroups,
+                                       blocks_p,
+                                       blocks_q,
+                                       n_blocks,
+                                       magic_per_xcd,
+                                       magic_p,
+                                       magic_q,
+                                       magic_n);
+    }
 }
 
 // Per-config launch.

@@ -42,7 +42,7 @@
 // the other, so SwizzleT serves both read models. See is_bank_conflict_free()
 // for the uint4/mod-16 predicate and the model it assumes, SwizzleWmmaTest for
 // the uint4/16-lane check, and SwizzleTest::MfmaLoadConflicts for the
-// uint2/32-lane check. Bank model and phase tables: references/lds_reference.md.
+// uint2/32-lane check.
 // =============================================================================
 //
 // Which LDS read model a SwizzleT instance is tuned for. The write (HBM -> LDS)
@@ -56,7 +56,7 @@
 //     is 0 and the rotation degenerates to the additive (c8 + x) % C8.
 //
 //   Wave64B128: the wave64 uint4 read that dispatches in 4 SCRAMBLED 16-lane
-//     phases (T0-3,T12-15,T20-23,T24-27, ...; see references/lds_reference.md).
+//     phases (T0-3,T12-15,T20-23,T24-27, ...).
 //     Under those phases the additive rotation (X_SHIFT = 0) is bank-free, while
 //     the Wave32B128 rotation reintroduces conflicts for C < 128. This is the
 //     read direct_l1 issues (a full uint4 = 8 channels per lane on wave64), so
@@ -147,8 +147,7 @@ public:
     // predicate.) For the shipped C in {32, 64, 128, 256} the uint2 and uint4
     // criteria agree. A read model with a different bank count, lane-group size,
     // or read width needs its own analysis. See SwizzleWmmaTest in
-    // test/swizzle_test.cpp, which cross-checks this against the measured pattern,
-    // and references/lds_reference.md for the bank model.
+    // test/swizzle_test.cpp, which cross-checks this against the measured pattern.
     //
     // A non-bank-free C still round-trips correctly (offset_uint2/x/c8 stay
     // mutual inverses), it just incurs those conflicts on the read. This lets a
@@ -254,8 +253,8 @@ private:
 // dispatches in 4 phases of 16 *scrambled* (non-contiguous) lanes -- e.g. phase
 // 0 is T0-3,T12-15,T20-23,T24-27 -- so the bank-free criterion is per-phase over
 // those scrambled groups, not the consecutive-16-lane rule SwizzleT's uint4 read
-// uses. The two are not interchangeable. The exact phase table (see
-// references/lds_reference.md, MI355X section) is enumerated in SwizzleFp32Test.
+// uses. The two are not interchangeable. The exact phase table is enumerated
+// in SwizzleFp32Test.
 //
 // Design choices:
 //   - Use uint4 (= 4 fp32): largest ds_read / HBM-load granularity, and a

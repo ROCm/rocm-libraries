@@ -5,6 +5,8 @@
 #include "hip_util.h"
 #include "launch_params.h"
 
+#include <array>
+#include <atomic>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -24,10 +26,63 @@ bool arch_name_matches(std::string_view requested, std::string_view registered)
            (requested.size() == registered.size() || requested[registered.size()] == ':');
 }
 
+// Drop the scores the merge ranked on; the public list is ordered, not annotated.
+std::vector<ConvKernelHandle> handles(const std::vector<ScoredKernel>& scored)
+{
+    std::vector<ConvKernelHandle> out;
+    out.reserve(scored.size());
+    for(const auto& entry : scored)
+        out.push_back(entry.kernel);
+    return out;
+}
+
+// Never launched; only something for hipFuncGetAttributes to ask about.
+__global__ void device_code_probe() {}
+
+// Whether this binary carries device code for the current GPU.
+//
+// The registry covers every arch in the tree, so a hit there does not mean the
+// kernels were built here. Cached per device; architectures can differ per GPU.
+bool device_code_available()
+{
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
+        return false;
+
+    const auto probe = [] {
+        hipFuncAttributes attr{};
+        return hipFuncGetAttributes(&attr, reinterpret_cast<const void*>(&device_code_probe)) ==
+               hipSuccess;
+    };
+
+    enum : signed char
+    {
+        unknown = 0,
+        present = 1,
+        absent  = -1
+    };
+    static constexpr int max_cached_devices = 32;
+    static std::array<std::atomic<signed char>, max_cached_devices> cache{};
+
+    if(device < 0 || device >= max_cached_devices)
+        return probe();
+
+    auto& slot       = cache[static_cast<std::size_t>(device)];
+    const auto known = slot.load(std::memory_order_relaxed);
+    if(known != unknown)
+        return known == present;
+
+    const bool available = probe();
+    slot.store(available ? present : absent, std::memory_order_relaxed);
+    return available;
+}
+
 } // anonymous namespace
 
 std::optional<ArchHandle> resolve_arch(std::string_view name)
 {
+    if(!device_code_available())
+        return std::nullopt;
     for(std::size_t i = 0; i < hipconv_arch_registry_size; ++i)
     {
         if(arch_name_matches(name, hipconv_arch_registry[i].name))
@@ -37,29 +92,31 @@ std::optional<ArchHandle> resolve_arch(std::string_view name)
 }
 
 std::vector<ConvKernelHandle>
-get_valid_configs(ArchHandle arch, const Conv2dParams& par, Algorithm algo)
+get_valid_configs(ArchHandle arch, const Conv2dParams& par, Algorithm algo, std::size_t max_ranked)
 {
     if(!arch)
         throw std::invalid_argument("null arch handle");
     for(const auto& entry : arch->algorithms)
     {
         if(entry.algorithm == algo)
-            return entry.impl->get_valid_configs(par);
+            return handles(entry.impl->get_valid_configs(par, max_ranked));
     }
     return {};
 }
 
-std::vector<ConvKernelHandle> get_valid_configs(ArchHandle arch, const Conv2dParams& par)
+std::vector<ConvKernelHandle>
+get_valid_configs(ArchHandle arch, const Conv2dParams& par, std::size_t max_ranked)
 {
     if(!arch)
         throw std::invalid_argument("null arch handle");
-    std::vector<ConvKernelHandle> result;
+    std::vector<ScoredKernel> scored;
     for(const auto& entry : arch->algorithms)
     {
-        auto cfgs = entry.impl->get_valid_configs(par);
-        result.insert(result.end(), cfgs.begin(), cfgs.end());
+        auto cfgs = entry.impl->get_valid_configs(par, max_ranked);
+        scored.insert(scored.end(), cfgs.begin(), cfgs.end());
     }
-    return result;
+    keep_top_ranked(scored, max_ranked);
+    return handles(scored);
 }
 
 std::optional<ConvKernelHandle> find_config(ArchHandle arch, const Conv2dParams& par)

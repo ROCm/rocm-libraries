@@ -360,7 +360,7 @@ private:
     //
     // 8-byte-block XOR swizzle: bank = (k/4) ^ q; offset = (q*16 + bank)*4 + (k%4).
     // Both sides are b64, so the conflict period is per-block. Bank-conflict-free for
-    // both opcodes (verified against the MI350X conflict map, lds_reference.md):
+    // both opcodes (verified against the MI350X conflict map):
     //   ds_write_b64: a write phase fixes kb, varies q over 0..15, so kb^q is a
     //     bijection -> 16 distinct banks.
     //   ds_read_b64: a read phase covers one even + one odd pixel, so q&1 splits the

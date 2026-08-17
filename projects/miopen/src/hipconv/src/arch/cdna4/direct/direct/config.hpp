@@ -8,10 +8,11 @@ namespace hipconv::cdna4::direct
 // Kernel configuration parameters.
 struct Config
 {
-    hipconv::Direction direction;
-    hipconv::DataType type;
-    int kh;
-    int kw;
+    // Assign default values to avoid -Wmissing-designated-field-initializers warnings.
+    hipconv::Direction direction = hipconv::Direction::Fprop;
+    hipconv::DataType type       = hipconv::DataType::fp16;
+    int kh                       = 0;
+    int kw                       = 0;
     int tile_size_k;
     int tile_size_c;
     int tile_size_n = 1;

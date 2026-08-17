@@ -17,7 +17,6 @@
 
 #include <initializer_list>
 #include <string>
-#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -2530,34 +2529,39 @@ struct ConvCkIgemmFwdV6r1DlopsNchw final : ConvTunableSolver<PerformanceConvCkIg
                              const PerformanceConvCkIgemmFwdV6r1DlopsNchw&) const override;
 };
 
-struct PerformanceConfigConvHipConv : PerfConfig
+// Tuning state for the vendored hipconv solver.
+//
+// hipconv exposes its per-shape kernels as an ordered, deterministic list
+// (hipconv::get_valid_configs). We persist the list index as the tuning key, and
+// keep the kernel name as a checksum so a drifted list is rejected on restore.
+// The index is the only field that identifies a config today because most
+// families do not implement describe_config().
+struct PerformanceConfigConvHipConv : PerfConfigBase<PerformanceConfigConvHipConv>
 {
-    // Serialized as "kernel_name[config_descriptor]", e.g. "direct[waves_k=2,kh=3]".
-    // Square brackets delimit the descriptor so commas inside it don't collide with
-    // the DB separator.
-    std::string kernel_id;
-
-    // Transient state for search iteration (not serialized).
-    int index = 0;
-    std::vector<std::string> valid_kernels;
+    int index               = -1;
+    std::string kernel_name = "";
 
     PerformanceConfigConvHipConv() = default;
     PerformanceConfigConvHipConv(bool) {}
 
-    void Serialize(std::ostream& stream) const override { stream << kernel_id; }
-    bool Deserialize(const std::string& s) override
+    template <class Self, class F>
+    static void Visit(Self&& self, F f)
     {
-        kernel_id = s;
-        return true;
+        f(self.index, "index");
+        f(self.kernel_name, "kernel_name");
     }
 
-    MIOPEN_INTERNALS_EXPORT void HeuristicInit(const ExecutionContext&,
-                                               const miopen::conv::ProblemDescription&);
-    MIOPEN_INTERNALS_EXPORT bool SetNextValue(const miopen::conv::ProblemDescription&);
-    MIOPEN_INTERNALS_EXPORT bool IsValidValue() const;
-    MIOPEN_INTERNALS_EXPORT bool IsValid(const ExecutionContext&,
-                                         const miopen::conv::ProblemDescription&) const;
-    MIOPEN_INTERNALS_EXPORT bool operator==(const PerformanceConfigConvHipConv& other) const;
+    void HeuristicInit(const ExecutionContext&, const miopen::conv::ProblemDescription&);
+    bool IsValidValue() const;
+    bool SetNextValue(const miopen::conv::ProblemDescription&);
+    bool IsValid(const ExecutionContext&, const miopen::conv::ProblemDescription&) const;
+    bool operator==(const PerformanceConfigConvHipConv& other) const;
+
+private:
+    // Populate index/kernel_name from a resolved arch handle (as const void* to
+    // keep hipconv types out of this header).
+    void InitFromArch(const void* arch, const miopen::conv::ProblemDescription&);
+    static std::string GetCurrentDeviceName();
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<PerformanceConfigConvHipConv>
@@ -2567,10 +2571,7 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<Performance
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;
     bool IsDynamic() const override { return true; }
-    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
-    {
-        return 1.0f;
-    }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override;
     size_t GetWorkspaceSize(const ExecutionContext&,
                             const miopen::conv::ProblemDescription&) const override;
     bool MayNeedWorkspace() const override { return true; }
@@ -2586,9 +2587,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipConv final : ConvTunableSolver<Performance
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&,
                              const PerformanceConfigConvHipConv&) const override;
-
-    // Return true if this build has a backend for the architecture.
-    static bool HasArchBackend(std::string_view arch_name);
 };
 
 struct MIOPEN_INTERNALS_EXPORT ConvDirectNaiveConvFwd final : ConvSolver

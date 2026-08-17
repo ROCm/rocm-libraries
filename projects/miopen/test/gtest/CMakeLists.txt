@@ -131,6 +131,10 @@ function(add_gtest TEST_NAME TEST_CPP)
   target_compile_options(${TEST_NAME} PRIVATE -Wno-global-constructors -Wno-undef)
   target_include_directories(${TEST_NAME} PRIVATE ../ ../../src/kernels)
 
+  if(MIOPEN_USE_HIPCONV)
+    target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_USE_HIPCONV=1)
+  endif()
+
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
   if(MIOPEN_ENABLE_AI_KERNEL_TUNING)
     target_link_libraries(${TEST_NAME} frugally-deep::fdeep Eigen3::Eigen)

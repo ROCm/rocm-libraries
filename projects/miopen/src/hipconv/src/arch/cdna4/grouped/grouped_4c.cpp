@@ -373,8 +373,10 @@ __device__ void conv2d_grouped_4c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
 
         for(int j = tid; j < WEIGHT_LDS_UINT4; j += cfg.block_size())
         {
+#ifdef __gfx950__
             __builtin_amdgcn_raw_ptr_buffer_load_lds(
                 weight_rsrc, &output_lds[j], 16, voffset_base + j * sizeof(uint4), 0, 0, 0);
+#endif
         }
     }
 
@@ -383,8 +385,10 @@ __device__ void conv2d_grouped_4c_cdna4_nhwc_impl(const ToType<DT>* __restrict__
     {
         if(load_active[p])
         {
+#ifdef __gfx950__
             __builtin_amdgcn_raw_ptr_buffer_load_lds(
                 input_rsrc, &input_lds[load_lds_slot[p]], 16, input_voffset_base[p], 0, 0, 0);
+#endif
         }
     }
 
@@ -840,27 +844,33 @@ __global__ void conv2d_grouped_4c_nhwc_cdna4(const ToType<DT>* __restrict__ in,
                                              int py,
                                              int px)
 {
-    conv2d_grouped_4c_cdna4_nhwc_impl<cfg, DT>(in,
-                                               wei,
-                                               alpha,
-                                               beta,
-                                               out,
-                                               N,
-                                               groups,
-                                               c_per_group,
-                                               k_per_group,
-                                               hi,
-                                               wi,
-                                               ho,
-                                               wo,
-                                               fy,
-                                               fx,
-                                               sy,
-                                               sx,
-                                               dy,
-                                               dx,
-                                               py,
-                                               px);
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_4x4x4f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_mfma_f32_4x4x4bf16_1k) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_raw_ptr_buffer_load_lds) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
+    {
+        conv2d_grouped_4c_cdna4_nhwc_impl<cfg, DT>(in,
+                                                   wei,
+                                                   alpha,
+                                                   beta,
+                                                   out,
+                                                   N,
+                                                   groups,
+                                                   c_per_group,
+                                                   k_per_group,
+                                                   hi,
+                                                   wi,
+                                                   ho,
+                                                   wo,
+                                                   fy,
+                                                   fx,
+                                                   sy,
+                                                   sx,
+                                                   dy,
+                                                   dx,
+                                                   py,
+                                                   px);
+    }
 }
 
 template <Config cfg>

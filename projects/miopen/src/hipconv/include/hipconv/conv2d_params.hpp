@@ -1,6 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <optional>
+#include <string_view>
 
 namespace hipconv
 {
@@ -33,9 +36,23 @@ enum class Direction
 enum class Algorithm
 {
     Grouped,
+    // Depthwise (1 channel per group, groups == C == K).
+    Depthwise,
     Direct,
     Pointwise
 };
+
+// Every Direction value, in declaration order.
+inline constexpr std::array all_directions{Direction::Fprop, Direction::Dgrad, Direction::Wgrad};
+
+// Every Algorithm value, in declaration order.
+inline constexpr std::array all_algorithms{Algorithm::Grouped,
+                                           Algorithm::Depthwise,
+                                           Algorithm::Direct,
+                                           Algorithm::Pointwise};
+
+// DataType values the driver accepts as input tags, in declaration order.
+inline constexpr std::array input_data_types{DataType::fp16, DataType::bf16, DataType::tf32};
 
 // Return the size in bytes of the given data-type.
 size_t sizeof_data_type(DataType dtype);
@@ -45,6 +62,28 @@ auto to_string(Direction dir) -> char const*;
 auto to_string(DataType dtype) -> char const*;
 
 auto to_string(Algorithm algo) -> char const*;
+
+// Parse an algorithm name (the inverse of to_string(Algorithm)).
+//
+// Returns nullopt for any string that is not one of grouped|depthwise|direct|pointwise.
+std::optional<Algorithm> parse_algorithm(std::string_view name);
+
+// Parse a supported input data-type name (fp16|bf16|tf32).
+//
+// This is the set of dtypes the driver accepts for a layer's input, a subset of
+// DataType: fp32, fp8, and bf8 are valid DataType values but not input tags, so
+// they return nullopt. Returns nullopt for any unrecognized string.
+std::optional<DataType> parse_data_type(std::string_view name);
+
+// Parse a direction name into a mask of Direction bits.
+//
+// Accepts fprop, dgrad, and wgrad, plus "all" for every direction at once. A mask
+// rather than a Direction is returned because "all" names three of them; callers
+// that want a single direction test the bits. Returns nullopt for any other string.
+//
+// The accepted spelling is lowercase, which is what the command line and the spec
+// files use; to_string(Direction) is capitalized, so this is not its strict inverse.
+std::optional<int> parse_direction_mask(std::string_view name);
 
 // The tensor order (i.e. layout).
 enum TensorOrder

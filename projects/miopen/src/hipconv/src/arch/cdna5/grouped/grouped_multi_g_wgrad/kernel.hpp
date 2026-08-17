@@ -35,7 +35,8 @@
 //
 // Scope: Direction::Wgrad, stride 1, dilation 1, KH=KW=3, fp16/bf16 in, fp32 dW.
 
-#include "conv_kernel_table.h"
+#include "config.hpp"
+#include "grouped/reduction.hpp"
 #include "grouped_conv_kernel.h"
 #include "types.h"
 #include "mathutil.h"
@@ -63,8 +64,7 @@ namespace grouped_multi_g_wgrad
 
 using namespace hipconv;
 using bunnies::TdmDesc;
-constexpr int WAVE_SIZE = 32;
-constexpr int TILE      = 16; // WMMA M = N
+constexpr int TILE = 16; // WMMA M = N
 
 // Packing factor (groups per 16-channel staging tile) for a group size G.
 constexpr int gpw_of(int g)
@@ -77,63 +77,18 @@ constexpr int ntile_of(int g)
     return (g + TILE - 1) / TILE;
 }
 
-struct Config
-{
-    int group_size; // 4, 8, 16, or 32
-    int waves_per_wg;
-    int kh                       = 3;
-    int kw                       = 3;
-    int prefetch_depth           = 3;
-    hipconv::Direction direction = hipconv::Direction::Wgrad;
-    // dW reduction strategy when >1 workgroup contributes (q-tiles or batch).
-    bool split_k = false;
-
-    constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
-};
-
-constexpr Config configs[] = {
-    // G x waves; split_k=false (single-contributor / cascading-atomic) first,
-    // then the split-K variants. is_valid_config matches par.channels_per_group
-    // to group_size, so only the configs for the shape's G are ever selected.
-    {.group_size = 4, .waves_per_wg = 8},
-    {.group_size = 4, .waves_per_wg = 4},
-    {.group_size = 4, .waves_per_wg = 2},
-    {.group_size = 4, .waves_per_wg = 1},
-    {.group_size = 8, .waves_per_wg = 8},
-    {.group_size = 8, .waves_per_wg = 4},
-    {.group_size = 8, .waves_per_wg = 2},
-    {.group_size = 8, .waves_per_wg = 1},
-    {.group_size = 16, .waves_per_wg = 8},
-    {.group_size = 16, .waves_per_wg = 4},
-    {.group_size = 16, .waves_per_wg = 2},
-    {.group_size = 16, .waves_per_wg = 1},
-    {.group_size = 32, .waves_per_wg = 8},
-    {.group_size = 32, .waves_per_wg = 4},
-    {.group_size = 32, .waves_per_wg = 2},
-    {.group_size = 32, .waves_per_wg = 1},
-    {.group_size = 4, .waves_per_wg = 8, .split_k = true},
-    {.group_size = 4, .waves_per_wg = 4, .split_k = true},
-    {.group_size = 8, .waves_per_wg = 8, .split_k = true},
-    {.group_size = 8, .waves_per_wg = 4, .split_k = true},
-    {.group_size = 16, .waves_per_wg = 8, .split_k = true},
-    {.group_size = 16, .waves_per_wg = 4, .split_k = true},
-    {.group_size = 32, .waves_per_wg = 8, .split_k = true},
-    {.group_size = 32, .waves_per_wg = 4, .split_k = true},
-};
-
 template <Config cfg, hipconv::DataType DT, bool NEEDS_ATOMIC, bool PARTITIONED = false>
-__global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad_nhwc_cdna5(
-    const ::ToType<DT>* __restrict__ input,
-    const ::ToType<DT>* __restrict__ delta,
-    float* __restrict__ wgrad,
-    int N,
-    int groups,
-    int hi,
-    int wi,
-    int ho,
-    int wo,
-    int py,
-    int px)
+__device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>* __restrict__ input,
+                                                             const ::ToType<DT>* __restrict__ delta,
+                                                             float* __restrict__ wgrad,
+                                                             int N,
+                                                             int groups,
+                                                             int hi,
+                                                             int wi,
+                                                             int ho,
+                                                             int wo,
+                                                             int py,
+                                                             int px)
 {
     (void)N; // batch is indexed via blockIdx.z; kept for interface consistency.
 
@@ -403,20 +358,27 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad
     });
 }
 
-// Split-K reduction: sum the `num_partitions` per-(q-tile, batch) partial dW
-// buffers (each `dW_total` fp32 elements, laid out [partition][dW]) into dW.
-__global__ void conv2d_grouped_multi_g_wgrad_reduce_cdna5(float* __restrict__ dW,
-                                                          const float* __restrict__ partials,
-                                                          int num_partitions,
-                                                          unsigned long long dW_total)
+template <Config cfg, hipconv::DataType DT, bool NEEDS_ATOMIC, bool PARTITIONED = false>
+__global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad_nhwc_cdna5(
+    const ::ToType<DT>* __restrict__ input,
+    const ::ToType<DT>* __restrict__ delta,
+    float* __restrict__ wgrad,
+    int N,
+    int groups,
+    int hi,
+    int wi,
+    int ho,
+    int wo,
+    int py,
+    int px)
 {
-    const unsigned long long e = (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
-    if(e >= dW_total)
-        return;
-    float sum = 0.0f;
-    for(int p = 0; p < num_partitions; p++)
-        sum += partials[(unsigned long long)p * dW_total + e];
-    dW[e] = sum;
+    if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_tensor_load_to_lds) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_wmma_f32_16x16x32_f16) &&
+       __builtin_amdgcn_is_invocable(__builtin_amdgcn_wmma_f32_16x16x32_bf16))
+    {
+        conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl<cfg, DT, NEEDS_ATOMIC, PARTITIONED>(
+            input, delta, wgrad, N, groups, hi, wi, ho, wo, py, px);
+    }
 }
 
 template <Config cfg>
@@ -590,13 +552,5 @@ private:
     const Config& cfg_;
 };
 
-HIPCONV_DEFINE_KERNEL_TABLE(Grouped_Multi_G_WgradConvKernel);
-
 } // namespace grouped_multi_g_wgrad
 } // namespace hipconv::cdna5
-
-// Host-only: the device linker must not see this struct or its function pointers.
-#ifndef __HIP_DEVICE_COMPILE__
-HIPCONV_EXPORT_KERNEL_TABLE(grouped_multi_g_wgrad_cdna5_kernels,
-                            hipconv::cdna5::grouped_multi_g_wgrad);
-#endif

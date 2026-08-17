@@ -8,6 +8,7 @@
 extern const hipconv::ConvAlgorithm pointwise_algo;
 #endif
 extern const hipconv::ConvAlgorithm grouped_@HIPCONV_ARCH_NAME@;
+extern const hipconv::ConvAlgorithm depthwise_@HIPCONV_ARCH_NAME@;
 extern const hipconv::ConvAlgorithm direct_@HIPCONV_ARCH_NAME@;
 
 const hipconv::ArchAlgorithm algos_@HIPCONV_ARCH_NAME@[] = {
@@ -15,6 +16,7 @@ const hipconv::ArchAlgorithm algos_@HIPCONV_ARCH_NAME@[] = {
     { hipconv::Algorithm::Pointwise, &pointwise_algo },
 #endif
     { hipconv::Algorithm::Grouped, &grouped_@HIPCONV_ARCH_NAME@ },
+    { hipconv::Algorithm::Depthwise, &depthwise_@HIPCONV_ARCH_NAME@ },
     { hipconv::Algorithm::Direct, &direct_@HIPCONV_ARCH_NAME@ },
 };
 // clang-format on
