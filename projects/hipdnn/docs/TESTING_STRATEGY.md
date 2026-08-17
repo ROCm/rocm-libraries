@@ -1,11 +1,9 @@
 # hipDNN Testing Strategy
 
-| Metadata | Value |
-|---|---|
-| Status | Draft |
-| Owner | `@ROCm/hipdnn-core` |
-| Technical Lead | Brian Harrison |
-| Last Updated | 2026-08-17 |
+- **Status:** Draft
+- **Owner:** @ROCm/hipdnn-core
+- **Technical Lead:** Brian Harrison
+- **Last Updated:** 2026-08-17
 
 ## Purpose and Scope
 

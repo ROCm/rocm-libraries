@@ -6,6 +6,8 @@ Detailed test models and coverage responsibilities live in [Testing Strategy](./
 
 ## Component Overview
 
+hipDNN is a graph-based DNN execution library with Windows and Linux support. The frontend, backend, and plugin separation allows each layer to be unit tested independently, while integration tests validate cross-layer behavior.
+
 hipDNN core includes the backend, frontend, Data SDK, FlatBuffers SDK, Plugin SDK, and Test SDK.
 Core unit and API suites use in-tree test plugins, so core-only changes can be validated without building a production provider.
 

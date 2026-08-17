@@ -1,7 +1,7 @@
 # Known Testing Gaps
 
 - **Status:** Draft
-- **Owner:** `@ROCm/hipdnn-core`
+- **Owner:** @ROCm/hipdnn-core
 - **Technical Lead:** Brian Harrison
 - **Last Updated:** 2026-08-17
 
