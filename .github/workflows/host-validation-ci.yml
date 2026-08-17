@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "shared/host-validation/**"
+      - ".github/scripts/validate_host_validation_install.py"
       - ".github/workflows/host-validation-ci.yml"
   push:
     branches:
       - develop
     paths:
       - "shared/host-validation/**"
+      - ".github/scripts/validate_host_validation_install.py"
       - ".github/workflows/host-validation-ci.yml"
   workflow_dispatch:
 
@@ -17,10 +19,12 @@ permissions:
   contents: read
 
 concurrency:
+  # A newer commit makes an in-flight validation run for the same ref obsolete.
   group: host-validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
+  # Match nested CPU-library worker pools to the explicit two-way build budget.
   BLIS_NUM_THREADS: "2"
   OMP_NUM_THREADS: "2"
   OPENBLAS_NUM_THREADS: "2"
@@ -50,7 +54,6 @@ jobs:
             -DHOST_VALIDATION_BUILD_TESTING=ON \
             -DHOST_VALIDATION_BUILD_PYTHON=ON \
             -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
-            -DHOST_VALIDATION_BUILD_MX_BACKEND=ON \
             -DHOST_VALIDATION_BUILD_BENCHMARKS=ON \
             -DCMAKE_BUILD_TYPE=Release
 
@@ -65,35 +68,11 @@ jobs:
         run: |
           cmake --install "${RUNNER_TEMP}/host-validation-build" \
             --prefix "${RUNNER_TEMP}/host-validation-install"
-          for header in \
-            reference_gemm \
-            reference_epilogue \
-            reference_reduction \
-            reference_axpby \
-            reference_common \
-            reference_softmax \
-            reference_layer_norm; do
-            test ! -e \
-              "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/${header}.hpp"
-          done
-          test ! -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/data_generation.hpp"
-          test ! -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/structured_sparsity.hpp"
-          test ! -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/tensor_views.hpp"
-          test ! -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/comparison.hpp"
-          test ! -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail/comparison_impl.hpp"
-          test ! -d \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/detail"
-          test -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/typed_comparison.hpp"
-          test -e \
-            "${RUNNER_TEMP}/host-validation-install/include/roc/host_validation/amd_gpu_layout/mx.hpp"
-          test -e \
-            "${RUNNER_TEMP}/host-validation-install/share/doc/ROCHostValidation/LICENSE.md"
+          # The source include tree is the public API inventory for the manifest.
+          python .github/scripts/validate_host_validation_install.py \
+            --source-dir shared/host-validation \
+            --build-dir "${RUNNER_TEMP}/host-validation-build" \
+            --install-prefix "${RUNNER_TEMP}/host-validation-install"
           cmake -S shared/host-validation/tests/package \
             -B "${RUNNER_TEMP}/host-validation-package-test" \
             -G Ninja \
@@ -106,15 +85,11 @@ jobs:
             -DCMAKE_DISABLE_FIND_PACKAGE_BLAS=TRUE \
             -DCMAKE_DISABLE_FIND_PACKAGE_OpenMP=TRUE
           cmake --build "${RUNNER_TEMP}/host-validation-core-package-test" --parallel 2
-          "${RUNNER_TEMP}/host-validation-core-package-test/host-validation-core-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-operations-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-comparison-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-typed-comparison-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-tiled-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-blas-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-mx-package-test"
-          "${RUNNER_TEMP}/host-validation-package-test/host-validation-amd-gpu-layout-package-test"
+          # CTest discovers package consumers registered by the test project.
+          ctest \
+            --test-dir "${RUNNER_TEMP}/host-validation-package-test" \
+            --no-tests=error \
+            --output-on-failure
           PYTHONPATH="$(find "${RUNNER_TEMP}/host-validation-install" \
             -type d -path '*/site-packages' -print -quit)" \
             python -c "import roc_host_validation"
@@ -126,7 +101,6 @@ jobs:
             -G Ninja \
             -DHOST_VALIDATION_BUILD_TESTING=ON \
             -DHOST_VALIDATION_BUILD_PYTHON=OFF \
-            -DHOST_VALIDATION_BUILD_MX_BACKEND=OFF \
             -DHOST_VALIDATION_AMD_GPU_LAYOUT_ENABLE_OPENMP=OFF \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build "${RUNNER_TEMP}/host-validation-no-layout-openmp" \
@@ -155,7 +129,6 @@ jobs:
             -DHOST_VALIDATION_BUILD_TESTING=ON \
             -DHOST_VALIDATION_BUILD_PYTHON=OFF \
             -DHOST_VALIDATION_BUILD_BLAS_BACKEND=ON \
-            -DHOST_VALIDATION_BUILD_MX_BACKEND=ON \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"

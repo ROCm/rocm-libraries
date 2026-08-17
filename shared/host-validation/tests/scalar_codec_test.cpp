@@ -3,6 +3,7 @@
 
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <complex>
 #include <cstdint>
@@ -11,11 +12,16 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
+using roc::host_validation::convertScalar;
+using roc::host_validation::IntegerOverflow;
+using roc::host_validation::IntegerRounding;
 using roc::host_validation::Layout;
 using roc::host_validation::Scalar;
+using roc::host_validation::ScalarConversionOptions;
 using roc::host_validation::ScalarType;
 using roc::host_validation::scalarTypeInfo;
 using roc::host_validation::Shape;
@@ -24,6 +30,29 @@ using roc::host_validation::Tensor;
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
+
+template <typename Exception, typename Function>
+void requireThrows(Function&& function, const char* message) {
+    bool threw = false;
+    try {
+        std::forward<Function>(function)();
+    } catch (const Exception&) {
+        threw = true;
+    }
+    require(threw, message);
+}
+
+class RoundingModeRestore {
+   public:
+    RoundingModeRestore() : m_original(std::fegetround()) {}
+
+    ~RoundingModeRestore() {
+        if (m_original != -1) std::fesetround(m_original);
+    }
+
+   private:
+    int m_original;
+};
 
 uint16_t bytesToUint16(std::span<const std::byte> bytes) {
     return static_cast<uint16_t>(std::to_integer<uint8_t>(bytes[0])) |
@@ -156,10 +185,313 @@ void testExhaustiveBinaryFormat(ScalarType type) {
         }
     }
 }
+
+void testIntegerConversionPrimitives() {
+    const ScalarConversionOptions defaults;
+    require(defaults.integerRounding == IntegerRounding::TowardZero &&
+                defaults.integerOverflow == IntegerOverflow::Reject,
+            "Scalar conversion option defaults changed.");
+
+    const ScalarConversionOptions rejectTowardZero{
+        IntegerRounding::TowardZero,
+        IntegerOverflow::Reject,
+    };
+    const ScalarConversionOptions rejectNearestEven{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::Reject,
+    };
+    const ScalarConversionOptions saturateNearestEven{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::Saturate,
+    };
+    const ScalarConversionOptions wrapNearestEven{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::ModuloWrap,
+    };
+
+    require(convertScalar<int32_t>(3.75, rejectTowardZero) == 3 &&
+                convertScalar<int32_t>(-3.75, rejectTowardZero) == -3,
+            "Toward-zero integer rounding mismatch.");
+
+    struct TieCase {
+        double value;
+        int32_t expected;
+    };
+    const std::array<TieCase, 6> ties{{
+        {0.5, 0},
+        {1.5, 2},
+        {2.5, 2},
+        {-0.5, 0},
+        {-1.5, -2},
+        {-2.5, -2},
+    }};
+    for (const auto& tie : ties)
+        require(convertScalar<int32_t>(tie.value, rejectNearestEven) == tie.expected,
+                "Nearest-even tie rounding mismatch.");
+
+    require(convertScalar<int8_t>(int16_t{-128}, rejectTowardZero) == -128 &&
+                convertScalar<int8_t>(int16_t{127}, rejectTowardZero) == 127,
+            "Signed integer boundary conversion mismatch.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)convertScalar<int8_t>(int16_t{-129}, rejectTowardZero); },
+        "Signed integer conversion accepted one below its minimum.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)convertScalar<int8_t>(int16_t{128}, rejectTowardZero); },
+        "Signed integer conversion accepted one above its maximum.");
+
+    require(convertScalar<uint8_t>(uint16_t{0}, rejectTowardZero) == 0 &&
+                convertScalar<uint8_t>(uint16_t{255}, rejectTowardZero) == 255,
+            "Unsigned integer boundary conversion mismatch.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)convertScalar<uint8_t>(int16_t{-1}, rejectTowardZero); },
+        "Unsigned integer conversion accepted a negative value.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)convertScalar<uint8_t>(uint16_t{256}, rejectTowardZero); },
+        "Unsigned integer conversion accepted one above its maximum.");
+
+    require(convertScalar<int64_t>(std::numeric_limits<int64_t>::min(), rejectTowardZero) ==
+                    std::numeric_limits<int64_t>::min() &&
+                convertScalar<int64_t>(std::numeric_limits<int64_t>::max(), rejectTowardZero) ==
+                    std::numeric_limits<int64_t>::max() &&
+                convertScalar<uint64_t>(std::numeric_limits<uint64_t>::max(), rejectTowardZero) ==
+                    std::numeric_limits<uint64_t>::max(),
+            "Wide integer boundary conversion mismatch.");
+    requireThrows<std::overflow_error>(
+        [&] {
+            (void)convertScalar<int64_t>(std::numeric_limits<uint64_t>::max(), rejectTowardZero);
+        },
+        "Signed conversion accepted UInt64 maximum.");
+
+    const double twoTo63 = std::ldexp(1.0, 63);
+    const double twoTo64 = std::ldexp(1.0, 64);
+    const double belowTwoTo64 = std::nextafter(twoTo64, 0.0);
+    require(
+        convertScalar<int64_t>(-twoTo63, rejectTowardZero) == std::numeric_limits<int64_t>::min(),
+        "Float-to-Int64 minimum conversion mismatch.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)convertScalar<int64_t>(twoTo63, rejectTowardZero); },
+        "Float-to-Int64 conversion accepted its exclusive upper bound.");
+    requireThrows<std::overflow_error>(
+        [&] {
+            (void)convertScalar<int64_t>(
+                std::nextafter(-twoTo63, -std::numeric_limits<double>::infinity()),
+                rejectTowardZero);
+        },
+        "Float-to-Int64 conversion accepted one representable value below its minimum.");
+    require(convertScalar<uint64_t>(belowTwoTo64, rejectTowardZero) ==
+                std::numeric_limits<uint64_t>::max() - uint64_t{2047},
+            "Float-to-UInt64 maximum representable value mismatch.");
+    requireThrows<std::overflow_error>(
+        [&] { (void)convertScalar<uint64_t>(twoTo64, rejectTowardZero); },
+        "Float-to-UInt64 conversion accepted its exclusive upper bound.");
+
+    require(convertScalar<int8_t>(int16_t{-129}, saturateNearestEven) == -128 &&
+                convertScalar<int8_t>(int16_t{128}, saturateNearestEven) == 127 &&
+                convertScalar<uint8_t>(int16_t{-1}, saturateNearestEven) == 0 &&
+                convertScalar<uint8_t>(uint16_t{256}, saturateNearestEven) == 255,
+            "Saturating integer conversion mismatch.");
+    require(convertScalar<int8_t>(std::numeric_limits<double>::infinity(), saturateNearestEven) ==
+                    127 &&
+                convertScalar<int8_t>(-std::numeric_limits<double>::infinity(),
+                                      saturateNearestEven) == -128 &&
+                convertScalar<uint8_t>(-std::numeric_limits<double>::infinity(),
+                                       saturateNearestEven) == 0,
+            "Saturating infinity conversion mismatch.");
+
+    require(convertScalar<int8_t>(int16_t{128}, wrapNearestEven) == -128 &&
+                convertScalar<int8_t>(int16_t{129}, wrapNearestEven) == -127 &&
+                convertScalar<int8_t>(int16_t{-129}, wrapNearestEven) == 127 &&
+                convertScalar<uint8_t>(int16_t{-1}, wrapNearestEven) == 255 &&
+                convertScalar<uint8_t>(uint16_t{256}, wrapNearestEven) == 0 &&
+                convertScalar<uint8_t>(258.6, wrapNearestEven) == 3,
+            "Modulo-wrap integer conversion mismatch.");
+    require(convertScalar<int64_t>(std::numeric_limits<uint64_t>::max(), wrapNearestEven) == -1 &&
+                convertScalar<uint64_t>(std::numeric_limits<int64_t>::min(), wrapNearestEven) ==
+                    (uint64_t{1} << 63) &&
+                convertScalar<uint64_t>(-1.0, wrapNearestEven) ==
+                    std::numeric_limits<uint64_t>::max() &&
+                convertScalar<int64_t>(twoTo63, wrapNearestEven) ==
+                    std::numeric_limits<int64_t>::min() &&
+                convertScalar<uint64_t>(
+                    std::nextafter(twoTo64, std::numeric_limits<double>::infinity()),
+                    wrapNearestEven) == 4096,
+            "Wide modulo-wrap conversion mismatch.");
+
+    for (const IntegerOverflow overflow :
+         {IntegerOverflow::Reject, IntegerOverflow::Saturate, IntegerOverflow::ModuloWrap}) {
+        const ScalarConversionOptions options{IntegerRounding::NearestEven, overflow};
+        requireThrows<std::domain_error>(
+            [&] {
+                (void)convertScalar<int32_t>(std::numeric_limits<double>::quiet_NaN(), options);
+            },
+            "Integer conversion accepted NaN.");
+    }
+    requireThrows<std::overflow_error>(
+        [&] {
+            (void)convertScalar<int32_t>(std::numeric_limits<double>::infinity(),
+                                         rejectNearestEven);
+        },
+        "Rejecting integer conversion accepted infinity.");
+    requireThrows<std::overflow_error>(
+        [&] {
+            (void)convertScalar<int32_t>(std::numeric_limits<double>::infinity(), wrapNearestEven);
+        },
+        "Modulo-wrap integer conversion accepted infinity.");
+
+    require(convertScalar<int32_t>(std::complex<double>{3.5, 0.0}, rejectNearestEven) == 4 &&
+                convertScalar<double>(std::complex<double>{-2.25, -0.0}, rejectTowardZero) == -2.25,
+            "Zero-imaginary complex-to-real conversion mismatch.");
+    requireThrows<std::domain_error>(
+        [&] { (void)convertScalar<int32_t>(std::complex<double>{3.5, 1.0}, rejectNearestEven); },
+        "Integer conversion discarded a nonzero imaginary component.");
+    requireThrows<std::domain_error>(
+        [&] { (void)convertScalar<double>(std::complex<double>{3.5, 1.0}, rejectTowardZero); },
+        "Floating conversion discarded a nonzero imaginary component.");
+}
+
+void testNearestEvenIgnoresHostRoundingMode() {
+    const RoundingModeRestore restore;
+    const ScalarConversionOptions nearestEvenReject{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::Reject,
+    };
+    const ScalarConversionOptions nearestEvenSaturate{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::Saturate,
+    };
+    const ScalarConversionOptions nearestEvenWrap{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::ModuloWrap,
+    };
+
+    struct Case {
+        double value;
+        int32_t expected;
+    };
+    const std::array<Case, 8> cases{{
+        {0.5, 0},
+        {1.5, 2},
+        {2.5, 2},
+        {3.5, 4},
+        {-0.5, 0},
+        {-1.5, -2},
+        {-2.5, -2},
+        {-3.5, -4},
+    }};
+    for (const int mode : {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO}) {
+        require(std::fesetround(mode) == 0, "Host did not accept a standard rounding mode.");
+        for (const auto& test : cases) {
+            volatile double value = test.value;
+            require(convertScalar<int32_t>(value, nearestEvenReject) == test.expected,
+                    "Nearest-even conversion depended on the host rounding mode.");
+        }
+
+        volatile double positiveBoundaryTie = 127.5;
+        volatile double negativeBoundaryTie = -128.5;
+        require(convertScalar<int8_t>(positiveBoundaryTie, nearestEvenSaturate) == 127 &&
+                    convertScalar<int8_t>(positiveBoundaryTie, nearestEvenWrap) == -128 &&
+                    convertScalar<int8_t>(negativeBoundaryTie, nearestEvenReject) == -128,
+                "Boundary tie conversion depended on the host rounding mode.");
+    }
+}
+
+void testIntegerCodecPolicies() {
+    const ScalarConversionOptions rejectNearestEven{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::Reject,
+    };
+    const ScalarConversionOptions saturateNearestEven{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::Saturate,
+    };
+    const ScalarConversionOptions wrapNearestEven{
+        IntegerRounding::NearestEven,
+        IntegerOverflow::ModuloWrap,
+    };
+
+    const std::array<double, 4> sourceValues{127.5, 128.5, -128.5, -129.5};
+    const Tensor source =
+        Tensor::fromNativeValues<double>(Shape{sourceValues.size()}, sourceValues);
+    const Tensor saturated = source.to(ScalarType::Int8, saturateNearestEven);
+    const Tensor wrapped = source.to(ScalarType::Int8, wrapNearestEven);
+    const std::array<int8_t, 4> saturatedExpected{127, 127, -128, -128};
+    const std::array<int8_t, 4> wrappedExpected{-128, -128, -128, 126};
+    for (size_t index = 0; index < sourceValues.size(); ++index) {
+        require(saturated.view().loadAs<int8_t>({index}) == saturatedExpected[index],
+                "Tensor saturating conversion mismatch.");
+        require(wrapped.view().loadAs<int8_t>({index}) == wrappedExpected[index],
+                "Tensor modulo-wrap conversion mismatch.");
+    }
+    requireThrows<std::overflow_error>(
+        [&] { (void)source.to(ScalarType::Int8, rejectNearestEven); },
+        "Tensor rejecting conversion accepted a rounded overflow.");
+    require(source.view().loadAs<int8_t>({0}, saturateNearestEven) == 127 &&
+                source.view().loadAs<int8_t>({0}, wrapNearestEven) == -128,
+            "Tensor load conversion options were not applied.");
+
+    Tensor nativeInteger(ScalarType::Int8, Shape{1});
+    nativeInteger.mutableView().storeFrom({0}, 128, saturateNearestEven);
+    require(nativeInteger.view().loadAs<int8_t>({0}) == 127,
+            "Native integer store did not saturate.");
+    nativeInteger.mutableView().storeFrom({0}, 128, wrapNearestEven);
+    require(nativeInteger.view().loadAs<int8_t>({0}) == -128,
+            "Native integer store did not modulo-wrap.");
+    requireThrows<std::overflow_error>(
+        [&] { nativeInteger.mutableView().storeFrom({0}, 128, rejectNearestEven); },
+        "Native integer store did not reject overflow.");
+
+    const std::array<int16_t, 1> overflowingValue{128};
+    const Tensor saturatedFactory = Tensor::fromValues<int16_t>(
+        ScalarType::Int8, Shape{1}, overflowingValue, saturateNearestEven);
+    require(saturatedFactory.view().loadAs<int8_t>({0}) == 127,
+            "Tensor value factory did not apply conversion options.");
+
+    Tensor packedInteger(ScalarType::Int4, Shape{4});
+    packedInteger.mutableView().storeFrom({0}, 9);
+    packedInteger.mutableView().storeFrom({1}, -9, saturateNearestEven);
+    packedInteger.mutableView().storeFrom({2}, 8, wrapNearestEven);
+    packedInteger.mutableView().storeFrom({3}, -9, wrapNearestEven);
+    require(packedInteger.view().loadAs<int32_t>({0}) == 7 &&
+                packedInteger.view().loadAs<int32_t>({1}) == -8 &&
+                packedInteger.view().loadAs<int32_t>({2}) == -8 &&
+                packedInteger.view().loadAs<int32_t>({3}) == 7,
+            "Packed integer policy conversion mismatch.");
+    requireThrows<std::overflow_error>(
+        [&] { packedInteger.mutableView().storeFrom({0}, 8, rejectNearestEven); },
+        "Packed integer store did not reject overflow.");
+
+    const Scalar zeroImaginary = Scalar::from(std::complex<double>{3.5, 0.0});
+    require(zeroImaginary.as<int32_t>(rejectNearestEven) == 4,
+            "Runtime scalar zero-imaginary conversion mismatch.");
+    const Scalar nonzeroImaginary = Scalar::from(std::complex<double>{3.5, 1.0});
+    requireThrows<std::domain_error>(
+        [&] { (void)nonzeroImaginary.as<double>(rejectNearestEven); },
+        "Runtime scalar conversion discarded a nonzero imaginary component.");
+
+    Tensor realTensor(ScalarType::Float32, Shape{1});
+    realTensor.mutableView().storeFrom({0}, std::complex<double>{1.25, 0.0}, rejectNearestEven);
+    require(realTensor.view().loadAs<float>({0}) == 1.25f,
+            "Zero-imaginary complex store mismatch.");
+    requireThrows<std::domain_error>(
+        [&] {
+            realTensor.mutableView().storeFrom({0}, std::complex<double>{1.25, 0.5},
+                                               rejectNearestEven);
+        },
+        "Real tensor store discarded a nonzero imaginary component.");
+
+    Tensor floatingCodec(ScalarType::Float8E4M3, Shape{1});
+    floatingCodec.mutableView().storeFrom({0}, 1.0625f, wrapNearestEven);
+    require(tensorRaw(floatingCodec) == 0x38,
+            "Integer conversion options changed floating codec tie behavior.");
+}
 }  // namespace
 
 int main() {
     using namespace roc::host_validation;
+
+    testIntegerConversionPrimitives();
+    testNearestEvenIgnoresHostRoundingMode();
+    testIntegerCodecPolicies();
 
     const int64_t exactInteger = 9'007'199'254'740'993;
     const Scalar integerScalar = Scalar::from(exactInteger);

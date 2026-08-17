@@ -10,14 +10,16 @@
 #include <cstdint>
 #include <hipblaslt_datatype2string.hpp>
 #include <limits>
-#include <roc/host_validation/adapters/hipblaslt/Types.hpp>
+#include <hipblaslt/host_validation/Types.hpp>
 #include <roc/host_validation/generation.hpp>
 #include <span>
 #include <utility>
 #include <vector>
 
-namespace roc::host_validation::hipblaslt_adapter
+namespace hipblaslt::host_validation
 {
+    using namespace ::roc::host_validation;
+
     enum class MatrixRole
     {
         A,
@@ -347,4 +349,4 @@ namespace roc::host_validation::hipblaslt_adapter
         initializeMatrixBatches(
             data, rows, columns, leadingDimension, batchStride, batchCount, options);
     }
-} // namespace roc::host_validation::hipblaslt_adapter
+} // namespace hipblaslt::host_validation

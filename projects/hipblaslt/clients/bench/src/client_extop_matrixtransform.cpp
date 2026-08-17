@@ -30,8 +30,8 @@
 #include <iostream>
 #include <memory>
 #include <numeric>
-#include <roc/host_validation/adapters/hipblaslt/HipblasltDataInitialization.hpp>
-#include <roc/host_validation/adapters/hipblaslt/MatrixTransformReference.hpp>
+#include <hipblaslt/host_validation/HipblasltDataInitialization.hpp>
+#include <hipblaslt/host_validation/MatrixTransformReference.hpp>
 #include <vector>
 
 struct MatrixTransformIO
@@ -82,7 +82,7 @@ private:
     void init(DType* buf, size_t len, hipblaslt_initialization initMethod)
     {
         std::vector<DType> ref(len);
-        roc::host_validation::hipblaslt_adapter::initialize(
+        hipblaslt::host_validation::initialize(
             ref.data(), ref.size(), initMethod);
 
         auto err = hipMemcpy(buf, ref.data(), len * sizeof(DType), hipMemcpyHostToDevice);
@@ -290,7 +290,7 @@ void validation(hipDataType datatype,
                 bool        transA,
                 bool        transB)
 {
-    const auto   scalarType   = roc::host_validation::hipblaslt_adapter::scalarType(datatype);
+    const auto   scalarType   = hipblaslt::host_validation::scalarType(datatype);
     const size_t elementBytes = roc::host_validation::scalarTypeInfo(scalarType).storageBits / 8;
     const size_t storageBytes = size_t(m) * n * batchSize * elementBytes;
     std::vector<std::byte> hA(storageBytes);
@@ -300,7 +300,7 @@ void validation(hipDataType datatype,
     hipErr                        = hipMemcpyDtoH(hB.data(), b, storageBytes);
     hipErr                        = hipMemcpyDtoH(hC.data(), c, storageBytes);
 
-    roc::host_validation::hipblaslt_adapter::MatrixTransformReferenceArguments arguments;
+    hipblaslt::host_validation::MatrixTransformReferenceArguments arguments;
     arguments.observed               = hC.data();
     arguments.observedStorageBytes   = storageBytes;
     arguments.a                      = hA.data();
@@ -324,11 +324,11 @@ void validation(hipDataType datatype,
     arguments.beta                   = beta;
 
     const auto result
-        = roc::host_validation::hipblaslt_adapter::referenceMatrixTransform(arguments);
+        = hipblaslt::host_validation::referenceMatrixTransform(arguments);
     if(!result.comparison.passed())
     {
-        roc::host_validation::hipblaslt_adapter::reportMatrixTransformMismatches(std::cerr,
-                                                                                 result.comparison);
+        hipblaslt::host_validation::reportMatrixTransformMismatches(std::cerr,
+                                                                    result.comparison);
         std::cerr << '\n';
     }
 }

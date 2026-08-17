@@ -28,7 +28,7 @@
 
 // Product-private hipBLASLt adapter.
 
-// Compatibility include bundle for client vector and initialization types.
+// hipBLASLt client compatibility include bundle for vector and initialization types.
 #include "d_vector.hpp"
 
 #include "device_vector.hpp"

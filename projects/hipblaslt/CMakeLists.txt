@@ -322,9 +322,6 @@ if(_hipblaslt_host_validation_enabled
         block(SCOPE_FOR VARIABLES)
             set(HOST_VALIDATION_BUILD_TESTING OFF)
             set(HOST_VALIDATION_BUILD_BLAS_BACKEND ${HIPBLASLT_ENABLE_CLIENT})
-            set(HOST_VALIDATION_BUILD_MX_BACKEND
-                ${_hipblaslt_mxdatagen_enabled}
-            )
             add_subdirectory(
                 "${_hipblaslt_host_validation_source}"
                 "${CMAKE_CURRENT_BINARY_DIR}/host-validation"
