@@ -284,9 +284,9 @@ bool pointwiseKernelMatches(const MatchContext& context,
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double pointwiseScore(const KernelDefinition& kernel,
-                      const MatchContext& /*context*/,
-                      const BoundTokens& /*bound*/)
+double pointwiseScore(const MatchContext& /*context*/,
+                      const BoundTokens& /*bound*/,
+                      const KernelDefinition& kernel)
 {
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));
 }

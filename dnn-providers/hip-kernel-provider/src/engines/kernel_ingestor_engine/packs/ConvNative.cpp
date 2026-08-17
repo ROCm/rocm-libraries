@@ -295,9 +295,9 @@ bool convFwdKernelMatches(const MatchContext& context,
     return kernel.getStringMetadata(std::string(DTYPE_FIELD)) == dataTypeName(*dataType);
 }
 
-double convFwdScore(const KernelDefinition& kernel,
-                    const MatchContext& /*context*/,
-                    const BoundTokens& /*bound*/)
+double convFwdScore(const MatchContext& /*context*/,
+                    const BoundTokens& /*bound*/,
+                    const KernelDefinition& kernel)
 {
     // A stand-in for a trained model: prefers the larger block size.
     return static_cast<double>(kernel.getIntMetadata(std::string(BLOCK_SIZE_FIELD)));

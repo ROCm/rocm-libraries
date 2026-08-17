@@ -69,9 +69,9 @@ bool matchKernel(const MatchContext& /*context*/,
     return true;
 }
 
-double score(const KernelDefinition& /*kernel*/,
-             const MatchContext& /*context*/,
-             const BoundTokens& /*bound*/)
+double score(const MatchContext& /*context*/,
+             const BoundTokens& /*bound*/,
+             const KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }

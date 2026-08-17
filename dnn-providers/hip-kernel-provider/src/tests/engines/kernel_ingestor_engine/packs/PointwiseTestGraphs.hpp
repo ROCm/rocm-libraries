@@ -180,11 +180,11 @@ inline bool matchesKernel(const PackSymbols& pack,
 }
 
 inline double scoreKernel(const PackSymbols& pack,
-                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                           const hipdnn_plugin_sdk::ingestor::MatchContext& context,
+                          const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                           const hipdnn_plugin_sdk::ingestor::BoundTokens& bound = {})
 {
-    return scorer(pack)(kernel, context, bound);
+    return scorer(pack)(context, bound, kernel);
 }
 
 /// Tensor uids the builders below use, in argument order.

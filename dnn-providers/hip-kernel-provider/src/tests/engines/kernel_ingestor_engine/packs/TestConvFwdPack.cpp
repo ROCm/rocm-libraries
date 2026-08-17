@@ -276,8 +276,8 @@ TEST(TestConvFwdScore, PrefersTheLargerBlockSize)
 {
     const GraphFixture fixture(buildConvFwdGraph());
 
-    EXPECT_GT(scoreKernel(CONV_FWD, makeKernel(256, "FLOAT", "ConvFwd"), fixture.context()),
-              scoreKernel(CONV_FWD, makeKernel(64, "FLOAT", "ConvFwd"), fixture.context()));
+    EXPECT_GT(scoreKernel(CONV_FWD, fixture.context(), makeKernel(256, "FLOAT", "ConvFwd")),
+              scoreKernel(CONV_FWD, fixture.context(), makeKernel(64, "FLOAT", "ConvFwd")));
 }
 
 // ---------------------------------------------------------------------------

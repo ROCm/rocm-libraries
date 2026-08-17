@@ -290,8 +290,8 @@ TEST(TestPointwiseAddScore, PrefersTheLargerBlockSize)
 {
     const GraphFixture fixture(buildPointwiseGraph());
 
-    EXPECT_GT(scoreKernel(POINTWISE_ADD, makeKernel(256, "FLOAT"), fixture.context()),
-              scoreKernel(POINTWISE_ADD, makeKernel(64, "FLOAT"), fixture.context()));
+    EXPECT_GT(scoreKernel(POINTWISE_ADD, fixture.context(), makeKernel(256, "FLOAT")),
+              scoreKernel(POINTWISE_ADD, fixture.context(), makeKernel(64, "FLOAT")));
 }
 
 TEST(TestPointwiseAddBinding, TheGraphMatchBindsTheOperandUidsItResolved)

@@ -58,9 +58,9 @@ std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
     return hipdnn_plugin_sdk::ingestor::BoundTokens{};
 }
 
-double scoreNothing(const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/,
-                    const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
-                    const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/)
+double scoreNothing(const hipdnn_plugin_sdk::ingestor::MatchContext& /*context*/,
+                    const hipdnn_plugin_sdk::ingestor::BoundTokens& /*bound*/,
+                    const hipdnn_plugin_sdk::ingestor::KernelDefinition& /*kernel*/)
 {
     return 0.0;
 }

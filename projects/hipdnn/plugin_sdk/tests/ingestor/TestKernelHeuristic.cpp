@@ -90,7 +90,7 @@ TEST(TestIngestorKernelHeuristic, ScoresFromTheTokensTheGraphMatchBound)
     constexpr const char* TOKEN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.token_score";
     ScoreRegistry::registerSymbol(
         TOKEN_SCORE_SYMBOL,
-        +[](const KernelDefinition& kernel, const MatchContext&, const BoundTokens& bound) {
+        +[](const MatchContext&, const BoundTokens& bound, const KernelDefinition& kernel) {
             const auto preferred = tryGetBoundInt(bound, "test.preferred_block_size");
             return preferred.has_value()
                            && kernel.getIntMetadata(std::string(BLOCK_SIZE)) == *preferred
@@ -281,7 +281,7 @@ TEST(TestIngestorKernelHeuristic, TreatsInfiniteScoresAsOrdinaryExtremes)
 
     ScoreRegistry::registerSymbol(
         "hipdnn.kernel_ingestor.test.infinite_score",
-        +[](const KernelDefinition& kernel, const MatchContext&, const BoundTokens&) -> double {
+        +[](const MatchContext&, const BoundTokens&, const KernelDefinition& kernel) -> double {
             return kernel.getIntMetadata(BLOCK_SIZE) == 4096
                        ? std::numeric_limits<double>::infinity()
                        : -std::numeric_limits<double>::infinity();
@@ -321,7 +321,7 @@ TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicBuildsANativeHeuristicForNa
     const TestGraph graph;
     const auto properties = testDeviceProperties();
     const MatchContext context{graph, 0, properties};
-    EXPECT_EQ(heuristic->score(makeDefinition(testId(0x01), 128), context, BoundTokens{}), 128.0);
+    EXPECT_EQ(heuristic->score(context, BoundTokens{}, makeDefinition(testId(0x01), 128)), 128.0);
 }
 
 TEST(TestIngestorKernelHeuristic, MakeKernelHeuristicThrowsForAKindWithNoAdapter)
@@ -417,8 +417,8 @@ TEST(TestIngestorKernelHeuristic, UnrankedRanksEveryKernelEqually)
 
     const UnrankedKernelHeuristic heuristic;
 
-    EXPECT_EQ(heuristic.score(makeDefinition(testId(0x01), 64), context, BoundTokens{}),
-              heuristic.score(makeDefinition(testId(0x02), 4096), context, BoundTokens{}));
+    EXPECT_EQ(heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x01), 64)),
+              heuristic.score(context, BoundTokens{}, makeDefinition(testId(0x02), 4096)));
 }
 
 } // namespace

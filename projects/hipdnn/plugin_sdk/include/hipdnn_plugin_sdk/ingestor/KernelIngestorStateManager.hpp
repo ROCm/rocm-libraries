@@ -475,7 +475,7 @@ private:
                 // kernel matcher below reads the definition without mutating it.
                 KernelDefinition definition = precomputed;
 
-                if(kernelLevelMatchersPass(pack, context, definition, catalog.bound))
+                if(kernelLevelMatchersPass(pack, context, catalog.bound, definition))
                 {
                     catalog.entries.push_back(std::move(definition));
                     ++admitted;
@@ -534,8 +534,8 @@ private:
 
     bool kernelLevelMatchersPass(const KernelDescriptorPack& pack,
                                  const MatchContext& context,
-                                 const KernelDefinition& kernel,
-                                 const BoundTokens& bound) const
+                                 const BoundTokens& bound,
+                                 const KernelDefinition& kernel) const
     {
         for(const auto& matcherId : pack.matcherIds)
         {

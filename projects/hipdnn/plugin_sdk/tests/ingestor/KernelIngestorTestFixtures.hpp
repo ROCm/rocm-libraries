@@ -174,9 +174,9 @@ inline bool acceptFloatKernels(const MatchContext& /*context*/,
     return kernel.getStringMetadata(DTYPE) == "FLOAT";
 }
 
-inline double scoreByBlockSize(const KernelDefinition& kernel,
-                               const MatchContext& /*context*/,
-                               const BoundTokens& /*bound*/)
+inline double scoreByBlockSize(const MatchContext& /*context*/,
+                               const BoundTokens& /*bound*/,
+                               const KernelDefinition& kernel)
 {
     return static_cast<double>(kernel.getIntMetadata(BLOCK_SIZE));
 }
@@ -386,9 +386,9 @@ inline bool countingFloatKernels(const MatchContext& context,
 
 constexpr const char* CONSTANT_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.constant_score";
 
-inline double scoreConstant(const KernelDefinition& /*kernel*/,
-                            const MatchContext& /*context*/,
-                            const BoundTokens& /*bound*/)
+inline double scoreConstant(const MatchContext& /*context*/,
+                            const BoundTokens& /*bound*/,
+                            const KernelDefinition& /*kernel*/)
 {
     return 1.0;
 }
@@ -416,9 +416,9 @@ constexpr const char* NAN_SCORE_SYMBOL = "hipdnn.kernel_ingestor.test.nan_score"
 /// Scores the largest block size NaN and everything else by block size, so a ranking
 /// that mishandles NaN misorders the *finite* kernels too -- the failure this models is
 /// one pack poisoning the order for the rest, not merely losing its own place.
-inline double scoreNanForLargestBlock(const KernelDefinition& kernel,
-                                      const MatchContext& /*context*/,
-                                      const BoundTokens& /*bound*/)
+inline double scoreNanForLargestBlock(const MatchContext& /*context*/,
+                                      const BoundTokens& /*bound*/,
+                                      const KernelDefinition& kernel)
 {
     return kernel.getIntMetadata(BLOCK_SIZE) == 4096
                ? std::numeric_limits<double>::quiet_NaN()
