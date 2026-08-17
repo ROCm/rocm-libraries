@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -133,6 +134,164 @@ class TestRecords(unittest.TestCase):
             rocke_debug.decode_word(0, "f64")
         with self.assertRaises(ValueError):
             rocke_debug.decode_word(1 << 32, "f32")
+
+
+def _tile_value(
+    *,
+    storage_dtype="f32",
+    shape=(2, 2),
+    wave_size=2,
+    fragment_length=2,
+    locations=("$v40", "$v41"),
+    coordinates=None,
+):
+    if coordinates is None:
+        coordinates = [
+            {"lane": 0, "slot": 0, "index": [0, 0]},
+            {"lane": 0, "slot": 1, "index": [0, 1]},
+            {"lane": 1, "slot": 0, "index": [1, 0]},
+            {"lane": 1, "slot": 1, "index": [1, 1]},
+        ]
+    return {
+        "name": "acc",
+        "dtype": "f32",
+        "shape": list(shape),
+        "storage_dtype": storage_dtype,
+        "locations": list(locations),
+        "layout": {
+            "name": "test.acc",
+            "role": "acc",
+            "wave_size": wave_size,
+            "fragment_length": fragment_length,
+            "coordinates": coordinates,
+        },
+    }
+
+
+class TestLogicalValues(unittest.TestCase):
+    def test_reconstructs_collection_into_layout_ordered_tile(self):
+        record = rocke_debug.decode_logical_value(
+            _tile_value(),
+            (
+                (0x3F800000, 0x40400000),
+                (0x40000000, 0x40800000),
+            ),
+            exec_mask=0b01,
+        )
+
+        self.assertEqual(record["schema"], "rocke-debug-value/v1")
+        self.assertEqual(record["status"], "available")
+        self.assertEqual(
+            [[cell["value"] for cell in row] for row in record["tile"]],
+            [[1.0, 2.0], [3.0, 4.0]],
+        )
+        self.assertEqual(
+            [[cell["status"] for cell in row] for row in record["tile"]],
+            [
+                ["available", "available"],
+                ["inactive_lane", "inactive_lane"],
+            ],
+        )
+        self.assertEqual(record["tile"][0][1]["machine_location"], "$v41")
+
+    def test_packed_storage_elements_become_fragment_slots(self):
+        value = _tile_value(
+            storage_dtype="f16x2",
+            shape=(1, 2),
+            wave_size=1,
+            fragment_length=2,
+            locations=("$v7",),
+            coordinates=[
+                {"lane": 0, "slot": 0, "index": [0, 0]},
+                {"lane": 0, "slot": 1, "index": [0, 1]},
+            ],
+        )
+        value["dtype"] = "f16"
+        record = rocke_debug.decode_logical_value(value, ((0x40003C00,),), exec_mask=1)
+
+        self.assertEqual([cell["value"] for cell in record["tile"][0]], [1.0, 2.0])
+        self.assertEqual([cell["packed_index"] for cell in record["tile"][0]], [0, 1])
+
+    def test_fp8_collection_expands_four_slots(self):
+        value = _tile_value(
+            storage_dtype="fp8e4m3x4",
+            shape=(1, 4),
+            wave_size=1,
+            fragment_length=4,
+            locations=("$v8",),
+            coordinates=[
+                {"lane": 0, "slot": slot, "index": [0, slot]} for slot in range(4)
+            ],
+        )
+        value["dtype"] = "fp8e4m3"
+        record = rocke_debug.decode_logical_value(value, ((0x7F7EB838,),), exec_mask=1)
+
+        self.assertEqual(
+            [cell["value_text"] for cell in record["tile"][0]],
+            ["1.0", "-1.0", "448.0", "nan"],
+        )
+
+    def test_jsonl_and_human_output_preserve_logical_provenance(self):
+        record = rocke_debug.decode_logical_value(
+            _tile_value(),
+            ((0x3F800000, 0x40400000), (0x40000000, 0x40800000)),
+        )
+
+        decoded = json.loads(rocke_debug.records_jsonl([record]))
+        self.assertEqual(decoded["name"], "acc")
+        self.assertEqual(decoded["layout"]["name"], "test.acc")
+        self.assertEqual(decoded["machine_locations"], ["$v40", "$v41"])
+        human = rocke_debug.values_human([record])
+        self.assertIn("acc f32 [2x2] layout=test.acc status=available", human)
+        self.assertIn("locations: $v40, $v41", human)
+        self.assertIn("?1.0 ?2.0", human)
+
+    def test_unavailable_status_is_explicit(self):
+        record = rocke_debug.unavailable_value(
+            _tile_value(), "optimized_out", "value has been optimized out"
+        )
+
+        self.assertEqual(record["status"], "optimized_out")
+        self.assertIsNone(record["tile"])
+        self.assertIn("optimized out", rocke_debug.values_human([record]))
+
+        error = ValueError("layout coordinate is invalid")
+        self.assertEqual(
+            rocke_debug.unavailable_status_for_error(error), "unsupported_layout"
+        )
+
+    def test_manifest_load_and_lookup(self):
+        manifest = {
+            "schema": "rocke-debug-manifest/v1",
+            "values": [_tile_value()],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            loaded = rocke_debug.load_manifest(str(path))
+
+        self.assertEqual(rocke_debug.manifest_value(loaded, "acc")["dtype"], "f32")
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            rocke_debug.manifest_value(loaded, "missing")
+
+    def test_manifest_rejects_non_object_values(self):
+        manifest = {"schema": "rocke-debug-manifest/v1", "values": [1]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(TypeError, "must be an object"):
+                rocke_debug.load_manifest(str(path))
+
+    def test_rejects_storage_width_and_layout_collisions(self):
+        with self.assertRaisesRegex(ValueError, "provide 1 elements"):
+            rocke_debug.decode_logical_value(
+                _tile_value(locations=("$v40",)), ((0, 0),)
+            )
+
+        duplicate = _tile_value()
+        duplicate["layout"]["coordinates"][1]["index"] = [0, 0]
+        with self.assertRaisesRegex(ValueError, "multiple physical sources"):
+            rocke_debug.decode_logical_value(duplicate, ((0, 0), (0, 0)))
 
 
 if __name__ == "__main__":

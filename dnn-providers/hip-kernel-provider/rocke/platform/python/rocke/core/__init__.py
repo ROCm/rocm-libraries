@@ -38,6 +38,19 @@ module exists so the layering is explicit.
 
 from __future__ import annotations
 
+from .backend import (
+    BackendCoverageGap,
+    BackendError,
+    BackendMismatch,
+    lower_universal_gemm,
+    resolve_backend,
+)
+from .debug_manifest import (
+    DEBUG_MANIFEST_SCHEMA,
+    debug_manifest,
+    evaluate_layout,
+    logical_value_manifest,
+)
 from .ir import (
     BF16,
     F16,
@@ -56,13 +69,6 @@ from .ir import (
     Type,
     Value,
     VectorType,
-)
-from .backend import (
-    BackendCoverageGap,
-    BackendError,
-    BackendMismatch,
-    lower_universal_gemm,
-    resolve_backend,
 )
 from .ir_print import print_ir
 from .ir_serialize import (
@@ -88,6 +94,7 @@ from .verify import Diagnostic, verify, verify_or_raise
 
 __all__ = [
     "BF16",
+    "DEBUG_MANIFEST_SCHEMA",
     "F16",
     "F32",
     "FP8E4M3",
@@ -95,35 +102,38 @@ __all__ = [
     "I8",
     "I32",
     "I64",
+    "BackendCoverageGap",
+    "BackendError",
+    "BackendMismatch",
+    "Diagnostic",
     "IRBuilder",
     "KernelDef",
     "Op",
+    "PassStats",
     "PtrType",
     "Region",
     "SmemType",
     "Type",
     "Value",
     "VectorType",
-    "BackendCoverageGap",
-    "BackendError",
-    "BackendMismatch",
-    "lower_universal_gemm",
-    "resolve_backend",
-    "print_ir",
-    "serialize",
-    "parse",
-    "canonicalize",
     "canonical_equal",
-    "Diagnostic",
-    "verify",
-    "verify_or_raise",
+    "canonicalize",
+    "canonicalize_region",
+    "debug_manifest",
+    "eliminate_dead_pure_ops",
+    "evaluate_layout",
+    "logical_value_manifest",
     "lower_implicit_gemm_conv_to_cktile",
     "lower_kernel_to_hip",
     "lower_kernel_to_llvm",
     "lower_spec_to_cktile",
+    "lower_universal_gemm",
     "lower_universal_gemm_to_cktile",
-    "PassStats",
-    "canonicalize_region",
-    "eliminate_dead_pure_ops",
     "optimize_kernel",
+    "parse",
+    "print_ir",
+    "resolve_backend",
+    "serialize",
+    "verify",
+    "verify_or_raise",
 ]

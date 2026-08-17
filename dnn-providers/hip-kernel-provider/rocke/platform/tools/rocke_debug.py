@@ -8,6 +8,7 @@ Source this file from rocGDB, then use ``rocke decode``::
     (gdb) source tools/rocke_debug.py
     (gdb) rocke decode $v40 --dtype f32
     (gdb) rocke decode $v41 --dtype fp8e4m3x4 --format jsonl
+    (gdb) rocke value acc --manifest debug-manifest.json
 
 The decoder is deliberately independent of rocGDB. Ordinary Python tests can
 verify dtype semantics and structured output without a GPU or a stopped wave.
@@ -25,8 +26,26 @@ from collections.abc import Sequence
 from typing import Any
 
 SCHEMA = "rocke-register-v1"
+VALUE_SCHEMA = "rocke-debug-value/v1"
+MANIFEST_SCHEMA = "rocke-debug-manifest/v1"
 DTYPES = ("f32", "f16x2", "bf16x2", "fp8e4m3x4", "bf8e5m2x4")
 FLOAT8_FORMATS = ("ocp", "fnuz")
+VALUE_STATUSES = (
+    "available",
+    "optimized_out",
+    "location_unavailable",
+    "inactive_lane",
+    "stale_manifest",
+    "unsupported_dtype",
+    "unsupported_layout",
+)
+_LOGICAL_STORAGE_DTYPES = {
+    "f16": "f16x2",
+    "bf16": "bf16x2",
+    "f32": "f32",
+    "fp8e4m3": "fp8e4m3x4",
+    "bf8e5m2": "bf8e5m2x4",
+}
 
 
 def _value_text(value: float, classification: str, negative: bool) -> str:
@@ -230,6 +249,278 @@ def records_human(records: Sequence[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def load_manifest(path: str) -> dict[str, Any]:
+    """Load and minimally validate a portable rocKE debug manifest."""
+    try:
+        with open(path, encoding="utf-8") as stream:
+            manifest = json.load(stream)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"cannot load debug manifest {path!r}: {error}") from error
+    if not isinstance(manifest, dict) or manifest.get("schema") != MANIFEST_SCHEMA:
+        actual = manifest.get("schema") if isinstance(manifest, dict) else None
+        raise ValueError(
+            f"unsupported debug manifest schema {actual!r}; expected {MANIFEST_SCHEMA!r}"
+        )
+    values = manifest.get("values")
+    if not isinstance(values, list):
+        raise TypeError("debug manifest 'values' must be a list")
+    if any(not isinstance(value, dict) for value in values):
+        raise TypeError("every debug manifest value must be an object")
+    return manifest
+
+
+def manifest_value(manifest: dict[str, Any], name: str) -> dict[str, Any]:
+    """Return one uniquely named logical-value entry from ``manifest``."""
+    matches = [value for value in manifest["values"] if value.get("name") == name]
+    if len(matches) != 1:
+        raise ValueError(
+            f"debug manifest must contain exactly one value named {name!r}; "
+            f"found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _validated_value_spec(value: dict[str, Any]) -> tuple[int, int, int]:
+    """Validate a logical-value manifest entry and return layout dimensions."""
+    if not isinstance(value.get("name"), str) or not value["name"]:
+        raise ValueError("logical value name must be a non-empty string")
+    dtype = value.get("dtype")
+    storage_dtype = value.get("storage_dtype")
+    if dtype not in ("f16", "bf16", "f32", "fp8e4m3", "bf8e5m2"):
+        raise ValueError(f"unsupported logical dtype {dtype!r}")
+    if storage_dtype not in DTYPES:
+        raise ValueError(f"unsupported storage dtype {storage_dtype!r}")
+    expected_storage = _LOGICAL_STORAGE_DTYPES[dtype]
+    if storage_dtype != expected_storage:
+        raise ValueError(
+            f"logical dtype {dtype!r} requires storage dtype {expected_storage!r}, "
+            f"not {storage_dtype!r}"
+        )
+
+    shape = value.get("shape")
+    if (
+        not isinstance(shape, list)
+        or len(shape) != 2
+        or any(not isinstance(extent, int) or extent <= 0 for extent in shape)
+    ):
+        raise ValueError(
+            f"value {value.get('name')!r} has invalid tile shape {shape!r}"
+        )
+    layout = value.get("layout")
+    if not isinstance(layout, dict):
+        raise TypeError(f"value {value.get('name')!r} has no layout object")
+    if not isinstance(layout.get("name"), str) or not layout["name"]:
+        raise ValueError("layout name must be a non-empty string")
+    if layout.get("role") not in ("a", "b", "acc"):
+        raise ValueError(f"unsupported layout role {layout.get('role')!r}")
+    wave_size = layout.get("wave_size")
+    fragment_length = layout.get("fragment_length")
+    if not isinstance(wave_size, int) or wave_size <= 0:
+        raise ValueError(f"invalid layout wave size {wave_size!r}")
+    if not isinstance(fragment_length, int) or fragment_length <= 0:
+        raise ValueError(f"invalid layout fragment length {fragment_length!r}")
+
+    locations = value.get("locations")
+    if not isinstance(locations, list) or any(
+        not isinstance(location, str) or not location for location in locations
+    ):
+        raise ValueError("value locations must be a list of non-empty expressions")
+    packed_width = len(decode_word(0, storage_dtype))
+    if len(locations) * packed_width != fragment_length:
+        raise ValueError(
+            f"{len(locations)} {storage_dtype} locations provide "
+            f"{len(locations) * packed_width} elements, but layout requires "
+            f"{fragment_length}"
+        )
+
+    coordinates = layout.get("coordinates")
+    if not isinstance(coordinates, list):
+        raise TypeError("layout coordinates must be a list")
+    if len(coordinates) != wave_size * fragment_length:
+        raise ValueError(
+            f"layout has {len(coordinates)} coordinates; expected "
+            f"{wave_size * fragment_length}"
+        )
+    if len(coordinates) != shape[0] * shape[1]:
+        raise ValueError(
+            f"layout has {len(coordinates)} logical elements, but shape {shape!r} "
+            f"contains {shape[0] * shape[1]}"
+        )
+    seen_physical = set()
+    seen_logical = set()
+    for coordinate in coordinates:
+        if not isinstance(coordinate, dict):
+            raise TypeError("every layout coordinate must be an object")
+        lane = coordinate.get("lane")
+        slot = coordinate.get("slot")
+        index = coordinate.get("index")
+        if (
+            not isinstance(lane, int)
+            or not 0 <= lane < wave_size
+            or not isinstance(slot, int)
+            or not 0 <= slot < fragment_length
+            or not isinstance(index, list)
+            or len(index) != 2
+            or any(not isinstance(axis, int) for axis in index)
+            or not 0 <= index[0] < shape[0]
+            or not 0 <= index[1] < shape[1]
+        ):
+            raise ValueError(f"invalid layout coordinate {coordinate!r}")
+        physical = (lane, slot)
+        logical = tuple(index)
+        if physical in seen_physical:
+            raise ValueError(f"duplicate physical layout coordinate {physical!r}")
+        if logical in seen_logical:
+            raise ValueError(
+                f"layout coordinate {logical!r} has multiple physical sources"
+            )
+        seen_physical.add(physical)
+        seen_logical.add(logical)
+    return wave_size, fragment_length, packed_width
+
+
+def unavailable_value(
+    value: dict[str, Any], status: str, detail: str
+) -> dict[str, Any]:
+    """Build an explicit unavailable logical-value record."""
+    if status not in VALUE_STATUSES or status in ("available", "inactive_lane"):
+        raise ValueError(f"invalid unavailable status {status!r}")
+    return {
+        "schema": VALUE_SCHEMA,
+        "name": value.get("name"),
+        "dtype": value.get("dtype"),
+        "shape": value.get("shape"),
+        "status": status,
+        "detail": detail,
+        "machine_locations": value.get("locations", []),
+        "layout": value.get("layout"),
+        "elements": [],
+        "tile": None,
+    }
+
+
+def unavailable_status_for_error(error: Exception) -> str:
+    """Classify manifest/decoder failures for machine-readable output."""
+    message = str(error).lower()
+    if "dtype" in message:
+        return "unsupported_dtype"
+    if "layout" in message or "coordinate" in message or "shape" in message:
+        return "unsupported_layout"
+    return "stale_manifest"
+
+
+def decode_logical_value(
+    value: dict[str, Any],
+    raw_locations: Sequence[Sequence[int]],
+    exec_mask: int | None = None,
+    float8_format: str = "ocp",
+) -> dict[str, Any]:
+    """Reconstruct a logical tile from lane-major physical register words."""
+    wave_size, fragment_length, packed_width = _validated_value_spec(value)
+    locations = value["locations"]
+    if len(raw_locations) != len(locations):
+        raise ValueError(
+            f"received {len(raw_locations)} physical locations; expected {len(locations)}"
+        )
+    if any(len(words) != wave_size for words in raw_locations):
+        lengths = [len(words) for words in raw_locations]
+        raise ValueError(
+            f"physical location lane counts {lengths!r} do not match wave size {wave_size}"
+        )
+
+    coordinate_by_physical = {
+        (coordinate["lane"], coordinate["slot"]): coordinate["index"]
+        for coordinate in value["layout"]["coordinates"]
+    }
+    shape = value["shape"]
+    tile: list[list[dict[str, Any] | None]] = [
+        [None for _ in range(shape[1])] for _ in range(shape[0])
+    ]
+    elements = []
+    storage_dtype = value["storage_dtype"]
+    for location_index, (location, words) in enumerate(zip(locations, raw_locations)):
+        for lane, word in enumerate(words):
+            decoded = decode_word(
+                int(word) & 0xFFFFFFFF,
+                storage_dtype,
+                float8_format=float8_format,
+            )
+            for packed_index, scalar in enumerate(decoded):
+                slot = location_index * packed_width + packed_index
+                if slot >= fragment_length:
+                    continue
+                index = coordinate_by_physical[(lane, slot)]
+                active = None if exec_mask is None else bool(exec_mask & (1 << lane))
+                status = "inactive_lane" if active is False else "available"
+                element = {
+                    "index": index,
+                    "lane": lane,
+                    "slot": slot,
+                    "active": active,
+                    "status": status,
+                    "machine_location": location,
+                    "packed_index": packed_index,
+                    "raw_bits": scalar["raw_bits"],
+                    "raw_hex": scalar["raw_hex"],
+                    "class": scalar["class"],
+                    "sign": scalar["sign"],
+                    "value": scalar["value"],
+                    "value_text": scalar["value_text"],
+                }
+                elements.append(element)
+                tile[index[0]][index[1]] = element
+
+    return {
+        "schema": VALUE_SCHEMA,
+        "name": value["name"],
+        "dtype": value["dtype"],
+        "storage_dtype": storage_dtype,
+        "float8_format": float8_format if "8" in storage_dtype else None,
+        "shape": shape,
+        "status": "available",
+        "detail": None,
+        "exec_mask": None if exec_mask is None else f"0x{exec_mask:x}",
+        "machine_locations": locations,
+        "layout": {
+            key: value["layout"][key]
+            for key in ("name", "role", "wave_size", "fragment_length")
+        },
+        "elements": elements,
+        "tile": tile,
+    }
+
+
+def values_human(records: Sequence[dict[str, Any]]) -> str:
+    """Render logical values and reconstructed tiles for humans."""
+    lines = []
+    for record in records:
+        shape = "x".join(str(extent) for extent in record.get("shape") or [])
+        layout = record.get("layout") or {}
+        lines.append(
+            f"{record.get('name')} {record.get('dtype')} [{shape}] "
+            f"layout={layout.get('name', '?')} status={record['status']}"
+        )
+        if record["status"] != "available":
+            lines.append(f"  {record.get('detail', '')}")
+            continue
+        lines.append("  locations: " + ", ".join(record["machine_locations"]))
+        lines.append("  inactive lanes are prefixed with ~; unknown activity with ?")
+        for row, cells in enumerate(record["tile"]):
+            rendered = []
+            for cell in cells:
+                if cell is None:
+                    rendered.append("<missing>")
+                else:
+                    prefix = (
+                        "~"
+                        if cell["active"] is False
+                        else ("?" if cell["active"] is None else "")
+                    )
+                    rendered.append(prefix + cell["value_text"])
+            lines.append(f"  {row:>3}: " + " ".join(rendered))
+    return "\n".join(lines)
+
+
 def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rocke decode", add_help=False)
     parser.add_argument("expression")
@@ -238,6 +529,17 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--float8-format", choices=FLOAT8_FORMATS, default="ocp")
     parser.add_argument("--lane", action="append", type=int)
     parser.add_argument("--active-only", action="store_true")
+    parser.add_argument("--exec", dest="exec_expression", default="$exec")
+    parser.add_argument("--help", action="help")
+    return parser
+
+
+def _value_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="rocke value", add_help=False)
+    parser.add_argument("name")
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--format", choices=("human", "jsonl"), default="human")
+    parser.add_argument("--float8-format", choices=FLOAT8_FORMATS, default="ocp")
     parser.add_argument("--exec", dest="exec_expression", default="$exec")
     parser.add_argument("--help", action="help")
     return parser
@@ -301,5 +603,54 @@ if gdb is not None:
             except (ValueError, RuntimeError, gdb.error) as error:
                 raise gdb.GdbError(str(error)) from error
 
+    class RockeValue(gdb.Command):
+        """Render a logical value: rocke value NAME --manifest PATH."""
+
+        def __init__(self) -> None:
+            super().__init__("rocke value", gdb.COMMAND_DATA)
+
+        def invoke(self, argument: str, from_tty: bool) -> None:
+            del from_tty
+            try:
+                args = _value_argument_parser().parse_args(shlex.split(argument))
+                value = manifest_value(load_manifest(args.manifest), args.name)
+                raw_locations = []
+                try:
+                    for expression in value.get("locations", []):
+                        raw_locations.append(_gdb_words(gdb.parse_and_eval(expression)))
+                except (gdb.error, RuntimeError) as error:
+                    message = str(error)
+                    status = (
+                        "optimized_out"
+                        if "optimized out" in message.lower()
+                        else "location_unavailable"
+                    )
+                    record = unavailable_value(value, status, message)
+                else:
+                    try:
+                        exec_mask = int(gdb.parse_and_eval(args.exec_expression))
+                    except (gdb.error, RuntimeError):
+                        exec_mask = None
+                    try:
+                        record = decode_logical_value(
+                            value,
+                            raw_locations,
+                            exec_mask=exec_mask,
+                            float8_format=args.float8_format,
+                        )
+                    except (TypeError, ValueError) as error:
+                        record = unavailable_value(
+                            value, unavailable_status_for_error(error), str(error)
+                        )
+                rendered = (
+                    records_jsonl([record])
+                    if args.format == "jsonl"
+                    else values_human([record])
+                )
+                gdb.write(rendered + "\n")
+            except (TypeError, ValueError, RuntimeError, gdb.error) as error:
+                raise gdb.GdbError(str(error)) from error
+
     RockePrefix()
     RockeDecode()
+    RockeValue()
