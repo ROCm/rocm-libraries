@@ -94,6 +94,8 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: rocm-libraries
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: true
 
       - name: Run setup test environment workflow
         timeout-minutes: 15
@@ -130,6 +132,13 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard }}
           TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
           TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
+          # MIOpen resolves its packaged system databases against MIOPEN_SYSTEM_DB_PATH, which
+          # CMake only bakes in for BUILD_DEV builds. Windows has no <lib>/share/miopen/db
+          # fallback, so in a BUILD_DEV=Off CI build the path is empty and lookup resolves
+          # relative to the ctest working directory rather than the artifact tree. Point it at
+          # bin/, which is DATABASE_INSTALL_DIR on Windows and where the databases actually land.
+          # Left empty elsewhere; Linux resolves correctly on its own.
+          MIOPEN_SYSTEM_DB_PATH: ${{ runner.os == 'Windows' && format('{0}/build/bin', github.workspace) || '' }}
         run: |
           # Create logs directory
           mkdir -p ./test_logs
