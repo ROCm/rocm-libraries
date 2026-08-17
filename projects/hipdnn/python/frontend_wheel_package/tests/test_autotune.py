@@ -960,7 +960,13 @@ def test_knob_constraints_describe_legal_values():
 
 @pytest.mark.gpu
 def test_knob_settings_end_to_end():
-    """Knob settings reach the engine: accepted, rejected, echoed and executed."""
+    """Knob settings are handed to the frontend, validated, echoed and executed.
+
+    Full lowering of the settings into the engine config descriptor is covered by
+    IntegrationGraphKnobsDescriptorLowering on the C++ side; what matters here is
+    that the bindings pass the settings through at all, which a rejection of an
+    illegal value demonstrates.
+    """
     report = _run_plugin_probe(
         "knob_settings.py", _knobs_plugin(), "no engine declares knobs"
     )
@@ -987,6 +993,11 @@ def test_knob_settings_end_to_end():
     ), results
 
     assert report["plan_created"]["ok"], report["plan_created"]["message"]
+    # Proves the settings vector reached the frontend on this path too. Unlike
+    # add_engine(), plan creation reports the raw constraint failure without
+    # naming the knob.
+    assert report["plan_rejected"]["ok"] is False, report["plan_rejected"]
+    assert "valid values" in report["plan_rejected"]["message"], report["plan_rejected"]
     assert report["plan_built"]["ok"], report["plan_built"]["message"]
     assert report["plan_executed"]["ok"], report["plan_executed"]["message"]
     assert report["plan_engine_id"] == engine_id

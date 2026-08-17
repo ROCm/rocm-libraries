@@ -79,6 +79,17 @@ created = planned.create_execution_plan_ext(
     engine_id, [hipdnn.KnobSetting(knob_id, other)]
 )
 report["plan_created"] = {"ok": created.is_good(), "message": created.get_message()}
+
+# An illegal value has to be refused here too. If the binding dropped the
+# settings vector, as it did while create_execution_plan_ext hardcoded an empty
+# one, this would succeed and nothing else in the flow would notice.
+plan_rejected = planned.create_execution_plan_ext(
+    engine_id, [hipdnn.KnobSetting(knob_id, max(values) + 1000)]
+)
+report["plan_rejected"] = {
+    "ok": plan_rejected.is_good(),
+    "message": plan_rejected.get_message(),
+}
 built_plans = planned.build_plans()
 report["plan_built"] = {
     "ok": built_plans.is_good(),
