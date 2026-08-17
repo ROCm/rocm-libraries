@@ -230,7 +230,10 @@ auto shuffle_b_v0(const ck_tile::HostTensor<T>& t)
     }
     else
     {
-        constexpr int MaxVecSize = 16 / sizeof(T);
+        // Defaults to 16 / sizeof(T); a config may override via BContiguousItemsPerAccess.
+        // Sub-byte packed types need the override to reach a full 16-byte access, and the
+        // value must match the device-side B granularity for the consuming pipeline.
+        constexpr int MaxVecSize = detail::b_contiguous_items_per_access<FlatmmConfig, T>::value;
         // because ck_tile::get_warp_size returns 64 in host side
         int KLane =
             (ck_tile::is_wave32() ? (ck_tile::get_warp_size() / 2) : (ck_tile::get_warp_size())) /

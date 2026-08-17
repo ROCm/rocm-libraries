@@ -1032,6 +1032,22 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
     static constexpr auto PreshuffleB      = Base::PreshuffleB;
     static constexpr auto TiledMMAPermuteN = Base::TiledMMAPermuteN;
 
+    // B-preshuffle granularity for the host shuffle: 16 bytes expressed in elements.
+    // sizeof() is the storage unit, so sub-byte packed types need PackedSize to reach a
+    // full 128-bit access. This MUST stay identical (same operand order) to KBPerLoad in
+    // gemm_wp_abquant_pipeline_ag_bg_cr_base_policy.hpp; if they diverge, host and device
+    // interleave K differently.
+    // The warp tiles come from Base, which overrides GemmConfig's on gfx1250.
+    struct BShuffleConfig : public GemmConfig
+    {
+        static constexpr ck_tile::index_t N_Warp_Tile = Base::N_Warp_Tile;
+        static constexpr ck_tile::index_t K_Warp_Tile = Base::K_Warp_Tile;
+
+        static constexpr ck_tile::index_t BContiguousItemsPerAccess =
+            16 / static_cast<ck_tile::index_t>(sizeof(BDataType)) *
+            ck_tile::numeric_traits<BDataType>::PackedSize;
+    };
+
     protected:
     void SetUpQuantTypeSpecific() {}
     void TearDownQuantTypeSpecific() {}
@@ -1113,12 +1129,12 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             if constexpr(TiledMMAPermuteN && BQuantGroupSize::kN == 1)
             {
                 printf("PreshuffleB with TiledMMAPermuteN\n");
-                b_k_n_dev = ck_tile::shuffle_b_permuteN<GemmConfig>(b_k_n);
+                b_k_n_dev = ck_tile::shuffle_b_permuteN<BShuffleConfig>(b_k_n);
             }
             else
             {
                 printf("PreshuffleB without TiledMMAPermuteN\n");
-                b_k_n_dev = ck_tile::shuffle_b_v0<GemmConfig>(b_k_n);
+                b_k_n_dev = ck_tile::shuffle_b_v0<BShuffleConfig>(b_k_n);
             }
         }
         if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)

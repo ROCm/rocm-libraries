@@ -57,8 +57,14 @@ struct GemmWPABQuantPipelineAgBgCrPolicy : public UniversalWeightPreshufflePipel
         constexpr index_t BlockSize = Problem::kBlockSize;
         constexpr index_t WaveSize  = get_warp_size();
         constexpr index_t WaveNum   = BlockSize / WaveSize;
-        constexpr index_t KBPerLoad =
-            min(GetKBPerLoad<Problem>(), 16 / static_cast<index_t>(sizeof(BDataType)));
+        // 16 bytes per access, expressed in elements. sizeof() is the storage unit, so
+        // sub-byte packed types need PackedSize to reach a full 128-bit load and to match
+        // A's K granularity (gemm_wp_abquant_pipeline_ag_bg_cr_v2.hpp) -- if the two
+        // disagree, A and B interleave K differently and half of every dot product pairs
+        // mismatched elements.
+        constexpr index_t BPackedSize = numeric_traits<remove_cvref_t<BDataType>>::PackedSize;
+        constexpr index_t KBPerLoad   = min(
+            GetKBPerLoad<Problem>(), 16 / static_cast<index_t>(sizeof(BDataType)) * BPackedSize);
 #if defined(__gfx11__)
         constexpr index_t KRepeatInWave = 2;
 #else
