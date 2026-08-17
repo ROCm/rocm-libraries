@@ -672,10 +672,8 @@ void testing_larft(Arguments& argus)
     I stTau = argus.get<rocblas_int>("strideTau", k);
     I stT   = argus.get<rocblas_int>("strideT", ldt * k);
 
-    hipsolverDirectMode_t direct
-        = (directC == 'F' || directC == 'f') ? HIPSOLVER_DIRECT_FORWARD : HIPSOLVER_DIRECT_BACKWARD;
-    hipsolverStorevMode_t storev = (storevC == 'C' || storevC == 'c') ? HIPSOLVER_STOREV_COLUMNWISE
-                                                                      : HIPSOLVER_STOREV_ROWWISE;
+    hipsolverDirectMode_t direct = char2hipsolver_direct(directC);
+    hipsolverStorevMode_t storev = char2hipsolver_storev(storevC);
 
     int bc        = argus.batch_count;
     int hot_calls = argus.iters;

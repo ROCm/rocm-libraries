@@ -248,3 +248,29 @@ hipsolverEigRange_t char2hipsolver_erange(char value)
         throw std::invalid_argument("Invalid character");
     }
 }
+
+hipsolverDirectMode_t char2hipsolver_direct(char value)
+{
+    switch(value)
+    {
+    case 'F':
+        return HIPSOLVER_DIRECT_FORWARD;
+    case 'B':
+        return HIPSOLVER_DIRECT_BACKWARD;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}
+
+hipsolverStorevMode_t char2hipsolver_storev(char value)
+{
+    switch(value)
+    {
+    case 'C':
+        return HIPSOLVER_STOREV_COLUMNWISE;
+    case 'R':
+        return HIPSOLVER_STOREV_ROWWISE;
+    default:
+        throw std::invalid_argument("Invalid character");
+    }
+}

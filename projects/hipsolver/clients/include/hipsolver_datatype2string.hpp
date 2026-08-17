@@ -110,3 +110,7 @@ hipsolverEigMode_t char2hipsolver_evect(char value);
 hipsolverEigType_t char2hipsolver_eform(char value);
 
 hipsolverEigRange_t char2hipsolver_erange(char value);
+
+hipsolverDirectMode_t char2hipsolver_direct(char value);
+
+hipsolverStorevMode_t char2hipsolver_storev(char value);
