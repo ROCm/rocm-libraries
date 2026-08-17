@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -166,13 +167,12 @@ int main(int argc, char** argv) noexcept
                   "--test-engine). Implies --allow-bundles, since bundles are what "
                   "carry the claims. Idempotent: no support change = zero git diff.");
         parser.add_argument("--emit-support-observations")
-            .default_value(false)
-            .implicit_value(true)
-            .help("Emit a ##support-snapshot:{json} line to stdout after the run "
-                  "containing all (bundle, case, engine) observations for this "
-                  "target. Pure side effect: never changes the verdict. CI greps "
-                  "stdout into a JSON file for "
-                  "scripts/harvest_support_observations.py.");
+            .default_value(std::string{})
+            .implicit_value(std::string{"stdout"})
+            .help("Emit support-observation snapshots after the run. Always writes "
+                  "##support-snapshot:{json} lines to stdout. When a directory path "
+                  "is given, also writes one JSON file per target under that path. "
+                  "Pure side effect: never changes the verdict.");
         std::vector<std::string> remainingArgs;
         try
         {
@@ -326,7 +326,12 @@ int main(int argc, char** argv) noexcept
         opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
         opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
 
-        opts.emitSupportObservations = parser.get<bool>("--emit-support-observations");
+        const auto emitArg = parser.get<std::string>("--emit-support-observations");
+        opts.emitSupportObservations = !emitArg.empty();
+        if(opts.emitSupportObservations && emitArg != "stdout")
+        {
+            opts.supportObservationsDir = emitArg;
+        }
 
         // The write path drains the log into sidecars and diverts every bundle
         // away from actually running. Harvesting from that run would record
@@ -508,6 +513,21 @@ int main(int argc, char** argv) noexcept
                 {
                     snapshot["provenance"] = provenance;
                     std::cout << "##support-snapshot:" << snapshot.dump() << std::endl;
+                }
+
+                if(hipdnn_integration_tests::TestConfig::get().hasSupportObservationsDir())
+                {
+                    const auto& outDir
+                        = hipdnn_integration_tests::TestConfig::get().getSupportObservationsDir();
+                    std::filesystem::create_directories(outDir);
+                    for(const auto& snapshot : snapshots)
+                    {
+                        const auto arch = snapshot["target"]["arch"].get<std::string>();
+                        const auto platform = snapshot["target"]["platform"].get<std::string>();
+                        const auto filename = arch + "_" + platform + ".snapshot.json";
+                        std::ofstream out(outDir / filename);
+                        out << snapshot.dump(2) << "\n";
+                    }
                 }
             }
         }

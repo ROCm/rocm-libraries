@@ -133,9 +133,11 @@ struct TestConfigOptions
     std::optional<std::filesystem::path> captureDir;
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
-    // When true, the harness prints ##support-observation: tagged lines to
-    // stdout during test execution (RFC 0015 §12.1).
+    // When true, the harness prints ##support-snapshot: tagged lines to
+    // stdout after the run (RFC 0015 §12.1). When a directory is also given,
+    // snapshot JSON files are written there alongside.
     bool emitSupportObservations = false;
+    std::optional<std::filesystem::path> supportObservationsDir;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -232,6 +234,7 @@ public:
         instance._captureDir = std::move(opts.captureDir);
 
         instance._emitSupportObservations = opts.emitSupportObservations;
+        instance._supportObservationsDir = std::move(opts.supportObservationsDir);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -439,6 +442,22 @@ public:
         return _emitSupportObservations;
     }
 
+    bool hasSupportObservationsDir() const
+    {
+        throwIfNotInitialized();
+        return _supportObservationsDir.has_value();
+    }
+
+    const std::filesystem::path& getSupportObservationsDir() const
+    {
+        throwIfNotInitialized();
+        if(!_supportObservationsDir.has_value())
+        {
+            throw std::runtime_error("getSupportObservationsDir() called but no path was provided");
+        }
+        return _supportObservationsDir.value();
+    }
+
 private:
     TestConfig() = default;
 
@@ -458,6 +477,7 @@ private:
     std::optional<VerificationMode> _verificationMode;
     std::optional<std::filesystem::path> _captureDir;
     bool _emitSupportObservations = false;
+    std::optional<std::filesystem::path> _supportObservationsDir;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;
