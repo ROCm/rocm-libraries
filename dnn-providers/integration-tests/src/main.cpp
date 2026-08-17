@@ -477,12 +477,12 @@ int main(int argc, char** argv) noexcept
 
         if(hipdnn_integration_tests::TestConfig::get().emitSupportObservations())
         {
-            const auto& log = hipdnn_integration_tests::bundle::SupportObservationLog::get();
-            if(!log.empty())
-            {
-                auto snapshots
-                    = log.toSnapshotJsons(hipdnn_integration_tests::bundle::resolveDataDir());
+            auto snapshots
+                = hipdnn_integration_tests::bundle::SupportObservationLog::get().toSnapshotJsons(
+                    hipdnn_integration_tests::bundle::resolveDataDir());
 
+            if(!snapshots.empty())
+            {
                 auto envOr = [](const char* name) -> std::string {
                     const char* v = std::getenv(name);
                     return v ? v : "";

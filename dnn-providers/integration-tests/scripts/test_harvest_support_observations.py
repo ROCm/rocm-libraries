@@ -94,16 +94,18 @@ def _record(
     engine: str = MIOPEN,
     verdict: str = SUPPORTED,
     case_id: str | None = None,
-    **extra,
+    graph: str | None = None,
+    enforcement_level: str = "full",
 ) -> dict:
-    record = {
+    record: dict = {
         "bundle": bundle,
         "case_id": case_id,
         "engine": engine,
         "verdict": verdict,
-        "enforcement_level": "full",
+        "enforcement_level": enforcement_level,
     }
-    record.update(extra)
+    if graph is not None:
+        record["graph"] = graph
     return record
 
 
@@ -206,6 +208,18 @@ class TestParseSnapshot:
         with pytest.raises(ValueError, match="schema_version"):
             parse_snapshot(self._snap([], schema_version=99))
 
+    def test_rejects_zero_schema_version(self) -> None:
+        with pytest.raises(ValueError, match="invalid schema_version"):
+            parse_snapshot(self._snap([], schema_version=0))
+
+    def test_rejects_string_schema_version(self) -> None:
+        with pytest.raises(ValueError, match="invalid schema_version"):
+            parse_snapshot(self._snap([], schema_version="1"))
+
+    def test_future_schema_version_mentions_upgrade(self) -> None:
+        with pytest.raises(ValueError, match="newer than this tool"):
+            parse_snapshot(self._snap([], schema_version=2))
+
     def test_rejects_missing_target(self) -> None:
         with pytest.raises(ValueError, match="'target'"):
             parse_snapshot({"schema_version": 1, "observations": []})
@@ -307,6 +321,29 @@ class TestUnion:
         merged, _, stats = load_snapshots([tmp_path / "missing.json", good])
         assert len(merged) == 1
         assert stats.files_read == 1
+        assert stats.files_failed == 1
+
+    def test_old_format_jsonl_is_detected(self, tmp_path: Path) -> None:
+        old = tmp_path / "old.jsonl"
+        old.write_text(
+            '{"bundle":"quick/A","engine":"E","verdict":"supported"}\n'
+            '{"bundle":"quick/B","engine":"E","verdict":"declined"}\n',
+            encoding="utf-8",
+        )
+        good = _snapshot(tmp_path / "good.json", [_record("quick/A")])
+        merged, _, stats = load_snapshots([old, good])
+        assert len(merged) == 1
+        assert stats.files_failed == 1
+
+    def test_missing_schema_version_is_detected(self, tmp_path: Path) -> None:
+        bad = tmp_path / "noversion.json"
+        bad.write_text(
+            json.dumps({"target": {"arch": "gfx942", "platform": "linux"}}),
+            encoding="utf-8",
+        )
+        good = _snapshot(tmp_path / "good.json", [_record("quick/A")])
+        merged, _, stats = load_snapshots([bad, good])
+        assert len(merged) == 1
         assert stats.files_failed == 1
 
 

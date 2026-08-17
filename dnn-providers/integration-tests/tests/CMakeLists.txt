@@ -38,6 +38,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportClaimReport.cpp
     TestSupportClaimRoundTrip.cpp
     TestSupportClaimWriter.cpp
+    TestSupportObservationLog.cpp
     TestSupportVerdict.cpp
 )
 

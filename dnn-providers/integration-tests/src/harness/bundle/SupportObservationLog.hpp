@@ -145,15 +145,23 @@ public:
 
     // Build one snapshot JSON per unique (arch, platform) target in the log.
     // Multi-GPU runs produce multiple snapshots; single-GPU runs (the common
-    // case) produce exactly one.  `bundleRoot` turns absolute sidecar paths
-    // into relative bundle keys (e.g. "quick/Conv/Default").
+    // case) produce exactly one.  Returns an empty vector when the log is
+    // empty, so callers need not check empty() first (avoids TOCTOU).
+    // `bundleRoot` turns absolute sidecar paths into relative bundle keys
+    // (e.g. "quick/Conv/Default").
     std::vector<nlohmann::json> toSnapshotJsons(const std::filesystem::path& bundleRoot) const
     {
-        const std::lock_guard<std::mutex> lock(_mutex);
+        // Snapshot the cells under the lock, then release before doing
+        // filesystem work (std::filesystem::relative is a syscall).
+        std::map<CellKey, CellValue> snapshot;
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            snapshot = _cells;
+        }
 
         // Group cells by target — preserves map ordering within each group.
         std::map<std::pair<std::string, std::string>, nlohmann::json> targetObs;
-        for(const auto& [key, val] : _cells)
+        for(const auto& [key, val] : snapshot)
         {
             std::error_code ec;
             const auto relative
@@ -177,11 +185,11 @@ public:
         snapshots.reserve(targetObs.size());
         for(auto& [target, observations] : targetObs)
         {
-            nlohmann::json snapshot;
-            snapshot["schema_version"] = 1;
-            snapshot["target"] = {{"arch", target.first}, {"platform", target.second}};
-            snapshot["observations"] = std::move(observations);
-            snapshots.push_back(std::move(snapshot));
+            nlohmann::json snap;
+            snap["schema_version"] = 1;
+            snap["target"] = {{"arch", target.first}, {"platform", target.second}};
+            snap["observations"] = std::move(observations);
+            snapshots.push_back(std::move(snap));
         }
         return snapshots;
     }

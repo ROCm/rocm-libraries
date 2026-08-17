@@ -217,8 +217,13 @@ def parse_snapshot(
         raise ValueError(f"snapshot must be an object, got {type(data).__name__}")
 
     version = data.get("schema_version")
-    if version != 1:
-        raise ValueError(f"unsupported schema_version {version!r} (expected 1)")
+    if not isinstance(version, int) or version < 1:
+        raise ValueError(f"invalid schema_version {version!r} (expected positive int)")
+    if version > 1:
+        raise ValueError(
+            f"schema_version {version} is newer than this tool supports (max 1); "
+            "upgrade the harvest tool or regenerate with --emit-support-observations"
+        )
 
     target = data.get("target")
     if not isinstance(target, dict):
@@ -290,8 +295,24 @@ def load_snapshots(
 
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            warn(f"{path}: invalid JSON ({exc}); skipping file")
+        except json.JSONDecodeError:
+            if "\n" in text.strip() and text.strip().startswith("{"):
+                warn(
+                    f"{path}: looks like old-format JSONL (one object per line); "
+                    "this tool now expects snapshot JSON. Re-run tests with "
+                    "the current binary to produce the new format."
+                )
+            else:
+                warn(f"{path}: invalid JSON; skipping file")
+            stats.files_failed += 1
+            continue
+
+        if isinstance(data, dict) and "schema_version" not in data:
+            warn(
+                f"{path}: JSON object has no schema_version field; "
+                "this looks like a pre-snapshot observation. Re-run tests with "
+                "the current binary to produce the new format."
+            )
             stats.files_failed += 1
             continue
 
