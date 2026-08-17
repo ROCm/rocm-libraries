@@ -19,6 +19,11 @@ from pathlib import Path
 # Diagnostic source label for an active Python rocm-sdk-core installation.
 _PYTHON_SDK_SOURCE = "active Python rocm_sdk_core"
 
+# Temporary compatibility gates. Keep the implementation below intact so the
+# version and Python-SDK paths can be re-enabled once TheRock provides them.
+_ENABLE_ROCM_VERSION_VALIDATION = False
+_ENABLE_PYTHON_ROCM_RUNTIME = False
+
 class TensileLiteRuntimeError(ImportError):
     """The installed TensileLite wheel and ROCm runtime do not match."""
 
@@ -56,10 +61,15 @@ def validate_distribution(
     distribution: str, distribution_version: str | None = None
 ) -> ValidatedRocm:
     """Select and validate the ROCm installation for a TensileLite wheel."""
-    expected = _expected_rocm_version(distribution, distribution_version)
-    python_sdk_version = _python_sdk_version()
-    if python_sdk_version is not None:
-        return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
+    expected = (
+        _expected_rocm_version(distribution, distribution_version)
+        if _ENABLE_ROCM_VERSION_VALIDATION
+        else "BYPASS"
+    )
+    if _ENABLE_PYTHON_ROCM_RUNTIME:
+        python_sdk_version = _python_sdk_version()
+        if python_sdk_version is not None:
+            return _validate_python_sdk(distribution, distribution_version, expected, python_sdk_version)
     return _validate_system_rocm(distribution, distribution_version, expected)
 
 
@@ -171,14 +181,15 @@ def _validate_python_sdk(
     version = _canonical_rocm_version(python_sdk_version)
     path = _python_sdk_location()
     executable_search_paths = _python_sdk_executable_search_paths()
-    _validate_compatibility(
-        distribution=distribution,
-        distribution_version=distribution_version,
-        expected_version=expected,
-        actual_version=version,
-        path=path,
-        source=_PYTHON_SDK_SOURCE,
-    )
+    if expected != "BYPASS":
+        _validate_compatibility(
+            distribution=distribution,
+            distribution_version=distribution_version,
+            expected_version=expected,
+            actual_version=version,
+            path=path,
+            source=_PYTHON_SDK_SOURCE,
+        )
     return PythonRocm(
         path=path,
         version=version,
@@ -249,14 +260,15 @@ def _validate_system_rocm(
         # TODO: Enable once conventional prefixes ship tensilelite-client here.
         # path / "libexec" / "hipblaslt" / "tensilelite",
     )
-    _validate_compatibility(
-        distribution=distribution,
-        distribution_version=distribution_version,
-        expected_version=_rocm_base_version(expected),
-        actual_version=actual,
-        path=path,
-        source=resolved.source,
-    )
+    if expected != "BYPASS":
+        _validate_compatibility(
+            distribution=distribution,
+            distribution_version=distribution_version,
+            expected_version=_rocm_base_version(expected),
+            actual_version=actual,
+            path=path,
+            source=resolved.source,
+        )
     return SystemRocm(
         path=path,
         version=actual,
