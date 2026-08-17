@@ -36,6 +36,33 @@ from rocke.runtime import KernelLauncher, LaunchConfig  # noqa: E402
 _TORCH_DT = {"bf16": torch.bfloat16, "fp16": torch.float16}
 
 
+def _build_request(args, sq: int):
+    """Build AttentionRequest from CLI args for dispatch path."""
+    from dispatch.attention import AttentionRequest
+
+    return AttentionRequest(
+        # Required fields
+        batch=1,
+        nhead_q=args.hq,
+        nhead_k=args.hkv,
+        seqlen_q=sq,
+        seqlen_k=sq,  # self-attention
+        hdim_q=args.d,
+        hdim_v=args.d,
+        arch="gfx950",
+        # Optional fields
+        mask_type=args.causal,  # 0 or 1, converted to bool by _dense_spec
+        use_sinks=args.use_sinks,
+        sliding_window=args.sw,
+        dtype=args.dtype,
+        algorithm="attention_dense",  # Required for opt-in to dense candidate
+        # Dense-specific knobs
+        dense_persistent="off" if not args.persistent else "on",
+        dense_num_persistent=args.np,
+        dense_persist_decode="auto",
+    )
+
+
 def _make_launcher(spec: AttentionDenseSpec):
     """kernel-spec generation + compilation + ABI signature -> cached launcher."""
     ok, why = supports_attention_dense(spec)
@@ -55,6 +82,8 @@ def _make_launcher(spec: AttentionDenseSpec):
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.use_sinks:
+        sb = sb.ptr("sink_ptr", spec.dtype)
     if spec.varlen:
         sb = sb.ptr("cu_seqlens_q", "i32").ptr("cu_seqlens_kv", "i32")
     sig = sb.build()
@@ -84,10 +113,17 @@ def run(
     out = torch.zeros(B, Sq, Hq, D, dtype=dt, device=dev)
     scale = 1.0 / math.sqrt(D)
 
+    # Generate sink tensor if needed (per query head, raw attention scores)
+    sinks = None
+    if spec.use_sinks:
+        sinks = torch.randn(Hq, dtype=dt, device=dev).contiguous()
+
     launcher = _make_launcher(spec)
     stream = torch.cuda.current_stream().cuda_stream
     cfg = _launch_config(spec, stream)
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": scale}
+    if spec.use_sinks:
+        vals["sink_ptr"] = sinks
 
     def call():
         launcher(vals, config=cfg)
@@ -97,23 +133,57 @@ def run(
 
     err = float("nan")
     if check:
-        qh = q.transpose(1, 2).float()
+        qh = q.transpose(1, 2).float()  # [B, Hq, Sq, D]
         rep = Hq // Hkv
-        kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()
-        vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()
+        kh = k.transpose(1, 2).repeat_interleave(rep, 1).float()  # [B, Hq, Skv, D]
+        vh = v.transpose(1, 2).repeat_interleave(rep, 1).float()  # [B, Hq, Skv, D]
         W = spec.sliding_window
-        if spec.causal and W > 0:
-            # Banded mask: keep k in [q-W+1, q] (causal AND sliding window).
-            qi = torch.arange(Sq, device=dev).view(-1, 1)
-            ki = torch.arange(Skv, device=dev).view(1, -1)
-            allowed = (ki <= qi) & (ki > qi - W)
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, attn_mask=allowed
-            ).transpose(1, 2)
+
+        # When sinks are enabled, must use manual implementation (torch SDPA doesn't support sinks)
+        if spec.use_sinks:
+            # Manual attention computation (matches parity_unified_attention.py pattern)
+            attn = torch.einsum("bhqd,bhkd->bhqk", qh, kh) / math.sqrt(D)
+
+            # Apply causal and/or sliding window masks
+            if spec.causal or W > 0:
+                qi = torch.arange(Sq, device=dev).view(-1, 1)
+                ki = torch.arange(Skv, device=dev).view(1, -1)
+                mask = torch.zeros(Sq, Skv, dtype=torch.bool, device=dev)
+                if spec.causal:
+                    mask |= ki > qi  # Causal: mask future tokens
+                if W > 0:
+                    mask |= ki <= (qi - W)  # Sliding window: mask tokens beyond window
+                attn.masked_fill_(mask.view(1, 1, Sq, Skv), float("-inf"))
+
+            # Add sinks to attention scores (append virtual sink token)
+            if sinks is not None:
+                # Sinks are raw attention scores (same domain as attn)
+                sink_scores = sinks.float().view(1, Hq, 1, 1).expand(B, Hq, Sq, 1)
+                attn = torch.cat([attn, sink_scores], dim=-1)  # [B, Hq, Sq, Skv+1]
+
+            # Softmax over all scores (including sink)
+            attn = torch.softmax(attn, dim=-1)
+
+            # Remove sink from attention weights (sink has no V vector)
+            if sinks is not None:
+                attn = attn[..., :-1]  # [B, Hq, Sq, Skv]
+
+            ref = torch.einsum("bhqk,bhkd->bhqd", attn, vh).transpose(1, 2)
+
         else:
-            ref = torch.nn.functional.scaled_dot_product_attention(
-                qh, kh, vh, is_causal=spec.causal
-            ).transpose(1, 2)
+            # Original fast path: use PyTorch's optimized SDPA when sinks not needed
+            if spec.causal and W > 0:
+                # Banded mask: keep k in [q-W+1, q] (causal AND sliding window).
+                qi = torch.arange(Sq, device=dev).view(-1, 1)
+                ki = torch.arange(Skv, device=dev).view(1, -1)
+                allowed = (ki <= qi) & (ki > qi - W)
+                ref = torch.nn.functional.scaled_dot_product_attention(
+                    qh, kh, vh, attn_mask=allowed
+                ).transpose(1, 2)
+            else:
+                ref = torch.nn.functional.scaled_dot_product_attention(
+                    qh, kh, vh, is_causal=spec.causal
+                ).transpose(1, 2)
         err = (out.float() - ref).abs().max().item()
 
     for _ in range(warmup):
@@ -163,24 +233,51 @@ def main():
     ap.add_argument(
         "--sw", type=int, default=0, help="sliding_window (0=off; multiple of --bn)"
     )
+    ap.add_argument("--use-sinks", action="store_true", help="enable attention sinks")
+    ap.add_argument(
+        "--dispatch",
+        action="store_true",
+        help="route through dispatch layer instead of direct spec construction",
+    )
     args = ap.parse_args()
+
+    # Warn about incompatible flags when using dispatch path
+    if args.dispatch:
+        if args.bn != 64:
+            print(f"Warning: --dispatch uses block_n=64 (ignoring --bn {args.bn})")
+        if args.wpe != 2:
+            print(
+                f"Warning: --dispatch uses waves_per_eu=2 (ignoring --wpe {args.wpe})"
+            )
+        if args.interleave:
+            print("Warning: --dispatch does not support --interleave")
+
     for sq in (256, 512, 2048, 8192):
-        spec = AttentionDenseSpec(
-            batch=1,
-            seqlen_q=sq,
-            seqlen_kv=sq,
-            num_query_heads=args.hq,
-            num_kv_heads=args.hkv,
-            head_size=args.d,
-            causal=bool(args.causal),
-            dtype=args.dtype,
-            block_n=args.bn,
-            waves_per_eu=args.wpe,
-            persistent=args.persistent,
-            num_persistent=args.np,
-            interleave=args.interleave,
-            sliding_window=args.sw,
-        )
+        if args.dispatch:
+            # Route through dispatch layer
+            from dispatch.attention.gfx950 import dense_spec_for_request
+
+            req = _build_request(args, sq)
+            spec = dense_spec_for_request(req)
+        else:
+            # Direct spec construction (original path)
+            spec = AttentionDenseSpec(
+                batch=1,
+                seqlen_q=sq,
+                seqlen_kv=sq,
+                num_query_heads=args.hq,
+                num_kv_heads=args.hkv,
+                head_size=args.d,
+                causal=bool(args.causal),
+                dtype=args.dtype,
+                block_n=args.bn,
+                waves_per_eu=args.wpe,
+                persistent=args.persistent,
+                num_persistent=args.np,
+                interleave=args.interleave,
+                sliding_window=args.sw,
+                use_sinks=args.use_sinks,
+            )
         run(spec)
 
 
