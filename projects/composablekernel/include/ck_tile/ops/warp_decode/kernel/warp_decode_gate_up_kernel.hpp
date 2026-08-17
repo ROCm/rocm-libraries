@@ -85,8 +85,12 @@ struct WarpDecodeGateUpKernel : public WarpDecodeNumeric
             return fail("WarpDecodeGateUpKernel requires positive tensor dimensions.");
         }
 
-        if(kargs.stride_x < kargs.hidden || kargs.stride_w_gate < kargs.hidden ||
-           kargs.stride_w_up < kargs.hidden || kargs.stride_intermediate < kargs.inter)
+        // Packed FP4 stores two values per pk_fp4_t, so a weight row of `hidden`
+        // fp4 values spans hidden/2 bytes (mirrors WarpDecodeDownReduceKernel).
+        const index_t min_w_stride =
+            std::is_same_v<WDataType, pk_fp4_t> ? (kargs.hidden / 2) : kargs.hidden;
+        if(kargs.stride_x < kargs.hidden || kargs.stride_w_gate < min_w_stride ||
+           kargs.stride_w_up < min_w_stride || kargs.stride_intermediate < kargs.inter)
         {
             return fail("WarpDecodeGateUpKernel received an invalid row stride.");
         }
