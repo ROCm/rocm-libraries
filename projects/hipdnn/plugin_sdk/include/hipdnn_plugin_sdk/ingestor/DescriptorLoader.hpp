@@ -1703,13 +1703,16 @@ inline std::vector<DescriptorSet>
         // a scoped `namespace:local` name and every built-in is unscoped, so this needs an
         // FNV-1a collision between the two spellings, not a literal name clash.
         //
-        // Blind spot: the registry behind getEngineIdToNameMap() is private to one plugin
-        // (hidden visibility, --exclude-libs=ALL), so two plugins can claim one engine id
-        // without either seeing the other -- EnginePluginManager::validateBeforeAdding
-        // checks only the API version and ABI major, with no id dedup. Not fixable here;
-        // a backend concern. In-process pairs this can't see (two hand-written engines, or
-        // anything registering after load) are caught by EngineManager::addEngine, which
-        // logs the duplicate instead of letting the map discard it in silence.
+        // What this check can't see: getEngineIdToNameMap()'s registry is private to one
+        // plugin (hidden visibility, --exclude-libs=ALL), so a name colliding with a
+        // DIFFERENT plugin's engine is invisible to this local lookup. That collision is
+        // still caught, just elsewhere and more harshly: EnginePluginManager::
+        // validateBeforeAdding tracks every id already loaded and rejects a later plugin
+        // outright on overlap, so the whole plugin fails to load -- every engine it ships,
+        // not just the one that collided. In-process pairs neither check can see (two
+        // hand-written engines, or anything registering after load) are caught by
+        // EngineManager::addEngine, which logs the duplicate instead of letting the map
+        // discard it in silence.
         const auto& registered = hipdnn_data_sdk::utilities::getEngineIdToNameMap();
         const auto claimed
             = registered.find(hipdnn_data_sdk::utilities::engineNameToId(set.engine.name));
