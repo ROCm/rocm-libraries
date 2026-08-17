@@ -196,10 +196,10 @@ def load_CMS_groups(
     make_param: Callable[..., ForkParameter],
     MT_DU: Optional[List] = None,
 ) -> GroupDimension:
-    """Load CMS groups from Tensile's kernel registry, returned as GroupDimension.
+    """Load CMS groups from TensileLite's kernel registry, returned as GroupDimension.
 
     *make_param* must be a bound ``_make_param`` from a ``BaseParamBuilder``
-    subclass: it attaches default Tensile metadata comments for ordinary
+    subclass: it attaches default TensileLite metadata comments for ordinary
     parameters. For ``MatrixInstruction``, that default is replaced here with
     a comment derived from ``MIDesign.calculate_mfma_parameters`` (MT, TT, WG,
     MIBlockM), matching the loop below.

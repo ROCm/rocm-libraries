@@ -6,7 +6,7 @@ from __future__ import annotations
 """GEMM Kernel Optimization module.
 
 Implements the main optimization workflow.
-Generates Tensile tensilelite for specific GEMM types and executes multi-GPU
+Generates TensileLite tensilelite for specific GEMM types and executes multi-GPU
 optimization with automatic load balancing and progress monitoring.
 
 Key functions:
@@ -14,7 +14,7 @@ Key functions:
     run: Execute optimization across multiple GPUs.
     analyze: Benchmark and filter optimized kernels.
 
-Integrates with hipBLASLt for benchmarking and Tensile for kernel compilation.
+Integrates with hipBLASLt for benchmarking and TensileLite for kernel compilation.
 """
 
 import os
@@ -128,7 +128,7 @@ def configure(
     arch: str = "gfx950",
     backend: str = "ductile"
 ) -> dict:
-    """Generate Tensile optimization configuration for one or more GEMM types.
+    """Generate TensileLite optimization configuration for one or more GEMM types.
 
     Builds a config dict from gemm_configs (each a GemmConfig with its
     GemmType and size list), applies ARCH-specific defaults via

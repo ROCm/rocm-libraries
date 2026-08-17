@@ -132,7 +132,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
         "GlobalParameters": {"A": 1},
         "BenchmarkProblems": [[{"OperationType": "GEMM"}, {"InitialSolutionParameters": "", "BenchmarkCommonParameters": [], "ForkParameters": entry.fork_params, "BenchmarkJoinParameters": "", "BenchmarkFinalParameters": [{"ProblemSizes": [{"Exact": "[ 16, 16, 1, 16 ]"}]}]}]],
         "LibraryLogic": {"ScheduleName": '"gfx950"'},
-        "Backend": {"Name": "Tensile"},
+        "Backend": {"Name": "tensile"},
     }
     writer.write_entity_files_only(entry, config, "# h\n", "e1")
     writer.append_aggregate_metadata("e1", entry, progress="1/1")
@@ -141,7 +141,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
 
 
 def _section_cfg(dtype="H", epilogues=True, ga=False):
-    gt = GemmType.from_tensile("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
+    gt = GemmType.from_tensilelite("N", "N", dtype, dtype, "S" if dtype != "D" else "D")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
         "ARCH": "gfx950",
@@ -199,8 +199,8 @@ def test_config_sections_generator_paths(monkeypatch) -> None:
 def test_gfx942_params_branches(monkeypatch) -> None:
     from geko.config_generator.fork_params import optimization_param as opt_param
 
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
-    gt = GemmType.from_tensile("N", "T", "H", "H", "S")
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
+    gt = GemmType.from_tensilelite("N", "T", "H", "H", "S")
     cfg = {
         "ARCH": "gfx942",
         "CUs": 304,

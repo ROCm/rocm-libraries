@@ -3,7 +3,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from geko.config_generator.fork_params.param_meta import load_tensile_metadata
+from geko.config_generator.fork_params.param_meta import load_tensilelite_metadata
 from geko.config_generator.shared_utils import (
     ForkParameter,
     GroupDimension,
@@ -14,7 +14,7 @@ from geko.config_generator.shared_utils import (
 class BaseParamBuilder:
     """Common base for classes that create ForkParameter instances.
 
-    Loads Tensile metadata once and provides _make_param for building
+    Loads TensileLite metadata once and provides _make_param for building
     ForkParameter with auto-generated comments (default value + valid range).
     Inherited by both BaseOptimizationParams and BasePostProcessor.
     """
@@ -22,7 +22,7 @@ class BaseParamBuilder:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self._gt = config["GemmProblem"].gemm_type
-        self._meta = load_tensile_metadata()
+        self._meta = load_tensilelite_metadata()
 
     def _make_param(
         self,
@@ -32,7 +32,7 @@ class BaseParamBuilder:
         active: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ForkParameter:
-        """Build a ForkParameter.  Auto-generates comment from Tensile
+        """Build a ForkParameter.  Auto-generates comment from TensileLite
         metadata when *comment* is not provided."""
         if comment is None and name in self._meta:
             m = self._meta[name]

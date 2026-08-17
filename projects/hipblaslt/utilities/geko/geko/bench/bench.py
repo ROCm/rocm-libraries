@@ -377,7 +377,7 @@ def compare(
             Defaults to "benchmarks".
         verify (bool, optional): Whether to run accuracy verification tests.
             Defaults to True.
-        cache (bool, optional): Whether to reuse existing Tensile library and results.
+        cache (bool, optional): Whether to reuse existing TensileLite library and results.
             Defaults to False.
         duration (float, optional): Target benchmark duration in seconds.  
             This is the duration of each benchmark. It will be used to calculate the number of iterations.
@@ -397,7 +397,7 @@ def compare(
         ValueError: If no valid libraries found in lib_dir.
 
     Note:
-        - Creates Tensile library if not cached.
+        - Creates TensileLite library if not cached.
         - Generates benchmark input files for each library.
         - Compares reference vs tuned performance with ratio calculation.
     """
@@ -411,7 +411,7 @@ def compare(
     custom_lib_dir = Path(custom_lib_dir)
     benchmark_dir = Path(benchmark_dir)
 
-    # Build custom library with TensileCreateLibrary if not found
+    # Build custom library with tensilelite_create_library if not found
     if not cache or len(list(custom_lib_dir.glob("library/**/TensileLibrary_lazy_gfx*.dat"))) == 0:
         logger.debug(f"Creating custom library cache={cache} custom_lib_dir={custom_lib_dir}")
         library.operations.create(hipblaslt_path, lib_dir, custom_lib_dir)

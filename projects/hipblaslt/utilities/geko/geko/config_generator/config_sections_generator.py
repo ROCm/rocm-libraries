@@ -32,7 +32,7 @@ class ConfigSectionGenerator:
 
     @staticmethod
     def _convert_type(dtype: str) -> str:
-        """Map config datatype to Tensile datatype."""
+        """Map config datatype to TensileLite datatype."""
         if dtype == "X1":
             return "B"
         if dtype == "X":
@@ -340,7 +340,8 @@ class ConfigSectionGenerator:
             'BenchmarkProblems': [[self._problem_type, benchmark_common]],
             'LibraryLogic': self._library_logic,
             '#LibraryClient': '',
-            'Backend': {"Name": "Ductile"} if is_ga else {"Name": "Tensile"}
+            # ``tensile`` is the current TensileLite backend's wire identifier.
+            'Backend': {"Name": "Ductile"} if is_ga else {"Name": "tensile"}
         }
 
         if is_ga:

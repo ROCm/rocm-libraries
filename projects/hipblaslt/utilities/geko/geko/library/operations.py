@@ -6,9 +6,9 @@ from __future__ import annotations
 """
 Library operations module.
 
-This module provides tools to manage and manipulate Tensile solution libraries including
+This module provides tools to manage and manipulate TensileLite solution libraries including
 loading, merging, and creating optimized GEMM solution libraries. It handles YAML
-manipulation, solution library operations, and integration with the Tensile framework.
+manipulation, solution library operations, and integration with TensileLite.
 
 The operations module enables the final step of the optimization workflow by merging
 individual optimized solutions into hipBLASLt libraries.
@@ -23,9 +23,9 @@ Functions:
     extract_solutions(df, match_table_path) -> LibraryCollection
         Build library from DataFrame with GEMMs and solution indices.
     merge(hipblaslt_path, orig_dir, inc_dir, output_dir) -> None
-        Merge incremental library into original using TensileMergeLibrary.
+        Merge incremental library into original using ``tensilelite.merge_library``.
     create(hipblaslt_path, input_dir, output_dir) -> None
-        Create a Tensile library from YAML library logic files using TensileCreateLibrary.
+        Create a TensileLite library from YAML library logic files.
     from_dataframe(df, lib_dir) -> LibraryCollection
         Create filtered libraries from a DataFrame of selected solutions.
     prune_library(hipblaslt_path, base_lib) -> Library
@@ -118,7 +118,7 @@ def load_collection(lib_dir: str | Path) -> LibraryCollection:
 
 
 def _library_supports_epilogues(lib: Library) -> bool:
-    """Return False for f64 (DGEMM) libraries; Tensile epilogues are not supported."""
+    """Return False for f64 (DGEMM) libraries; TensileLite epilogues are not supported."""
     data_type = lib.problem.get("DataType")
     return INDEX_TYPE_MAP.get(data_type) != "f64_r"
 
@@ -139,7 +139,7 @@ def merge_solutions(
         epilogues (bool, optional): Whether to add epilogue support to merged libraries.
             Defaults to True. DGEMM (f64) libraries are always skipped.
         pattern (str, optional): Search pattern for libraries in the given input dir.
-            Defaults to Tensile format.
+            Defaults to TensileLite format.
         trim_size (bool, optional): Whether to use [M, N, B, K] format or to keep leading dimensions.
             Defaults to True.
 
@@ -182,7 +182,7 @@ def merge_solutions(
 
         if libs[lib.name].default_solution != lib.default_solution:
             raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
-                                      f"Use TensileMergeLibrary instead.")
+                                      f"Use tensilelite.merge_library instead.")
 
         base_sols = libs[lib.name].solutions
         base_sizes = libs[lib.name].sizes
@@ -269,7 +269,7 @@ def extract_solutions(df: pd.DataFrame, match_table_path: str | Path) -> Library
         else:
             if libs[lib.name].default_solution != lib.default_solution:
                 raise NotImplementedError(f"Default solution mismatch for library '{lib.name}'. "
-                                          f"Use TensileMergeLibrary instead.")
+                                          f"Use tensilelite.merge_library instead.")
             new_sols = libs[lib.name].solutions
             new_sizes = libs[lib.name].sizes
 
@@ -298,11 +298,11 @@ def merge(
     eff: bool = False,
     force: bool = True,
 ) -> None:
-    """Merge incremental library into original using TensileMergeLibrary.
+    """Merge incremental library into original using ``tensilelite.merge_library``.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
-        orig_dir (str | Path): Directory containing original Tensile library.
+        orig_dir (str | Path): Directory containing original TensileLite library.
         inc_dir (str | Path): Directory containing incremental/tuned library.
         output_dir (str | Path): Output directory for merged library.
         eff (bool, optional): Whether to set efficiency calculations.
@@ -324,7 +324,7 @@ def merge(
 
 
 def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str | Path, version: str = "5") -> None:
-    """Create a Tensile library from YAML library logic files using TensileCreateLibrary.
+    """Create a TensileLite library from YAML library logic files.
 
     Args:
         hipblaslt_path (str | Path): Path to hipBLASLt installation.
@@ -365,13 +365,13 @@ def create(hipblaslt_path: str | Path, library_dir: str | Path, output_dir: str 
     )
 
 def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path: ( str | Path) | None = None) -> None:
-    """Normalize a Tensile library using TensileNormalizeLibrary.
+    """Normalize a TensileLite library using its merge-library helpers.
 
     Args:
         library_path (str | Path): Path to the input library.
         output_path (str | Path): Path to the output normalized library.
         hipblaslt_path (str | Path, optional): Path to hipBLASLt installation. 
-            If set, will append the path to sys.path to find Tensile.
+            If set, will append the path to sys.path to find TensileLite.
 
     Raises:
         FileNotFoundError: If library path does not exist.
@@ -388,11 +388,14 @@ def normalize(library_path: str | Path, output_path: str | Path, hipblaslt_path:
         sys.path.append(str(hipblaslt_path / "tensilelite"))
 
     try:
-        from Tensile import LibraryIO
-        from Tensile.CustomYamlLoader import load_yaml_stream
-        from Tensile.TensileMergeLibrary import convertToDict, normalizeDictLibraryLayout
+        from tensilelite import LibraryIO
+        from tensilelite.CustomYamlLoader import load_yaml_stream
+        from tensilelite.merge_library import convertToDict, normalizeDictLibraryLayout
     except ImportError as e:
-        raise ImportError(f"Failed to import Tensile. Install it or pass the correct path to hipBLASLt. Error: {e}. ")
+        raise ImportError(
+            "Failed to import TensileLite. Install it or pass the correct path to hipBLASLt. "
+            f"Error: {e}."
+        ) from e
     
     data = load_yaml_stream(library_path, SafeLoader)
     if not isinstance(data, list):

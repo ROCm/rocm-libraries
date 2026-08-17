@@ -55,7 +55,7 @@ def test_cluster_sizes_mi_and_reorder(monkeypatch) -> None:
 
 
 def _post_cfg(mt_du=None):
-    gt = GemmType.from_tensile("N", "N", "H", "H", "S")
+    gt = GemmType.from_tensilelite("N", "N", "H", "H", "S")
     return {
         "GemmProblem": type("GP", (), {"gemm_type": gt})(),
         "ARCH": "gfx950",
@@ -66,7 +66,7 @@ def _post_cfg(mt_du=None):
 
 
 def test_base_postprocessor_mt_du_and_matcher(monkeypatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     pp = base_pp.BasePostProcessor(_post_cfg(mt_du=[64, 32, 16]))
     fork = {
         "DepthU": ForkParameter(name="DepthU", values=[8, 16, 32]),
@@ -87,7 +87,7 @@ def test_base_postprocessor_mt_du_and_matcher(monkeypatch) -> None:
 
 
 def test_gfx950_postprocessor_adjustments(monkeypatch) -> None:
-    monkeypatch.setattr(opt_param, "load_tensile_metadata", lambda: {})
+    monkeypatch.setattr(opt_param, "load_tensilelite_metadata", lambda: {})
     pp = gfx950_pp.GFX950PostProcessor(_post_cfg())
     fork = {
         "PrefetchGlobalRead": ForkParameter(name="PrefetchGlobalRead", values=[2]),

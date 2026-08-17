@@ -34,7 +34,7 @@ logger = logging.getLogger("GEKO")
 # =====================================================================
 
 class TuningConfigWriter:
-    """Serialize a config dict (with :class:`ForkParameter` values) to Tensile YAML.
+    """Serialize a config dict (with :class:`ForkParameter` values) to TensileLite YAML.
 
     Emits GlobalParameters, BenchmarkProblems (including ForkParameters and Groups),
     LibraryLogic, optional ductile GA section, in one pass without post-processing.
@@ -280,7 +280,7 @@ def write_run_script(
     hipblaslt_path: str | Path,
     client_path: Optional[str | Path] = None,
 ) -> None:
-    """Write an executable bash script that runs Tensile for one YAML.
+    """Write an executable bash script that runs TensileLite for one YAML.
     
     Args:
         filepath: Path for the ``.sh`` file (created with mode ``0o755``).
