@@ -147,16 +147,20 @@ struct BlockFmhaPipelineQRKSVSTdm
         }
     }
 
-    static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
-                   (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
-                    !kHasLogitsSoftCap)) ||
-                  (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
+    // Every softmax site here calls exp2 directly; there is no exp() path to fall back to.
+    static_assert(CK_TILE_FMHA_FWD_FAST_EXP2,
+                  "qr_tdm pipeline: FAST_EXP2=0 has no code path here - log2(e) is never folded "
+                  "into scale_s, so the kernel would return 2^logit instead of e^logit");
 
-    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
+    static_assert(!kHasLogitsSoftCap,
+                  "qr_tdm pipeline does not implement logits soft cap - LogitsTransform is never "
+                  "applied, so scores would reach softmax uncapped and unscaled");
 
     // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
     // Dropout requires kernel dispatch interface expansion (dropout object +
     // randval window) and is deferred to a follow-up task.
+    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
+
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
@@ -305,12 +309,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
 
+        // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
+        // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
-                          // Hybrid loaders: Q/K via TDM (box-major LDS write), V via async_load
-                          // + ds_load_tr (transposed). V dram window keeps (kN1, kK1) shape.
                           kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -413,18 +417,18 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
         }
 
+        // ---------------------------------------------------------------------
         // TDM configs for Q / K / V
+        // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+        // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
+        // as Q / K, with V dram dist switched to trivial tile-major and the
+        // V LDS read view kept plain row-major (matches the write view).
+        // ---------------------------------------------------------------------
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
-        // ---------------------------------------------------------------------
         {
-            // pad_enable + pad_amount + pad_interval are compile-time, sourced from
-            // the policy. workgroup_mask defaults to 0 (no cluster multicast).
-            // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
-            // as Q / K, with V dram dist switched to trivial tile-major and the
-            // V LDS read view kept plain row-major (matches the write view).
-            // ---------------------------------------------------------------------
             constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
             tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
@@ -579,12 +583,12 @@ struct BlockFmhaPipelineQRKSVSTdm
             [[maybe_unused]] const index_t kv_last       = physical_seqlen_k_end - 1;
 
             block_sync_lds();
+            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
+            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
             load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window); // prefetch load v tile
 
             // move V tile windows
             move_tile_window(v_dram_window, {kN0, 0});
-            // V uses load_tile_tdm (single-box plain LDS write). Both K and V
-            // are on the tensorcnt counter (s_wait_tensorcnt_barrier for sync).
 
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
@@ -993,12 +997,12 @@ struct BlockFmhaPipelineQRKSVSTdm
                 std::is_same_v<VDataType, remove_cvref_t<typename VDramBlockWindowTmp::DataType>>,
             "wrong!");
 
+        // Hybrid loaders: Q/K via TDM, V via async_load + ds_load_tr (same
+        // as the single-buffer overload above; see notes there).
         static_assert(kM0 == QDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kSubQKHeaddim == QDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
-                          // Hybrid loaders: Q/K via TDM, V via async_load + ds_load_tr (same
-                          // as the single-buffer overload above; see notes there).
                           kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&
@@ -1098,18 +1102,18 @@ struct BlockFmhaPipelineQRKSVSTdm
             }
         }
 
+        // ---------------------------------------------------------------------
         // TDM configs for Q / K / V
+        // pad_enable + pad_amount + pad_interval are compile-time, sourced from
+        // the policy. workgroup_mask defaults to 0 (no cluster multicast).
+        // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
+        // as Q / K, with V dram dist switched to trivial tile-major and the
+        // V LDS read view kept plain row-major (matches the write view).
+        // ---------------------------------------------------------------------
         TDMConfig tdm_config_q;
         TDMConfig tdm_config_k;
         TDMConfig tdm_config_v;
-        // ---------------------------------------------------------------------
         {
-            // pad_enable + pad_amount + pad_interval are compile-time, sourced from
-            // the policy. workgroup_mask defaults to 0 (no cluster multicast).
-            // V uses load_tile_tdm (single-box plain layout) -- same TDM machinery
-            // as Q / K, with V dram dist switched to trivial tile-major and the
-            // V LDS read view kept plain row-major (matches the write view).
-            // ---------------------------------------------------------------------
             constexpr auto LdsPaddingConfigQ     = Policy::template GetLdsPaddingConfigQ<Problem>();
             tdm_config_q.pad_enable              = LdsPaddingConfigQ[I0];
             tdm_config_q.pad_config.pad_amount   = LdsPaddingConfigQ[I1];
