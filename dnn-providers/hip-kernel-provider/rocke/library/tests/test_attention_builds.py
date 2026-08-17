@@ -43,47 +43,21 @@ from kernels import (
 
 
 def _patch_resolved_arch(arch: str):
-    """Pin the resolved attention arch for a test, on every module that reads it.
+    """Pin the resolved attention arch for a test, on the module that defines it.
 
-    ``_resolve_attention_arch`` is defined in ``kernels.common.attention_unified``
-    but imported *by name* into other modules (e.g.
-    ``builders.common.attention_spec_builder``), so each holds its own binding.
-    Patching only the defining module leaves the spec builder resolving the real
-    device arch -- which silently ignores the test's requested arch on any host
-    whose GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). Patch
-    every by-name importer so the pin actually reaches the builder.
+    ``_resolve_attention_arch`` lives in ``kernels.common.attention_unified`` and
+    ``builders.common.attention_spec_builder`` reaches it through that module
+    handle, so this one patch steers the builder too. A bound import in the
+    builder would freeze the reference at import time, leaving it on the real
+    device arch and silently ignoring the test's requested arch on any host whose
+    GPU differs (e.g. an ``arch='gfx950'`` case on a gfx942 box). That invariant
+    is pinned by ``test_arch_binding_guard.py``; it is not re-asserted here.
     """
     from unittest import mock
 
-    import builders.common.attention_spec_builder as _asb
     import kernels.common.attention_unified as _au
 
-    targets = [_au]
-    if getattr(_asb, "_resolve_attention_arch", None) is not None:
-        targets.append(_asb)
-    return _MultiPatch(
-        [
-            mock.patch.object(m, "_resolve_attention_arch", return_value=arch)
-            for m in targets
-        ]
-    )
-
-
-class _MultiPatch:
-    """Enter/exit a list of ``mock.patch`` context managers as one."""
-
-    def __init__(self, patches):
-        self._patches = patches
-
-    def __enter__(self):
-        for p in self._patches:
-            p.start()
-        return self
-
-    def __exit__(self, *exc):
-        for p in reversed(self._patches):
-            p.stop()
-        return False
+    return mock.patch.object(_au, "_resolve_attention_arch", return_value=arch)
 
 
 # ---------------------------------------------------------------------
