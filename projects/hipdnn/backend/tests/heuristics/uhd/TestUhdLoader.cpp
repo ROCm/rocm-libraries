@@ -38,22 +38,23 @@ std::vector<uint8_t> buildMinimalUhd(const std::string& uhdId,
     // Build score metadata
     auto scoreOffset = CreateUhdScoreMetadata(builder, units, false, xform);
 
-    // Build UHD
+    // Build UHD (RFC 0019 §6.4: derived field added between adapter and features_signature)
     auto uhdOffset = CreateUHD(builder,
-                               id,
-                               0,
-                               UhdAdapter::STATIC_ORDER,
-                               0,
-                               hash,
-                               obj,
-                               scoreOffset);
+                               id,          // id
+                               0,           // name
+                               UhdAdapter::STATIC_ORDER, // adapter
+                               0,           // derived (empty for static_order)
+                               0,           // features_signature (empty)
+                               hash,        // features_hash
+                               obj,         // objective
+                               scoreOffset);// score
 
     builder.Finish(uhdOffset, "HUHD");
 
     uint8_t* buf      = builder.GetBufferPointer();
     const size_t size = builder.GetSize();
 
-    return std::vector<uint8_t>(buf, buf + size);
+    return {buf, buf + size};
 }
 
 /// Helper to build a tree_data UHD with model artifact path.
@@ -79,22 +80,24 @@ std::vector<uint8_t> buildTreeDataUhd(const std::string& uhdId,
 
     auto scoreOffset = CreateUhdScoreMetadata(builder, units, false, xform);
 
+    // Build UHD with features_signature (tree_data adapter)
     auto uhdOffset = CreateUHD(builder,
-                               id,
-                               0,
-                               UhdAdapter::TREE_DATA,
-                               featSig,
-                               hash,
-                               obj,
-                               scoreOffset,
-                               modelArt);
+                               id,               // id
+                               0,                // name
+                               UhdAdapter::TREE_DATA, // adapter
+                               0,                // derived (empty for this test)
+                               featSig,          // features_signature
+                               hash,             // features_hash
+                               obj,              // objective
+                               scoreOffset,      // score
+                               modelArt);        // model_artifact_path
 
     builder.Finish(uhdOffset, "HUHD");
 
     uint8_t* buf      = builder.GetBufferPointer();
     const size_t size = builder.GetSize();
 
-    return std::vector<uint8_t>(buf, buf + size);
+    return {buf, buf + size};
 }
 
 } // namespace

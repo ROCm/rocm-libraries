@@ -138,6 +138,7 @@ add_executable(
     heuristics/TestUhdTraceRetrieval.cpp
     heuristics/uhd/TestEngineRegistryArchResolution.cpp
     heuristics/uhd/TestUhdLoader.cpp
+    heuristics/uhd/TestUhdLoaderMultiArch.cpp
     TestUserLoggingApis.cpp
     TestPlatformUtils.cpp
     TestEnginePluginOverride.cpp
