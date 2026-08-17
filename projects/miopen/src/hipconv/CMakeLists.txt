@@ -32,6 +32,15 @@ include(GpuArch)
 
 set(HIPCONV_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 
+# The CRT deprecates getenv in favour of _dupenv_s.
+#
+# Directory-scoped, so it reaches the arch libraries and the shard generators without
+# leaking to a consumer. A consumer's Windows toolchain typically sets this for its CXX
+# targets and not its HIP ones, which is where the kernels compile.
+if(WIN32)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
 # Experimental cdna4 depthwise 2D patch-Toeplitz kernel; off by default since it never
 # wins the auto-pick.
 #
@@ -97,7 +106,6 @@ target_include_directories(hipconv
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
 target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden)
-target_compile_definitions(hipconv PRIVATE HIPCONV_BUILDING_LIBRARY)
 if(HIPCONV_ENABLE_POINTWISE)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_POINTWISE)
