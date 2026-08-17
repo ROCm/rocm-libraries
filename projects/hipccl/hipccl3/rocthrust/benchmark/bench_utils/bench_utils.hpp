@@ -26,10 +26,11 @@
 // Utils
 #include <thrust/execution_policy.h>
 
-#include "cmdparser.hpp"
-#include "common/types.hpp"
-#include "custom_reporter.hpp"
-#include "generation_utils.hpp"
+#include "cmdparser.hpp" // IWYU pragma: export
+#include "common/types.hpp" // IWYU pragma: export
+#include "custom_reporter.hpp" // IWYU pragma: export
+#include "generation_utils.hpp" // IWYU pragma: export
+#include "thrust_compat.hpp" // IWYU pragma: export
 
 // HIP/CUDA
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
@@ -57,7 +58,7 @@
 
 namespace bench_utils
 {
-#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP) || (THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA)
 
 #  define HIP_CHECK(condition)                                                     \
     {                                                                              \
@@ -280,7 +281,14 @@ inline void add_common_benchmark_info()
   num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
   num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
   num("hdp_can_map_host_memory", devProp.canMapHostMemory);
+
+#ifdef __NVCC__
+  // NVIDIA GPUs do not have a GCN Architecture Name; devProp.gcnArchName is uninitialized
+  str("hdp_gcn_arch_name", "");
+#else
   str("hdp_gcn_arch_name", devProp.gcnArchName);
+#endif
+
   num("hdp_integrated", devProp.integrated);
   num("hdp_cooperative_launch", devProp.cooperativeLaunch);
   num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);

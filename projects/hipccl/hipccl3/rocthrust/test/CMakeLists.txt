@@ -64,8 +64,10 @@ function(add_rocthrust_test TEST)
             ${sqlite_local_SOURCE_DIR}
     )
 
-    if(USE_SYSTEM_LIB)
-        target_link_libraries(${TEST_TARGET} PRIVATE roc::rocthrust)
+    if(GRAFT_THRUST_ONTO_BINARIES)
+        target_link_libraries(${TEST_TARGET} INTERFACE CCCL::CCCL)
+    elseif(USE_SYSTEM_LIB)
+        target_link_libraries(${TEST_TARGET} INTERFACE roc::rocthrust)
     else()
         target_link_libraries(${TEST_TARGET}
             PRIVATE
