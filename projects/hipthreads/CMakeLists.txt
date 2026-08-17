@@ -45,7 +45,9 @@ option(HIPTHREADS_COPY_TO_BUILD
   "Copy source tree into build folder (set by TheRock; required for the tester pipeline)." OFF)
 
 if(HIPTHREADS_COPY_TO_BUILD)
-  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}"
+    REGEX ".*(matrices\\.tgz|shallow_water1\\.mtx)$" EXCLUDE
+  )
 endif()
 
 add_subdirectory(src)

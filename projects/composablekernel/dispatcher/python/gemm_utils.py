@@ -65,6 +65,14 @@ _SUPPORTED_ARCHES = ("gfx90a", "gfx942", "gfx950")
 BRIDGE_PERMUTE_N = False
 
 
+try:
+    # Reuse the single canonical amd-smi bridge instead of re-implementing it.
+    from dispatcher_common import _detect_gpu_arch_via_amd_smi
+except Exception:  # noqa: BLE001 - standalone use without dispatcher_common on path
+    def _detect_gpu_arch_via_amd_smi() -> Optional[str]:
+        return None
+
+
 @functools.lru_cache(maxsize=1)
 def _get_arch() -> str:
     """Detect the GPU architecture from rocminfo and validate it.
@@ -74,20 +82,21 @@ def _get_arch() -> str:
     default to a specific architecture -- and ``ValueError`` when the detected
     arch is not one this bridge supports.
     """
-    detected: Optional[str] = None
-    try:
-        out = subprocess.check_output(
-            ["rocminfo"], stderr=subprocess.DEVNULL, text=True
-        )
-        for line in out.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("Name:") and "gfx" in stripped:
-                name = stripped.split(":", 1)[1].strip()
-                if name.startswith("gfx"):
-                    detected = name
-                    break
-    except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
-        detected = None
+    detected: Optional[str] = _detect_gpu_arch_via_amd_smi()
+    if detected is None:
+        try:
+            out = subprocess.check_output(
+                ["rocminfo"], stderr=subprocess.DEVNULL, text=True
+            )
+            for line in out.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("Name:") and "gfx" in stripped:
+                    name = stripped.split(":", 1)[1].strip()
+                    if name.startswith("gfx"):
+                        detected = name
+                        break
+        except Exception:  # noqa: BLE001 - rocminfo missing / no GPU / timeout
+            detected = None
 
     if detected is None:
         raise RuntimeError(
@@ -2093,6 +2102,23 @@ def _expand_values(entry: Optional[Dict[str, Any]], default: List[Any]) -> List[
 
 def _is_power_of_two(x: int) -> bool:
     return x > 0 and (x & (x - 1)) == 0
+
+
+def _cshuffle_store_ok(
+    m_repeat: int, n_repeat: int, warp_tile_m: int, warp_tile_n: int
+) -> bool:
+    """Return False for the one CShuffle-store combination that is numerically
+    wrong (issue #9684): an ODD per-wave repeat (>1) paired with a 32-wide warp
+    tile in that dimension. GPU-verified on gfx942 -- e.g. tile_m=192 / wave_m=2
+    / warp_tile_m=32 (MRepeat=3) returns garbage, while every other non-power-of-
+    two repeat (incl. MRepeat=3 with warp_tile_m=16, and even repeats like 6/12)
+    is correct. Only relevant for the CShuffle epilogue; the default epilogue is
+    exempt."""
+
+    def _dim_bad(repeat: int, warp_tile: int) -> bool:
+        return repeat > 1 and repeat % 2 == 1 and warp_tile == 32
+
+    return not (_dim_bad(m_repeat, warp_tile_m) or _dim_bad(n_repeat, warp_tile_n))
 
 
 # --- Warp-configuration gate (parity with Old-TE) --------------------------
