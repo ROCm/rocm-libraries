@@ -79,6 +79,14 @@ hipDNN owns routing, API, serialization, and plugin-contract quality.
 Each provider owns its operation correctness and supported-architecture coverage; a core-only pass is not evidence that provider behavior is correct.
 Detailed responsibility and environment matrices belong in [Testing Strategy](./TESTING_STRATEGY.md), while bundle authoring and tier mechanics belong in the [provider integration README](../../../dnn-providers/integration-tests/README.md).
 
+## Performance & Benchmarking
+
+hipDNN dispatches graphs to provider engines; it does not own most provider kernels. Performance results must identify the selected provider and engine so regressions can be reduced to hipDNN dispatch, the provider adapter, or the underlying library/kernel layer.
+
+Use [ROCm dnn-benchmarking](https://github.com/ROCm/dnn-benchmarking#readme) for manual graph benchmarks. Select explicit graph inputs or DVC workload pointers under `Workloads/**/*.tar.gz.dvc`, and record the workload revision, GPU architecture, provider/engine identity, plugin version or artifact, and software/build context. Compare results only against a controlled baseline from the same GPU architecture.
+
+Keep GPU graph-event timing separate from host-submission timing; a graph may dispatch multiple kernels. See [Testing Strategy](./TESTING_STRATEGY.md#performance-and-benchmarking) for timing boundaries and ownership. No checked automated performance-regression gate currently exists; see [Known Gaps](./KNOWN_GAPS.md#performance-regression-signal).
+
 ## Pre-submit / CI gates
 
 Use the applicable component's `standard` label as the local pre-push convention, noting that core tiers currently collapse to one set and superbuild CI runs unfiltered CTest. Local checks do not replace CI.
