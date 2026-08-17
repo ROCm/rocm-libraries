@@ -63,6 +63,10 @@ from ..Common.LdsPaddingLimits import (
     LDS_PAD_BLOCK_BYTES as _LDS_PAD_BLOCK_BYTES,
 )
 
+# Most bytes per lane one local read instruction moves (ds_load_b128,
+# ds_load_tr16_b128). b192 is a macro that rocisa expands to b128 + b64.
+MAX_LOCAL_READ_BYTES = 16
+
 def _pad_candidate_bytes(step: int = _LDS_PAD_STEP_BYTES):
   """Legal LdsPad values in bytes, smallest first.
 
