@@ -28,6 +28,8 @@ struct MatmulAttributesT : public ::flatbuffers::NativeTable {
   int64_t a_tensor_uid = 0;
   int64_t b_tensor_uid = 0;
   int64_t c_tensor_uid = 0;
+  std::string umd_flops{};
+  std::string umd_bytes{};
 };
 
 struct MatmulAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -36,7 +38,9 @@ struct MatmulAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_A_TENSOR_UID = 4,
     VT_B_TENSOR_UID = 6,
-    VT_C_TENSOR_UID = 8
+    VT_C_TENSOR_UID = 8,
+    VT_UMD_FLOPS = 10,
+    VT_UMD_BYTES = 12
   };
   int64_t a_tensor_uid() const {
     return GetField<int64_t>(VT_A_TENSOR_UID, 0);
@@ -56,11 +60,27 @@ struct MatmulAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_c_tensor_uid(int64_t _c_tensor_uid = 0) {
     return SetField<int64_t>(VT_C_TENSOR_UID, _c_tensor_uid, 0);
   }
+  const ::flatbuffers::String *umd_flops() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_UMD_FLOPS);
+  }
+  ::flatbuffers::String *mutable_umd_flops() {
+    return GetPointer<::flatbuffers::String *>(VT_UMD_FLOPS);
+  }
+  const ::flatbuffers::String *umd_bytes() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_UMD_BYTES);
+  }
+  ::flatbuffers::String *mutable_umd_bytes() {
+    return GetPointer<::flatbuffers::String *>(VT_UMD_BYTES);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int64_t>(verifier, VT_A_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_B_TENSOR_UID, 8) &&
            VerifyField<int64_t>(verifier, VT_C_TENSOR_UID, 8) &&
+           VerifyOffset(verifier, VT_UMD_FLOPS) &&
+           verifier.VerifyString(umd_flops()) &&
+           VerifyOffset(verifier, VT_UMD_BYTES) &&
+           verifier.VerifyString(umd_bytes()) &&
            verifier.EndTable();
   }
   MatmulAttributesT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -81,6 +101,12 @@ struct MatmulAttributesBuilder {
   void add_c_tensor_uid(int64_t c_tensor_uid) {
     fbb_.AddElement<int64_t>(MatmulAttributes::VT_C_TENSOR_UID, c_tensor_uid, 0);
   }
+  void add_umd_flops(::flatbuffers::Offset<::flatbuffers::String> umd_flops) {
+    fbb_.AddOffset(MatmulAttributes::VT_UMD_FLOPS, umd_flops);
+  }
+  void add_umd_bytes(::flatbuffers::Offset<::flatbuffers::String> umd_bytes) {
+    fbb_.AddOffset(MatmulAttributes::VT_UMD_BYTES, umd_bytes);
+  }
   explicit MatmulAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -96,12 +122,34 @@ inline ::flatbuffers::Offset<MatmulAttributes> CreateMatmulAttributes(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     int64_t a_tensor_uid = 0,
     int64_t b_tensor_uid = 0,
-    int64_t c_tensor_uid = 0) {
+    int64_t c_tensor_uid = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> umd_flops = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> umd_bytes = 0) {
   MatmulAttributesBuilder builder_(_fbb);
   builder_.add_c_tensor_uid(c_tensor_uid);
   builder_.add_b_tensor_uid(b_tensor_uid);
   builder_.add_a_tensor_uid(a_tensor_uid);
+  builder_.add_umd_bytes(umd_bytes);
+  builder_.add_umd_flops(umd_flops);
   return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<MatmulAttributes> CreateMatmulAttributesDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    int64_t a_tensor_uid = 0,
+    int64_t b_tensor_uid = 0,
+    int64_t c_tensor_uid = 0,
+    const char *umd_flops = nullptr,
+    const char *umd_bytes = nullptr) {
+  auto umd_flops__ = umd_flops ? _fbb.CreateString(umd_flops) : 0;
+  auto umd_bytes__ = umd_bytes ? _fbb.CreateString(umd_bytes) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateMatmulAttributes(
+      _fbb,
+      a_tensor_uid,
+      b_tensor_uid,
+      c_tensor_uid,
+      umd_flops__,
+      umd_bytes__);
 }
 
 ::flatbuffers::Offset<MatmulAttributes> CreateMatmulAttributes(::flatbuffers::FlatBufferBuilder &_fbb, const MatmulAttributesT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -111,7 +159,9 @@ inline bool operator==(const MatmulAttributesT &lhs, const MatmulAttributesT &rh
   return
       (lhs.a_tensor_uid == rhs.a_tensor_uid) &&
       (lhs.b_tensor_uid == rhs.b_tensor_uid) &&
-      (lhs.c_tensor_uid == rhs.c_tensor_uid);
+      (lhs.c_tensor_uid == rhs.c_tensor_uid) &&
+      (lhs.umd_flops == rhs.umd_flops) &&
+      (lhs.umd_bytes == rhs.umd_bytes);
 }
 
 inline bool operator!=(const MatmulAttributesT &lhs, const MatmulAttributesT &rhs) {
@@ -131,6 +181,8 @@ inline void MatmulAttributes::UnPackTo(MatmulAttributesT *_o, const ::flatbuffer
   { auto _e = a_tensor_uid(); _o->a_tensor_uid = _e; }
   { auto _e = b_tensor_uid(); _o->b_tensor_uid = _e; }
   { auto _e = c_tensor_uid(); _o->c_tensor_uid = _e; }
+  { auto _e = umd_flops(); if (_e) _o->umd_flops = _e->str(); }
+  { auto _e = umd_bytes(); if (_e) _o->umd_bytes = _e->str(); }
 }
 
 inline ::flatbuffers::Offset<MatmulAttributes> MatmulAttributes::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const MatmulAttributesT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -144,11 +196,15 @@ inline ::flatbuffers::Offset<MatmulAttributes> CreateMatmulAttributes(::flatbuff
   auto _a_tensor_uid = _o->a_tensor_uid;
   auto _b_tensor_uid = _o->b_tensor_uid;
   auto _c_tensor_uid = _o->c_tensor_uid;
+  auto _umd_flops = _o->umd_flops.empty() ? 0 : _fbb.CreateString(_o->umd_flops);
+  auto _umd_bytes = _o->umd_bytes.empty() ? 0 : _fbb.CreateString(_o->umd_bytes);
   return hipdnn_flatbuffers_sdk::data_objects::CreateMatmulAttributes(
       _fbb,
       _a_tensor_uid,
       _b_tensor_uid,
-      _c_tensor_uid);
+      _c_tensor_uid,
+      _umd_flops,
+      _umd_bytes);
 }
 
 }  // namespace data_objects

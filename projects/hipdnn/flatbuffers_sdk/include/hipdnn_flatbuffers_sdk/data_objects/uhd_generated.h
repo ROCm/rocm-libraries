@@ -16,6 +16,10 @@ static_assert(FLATBUFFERS_VERSION_MAJOR == 25 &&
 namespace hipdnn_flatbuffers_sdk {
 namespace data_objects {
 
+struct UhdDerivedEntry;
+struct UhdDerivedEntryBuilder;
+struct UhdDerivedEntryT;
+
 struct UhdScoreMetadata;
 struct UhdScoreMetadataBuilder;
 struct UhdScoreMetadataT;
@@ -24,6 +28,8 @@ struct UHD;
 struct UHDBuilder;
 struct UHDT;
 
+bool operator==(const UhdDerivedEntryT &lhs, const UhdDerivedEntryT &rhs);
+bool operator!=(const UhdDerivedEntryT &lhs, const UhdDerivedEntryT &rhs);
 bool operator==(const UhdScoreMetadataT &lhs, const UhdScoreMetadataT &rhs);
 bool operator!=(const UhdScoreMetadataT &lhs, const UhdScoreMetadataT &rhs);
 bool operator==(const UHDT &lhs, const UHDT &rhs);
@@ -75,6 +81,99 @@ inline const char *EnumNameUhdAdapter(UhdAdapter e) {
   const size_t index = static_cast<size_t>(e);
   return EnumNamesUhdAdapter()[index];
 }
+
+struct UhdDerivedEntryT : public ::flatbuffers::NativeTable {
+  typedef UhdDerivedEntry TableType;
+  std::string name{};
+  std::string expression{};
+};
+
+/// @brief Key-value pair for derived feature expressions (RFC 0019 §6.4).
+///
+/// Each entry is a named JsonLogic expression that can reference $device.*,
+/// $kernel.*, $q.*, and earlier $derived.* entries. Evaluated in order to
+/// form the $derived.* namespace.
+struct UhdDerivedEntry FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef UhdDerivedEntryT NativeTableType;
+  typedef UhdDerivedEntryBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_NAME = 4,
+    VT_EXPRESSION = 6
+  };
+  /// Feature name (e.g., "num_tiles_m", "arithmetic_intensity").
+  const ::flatbuffers::String *name() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_NAME);
+  }
+  ::flatbuffers::String *mutable_name() {
+    return GetPointer<::flatbuffers::String *>(VT_NAME);
+  }
+  /// JsonLogic expression as a JSON string.
+  /// Example: "{\"ceil_div\": [\"$q.seqlen_q\", \"$kernel.tile_m0\"]}"
+  const ::flatbuffers::String *expression() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_EXPRESSION);
+  }
+  ::flatbuffers::String *mutable_expression() {
+    return GetPointer<::flatbuffers::String *>(VT_EXPRESSION);
+  }
+  bool Verify(::flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffsetRequired(verifier, VT_NAME) &&
+           verifier.VerifyString(name()) &&
+           VerifyOffsetRequired(verifier, VT_EXPRESSION) &&
+           verifier.VerifyString(expression()) &&
+           verifier.EndTable();
+  }
+  UhdDerivedEntryT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(UhdDerivedEntryT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<UhdDerivedEntry> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UhdDerivedEntryT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct UhdDerivedEntryBuilder {
+  typedef UhdDerivedEntry Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_name(::flatbuffers::Offset<::flatbuffers::String> name) {
+    fbb_.AddOffset(UhdDerivedEntry::VT_NAME, name);
+  }
+  void add_expression(::flatbuffers::Offset<::flatbuffers::String> expression) {
+    fbb_.AddOffset(UhdDerivedEntry::VT_EXPRESSION, expression);
+  }
+  explicit UhdDerivedEntryBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<UhdDerivedEntry> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<UhdDerivedEntry>(end);
+    fbb_.Required(o, UhdDerivedEntry::VT_NAME);
+    fbb_.Required(o, UhdDerivedEntry::VT_EXPRESSION);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntry(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    ::flatbuffers::Offset<::flatbuffers::String> name = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> expression = 0) {
+  UhdDerivedEntryBuilder builder_(_fbb);
+  builder_.add_expression(expression);
+  builder_.add_name(name);
+  return builder_.Finish();
+}
+
+inline ::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntryDirect(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    const char *name = nullptr,
+    const char *expression = nullptr) {
+  auto name__ = name ? _fbb.CreateString(name) : 0;
+  auto expression__ = expression ? _fbb.CreateString(expression) : 0;
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUhdDerivedEntry(
+      _fbb,
+      name__,
+      expression__);
+}
+
+::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntry(::flatbuffers::FlatBufferBuilder &_fbb, const UhdDerivedEntryT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 
 struct UhdScoreMetadataT : public ::flatbuffers::NativeTable {
   typedef UhdScoreMetadata TableType;
@@ -186,6 +285,7 @@ struct UHDT : public ::flatbuffers::NativeTable {
   std::string id{};
   std::string name{};
   hipdnn_flatbuffers_sdk::data_objects::UhdAdapter adapter = hipdnn_flatbuffers_sdk::data_objects::UhdAdapter::STATIC_ORDER;
+  std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT>> derived{};
   std::vector<std::string> features_signature{};
   std::string features_hash{};
   std::string objective{};
@@ -219,14 +319,15 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_ID = 4,
     VT_NAME = 6,
     VT_ADAPTER = 8,
-    VT_FEATURES_SIGNATURE = 10,
-    VT_FEATURES_HASH = 12,
-    VT_OBJECTIVE = 14,
-    VT_SCORE = 16,
-    VT_MODEL_ARTIFACT_PATH = 18,
-    VT_MODEL_HASH = 20,
-    VT_STATIC_ORDER_FIELDS = 22,
-    VT_CUSTOM_LIBRARY_SYMBOL = 24
+    VT_DERIVED = 10,
+    VT_FEATURES_SIGNATURE = 12,
+    VT_FEATURES_HASH = 14,
+    VT_OBJECTIVE = 16,
+    VT_SCORE = 18,
+    VT_MODEL_ARTIFACT_PATH = 20,
+    VT_MODEL_HASH = 22,
+    VT_STATIC_ORDER_FIELDS = 24,
+    VT_CUSTOM_LIBRARY_SYMBOL = 26
   };
   /// Unique identifier (UUID/GUID).
   const ::flatbuffers::String *id() const {
@@ -249,8 +350,18 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_adapter(hipdnn_flatbuffers_sdk::data_objects::UhdAdapter _adapter = static_cast<hipdnn_flatbuffers_sdk::data_objects::UhdAdapter>(0)) {
     return SetField<int8_t>(VT_ADAPTER, static_cast<int8_t>(_adapter), 0);
   }
+  /// Ordered list of derived feature definitions (RFC 0019 §6.4).
+  /// Evaluated in order to form the $derived.* namespace. Each expression
+  /// can reference $device.*, $kernel.*, $q.*, and earlier $derived.* entries.
+  /// Values are cached per-candidate when they reference only $kernel.*.
+  const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>> *derived() const {
+    return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>> *>(VT_DERIVED);
+  }
+  ::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>> *mutable_derived() {
+    return GetPointer<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>> *>(VT_DERIVED);
+  }
   /// Ordered list of feature expressions (JsonLogic format).
-  /// Each expression references $device.*, $kernel.*, or $q.* variables.
+  /// Each expression references $device.*, $kernel.*, $q.*, or $derived.* variables.
   /// Order must match training; the contract is frozen at model export.
   const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *features_signature() const {
     return GetPointer<const ::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>> *>(VT_FEATURES_SIGNATURE);
@@ -316,6 +427,9 @@ struct UHD FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyOffset(verifier, VT_NAME) &&
            verifier.VerifyString(name()) &&
            VerifyField<int8_t>(verifier, VT_ADAPTER, 1) &&
+           VerifyOffset(verifier, VT_DERIVED) &&
+           verifier.VerifyVector(derived()) &&
+           verifier.VerifyVectorOfTables(derived()) &&
            VerifyOffset(verifier, VT_FEATURES_SIGNATURE) &&
            verifier.VerifyVector(features_signature()) &&
            verifier.VerifyVectorOfStrings(features_signature()) &&
@@ -353,6 +467,9 @@ struct UHDBuilder {
   }
   void add_adapter(hipdnn_flatbuffers_sdk::data_objects::UhdAdapter adapter) {
     fbb_.AddElement<int8_t>(UHD::VT_ADAPTER, static_cast<int8_t>(adapter), 0);
+  }
+  void add_derived(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>>> derived) {
+    fbb_.AddOffset(UHD::VT_DERIVED, derived);
   }
   void add_features_signature(::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> features_signature) {
     fbb_.AddOffset(UHD::VT_FEATURES_SIGNATURE, features_signature);
@@ -395,6 +512,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(
     ::flatbuffers::Offset<::flatbuffers::String> id = 0,
     ::flatbuffers::Offset<::flatbuffers::String> name = 0,
     hipdnn_flatbuffers_sdk::data_objects::UhdAdapter adapter = hipdnn_flatbuffers_sdk::data_objects::UhdAdapter::STATIC_ORDER,
+    ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>>> derived = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<::flatbuffers::String>>> features_signature = 0,
     ::flatbuffers::Offset<::flatbuffers::String> features_hash = 0,
     ::flatbuffers::Offset<::flatbuffers::String> objective = 0,
@@ -412,6 +530,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(
   builder_.add_objective(objective);
   builder_.add_features_hash(features_hash);
   builder_.add_features_signature(features_signature);
+  builder_.add_derived(derived);
   builder_.add_name(name);
   builder_.add_id(id);
   builder_.add_adapter(adapter);
@@ -423,6 +542,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
     const char *id = nullptr,
     const char *name = nullptr,
     hipdnn_flatbuffers_sdk::data_objects::UhdAdapter adapter = hipdnn_flatbuffers_sdk::data_objects::UhdAdapter::STATIC_ORDER,
+    const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>> *derived = nullptr,
     const std::vector<::flatbuffers::Offset<::flatbuffers::String>> *features_signature = nullptr,
     const char *features_hash = nullptr,
     const char *objective = nullptr,
@@ -433,6 +553,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
     const char *custom_library_symbol = nullptr) {
   auto id__ = id ? _fbb.CreateString(id) : 0;
   auto name__ = name ? _fbb.CreateString(name) : 0;
+  auto derived__ = derived ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>>(*derived) : 0;
   auto features_signature__ = features_signature ? _fbb.CreateVector<::flatbuffers::Offset<::flatbuffers::String>>(*features_signature) : 0;
   auto features_hash__ = features_hash ? _fbb.CreateString(features_hash) : 0;
   auto objective__ = objective ? _fbb.CreateString(objective) : 0;
@@ -445,6 +566,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
       id__,
       name__,
       adapter,
+      derived__,
       features_signature__,
       features_hash__,
       objective__,
@@ -456,6 +578,47 @@ inline ::flatbuffers::Offset<UHD> CreateUHDDirect(
 }
 
 ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_fbb, const UHDT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+
+inline bool operator==(const UhdDerivedEntryT &lhs, const UhdDerivedEntryT &rhs) {
+  return
+      (lhs.name == rhs.name) &&
+      (lhs.expression == rhs.expression);
+}
+
+inline bool operator!=(const UhdDerivedEntryT &lhs, const UhdDerivedEntryT &rhs) {
+    return !(lhs == rhs);
+}
+
+
+inline UhdDerivedEntryT *UhdDerivedEntry::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<UhdDerivedEntryT>(new UhdDerivedEntryT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void UhdDerivedEntry::UnPackTo(UhdDerivedEntryT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = name(); if (_e) _o->name = _e->str(); }
+  { auto _e = expression(); if (_e) _o->expression = _e->str(); }
+}
+
+inline ::flatbuffers::Offset<UhdDerivedEntry> UhdDerivedEntry::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const UhdDerivedEntryT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CreateUhdDerivedEntry(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<UhdDerivedEntry> CreateUhdDerivedEntry(::flatbuffers::FlatBufferBuilder &_fbb, const UhdDerivedEntryT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const UhdDerivedEntryT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _name = _fbb.CreateString(_o->name);
+  auto _expression = _fbb.CreateString(_o->expression);
+  return hipdnn_flatbuffers_sdk::data_objects::CreateUhdDerivedEntry(
+      _fbb,
+      _name,
+      _expression);
+}
 
 
 inline bool operator==(const UhdScoreMetadataT &lhs, const UhdScoreMetadataT &rhs) {
@@ -508,6 +671,7 @@ inline bool operator==(const UHDT &lhs, const UHDT &rhs) {
       (lhs.id == rhs.id) &&
       (lhs.name == rhs.name) &&
       (lhs.adapter == rhs.adapter) &&
+      (lhs.derived.size() == rhs.derived.size() && std::equal(lhs.derived.cbegin(), lhs.derived.cend(), rhs.derived.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.features_signature == rhs.features_signature) &&
       (lhs.features_hash == rhs.features_hash) &&
       (lhs.objective == rhs.objective) &&
@@ -535,12 +699,15 @@ inline UHDT::UHDT(const UHDT &o)
         model_hash(o.model_hash),
         static_order_fields(o.static_order_fields),
         custom_library_symbol(o.custom_library_symbol) {
+  derived.reserve(o.derived.size());
+  for (const auto &derived_ : o.derived) { derived.emplace_back((derived_) ? new hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT(*derived_) : nullptr); }
 }
 
 inline UHDT &UHDT::operator=(UHDT o) FLATBUFFERS_NOEXCEPT {
   std::swap(id, o.id);
   std::swap(name, o.name);
   std::swap(adapter, o.adapter);
+  std::swap(derived, o.derived);
   std::swap(features_signature, o.features_signature);
   std::swap(features_hash, o.features_hash);
   std::swap(objective, o.objective);
@@ -564,6 +731,7 @@ inline void UHD::UnPackTo(UHDT *_o, const ::flatbuffers::resolver_function_t *_r
   { auto _e = id(); if (_e) _o->id = _e->str(); }
   { auto _e = name(); if (_e) _o->name = _e->str(); }
   { auto _e = adapter(); _o->adapter = _e; }
+  { auto _e = derived(); if (_e) { _o->derived.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->derived[_i]) { _e->Get(_i)->UnPackTo(_o->derived[_i].get(), _resolver); } else { _o->derived[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntryT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->derived.resize(0); } }
   { auto _e = features_signature(); if (_e) { _o->features_signature.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { _o->features_signature[_i] = _e->Get(_i)->str(); } } else { _o->features_signature.resize(0); } }
   { auto _e = features_hash(); if (_e) _o->features_hash = _e->str(); }
   { auto _e = objective(); if (_e) _o->objective = _e->str(); }
@@ -585,6 +753,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_f
   auto _id = _fbb.CreateString(_o->id);
   auto _name = _o->name.empty() ? 0 : _fbb.CreateString(_o->name);
   auto _adapter = _o->adapter;
+  auto _derived = _o->derived.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::UhdDerivedEntry>> (_o->derived.size(), [](size_t i, _VectorArgs *__va) { return CreateUhdDerivedEntry(*__va->__fbb, __va->__o->derived[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _features_signature = _o->features_signature.size() ? _fbb.CreateVectorOfStrings(_o->features_signature) : 0;
   auto _features_hash = _o->features_hash.empty() ? 0 : _fbb.CreateString(_o->features_hash);
   auto _objective = _o->objective.empty() ? 0 : _fbb.CreateString(_o->objective);
@@ -598,6 +767,7 @@ inline ::flatbuffers::Offset<UHD> CreateUHD(::flatbuffers::FlatBufferBuilder &_f
       _id,
       _name,
       _adapter,
+      _derived,
       _features_signature,
       _features_hash,
       _objective,
