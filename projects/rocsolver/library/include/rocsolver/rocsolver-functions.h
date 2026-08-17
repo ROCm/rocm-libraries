@@ -18482,7 +18482,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegst_strided_batched(rocblas_handle 
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of A.
     @param[out]
-    tau        pointer to type. Array on the GPU of dimension n-1.
+    tau         pointer to type. Array on the GPU of dimension n-1.
                 The Householder scalars.
     ********************************************************************/
 
@@ -18566,7 +18566,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2(rocblas_handle handle,
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
     @param[out]
-    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+    tau         pointer to type. Array on the GPU (the size depends on the value of strideP).
                 Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
@@ -18670,7 +18670,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_batched(rocblas_handle handle,
                 Stride from the start of one matrix A_l to the next one A_(l+1).
                 There is no restriction for the value of strideA. The normal use case is strideA >= lda*n.
     @param[out]
-    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+    tau         pointer to type. Array on the GPU (the size depends on the value of strideP).
                 Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
@@ -18774,7 +18774,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehd2_strided_batched(rocblas_handle 
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of A.
     @param[out]
-    tau        pointer to type. Array on the GPU of dimension n-1.
+    tau         pointer to type. Array on the GPU of dimension n-1.
                 The Householder scalars.
     ********************************************************************/
 
@@ -18858,7 +18858,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd(rocblas_handle handle,
     lda         rocblas_int. lda >= n.
                 Specifies the leading dimension of matrices A_l.
     @param[out]
-    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+    tau         pointer to type. Array on the GPU (the size depends on the value of strideP).
                 Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
@@ -18962,7 +18962,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgehrd_batched(rocblas_handle handle,
                 Stride from the start of one matrix A_l to the next one A_(l+1).
                 There is no restriction for the value of strideA. The normal use case is strideA >= lda*n.
     @param[out]
-    tau        pointer to type. Array on the GPU (the size depends on the value of strideP).
+    tau         pointer to type. Array on the GPU (the size depends on the value of strideP).
                 Contains the vectors tau_l of corresponding Householder scalars.
     @param[in]
     strideP     rocblas_stride.
