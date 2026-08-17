@@ -240,11 +240,14 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
 
 // Standard: Bwd-data grid-overflow (n·c > 16M crosses MAX_GRID_SIZE).
-// Disabled pending ROCM-28047 fix; re-enable once the kernel handles overflow.
-using DISABLED_GPU_UnitTestConvSolverDirectNaiveBwd_FP16_GridOverflow =
-    GPU_UnitTestConvSolverDirectNaiveBwd_FP16;
+// Disabled pending ROCM-28047 fix; re-enable (rename to ConvDirectNaiveConvBwd) once fixed.
+TEST_P(GPU_UnitTestConvSolverDirectNaiveBwd_FP16, DISABLED_ConvDirectNaiveConvBwdSubbatch)
+{
+    this->RunTest(miopen::solver::conv::ConvDirectNaiveConvBwd{});
+};
+
 INSTANTIATE_TEST_SUITE_P(Standard,
-                         DISABLED_GPU_UnitTestConvSolverDirectNaiveBwd_FP16_GridOverflow,
+                         GPU_UnitTestConvSolverDirectNaiveBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetSubbatchTestCaseBwd())));
