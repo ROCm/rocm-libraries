@@ -9,6 +9,7 @@ void graphBindings(nanobind::module_& m);
 void tensorBindings(nanobind::module_& m);
 void attributesBindings(nanobind::module_& m);
 void typesBindings(nanobind::module_& m);
+void autotuneBindings(nanobind::module_& m);
 void handleBindings(nanobind::module_& m);
 void memoryBindings(nanobind::module_& m);
 void hipBindings(nanobind::module_& m);

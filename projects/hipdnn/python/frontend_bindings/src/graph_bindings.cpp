@@ -23,6 +23,10 @@
 #include <hipdnn_frontend/attributes/ReductionAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleBwdAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
+#include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
+#include <hipdnn_frontend/autotune/PlanSpec.hpp>
+#include <hipdnn_frontend/knob/Knob.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #ifdef HIPDNN_ENABLE_SDPA
 #include <hipdnn_frontend/attributes/SdpaAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
@@ -40,6 +44,57 @@
 
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
+
+namespace
+{
+
+// Shared body for both autotune() bindings. The UID-keyed and tensor-keyed variant
+// packs differ only in their key type, which Graph::autotune() itself overloads on.
+// Pointers cross the boundary as integers, exactly as the execute() binding does.
+template <typename KeyT>
+std::vector<AutotuneResult> autotunePy(graph::Graph& g,
+                                       const nb::object& handle,
+                                       const std::unordered_map<KeyT, uintptr_t>& variantPack,
+                                       uintptr_t workspace,
+                                       std::optional<int64_t> workspaceSize,
+                                       const AutotuneConfig& config,
+                                       const AutotuneStorageConfig& storageConfig)
+{
+    auto handlePtr = handle.attr("get")();
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+    std::unordered_map<KeyT, void*> cppVariantPack;
+    cppVariantPack.reserve(variantPack.size());
+    for(const auto& [key, value] : variantPack)
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        cppVariantPack[key] = reinterpret_cast<void*>(value);
+    }
+
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+
+    std::vector<AutotuneResult> results;
+    const auto err
+        = workspaceSize
+              ? g.autotune(rawHandle,
+                           cppVariantPack,
+                           workspacePtr,
+                           *workspaceSize,
+                           config,
+                           storageConfig,
+                           &results)
+              : g.autotune(
+                    rawHandle, cppVariantPack, workspacePtr, config, storageConfig, &results);
+    if(err.is_bad())
+    {
+        throw std::runtime_error("Autotune failed: " + err.get_message());
+    }
+    return results;
+}
+
+} // namespace
 
 void graphBindings(nb::module_& m)
 {
@@ -62,16 +117,16 @@ void graphBindings(nb::module_& m)
              &graph::Graph::create_execution_plans,
              nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
              "Create execution plans with specified heuristic modes")
-        .def(
-            "create_execution_plan_ext",
-            [](graph::Graph& g, int64_t engineId) {
-                return g.create_execution_plan_ext(engineId, {});
-            },
-            nb::arg("engine_id"),
-            "Hard-select an engine: create/select the execution plan descriptor for "
-            "this exact engine id (call build_plans() to finalize). Returns an Error "
-            "whose is_bad() is set if the engine is not valid/applicable (no "
-            "heuristic fallback).")
+        .def("create_execution_plan_ext",
+             &graph::Graph::create_execution_plan_ext,
+             nb::arg("engine_id"),
+             nb::arg("knob_settings") = std::vector<KnobSetting>{},
+             "Hard-select an engine: create/select the execution plan descriptor for "
+             "this exact engine id, optionally overriding its knobs (call build_plans() "
+             "to finalize). Knobs the engine does not expose are ignored with a warning; "
+             "a value that violates a knob's constraint, or an engine that is not "
+             "valid/applicable, returns an Error whose is_bad() is set (no heuristic "
+             "fallback).")
         .def(
             "get_execution_plan_engine_id",
             [](const graph::Graph& g) {
@@ -169,6 +224,195 @@ void graphBindings(nb::module_& m)
             nb::arg("variant_pack"),
             nb::arg("workspace") = 0,
             "Execute the graph with the given handle, variant pack, and optional workspace")
+        .def("get_execution_plan_count",
+             &graph::Graph::get_execution_plan_count,
+             "Number of compiled plans, including ones that failed to compile. Use with "
+             "build_plans(BuildPlanPolicy.ALL) to drive a manual per-plan tuning loop.")
+        .def(
+            "execute_plan_at_index",
+            [](const graph::Graph& g,
+               const nb::object& handle,
+               const std::unordered_map<int64_t, uintptr_t>& variantPack,
+               uintptr_t workspace,
+               int64_t planIndex) {
+                auto handlePtr = handle.attr("get")();
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                auto rawHandle = reinterpret_cast<hipdnnHandle_t>(nb::cast<uintptr_t>(handlePtr));
+
+                std::unordered_map<int64_t, void*> cppVariantPack;
+                cppVariantPack.reserve(variantPack.size());
+                for(const auto& [key, value] : variantPack)
+                {
+                    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                    cppVariantPack[key] = reinterpret_cast<void*>(value);
+                }
+
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                void* workspacePtr = workspace ? reinterpret_cast<void*>(workspace) : nullptr;
+
+                return g.execute_plan_at_index(rawHandle, cppVariantPack, workspacePtr, planIndex);
+            },
+            nb::arg("handle"),
+            nb::arg("variant_pack"),
+            nb::arg("workspace"),
+            nb::arg("plan_index"),
+            "Execute one compiled plan without making it active. Returns an Error whose "
+            "is_bad() is set for an out-of-bounds, barred or uncompiled plan, so a manual "
+            "tuning loop can skip it and continue.")
+        .def(
+            "get_workspace_size_plan_at_index",
+            [](const graph::Graph& g, int64_t planIndex) {
+                int64_t size = 0;
+                const auto err = g.get_workspace_size_plan_at_index(planIndex, size);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get workspace size for plan: "
+                                             + err.get_message());
+                }
+                return size;
+            },
+            nb::arg("plan_index"),
+            "Workspace size cached for one compiled plan. Raises RuntimeError for an "
+            "out-of-bounds index; the C++ overload that reports -1 instead is not bound "
+            "separately, since the exception already separates that case from a zero size.")
+        .def(
+            "get_plan_name_at_index",
+            [](const graph::Graph& g, int64_t planIndex) {
+                std::string name;
+                const auto err = g.get_plan_name_at_index(planIndex, name);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get plan name: " + err.get_message());
+                }
+                return name;
+            },
+            nb::arg("plan_index"),
+            "Engine name backing one compiled plan (hex fallback for unregistered engines).")
+        .def("build_plan_at_index",
+             &graph::Graph::build_plan_at_index,
+             nb::arg("plan_index"),
+             "Compile if needed and make the plan at this index active, so the following "
+             "execute() uses it. Returns an Error whose is_bad() is set for an "
+             "out-of-bounds, barred or invalid plan.")
+        .def(
+            "get_engine_configs",
+            [](graph::Graph& g, const std::vector<HeuristicMode>& modes) {
+                std::vector<EngineConfigInfo> configs;
+                const auto err = g.get_engine_configs(configs, modes);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get engine configs: " + err.get_message());
+                }
+                return configs;
+            },
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            "Discover engine metadata (id, name, knobs, workspace estimate) for the built "
+            "operation graph. Requires build_operation_graph() to have been called first.")
+        .def(
+            "get_knobs_for_engine",
+            [](const graph::Graph& g, int64_t engineId) {
+                std::vector<Knob> knobs;
+                const auto err = g.get_knobs_for_engine(engineId, knobs);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get knobs for engine: "
+                                             + err.get_message());
+                }
+                return knobs;
+            },
+            nb::arg("engine_id"),
+            "Get the tunable knobs an engine exposes for the built operation graph.")
+        .def(
+            "get_knob_lookup_for_engine",
+            [](const graph::Graph& g, int64_t engineId) {
+                std::unordered_map<KnobType_t, Knob> knobs;
+                const auto err = g.get_knob_lookup_for_engine(engineId, knobs);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get knob lookup for engine: "
+                                             + err.get_message());
+                }
+                return knobs;
+            },
+            nb::arg("engine_id"),
+            "Same knobs as get_knobs_for_engine(), keyed by knob id for direct lookup.")
+        .def(
+            "get_estimated_max_workspace_size",
+            [](const graph::Graph& g) {
+                int64_t maxSize = 0;
+                const auto err = g.get_estimated_max_workspace_size(maxSize);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get estimated max workspace size: "
+                                             + err.get_message());
+                }
+                return maxSize;
+            },
+            "Maximum workspace estimate across the plan specs added by add_engine_*(). "
+            "Allocate this much workspace before calling autotune().")
+        .def("add_engine_configs",
+             &graph::Graph::add_engine_configs,
+             nb::arg("configs"),
+             "Add engine configs (from get_engine_configs()) as autotune plan specs.")
+        .def("add_engine",
+             &graph::Graph::add_engine,
+             nb::arg("engine_id"),
+             nb::arg("knob_settings") = std::vector<KnobSetting>{},
+             "Add one engine with optional knob settings as an autotune plan spec.")
+        .def("add_engines",
+             &graph::Graph::add_engines,
+             nb::arg("engine_ids"),
+             "Add several engines, each with its default knob settings, as plan specs.")
+        .def("add_engine_variants",
+             &graph::Graph::add_engine_variants,
+             nb::arg("variants"),
+             "Add one plan spec per EngineVariant (engine id plus explicit knob settings).")
+        .def("add_engine_sweep",
+             &graph::Graph::add_engine_sweep,
+             nb::arg("specs"),
+             "Add the Cartesian product of each EngineSweepSpec's knob axes as plan specs.")
+        .def("add_all_engines",
+             &graph::Graph::add_all_engines,
+             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+             "Add every engine applicable to the built operation graph as a plan spec.")
+        .def("deselect_workspace_greater_than",
+             &graph::Graph::deselect_workspace_greater_than,
+             nb::arg("workspace"),
+             nb::rv_policy::reference_internal,
+             "Bar plans whose compiled workspace exceeds this many bytes.")
+        .def("deselect_engines",
+             nb::overload_cast<const std::vector<std::string>&>(&graph::Graph::deselect_engines),
+             nb::arg("engine_names"),
+             nb::rv_policy::reference_internal,
+             "Bar plans belonging to these engine names.")
+        .def("deselect_engines",
+             nb::overload_cast<const std::vector<int64_t>&>(&graph::Graph::deselect_engines),
+             nb::arg("engine_ids"),
+             nb::rv_policy::reference_internal,
+             "Bar plans belonging to these engine IDs.")
+        .def("autotune",
+             &autotunePy<int64_t>,
+             nb::arg("handle"),
+             nb::arg("variant_pack"),
+             nb::arg("workspace") = 0,
+             nb::arg("workspace_size") = nb::none(),
+             nb::arg("config") = AutotuneConfig{},
+             nb::arg("storage_config") = AutotuneStorageConfig{},
+             "Benchmark autotune candidates and return one AutotuneResult per candidate.\n"
+             "variant_pack maps either tensor UIDs or tensors to device pointers.\n"
+             "Pass workspace_size (from get_estimated_max_workspace_size()) for the plan-spec "
+             "path added via add_engine_*(); omit it for the compiled-plan path built with "
+             "build_plans(BuildPlanPolicy.ALL). The winning plan is left active, so a "
+             "following execute() uses it. Raises RuntimeError if autotuning fails.")
+        .def("autotune",
+             &autotunePy<std::shared_ptr<graph::TensorAttributes>>,
+             nb::arg("handle"),
+             nb::arg("variant_pack"),
+             nb::arg("workspace") = 0,
+             nb::arg("workspace_size") = nb::none(),
+             nb::arg("config") = AutotuneConfig{},
+             nb::arg("storage_config") = AutotuneStorageConfig{},
+             "autotune() overload taking a tensor-keyed variant pack.")
         .def("set_name", &graph::Graph::set_name, nb::rv_policy::reference_internal)
         .def("set_compute_data_type",
              &graph::Graph::set_compute_data_type,
